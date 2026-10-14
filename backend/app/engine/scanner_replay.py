@@ -28,6 +28,7 @@ DEFAULT_PROMPT = (
     "Do not call other trading, journal, email or co-pilot tools. Missing historical option fields are unavailable, "
     "not a failed liquidity check. After each commit read the same run for its next setup. "
     "Resume interruptions at the next uncommitted setup. Do not request outcomes during a run. "
+    "For an interrupted run call get_practice_run with resume=true so the next uncommitted setup is marked in its receipt. "
     "This is underlying-scored paper research, with no explicit outcome feedback, not live options execution."
 )
 
@@ -72,7 +73,7 @@ def split_dates(days, seed, exam_count=0, *, allow_holdout=False):
 
 
 def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DEFAULT_PROMPT,
-                  prompt_version="tj-shadow-selection-v1", policy=None, history_rows=None, allow_holdout=False):
+                  prompt_version="tj-shadow-selection-v2", policy=None, history_rows=None, allow_holdout=False):
     """Operator-only import. Split/freeze BEFORE generating or observing results."""
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == "owner":
         raise decisions.DecisionError("Use a fresh isolated actor")
@@ -121,6 +122,7 @@ def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DE
                 policy_version=SCHEMA, policy_hash=digest(manifest),
                 brief_json=canonical({"schema": SCHEMA, "manifest": manifest, "phase": phases[day],
                     "differences": generated["differences"], "coverage_gaps": generated["gaps"],
+                    "coverage": generated["coverage"], "daily_atr": generated["daily_atr"],
                     "retrieved_at": generated["retrieved_at"]}))
             db.add(run)
             db.flush()
@@ -211,12 +213,13 @@ def reveal_allowed(db, run):
     return True
 
 
-def view(db, run, actor, symbols, *, details=True):
+def view(db, run, actor, symbols, *, details=True, resume=False):
     authorized(run, actor, symbols)
     meta = metadata(run)
     values = entries(run)
     records = own_records(db, run, actor)
-    next_entry = next((e for e in values if operation(run, e) not in records), None) if run.status == "prepared" else None
+    read_only = meta["manifest"]["scoring_policy"]["version"] != market.VERSION
+    next_entry = next((e for e in values if operation(run, e) not in records), None) if run.status == "prepared" and not read_only else None
     state = json.loads(run.timings_json)
     revealed = reveal_allowed(db, run)
     result = {"id": str(run.id), "day": run.day.isoformat(), "status": run.status, "phase": meta["phase"],
@@ -225,8 +228,11 @@ def view(db, run, actor, symbols, *, details=True):
         "scoring_policy": meta["manifest"]["scoring_policy"], "policy_hash": run.policy_hash,
         "differences_from_live": meta["differences"], "labels": market.LABELS,
         "retrieved_at": meta["retrieved_at"], "coverage_gaps": meta["coverage_gaps"] if revealed else None,
+        "coverage": meta.get("coverage") if revealed else None,
+        "daily_atr": meta.get("daily_atr") if revealed else None,
         "next_setup": None, "choices": [], "report": None,
         "outcomes_sealed": not revealed, "expires_on_historical_clock": False,
+        "read_only": read_only,
         "batch_runs": [{"day": day, "run_id": value, "phase": meta["manifest"]["phases"][day]}
                        for day, value in meta["manifest"]["run_ids"].items()]}
     if details:
@@ -234,8 +240,18 @@ def view(db, run, actor, symbols, *, details=True):
         if next_entry:
             _, result["next_setup"] = context_packet(db, next_entry)
             served = state.setdefault("served", {})
+            changed = False
+            if resume:
+                if not records and not served:
+                    raise decisions.DecisionError("An unstarted run cannot be marked resumed")
+                marks = state.setdefault("resume_marks", {})
+                if next_entry["opportunity_id"] not in marks:
+                    marks[next_entry["opportunity_id"]] = access.now().replace(tzinfo=timezone.utc).isoformat()
+                    changed = True
             if next_entry["opportunity_id"] not in served:
                 served[next_entry["opportunity_id"]] = access.now().replace(tzinfo=timezone.utc).isoformat()
+                changed = True
+            if changed:
                 run.timings_json = canonical(state)
                 db.add(run)
                 db.commit()
@@ -269,6 +285,8 @@ def choose(db, run, entry, actor, symbols, payload):
         if saved["decision"] != payload["decision"] or saved["reason"] != payload["rationale"]:
             raise decisions.DecisionError("Opportunity already has different content")
         return records[key], False
+    if metadata(run)["manifest"]["scoring_policy"]["version"] != market.VERSION:
+        raise decisions.DecisionError("Legacy scanner run is read-only; its frozen policy cannot accept new choices")
     if run.status != "prepared" or next((e for e in entries(run) if operation(run, e) not in records), None) != entry:
         raise decisions.DecisionError("Commit only the next uncommitted setup")
     now = access.now()
@@ -280,6 +298,8 @@ def choose(db, run, entry, actor, symbols, payload):
         "candidate_id": packet["candidate"]["candidate_id"], "decision": payload["decision"],
         "reason": payload["rationale"], "committed_at": now.replace(tzinfo=timezone.utc).isoformat(),
         "served_at": served, "wall_seconds": max(0, (now - decisions._utc(served, "served time")).total_seconds()),
+        "resumed": entry["opportunity_id"] in state.get("resume_marks", {}),
+        "resumed_at": state.get("resume_marks", {}).get(entry["opportunity_id"]),
         "prompt_version": metadata(run)["manifest"]["prompt_version"], "policy_hash": run.policy_hash,
         "context_sha256": context.context_sha256, "status": "scanner_selection_unarmed"}
     record = DecisionRecord(operation_id=key, opportunity_id="scanner:" + entry["opportunity_id"],
@@ -339,13 +359,17 @@ def summary(rows, select_row=lambda row: True, result_key="rules"):
     chosen = [row for row in rows if select_row(row)]
     resolved = [row[result_key] for row in chosen if row[result_key]["resolved"]]
     rs = [row["r"] for row in resolved]
+    sensitivity = [row for row in resolved if row.get("r_cost_sensitivity") is not None]
     return {"selected": len(chosen), "resolved": len(resolved), "unresolved_or_invalidated": len(chosen)-len(resolved),
         "unresolved": sum(row[result_key]["status"] == "unresolved" for row in chosen),
         "invalidated": sum(row[result_key]["status"] == "invalidated" for row in chosen),
         "total_r": round(sum(rs), 6) if rs else None,
         "mean_r": round(sum(rs)/len(rs), 6) if rs else None,
         "win_rate": sum(r > 0 for r in rs)/len(rs) if rs else None,
-        "pnl_100": round(sum(row["pnl_100"] for row in resolved), 2) if resolved else None}
+        "pnl_100": round(sum(row["pnl_100"] for row in resolved), 2) if resolved else None,
+        "cost_sensitivity_resolved": len(sensitivity),
+        "r_cost_sensitivity": round(sum(row["r_cost_sensitivity"] for row in sensitivity), 6) if sensitivity else None,
+        "pnl_100_cost_sensitivity": round(sum(row["pnl_100_cost_sensitivity"] for row in sensitivity), 2) if sensitivity else None}
 
 
 def scorecard(rows, session_count):
@@ -358,7 +382,8 @@ def scorecard(rows, session_count):
         "jo_delayed_entry": summary(rows, lambda r: decision(r) == "take", "delayed"),
         "skipped_setups": summary(rows, lambda r: decision(r) == "skip"),
         "seeded_random_50pct": summary(rows, lambda r: r["random_take"]),
-        "skip_all": {"selected": 0, "resolved": 0, "total_r": 0, "pnl_100": 0, "win_rate": None}}
+        "skip_all": {"selected": 0, "resolved": 0, "total_r": 0, "pnl_100": 0, "win_rate": None,
+                     "r_cost_sensitivity": 0, "pnl_100_cost_sensitivity": 0}}
     card["evidence_warning"] = "not enough evidence" if sum(card["decisions"].values()) < 30 else None
     card["threshold_notice"] = "30 decisions is a display warning threshold, not proof; setups within sessions are correlated"
     return card

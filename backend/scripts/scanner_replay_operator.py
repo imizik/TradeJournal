@@ -96,7 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--allow-holdout", action="store_true", help="Explicitly permit sessions on/after 2026-09-14")
     prepare.add_argument("--history-rows", type=Path, help="Optional private precomputed historical feature rows")
     prepare.add_argument("--prompt-file", type=Path, help="Optional private frozen Jo prompt text")
-    prepare.add_argument("--prompt-version", default="tj-shadow-selection-v1")
+    prepare.add_argument("--prompt-version", default="tj-shadow-selection-v2")
     prepare.add_argument("--decision-delay-seconds", type=int, default=60)
     prepare.add_argument("--cost-per-share", type=float, default=0, help="Proxy dollars per share per side")
     prepare.add_argument("--slippage-bps", type=float, default=0, help="Adverse proxy slippage per side")

@@ -23,8 +23,14 @@ STOCKS = "https://data.alpaca.markets/v2/stocks/bars"
 CALENDAR = "https://api.alpaca.markets/v2/calendar"
 MAX_DATES = 10
 MAX_DATE_SPAN_DAYS = 366
+DAILY_LOOKBACK_DAYS = 90
+MIN_PRIOR_SESSIONS = 15
 MAX_PAGES = 32
 MAX_PAGE_BYTES = 2 * 1024 * 1024
+
+
+class InsufficientDailyHistory(ValueError):
+    """Safe diagnostic: fixed-universe symbols and counts only."""
 
 
 def _read(client: httpx.Client, url: str, params: dict) -> dict | list:
@@ -102,9 +108,10 @@ def capture(client: httpx.Client, days: list[date]) -> list[dict]:
     for day in days:
         open_at, close_at = sessions[day]
         minute_raw = _bars(client, datetime.fromtimestamp(open_at, UTC), datetime.fromtimestamp(close_at, UTC), "1Min")
-        daily_raw = _bars(client, datetime.combine(day - timedelta(days=45), time(), ET),
+        daily_raw = _bars(client, datetime.combine(day - timedelta(days=DAILY_LOOKBACK_DAYS), time(), ET),
                           datetime.combine(day, time(), ET), "1Day")
         symbols = {}
+        shortages = []
         for symbol in UNIVERSE:
             minutes = []
             for bar in minute_raw[symbol]:
@@ -121,8 +128,15 @@ def capture(client: httpx.Client, days: list[date]) -> list[dict]:
                     daily.append({"time": int(datetime.combine(session_day, time(12), ET).timestamp()),
                                   "date": session_day.isoformat(), "high": bar["h"], "low": bar["l"],
                                   "close": bar["c"], "volume": bar["v"]})
+            prior_dates = {row["date"] for row in daily}
+            if len(prior_dates) != len(daily):
+                raise ValueError("Provider returned a duplicate prior daily session")
+            if len(prior_dates) < MIN_PRIOR_SESSIONS:
+                shortages.append(f"{symbol}({len(prior_dates)})")
             symbols[symbol] = {"minutes": sorted(minutes, key=lambda b: b["time"]),
                                "daily": sorted(daily, key=lambda b: b["time"])}
+        if shortages:
+            raise InsufficientDailyHistory("fewer than 15 prior daily sessions: " + ", ".join(shortages))
         bundles.append({"session_date": day.isoformat(), "retrieved_at": datetime.now(UTC).isoformat(),
                         "open_at": open_at, "close_at": close_at, "symbols": symbols,
                         "feed": "sip", "adjustment": "raw", "provider": "alpaca"})
@@ -171,6 +185,8 @@ def main() -> None:
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
             print(json.dumps({"saved": str(path), "bytes": len(data), "symbols": len(bundle["symbols"])}))
+    except InsufficientDailyHistory as exc:
+        parser.exit(2, f"Scanner replay capture refused: {exc}\n")
     except (ValueError, OSError, KeyError, TypeError):
         parser.exit(2, "Scanner replay capture refused: invalid request or unavailable provider data.\n")
 

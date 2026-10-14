@@ -110,6 +110,8 @@ verified regular-session calendars without importing the app or a database.
 September 14, 2026 onward is SC-3 holdout and is refused unless the operator
 explicitly passes `--allow-holdout` at capture and preparation. The frozen
 universe, scanner version and parameter hash never change.
+Capture verifies at least fifteen distinct prior daily sessions for every
+symbol in a bounded ninety-day lookback; missing ATR14 blocks preparation.
 
 The generator streams completed minutes through unchanged `scanner_rules.scan`,
 using caller cooldown, taken/fade limits and a rules-only underlying proxy for
@@ -117,6 +119,10 @@ open-trade suppression. Jo's choices never affect this shared stream. Alpaca
 SIP replaces live Tradier timesales/daily ATR; unavailable option eligibility,
 quote failures and actual monitoring latency cannot be reconstructed. Missing
 minutes stop further setup generation for that symbol; reports disclose coverage.
+Coverage counts supplied/expected/absent regular minutes, first missing minute,
+scan symbol-minutes lost through the final scan cutoff, blocked scan slots and
+emitted setups per symbol/session. The actual lost setup count is unknowable
+without source bars; scan slots are not fabricated setups or provider outages.
 The proxy uses the non-same-day flat rule because historical expiry is unknown.
 Raw prior daily ATR can straddle corporate actions without verified basis
 coverage, so every result carries `basis-unverified`.
@@ -139,6 +145,12 @@ INSUFFICIENT_DATA with a reason of at most 1000 characters. Exact retries recove
 the same receipt; different content conflicts. Wall time runs from first packet
 service to commit and includes interruptions. Historical deadlines never expire
 a scanner run; current credential expiry/revocation still applies.
+On an interrupted, already-started run Jo explicitly calls
+`get_practice_run(run_id, resume=true)`. The next uncommitted setup receives one
+durable resume timestamp, copied into its immutable choice. Normal repeated
+reads are not resumes; terminal receipts cannot acquire later markers. Reports
+include wall seconds and a resumed-setup column. Full default instructions use
+`tj-shadow-selection-v2`.
 
 Each continuation is sealed with a random nonce and a public commitment. No
 explicit outcome feedback is exposed during a run. Practice results reveal
@@ -158,6 +170,7 @@ first full minute strictly after detection; Jo's delayed view enters strictly
 after detection plus the frozen delay (default sixty seconds). Selection is
 also scored on Jo's TAKEs at the rules entry time. Stop/target checks start with
 the minute after entry, matching the live scanner's entry-minute exclusion.
+Reports explicitly list **entry-minute stop not checked (optimistic)**.
 Stop wins a bar touching both; a gap through stop fills at the adverse open,
 and favorable target gaps are capped at the target. The sixty-minute time stop
 runs from each actual proxy entry; clock exits use the first eligible minute
@@ -167,6 +180,12 @@ P&L. Missing required entry/hold/exit bars are unresolved, never forward-filled.
 Adverse slippage in basis points and per-share-per-side costs are frozen,
 default zero and labelled. R uses the same frozen detection-close-to-rule-stop
 distance for baseline and delayed views; dollars use one hundred shares.
+`scanner-selection-replay-v1` versions the frozen policy hash and includes fixed
+$0.02/share/side sensitivity. Both cost views use identical raw fills, times and
+resolved cohorts; fees change net R/dollars, not entry eligibility, busy state
+or the candidate stream. Legacy v0 snapshots/receipts remain readable and exact
+retries recover them, but that superseded policy cannot accept new choices,
+generation or score recomputation.
 
 Reports separate practice/exam, per-run/cumulative and setup-type rows, with
 TAKE/SKIP/INSUFFICIENT_DATA counts, resolved/unresolved/invalidated coverage,
@@ -177,6 +196,7 @@ eligibility is unknown. The existing S2 linker links owner-supplied actual trade
 snapshots; Isaac's realized options P&L is separately labelled and never included
 in the comparable underlying ranking. Thirty decisions is a display warning
 threshold, not proof of an edge; within-session setups are correlated.
+Decision counts render as plain TAKE / SKIP / INSUFFICIENT_DATA text.
 
 The scanner parameters were selected using March–September 2026 data. An exam
 therefore tests Jo's selection conditional on those rules, not an untouched
@@ -193,6 +213,14 @@ setup after interruption, then reading the end-of-run scorecard. Signed fixture
 proof does not substitute. The new mode has not been activated or used by Jo;
 that acceptance remains pending a separately authorized isolated demo setup.
 Frozen multi-session exam evaluation follows actual practice acceptance.
+Real-data generation proof on October 13, 2026: August 25 SIP/raw capture returned
+62 distinct prior daily sessions through August 24 for all twelve symbols; all
+had positive ATR14. It supplied 4,672 of 4,680 expected regular symbol-minutes:
+CRDO lacked seven and LLY one. The conservative prefix guard lost 196 scan
+symbol-minutes and blocked forty scan slots; one setup was emitted. This is an
+incomplete session, not a quiet one; the actual lost setup count is unknowable.
+No Jo decisions, database writes, service activation or model calls occurred.
+This proves the daily-data path and coverage reporting, not Jo acceptance.
 Operator commands are `backend/scripts/scanner_replay_capture.py` for private
 capture and `backend/scripts/scanner_replay_operator.py` for prepare/report/abandon
 on the marked isolated database. Live scanner/shadow ledgers, SC-0, production

@@ -61,6 +61,8 @@ class SampleMCP(FastMCP):
                 fields[name], optional = set(), {"day"}
             if name == "record_practice_choice":
                 optional = set()
+            if name == "get_practice_run":
+                optional = {"resume"}
         if (name not in fields or not isinstance(arguments, dict) or not fields[name] <= set(arguments)
                 or set(arguments) - fields[name] - optional):
             raise ToolError("Use only the declared sample tools and arguments")
@@ -198,16 +200,29 @@ def create_server(config_path: Path, *, backend_transport=None):
                 raise ToolError("Use a New York date in YYYY-MM-DD format") from None
             return await bridge("/cloud-mcp/practice/runs", {"day": day})
 
-    @server.tool(title=f"Read assigned {label} Practice run", annotations=annotations,
-        meta=metadata, structured_output=True)
-    async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)]) -> dict[str, Any]:
-        """Read a listed run UUID: frozen evidence and this assistant's own saved choices, preserving reveal rules."""
-        try:
-            if str(uuid.UUID(run_id)) != run_id:
-                raise ValueError()
-        except ValueError:
-            raise ToolError("Use a canonical run UUID from list_practice_runs") from None
-        return await bridge("/cloud-mcp/practice/runs/" + run_id)
+    if scanner:
+        @server.tool(title="Read or resume assigned scanner replay", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)],
+                                   resume: bool = False) -> dict[str, Any]:
+            """Read the next setup. On an interrupted run use resume=true to record its resumed setup marker."""
+            try:
+                if str(uuid.UUID(run_id)) != run_id:
+                    raise ValueError()
+            except ValueError:
+                raise ToolError("Use a canonical run UUID from list_practice_runs") from None
+            return await bridge("/cloud-mcp/practice/runs/" + run_id, {"resume": "true"} if resume else None)
+    else:
+        @server.tool(title=f"Read assigned {label} Practice run", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)]) -> dict[str, Any]:
+            """Read a listed run UUID: frozen evidence and this assistant's own saved choices, preserving reveal rules."""
+            try:
+                if str(uuid.UUID(run_id)) != run_id:
+                    raise ValueError()
+            except ValueError:
+                raise ToolError("Use a canonical run UUID from list_practice_runs") from None
+            return await bridge("/cloud-mcp/practice/runs/" + run_id)
 
     if config.decision_writes:
         def opportunity_path(value):

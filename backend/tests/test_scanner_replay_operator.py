@@ -113,6 +113,7 @@ def test_prepare_records_split_and_report_after_commit(trial, tmp_path, capsys):
         with pytest.raises(Exception, match="sealed"):
             scanner_replay.report(db, run)
         scanner_replay.view(db, run, manifest["actor"], scanner_replay_market.rules.UNIVERSE)
+        scanner_replay.view(db, run, manifest["actor"], scanner_replay_market.rules.UNIVERSE, resume=True)
         scanner_replay.choose(db, run, scanner_replay.entries(run)[0], manifest["actor"],
                               scanner_replay_market.rules.UNIVERSE,
                               {"decision": "take", "rationale": "<script>|`line\nnext"})
@@ -120,6 +121,8 @@ def test_prepare_records_split_and_report_after_commit(trial, tmp_path, capsys):
         assert saved["scorecard"]["rules_take_all"]["resolved"] == 1
         assert saved["scorecard"]["jo_baseline_entry"]["total_r"] == 2.2
         assert saved["scorecard"]["jo_delayed_entry"]["total_r"] == 2.2
+        assert saved["scorecard"]["jo_baseline_entry"]["pnl_100_cost_sensitivity"] == pytest.approx(
+            saved["scorecard"]["jo_baseline_entry"]["pnl_100"] - 4)
         assert scanner_replay.report(db, run)["scorecard"] == saved["scorecard"]
     output = tmp_path / "private-report.md"
     operator.main(["--trial-root", str(root), "report", "--run-id", run_id, "--output", str(output)])
@@ -131,6 +134,14 @@ def test_prepare_records_split_and_report_after_commit(trial, tmp_path, capsys):
     assert "all unknown" in markdown and "30 decisions" in markdown
     assert "model-memory-unverified" in markdown and "Alpaca SIP" in markdown
     assert "source_fill_key" not in markdown
+    assert "TAKE 1; SKIP 0; INSUFFICIENT_DATA 0" in markdown
+    assert "&#x27;take&#x27;" not in markdown
+    assert "Wall seconds" in markdown and "Resumed setup" in markdown
+    assert "| yes |" in markdown
+    assert "P&L / 100 shares at $0.02/share/side" in markdown
+    assert "entry-minute stop not checked (optimistic)" in markdown.lower()
+    assert "Daily ATR coverage" in markdown and "Missing-minute impact" in markdown
+    assert "Lost setup count is unknowable" in markdown
 
 
 def test_exam_abandon_does_not_publish_report(trial, tmp_path, capsys):

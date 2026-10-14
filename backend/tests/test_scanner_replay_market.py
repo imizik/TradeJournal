@@ -33,7 +33,7 @@ def bundle():
              for prior in prior_sessions]
     minutes = [minute(OPEN + i * 60) if i < 15 else minute(OPEN + i * 60, 100.2, 100.35, 100.1, 100.25)
                for i in range(35)]
-    symbols = {symbol: {"minutes": [], "daily": []} for symbol in rules.UNIVERSE}
+    symbols = {symbol: {"minutes": [], "daily": copy.deepcopy(daily)} for symbol in rules.UNIVERSE}
     symbols["SPY"] = {"minutes": minutes, "daily": daily}
     return {"session_date": DAY.isoformat(), "retrieved_at": datetime.fromtimestamp(CLOSE + 60, UTC).isoformat(),
             "open_at": OPEN, "close_at": CLOSE, "symbols": symbols, "feed": "sip", "adjustment": "raw"}
@@ -76,6 +76,11 @@ def test_scanner_signal_parity_and_no_future_in_published_packet():
                for row in first["packet"]["candles_1m_last60"] + first["packet"]["candles_5m_session"])
     assert len(first["continuation"]["nonce"]) == 64
     assert result["scoring_policy"]["hash"] == replay.scoring_policy()["hash"]
+    assert result["daily_atr"]["SPY"] == {"prior_sessions": 15, "atr14": 2.0,
+        "as_of_session": "2026-08-24",
+        "source": "alpaca_sip_1day_raw", "feed": "sip", "adjustment": "raw"}
+    assert set(result["daily_atr"]) == set(rules.UNIVERSE)
+    assert any("Entry-minute stop not checked (optimistic)" in note for note in result["differences"])
 
     changed = copy.deepcopy(source)
     for bar in changed["symbols"]["SPY"]["minutes"]:
@@ -106,6 +111,9 @@ def test_cooldown_and_taken_state_after_proxy_exit(monkeypatch):
     setups = replay.generate_session(source)["setups"]
     assert [replay._epoch(x["packet"]["candidate"]["bar_end"]) for x in setups] == [OPEN + 20 * 60, OPEN + 55 * 60]
     assert ("orb", OPEN + 20 * 60) in dict(seen)[OPEN + 55 * 60]
+    costly = replay.generate_session(source, scoring_policy=replay.scoring_policy(cost_per_share=0.5))["setups"]
+    assert [x["packet"]["candidate"]["candidate_id"] for x in costly] == [
+        x["packet"]["candidate"]["candidate_id"] for x in setups]
 
 
 def test_missing_minute_blocks_scanning_and_prior_daily_only():
@@ -115,9 +123,28 @@ def test_missing_minute_blocks_scanning_and_prior_daily_only():
     source = bundle()
     source["symbols"]["SPY"]["daily"] = source["symbols"]["SPY"]["daily"][:14]
     source["symbols"]["SPY"]["daily"].append({"date": DAY.isoformat(), "high": 1000, "low": 1, "close": 500})
+    with pytest.raises(ValueError, match="Prior daily ATR requires at least 15 sessions.*SPY"):
+        replay.generate_session(source)
+
+
+def test_coverage_counts_lost_symbol_time_without_inventing_setups():
+    source = bundle()
+    source["symbols"]["SPY"]["minutes"].pop(21)  # 09:51, after the first candidate
     result = replay.generate_session(source)
-    assert not result["setups"]
-    assert {g["reason"] for g in result["gaps"]} >= {"prior_daily_atr14_unavailable"}
+    spy = result["coverage"]["symbols"]["SPY"]
+    assert spy["expected_minutes"] == 390
+    assert spy["provided_minutes"] == 34
+    assert spy["missing_minutes"] == 356
+    assert spy["first_missing_epoch"] == OPEN + 21 * 60
+    assert spy["evaluated_scan_slots"] == 1
+    assert spy["blocked_scan_slots"] == spy["eligible_scan_slots"] - 1
+    assert spy["scan_minutes_lost"] == 309
+    assert spy["setups_emitted"] == 1
+    assert spy["actual_suppressed_setups"] is None
+    assert result["coverage"]["totals"]["actual_suppressed_setups"] is None
+    assert len(result["setups"]) == 1
+    assert "coverage" not in result["setups"][0]["packet"]
+    assert "daily_atr" not in result["setups"][0]["packet"]
 
 
 def test_holdout_feed_and_universe_are_explicit():
@@ -194,9 +221,38 @@ def test_scoring_costs_are_explicit_and_policy_is_frozen():
     result = replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE}, policy)
     assert result["reason"] == "target" and result["pnl_100"] < 200
     assert result["entry_at"] == at + 60  # entry-minute stop/target touches are ignored
-    assert result["exit_price"] < 102  # adverse costs; favorable gap cannot improve target
+    assert result["exit_price"] == result["raw_exit_price"] == 102  # target capped at raw fill
+    assert result["net_fees_100"] == 2 and result["slippage_100"] > 0
+    assert result["pnl_100_cost_sensitivity"] < result["pnl_100"]
     with pytest.raises(ValueError, match="modified"):
         replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE}, {**policy, "shares": 1})
+
+
+def test_sensitivity_is_same_raw_fill_and_cost_cannot_invalidate_entry():
+    c = candidate()
+    at = OPEN + 30 * 60
+    rows = [minute(at + 60, 101.99, 102, 101.8, 101.99),
+            minute(at + 120, 102, 102.2, 101.8, 102.1)]
+    zero = replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE}, replay.scoring_policy())
+    costly_policy = replay.scoring_policy(cost_per_share=0.5)
+    costly = replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE}, costly_policy)
+    assert (zero["status"], zero["entry_at"], zero["exit_at"], zero["entry_price"], zero["exit_price"]) == (
+        costly["status"], costly["entry_at"], costly["exit_at"], costly["entry_price"], costly["exit_price"])
+    assert costly["resolved"] and costly["pnl_100"] < 0
+    assert zero["pnl_100_cost_sensitivity"] == pytest.approx(zero["pnl_100"] - 4)
+    assert costly["pnl_100_cost_sensitivity"] == zero["pnl_100_cost_sensitivity"]
+    assert costly_policy["hash"] != replay.scoring_policy()["hash"]
+
+
+def test_legacy_policy_is_validated_but_never_recomputed():
+    legacy = replay._scoring_policy(replay.LEGACY_VERSION, 60, 0, 0)
+    current = replay.scoring_policy()
+    assert replay._policy(legacy) == legacy and legacy["hash"] != current["hash"]
+    c = candidate()
+    with pytest.raises(ValueError, match="original scores must not be recomputed"):
+        replay.score_setup(c, continuation(c, []), {"open_at": OPEN, "close_at": CLOSE}, legacy)
+    with pytest.raises(ValueError, match="reading, not new generation"):
+        replay.generate_session(bundle(), scoring_policy=legacy)
 
 
 def test_capture_uses_calendar_and_daily_bar_calendar_date(monkeypatch):
@@ -207,8 +263,12 @@ def test_capture_uses_calendar_and_daily_bar_calendar_date(monkeypatch):
         if url == capture.CALENDAR:
             return [{"date": DAY.isoformat(), "open": "09:30", "close": "16:00"}]
         stock = {"t": replay._stamp(OPEN), "o": 100, "h": 101, "l": 99, "c": 100, "v": 100}
-        daily = {**stock, "t": "2026-08-24T00:00:00Z"}
-        return {"bars": {"SPY": [stock if params["timeframe"] == "1Min" else daily]},
+        prior_days = [DAY - timedelta(days=i) for i in range(1, 30) if (DAY - timedelta(days=i)).weekday() < 5][:15]
+        daily = [{**stock, "t": datetime.combine(prior, time(), ET).astimezone(UTC).isoformat().replace("+00:00", "Z")}
+                 for prior in prior_days]
+        bars = ({"SPY": [stock]} if params["timeframe"] == "1Min"
+                else {symbol: daily for symbol in capture.UNIVERSE})
+        return {"bars": bars,
                 "next_page_token": None}
 
     monkeypatch.setattr(capture, "_read", provider)
@@ -216,7 +276,28 @@ def test_capture_uses_calendar_and_daily_bar_calendar_date(monkeypatch):
     assert len(calls) == 3
     assert all(p.get("feed", "sip") == "sip" and p.get("adjustment", "raw") == "raw" for _, p in calls)
     assert result["symbols"]["SPY"]["minutes"][0]["time"] == OPEN
-    assert result["symbols"]["SPY"]["daily"][0]["date"] == "2026-08-24"
+    assert len(result["symbols"]["SPY"]["daily"]) == 15
+    assert result["symbols"]["SPY"]["daily"][-1]["date"] == "2026-08-24"
+    assert all(len(result["symbols"][symbol]["daily"]) == 15 for symbol in capture.UNIVERSE)
+
+
+def test_capture_refuses_any_symbol_with_fewer_than_15_prior_sessions(monkeypatch):
+    calls = []
+    def provider(_client, url, params):
+        calls.append(url)
+        if url == capture.CALENDAR:
+            return [{"date": DAY.isoformat(), "open": "09:30", "close": "16:00"}]
+        if params["timeframe"] == "1Min":
+            return {"bars": {}, "next_page_token": None}
+        prior_days = [DAY - timedelta(days=i) for i in range(1, 30) if (DAY - timedelta(days=i)).weekday() < 5][:15]
+        daily = [{"t": datetime.combine(prior, time(), ET).astimezone(UTC).isoformat().replace("+00:00", "Z"),
+                  "o": 100, "h": 101, "l": 99, "c": 100, "v": 100} for prior in prior_days]
+        return {"bars": {symbol: daily[:14] if symbol == "SPY" else daily for symbol in capture.UNIVERSE},
+                "next_page_token": None}
+    monkeypatch.setattr(capture, "_read", provider)
+    with pytest.raises(capture.InsufficientDailyHistory, match=r"SPY\(14\)"):
+        capture.capture(object(), [DAY])
+    assert calls == [capture.CALENDAR, capture.STOCKS, capture.STOCKS]
 
 
 def test_capture_bounded_pages_and_calendar_span(monkeypatch):

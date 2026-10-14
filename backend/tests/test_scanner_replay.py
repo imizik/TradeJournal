@@ -116,7 +116,7 @@ def test_actual_tool_protocol_resume_immutable_retry_and_practice_reveal(linked)
     cloud_practice_access.verifier.cache_clear()
     resumed = create_server(h.config, backend_transport=httpx.ASGITransport(app=app))
     with TestClient(resumed.streamable_http_app()) as client:
-        result = _request(client, "tools/call", {"name": "get_practice_run", "arguments": {"run_id": run_id}}, h.token)["result"]
+        result = _request(client, "tools/call", {"name": "get_practice_run", "arguments": {"run_id": run_id, "resume": True}}, h.token)["result"]
         assert not result.get("isError"), result
         value = result["structuredContent"]["run"]
         assert value["next_setup"]["opportunity_id"] != first_id
@@ -126,9 +126,50 @@ def test_actual_tool_protocol_resume_immutable_retry_and_practice_reveal(linked)
     assert done["status"] == "committed" and done["report"] and not done["outcomes_sealed"]
     assert done["report"]["scorecard"]["decisions"] == {"take": 0, "skip": 1, "insufficient_data": 1}
     assert done["report"]["scorecard"]["sessions"] == 1
+    assert done["choices"][0]["resumed"] is False
+    assert done["choices"][1]["resumed"] is True
+    assert done["choices"][1]["resumed_at"] is not None
     with Session(h.b.engine) as db:
         assert len(db.exec(select(DecisionRecord)).all()) == 2
         assert not db.exec(select(DecisionEvent)).all()
+
+
+def test_normal_rereads_are_not_resume_and_terminal_receipts_stay_frozen(linked):
+    first = read(linked)
+    repeated = read(linked)
+    assert first["next_setup"]["opportunity_id"] == repeated["next_setup"]["opportunity_id"]
+    done = complete(linked, linked.ids[0])
+    assert all(not choice["resumed"] for choice in done["choices"])
+    response = linked.backend.get("/cloud-mcp/practice/runs/" + linked.ids[0], params={"resume": "true"})
+    assert response.status_code == 200
+    assert response.json()["run"]["choices"] == done["choices"]
+
+
+def test_unstarted_resume_is_refused_and_future_coverage_stays_sealed(linked):
+    response = linked.backend.get("/cloud-mcp/practice/runs/" + linked.ids[0], params={"resume": "true"})
+    assert response.status_code == 404
+    value = read(linked)
+    assert value["coverage"] is None and value["daily_atr"] is None
+    assert linked.backend.get("/cloud-mcp/practice/runs/" + linked.ids[0], params={"resume": "false"}).status_code == 422
+
+
+def test_superseded_policy_rejects_new_choices_before_any_partial_commit(boundary):
+    with Session(boundary.engine) as db:
+        run = replay.prepare_batch(db, [two_setup_bundle()], identifier="legacy-test", seed=19)[0]
+        # Compatibility fixture: a prepared session retained from the original
+        # policy. No real v0 session was activated; these rows are disposable.
+        meta = replay.metadata(run)
+        meta["manifest"]["scoring_policy"] = replay.market._scoring_policy(replay.market.LEGACY_VERSION, 60, 0, 0)
+        run.brief_json = replay.canonical(meta)
+        run.policy_hash = replay.digest(meta["manifest"])
+        db.add(run)
+        db.commit()
+        value = replay.view(db, run, "legacy-test", replay.market.rules.UNIVERSE, resume=True)
+        assert value["read_only"] and value["next_setup"] is None
+        with pytest.raises(decisions.DecisionError, match="read-only"):
+            replay.choose(db, run, replay.entries(run)[0], "legacy-test", replay.market.rules.UNIVERSE,
+                          {"decision": "skip", "rationale": "Must not partly change a superseded run"})
+        assert not db.exec(select(DecisionRecord)).all()
 
 
 def test_future_setup_denied_and_concurrent_receipt_recovery(linked):

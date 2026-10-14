@@ -15,7 +15,7 @@ from cloud_mcp_d1_common import MAX_RESPONSE_BYTES
 router = APIRouter()
 
 
-def packet(request, db, run, *, details):
+def packet(request, db, run, *, details, resume=False):
     require_sample(request)
     who = request.state.access
     if str(run.id) not in who.grants["run_ids"]:
@@ -27,7 +27,7 @@ def packet(request, db, run, *, details):
                 access._serialized(db)
                 db.expire_all()
                 db.refresh(run)
-                result = scanner_replay.view(db, run, who.identifier, who.grants["symbols"], details=details)
+                result = scanner_replay.view(db, run, who.identifier, who.grants["symbols"], details=details, resume=resume)
                 # Summary-only/terminal views do not write first-served time.
                 # End this transaction before projecting the next listed run.
                 db.commit()
@@ -79,9 +79,17 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
 @router.get("/runs/{run_id}")
 def get_run(run_id: uuid.UUID, request: Request, db: Session = Depends(get_session)):
     require_sample(request)
-    if request.query_params or str(run_id) not in request.state.access.grants["run_ids"]:
+    resume = False
+    if scanner_mode() and request.query_params:
+        if (set(request.query_params) != {"resume"} or len(request.query_params.getlist("resume")) != 1
+                or request.query_params["resume"] != "true"):
+            raise HTTPException(422, "Use only resume=true for an interrupted scanner run")
+        resume = True
+    elif request.query_params:
+        raise HTTPException(404, "Sample run not found")
+    if str(run_id) not in request.state.access.grants["run_ids"]:
         raise HTTPException(404, "Sample run not found")
     run = db.get(PracticeRun, run_id)
     if run is None:
         raise HTTPException(404, "Sample run not found")
-    return response({"run": packet(request, db, run, details=True)}, run.day)
+    return response({"run": packet(request, db, run, details=True, resume=resume)}, run.day)

@@ -19,7 +19,9 @@ from zoneinfo import ZoneInfo
 from app.engine import scanner_rules as rules
 
 ET = ZoneInfo("America/New_York")
-VERSION = "scanner-selection-replay-v0"
+VERSION = "scanner-selection-replay-v1"
+LEGACY_VERSION = "scanner-selection-replay-v0"
+SENSITIVITY_COST_PER_SHARE_PER_SIDE = 0.02
 HOLDOUT_START = date(2026, 9, 14)
 NAMESPACE = uuid.UUID("e67f01c8-bc75-4f76-b77c-d92313cfdb16")
 LABELS = ["informed-by-history", "independence-unverified", "model-memory-unverified",
@@ -32,6 +34,8 @@ DIFFERENCES = (
     "Daily ATR uses only prior raw stock sessions; historical intraday relative volume and macro context are unavailable.",
     "No historical corporate-action coverage verifies raw share basis across the ATR lookback.",
     "A missing minute blocks later setup selection for that symbol; complete five-minute bars match the live scanner on complete data.",
+    "Entry-minute stop not checked (optimistic); target touches are also ignored, matching the live watcher.",
+    "The 2-cent-per-share-per-side cost sensitivity changes net proxy R only, never fills, timing, selection or cooldown.",
 )
 
 
@@ -53,27 +57,37 @@ def _epoch(value: object) -> int:
     raise ValueError("A timezone-aware timestamp or epoch is required")
 
 
-def scoring_policy(delay_seconds: int = 60, cost_per_share: float = 0, slippage_bps: float = 0) -> dict:
+def _scoring_policy(version: str, delay_seconds: int, cost_per_share: float, slippage_bps: float) -> dict:
     """Fixed share proxy: costs are dollars per share per side, slippage is adverse per side."""
     if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, int) or not 0 <= delay_seconds <= 600:
         raise ValueError("delay_seconds must be an integer from 0 to 600")
     if not all(isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for v in (cost_per_share, slippage_bps)):
         raise ValueError("Proxy costs must be finite and nonnegative")
-    body = {"version": VERSION, "entry": "first_full_minute_after_detection_plus_delay_open",
+    body = {"version": version, "entry": "first_full_minute_after_detection_plus_delay_open",
             "exit": "completed_minute_stop_first_then_target; clock_at_first_eligible_open",
             "entry_minute_stop_check": False, "favorable_target_price_cap": True,
             "time_stop_seconds": rules.TIME_STOP_SECONDS, "flat_rule": "scanner_s1_other_day",
             "risk_basis": "abs(detection_close_minus_rule_stop)", "shares": 100,
             "decision_delay_seconds": delay_seconds, "cost_per_share_per_side": float(cost_per_share),
             "slippage_bps_per_side": float(slippage_bps)}
+    if version == VERSION:
+        body["sensitivity_cost_per_share_per_side"] = SENSITIVITY_COST_PER_SHARE_PER_SIDE
     return {**body, "hash": hashlib.sha256(_canonical(body).encode()).hexdigest()}
+
+
+def scoring_policy(delay_seconds: int = 60, cost_per_share: float = 0, slippage_bps: float = 0) -> dict:
+    """Versioned primary proxy and fixed two-cent per-side cost sensitivity."""
+    return _scoring_policy(VERSION, delay_seconds, cost_per_share, slippage_bps)
 
 
 def _policy(policy: dict | None) -> dict:
     if policy is None:
         return scoring_policy()
-    expected = scoring_policy(policy["decision_delay_seconds"], policy["cost_per_share_per_side"],
-                              policy["slippage_bps_per_side"])
+    version = policy.get("version")
+    if version not in (VERSION, LEGACY_VERSION):
+        raise ValueError("Unrecognized scoring policy version")
+    expected = _scoring_policy(version, policy["decision_delay_seconds"], policy["cost_per_share_per_side"],
+                               policy["slippage_bps_per_side"])
     if policy != expected:
         raise ValueError("Unrecognized or modified scoring policy")
     return expected
@@ -201,13 +215,17 @@ def _packet(symbol: str, signal: dict, day: date, retrieved_at: str, minutes: li
 def _unresolved(reason: str, entry_at=None, entry_price=None) -> dict:
     return {"status": "unresolved", "resolved": False, "reason": reason,
             "entry_at": entry_at, "exit_at": None, "entry_price": entry_price,
-            "exit_price": None, "r": None, "pnl_100": None}
+            "exit_price": None, "raw_entry_price": entry_price, "raw_exit_price": None,
+            "net_fees_100": None, "slippage_100": None,
+            "r": None, "pnl_100": None, "r_cost_sensitivity": None, "pnl_100_cost_sensitivity": None}
 
 
 def score_setup(candidate: dict, continuation: dict, session: dict, policy: dict,
                 delay_seconds: int = 0) -> dict:
     """Score only sealed post-cutoff bars. Missing eligible minutes stay unresolved."""
     policy = _policy(policy)
+    if policy["version"] == LEGACY_VERSION:
+        raise ValueError("Legacy v0 policy is readable but its original scores must not be recomputed")
     if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, int) or delay_seconds < 0:
         raise ValueError("delay_seconds must be a nonnegative integer")
     # The caller supplies the *total* decision delay. The policy's 60-second
@@ -238,16 +256,11 @@ def score_setup(candidate: dict, continuation: dict, session: dict, policy: dict
     raw_entry = bar["open"]
     if sign * (raw_entry - stop) <= 0 or sign * (target - raw_entry) <= 0:
         return {**_unresolved("entry_open_at_or_beyond_stop_or_target"), "status": "invalidated"}
-    slip = policy["slippage_bps_per_side"] / 10_000
-    cost = policy["cost_per_share_per_side"]
-    entry = raw_entry * (1 + sign * slip) + sign * cost
-    if sign * (target - entry) <= 0:
-        return {**_unresolved("cost_adjusted_entry_at_or_beyond_target"), "status": "invalidated"}
     time_stop = eligible + rules.TIME_STOP_SECONDS
     for at in range(eligible + 60, min(close_at, max(by_time, default=eligible) + 60), 60):
         row = by_time.get(at)
         if row is None:
-            return _unresolved("missing_exit_minute", eligible, round(entry, 4))
+            return _unresolved("missing_exit_minute", eligible, round(raw_entry, 4))
         if at >= min(time_stop, flat):
             reason = "time_stop" if time_stop <= flat else "flat"
             raw_exit = row["open"]
@@ -263,19 +276,29 @@ def score_setup(candidate: dict, continuation: dict, session: dict, policy: dict
             else:
                 raw_exit = target
             exit_at = row["end_time"]
-        exit_price = raw_exit * (1 - sign * slip) - sign * cost
-        pnl_share = sign * (exit_price - entry)
+        gross_share = sign * (raw_exit - raw_entry)
+        slip_share = (raw_entry + raw_exit) * policy["slippage_bps_per_side"] / 10_000
+        primary_fees_share = 2 * policy["cost_per_share_per_side"]
+        sensitivity_fees_share = 2 * policy["sensitivity_cost_per_share_per_side"]
+        primary_share = gross_share - slip_share - primary_fees_share
+        sensitivity_share = gross_share - slip_share - sensitivity_fees_share
         return {"status": "resolved", "resolved": True, "reason": reason,
-                "entry_at": eligible, "exit_at": exit_at, "entry_price": round(entry, 4),
-                "exit_price": round(exit_price, 4), "r": round(pnl_share / risk, 4),
-                "pnl_100": round(100 * pnl_share, 2)}
-    return _unresolved("continuation_ends_before_exit", eligible, round(entry, 4))
+                "entry_at": eligible, "exit_at": exit_at, "entry_price": round(raw_entry, 4),
+                "exit_price": round(raw_exit, 4), "raw_entry_price": round(raw_entry, 4),
+                "raw_exit_price": round(raw_exit, 4), "net_fees_100": round(100 * primary_fees_share, 2),
+                "slippage_100": round(100 * slip_share, 2),
+                "r": round(primary_share / risk, 4), "pnl_100": round(100 * primary_share, 2),
+                "r_cost_sensitivity": round(sensitivity_share / risk, 4),
+                "pnl_100_cost_sensitivity": round(100 * sensitivity_share, 2)}
+    return _unresolved("continuation_ends_before_exit", eligible, round(raw_entry, 4))
 
 
 def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
                      history_rows: list[dict] | None = None, allow_holdout: bool = False) -> dict:
     """Stream completed bars through unchanged S1 scanner rules, then seal each continuation."""
     policy = _policy(scoring_policy)
+    if policy["version"] != VERSION:
+        raise ValueError("Legacy policy is retained for reading, not new generation")
     day = date.fromisoformat(bundle["session_date"])
     if day >= HOLDOUT_START and not allow_holdout:
         raise ValueError("Holdout session requires explicit allow_holdout=True")
@@ -291,21 +314,54 @@ def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
         raise ValueError("Capture must be retrieved after the session closes")
     last_end = min(int(datetime.combine(day, time(15), ET).timestamp()), close_at - 3600)
     session = {"open_at": open_at, "close_at": close_at}
+    daily_by_symbol = {}
+    atr_by_symbol = {}
+    daily_atr = {}
+    missing_daily = []
+    for symbol in rules.UNIVERSE:
+        daily = _daily(bundle["symbols"][symbol]["daily"], day)
+        atr = rules.atr14(daily)
+        if len(daily) < 15 or atr is None:
+            missing_daily.append(f"{symbol} ({len(daily)} prior sessions)")
+        daily_by_symbol[symbol] = daily
+        atr_by_symbol[symbol] = atr
+        daily_atr[symbol] = {"prior_sessions": len(daily), "atr14": round(atr, 4) if atr is not None else None,
+                             "as_of_session": daily[-1]["date"] if daily else None,
+                             "source": "alpaca_sip_1day_raw", "feed": "sip", "adjustment": "raw"}
+    if missing_daily:
+        raise ValueError("Prior daily ATR requires at least 15 sessions for every symbol: " + ", ".join(missing_daily))
     setups, gaps = [], []
+    coverage_symbols = {}
+    eligible_scan_ends = list(range(open_at + rules.FIRST_BAR_AFTER + rules.BAR_SECONDS, last_end + 1,
+                                    rules.BAR_SECONDS))
+    expected_regular = (close_at - open_at) // 60
     for symbol in rules.UNIVERSE:
         source = bundle["symbols"][symbol]
         minutes = _minutes(source["minutes"], open_at, close_at)
-        daily = _daily(source["daily"], day)
-        atr = rules.atr14(daily)
-        if atr is None:
-            gaps.append({"symbol": symbol, "reason": "prior_daily_atr14_unavailable"})
-            continue
+        daily = daily_by_symbol[symbol]
+        atr = atr_by_symbol[symbol]
         by_time = {m["time"]: m for m in minutes}
+        first_missing = next((at for at in range(open_at, close_at, 60) if at not in by_time), None)
+        blocked_slots = sum(end > first_missing for end in eligible_scan_ends) if first_missing is not None else 0
+        coverage_symbols[symbol] = {"expected_minutes": expected_regular,
+            "provided_minutes": len(minutes), "missing_minutes": expected_regular - len(minutes),
+            "first_missing_at": _stamp(first_missing) if first_missing is not None else None,
+            "first_missing_epoch": first_missing,
+            "eligible_scan_slots": len(eligible_scan_ends),
+            "evaluated_scan_slots": len(eligible_scan_ends) - blocked_slots,
+            "blocked_scan_slots": blocked_slots,
+            "scan_minutes_lost":
+                max(0, (last_end - first_missing) // 60) if first_missing is not None else 0,
+            "setups_emitted": 0, "actual_suppressed_setups": None}
+        if first_missing is not None:
+            gaps.append({"symbol": symbol, "reason": "missing_completed_minute", "at": first_missing,
+                         "missing_minutes": expected_regular - len(minutes),
+                         "blocked_scan_slots": blocked_slots,
+                         "actual_suppressed_setups": None})
         taken: set[tuple[str, int]] = set()
         saved = []
         for bar_end in range(open_at + 300, last_end + 1, 300):
             if any(at not in by_time for at in range(open_at, bar_end, 60)):
-                gaps.append({"symbol": symbol, "reason": "missing_completed_minute", "at": bar_end})
                 break
             prefix = [by_time[at] for at in range(open_at, bar_end, 60)]
             fives = _complete_fives(prefix, open_at, close_at)
@@ -329,9 +385,19 @@ def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
                             "candidate_id": candidate["candidate_id"], "cutoff_at": bar_end,
                             "minutes": [m for m in minutes if m["time"] >= bar_end]}
             setups.append({"packet": packet, "continuation": continuation})
+            coverage_symbols[symbol]["setups_emitted"] += 1
             saved.append(setups[-1])
             taken.add((signal["setup"], bar_end))
     setups.sort(key=lambda item: (item["packet"]["candidate"]["bar_end"], item["packet"]["candidate"]["symbol"]))
+    sums = ("expected_minutes", "provided_minutes", "missing_minutes",
+            "eligible_scan_slots", "evaluated_scan_slots", "blocked_scan_slots",
+            "scan_minutes_lost", "setups_emitted")
+    totals = {key: sum(row[key] for row in coverage_symbols.values()) for key in sums}
+    coverage = {"session_date": day.isoformat(), "scan_end_at": _stamp(last_end),
+                "symbols": coverage_symbols,
+                "totals": {**totals, "actual_suppressed_setups": None},
+                "suppressed_setup_note": "Actual suppressed setup count is unavailable after a missing minute; no future bars are inferred."}
     return {"session_date": day.isoformat(), "retrieved_at": _stamp(retrieved), "session": session,
             "setups": setups, "differences": list(DIFFERENCES), "gaps": gaps,
+            "coverage": coverage, "daily_atr": daily_atr,
             "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH, "scoring_policy": policy}

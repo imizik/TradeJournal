@@ -86,15 +86,15 @@ def _number(value: object, digits: int = 2) -> str:
 
 
 def _score_table(card: dict) -> list[str]:
-    lines = ["| Cohort | Selected | Resolved | Unresolved | Invalidated | Total R | Mean R | Win rate | Proxy P&L / 100 shares |",
-             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    lines = ["| Cohort | Selected | Resolved | Unresolved | Invalidated | Total R | Mean R | Win rate | Primary P&L / 100 shares | P&L / 100 shares at $0.02/share/side |",
+             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for name, key in (("Rules take all", "rules_take_all"), ("Jo at baseline entry", "jo_baseline_entry"),
                       ("Jo at delayed entry", "jo_delayed_entry"), ("Jo skips, counterfactual", "skipped_setups"),
                       ("Seeded random 50%", "seeded_random_50pct"), ("Skip all", "skip_all")):
         row = card[key]
         win = "—" if row.get("win_rate") is None else f"{100 * row['win_rate']:.1f}%"
         lines.append(f"| {name} | {row['selected']} | {row['resolved']} | {row.get('unresolved', 0)} | {row.get('invalidated', 0)} | {_number(row.get('total_r'))} | "
-                     f"{_number(row.get('mean_r'))} | {win} | {_number(row.get('pnl_100'))} |")
+                     f"{_number(row.get('mean_r'))} | {win} | {_number(row.get('pnl_100'))} | {_number(row.get('pnl_100_cost_sensitivity'))} |")
     return lines
 
 
@@ -115,6 +115,8 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
     links = link_snapshot(setups, isaac_trades) if isaac_trades is not None else None
     prompt_hash = hashlib.sha256(manifest["prompt_text"].encode()).hexdigest()
     policy = manifest["scoring_policy"]
+    decisions = result["scorecard"]["decisions"]
+    decision_text = "; ".join(f"{name.upper()} {decisions[name]}" for name in ("take", "skip", "insufficient_data"))
     lines = [f"# Scanner selection replay — {escape(run.day.isoformat())}", "",
              f"Run: `{run.id}` · phase: **{escape(meta['phase'])}** · status: **{escape(run.status)}**",
              f"Prompt version: {escape(manifest['prompt_version'])} · prompt SHA-256: `{prompt_hash}`",
@@ -125,10 +127,13 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
              "premium fill, or option P&L was inferred. The with/without-contract cohort is omitted because every "
              "historical contract is unknown.",
              "Contract eligibility: " + escape(result["contract_eligibility"]), "",
+             f"Primary costs: ${policy['cost_per_share_per_side']:.2f}/share/side; sensitivity: $0.02/share/side, "
+             "using the same raw fills, entry/exit times and resolved cohort. Costs do not remove trades or alter the candidate stream. "
+             "A dash in a legacy sensitivity column means that frozen snapshot predates this comparison.", "",
              "## Frozen scoring policy", "", "```json", json.dumps(policy, sort_keys=True, indent=2), "```", "",
              "## Session scorecard", ""]
     lines.extend(_score_table(result["scorecard"]))
-    lines.extend(["", f"Sessions: {result['scorecard']['sessions']}; decisions: {escape(result['scorecard']['decisions'])}; "
+    lines.extend(["", f"Sessions: {result['scorecard']['sessions']}; decisions: {decision_text}; "
                   f"uncommitted: {result['scorecard']['uncommitted']}.",
                   "Evidence warning: " + escape(result['scorecard']['evidence_warning']),
                   escape(result["scorecard"]["threshold_notice"]),
@@ -148,8 +153,8 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
         lines.extend(_score_table(card))
         lines.append("")
     lines.extend(["## Setup ledger", "",
-                  "| Time ET | Symbol | Setup | Jo choice | Jo reason | Rules R | Jo baseline R | Jo delayed R | Isaac link |",
-                  "| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |"])
+                  "| Time ET | Symbol | Setup | Jo choice | Jo reason | Wall seconds | Resumed setup | Rules R | Jo baseline R | Jo delayed R | Isaac link |",
+                  "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | --- |"])
     for item in setups:
         c = item["candidate"]
         choice = item.get("choice") or {}
@@ -157,6 +162,7 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
         link = "snapshot not supplied" if links is None else f"{len(links[c['candidate_id']])} matched option trade(s)"
         lines.append("| " + " | ".join((escape(_ny(c["detected_at"]).strftime("%H:%M")), escape(c["symbol"]),
             escape(c["setup"]), escape(choice.get("decision")), escape(choice.get("reason")),
+            _number(choice.get("wall_seconds")), "yes" if choice.get("resumed") else "no" if "resumed" in choice else "—",
             _result_r(item["rules"]), _result_r(item["rules"] if take else None),
             _result_r(item["delayed"] if take else None), escape(link))) + " |")
     lines.extend(["", "## Isaac's actual option trades (separate, not ranked against share R)", ""])
@@ -185,9 +191,36 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
                   "and Jo's existing memory can contain later information; sessions are not independent blind questions. "
                   "Outside news and model memory cannot be verified from these receipts; review the labels below. "
                   "No trade or live order was placed by this report.", "",
+                  "Wall seconds measure first packet service to commit, including interruption time. "
+                  "Resumed setup is marked only by an explicit resume=true read before that immutable choice; "
+                  "a repeated normal read is not labelled a resume.", "",
                   "Labels: " + ", ".join(escape(label) for label in result["labels"]), "",
                   "Differences from live S1:", ""])
     lines.extend(f"- {escape(note)}" for note in meta["differences"])
+    lines.extend(["", "Daily ATR coverage:", "",
+                  "| Symbol | Prior daily sessions | ATR14 | Source |", "| --- | ---: | ---: | --- |"])
+    for symbol, row in sorted(meta.get("daily_atr", {}).items()):
+        lines.append(f"| {escape(symbol)} | {row['prior_sessions']} | {_number(row['atr14'], 4)} | {escape(row['source'])} |")
+    if "daily_atr" not in meta:
+        lines.append("| — | — | — | Legacy snapshot: ATR coverage not recorded |")
+    coverage = meta.get("coverage")
+    lines.extend(["", "Missing-minute impact:", ""])
+    if coverage is None:
+        lines.append("Legacy snapshot: symbol-time loss was not recorded.")
+    else:
+        lines.extend(["| Symbol | Expected minutes | Supplied minutes | Missing minutes | Scan minutes lost | Blocked scan slots | Setups emitted |",
+                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"])
+        for symbol, row in sorted(coverage["symbols"].items()):
+            lines.append("| " + " | ".join((escape(symbol), str(row["expected_minutes"]), str(row["provided_minutes"]),
+                str(row["missing_minutes"]), str(row["scan_minutes_lost"]), str(row["blocked_scan_slots"]),
+                str(row["setups_emitted"]))) + " |")
+        totals = coverage["totals"]
+        completeness = "complete" if totals["missing_minutes"] == 0 else "incomplete"
+        lines.extend(["", f"Session data: {completeness}. Session totals: {totals['missing_minutes']} missing symbol-minutes; "
+                      f"{totals['scan_minutes_lost']} scan symbol-minutes lost; {totals['blocked_scan_slots']} blocked scan slots; "
+                      f"{totals['setups_emitted']} setups emitted.",
+                      "Lost setup count is unknowable when bars are absent. Blocked scan slots are opportunities to evaluate "
+                      "a signal, not claimed missing setups; a quiet complete session has zero lost symbol-time."])
     lines.extend(["", "Coverage gaps:", ""])
     if meta["coverage_gaps"]:
         lines.extend(f"- {escape(gap.get('symbol'))}: {escape(gap.get('reason'))}"
