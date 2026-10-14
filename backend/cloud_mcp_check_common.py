@@ -50,6 +50,7 @@ class CheckConfig(Strict):
     ledger_file: str
     features_pointer: str
     market_watch_snapshots_dir: str | None = None
+    market_watch_outbox_dir: str | None = None
     shadow_setups_dir: str | None = None
     shadow_outbox_dir: str | None = None
     # History older than this is still real; it is used with a caveat.
@@ -69,7 +70,8 @@ class CheckConfig(Strict):
     def https_url(cls, value):
         return Config.https_url(value)
 
-    @field_validator("jwks_file", "ledger_file", "features_pointer", "shadow_setups_dir", "shadow_outbox_dir", "market_watch_snapshots_dir")
+    @field_validator("jwks_file", "ledger_file", "features_pointer", "shadow_setups_dir", "shadow_outbox_dir", "market_watch_snapshots_dir",
+                     "market_watch_outbox_dir")
     @classmethod
     def absolute_path(cls, value):
         if value is None:
@@ -89,7 +91,10 @@ class CheckConfig(Strict):
             raise ValueError("Require the separate /check/mcp resource")
         if len({self.ledger_file, self.features_pointer, self.jwks_file}) != 3:
             raise ValueError("Ledger, features and keys must be distinct files")
-        paths = [Path(p) for p in (self.shadow_setups_dir, self.shadow_outbox_dir, self.market_watch_snapshots_dir) if p]
+        if self.market_watch_outbox_dir and not self.market_watch_snapshots_dir:
+            raise ValueError("A market-watch outbox requires the market-watch snapshots directory")
+        paths = [Path(p) for p in (self.shadow_setups_dir, self.shadow_outbox_dir, self.market_watch_snapshots_dir,
+                                   self.market_watch_outbox_dir) if p]
         if any(a == b or a in b.parents or b in a.parents for i, a in enumerate(paths) for b in paths[i+1:]):
             raise ValueError("Exchange directories must be distinct and disjoint")
         if any(p == Path(f) or p in Path(f).parents for p in paths
@@ -114,7 +119,8 @@ class CheckVerifier(JWKSVerifier):
 
     def active_config(self):
         current = super().active_config()
-        fixed = ("ledger_file", "features_pointer", "provider_feed", "shadow_setups_dir", "shadow_outbox_dir", "market_watch_snapshots_dir")
+        fixed = ("ledger_file", "features_pointer", "provider_feed", "shadow_setups_dir", "shadow_outbox_dir", "market_watch_snapshots_dir",
+                 "market_watch_outbox_dir")
         if current is None or any(getattr(current, key) != getattr(self.config, key) for key in fixed):
             return None
         return current
