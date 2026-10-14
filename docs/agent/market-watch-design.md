@@ -1,11 +1,11 @@
 # Jo's market watch — design (proposed October 14, 2026)
 
-**Status: MW-1 implementation selected October 14, 2026; activation remains disabled.** Written at Isaac's request
+**Status: MW-1 implemented; owner-authorized activation is partial as of October 14, 2026. Calendar repair and actual Jo access proof remain pending.** Written at Isaac's request
 after the October 14 CPI session. It extends the
 [shadow trader design](shadow-trader-design.md) and reuses rules already
 written in the [agentic trading roadmap](../agentic-trading-roadmap.md)
 (macro and catalysts, thesis versions, morning pipeline, anti-hindsight).
-It changes nothing that is live: [setup scanner S1](setup-scanner-contract.md),
+[Setup scanner S1](setup-scanner-contract.md),
 its ten-session acceptance and [shadow S1](shadow-s1-contract.md) keep their
 rules, records and gates. Codex owns the shadow and check-service backend;
 selecting any slice below goes through the
@@ -497,9 +497,22 @@ Separately authorized activation must name the release, actor and paths, then:
    original-versus-corrected cohorts. No outcome continuation is mounted into
    the check process.
 
-None of these activation actions was performed by this implementation task.
+None of these activation actions was performed by the initial implementation task.
 MW-2 scheduling, event detection and message transport need their own scope and
 review; merging this foundation does not authorize them.
+
+Subsequent owner-authorized activation on October 14 installed the merged code,
+initialized the isolated stores after a verified ledger backup, added only the
+two delegated market-watch scopes, and refreshed the existing Check v4 catalog.
+A manual post-close snapshot passed validation inside the check service's mount
+namespace; publication writes and private configuration/outcome reads remained
+denied. It exposed an incorrect default macro-calendar file path, now corrected
+to the bundled `app/data/macro_calendar.json` with a default-reader regression.
+The first immutable snapshot retains its explicit calendar source-error gap;
+the repaired producer must be installed and a new snapshot published before
+Jo's activation proof. Actual Jo read/submit access, scoped-token proof and
+nonempty live outcome evaluation remain unverified. The empty owner export and
+offline evaluator baseline passed; no trial, schedule or delivery was activated.
 
 ## Wake-ups and messages (MW-2)
 
