@@ -297,45 +297,59 @@ def _submit_notice(ledger, outbox, snapshot, operation, now, previous=None, **ch
 
 
 def test_messages_budget_corrections_links_and_freshness(env, tmp_path):
+    from market_watch_ledger import MessageBudgetExceeded
     runner, clock, _, pushed, _ = env
     ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
     snapshot = snapshot_at(clock.now)
     publish_snapshot(runner.snapshots_dir, snapshot)
+    real_push = runner.push
+    runner.push = lambda title, body: real_push(title, body) if len(pushed) < 2 else (_ for _ in ()).throw(RuntimeError("ntfy_not_configured"))
     receipts, previous = [], None
-    for i in range(4):
+    for i in range(3):
         r = _submit_notice(ledger, runner.outbox_dir, snapshot, f"op{i}", clock.now + timedelta(seconds=i), previous)
         receipts.append(r)
         previous = r["read_id"]
+    # The check ledger (#315) refuses a fourth ordinary intent before anything is committed.
+    served = ledger.serve(ACTOR, snapshot, lambda: clock.now + timedelta(seconds=4))
+    with pytest.raises(MessageBudgetExceeded):
+        ledger.submit(ACTOR, request(served["input_id"], operation_id="op3", previous_read_id=previous), lambda: clock.now + timedelta(seconds=4))
     clock.now += timedelta(seconds=5)  # a notice stamped after the app's clock is refused as future-dated
-    runner.ingest_notices(clock.now)
-    runner.deliver_messages(clock.now)
-    decisions = {d["read_id"]: d for d in runner.store.records("message_decision")}
-    assert [decisions[r["read_id"]]["decision"] for r in receipts] == ["send", "send", "send", "suppressed_budget"]
-    clock.now += timedelta(seconds=10)
-    correction = _submit_notice(ledger, runner.outbox_dir, snapshot, "fix", clock.now, previous,
-                                message_intent="correction", correction_of_read_id=receipts[0]["read_id"])
-    runner.ingest_notices(clock.now)
-    runner.deliver_messages(clock.now)
-    final = {d["read_id"]: d for d in runner.store.records("message_decision")}[correction["read_id"]]
-    assert final["decision"] == "send" and final["budget_free"] and final["corrects_message_id"] == receipts[0]["message_id"]
-    assert len(pushed) == 4 and pushed[-1][0].startswith("Jo correction: DOWN")
-    # Correcting a message Isaac never got, or correcting the same message twice, gets no budget bypass.
-    for operation, target in (("fix-unsent", receipts[3]), ("fix-again", receipts[0])):
-        clock.now += timedelta(seconds=10)
-        previous = runner.store.records("read_notice")[-1]["read_id"]
-        r = _submit_notice(ledger, runner.outbox_dir, snapshot, operation, clock.now, previous,
-                           message_intent="correction", correction_of_read_id=target["read_id"])
+    for step in range(4):  # the third push keeps failing and expires after its retries
         runner.ingest_notices(clock.now)
         runner.deliver_messages(clock.now)
-        decision = {d["read_id"]: d for d in runner.store.records("message_decision")}[r["read_id"]]
-        assert decision["decision"] == "suppressed_budget" and not decision["budget_free"]
-    assert len(pushed) == 4
+        clock.now += timedelta(seconds=61)
+    decisions = {d["read_id"]: d for d in runner.store.records("message_decision")}
+    assert [decisions[r["read_id"]]["decision"] for r in receipts] == ["send", "send", "send"]
+    assert len(pushed) == 2
     title, body = pushed[0]
     assert title == "Jo market read: DOWN" and "Weak tape" in body and "Wrong if: Reclaim VWAP" in body
     assert "30m 0.60" in body and receipts[0]["read_id"] in body and "late-day holds" in body
-    attempts = [a for a in runner.store.records("message_attempt") if a["result"] != "sending"]
-    assert all(a["result"] == "accepted" and a["transport_receipt_id"].startswith("ntfy-") for a in attempts)
-    assert {a["read_id"] for a in attempts} == {r["read_id"] for r in receipts[:3]} | {correction["read_id"]}
+    attempts = [a for a in runner.store.records("message_attempt") if a["result"] in ("accepted", "expired")]
+    assert {(a["read_id"], a["result"]) for a in attempts} == {(receipts[0]["read_id"], "accepted"), (receipts[1]["read_id"], "accepted"),
+                                                               (receipts[2]["read_id"], "expired")}
+    assert all(a["transport_receipt_id"].startswith("ntfy-") for a in attempts if a["result"] == "accepted")
+    runner.push = real_push
+
+    def correct(operation, target):
+        nonlocal previous
+        clock.now += timedelta(seconds=10)
+        r = _submit_notice(ledger, runner.outbox_dir, snapshot, operation, clock.now, previous,
+                           message_intent="correction", correction_of_read_id=target["read_id"])
+        previous = r["read_id"]
+        runner.ingest_notices(clock.now)
+        runner.deliver_messages(clock.now)
+        return {d["read_id"]: d for d in runner.store.records("message_decision")}[r["read_id"]]
+    # A correction of a message Isaac got is budget-free, once per corrected message.
+    first = correct("fix", receipts[0])
+    assert first["decision"] == "send" and first["budget_free"] and first["corrects_message_id"] == receipts[0]["message_id"]
+    assert pushed[-1][0].startswith("Jo correction: DOWN")
+    # Correcting the never-delivered third message is budgeted like an update (the expired send was refunded).
+    unsent = correct("fix-unsent", receipts[2])
+    assert unsent["decision"] == "send" and not unsent["budget_free"] and unsent["budget_used_before"] == 2
+    # A second correction of the same delivered message is budgeted too; the budget is now spent.
+    again = correct("fix-again", receipts[0])
+    assert again["decision"] == "suppressed_budget" and not again["budget_free"]
+    assert len(pushed) == 4
     runner.deliver_messages(clock.now + timedelta(minutes=1))
     assert len(pushed) == 4
 

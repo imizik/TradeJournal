@@ -21,6 +21,11 @@ from market_watch_common import canonical, digest, seal, verify, validate_snapsh
 
 HORIZONS = ('30m', '60m', 'close')
 TABLES = ('market_watch_input', 'market_watch_read', 'market_watch_comparator', 'market_watch_message_event')
+DAILY_DISCRETIONARY_INTENTS = 3
+
+
+class MessageBudgetExceeded(ValueError):
+    """The actor already reserved its discretionary messages for this session."""
 
 
 def identifier(prefix):
@@ -185,6 +190,29 @@ class MarketWatchLedger:
             verify(record)
         return result
 
+    def _context(self, db, actor, session_date):
+        reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == session_date]
+        by_id = {r['read_id']: r for r in reads}
+        intents = [m for m in self.rows(db, TABLES[3], actor)
+                   if m['kind'] == 'intent' and m['read_id'] in by_id]
+        used = sum(not m['is_correction'] for m in intents)
+        latest_intent = intents[-1] if intents else None
+        return {'session_date': session_date, 'latest_read': reads[-1] if reads else None,
+                'latest_message_intent': ({'message_id': latest_intent['message_id'],
+                    'is_correction': latest_intent['is_correction'],
+                    'read': by_id[latest_intent['read_id']]} if latest_intent else None),
+                'discretionary_intents_used': used,
+                'discretionary_intents_remaining': max(0, DAILY_DISCRETIONARY_INTENTS - used),
+                'delivery_status': 'unverified'}
+
+    def context(self, actor, clock):
+        """Own current-session records only; never exposes checks or another actor."""
+        actor_valid(actor)
+        with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            session_date = clock().astimezone(ZoneInfo('America/New_York')).date().isoformat()
+            return self._context(db, actor, session_date)
+
     def serve(self, actor, snapshot, clock):
         actor_valid(actor)
         validate_snapshot(snapshot)
@@ -198,8 +226,10 @@ class MarketWatchLedger:
                            'snapshot_sha256': snapshot['content_sha256'], 'snapshot_json': snapshot,
                            'served_at': now.isoformat(), 'created_at': now.isoformat()})
             self.insert(db, TABLES[0], record, 'input_id')
+            context = self._context(db, actor, snapshot['session_date'])
         return {'input_id': record['input_id'], 'served_at': record['served_at'], 'snapshot_id': snapshot['snapshot_id'],
-                'snapshot_sha256': snapshot['content_sha256'], 'snapshot': snapshot, 'quality_flags': flags}
+                'snapshot_sha256': snapshot['content_sha256'], 'snapshot': snapshot, 'quality_flags': flags,
+                'context': context}
 
     def submit(self, actor, request, clock):
         actor_valid(actor)
@@ -235,6 +265,8 @@ class MarketWatchLedger:
             prior_message = next((m for m in self.rows(db, TABLES[3], actor) if m['read_id'] == correction and m['kind'] == 'intent'), None) if correction else None
             if request['message_intent'] == 'correction' and not prior_message:
                 raise ValueError('Message correction requires an earlier intent')
+            if request['message_intent'] == 'update' and not self._context(db, actor, snapshot['session_date'])['discretionary_intents_remaining']:
+                raise MessageBudgetExceeded('Daily discretionary message-intent budget exhausted')
             read_id = identifier('mwr')
             read = seal({**request, 'read_id': read_id, 'actor': actor, 'request_sha256': request_hash,
                          'received_at': now.isoformat(), 'created_at': now.isoformat(),

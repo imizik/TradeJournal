@@ -122,6 +122,13 @@ def test_tools_disabled_by_default_and_scoped_audited_without_provider_calls(har
         assert call(client, 'market_watch_submit', req, harness.token(scope='check:read market-watch:read'))['isError']
         receipt = call(client, 'market_watch_submit', req, harness.token(scope=scope))['structuredContent']
         assert receipt['read_id']
+        context = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']['context']
+        assert context['latest_read']['read_id'] == receipt['read_id']
+        assert context['discretionary_intents_remaining'] == 2
+        (directory / 'latest.json').unlink()
+        missing = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']
+        assert missing['status'] == 'unavailable'
+        assert missing['context']['latest_read']['read_id'] == receipt['read_id']
     assert len(harness.requests) == before
     config = json.loads(harness.config_path.read_text())
     with sqlite3.connect(config['ledger_file']) as db:
@@ -195,3 +202,54 @@ def test_comparator_frozen_constants_and_stale_missing_refusal():
     assert comparator(snapshot, read, NOW + timedelta(seconds=181))['signal'] == 'unavailable'
     snapshot['indices']['SPY']['vwap'] = {'value': None, 'status': 'missing'}
     assert comparator(snapshot, read, NOW)['probabilities']['30m'] is None
+
+
+def test_current_session_context_recovers_parent_without_other_actor_data(ledger):
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    assert inp['context']['latest_read'] is None
+    assert inp['context']['discretionary_intents_remaining'] == 3
+    receipt = ledger.submit(ACTOR, request(inp['input_id']), lambda: NOW)
+    recovered = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)['context']
+    assert recovered['latest_read']['read_id'] == receipt['read_id']
+    assert recovered['latest_message_intent']['message_id'] == receipt['message_id']
+    assert recovered['latest_message_intent']['read']['read_id'] == receipt['read_id']
+    assert recovered['discretionary_intents_remaining'] == 2
+    assert recovered['delivery_status'] == 'unverified'
+    assert ledger.context(OTHER, lambda: NOW)['latest_read'] is None
+    next_day = ledger.context(ACTOR, lambda: NOW + timedelta(days=1))
+    assert next_day['latest_read'] is None
+    assert next_day['discretionary_intents_remaining'] == 3
+
+
+def test_daily_intent_budget_atomic_recovery_and_corrections(ledger):
+    from market_watch_ledger import MessageBudgetExceeded
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    parent = None
+    requests, receipts = [], []
+    for i in range(3):
+        req = request(inp['input_id'], operation_id=f'message-{i}', previous_read_id=parent)
+        receipt = ledger.submit(ACTOR, req, lambda: NOW)
+        requests.append(req)
+        receipts.append(receipt)
+        parent = receipt['read_id']
+    assert ledger.context(ACTOR, lambda: NOW)['discretionary_intents_remaining'] == 0
+    # A lost response recovers even after the budget is used and on the next day.
+    assert ledger.submit(ACTOR, requests[0], lambda: NOW + timedelta(days=1))['read_id'] == receipts[0]['read_id']
+    denied = request(inp['input_id'], operation_id='fourth', previous_read_id=parent)
+    with pytest.raises(MessageBudgetExceeded):
+        ledger.submit(ACTOR, denied, lambda: NOW)
+    assert len(ledger.export(ledger.ledger.path, ACTOR)['reads']) == 3
+    # A denied intent does not erase the observation: the same uncommitted
+    # operation can be saved without an intent.
+    fourth = ledger.submit(ACTOR, {**denied, 'message_intent': 'none'}, lambda: NOW)
+    assert fourth['message_id'] is None
+    corrected = ledger.submit(ACTOR, request(inp['input_id'], operation_id='correction',
+        previous_read_id=fourth['read_id'], message_intent='correction',
+        correction_of_read_id=receipts[0]['read_id']), lambda: NOW)
+    assert corrected['message_id'] is not None
+    assert ledger.context(ACTOR, lambda: NOW)['discretionary_intents_remaining'] == 0
+    # Corrections cannot manufacture a budget exemption for an unmessaged read.
+    with pytest.raises(ValueError, match='earlier intent'):
+        ledger.submit(ACTOR, request(inp['input_id'], operation_id='fake-correction',
+            previous_read_id=corrected['read_id'], message_intent='correction',
+            correction_of_read_id=fourth['read_id']), lambda: NOW)
