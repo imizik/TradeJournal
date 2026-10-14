@@ -264,7 +264,8 @@ class SetupScanner:
 
     def _minutes(self, symbol: str, today: date) -> list[dict]:
         # The same request the Practice paper watcher makes for a same-day plan, so a shared cache entry.
-        data, _, issue = self.feed.read("/v1/markets/timesales", {
+        observed_at = self.clock()
+        data, fetched_at, issue = self.feed.read("/v1/markets/timesales", {
             "symbol": symbol, "interval": "1min", "session_filter": "all",
             "start": today.strftime("%Y-%m-%d 04:00"), "end": today.strftime("%Y-%m-%d 20:00"),
         }, 15)
@@ -273,7 +274,7 @@ class SetupScanner:
         series = (data or {}).get("series") or {}
         rows = series.get("data") if isinstance(series, dict) else None
         result = normalize_bars(rows if isinstance(rows, list) else [rows] if isinstance(rows, dict) else [])
-        self._pass_minutes[symbol] = result
+        self._pass_minutes[symbol] = (result, min(observed_at, fetched_at))
         return result
 
     def publish_candles(self, today, session):
@@ -290,10 +291,10 @@ class SetupScanner:
             symbols = scanner_settings.read_settings(db)["symbols"]
         for symbol in symbols:
             try:
-                minutes = self._pass_minutes.get(symbol)
-                if minutes is None:
-                    minutes = self._minutes(symbol, today)
-                cutoff = min(self.clock(), session.close_at)
+                if symbol not in self._pass_minutes:
+                    self._minutes(symbol, today)
+                minutes, observed_at = self._pass_minutes[symbol]
+                cutoff = min(observed_at, session.close_at)
                 complete = [m for m in minutes if session.open_at <= m["time"] and m["end_time"] <= cutoff]
                 five = rules.five_minute_bars(complete, session.open_at, session.close_at)
                 packet = shadow_exchange.candle_packet(complete, five, cutoff, limit=120)

@@ -157,8 +157,9 @@ class Calendar:
 
 
 class Feed:
-    def __init__(self):
+    def __init__(self, clock=lambda: 0):
         self.minutes = []
+        self.clock = clock
 
     def add(self, first, last, low, high, volume=100):
         self.minutes += [(t, low, high, volume) for t in range(first, last, 60)]
@@ -168,7 +169,7 @@ class Feed:
             days = [{"date": f"2026-09-{d:02d}", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1} for d in range(10, 30)]
             return {"history": {"day": days}}, 0, None
         rows = [{"timestamp": t, "open": low, "high": high, "low": low, "close": high, "volume": v} for t, low, high, v in self.minutes]
-        return {"series": {"data": rows}}, 0, None
+        return {"series": {"data": rows}}, self.clock(), None
 
 
 class Options:
@@ -219,7 +220,7 @@ def breakout_day(feed):
 
 def scanner(engine, now, quotes=None, options=None):
     clock = Clock(now)
-    return setup_scanner.SetupScanner(engine, Feed(), Calendar(), options or Options(), clock, quote=quotes or Quotes()), clock
+    return setup_scanner.SetupScanner(engine, Feed(clock), Calendar(), options or Options(), clock, quote=quotes or Quotes()), clock
 
 
 def rows(engine):
@@ -1082,3 +1083,28 @@ def test_candle_packet_limits_and_completion_without_forward_fill():
     assert all(m['end'] <= cutoff for m in frozen['5m'])
     assert not any(m['time'] == OPEN + 30 * 60 for m in rolling['1m'])
     assert shadow_exchange.candle_packet([], [], cutoff, limit=60) is None
+
+
+def test_rolling_does_not_promote_cached_partial_minute(engine, monkeypatch, tmp_path):
+    setups = tmp_path / 'setups'
+    setups.mkdir()
+    rolling = tmp_path / 'candles'
+    rolling.mkdir()
+    monkeypatch.setenv('SHADOW_SETUPS_DIR', str(setups))
+    watch, clock = scanner(engine, at(9, 51, 59))
+    watch.feed.add(at(9, 50), at(9, 52), 100, 101)
+    watch._minutes('SPY', DAY)
+    clock.now = at(9, 52, 1)
+    from types import SimpleNamespace
+    watch.publish_candles(DAY, SimpleNamespace(open_at=OPEN, close_at=CLOSE))
+    packet = json.loads((rolling / 'SPY.json').read_text())
+    assert packet['1m'][-1]['end_time'] == at(9, 51)
+    # The feed cache's age is part of the observation cutoff too.
+    original = watch.feed.read
+    def cached(*args):
+        data, _, issue = original(*args)
+        return data, at(9, 51, 46), issue
+    monkeypatch.setattr(watch.feed, 'read', cached)
+    watch._minutes('SPY', DAY)
+    watch.publish_candles(DAY, SimpleNamespace(open_at=OPEN, close_at=CLOSE))
+    assert json.loads((rolling / 'SPY.json').read_text())['1m'][-1]['end_time'] == at(9, 51)

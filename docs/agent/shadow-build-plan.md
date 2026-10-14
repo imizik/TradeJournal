@@ -47,7 +47,7 @@ send the evidence, not a retry.
 | SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
 | SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
 | SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
-| Candle access | Frozen v2 packet + rolling/direct candle tool | lead | Sol, high | 2 | SH-3/SH-4 | Implemented in candidate; focused verification and independent review required, not deployed |
+| Candle access | Frozen v2 packet + rolling/direct candle tool | lead | Sol, high | 2 | SH-3/SH-4 | Implemented in this PR — frozen packets, rolling exchange, direct fallback and focused regression coverage; merge/deployment pending |
 | SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange and SMTP active at `23b7c6c`; self-sent Gmail wake-up repaired with a tested owner-account relay; enabled v4 production task restored; actual Jo decision and first-session acceptance pending |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Built — display-only links and day/cumulative comparisons |
