@@ -11,8 +11,8 @@ seconds in the API process) does, in order:
 4. plan scheduled and event wakes under ``WAKE_POLICY`` and email each wake ID
    to Jo through the scanner's mail path (``scanner_mail``);
 5. push Jo's notify reads to Isaac through the server's ntfy alerts
-   (``MESSAGE_POLICY``), within a daily discretionary budget; corrections
-   always go out.
+   (``MESSAGE_POLICY``), within a daily discretionary budget; a correction of a
+   message that reached Isaac skips the budget (once per message, capped).
 
 Every event, wake, send attempt (recorded before the send starts), notice,
 refused notice, message decision and failure is an append-only row in an
@@ -74,7 +74,7 @@ MESSAGE_POLICY = {
     "channel": "push",
     "transport": "ntfy",
     "discretionary_per_session": 3,
-    "corrections_bypass_budget": True,
+    "corrections_bypass_budget": "when_the_corrected_message_reached_isaac_once_per_message",
     "freshness_minutes": 10,
     "max_attempts": 3,
     "retry_seconds": 60,
@@ -400,7 +400,8 @@ def _classify(exc: BaseException) -> tuple[str, str]:
     if any(isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError,
                           smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, ConnectionRefusedError)) for e in chain):
         return "failed", type(chain[-1]).__name__
-    if any(isinstance(e, (TimeoutError, httpx.TimeoutException, smtplib.SMTPServerDisconnected)) for e in chain):
+    if any(isinstance(e, (TimeoutError, httpx.TimeoutException, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError,
+                          smtplib.SMTPServerDisconnected, ConnectionResetError)) for e in chain):
         return "unknown", type(chain[-1]).__name__
     return "failed", type(chain[-1]).__name__
 
@@ -724,7 +725,8 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
         message_attempts = store.records("message_attempt", session)
         events = store.records("event", session)
         refusals = store.records("notice_refusal", session)
-        accepted = sorted(((parse_time(a["occurred_at"]), a["wake_id"]) for a in wake_attempts if a["result"] == "accepted"))
+        # Wakes that went out, or may have (``unknown``), can be answered by a read.
+        accepted = sorted(((parse_time(a["occurred_at"]), a["wake_id"]) for a in wake_attempts if a["result"] in ("accepted", "unknown")))
         read_times = {n["read_id"]: parse_time(n["received_at"]) for n in notices}
         for read in exported_reads:
             if read["session_date"] == session:
@@ -805,6 +807,6 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             "wake_policy_version": WAKE_POLICY["wake_policy_version"],
             "message_policy_version": MESSAGE_POLICY["message_policy_version"], "sessions": by_session,
             "scores": outcome_store.report(exported_reads) if outcome_store is not None else None,
-            "limits": ["read-to-wake links are by time window, not by an ID in the read",
+            "limits": ["read-to-wake links are by time window, not by an ID in the read; wakes with an unknown send count as sent",
                        "independence-unverified: reads are advice to Isaac and never feed Shadow Isaac or S1",
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}

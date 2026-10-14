@@ -553,7 +553,9 @@ Isaac only when the read changes what he should consider: a directional
 view forms or strengthens past a stated probability, a view is invalidated,
 or a specific opportunity appears. Another red candle is not a reason.
 Budget: about three discretionary messages a day; a **correction** to an
-earlier message is always sent, even over budget.
+earlier message is always sent, even over budget. (As implemented in MW-2: when
+the corrected message reached Isaac, once per corrected message and at most
+three a session; see below and "Choices for Isaac".)
 
 Message format: the read in one line, confidence as a probability on a named
 forecast, the evidence, what would prove it wrong, and which trades fit or
@@ -605,7 +607,8 @@ acceptance or shadow S1; market-watch reads never reach Shadow Isaac.
   Gmail acceptance is recorded `accepted`; a refusal or unreachable server is
   `failed` and retried at most 3 times, 60 seconds apart, within 5 minutes, then
   `expired`. A timeout after the request went out, or a `sending` row with no
-  result (crash mid-send), is recorded `unknown` and never resent. Wake IDs are
+  result (crash mid-send), is recorded `unknown` and never resent — a dropped connection or timeout may lose a wake
+  rather than send it twice. Wake IDs are
   deterministic per slot or event, so a restart never plans a wake twice.
 - **Read notices.** With `market_watch_outbox_dir` set in the check
   configuration, `market_watch_submit` writes a sealed, deterministic notice of
@@ -633,8 +636,8 @@ acceptance or shadow S1; market-watch reads never reach Shadow Isaac.
   and retried at most 3 times within 10 minutes of the read, then `expired`;
   nothing is sent after that. Timeouts and interrupted sends are `unknown`, as
   for wakes.
-- **Records.** Events, wakes, wake attempts, read notices, message decisions and
-  message attempts are immutable rows in an explicitly selected SQLite file
+- **Records.** Events, wakes, wake attempts, read notices, notice refusals,
+  message decisions and message attempts are immutable rows in an explicitly selected SQLite file
   (application ID `MWD1`), separate from the journal database, the MW-1 outcome
   store and the check ledger. Transport events stay in that app-side file rather
   than the check ledger's message-event table, because the app cannot write the
@@ -643,8 +646,8 @@ acceptance or shadow S1; market-watch reads never reach Shadow Isaac.
 - **Report.** `python market_watch_owner.py report --store ABS --outcomes ABS`
   prints wakes → reads → messages → outcomes per session, plus the MW-1
   evaluator's score groups over imported exports. Reads carry no wake ID, so a
-  read is attributed to the first accepted wake within 30 minutes before it (and
-  before the next wake) and labelled `time_window`. It flags notices missing from
+  read is attributed to the first sent (`accepted` or `unknown`) wake within
+  30 minutes before it (and before the next wake) and labelled `time_window`. It flags notices missing from
   the export, exports without notices and hash mismatches.
 
 Fixture tests: `backend/tests/test_market_watch_wakes.py`. They are not live proof
@@ -725,5 +728,8 @@ descriptive. Only a measured advantage justifies the idea book.
 - Whether to authorize the MW-1 activation steps above, then select an MW-2 slice.
 - Whether to authorize the MW-2 activation steps above (implemented with ntfy
   push and a budget of three discretionary messages a session).
+- Whether the MW-2 correction rule is right: a correction skips the budget only
+  when the message it corrects reached Isaac, once per corrected message and at
+  most three a session; a correction of a message he never got is budgeted.
 - Whether Jo's market reads may see his open positions (useful advice, but
   reads then cannot feed an independent shadow).
