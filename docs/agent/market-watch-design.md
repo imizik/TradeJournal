@@ -1,6 +1,6 @@
 # Jo's market watch — design (proposed October 14, 2026)
 
-**Status: MW-1 implemented; owner-authorized activation is partial as of October 14, 2026. Calendar repair and actual Jo access proof remain pending.** Written at Isaac's request
+**Status: MW-1 implemented; owner-authorized activation is partial as of October 14, 2026. Calendar repair and instructed connector proof are complete; actual Jo use remains unproven.** Written at Isaac's request
 after the October 14 CPI session. It extends the
 [shadow trader design](shadow-trader-design.md) and reuses rules already
 written in the [agentic trading roadmap](../agentic-trading-roadmap.md)
@@ -509,10 +509,24 @@ namespace; publication writes and private configuration/outcome reads remained
 denied. It exposed an incorrect default macro-calendar file path, now corrected
 to the bundled `app/data/macro_calendar.json` with a default-reader regression.
 The first immutable snapshot retains its explicit calendar source-error gap;
-the repaired producer must be installed and a new snapshot published before
-Jo's activation proof. Actual Jo read/submit access, scoped-token proof and
-nonempty live outcome evaluation remain unverified. The empty owner export and
-offline evaluator baseline passed; no trial, schedule or delivery was activated.
+the repaired producer was installed from merged PR #313 (`a00ad678cd4c`) after
+main CI and deployment-package checks passed. A new immutable post-close
+snapshot retained the CPI entry with `observation_time_unknown`, stale prices
+and VIX, and the explicit unpublished-news gap. Check-namespace read-only and
+private-path denial checks passed again.
+
+An instructed **Codex connector** proof then used the existing authenticated
+Check v4 actor to fetch that snapshot, submit one explicitly labelled `no_view`
+read with three abstentions and `message_intent=none`, and retry the identical
+submission. The same immutable read/hash was returned, with no duplicate or
+message event. This proves the connector's scoped read/submit access, not actual
+Jo use or independent market reasoning. The narrow owner export was identical
+on retry. The app-side evaluator used only the snapshot's frozen IEX bars and
+recorded three `not_eligible` outcomes, zero scores and an unavailable session
+label because required history/roster were absent. Repeating import/evaluation
+inserted no extra outcomes. Actual Jo read/submit use and eligible intraday
+scoring remain unproven; no trial, schedule or market-message delivery was
+activated.
 
 ## Wake-ups and messages (MW-2)
 
