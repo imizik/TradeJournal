@@ -17,3 +17,9 @@ class PracticeChoice(BaseModel):
     wait_condition: str | None = Field(default=None, max_length=500)
     wait_expiry: str | None = Field(default=None, max_length=64)
     plan: dict | None = None
+
+
+class ScannerReplayChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    decision: Literal["take", "skip", "insufficient_data"]
+    rationale: str = Field(min_length=1, max_length=1000)

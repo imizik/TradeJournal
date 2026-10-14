@@ -21,7 +21,7 @@ import uvicorn
 
 from cloud_mcp_d0 import Profile, RequestLimits, SCOPE, activated_socket
 from cloud_mcp_d1_common import MAX_RESPONSE_BYTES, PRACTICE_SCOPE, SampleReadVerifier, read_config
-from cloud_mcp_d2_common import MAX_CHOICE_BYTES, PracticeChoice, WRITE_SCOPE
+from cloud_mcp_d2_common import MAX_CHOICE_BYTES, PracticeChoice, ScannerReplayChoice, WRITE_SCOPE
 
 UNAVAILABLE = "Sample practice is unavailable or outside the current grant; reconnect or contact the owner"
 BACKEND_DEADLINE = 10
@@ -31,6 +31,7 @@ RECOVER = "Choice save could not be confirmed. Retrieve the receipt with get_pra
 
 class SampleMCP(FastMCP):
     choice_enabled = False
+    scanner_replay = False
 
     def streamable_http_app(self):
         app = super().streamable_http_app()
@@ -55,6 +56,13 @@ class SampleMCP(FastMCP):
             fields.update({"get_practice_choice": {"opportunity_id"},
                 "record_practice_choice": {"opportunity_id", "decision", "rationale"}})
         optional = {"wait_condition", "wait_expiry", "plan"} if name == "record_practice_choice" else set()
+        if self.scanner_replay:
+            if name == "list_practice_runs":
+                fields[name], optional = set(), {"day"}
+            if name == "record_practice_choice":
+                optional = set()
+            if name == "get_practice_run":
+                optional = {"resume"}
         if (name not in fields or not isinstance(arguments, dict) or not fields[name] <= set(arguments)
                 or set(arguments) - fields[name] - optional):
             raise ToolError("Use only the declared sample tools and arguments")
@@ -65,12 +73,21 @@ def create_server(config_path: Path, *, backend_transport=None):
     verifier = SampleReadVerifier(config_path)
     config = verifier.config
     historical = config.exercise_kind == "historical"
-    run_schema = "historical-demo-practice-v1" if historical else "d1-sample-practice-v1"
-    choice_schema = "historical-demo-choice-v1" if historical else "d2-sample-choice-v1"
-    label = "historical demo" if historical else "sample"
+    scanner = config.exercise_kind == "scanner_replay"
+    retrospective = historical or scanner
+    run_schema = "practice-scanner-replay-v1" if scanner else "historical-demo-practice-v1" if historical else "d1-sample-practice-v1"
+    choice_schema = "practice-scanner-replay-v1-choice" if scanner else "historical-demo-choice-v1" if historical else "d2-sample-choice-v1"
+    label = "scanner historical benchmark" if scanner else "historical demo" if historical else "sample"
     resource = urlsplit(config.resource_url)
     server = SampleMCP("tradejournal-d1-sample-practice", json_response=True, stateless_http=True,
         instructions=(
+            "Use only your frozen scanner replay batch. Call list_practice_runs without a date to start/resume the next run. "
+            "Read get_practice_run for its sole next_setup and frozen prompt, then record TAKE, SKIP or INSUFFICIENT_DATA "
+            "with a reason <=1000 characters. Repeat at each detection cutoff. Decisions do not change the scanner stream. "
+            "Practice outcomes reveal together at session end; exam outcomes only after the entire frozen exam batch commits. "
+            "Later candles and existing memory can leak information; these are sequential simulations, not independent blind questions. "
+            "Underlying price-path results do not establish options P&L or live execution. "
+            if scanner else
             "Use only the linked assistant's one assigned historical MU/NBIS demo exercise. "
             "Real provider history is retrospectively retrieved, with simulated execution. "
             "Keep original bar times, provider retrieval, simulated cutoff and real receipt/deadline distinct. "
@@ -86,12 +103,14 @@ def create_server(config_path: Path, *, backend_transport=None):
         + ("Opt-in choices save only your own immutable unarmed draft against a listed frozen opportunity. "
            "Before retrying an uncertain save or switching entrances, retrieve its receipt. "
            if config.decision_writes else "No writes exist. ")
-        + "No reveal, preparation, replay start, model calls, subscriptions or live journal reads exist.",
+        + ("No preparation, live orders, paid model calls, subscriptions or journal reads exist." if scanner else
+           "No reveal, preparation, replay start, model calls, subscriptions or live journal reads exist."),
         token_verifier=verifier, auth=AuthSettings(issuer_url=AnyHttpUrl(config.issuer_url),
             resource_server_url=AnyHttpUrl(config.resource_url), required_scopes=[SCOPE]),
         transport_security=TransportSecuritySettings(allowed_hosts=["127.0.0.1:*", "localhost:*", resource.netloc],
             allowed_origins=["http://127.0.0.1:*", "http://localhost:*", f"{resource.scheme}://{resource.netloc}"]))
     server.choice_enabled = config.decision_writes
+    server.scanner_replay = scanner
     annotations = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False, idempotentHint=True)
 
     async def authenticated(*, practice=False, write=False):
@@ -130,8 +149,8 @@ def create_server(config_path: Path, *, backend_transport=None):
                         if len(received) > MAX_RESPONSE_BYTES:
                             raise ValueError()
             result = json.loads(received)
-            if (not isinstance(result, dict) or result.get("sample_data") is not (not historical)
-                    or (historical and (result.get("demo_only") is not True or result.get("historical_replay") is not True))
+            if (not isinstance(result, dict) or result.get("sample_data") is not (not retrospective)
+                    or (retrospective and (result.get("demo_only") is not True or result.get("historical_replay") is not True))
                     or result.get("schema_version") != schema):
                 raise ValueError()
             return result
@@ -157,27 +176,53 @@ def create_server(config_path: Path, *, backend_transport=None):
 
     metadata = {"securitySchemes": [{"type": "oauth2", "scopes": [SCOPE, PRACTICE_SCOPE]}]}
 
-    @server.tool(title=f"List assigned {label} Practice runs", annotations=annotations,
-        meta=metadata, structured_output=True)
-    async def list_practice_runs(day: Annotated[str, Field(min_length=10, max_length=10)]) -> dict[str, Any]:
-        """List only the assigned demo run for a New York YYYY-MM-DD date. No preparation or model calls."""
-        try:
-            if date.fromisoformat(day).isoformat() != day:
-                raise ValueError()
-        except ValueError:
-            raise ToolError("Use a New York date in YYYY-MM-DD format") from None
-        return await bridge("/cloud-mcp/practice/runs", {"day": day})
+    if scanner:
+        @server.tool(title="Start or resume assigned scanner replay", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def list_practice_runs(day: Annotated[str | None, Field(min_length=10, max_length=10)] = None) -> dict[str, Any]:
+            """With no date, return the next uncommitted practice run, then exam run. No model calls."""
+            if day is not None:
+                try:
+                    if date.fromisoformat(day).isoformat() != day:
+                        raise ValueError()
+                except ValueError:
+                    raise ToolError("Use a historical session date in YYYY-MM-DD format") from None
+            return await bridge("/cloud-mcp/practice/runs", {"day": day} if day else None)
+    else:
+        @server.tool(title=f"List assigned {label} Practice runs", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def list_practice_runs(day: Annotated[str, Field(min_length=10, max_length=10)]) -> dict[str, Any]:
+            """List only the assigned demo run for a New York YYYY-MM-DD date. No preparation or model calls."""
+            try:
+                if date.fromisoformat(day).isoformat() != day:
+                    raise ValueError()
+            except ValueError:
+                raise ToolError("Use a New York date in YYYY-MM-DD format") from None
+            return await bridge("/cloud-mcp/practice/runs", {"day": day})
 
-    @server.tool(title=f"Read assigned {label} Practice run", annotations=annotations,
-        meta=metadata, structured_output=True)
-    async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)]) -> dict[str, Any]:
-        """Read a listed run UUID: frozen evidence and this assistant's own saved choices, preserving reveal rules."""
-        try:
-            if str(uuid.UUID(run_id)) != run_id:
-                raise ValueError()
-        except ValueError:
-            raise ToolError("Use a canonical run UUID from list_practice_runs") from None
-        return await bridge("/cloud-mcp/practice/runs/" + run_id)
+    if scanner:
+        @server.tool(title="Read or resume assigned scanner replay", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)],
+                                   resume: bool = False) -> dict[str, Any]:
+            """Read the next setup. On an interrupted run use resume=true to record its resumed setup marker."""
+            try:
+                if str(uuid.UUID(run_id)) != run_id:
+                    raise ValueError()
+            except ValueError:
+                raise ToolError("Use a canonical run UUID from list_practice_runs") from None
+            return await bridge("/cloud-mcp/practice/runs/" + run_id, {"resume": "true"} if resume else None)
+    else:
+        @server.tool(title=f"Read assigned {label} Practice run", annotations=annotations,
+            meta=metadata, structured_output=True)
+        async def get_practice_run(run_id: Annotated[str, Field(min_length=36, max_length=36)]) -> dict[str, Any]:
+            """Read a listed run UUID: frozen evidence and this assistant's own saved choices, preserving reveal rules."""
+            try:
+                if str(uuid.UUID(run_id)) != run_id:
+                    raise ValueError()
+            except ValueError:
+                raise ToolError("Use a canonical run UUID from list_practice_runs") from None
+            return await bridge("/cloud-mcp/practice/runs/" + run_id)
 
     if config.decision_writes:
         def opportunity_path(value):
@@ -196,22 +241,33 @@ def create_server(config_path: Path, *, backend_transport=None):
 
         write_metadata = {"securitySchemes": [{"type": "oauth2", "scopes": [SCOPE, PRACTICE_SCOPE, WRITE_SCOPE]}]}
 
-        @server.tool(title=f"Save own immutable {label} Practice choice",
-            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False, idempotentHint=True),
-            meta=write_metadata, structured_output=True)
-        async def record_practice_choice(opportunity_id: Annotated[str, Field(min_length=36, max_length=36)],
-                decision: Literal["take", "wait", "skip"], rationale: Annotated[str, Field(min_length=1, max_length=2000)],
-                wait_condition: Annotated[str | None, Field(max_length=500)] = None,
-                wait_expiry: Annotated[str | None, Field(max_length=64)] = None,
-                plan: dict | None = None) -> dict[str, Any]:
-            """Save one own unarmed demo choice against frozen facts. Identical retries return its receipt; changed content conflicts.
+        if scanner:
+            @server.tool(title="Commit scanner replay selection",
+                annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False, idempotentHint=True),
+                meta=write_metadata, structured_output=True)
+            async def record_practice_choice(opportunity_id: Annotated[str, Field(min_length=36, max_length=36)],
+                    decision: Literal["take", "skip", "insufficient_data"],
+                    rationale: Annotated[str, Field(min_length=1, max_length=1000)]) -> dict[str, Any]:
+                """Commit the current selection immutably. Read next_setup after saving; uncertain saves require receipt retrieval."""
+                body = ScannerReplayChoice(decision=decision, rationale=rationale).model_dump()
+                return await bridge(opportunity_path(opportunity_id), body=body, schema=choice_schema, write=True)
+        else:
+            @server.tool(title=f"Save own immutable {label} Practice choice",
+                annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False, idempotentHint=True),
+                meta=write_metadata, structured_output=True)
+            async def record_practice_choice(opportunity_id: Annotated[str, Field(min_length=36, max_length=36)],
+                    decision: Literal["take", "wait", "skip"], rationale: Annotated[str, Field(min_length=1, max_length=2000)],
+                    wait_condition: Annotated[str | None, Field(max_length=500)] = None,
+                    wait_expiry: Annotated[str | None, Field(max_length=64)] = None,
+                    plan: dict | None = None) -> dict[str, Any]:
+                """Save one own unarmed demo choice against frozen facts. Identical retries return its receipt; changed content conflicts.
 
-            On an uncertain result retrieve get_practice_choice before retrying or using the UI.
-            This never arms, reveals or starts a replay and never grants another opportunity.
-            """
-            body = PracticeChoice(decision=decision, rationale=rationale, wait_condition=wait_condition,
-                wait_expiry=wait_expiry, plan=plan).model_dump()
-            return await bridge(opportunity_path(opportunity_id), body=body, schema=choice_schema, write=True)
+                On an uncertain result retrieve get_practice_choice before retrying or using the UI.
+                This never arms, reveals or starts a replay and never grants another opportunity.
+                """
+                body = PracticeChoice(decision=decision, rationale=rationale, wait_condition=wait_condition,
+                    wait_expiry=wait_expiry, plan=plan).model_dump()
+                return await bridge(opportunity_path(opportunity_id), body=body, schema=choice_schema, write=True)
 
     return server
 

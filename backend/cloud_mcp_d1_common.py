@@ -26,7 +26,7 @@ class LinkedProfile(ProfileGrant):
 
 class SampleReadConfig(Config):
     sample_only: Literal[True]
-    exercise_kind: Literal["synthetic", "historical"] = "synthetic"
+    exercise_kind: Literal["synthetic", "historical", "scanner_replay"] = "synthetic"
     decision_writes: bool = Field(default=False, strict=True)
     profiles: list[LinkedProfile] = Field(min_length=1, max_length=1)
     backend_socket: str = "/run/tradejournal-d1/reads.sock"

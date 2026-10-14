@@ -48,7 +48,7 @@ class Feedback(Strict):
 
 def run_or_404(db, run_id):
     run = db.get(PracticeRun, run_id)
-    if not run:
+    if not run or run.session_key.startswith("scanner-replay:"):
         raise HTTPException(404, "Daily run not found")
     return run
 
@@ -75,6 +75,9 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
 
 
 def inspector_view(request, db, run, *, details=True):
+    from app.engine import scanner_replay
+    if scanner_replay.recognized(run):
+        raise HTTPException(404, "Scanner replay uses its isolated connector and operator report")
     if market_practice.recognized(run):
         who = getattr(request.state, "access", None)
         restricted = access.permitted_runs(request) is not None
@@ -119,8 +122,9 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
             PracticeRun.session_key.startswith(historical_replay.PREFIX if historical else market_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
-    visible = [r for r in db.exec(query).all() if allowed is None or not market_practice.recognized(r)
-        or market_practice.visible_to(r, request.state.access.identifier)]
+    from app.engine import scanner_replay
+    visible = [r for r in db.exec(query).all() if not scanner_replay.recognized(r) and
+        (allowed is None or not market_practice.recognized(r) or market_practice.visible_to(r, request.state.access.identifier))]
     return {"runs": [inspector_view(request, db, r, details=False) for r in visible]}
 
 
