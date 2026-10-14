@@ -501,6 +501,19 @@ None of these activation actions was performed by this implementation task.
 MW-2 scheduling, event detection and message transport need their own scope and
 review; merging this foundation does not authorize them.
 
+Subsequent owner-authorized activation on October 14 installed the merged code,
+initialized the isolated stores after a verified ledger backup, added only the
+two delegated market-watch scopes, and refreshed the existing Check v4 catalog.
+A manual post-close snapshot passed validation inside the check service's mount
+namespace; publication writes and private configuration/outcome reads remained
+denied. It exposed an incorrect default macro-calendar file path, now corrected
+to the bundled `app/data/macro_calendar.json` with a default-reader regression.
+The first immutable snapshot retains its explicit calendar source-error gap;
+the repaired producer must be installed and a new snapshot published before
+Jo's activation proof. Actual Jo read/submit access, scoped-token proof and
+nonempty live outcome evaluation remain unverified. The empty owner export and
+offline evaluator baseline passed; no trial, schedule or delivery was activated.
+
 ## Wake-ups and messages (MW-2)
 
 **Observe often, message rarely.** TradeJournal runs the event detector; Jo

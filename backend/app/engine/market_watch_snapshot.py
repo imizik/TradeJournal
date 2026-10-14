@@ -208,7 +208,7 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
     if calendar_reader is None:
         def calendar_reader(day, at):
             from pathlib import Path
-            calendar_path = Path(__file__).resolve().parents[2] / "data" / "macro_calendar.json"
+            calendar_path = Path(__file__).resolve().parents[1] / "data" / "macro_calendar.json"
             data = json.loads(calendar_path.read_text())
             start_coverage, end_coverage = data["covers_from"], data["covers_through"]
             if not start_coverage <= day.isoformat() <= end_coverage:

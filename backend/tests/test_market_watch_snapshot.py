@@ -89,6 +89,23 @@ def test_snapshot_has_exact_universe_completed_bars_and_reproducible_manifest():
     assert packet["content_sha256"] == digest({k: v for k, v in packet.items() if k != "content_sha256"})
 
 
+def test_default_calendar_retains_bundled_cpi_without_claiming_freshness():
+    bars, daily = _sources()
+    packet = build_snapshot(
+        NOW, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
+        vix_reader=lambda: None,
+        bounds_reader=lambda _: (OPEN, datetime(2026, 10, 14, 20, 0, tzinfo=UTC)),
+    )
+    validate_snapshot(packet)
+    calendar = packet["calendar"]
+    assert calendar["reason"] == "observation_time_unknown"
+    assert calendar["status"] == "missing"
+    assert calendar["observed_at"] is None
+    assert calendar["coverage_start"] <= DAY.isoformat() <= calendar["coverage_end"]
+    assert any(event["kind"] == "cpi" and event["scheduled_at"] == "2026-10-14T12:30:00.000000Z"
+               for event in calendar["events"])
+
+
 def test_partial_source_is_explicit_and_future_bars_never_enter(tmp_path):
     packet = fixture_snapshot(missing_qqq=True)
     assert packet["indices"]["QQQ"]["bar_1m"] is None
