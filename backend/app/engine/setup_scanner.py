@@ -30,6 +30,7 @@ from sqlmodel import Session, select
 from app.engine import scanner_rules as rules
 from app.engine import scanner_mail, tradier
 from app.engine import shadow_exchange
+from app.engine import scanner_settings
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, normalize_bars
 from app.engine.level_alerts import LATENESS
@@ -169,18 +170,20 @@ class SetupScanner:
             return
         if now - bar_end > rules.MAX_DELAY_SECONDS + LATENESS:
             return  # too late to act on this bar; a symbol not judged in time simply misses it
-        for symbol in rules.UNIVERSE:
+        with Session(self.engine) as db:
+            settings = scanner_settings.read_settings(db)
+        for symbol in settings["symbols"]:
             if self._scanned.get(symbol, 0) >= bar_end:
                 continue
             try:
-                self._scan_symbol(symbol, today, session, bar_end, last_end)
+                self._scan_symbol(symbol, today, session, bar_end, last_end, settings)
                 self._scanned[symbol] = bar_end  # a failed read is retried on the next pass while still in time
             except (ChartFeedError, OptionsChainError, ValueError) as exc:
                 log.warning("Setup scanner could not judge %s at %s: %s", symbol, _utc(bar_end), exc)
             except Exception:
                 log.exception("Setup scanner failed on %s", symbol)
 
-    def _scan_symbol(self, symbol: str, today: date, session, bar_end: int, last_end: int) -> None:
+    def _scan_symbol(self, symbol: str, today: date, session, bar_end: int, last_end: int, settings: dict) -> None:
         atr = self._daily_atr(symbol, today)
         if atr is None:
             return
@@ -190,8 +193,9 @@ class SetupScanner:
             raise ChartFeedError("the newest 5-minute bar has no minutes yet")
         bars = rules.five_minute_bars(complete, session.open_at, session.close_at)
         with Session(self.engine) as db:
-            saved = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == today, ScannerCandidate.symbol == symbol,
-                                                           ScannerCandidate.scanner_version == rules.VERSION)).all()
+            # Universe edits must not reset cooldowns, daily caps or open-trade protection.
+            saved = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == today,
+                                                           ScannerCandidate.symbol == symbol)).all()
             taken = {(c.setup, int(_epoch(c.bar_end))) for c in saved}
             busy = any(status_of(c, fold(self._events(db, c.id))) in ("pending_entry", "open", "exiting") for c in saved)
         signals = rules.scan(bars, atr, session.open_at, last_end, taken)
@@ -202,12 +206,15 @@ class SetupScanner:
             return
         contract, note = self._contract(symbol, today, signal["direction"])
         detected = self.clock()
+        version, params_hash = scanner_settings.identity(settings["symbols"])
         candidate = ScannerCandidate(
-            scanner_version=rules.VERSION, params_hash=rules.PARAMS_HASH, session_date=today, symbol=symbol,
+            scanner_version=version, params_hash=params_hash, session_date=today, symbol=symbol,
             setup=signal["setup"], direction=signal["direction"], bar_start=_utc(signal["bar_start"]), bar_end=_utc(bar_end),
             detected_at=_utc(detected), expires_at=_utc(detected + rules.EXPIRY_SECONDS), stop=signal["stop"],
             target=signal["target"], flags_json=json.dumps(signal["flags"]),
-            facts_json=json.dumps({**signal["facts"], **({"contract_note": note} if note else {})}, sort_keys=True),
+            facts_json=json.dumps({**signal["facts"], "scanner_universe": settings["symbols"],
+                                   "scanner_settings_revision": settings["revision"],
+                                   **({"contract_note": note} if note else {})}, sort_keys=True),
             contract_json=json.dumps(contract, sort_keys=True) if contract else None, source=SOURCE,
         )
         with Session(self.engine) as db:
@@ -490,6 +497,7 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None,
             totals["trades"] += 1
         items.append({
             "id": str(c.id), "symbol": c.symbol, "setup": c.setup, "direction": c.direction,
+            "scanner_version": c.scanner_version, "params_hash": c.params_hash,
             "bar_end": c.bar_end.isoformat() + "Z", "detected_at": c.detected_at.isoformat() + "Z",
             "stop": c.stop, "target": c.target, "flags": flags, "facts": json.loads(c.facts_json),
             "contract": json.loads(c.contract_json) if c.contract_json else None, "status": status,

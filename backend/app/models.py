@@ -309,7 +309,8 @@ class ChartSettingsRecord(SQLModel, table=True):
     indicators and layout, as one JSON document the frontend validates. The
     symbol on screen stays per device. ``revision`` is bumped on every save and
     a save based on an older revision is refused, so a phone and a desktop
-    cannot silently overwrite each other. The app uses the ``default`` row."""
+    cannot silently overwrite each other. Charts uses the ``default`` row;
+    the scanner's independent ticker selection uses ``scanner-universe``."""
 
     __tablename__ = "chart_settings"
 
