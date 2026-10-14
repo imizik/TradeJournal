@@ -69,7 +69,8 @@ coverage reference below only to identify a relevant gap, not to expand the task
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs backend, frontend and Postgres jobs on
-every pull request. It runs the two browser shards unless the diff contains only
+every pull request. It runs the browser shards (three for the ordinary suite,
+one for the authenticated and sample suites) unless the diff contains only
 Markdown under `docs/`, root README/agent guides or the PR template
 (`scripts/ci_scope.sh`, shared with the deployment workflow and covered by
 `test_ci_scope_script.py`). Documentation-only pull requests skip that

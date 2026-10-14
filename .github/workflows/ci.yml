@@ -155,12 +155,19 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # Three shards of the ordinary suite, plus one runner for the
+      # authenticated and sample-decision suites, which used to run after
+      # shard 1 and made it the long pole.
       matrix:
         include:
-          - shard: "1/2"
+          - shard: "1/3"
             artifact: one
-          - shard: "2/2"
+          - shard: "2/3"
             artifact: two
+          - shard: "3/3"
+            artifact: three
+          - shard: access
+            artifact: access
     steps:
       - uses: actions/checkout@v4
 
@@ -205,16 +212,26 @@ jobs:
       # only check that proves a page renders; typecheck, lint and build all
       # pass on a component that is broken at runtime.
       - name: Browser smoke tests
+        if: matrix.shard != 'access'
         working-directory: frontend
         run: npm run e2e -- --shard=${{ matrix.shard }}
 
+      # The access suites start the built frontend without building it, so
+      # this runner builds it the way the ordinary suite does.
+      - name: Build frontend for access suites
+        if: matrix.shard == 'access'
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: /api/backend
+        run: npm run build
+
       - name: Authenticated browser boundaries
-        if: matrix.shard == '1/2'
+        if: matrix.shard == 'access'
         working-directory: frontend
         run: npx playwright test --config playwright.auth.config.ts
 
       - name: Sample decision browser boundaries
-        if: matrix.shard == '1/2'
+        if: matrix.shard == 'access'
         working-directory: frontend
         run: npx playwright test --config playwright.sample.config.ts
 
@@ -333,7 +350,7 @@ jobs:
             cp "$REPORT/comment.md" "$BODY"
           elif [ "$E2E_RESULT" = "failure" ]; then
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
-              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report-one\` and \`playwright-report-two\` downloads, one per browser shard: [test run]($RUN_URL)." \
+              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report-*\` downloads, one per browser shard: [test run]($RUN_URL)." \
               > "$BODY"
           else
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
