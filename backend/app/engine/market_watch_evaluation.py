@@ -119,8 +119,8 @@ def evaluate_forecast(read: dict, forecast: dict, bars: Iterable[dict], *,
                   "evaluation_revision": revision, "supersedes_outcome_id": supersedes_outcome_id,
                   "read_id": read["read_id"], "forecast_id": forecast["forecast_id"], "protocol_id": read["protocol_id"],
                   "horizon": horizon, "evaluated_at": now.isoformat(),
-                  "status": "not_eligible" if market_phase == "closed" else "unavailable",
-                  "reason": "exchange_closed" if market_phase == "closed" else "session_calendar_unavailable",
+                  "status": "not_eligible" if market_phase in ("closed", "market_closed") else "unavailable",
+                  "reason": "exchange_closed" if market_phase in ("closed", "market_closed") else "session_calendar_unavailable",
                   "anchor_at": None, "anchor_price": None,
                   "target_at": None, "target_price": None, "return": None, "outcome_y": None,
                   "probability": probability, "brier": None, "comparator_probability": comparator_probability,
@@ -244,7 +244,7 @@ def session_diagnostic(*, session_date: str, read_rows: list[dict], today_bars: 
                   "session_date": session_date, "protocol_id": protocol_id, "open": None, "close": None,
                   "high": None, "low": None, "prior_atr14": None,
                   "day_label": "unavailable",
-                  "reason": "exchange_closed" if market_phase == "closed" else "session_calendar_unavailable",
+                  "reason": "exchange_closed" if market_phase in ("closed", "market_closed") else "session_calendar_unavailable",
                   "first_directional_read_at": None,
                   "false_alarm": None, "opposite_direction": None, "missed_before_noon": None,
                   "late_only": None, "coverage_status": "manual_partial", "bar_manifest": session_manifest,
@@ -677,17 +677,22 @@ class MarketWatchOutcomeStore:
                 "paired_count": 0, "paired_jo_brier_sum": 0.0, "paired_comparator_brier_sum": 0.0,
                 "excluded_comparator": 0, "stale_input_count": 0, "quality_flags": [], "quality_flag_counts": {}})
 
+        def add_quality_flags(group, read):
+            flags = read.get("quality_flags", [])
+            for flag in flags:
+                if flag not in group["quality_flags"]:
+                    group["quality_flags"].append(flag)
+                group["quality_flag_counts"][flag] = group["quality_flag_counts"].get(flag, 0) + 1
+            if any(flag == "snapshot-stale" or str(flag).lower().endswith(":stale") for flag in flags):
+                group["stale_input_count"] += 1
+
         for r, f in slots.values():
             if protocol_id is not None and r["protocol_id"] != protocol_id:
                 continue
             g = group_for(f["horizon"], r["protocol_id"], r.get("model_id") or "unknown",
                           r.get("prompt_version") or "unknown", 1)
             g["submitted"] += 1
-            for flag in r.get("quality_flags", []):
-                if flag not in g["quality_flags"]:
-                    g["quality_flags"].append(flag)
-                g["quality_flag_counts"][flag] = g["quality_flag_counts"].get(flag, 0) + 1
-                g["stale_input_count"] += int("stale" in str(flag).lower())
+            add_quality_flags(g, r)
         for o in selected:
             r, f = slots[(o["read_id"], o["forecast_id"])]
             revision = o["evaluation_revision"]
@@ -695,6 +700,7 @@ class MarketWatchOutcomeStore:
                           r.get("prompt_version") or "unknown", revision)
             if revision > 1:
                 g["submitted"] += 1
+                add_quality_flags(g, r)
             if o["status"] == "scored":
                 g["scored"] += 1
                 g["brier_sum"] += o["brier"]

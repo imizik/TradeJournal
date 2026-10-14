@@ -171,7 +171,7 @@ def validate_snapshot(record: dict) -> None:
             if retrieved is None:
                 raise ValueError("index observation requires retrieval time")
             age = max(0.0, (retrieved - observed).total_seconds())
-            expected = "stale" if record["market_phase"] == "regular_session" and age > PROTOCOL["freshness_limits"]["rth_price_seconds"] else "fresh"
+            expected = "stale" if age > PROTOCOL["freshness_limits"]["rth_price_seconds"] else "fresh"
             if group["status"] != expected or not math.isclose(float(group["age_seconds"]), age, abs_tol=0.001):
                 raise ValueError("index freshness does not match its timestamps")
         for field in ("price", "bar_1m", "vwap", "or15_high", "or15_low"):
@@ -212,6 +212,13 @@ def validate_snapshot(record: dict) -> None:
         if bars:
             open_at = parse_time(record["session_open_at"])
             contiguous = starts[0] == open_at and all(starts[i] == starts[i - 1] + timedelta(minutes=1) for i in range(1, len(starts)))
+            opening_bar = bars[0] if starts[0] == open_at else None
+            session_open = group["session_open"]
+            if opening_bar:
+                if session_open.get("value") != opening_bar["open"] or parse_time(session_open.get("at")) != open_at:
+                    raise ValueError("session open does not match the exact opening minute")
+            elif session_open.get("value") is not None or session_open.get("at") is not None or session_open.get("status") != "missing":
+                raise ValueError("session open must be missing without the exact opening minute")
             last = bars[-1]
             if group["bar_1m"] != last or group["price"].get("value") != last["close"]:
                 raise ValueError("latest price does not match its bar")
@@ -222,6 +229,20 @@ def validate_snapshot(record: dict) -> None:
                     raise ValueError("VWAP does not match its source bars")
             elif group["vwap"].get("value") is not None or group["vwap"].get("status") != "missing":
                 raise ValueError("VWAP must be unavailable when source bars are incomplete")
+            buckets = []
+            by_start = {parse_time(bar["start"]): bar for bar in bars}
+            for start in sorted(by_start):
+                if (start - open_at).total_seconds() % 300:
+                    continue
+                keys = [start + timedelta(minutes=i) for i in range(5)]
+                if any(key not in by_start for key in keys):
+                    continue
+                chunk = [by_start[key] for key in keys]
+                buckets.append({"start": chunk[0]["start"], "end": chunk[-1]["end"], "open": chunk[0]["open"],
+                    "high": max(bar["high"] for bar in chunk), "low": min(bar["low"] for bar in chunk),
+                    "close": chunk[-1]["close"], "volume": sum(bar["volume"] for bar in chunk)})
+            if group["bars_5m"] != buckets[-12:]:
+                raise ValueError("five-minute bars do not match completed session-aligned source bars")
             first15 = bars[:15]
             or_ready = (len(first15) == 15 and first15[0]["start"] == record["session_open_at"] and
                         all(parse_time(first15[i]["start"]) == parse_time(first15[0]["start"]) + timedelta(minutes=i) for i in range(15)))
@@ -252,7 +273,7 @@ def validate_snapshot(record: dict) -> None:
             raise ValueError(f"{name} with unknown observation time must be missing")
         if name == "volatility" and observed is not None:
             age = max(0.0, (retrieved - observed).total_seconds())
-            expected = "stale" if record["market_phase"] == "regular_session" and age > PROTOCOL["freshness_limits"]["vix_seconds"] else "fresh"
+            expected = "stale" if age > PROTOCOL["freshness_limits"]["vix_seconds"] else "fresh"
             if group["status"] != expected or not math.isclose(float(group["age_seconds"]), age, abs_tol=0.001):
                 raise ValueError("volatility freshness does not match its timestamps")
             payload = {"source": group["source"], "value": group["value"], "change_pct": group["change_pct"], "observed_at": group["observed_at"]}

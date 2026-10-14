@@ -18,7 +18,7 @@ def _bar(start, n):
             "l": price - .2, "c": price + .1, "v": 1000}
 
 
-def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_minute=False):
+def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_minute=False, missing_open=False):
     bars = {}
     for symbol in ("SPY", "QQQ"):
         bars[symbol] = [_bar(OPEN + timedelta(minutes=i), i) for i in range(30)]
@@ -29,6 +29,8 @@ def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_
     daily = {symbol: [{"t": "2026-10-13T00:00:00Z", "c": 99}] for symbol in ("SPY", "QQQ")}
     if stale:
         bars["SPY"] = [_bar(OPEN + timedelta(minutes=i), i) for i in range(10)]
+    if missing_open:
+        bars["SPY"] = bars["SPY"][1:]
     if missing_minute:
         bars["SPY"] = [row for i, row in enumerate(bars["SPY"]) if i != 10]
     if duplicate_minute:
@@ -41,11 +43,12 @@ def fixture_snapshot(**options):
     bounds = options.pop("bounds", (OPEN, datetime(2026, 10, 14, 20, 0, tzinfo=UTC)))
     vix = options.pop("vix", {"observed_at": now - timedelta(minutes=5), "value": 17.2, "change_pct": 2.1})
     news_items = options.pop("news_items", [])
+    fail_calendar = options.pop("fail_calendar", False)
     bars, daily = _sources(**options)
     return build_snapshot(
         now, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
         vix_reader=lambda: vix,
-        calendar_reader=lambda day, at: {"status": "fresh", "reason": None, "source": "official_calendar",
+        calendar_reader=lambda day, at: (_ for _ in ()).throw(OSError("fixture outage")) if fail_calendar else {"status": "fresh", "reason": None, "source": "official_calendar",
             "observed_at": at.isoformat().replace("+00:00", "Z"), "retrieved_at": at.isoformat().replace("+00:00", "Z"),
             "age_seconds": 0, "source_sha256": digest({"coverage_start": "2026-01-01", "coverage_end": "2027-01-01",
                 "calendar_version": "fixture", "events": []}), "coverage_start": "2026-01-01", "coverage_end": "2027-01-01",
@@ -198,3 +201,40 @@ def test_protocol_id_is_content_bound_and_cached_session_bounds_do_not_fetch(mon
     packet = seal(packet)
     with pytest.raises(ValueError, match="protocol hash"):
         validate_snapshot(packet)
+
+
+def test_postmarket_retains_stale_prices_without_rejecting_descriptive_snapshot():
+    packet = fixture_snapshot(now=datetime(2026, 10, 14, 20, 4, tzinfo=UTC))
+    assert packet["market_phase"] == "post_market"
+    assert packet["indices"]["SPY"]["status"] == "stale"
+    validate_snapshot(packet)
+
+
+def test_calendar_failure_keeps_valid_partial_snapshot_and_source_hash(tmp_path):
+    packet = fixture_snapshot(fail_calendar=True)
+    assert packet["calendar"]["status"] == "missing"
+    assert packet["calendar"]["reason"] == "source_error:OSError"
+    assert packet["indices"]["SPY"]["price"]["value"] is not None
+    publish_snapshot(tmp_path, packet)
+    assert read_latest_snapshot(tmp_path, NOW) == packet
+
+
+def test_missing_open_stays_missing_and_five_minute_buckets_stay_clock_aligned():
+    packet = fixture_snapshot(missing_open=True, missing_minute=True)
+    spy = packet["indices"]["SPY"]
+    assert spy["session_open"] == {"value": None, "at": None, "status": "missing", "reason": "session_open_bar_missing"}
+    assert spy["vwap"]["value"] is None
+    assert spy["bars_5m"]
+    for bar in spy["bars_5m"]:
+        assert (parse_time(bar["start"]) - OPEN).total_seconds() % 300 == 0
+    assert spy["bars_5m"][0]["start"] == "2026-10-14T13:35:00.000000Z"
+
+
+def test_resealed_future_five_minute_bar_is_refused():
+    packet = fixture_snapshot()
+    packet['indices']['SPY']['bars_5m'][-1]['end'] = (NOW + timedelta(minutes=5)).isoformat()
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='five-minute bars'):
+        validate_snapshot(seal(packet))

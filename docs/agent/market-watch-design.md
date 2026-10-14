@@ -454,6 +454,15 @@ retention boundary; adding a durable publication later is a separate decision.
 Unknown exchange-calendar bounds also remain unavailable instead of inventing
 regular hours.
 
+Fixture acceptance is exercised by `backend/tests/test_market_watch_snapshot.py`,
+`backend/tests/test_market_watch_ledger.py`, and
+`backend/tests/test_market_watch_evaluation.py`: publication/receipt/export/score
+reproduction, source failures, postmarket/closed-session handling, missing opening
+and interior bars, exact endpoints, correction cohorts, immutable retries,
+concurrency, actor/scope refusals, and message provenance. Native review and
+final-head CI status are recorded in the implementation PR, not inferred from
+these fixtures.
+
 The implementation retains `manual_partial` session coverage and
 `independence-unverified`. Fixture acceptance is evidence about records and
 math, not live access, delivery, performance, or completion of the later

@@ -73,6 +73,7 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
     bars = _session_bars(rows, opened, cutoff)
     gaps = []
     last = bars[-1] if bars else None
+    opening_bar = bars[0] if bars and parse_time(bars[0]["start"]) == opened else None
     price = {"value": last["close"] if last else None, "at": last["end"] if last else None,
              "status": "fresh" if last and (retrieved - parse_time(last["end"])).total_seconds() <= 180 else "stale" if last else "missing",
              "reason": None if last else "no_completed_regular_session_bar"}
@@ -96,8 +97,8 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
              "status": status, "reason": None if bars else "no_completed_regular_session_bar",
              "source_sha256": digest(bars), "price": price,
              "prior_close": prior_close or {"value": None, "at": None, "status": "missing", "reason": "prior_close_unavailable"},
-             "session_open": {"value": bars[0]["open"] if bars else None, "at": bars[0]["start"] if bars else None,
-                              "status": "fresh" if bars else "missing", "reason": None if bars else "session_open_bar_missing"},
+             "session_open": {"value": opening_bar["open"] if opening_bar else None, "at": opening_bar["start"] if opening_bar else None,
+                              "status": "fresh" if opening_bar else "missing", "reason": None if opening_bar else "session_open_bar_missing"},
              "bar_1m": last, "vwap": {"value": vwap, "status": status if vwap is not None else "missing",
                                          "reason": None if vwap is not None else "missing_minute_bar_or_nonpositive_volume"},
              "or15_high": {"value": max((bar["high"] for bar in bars[:15]), default=None) if opening_complete else None, "status": or_status,
@@ -108,16 +109,20 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
              "distance_to_vwap": ((last["close"] / vwap - 1) if last and vwap else None),
              "bars_5m": []}
     # Keep at most 12 completed 5-minute buckets; partial buckets never qualify.
-    for offset in range(0, len(bars) - 4, 5):
-        chunk = bars[offset:offset + 5]
-        if len(chunk) != 5 or any(parse_time(chunk[i]["start"]) != parse_time(chunk[0]["start"]) + timedelta(minutes=i) for i in range(5)):
+    by_start = {parse_time(bar["start"]): bar for bar in bars}
+    for offset in range(0, max(0, int((cutoff - opened).total_seconds() // 60) - 4), 5):
+        starts = [opened + timedelta(minutes=offset+i) for i in range(5)]
+        if any(start not in by_start for start in starts):
             continue
+        chunk = [by_start[start] for start in starts]
         group["bars_5m"].append({"start": chunk[0]["start"], "end": chunk[-1]["end"], "open": chunk[0]["open"],
                                 "high": max(x["high"] for x in chunk), "low": min(x["low"] for x in chunk),
                                 "close": chunk[-1]["close"], "volume": sum(x["volume"] for x in chunk)})
     group["bars_5m"] = group["bars_5m"][-12:]
     if status != "fresh":
         gaps.append({"group": f"indices.{symbol}", "reason": group["reason"] or "stale_price_bar"})
+    if opening_bar is None:
+        gaps.append({"group": f"indices.{symbol}.session_open", "reason": "session_open_bar_missing"})
     if vwap is None:
         gaps.append({"group": f"indices.{symbol}.vwap", "reason": group["vwap"]["reason"]})
     if or_status != "fresh":
@@ -309,7 +314,7 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
                 observed = item.get("observed_at")
                 payload = {"source": "Tradier", "value": item.get("value"), "change_pct": item.get("change_pct"),
                            "observed_at": _time(_raw_time(observed)) if observed else None}
-                group = _stamp_group("Tradier", observed, vix_retrieved, payload, limit=3600, active=phase == "regular_session")
+                group = _stamp_group("Tradier", observed, vix_retrieved, payload, limit=3600, active=True)
                 volatility = {**group, "instrument": "VIX", "instrument_type": "spot_index", "value": item.get("value"), "change_pct": item.get("change_pct")}
         except Exception as exc:
             vix_retrieved = source_clock()
@@ -320,6 +325,8 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
     calendar_started = source_clock()
     calendar = {"status": "missing", "reason": "calendar_unavailable", "source": "macro_calendar", "observed_at": None,
                 "retrieved_at": _time(calendar_started), "age_seconds": None, "source_sha256": digest(None), "coverage_start": None, "coverage_end": None, "calendar_version": None, "events": []}
+    calendar["source_sha256"] = digest({key: calendar[key] for key in
+        ("coverage_start", "coverage_end", "calendar_version", "events")})
     if calendar_reader:
         try:
             calendar = calendar_reader(day, calendar_started)

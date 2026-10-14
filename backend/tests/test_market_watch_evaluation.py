@@ -7,6 +7,7 @@ from app.engine.market_watch_evaluation import (
     MarketWatchEvaluationError, MarketWatchOutcomeStore, evaluate_forecast as _evaluate_forecast,
     session_diagnostic as _session_diagnostic,
 )
+from market_watch_common import digest
 
 
 ET = timezone(timedelta(hours=-4))
@@ -154,6 +155,52 @@ def test_session_coverage_does_not_claim_whole_day_when_history_missing():
                              session_open_at=opening, session_close_at=opening + timedelta(hours=6, minutes=30))
     assert out["day_label"] == "unavailable"
     assert out["coverage_status"] == "manual_partial"
+
+
+def test_known_market_closed_holiday_is_ineligible_not_calendar_unavailable():
+    read = {"read_id": "holiday-read", "received_at": "2026-10-12T14:00:00Z",
+            "protocol_id": "mw-v1", "view": "no_view"}
+    forecast = {"forecast_id": "holiday-f", "horizon": "30m", "probability": 0.5}
+    result = evaluate_forecast(read, forecast, [], session_open_at=None, session_close_at=None,
+                               market_phase="market_closed", evaluated_at="2026-10-12T14:01:00Z")
+    assert result["status"] == "not_eligible" and result["reason"] == "exchange_closed"
+    session = session_diagnostic(session_date="2026-10-12", read_rows=[], today_bars=[], prior_sessions=[],
+                                 session_open_at=None, session_close_at=None, market_phase="market_closed",
+                                 evaluated_at="2026-10-12T20:00:00Z")
+    assert session["day_label"] == "unavailable" and session["reason"] == "exchange_closed"
+
+
+def test_corrected_revision_is_append_only_idempotent_and_keeps_quality_cohort(tmp_path):
+    store = MarketWatchOutcomeStore(tmp_path / "revision-outcomes.sqlite")
+    opening = datetime(2026, 10, 14, 9, 30, tzinfo=ET)
+    bars = [minute(opening + timedelta(minutes=i), 100 if i < 31 else 101) for i in range(32)]
+    read = {"read_id": "revision-read", "received_at": (opening + timedelta(seconds=5)).isoformat(),
+            "protocol_id": "mw-v1", "view": "up", "model_id": "model-a", "prompt_version": "p1",
+            "quality_flags": ["snapshot-stale", "SPY:stale", "QQQ:stale"], "forecasts": []}
+    forecast = {"forecast_id": "revision-forecast", "horizon": "30m", "probability": 0.8}
+    read["forecasts"] = [forecast]
+    common = dict(session_open_at=opening, session_close_at=opening + timedelta(hours=6, minutes=30),
+                  evaluated_at=opening + timedelta(minutes=48), bar_source=SOURCE)
+    original = _evaluate_forecast(read, forecast, bars, **common)
+    assert store.append_evaluations([original]) == 1
+    corrected = _evaluate_forecast(read, forecast, bars, revision=2,
+                                   supersedes_outcome_id=original["outcome_id"], **common)
+    assert store.append_evaluations([corrected]) == 1
+    assert store.append_evaluations([corrected]) == 0
+    conflicting = {**corrected, "reason": "changed after append"}
+    conflicting["content_sha256"] = digest({k: v for k, v in conflicting.items() if k != "content_sha256"})
+    with pytest.raises(MarketWatchEvaluationError, match="revision already exists"):
+        store.append_evaluations([conflicting])
+    rows = store.outcomes()
+    assert len(rows) == 2 and {row["evaluation_revision"] for row in rows} == {1, 2}
+    report = store.report([read])
+    cohorts = {group["evaluation_revision"]: group for group in report["groups"]}
+    assert report["total_submitted_slots"] == 1
+    for cohort in cohorts.values():
+        assert cohort["submitted"] == 1
+        assert cohort["stale_input_count"] == 1  # three stale flags, one affected slot
+        assert cohort["quality_flags"] == read["quality_flags"]
+        assert cohort["quality_flag_counts"] == {flag: 1 for flag in read["quality_flags"]}
 
 
 def test_sealed_ledger_export_import_evaluate_and_report_end_to_end(tmp_path):
