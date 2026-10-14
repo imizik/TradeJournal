@@ -1,0 +1,512 @@
+# Jo's market watch — design (proposed October 14, 2026)
+
+**Status: proposed design, not selected for build.** Written at Isaac's request
+after the October 14 CPI session. It extends the
+[shadow trader design](shadow-trader-design.md) and reuses rules already
+written in the [agentic trading roadmap](../agentic-trading-roadmap.md)
+(macro and catalysts, thesis versions, morning pipeline, anti-hindsight).
+It changes nothing that is live: [setup scanner S1](setup-scanner-contract.md),
+its ten-session acceptance and [shadow S1](shadow-s1-contract.md) keep their
+rules, records and gates. Codex owns the shadow and check-service backend;
+selecting any slice below goes through the
+[Dots delivery board](dots-integration.md#current-delivery-board).
+
+## What Isaac wants
+
+Jo should pay attention to the market on its own, form a view of the day from
+macro events, news and the tape, and tell Isaac without being asked when
+something meaningful develops — a directional day building, a view that
+failed, or a strong opportunity. Not an alert every 20 minutes, and not
+invented trades. Isaac reports no market-level alert on October 14 (CPI morning, persistent
+selling, repeated failed bounces). MW-0 below separates what the server
+records establish from the still-unobserved task and notification history.
+
+## The reframe
+
+Today the system is **setup-driven**: a scanner rule fires, Jo rates or shadows
+that setup, a paper trade runs. This design adds an **observation-driven**
+path beside it:
+
+| | Setup path (live, unchanged) | Market watch (proposed) |
+|---|---|---|
+| Trigger | S1 candidate email | Schedule plus deterministic market events |
+| Jo's output | TAKE/SKIP, Go/Wait/Pass on one setup | A timestamped market read; optionally a message to Isaac |
+| Baseline | S1 rules-only paper trade | Simple frozen price checks scored on the same outcomes |
+| Trades | S1 contract and exits | None in the first version; a separate idea book later |
+
+S1 observations may become inputs to Jo's read, but Jo's read never changes
+S1's candidates or paper trades. That keeps S1 a clean baseline.
+
+## What the research says (exploratory, research branch only)
+
+Research lives on branch `claude/research-s1-orb-breakdown-put` (no PR;
+branch-relative location `claude/research-s1-orb-breakdown-put:research/s1_downside_puts/`). In-sample, March 2 – October 13, 2026, SPY
+trend day = at least 0.5 daily ATR open-to-close with the close in the outer
+30% of the day's range (a hindsight label).
+
+- Downside setups added to S1 (opening-range breakdown put, trend-continuation
+  put) did not beat realistic option costs (profit factor 0.91 and 0.83).
+- Trades on days that, in hindsight, trended made money with a VWAP trailing
+  exit (about +35% return on premium); chop days lost it back. Identifying the
+  day early is the problem.
+- No price, breadth, volume or VIXY check called down-trend days well by late
+  morning (best about one in three). Afternoon checks caught most down days,
+  but little move remained after them.
+- Macro days are small samples: CPI and jobs mornings mostly ended choppy;
+  FOMC days leaned down (3 of 5); a gap down after an 08:30 release followed
+  through more often than an ordinary gap down (2 of 5 vs 2 of 29).
+
+These are leads, not design assumptions. They justify testing whether a
+judgment-based read does better than simple checks, scored prospectively.
+They do not show that it will.
+
+## Diagnose October 14 first (MW-0)
+
+**Read-only diagnosis, October 14, 2026, through 15:11:37 ET.** This is a
+partial-session audit, not an end-of-day or ten-session acceptance receipt.
+The application and installed check-service metadata name release
+`e89a22813e5091b4aa4fc630a848849fad98a8fe`; it was the active release at
+inspection, not necessarily for the whole morning. Sources: scanner day GET,
+check ledger located from the configuration used by `deploy/check_control.py`
+and opened with SQLite `mode=ro` plus `query_only`, saved check/model records,
+deployed tool code and systemd/cron inventory. No production writes, tool
+invocations, restarts or deployments were performed.
+
+| Possible cause | Finding and evidence (all times ET) |
+|---|---|
+| 1. Jo never woke | **Refuted for the observed session.** Authenticated `tool_call` IDs 11–80 contain 70 calls by one actor. All 12 emailed candidates received on-time SKIP commits. `preopen_watchlist` calls 11–13 occurred at 09:13:13, 09:13:22 and 09:16:24, before the first candidate; their wake source is unknown. |
+| 2. Needed data missing/stale | **Partial context/output gap, not absence of CPI awareness.** Every saved check contains `CPI (Sep 2026), 08:30, today`; `chk_e462a8f2…` at 09:52:02 already returned that calendar fact and VIX 15.83. Stored internal analyses have SPY/QQQ price/VWAP and 1–10 news headlines. However, `jo_view` returns the compact single-ticker answer, calendar and VIX/earnings, not the full index/news packet. `preopen_watchlist` can return index tape and news, but its six responses were not retained. No structured actual/consensus surprise, IWM/breadth or persistent market-state record was present in these saved answers. |
+| 3. Retrieved data but formed no directional view | **Refuted for local weakness recognition; market-level synthesis unknown.** SPY decision `shd_bb39f951…` at 11:02:00 calls the entry countertrend below VWAP/EMA9. SPY `shd_d8530ccc…` at 11:58:47 says recovery is not holding; QQQ `shd_58aa2f2b…` at 11:59:10 describes a surrendered bounce near the low. These are setup rejections, not a saved day thesis or a timestamped bearish forecast. |
+| 4. Formed a view but no path/permission to message | **Strongly supported as a setup-output/policy mismatch; external permission unknown.** The deployed catalog has no market-read submit or notification tool. The documented Gmail task allows fresh co-pilot Go alerts; saved verdict `chk_ddfa8f22…` at 11:03:17 explicitly says “noGo notification,” and `chk_f99b1143…` at 11:59:42 says “no Go alert.” There were no Go verdicts. This explains silence under that policy, but does not prove what Jo actually sent or its current task permissions. |
+
+**Wake evidence and limits.** The documented route is scanner email → relay →
+Jo Gmail task. No additional Jo market-watch wake was found in the host's
+systemd timers, `/etc/cron.d`, or root/ubuntu/application-user crontabs.
+The market-context timer refreshes earnings/VIX; Gmail sync imports journal
+mail; operational alerts are not Jo market-watch wakes. ChatGPT schedules,
+other Gmail triggers, task run history, manual prompts and messages to Isaac
+are **unknown from the server**. The call log stores name/actor/time, not
+arguments, success, response or wake origin. An authenticated call is not proof
+of a successful response. No matching scanner/shadow failure was found in the
+bounded journal filter; that does not establish external delivery.
+
+**Conclusion:** the hypothesis is supported for setup-local interpretation and
+missing market-level recording/message criteria. Its claim that Jo only woke
+on setups is unproved; broader tools were called. CPI calendar awareness
+already existed. MW-1 should expose and freeze a reusable market packet and
+record market reads, rather than start by adding a new macro data vendor.
+Ask Isaac for screenshots of Jo's enabled schedules/Gmail triggers and their
+prompts, October 14 run history, and messages/manual prompts around 09:13–09:16,
+10:40–11:03, 12:37 and 13:12–13:16 to resolve the remaining causes.
+
+<details>
+<summary>October 14 candidate and check timeline (ET; IDs shown as unique prefixes)</summary>
+
+20 candidates: 19 long VWAP fades and one long ORB; no shorts. Twelve emails
+were `sent`; none were `expired` or `skipped_daily_cap`. Eight `no_contract`
+candidates have no email event and no shadow commit. The ledger and scanner
+agree on all 12 commits, each `skip`, `on_time` (9 clean, 3 unclean).
+
+| Candidate ID | Symbol/setup | Detected | Email sent | Shadow commit / decision ID |
+|---|---|---|---|---|
+| `b75fd4c5` | GOOGL orb | 09:50:33 | 09:50:44 | 09:51:51 / `shd_85d617d4` |
+| `4c1acb94` | SPY fade | 11:00:42 | 11:00:50 | 11:02:00 / `shd_bb39f951` |
+| `1a62f477` | AMZN fade | 11:20:47 | 11:20:54 | 11:24:58 / `shd_a9eb3da0` (unclean) |
+| `e025363a` | QQQ fade | 11:20:49 | 11:20:59 | 11:23:53 / `shd_63e99ae2` |
+| `20652164` | MRVL fade | 11:50:34 | no_contract; no event | — |
+| `a684732c` | GOOGL fade | 11:55:39 | 11:55:42 | 11:56:42 / `shd_aec7bb37` |
+| `1474c12c` | SPY fade | 11:55:39 | 11:55:43 | 11:58:47 / `shd_d8530ccc` (unclean) |
+| `628766a8` | QQQ fade | 11:55:40 | 11:55:45 | 11:59:10 / `shd_58aa2f2b` (unclean) |
+| `557c51b2` | META fade | 12:30:47 | 12:30:51 | 12:32:39 / `shd_fea9924d` |
+| `563920a6` | MU fade | 12:35:36 | 12:35:37 | 12:36:48 / `shd_c9462e1e` |
+| `06cd9247` | CRDO fade | 12:35:36 | no_contract; no event | — |
+| `eff7db18` | MRVL fade | 12:35:36 | no_contract; no event | — |
+| `3279227c` | AMD fade | 12:40:49 | no_contract; no event | — |
+| `fe9f2db5` | AMZN fade | 12:45:37 | no_contract; no event | — |
+| `0b2232ae` | GOOGL fade | 12:45:37 | 12:45:39 | 12:46:39 / `shd_21ca359a` |
+| `634dd695` | AAPL fade | 13:50:48 | no_contract; no event | — |
+| `90d85159` | META fade | 13:50:48 | 13:50:50 | 13:52:19 / `shd_08700289` |
+| `a1178cc6` | CRDO fade | 14:05:38 | no_contract; no event | — |
+| `35992f71` | AMD fade | 14:05:39 | no_contract; no event | — |
+| `ced853fb` | AAPL fade | 14:30:40 | 14:30:42 | 14:32:14 / `shd_1c449726` |
+
+`clean_order=false` is explained by interleaved co-pilot calls for other
+candidates: AMZN `1a62f477` spans calls 28–29 at 11:24:02/11:24:14 (QQQ check
+and verdict); SPY `1474c12c` and QQQ `628766a8` span calls 36–37 at
+11:56:54/11:57:04 (GOOGL check and verdict). No `position_check` or `get_notes`
+call appears in the observed log. This does not establish independence from
+Gmail, memory or other connectors; S1's flags and labels remain unchanged.
+
+Thirteen pre-trade checks and thirteen saved model verdicts: twelve match the
+emailed candidates; the additional NBIS check's origin is unknown. Every idea
+was long/call. Rules: 11 Pass, 2 Wait. Model: 11 Pass, 1 Wait, 1 Insufficient
+Data; zero Go. No new check or verdict was submitted by this audit.
+
+| Check ID | Symbol | Check received | Model saved | Rules / model |
+|---|---|---|---|---|
+| `chk_e462a8f2` | GOOGL | 09:52:02 | 09:52:18 | wait / wait |
+| `chk_b8fda934` | NBIS | 11:02:24 | 11:02:38 | wait / insufficient_data |
+| `chk_ddfa8f22` | SPY | 11:03:04 | 11:03:17 | pass / pass |
+| `chk_d9852487` | QQQ | 11:24:02 | 11:24:14 | pass / pass |
+| `chk_a7197d22` | AMZN | 11:25:09 | 11:25:20 | pass / pass |
+| `chk_3738bfbd` | GOOGL | 11:56:54 | 11:57:04 | pass / pass |
+| `chk_f99b1143` | SPY | 11:59:23 | 11:59:42 | pass / pass |
+| `chk_5c234c10` | QQQ | 11:59:26 | 11:59:44 | pass / pass |
+| `chk_cd797931` | META | 12:32:48 | 12:33:00 | pass / pass |
+| `chk_b6b7a956` | MU | 12:37:07 | 12:37:19 | pass / pass |
+| `chk_69c41246` | GOOGL | 12:46:44 | 12:46:54 | pass / pass |
+| `chk_f0567d1d` | META | 13:52:28 | 13:52:35 | pass / pass |
+| `chk_9fd34a6c` | AAPL | 14:32:25 | 14:32:33 | pass / pass |
+
+Tool-call inventory: 12 `shadow_setup`, 12 `shadow_decide`, 13
+`pre_trade_check`, 13 `attach_model_verdict`, 6 `preopen_watchlist`, 11
+`candles`, 3 `review_checks`. Market-context-capable watchlist calls were
+11/12/13 at 09:13:13/09:13:22/09:16:24, 18 at 10:40:31, 19 at 11:00:13,
+and 54 at 12:37:20. Candle calls 59–69 span 13:12:42–13:16:06; their symbols
+and responses are not logged. Review calls 78–80 were at
+14:51:07/14:52:39/14:52:49. The private audit timeline retains every call's
+exact timestamp and complete candidate/check/decision IDs; no credentials,
+private addresses or account identifiers are copied into this design.
+
+</details>
+
+## Records and outcomes come first (MW-1)
+
+**Bounded proposed contract; implementation and activation are not authorized
+by this document update.** Build a snapshot/read/score foundation beside S1,
+with no trades, autonomous wake-ups, delivery, UI or paid model calls. MW-0
+found existing calendar, index and news inputs but no retained market read;
+reuse those sources and make the exact returned evidence durable. MW-2 owns
+scheduling, event detectors and delivery. Preserve S1 rules, the ten-session
+acceptance, shadow-first ordering and all independence labels.
+
+### Storage and immutable records
+
+Names below are proposed records, not claims that tables/tools already exist.
+Every record carries `schema_version`, a server-generated ID, UTC server
+`created_at`, and `content_sha256` over canonical JSON excluding that hash.
+Numbers must be finite; timestamps must include an offset and are stored in
+UTC; `session_date` uses the exchange calendar in America/New_York. Updates,
+deletes and conflicting overwrites are refused by storage constraints/triggers,
+not merely by the tool description. Corrections append linked versions.
+
+| Record / owner | Required fields beyond the common envelope |
+|---|---|
+| `market_watch_protocol` / app | `protocol_id`, `effective_from`, `universe`, `source_policy`, `feature_version`, `freshness_limits`, `horizons`, `anchor_rule`, `price_basis`, `missing_policy`, `comparator_version`, `day_label_version`; complete frozen values defined below |
+| `market_watch_snapshot` / app | `snapshot_id`, `protocol_id`, `session_date`, `collection_started_at`, `collection_finished_at`, `session_open_at`, `session_close_at`, `market_phase`, `indices`, `volatility`, `calendar`, `headlines`, `gaps`, `input_manifest` |
+| `market_watch_input` / check SQLite ledger | `input_id`, authenticated `actor`, `snapshot_id`, `snapshot_sha256`, exact returned `snapshot_json`, `served_at`; records what the tool offered, not proof the model understood it |
+| `market_watch_read` / check ledger | `read_id`, `actor`, client `operation_id`, `request_sha256`, server `received_at`, `session_date`, `protocol_id`, `input_id`, `snapshot_id`, `snapshot_sha256`, `previous_read_id` (nullable), `view` (`up`, `down`, `mixed`, `no_view`), `main`, `alternative`, `invalidation`, `change_summary`, `forecasts`, `message_intent` (`none`, `update`, `correction`), `correction_of_read_id` (nullable), `prompt_version`, declared `model_id` (nullable/unknown), `quality_flags` |
+| `market_watch_comparator` / check ledger | `comparator_id`, `read_id`, `protocol_id`, `snapshot_sha256`, `computed_at`, `signal` (`up`, `down`, `neutral`, `unavailable`), exact input values, three horizon probabilities or missing reasons; written atomically with the read |
+| `market_watch_message_event` / check ledger | `message_id`, `event_id`, `read_id`, `actor`, `kind` (`intent`, `attempt`, `accepted`, `delivered`, `failed`, `unknown`, `rated`), `channel` (`none`, `email`, `push`), `is_correction`, `corrects_message_id` (nullable), `text_sha256`, bounded `text`, `occurred_at`, `recorded_at`, `source` (`system`, `transport`, `owner_report`), `transport_receipt_id` (nullable), `error_code` (nullable), `rating` (`useful`, `not_useful`, nullable) |
+| `market_watch_outcome` / app | `outcome_id`, `evaluation_revision`, `supersedes_outcome_id` (nullable), `read_id`, `forecast_id`, `protocol_id`, `evaluated_at`, `status`, `reason`, `anchor_at`, `anchor_price`, `target_at`, `target_price`, `return`, `outcome_y`, `brier`, `comparator_brier`, `adverse_excursion`, `favorable_excursion`, `path_status`, `bar_manifest_sha256`; nullable measurements remain explicit |
+| `market_watch_session_outcome` / app | `evaluation_revision`, `supersedes_outcome_id` (nullable), `session_date`, `protocol_id`, `open`, `close`, `high`, `low`, `prior_atr14`, `day_label`, `first_directional_read_at`, `false_alarm`, `opposite_direction`, `missed_before_noon`, `late_only`, `coverage_status`, `bar_manifest_sha256` |
+
+App snapshots are saved before publication as content-addressed files through
+a narrow read-only handoff, following the existing shadow exchange pattern.
+The check service gets only those public-market files, no database credential
+or new access to the private API. It retains the complete served snapshot in
+its ledger so later publication changes cannot alter a read's evidence.
+A narrow owner export supplies reads/comparators to the app evaluator; it
+excludes checks, history, positions, notes and other actors. Export is read-only
+and idempotent, and the app verifies IDs/hashes before insertion. The check process
+cannot fetch outcome continuations through either new Jo tool. Protocol/hash
+mismatches, forged IDs and cross-actor references fail closed. Any new path,
+reader/export permission or migration needs MW-1's tier-2 review and separately
+authorized activation; no existing grant is silently widened.
+
+### Snapshot v1: the smallest useful packet
+
+- **Universe:** SPY and QQQ only. No personalized watchlist, holdings or trade
+  history. IWM, watchlist breadth, sectors, rates/dollar, flow labels and S1
+  candidate/outcome feeds are deferred; they are not prerequisites to record
+  the weakness MW-0 already found. No full-market breadth claim.
+- **Prices:** reuse the bounded Alpaca adapter with explicitly labelled IEX
+  stock bars/quotes in v1; no silent fallback or consolidated-feed claim. Per index: `price`, `price_at`, `prior_close`,
+  `prior_close_at`, `session_open`, latest completed `bar_1m`, `vwap`,
+  `or15_high`, `or15_low`, `return_vs_prior_close`, `distance_to_vwap`, and
+  up to 12 completed regular-session `bars_5m` (start/end/OHLCV). No unclosed
+  bars or forward filling. Regular-session VWAP is cumulative
+  `sum(((high+low+close)/3)*volume)/sum(volume)` from the same completed 1-minute
+  bars; OR15 is the high/low of all 15 bars from the exchange open. Missing
+  required bars makes the affected aggregate unavailable. Before OR completion
+  it is `not_ready`; regular-session metrics are not invented premarket.
+  `input_manifest` retains the exact source bars needed to reproduce each
+  aggregate, provider/feed, request window, retrieval time and payload hash.
+- **Volatility:** reuse the existing timestamped VIX publication; fields
+  `instrument`, `instrument_type=spot_index`, `value`, `change_pct`. Do not add
+  VIXY as a substitute; any later futures ETF must use a distinct instrument
+  type and protocol version.
+- **Calendar:** reuse the official-source CPI/FOMC/jobs calendar, with
+  `event_id`, `kind`, `name`, `scheduled_at`, `source`, `calendar_version`,
+  `coverage_start`, `coverage_end`. `actual`, `consensus`, `surprise` are null
+  with `not_supported` in v1. A scheduled time passing is not verification of
+  release contents or of a “hot” surprise. Out-of-coverage is missing, not
+  “no events.” Adding BEA or release values is a separate scope decision.
+- **News:** retain at most 10 already-fetched SPY/QQQ headlines from the last
+  24 hours; no new collector or historical backfill. Preserve `article_id`
+  (nullable), `provider`, public `url`, `headline`, `published_at`,
+  `provider_updated_at` (nullable), `first_observed_at`, `retrieved_at`,
+  `payload_sha256`, `truncated`, query symbols/window and coverage/errors.
+  Unknown first-observation/update times stay unknown. Apply
+  [Catalyst V1](../agentic-trading-roadmap.md#catalyst-v1): retain the exact
+  evidence used, and do not claim empty results prove no catalyst existed.
+- **Every input group** includes `source`, `observed_at`, `retrieved_at`,
+  `age_seconds`, `status` (`fresh`, `stale`, `missing`, `not_ready`,
+  `not_supported`), `reason`, `source_sha256`. Use finer timestamps when fields
+  differ. In RTH, price/completed-bar age over 180 seconds is stale; published
+  VIX observation age over 60 minutes is stale. News retrieval age over
+  30 minutes is stale, distinct from article age. An unknown observation time
+  uses `status=missing, reason=observation_time_unknown`, never fresh. No replacement with zero. Source times
+  later than collection completion are rejected. Preserve coverage gaps.
+
+The private app producer is invoked manually for MW-1 verification; no timer
+or Jo wake is introduced. Save a bounded partial snapshot when a source fails,
+with typed gaps. Freeze the manifest and protocol before any read is accepted.
+
+### Jo tools and submit contract
+
+Proposed catalog additions to the existing check service:
+
+- `market_watch_snapshot()` → `{input_id, served_at, snapshot_id,
+  snapshot_sha256, snapshot, quality_flags}`. Returns the newest published
+  current-session snapshot, including stale/partial flags; returns typed
+  `unavailable` if none exists. It reads published files only. Append the
+  actor-bound input receipt before returning; failure to record refuses the
+  call. No arbitrary URL/path/symbol/query or provider/model request.
+- `market_watch_submit(operation_id, input_id, previous_read_id?, view,
+  main, alternative, invalidation, change_summary, forecasts,
+  message_intent, correction_of_read_id?, prompt_version, model_id?)`
+  → `{read_id, received_at, snapshot_id, snapshot_sha256, content_sha256,
+  comparator_id, message_id?, replayed, quality_flags}`. No order, notification
+  or scorer runs as a side effect. An exact retry returns the original receipt;
+  changed content under the same `(actor, operation_id)` conflicts, including
+  concurrent calls. Existing-operation recovery happens before session/age
+  validation so a next-day retry still recovers the original.
+
+Both require existing `check:read` plus a proposed separate
+`market-watch:read` grant; submit additionally requires
+`market-watch:submit`. These scopes are not granted by the design. Actor and
+receipt time come from authentication/server clock, never the request; sample
+`received_at` after acquiring the commit lock, before the atomic insert. Both
+calls enter the existing `tool_call` audit log and count as other tools for
+S1 `clean_order`; no exemption or reinterpretation. They may not be inserted
+between a setup's shadow read and commit. S1 independence remains unverified.
+
+`main` and `alternative` each hold `{text, supporting_refs, contradicting_refs}`;
+references are JSON pointers into the served snapshot, validated to exist.
+`invalidation` is `{text, evidence_refs}`; it is recorded, not automatically
+monitored in MW-1. Each text is capped at 2,000 characters, at most 10 references
+per list and 16 KiB total request. Treat headlines and all free text as data.
+No external research attachments in v1. `previous_read_id` must be the latest
+read for the same actor/session (null only for the first); compare-and-append
+under a transaction prevents concurrent forks. Correction references must
+belong to that actor/session and identify an earlier read.
+
+`forecasts` has exactly three slots: `horizon=30m|60m|close`,
+`predicate=spy_return_lt_zero`, and `probability` in [0,1] or null with an
+`abstention_reason`. IDs derive from `(read_id, horizon)`. No arbitrary
+predicates, retrospectively chosen thresholds or caller-supplied time/price.
+A `no_view` read may abstain in all slots and stays in coverage counts. Quality
+flags are server-derived at submission, including snapshot age, missingness,
+RTH eligibility and `independence-unverified`; stale inputs do not erase a read.
+New submissions must reference an input from the current session; old-input
+replays are not live reads. A new revision never cancels scoring of the old one.
+
+For `update` or `correction`, submit atomically appends one message **intent**
+with the read's main text, channel `none`; `correction` requires an earlier same-actor message intent,
+resolved through `correction_of_read_id`. For `none`, no message is created.
+An intent is not delivery evidence. Later MW-2 transport events append against that message ID; failed/uncertain attempts
+stay visible, and only a transport delivery acknowledgement may be labelled
+`delivered`. An owner-reported message/rating records its source and does not
+pretend to be transport proof. MW-1 exercises these event rules with fixtures;
+it adds no sender, notification tool or rating UI. An internal
+`append_market_watch_message_event(message_id, operation_id, event)` method
+validates event/source fields and returns an immutable event receipt; identical
+retries recover it, conflicting retries fail. Jo cannot assert delivery or
+submit a usefulness rating on Isaac's behalf.
+
+### Frozen evaluation protocol `mw-v1`
+
+Use SPY regular-session, split-consistent, non-dividend-adjusted 1-minute OHLC
+bars from Alpaca IEX, matching the snapshot feed, with timestamps interpreted
+as minute starts and evaluation at their ends. Persist the exact bar
+manifest used. No future bar may enter the snapshot or comparator.
+
+- **Anchor:** first regular-session minute close strictly after server
+  `received_at`; the decision precedes its reference price. This adds at most
+  one minute to receipt, explicitly reported. Forecast ends are anchor +30
+  minutes, anchor +60 minutes, and the calendar's actual session close. Never
+  truncate 30/60 minutes to fit the close or carry into another session.
+  A target after the session close or at/before the anchor is `not_eligible`.
+  Premarket/after-hours reads are descriptive, `not_eligible`; an unavailable
+  or out-of-session anchor/target has no invented score. Half-days and DST use
+  the exchange calendar, not fixed UTC/16:00 assumptions.
+- **Outcome:** `return = target_price / anchor_price - 1`;
+  `y = 1` iff return < 0, otherwise 0 (an exact tie is 0).
+  `Brier = (probability - y)^2`. The close-horizon return measures move
+  remaining after the read, not the day's open-to-close move.
+- **Path:** use only full bars strictly after the anchor through the target.
+  With directional sign `s=+1` for up and `s=-1` for down, favorable excursion
+  is `max(0, max(s*(price/anchor_price-1)))` and adverse excursion is
+  `max(0, -min(s*(price/anchor_price-1)))` over bar highs/lows. For mixed/no_view,
+  directional excursions are null. Missing intermediate bars make path
+  metrics unavailable even if endpoint return is scoreable. No options P&L.
+- **Missingness:** evaluation is pending until target +15 minutes; retain that
+  pending state as a query-derived state, not a mutable terminal row. A local
+  finite evaluator then saves one initial terminal result per `(read_id, horizon,
+  protocol_id, evaluation_revision=1)`: `scored`, `abstained`, `not_eligible`,
+  or `unavailable` with reasons. Status precedence is not-eligible, then
+  abstained, then missing endpoints, then scored; retained reasons may overlap. Missing exact anchor/target bars are unavailable; no nearest-bar
+  substitution. Later data corrections append a superseding evaluation with
+  its own manifest/version; the original remains visible and is never silently
+  replaced. Superseding results increment `evaluation_revision` and name
+  `supersedes_outcome_id`; reports retain original-versus-corrected cohorts.
+  No automatic rescoring on provider revisions. Identical retries do not
+  duplicate results. The same revision rules apply to session outcomes.
+- **Simple comparator:** `price-check-v1`, computed at submission using the
+  same frozen snapshot. Down when both SPY and QQQ completed-minute closes are
+  below their session VWAP **and** SPY is below OR15 low; up for the symmetric
+  above-VWAP/above-OR15-high condition; otherwise neutral. Freeze down-probability
+  at 0.65/0.35/0.50 respectively for each horizon. These are uncalibrated design
+  constants, not the unverified research win rates. Missing/stale required
+  inputs yield `unavailable`, not neutral. Also report a constant p=0.50
+  no-information baseline. All share each read's anchor, horizon and outcome.
+- **Session diagnostic:** prior ATR14 is the arithmetic mean of true range
+  over the preceding 14 complete regular sessions (exclude today), with
+  `TR=max(high-low, abs(high-previous_close), abs(low-previous_close))`. Up/down
+  trend requires signed open-to-close move >=0.5 ATR14 and close in the upper/
+  lower 30% of today's high-low range (inclusive boundaries); otherwise chop. Missing history/session
+  bars or zero range yields unavailable. A directional `view` on chop is a
+  false alarm; a view opposite a trend is separately counted. A trend with no
+  matching directional read before 12:00 ET is missed-before-noon; a first
+  matching read afterward is late-only, never an early hit. For half-days use
+  the earlier of noon and session close. MW-1's manually sampled sessions have
+  `coverage_status=manual_partial`; whole-day miss rates stay unknown until
+  MW-2 supplies a declared observation roster with wake failures included.
+
+Report Brier and fixed probability calibration bins [0,.1), [.1,.2), …,
+[.9,1] by horizon and protocol/model/prompt version, with counts of all submitted, scored, abstained, ineligible and unavailable
+slots; preserve stale-input flags. Paired comparison uses the intersection
+with a scoreable comparator and discloses exclusions plus total coverage.
+Keep revisions and correlated horizons visible; do not present them as
+independent sessions or claim statistical advantage from a small sample.
+
+### Verification, acceptance and review
+
+MW-1 is accepted as a foundation when fixture-based end-to-end proof covers:
+
+1. Snapshot → published hash → actor-bound input → read/comparator/message
+   intent → owner export → terminal outcomes, with exact input reproduction.
+   Partial sources, stale data, absent calendar coverage and unpublished news
+   remain flagged. No future observations or unclosed bars pass the cutoff.
+2. Direct database UPDATE/DELETE refusal; exact and conflicting retries;
+   concurrent submissions; latest-parent enforcement; cross-actor/forged
+   references; hash tampering; lost-response recovery after restart/next day;
+   duplicate export/evaluator execution. One immutable logical record survives.
+3. Deterministic 30m/60m/close fixtures with known returns, ties, up/down path
+   excursions and Brier values, matched comparator inputs, missing endpoints
+   and interior bars, abstentions, late-session reads, holidays, half-days and
+   DST. A corrected dataset cannot overwrite the original result. A later
+   revision cannot remove an earlier forecast from the denominator.
+4. Missing scopes/invalid actor and credential/path injection are refused;
+   snapshot/export readers cannot access private account data or other ledger
+   tables. New calls preserve existing S1 `clean_order` behavior. No live
+   provider/model call, message, paper trade or S1 mutation occurs in tests.
+5. Message intent/attempt/accepted/delivered/unknown remain distinct; retries
+   and owner ratings append without manufacturing delivery. The acceptance
+   report reproduces scores and unavailable counts from frozen fixtures.
+
+**Review:** this proposed documentation update is ordinary documentation;
+implementing the records, migrations, scorer and check-service tools is
+**tier 2** under [review policy](pr-review.md): fresh `risk-reviewer` (Astra,
+high) plus focused `reviewer` (Sol, medium), focusing on append-only provenance,
+auth boundaries and no-lookahead scoring; focused failure/recovery tests and
+full applicable final-head CI via the CI-backed path. A separate authorized
+activation proves the installed paths/grants and real Jo tool access. MW-1
+fixture acceptance does not complete MW-2's 20-session trial or either S1 gate.
+
+## Wake-ups and messages (MW-2)
+
+**Observe often, message rarely.** TradeJournal runs the event detector; Jo
+is called on:
+
+- a schedule: about 08:50 (after 08:30 releases), 09:50, 11:00, 12:30, 14:00;
+- deterministic events: a scheduled release time passed, SPY crossing or
+  failing at VWAP or the opening range, a new session high/low after 11:00,
+  a move of N daily ATR since Jo's last read. Thresholds are set once and
+  versioned.
+
+Each wake produces a read (possibly "no change"). A **message** goes to
+Isaac only when the read changes what he should consider: a directional
+view forms or strengthens past a stated probability, a view is invalidated,
+or a specific opportunity appears. Another red candle is not a reason.
+Budget: about three discretionary messages a day; a **correction** to an
+earlier message is always sent, even over budget.
+
+Message format: the read in one line, confidence as a probability on a named
+forecast, the evidence, what would prove it wrong, and which trades fit or
+should be avoided, with Isaac's recorded cautions (puts in the first 15
+minutes, chasing extended moves, late-day holds) as flags rather than rules.
+
+**Wake route.** The documented automatic setup route uses Gmail; MW-0 could
+not establish the origin of the other observed calls. Proposed options,
+to be chosen with the shadow independence work: (a) a TradeJournal email per
+scheduled or event wake — available now, inherits the same
+`independence-unverified` limits; (b) MCP Events on the connector
+([shadow S3](shadow-build-plan.md#s3--independence-later-research-gated));
+(c) a scheduled Jo task, subject to plan usage limits. The market watch is
+advice to Isaac, so route (a) is acceptable for it; its reads must not feed
+Shadow Isaac decisions until independence is settled.
+
+## Replay as evidence, with limits (MW-3)
+
+Use replay to find failures and test the workflow, not to establish
+performance:
+
+- price history replays cleanly with sealed continuation (the
+  [historical replay](dot-historical-replay-contract.md) pattern, extended
+  from 15-minute shares to SPY/QQQ/IWM 5-minute bars — needs a focused check
+  of those interfaces before calling it an extension);
+- calendar times are reliable; consensus/actual values need publication-time
+  sources;
+- historical news needs original publication and revision times, which the
+  current fetcher does not keep;
+- the model may already know famous outcomes, so replay results are labelled
+  `replay-hindsight-risk` and never pooled with live reads.
+
+Candidate set: the 2026 macro days in the research table plus a matched
+number of ordinary days, so false alarms are measured too.
+
+## Later, gated on evidence
+
+- **Idea book**: Jo's own paper trade ideas in either direction, recorded
+  before the trigger with trigger, invalidation, contract and execution
+  assumptions, priced like S1, kept separate from S1 and Shadow Isaac.
+  Only after reads beat the comparator on false alarms and calibration.
+- **Analog days and playbooks** (CPI, FOMC, jobs, expiration, earnings):
+  only when enough recorded days of each type exist to say something.
+- **Scorecard screen**: after the records and outcomes above exist.
+
+## Smallest version and acceptance
+
+MW-0 to MW-2 with no trades. It is accepted when, over at least 20 live
+sessions including at least three scheduled macro days:
+
+1. every scheduled wake and triggered event produced a read or a recorded
+   failure, with input freshness visible;
+2. every read's forecasts were scored at their horizons;
+3. messages stayed within budget, every correction was sent, and Isaac rated
+   each message;
+4. the read-versus-comparator table (calibration, false alarms, missed days,
+   move remaining after the read) is reported honestly, including "no
+   advantage shown".
+
+Twenty sessions may hold only a few trend days; the first result is
+descriptive. Only a measured advantage justifies the idea book.
+
+## Choices for Isaac
+
+- Whether to select this as the next shadow/co-pilot slice, and who builds it.
+- Message channel and budget (email, phone push via the existing ntfy alerts).
+- Whether Jo's market reads may see his open positions (useful advice, but
+  reads then cannot feed an independent shadow).

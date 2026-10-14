@@ -28,6 +28,7 @@ the next-work sequence. Check it before starting another roadmap slice.
 | [codex-workflow.md](codex-workflow.md) | Optional bounded delegation; direct work with the selected model is the default |
 | [shadow-trader-design.md](shadow-trader-design.md) | Selected Dots step 6 direction: informed shadow trader with its own paper book, setup co-pilot, shared scanner and Dots feasibility checks |
 | [shadow-build-plan.md](shadow-build-plan.md) | Codex execution plan for the remaining scanner and shadow work: packages, model per package, parallel lanes, frozen file formats, tests and traps |
+| [market-watch-design.md](market-watch-design.md) | Proposed, not selected: Jo forms timestamped market reads on a schedule and on market events, messages Isaac only on meaningful changes, scored against simple checks |
 | [shadow-s1-contract.md](shadow-s1-contract.md) | Current Dots priority: Jo as Shadow Isaac takes or skips scanner setups for its own paper book; tools, visibility cutoff, labels and acceptance |
 | [setup-scanner-contract.md](setup-scanner-contract.md) | Setup scanner S1: universe, VWAP-fade and opening-range rules, contract choice, rules-only options paper baseline and switch-on gates |
 | [advisor-pretrade-check-contract.md](advisor-pretrade-check-contract.md) | Jo's live pre-trade check service: approved data, tools, isolation, build status and the advisor next-steps table |
