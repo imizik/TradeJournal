@@ -451,7 +451,7 @@ is `no_response`. Publication and email-send status do not prove Jo received
 or read the setup. Groups without priced outcomes show “No evaluated trades”.
 
 ### SC-3 — 50-trade evaluation
-Historical selection practice is scoped in the [scanner replay section](dot-historical-replay-contract.md#scanner-replay--historical-selection-benchmark-v0); actual Jo practice/resume acceptance precedes its frozen exam evaluation and does not replace live S1/SC-3 proof.
+Historical selection practice is scoped in the [scanner replay section](dot-historical-replay-contract.md#scanner-replay--historical-selection-benchmark-v0); actual Jo completed/resumed the first practice session on October 13 ET. The generation-frequency, sparse-bucket and cutoff-history follow-up precedes a five-session practice batch; no exam is frozen, and practice does not replace live S1/SC-3 proof.
 
 Report per setup type and direction: count, win rate, mean and median per
 contract, the 2× spread view, by exit reason; then the holdout comparison

@@ -118,10 +118,15 @@ using caller cooldown, taken/fade limits and a rules-only underlying proxy for
 open-trade suppression. Jo's choices never affect this shared stream. Alpaca
 SIP replaces live Tradier timesales/daily ATR; unavailable option eligibility,
 quote failures and actual monitoring latency cannot be reconstructed. Missing
-minutes stop further setup generation for that symbol; reports disclose coverage.
+minutes follow live sparse-bucket selection: aggregate only supplied completed
+minutes, evaluate occupied partial five-minute buckets, skip an empty current
+bucket and resume at later occupied buckets. No missing minute is synthesized
+or treated as proof of no trades. Strict v1 selection is retained only for the
+generation-frequency comparison; reports disclose coverage and count changes.
 Coverage counts supplied/expected/absent regular minutes, first missing minute,
-scan symbol-minutes lost through the final scan cutoff, blocked scan slots and
-emitted setups per symbol/session. The actual lost setup count is unknowable
+partial/empty five-minute buckets, scan symbol-minutes lost to empty eligible
+buckets, blocked scan slots, emitted setups and strict-v1 count deltas per
+symbol/session. The actual lost setup count is unknowable
 without source bars; scan slots are not fabricated setups or provider outages.
 The proxy uses the non-same-day flat rule because historical expiry is unknown.
 Raw prior daily ATR can straddle corporate actions without verified basis
@@ -132,7 +137,16 @@ with historical contract/quote/liquidity information explicitly unavailable.
 Only completed candles at/before detection enter the last sixty minute bars and
 session-to-date five-minute bars, with original timestamps and feed. The existing
 history cohort builder includes only trades closed strictly before that day's
-New York midnight and removes fill keys. Provider retrieval time, simulated
+New York midnight and removes fill keys. For real history,
+`backend/scripts/scanner_replay_history.py` runs beside the existing approved
+feature publisher: trade rows remain there; only sanitized aggregates leave.
+Preparation binds each card to its candidate, cohort dimensions and exact
+pre-session cutoff, freezes the aggregate input/source hashes and refuses a
+missing or mismatched card. `history.available` and `history.source_state`
+distinguish missing inputs from available but zero matching trades. Packets
+carry `informed-by-history` only when a cohort actually contains prior trades;
+otherwise they say `prior-trade-history-unavailable` or
+`history-available-no-matching-trades`. No new journal grant is needed. Provider retrieval time, simulated
 detection cutoff, first packet service time and actual commit time stay distinct.
 
 The operator prepares a frozen batch before any choices/results, recording the
@@ -150,7 +164,7 @@ On an interrupted, already-started run Jo explicitly calls
 durable resume timestamp, copied into its immutable choice. Normal repeated
 reads are not resumes; terminal receipts cannot acquire later markers. Reports
 include wall seconds and a resumed-setup column. Full default instructions use
-`tj-shadow-selection-v2`.
+`tj-shadow-selection-v3`, including explicit inspection of the history fields.
 
 Each continuation is sealed with a random nonce and a public commitment. No
 explicit outcome feedback is exposed during a run. Practice results reveal
@@ -180,12 +194,15 @@ P&L. Missing required entry/hold/exit bars are unresolved, never forward-filled.
 Adverse slippage in basis points and per-share-per-side costs are frozen,
 default zero and labelled. R uses the same frozen detection-close-to-rule-stop
 distance for baseline and delayed views; dollars use one hundred shares.
-`scanner-selection-replay-v1` versions the frozen policy hash and includes fixed
+`scanner-selection-replay-v2` versions the frozen policy hash and includes fixed
 $0.02/share/side sensitivity. Both cost views use identical raw fills, times and
 resolved cohorts; fees change net R/dollars, not entry eligibility, busy state
-or the candidate stream. Legacy v0 snapshots/receipts remain readable and exact
-retries recover them, but that superseded policy cannot accept new choices,
-generation or score recomputation.
+or the candidate stream. Invalid frozen stop/target geometry is counted as a
+live signal but invalidated without a proxy entry or P&L; it cannot fabricate
+open-trade suppression. Legacy v0/v1 snapshots and exact choice retries remain
+readable; only v2 accepts new choices/generation. V1 retained scoring remains
+readable/recomputable, while v0 score recomputation is refused. Corrected
+display labels do not rewrite prior contexts, choices or receipts.
 
 Reports separate practice/exam, per-run/cumulative and setup-type rows, with
 TAKE/SKIP/INSUFFICIENT_DATA counts, resolved/unresolved/invalidated coverage,
@@ -203,24 +220,43 @@ therefore tests Jo's selection conditional on those rules, not an untouched
 scanner test. Later candles can reveal earlier price paths, and Jo's memory can
 contain later information: sessions are sequential simulations, not independent
 blind questions. Labels include `model-memory-unverified`, `no-historical-news`,
-`underlying-scored`, `informed-by-history` and `independence-unverified`.
+`underlying-scored`, the applicable history label and `independence-unverified`.
 Provider corrections, no historical news/Level 2, unknown option eligibility
 and raw-basis limits remain disclosed.
 
 Start with a practice-only batch. Required acceptance is **actual Jo** completing
 one full session through the demo connector, resuming at the next uncommitted
 setup after interruption, then reading the end-of-run scorecard. Signed fixture
-proof does not substitute. The new mode has not been activated or used by Jo;
-that acceptance remains pending a separately authorized isolated demo setup.
-Frozen multi-session exam evaluation follows actual practice acceptance.
+proof does not substitute. Actual Jo completed the August 25 session through D0 on October 13 ET after
+an interruption and whole isolated-service restart: one immutable SKIP, explicit
+resume marker and terminal scorecard were read back. Its history field was
+`available=false`, `source_state=missing`; the original unconditional informed
+label was incorrect and is preserved only in immutable old evidence. Frozen
+multi-session exam evaluation follows practice; no exam is currently prepared.
 Real-data generation proof on October 13, 2026: August 25 SIP/raw capture returned
 62 distinct prior daily sessions through August 24 for all twelve symbols; all
 had positive ATR14. It supplied 4,672 of 4,680 expected regular symbol-minutes:
-CRDO lacked seven and LLY one. The conservative prefix guard lost 196 scan
-symbol-minutes and blocked forty scan slots; one setup was emitted. This is an
-incomplete session, not a quiet one; the actual lost setup count is unknowable.
+CRDO lacked seven and LLY one. The original strict-v1 prefix guard lost 196 scan
+symbol-minutes and blocked forty scan slots; one setup was emitted. That
+coverage is retained as original evidence; v2 no longer blocks all later slots
+for an isolated missing minute. The actual lost setup count is unknowable.
 No Jo decisions, database writes, service activation or model calls occurred.
-This proves the daily-data path and coverage reporting, not Jo acceptance.
+Generation-only follow-up covers all 135 regular sessions March 2–September 11:
+1,172 v2 setups (mean 8.68, median 8, range 0–24), versus strict-v1 1,169.
+All twelve symbols have prior-session daily ATR in every capture. Sparse parity
+adds three LLY fade-long setups. The earlier split-adjusted five-minute
+calibration had 1,193; raw-minute/proxy generation is 1.8% lower. Live since
+enablement has zero stored candidates October 12 and fourteen October 13;
+October 13 is an activation baseline, not a full SC-2 acceptance session, and
+source errors prevent an uninterrupted-exposure claim. One candidate-bearing
+live date does not establish a systematic frequency deficit. Scanner parameters
+were not tuned. `backend/scripts/scanner_replay_frequency.py` produces the
+zero-inclusive per-session/symbol/type report and strict-versus-parity counts.
+The next practice-only sample uses uniform calendar sampling with seed 305:
+May 4 (6 setups), May 6 (14), June 12 (5), July 24 (8), September 10 (4).
+No profit results or Jo choices selected these dates. All 37 packets have
+cutoff-bound history aggregates; nine have no matching trades. Actual Jo's
+five-session completion and combined scorecard remain pending; exam count is zero.
 Operator commands are `backend/scripts/scanner_replay_capture.py` for private
 capture and `backend/scripts/scanner_replay_operator.py` for prepare/report/abandon
 on the marked isolated database. Live scanner/shadow ledgers, SC-0, production

@@ -19,12 +19,14 @@ from zoneinfo import ZoneInfo
 from app.engine import scanner_rules as rules
 
 ET = ZoneInfo("America/New_York")
-VERSION = "scanner-selection-replay-v1"
+VERSION = "scanner-selection-replay-v2"
+STRICT_VERSION = "scanner-selection-replay-v1"
 LEGACY_VERSION = "scanner-selection-replay-v0"
+SETUP_COUNT_KEYS = ("orb:long", "fade:long", "fade:short")
 SENSITIVITY_COST_PER_SHARE_PER_SIDE = 0.02
 HOLDOUT_START = date(2026, 9, 14)
 NAMESPACE = uuid.UUID("e67f01c8-bc75-4f76-b77c-d92313cfdb16")
-LABELS = ["informed-by-history", "independence-unverified", "model-memory-unverified",
+LABELS = ["independence-unverified", "model-memory-unverified",
           "no-historical-news", "underlying-scored", "basis-unverified"]
 DIFFERENCES = (
     "Historical Alpaca SIP raw stock bars replace live Tradier timesales and daily history; exact live signals may differ.",
@@ -33,7 +35,7 @@ DIFFERENCES = (
     "Entry and exit use completed minute stock bars and an explicit simulated clock; no live monitoring latency or quote freshness is reproduced.",
     "Daily ATR uses only prior raw stock sessions; historical intraday relative volume and macro context are unavailable.",
     "No historical corporate-action coverage verifies raw share basis across the ATR lookback.",
-    "A missing minute blocks later setup selection for that symbol; complete five-minute bars match the live scanner on complete data.",
+    "Missing minutes make partial five-minute bars; an empty newest bucket skips only that scan slot, as in live S1. Sparse bars can change signals without proving a setup was missed.",
     "Entry-minute stop not checked (optimistic); target touches are also ignored, matching the live watcher.",
     "The 2-cent-per-share-per-side cost sensitivity changes net proxy R only, never fills, timing, selection or cooldown.",
 )
@@ -70,8 +72,11 @@ def _scoring_policy(version: str, delay_seconds: int, cost_per_share: float, sli
             "risk_basis": "abs(detection_close_minus_rule_stop)", "shares": 100,
             "decision_delay_seconds": delay_seconds, "cost_per_share_per_side": float(cost_per_share),
             "slippage_bps_per_side": float(slippage_bps)}
-    if version == VERSION:
+    if version in (VERSION, STRICT_VERSION):
         body["sensitivity_cost_per_share_per_side"] = SENSITIVITY_COST_PER_SHARE_PER_SIDE
+    if version == VERSION:
+        body["selection_gap_rule"] = "occupied_current_bucket;partial_five_minute_bars;resume_after_empty_bucket"
+        body["invalid_frozen_geometry_rule"] = "count_live_signal;invalidate_proxy_without_entry_or_pnl"
     return {**body, "hash": hashlib.sha256(_canonical(body).encode()).hexdigest()}
 
 
@@ -84,7 +89,7 @@ def _policy(policy: dict | None) -> dict:
     if policy is None:
         return scoring_policy()
     version = policy.get("version")
-    if version not in (VERSION, LEGACY_VERSION):
+    if version not in (VERSION, STRICT_VERSION, LEGACY_VERSION):
         raise ValueError("Unrecognized scoring policy version")
     expected = _scoring_policy(version, policy["decision_delay_seconds"], policy["cost_per_share_per_side"],
                                policy["slippage_bps_per_side"])
@@ -146,7 +151,8 @@ def _complete_fives(minutes: list[dict], open_at: int, close_at: int) -> list[di
     return rules.five_minute_bars(complete, open_at, close_at)
 
 
-def _history_card(history_rows: list[dict], symbol: str, signal: dict, day: date) -> dict:
+def _history_card(history_rows: list[dict], symbol: str, signal: dict, day: date,
+                  history_cards: dict | None = None, candidate_id: str | None = None) -> dict:
     # Import only when history is requested. The owning cohort builder is used
     # verbatim; capture CLI does not import this module or the application.
     from app.engine.pretrade_check import history_card, idea_features
@@ -159,13 +165,58 @@ def _history_card(history_rows: list[dict], symbol: str, signal: dict, day: date
     analysis = {"request": {"instrument": "option", "option_type": idea["option_type"]},
                 "data": {"intraday": {"minutes_since_open": minutes,
                                       "price_vs_vwap_pct": facts["vs_vwap_pct"], "rvol": None}}}
+    features = idea_features(idea, analysis)
+    if history_cards is not None:
+        if (not isinstance(history_cards, dict)
+                or set(history_cards) != {"format", "source_state", "source_sha256", "generated_at", "cards"}
+                or not isinstance(history_cards.get("source_sha256"), str)
+                or len(history_cards["source_sha256"]) != 64
+                or any(c not in "0123456789abcdef" for c in history_cards["source_sha256"])
+                or not isinstance(history_cards.get("cards"), dict)):
+            raise ValueError("Invalid cutoff history source")
+        _epoch(history_cards["generated_at"])
+        card = history_cards.get("cards", {}).get(candidate_id)
+        if (history_cards.get("format") != "scanner-replay-cutoff-history-v1"
+                or history_cards.get("source_state") not in {"fresh", "stale"}
+                or not isinstance(card, dict) or set(card) != {"features", "history_cutoff", "history"}
+                or card.get("history_cutoff") != cutoff.isoformat()
+                or card.get("features") != {k: features[k] for k in ("underlying", "side", "time_bucket", "vwap_bucket")}):
+            raise ValueError("Missing or mismatched pre-session history aggregate")
+        result = card.get("history")
+        if (not isinstance(result, dict) or set(result) != {"as_of_ny", "available", "source_state", "cohorts"}
+                or result.get("as_of_ny") != cutoff.isoformat() or result.get("available") is not True
+                or result.get("source_state") != history_cards["source_state"]
+                or not isinstance(result.get("cohorts"), list) or len(result["cohorts"]) != 2):
+            raise ValueError("Invalid pre-session history aggregate")
+        allowed = {"name", "definition", "trades", "distinct_days", "distinct_weeks", "enough", "note",
+                   "win_rate", "total_pnl", "avg_pnl", "median_return_pct", "median_mfe_pct", "median_mae_pct",
+                   "coverage", "loser_pattern"}
+        for cohort, name, keys in zip(result["cohorts"], ("same_setup", "same_ticker_side"),
+                                      (("underlying", "side", "time_bucket", "vwap_bucket"), ("underlying", "side"))):
+            if (not isinstance(cohort, dict) or set(cohort) - allowed or cohort.get("name") != name
+                    or cohort.get("definition") != {k: features[k] for k in keys}
+                    or any(type(cohort.get(k)) is not int or not 0 <= cohort[k] <= 100000
+                           for k in ("trades", "distinct_days", "distinct_weeks"))
+                    or type(cohort.get("enough")) is not bool):
+                raise ValueError("Invalid pre-session cohort")
+            numeric = ("win_rate", "total_pnl", "avg_pnl", "median_return_pct", "median_mfe_pct", "median_mae_pct")
+            if (any(k in cohort and cohort[k] is not None
+                    and (type(cohort[k]) not in (int, float) or not math.isfinite(cohort[k])) for k in numeric)
+                    or any(k in cohort and not isinstance(cohort[k], str) for k in ("note", "loser_pattern"))):
+                raise ValueError("Invalid pre-session cohort values")
+            coverage = cohort.get("coverage")
+            if coverage is not None and (not isinstance(coverage, dict) or set(coverage) != {"pnl", "path"}
+                    or any(type(v) is not int or not 0 <= v <= cohort["trades"] for v in coverage.values())):
+                raise ValueError("Invalid pre-session cohort coverage")
+        _canonical(result)
+        return result
     prior = []
     for row in history_rows:
         closed = datetime.fromisoformat(row["closed_at"])
         closed = closed.replace(tzinfo=ET) if closed.tzinfo is None else closed.astimezone(ET)
         if closed < cutoff:
             prior.append({**row, "closed_at": closed.replace(tzinfo=None).isoformat()})
-    card = history_card(prior, idea_features(idea, analysis), cutoff.astimezone(UTC))
+    card = history_card(prior, features, cutoff.astimezone(UTC))
     card.pop("source_fill_keys", None)
     card.update({"as_of_ny": cutoff.isoformat(), "available": bool(history_rows),
                  "source_state": "provided" if history_rows else "missing"})
@@ -173,7 +224,7 @@ def _history_card(history_rows: list[dict], symbol: str, signal: dict, day: date
 
 
 def _packet(symbol: str, signal: dict, day: date, retrieved_at: str, minutes: list[dict], daily: list[dict], fives: list[dict],
-            history_rows: list[dict]) -> dict:
+            history_rows: list[dict], history_cards: dict | None = None) -> dict:
     detected = signal["bar_end"]
     candidate_id = str(uuid.uuid5(NAMESPACE, f"{rules.VERSION}:{day}:{symbol}:{signal['setup']}:{detected}"))
     candidate = {"format": "shadow-setup-v1", "candidate_id": candidate_id, "scanner_version": rules.VERSION,
@@ -189,7 +240,7 @@ def _packet(symbol: str, signal: dict, day: date, retrieved_at: str, minutes: li
               if detected - 3600 <= m["time"] and m["end_time"] <= detected]
     published_fives = [{**b, "time": b["start"], "end_time": b["end"], "feed": "sip",
                         "source": "alpaca_sip_raw"} for b in fives if b["end"] <= detected]
-    history = _history_card(history_rows, symbol, signal, day)
+    history = _history_card(history_rows, symbol, signal, day, history_cards, candidate_id)
     facts = signal["facts"]
     levels = {"vwap": facts["vwap"], "or5_high": fives[0]["high"] if fives else None,
               "or5_low": fives[0]["low"] if fives else None,
@@ -207,9 +258,16 @@ def _packet(symbol: str, signal: dict, day: date, retrieved_at: str, minutes: li
                                       "prior_daily_session": daily[-1]["date"] if daily else None},
                      "levels": levels},
             "history": history, "history_cutoff": datetime.combine(day, time(), ET).isoformat(),
-            "labels": list(LABELS), "published_at": _stamp(detected), "expired": False,
+            "labels": [*LABELS, history_label(history)],
+            "published_at": _stamp(detected), "expired": False,
             "retrieved_at": retrieved_at, "candles_1m_last60": last60, "candles_5m_session": published_fives,
             "unavailable": ["historical_option_chain", "historical_option_quotes", "historical_rvol", "macro_context"]}
+
+
+def history_label(history):
+    if not history["available"]:
+        return "prior-trade-history-unavailable"
+    return "informed-by-history" if any(c["trades"] for c in history["cohorts"]) else "history-available-no-matching-trades"
 
 
 def _unresolved(reason: str, entry_at=None, entry_price=None) -> dict:
@@ -245,7 +303,10 @@ def score_setup(candidate: dict, continuation: dict, session: dict, policy: dict
     detection_close = float(candidate["facts"]["close"])
     risk = abs(detection_close - stop)
     if risk <= 0 or sign * (detection_close - stop) <= 0 or sign * (target - detection_close) <= 0:
-        raise ValueError("Invalid frozen stop/target geometry")
+        # The unchanged live scanner can publish a fade whose stale stretch
+        # level puts the stop on the wrong side of its detection close. Count
+        # that signal, but never invent a valid underlying-share proxy trade.
+        return {**_unresolved("invalid_frozen_stop_target_geometry"), "status": "invalidated"}
     eligible = ((detected + delay) // 60 + 1) * 60
     flat = rules.flat_at(open_at, close_at, False)
     if eligible >= flat:
@@ -293,12 +354,8 @@ def score_setup(candidate: dict, continuation: dict, session: dict, policy: dict
     return _unresolved("continuation_ends_before_exit", eligible, round(raw_entry, 4))
 
 
-def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
-                     history_rows: list[dict] | None = None, allow_holdout: bool = False) -> dict:
-    """Stream completed bars through unchanged S1 scanner rules, then seal each continuation."""
-    policy = _policy(scoring_policy)
-    if policy["version"] != VERSION:
-        raise ValueError("Legacy policy is retained for reading, not new generation")
+def _session_inputs(bundle: dict, allow_holdout: bool) -> tuple:
+    """Validate a captured day once for both parity and strict count-only selection."""
     day = date.fromisoformat(bundle["session_date"])
     if day >= HOLDOUT_START and not allow_holdout:
         raise ValueError("Holdout session requires explicit allow_holdout=True")
@@ -330,6 +387,87 @@ def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
                              "source": "alpaca_sip_1day_raw", "feed": "sip", "adjustment": "raw"}
     if missing_daily:
         raise ValueError("Prior daily ATR requires at least 15 sessions for every symbol: " + ", ".join(missing_daily))
+    return day, retrieved, session, last_end, daily_by_symbol, atr_by_symbol, daily_atr
+
+
+def _select_symbol(symbol: str, day: date, minutes: list[dict], atr: float, session: dict,
+                   last_end: int, policy: dict, *, strict: bool) -> list[dict]:
+    """Select with live sparse-bucket semantics, or the superseded v1 strict rule."""
+    open_at, close_at = session["open_at"], session["close_at"]
+    by_time = {m["time"]: m for m in minutes}
+    taken: set[tuple[str, int]] = set()
+    selected = []
+    for bar_end in range(open_at + rules.BAR_SECONDS, last_end + 1, rules.BAR_SECONDS):
+        if strict and any(at not in by_time for at in range(open_at, bar_end, 60)):
+            break
+        prefix = [m for m in minutes if m["end_time"] <= bar_end]
+        if not strict and not any(m["time"] >= bar_end - rules.BAR_SECONDS for m in prefix):
+            continue
+        fives = (_complete_fives(prefix, open_at, close_at) if strict
+                 else rules.five_minute_bars(prefix, open_at, close_at))
+        signal_list = rules.scan(fives, atr, open_at, last_end, taken)
+        signal = signal_list[-1] if signal_list and signal_list[-1]["bar_end"] == bar_end else None
+        if signal is None:
+            continue
+        busy = False
+        for prior in selected:
+            cutoff = prior["signal"]["bar_end"]
+            partial = {"candidate_id": prior["candidate"]["candidate_id"], "cutoff_at": cutoff,
+                       "minutes": [m for m in minutes if cutoff <= m["time"] and m["end_time"] <= bar_end]}
+            state = score_setup(prior["candidate"], partial, session, policy)
+            if state["status"] == "unresolved" or (state["exit_at"] is not None and state["exit_at"] > bar_end):
+                busy = True
+                break
+        if busy or (selected and selected[-1]["signal"]["bar_end"] > bar_end - rules.COOLDOWN_SECONDS):
+            continue
+        candidate_id = str(uuid.uuid5(NAMESPACE, f"{rules.VERSION}:{day}:{symbol}:{signal['setup']}:{bar_end}"))
+        candidate = {"candidate_id": candidate_id, "detected_at": _stamp(bar_end),
+                     "direction": signal["direction"], "stop": signal["stop"], "target": signal["target"],
+                     "facts": {"close": signal["facts"]["close"]}}
+        selected.append({"signal": signal, "prefix": prefix, "fives": fives, "candidate": candidate})
+        taken.add((signal["setup"], bar_end))
+    return selected
+
+
+def strict_v1_setup_counts(bundle: dict, *, scoring_policy: dict | None = None,
+                           allow_holdout: bool = False) -> dict:
+    """Compare old strict v1 counts by symbol and setup, without packets or choices."""
+    policy = _policy(scoring_policy)
+    if policy["version"] == LEGACY_VERSION:
+        raise ValueError("Legacy v0 scores must not be recomputed")
+    day, _, session, last_end, _, atr_by_symbol, _ = _session_inputs(bundle, allow_holdout)
+    counts = {}
+    by_symbol_setup = {}
+    by_setup = {key: 0 for key in SETUP_COUNT_KEYS}
+    for symbol in rules.UNIVERSE:
+        minutes = _minutes(bundle["symbols"][symbol]["minutes"], session["open_at"], session["close_at"])
+        selected = _select_symbol(symbol, day, minutes, atr_by_symbol[symbol], session,
+                                  last_end, policy, strict=True)
+        setup_counts = {key: 0 for key in SETUP_COUNT_KEYS}
+        for item in selected:
+            signal = item["signal"]
+            key = f"{signal['setup']}:{signal['direction']}"
+            if key not in setup_counts:
+                raise ValueError("Unrecognized frozen scanner setup")
+            setup_counts[key] += 1
+            by_setup[key] += 1
+        counts[symbol] = len(selected)
+        by_symbol_setup[symbol] = setup_counts
+    return {"version": STRICT_VERSION, "symbols": counts, "by_setup": by_setup,
+            "by_symbol_setup": by_symbol_setup, "total": sum(counts.values())}
+
+
+def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
+                     history_rows: list[dict] | None = None, history_cards: dict | None = None,
+                     allow_holdout: bool = False) -> dict:
+    """Stream available completed bars through live S1 buckets, then seal continuations."""
+    policy = _policy(scoring_policy)
+    if policy["version"] != VERSION:
+        raise ValueError("Superseded policy is retained for reading, not new generation")
+    if history_rows and history_cards is not None:
+        raise ValueError("Choose feature rows or cutoff aggregate cards, not both")
+    day, retrieved, session, last_end, daily_by_symbol, atr_by_symbol, daily_atr = _session_inputs(bundle, allow_holdout)
+    open_at, close_at = session["open_at"], session["close_at"]
     setups, gaps = [], []
     coverage_symbols = {}
     eligible_scan_ends = list(range(open_at + rules.FIRST_BAR_AFTER + rules.BAR_SECONDS, last_end + 1,
@@ -342,7 +480,13 @@ def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
         atr = atr_by_symbol[symbol]
         by_time = {m["time"]: m for m in minutes}
         first_missing = next((at for at in range(open_at, close_at, 60) if at not in by_time), None)
-        blocked_slots = sum(end > first_missing for end in eligible_scan_ends) if first_missing is not None else 0
+        bucket_counts = {end: sum(end - rules.BAR_SECONDS <= m["time"] < end for m in minutes)
+                         for end in range(open_at + rules.BAR_SECONDS, last_end + 1, rules.BAR_SECONDS)}
+        blocked_slots = sum(bucket_counts[end] == 0 for end in eligible_scan_ends)
+        partial_slots = sum(0 < bucket_counts[end] < 5 for end in eligible_scan_ends)
+        selected = _select_symbol(symbol, day, minutes, atr, session, last_end, policy, strict=False)
+        strict_selected = (_select_symbol(symbol, day, minutes, atr, session, last_end, policy, strict=True)
+                           if first_missing is not None else selected)
         coverage_symbols[symbol] = {"expected_minutes": expected_regular,
             "provided_minutes": len(minutes), "missing_minutes": expected_regular - len(minutes),
             "first_missing_at": _stamp(first_missing) if first_missing is not None else None,
@@ -350,54 +494,41 @@ def generate_session(bundle: dict, *, scoring_policy: dict | None = None,
             "eligible_scan_slots": len(eligible_scan_ends),
             "evaluated_scan_slots": len(eligible_scan_ends) - blocked_slots,
             "blocked_scan_slots": blocked_slots,
-            "scan_minutes_lost":
-                max(0, (last_end - first_missing) // 60) if first_missing is not None else 0,
-            "setups_emitted": 0, "actual_suppressed_setups": None}
+            "scan_minutes_lost": blocked_slots * 5,
+            "affected_five_minute_buckets": sum(count < 5 for count in bucket_counts.values()),
+            "partial_five_minute_buckets": sum(0 < count < 5 for count in bucket_counts.values()),
+            "empty_five_minute_buckets": sum(count == 0 for count in bucket_counts.values()),
+            "partial_scan_buckets": partial_slots, "empty_scan_buckets": blocked_slots,
+            "setups_emitted": len(selected), "strict_v1_setups_emitted": len(strict_selected),
+            "parity_minus_strict_setups": len(selected) - len(strict_selected),
+            "actual_suppressed_setups": None}
         if first_missing is not None:
             gaps.append({"symbol": symbol, "reason": "missing_completed_minute", "at": first_missing,
                          "missing_minutes": expected_regular - len(minutes),
-                         "blocked_scan_slots": blocked_slots,
+                         "blocked_scan_slots": blocked_slots, "partial_scan_buckets": partial_slots,
                          "actual_suppressed_setups": None})
-        taken: set[tuple[str, int]] = set()
-        saved = []
-        for bar_end in range(open_at + 300, last_end + 1, 300):
-            if any(at not in by_time for at in range(open_at, bar_end, 60)):
-                break
-            prefix = [by_time[at] for at in range(open_at, bar_end, 60)]
-            fives = _complete_fives(prefix, open_at, close_at)
-            signal_list = rules.scan(fives, atr, open_at, last_end, taken)
-            signal = signal_list[-1] if signal_list and signal_list[-1]["bar_end"] == bar_end else None
-            if signal is None:
-                continue
-            busy = False
-            for prior in saved:
-                partial = {**prior["continuation"], "minutes": [m for m in minutes
-                           if prior["continuation"]["cutoff_at"] <= m["time"] and m["end_time"] <= bar_end]}
-                state = score_setup(prior["packet"]["candidate"], partial, session, policy)
-                if state["status"] == "unresolved" or (state["exit_at"] is not None and state["exit_at"] > bar_end):
-                    busy = True
-                    break
-            if busy or (saved and saved[-1]["continuation"]["cutoff_at"] > bar_end - rules.COOLDOWN_SECONDS):
-                continue
-            packet = _packet(symbol, signal, day, _stamp(retrieved), prefix, daily, fives, history_rows or [])
+        for item in selected:
+            signal, prefix, fives = item["signal"], item["prefix"], item["fives"]
+            bar_end = signal["bar_end"]
+            packet = _packet(symbol, signal, day, _stamp(retrieved), prefix, daily, fives, history_rows or [], history_cards)
             candidate = packet["candidate"]
             continuation = {"version": VERSION, "nonce": secrets.token_hex(32),
                             "candidate_id": candidate["candidate_id"], "cutoff_at": bar_end,
                             "minutes": [m for m in minutes if m["time"] >= bar_end]}
             setups.append({"packet": packet, "continuation": continuation})
-            coverage_symbols[symbol]["setups_emitted"] += 1
-            saved.append(setups[-1])
-            taken.add((signal["setup"], bar_end))
     setups.sort(key=lambda item: (item["packet"]["candidate"]["bar_end"], item["packet"]["candidate"]["symbol"]))
     sums = ("expected_minutes", "provided_minutes", "missing_minutes",
             "eligible_scan_slots", "evaluated_scan_slots", "blocked_scan_slots",
-            "scan_minutes_lost", "setups_emitted")
+            "scan_minutes_lost", "affected_five_minute_buckets", "partial_five_minute_buckets",
+            "empty_five_minute_buckets", "partial_scan_buckets", "empty_scan_buckets",
+            "setups_emitted", "strict_v1_setups_emitted", "parity_minus_strict_setups")
     totals = {key: sum(row[key] for row in coverage_symbols.values()) for key in sums}
     coverage = {"session_date": day.isoformat(), "scan_end_at": _stamp(last_end),
                 "symbols": coverage_symbols,
                 "totals": {**totals, "actual_suppressed_setups": None},
-                "suppressed_setup_note": "Actual suppressed setup count is unavailable after a missing minute; no future bars are inferred."}
+                "suppressed_setup_note": "Strict v1 versus live-bucket v2 counts are observable; actual setups absent from provider data are unknowable. No bars are inferred."}
     return {"session_date": day.isoformat(), "retrieved_at": _stamp(retrieved), "session": session,
             "setups": setups, "differences": list(DIFFERENCES), "gaps": gaps,
             "coverage": coverage, "daily_atr": daily_atr,
-            "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH, "scoring_policy": policy}
+            "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH, "scoring_policy": policy,
+            "labels": [*LABELS, *sorted({history_label(s["packet"]["history"]) for s in setups})]}

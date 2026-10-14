@@ -116,10 +116,19 @@ def test_cooldown_and_taken_state_after_proxy_exit(monkeypatch):
         x["packet"]["candidate"]["candidate_id"] for x in setups]
 
 
-def test_missing_minute_blocks_scanning_and_prior_daily_only():
+def test_sparse_opening_bucket_matches_live_rules_and_prior_daily_only():
     source = bundle()
     source["symbols"]["SPY"]["minutes"].pop(2)
-    assert not replay.generate_session(source)["setups"]
+    result = replay.generate_session(source)
+    prefix = [m for m in source["symbols"]["SPY"]["minutes"] if m["end_time"] <= OPEN + 20 * 60]
+    live_bars = rules.five_minute_bars(prefix, OPEN, CLOSE)
+    expected = rules.scan(live_bars, 2, OPEN, OPEN + 330 * 60, set())[-1]
+    assert len(result["setups"]) == 1
+    assert result["setups"][0]["packet"]["candidate"]["stop"] == expected["stop"]
+    assert result["setups"][0]["packet"]["candidate"]["target"] == expected["target"]
+    assert replay.strict_v1_setup_counts(source)["symbols"]["SPY"] == 0
+    assert result["coverage"]["symbols"]["SPY"]["parity_minus_strict_setups"] == 1
+    assert [m["time"] for m in result["setups"][0]["packet"]["candles_1m_last60"]] == [m["time"] for m in prefix]
     source = bundle()
     source["symbols"]["SPY"]["daily"] = source["symbols"]["SPY"]["daily"][:14]
     source["symbols"]["SPY"]["daily"].append({"date": DAY.isoformat(), "high": 1000, "low": 1, "close": 500})
@@ -136,15 +145,60 @@ def test_coverage_counts_lost_symbol_time_without_inventing_setups():
     assert spy["provided_minutes"] == 34
     assert spy["missing_minutes"] == 356
     assert spy["first_missing_epoch"] == OPEN + 21 * 60
-    assert spy["evaluated_scan_slots"] == 1
-    assert spy["blocked_scan_slots"] == spy["eligible_scan_slots"] - 1
-    assert spy["scan_minutes_lost"] == 309
+    assert spy["evaluated_scan_slots"] == 4
+    assert spy["blocked_scan_slots"] == spy["eligible_scan_slots"] - 4
+    assert spy["scan_minutes_lost"] == 5 * spy["blocked_scan_slots"]
+    assert spy["partial_scan_buckets"] == 1
+    assert spy["empty_scan_buckets"] == spy["blocked_scan_slots"]
     assert spy["setups_emitted"] == 1
+    assert spy["strict_v1_setups_emitted"] == 1
     assert spy["actual_suppressed_setups"] is None
     assert result["coverage"]["totals"]["actual_suppressed_setups"] is None
     assert len(result["setups"]) == 1
     assert "coverage" not in result["setups"][0]["packet"]
     assert "daily_atr" not in result["setups"][0]["packet"]
+
+
+def test_empty_current_bucket_skips_only_that_bar_and_later_sparse_bars_resume():
+    source = bundle()
+    spy = source["symbols"]["SPY"]["minutes"]
+    spy[15:20] = [minute(OPEN + i * 60) for i in range(15, 20)]
+    spy[20:25] = []  # 09:50-09:54 is empty; the 10:00 bar remains occupied
+    result = replay.generate_session(source)
+    assert result["coverage"]["symbols"]["SPY"]["blocked_scan_slots"] > 0
+    selected = [replay._epoch(s["packet"]["candidate"]["bar_end"]) for s in result["setups"]]
+    assert selected == [OPEN + 30 * 60]
+    prefix = [m for m in spy if m["end_time"] <= OPEN + 30 * 60]
+    expected = rules.scan(rules.five_minute_bars(prefix, OPEN, CLOSE), 2, OPEN, OPEN + 330 * 60, set())[-1]
+    assert result["setups"][0]["packet"]["candidate"]["stop"] == expected["stop"]
+    assert replay.strict_v1_setup_counts(source)["symbols"]["SPY"] == 0
+
+
+def test_strict_v1_counts_include_zeroed_setup_types_and_symbols():
+    counts = replay.strict_v1_setup_counts(bundle())
+    expected_types = {"orb:long", "fade:long", "fade:short"}
+    assert counts["version"] == replay.STRICT_VERSION
+    assert counts["total"] == 1
+    assert counts["by_setup"] == {"orb:long": 1, "fade:long": 0, "fade:short": 0}
+    assert set(counts["by_symbol_setup"]) == set(rules.UNIVERSE)
+    assert all(set(per_symbol) == expected_types for per_symbol in counts["by_symbol_setup"].values())
+    assert counts["by_symbol_setup"]["SPY"] == counts["by_setup"]
+    assert all(sum(per_symbol.values()) == counts["symbols"][symbol]
+               for symbol, per_symbol in counts["by_symbol_setup"].items())
+
+
+def test_only_current_bar_signal_is_selected_when_rules_return_older_signal(monkeypatch):
+    source = bundle()
+    original = rules.scan
+    old_signal = original(rules.five_minute_bars(source["symbols"]["SPY"]["minutes"][:20], OPEN, CLOSE),
+                          2, OPEN, OPEN + 330 * 60, set())[-1]
+
+    def older_only(bars, atr, open_at, last_end, taken):
+        return [old_signal] if bars and bars[-1]["end"] >= old_signal["bar_end"] else []
+
+    monkeypatch.setattr(rules, "scan", older_only)
+    result = replay.generate_session(source)
+    assert [replay._epoch(s["packet"]["candidate"]["bar_end"]) for s in result["setups"]] == [OPEN + 20 * 60]
 
 
 def test_holdout_feed_and_universe_are_explicit():
@@ -192,6 +246,10 @@ def test_score_stop_first_gap_and_missing_exit():
                               replay.scoring_policy())["status"] == "unresolved"
     assert replay.score_setup(c, continuation(c, rows[1:]), {"open_at": OPEN, "close_at": CLOSE},
                               replay.scoring_policy())["reason"] == "missing_entry_minute"
+    rows = [minute(at + 60, 100), minute(at + 180, 100)]
+    missing_middle = replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE},
+                                         replay.scoring_policy())
+    assert missing_middle["status"] == "unresolved" and missing_middle["reason"] == "missing_exit_minute"
 
 
 def test_delay_entry_invalidated_and_clock_flat():
@@ -211,6 +269,36 @@ def test_delay_entry_invalidated_and_clock_flat():
     rows = [minute(t, 100) for t in range(at + 60, OPEN + 60 * 60, 60)]
     flat = replay.score_setup(c, continuation(c, rows), short_session, replay.scoring_policy())
     assert flat["reason"] == "flat" and flat["exit_at"] == short_session["close_at"] - 600
+
+
+def test_live_fade_with_wrong_side_stop_is_counted_but_proxy_never_enters(monkeypatch):
+    c = candidate(direction="short")
+    c["stop"] = 99  # live rules can emit a stale fade stop below its short detection close of 100
+    invalid = replay.score_setup(c, continuation(c, [minute(OPEN + 31 * 60, 100)]),
+                                 {"open_at": OPEN, "close_at": CLOSE}, replay.scoring_policy())
+    assert invalid["status"] == "invalidated" and invalid["reason"] == "invalid_frozen_stop_target_geometry"
+    assert invalid["entry_at"] is None and invalid["r"] is None and invalid["pnl_100"] is None
+
+    source = bundle()
+    spy = source["symbols"]["SPY"]["minutes"]
+    spy.extend(minute(OPEN + i * 60, 100.2, 100.35, 100.1, 100.25) for i in range(35, 60))
+    original = rules.scan
+    first = original(rules.five_minute_bars(spy[:20], OPEN, CLOSE), 2, OPEN, OPEN + 330 * 60, set())[-1]
+
+    def wrong_side_then_valid(bars, atr, open_at, last_end, taken):
+        end = bars[-1]["end"]
+        if end == OPEN + 20 * 60:
+            return [{**first, "setup": "fade", "direction": "short", "stop": 99, "target": 98,
+                     "facts": {**first["facts"], "close": 100}}]
+        if end == OPEN + 55 * 60:
+            return [{**first, "bar_start": end - 300, "bar_end": end}]
+        return []
+
+    monkeypatch.setattr(rules, "scan", wrong_side_then_valid)
+    generated = replay.generate_session(source)
+    assert [replay._epoch(item["packet"]["candidate"]["bar_end"]) for item in generated["setups"]] == [
+        OPEN + 20 * 60, OPEN + 55 * 60]
+    assert generated["coverage"]["symbols"]["SPY"]["setups_emitted"] == 2
 
 
 def test_scoring_costs_are_explicit_and_policy_is_frozen():
@@ -253,6 +341,20 @@ def test_legacy_policy_is_validated_but_never_recomputed():
         replay.score_setup(c, continuation(c, []), {"open_at": OPEN, "close_at": CLOSE}, legacy)
     with pytest.raises(ValueError, match="reading, not new generation"):
         replay.generate_session(bundle(), scoring_policy=legacy)
+
+
+def test_v2_policy_freezes_sparse_selection_while_v1_scores_remain_readable():
+    current = replay.scoring_policy()
+    strict_v1 = replay._scoring_policy(replay.STRICT_VERSION, 60, 0, 0)
+    assert current["selection_gap_rule"] == "occupied_current_bucket;partial_five_minute_bars;resume_after_empty_bucket"
+    assert current["hash"] != strict_v1["hash"]
+    assert replay._policy(strict_v1) == strict_v1
+    with pytest.raises(ValueError, match="reading, not new generation"):
+        replay.generate_session(bundle(), scoring_policy=strict_v1)
+    c = candidate()
+    rows = [minute(OPEN + 31 * 60, 100), minute(OPEN + 32 * 60, 100, 102.2, 99.9, 101)]
+    assert replay.score_setup(c, continuation(c, rows), {"open_at": OPEN, "close_at": CLOSE},
+                              strict_v1)["resolved"]
 
 
 def test_capture_uses_calendar_and_daily_bar_calendar_date(monkeypatch):
