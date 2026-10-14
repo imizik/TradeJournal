@@ -442,3 +442,28 @@ def test_capture_refuses_before_network_without_echoing_inputs(monkeypatch, tmp_
         assert (output / f"bundle-{day}.json").read_text() == "old"
     else:
         assert not output.exists()
+
+
+@pytest.mark.parametrize("missing_minute", [21, 22])
+def test_unknown_proxy_hold_is_bounded_without_resolving_missing_prices(monkeypatch, missing_minute):
+    source = bundle()
+    first = rules.scan(rules.five_minute_bars(source["symbols"]["SPY"]["minutes"][:20], OPEN, CLOSE),
+                       2, OPEN, OPEN + 330 * 60, set())[-1]
+    rows = [minute(OPEN + i * 60) for i in range(110) if i != missing_minute]
+
+    def signals(bars, atr, open_at, last_end, taken):
+        end = bars[-1]["end"]
+        if end in [OPEN + 20 * 60, OPEN + 55 * 60, OPEN + 90 * 60]:
+            return [{**first, "bar_start": end - 300, "bar_end": end, "stop": 99, "target": 102,
+                     "facts": {**first["facts"], "close": 100}}]
+        return []
+
+    monkeypatch.setattr(rules, "scan", signals)
+    selected = replay._select_symbol("SPY", DAY, rows, 2, {"open_at": OPEN, "close_at": CLOSE},
+                                      OPEN + 110 * 60, replay.scoring_policy(), strict=False)
+    assert [item["signal"]["bar_end"] for item in selected] == [OPEN + 20 * 60, OPEN + 90 * 60]
+    c = selected[0]["candidate"]
+    result = replay.score_setup(c, continuation(c, [r for r in rows if r["time"] >= OPEN + 20 * 60]),
+                                 {"open_at": OPEN, "close_at": CLOSE}, replay.scoring_policy())
+    assert result["status"] == "unresolved" and result["r"] is None and result["pnl_100"] is None
+    assert result["reason"] == ("missing_entry_minute" if missing_minute == 21 else "missing_exit_minute")

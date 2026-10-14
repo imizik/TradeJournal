@@ -106,7 +106,8 @@ def render(result, live):
                   "Sparse selection matches live: aggregate only supplied completed minutes; evaluate occupied partial buckets, "
                   "skip an empty current bucket, and resume later. No synthetic/forward-filled bars and no claim that absence proves "
                   "no trades. Missing required scoring minutes remain unresolved. Invalid live stop/target geometry remains counted "
-                  "as a signal but gets no proxy entry/P&L.", "",
+                  "as a signal but gets no proxy entry/P&L. Unknown proxy holds suppress until their fixed time-stop/flat "
+                  "deadline, then release selection while monetary outcomes stay unresolved.", "",
                   "## By symbol (all replay sessions, including zeroes)", ""])
     lines.extend(_table(result["by_symbol"]))
     lines.extend(["", "Live totals by symbol: " + "; ".join(f"{s} {live_symbols[s]}" for s in market.rules.UNIVERSE),

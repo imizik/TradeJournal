@@ -199,7 +199,10 @@ $0.02/share/side sensitivity. Both cost views use identical raw fills, times and
 resolved cohorts; fees change net R/dollars, not entry eligibility, busy state
 or the candidate stream. Invalid frozen stop/target geometry is counted as a
 live signal but invalidated without a proxy entry or P&L; it cannot fabricate
-open-trade suppression. Legacy v0/v1 snapshots and exact choice retries remain
+open-trade suppression. A hold made uncertain by missing entry/exit minutes
+conservatively suppresses until the planned baseline entry plus sixty minutes
+or flat deadline, then releases selection; its monetary result stays unresolved.
+This deterministic proxy deadline can differ from actual live close latency. Legacy v0/v1 snapshots and exact choice retries remain
 readable; only v2 accepts new choices/generation. V1 retained scoring remains
 readable/recomputable, while v0 score recomputation is refused. Corrected
 display labels do not rewrite prior contexts, choices or receipts.

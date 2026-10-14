@@ -37,6 +37,7 @@ DIFFERENCES = (
     "No historical corporate-action coverage verifies raw share basis across the ATR lookback.",
     "Missing minutes make partial five-minute bars; an empty newest bucket skips only that scan slot, as in live S1. Sparse bars can change signals without proving a setup was missed.",
     "Entry-minute stop not checked (optimistic); target touches are also ignored, matching the live watcher.",
+    "If missing scoring minutes make a proxy hold unknown, suppress until its fixed baseline time-stop/flat deadline, then release selection without resolving P&L. Actual live close timing can differ.",
     "The 2-cent-per-share-per-side cost sensitivity changes net proxy R only, never fills, timing, selection or cooldown.",
 )
 
@@ -76,6 +77,7 @@ def _scoring_policy(version: str, delay_seconds: int, cost_per_share: float, sli
         body["sensitivity_cost_per_share_per_side"] = SENSITIVITY_COST_PER_SHARE_PER_SIDE
     if version == VERSION:
         body["selection_gap_rule"] = "occupied_current_bucket;partial_five_minute_bars;resume_after_empty_bucket"
+        body["unknown_proxy_busy_rule"] = "conservative_until_baseline_entry_plus_time_stop_or_flat;monetary_result_unresolved"
         body["invalid_frozen_geometry_rule"] = "count_live_signal;invalidate_proxy_without_entry_or_pnl"
     return {**body, "hash": hashlib.sha256(_canonical(body).encode()).hexdigest()}
 
@@ -415,7 +417,16 @@ def _select_symbol(symbol: str, day: date, minutes: list[dict], atr: float, sess
             partial = {"candidate_id": prior["candidate"]["candidate_id"], "cutoff_at": cutoff,
                        "minutes": [m for m in minutes if cutoff <= m["time"] and m["end_time"] <= bar_end]}
             state = score_setup(prior["candidate"], partial, session, policy)
-            if state["status"] == "unresolved" or (state["exit_at"] is not None and state["exit_at"] > bar_end):
+            unknown_open = state["status"] == "unresolved"
+            if unknown_open and not strict:
+                # Missing prices cannot establish an early stop/target. Bound
+                # this conservative unknown hold by the fixed proxy clock;
+                # scoring remains unresolved rather than fabricating an exit.
+                baseline_entry = (cutoff // 60 + 1) * 60
+                deadline = min(baseline_entry + rules.TIME_STOP_SECONDS,
+                               rules.flat_at(open_at, close_at, False))
+                unknown_open = bar_end < deadline
+            if unknown_open or (state["exit_at"] is not None and state["exit_at"] > bar_end):
                 busy = True
                 break
         if busy or (selected and selected[-1]["signal"]["bar_end"] > bar_end - rules.COOLDOWN_SECONDS):
