@@ -44,7 +44,7 @@ from mcp.types import Tool, ToolAnnotations
 from pydantic import AnyHttpUrl, Field
 
 from cloud_mcp_check_common import (CREDENTIAL_NAMES, NOTE_SCOPE, READ_SCOPE, RESOURCE_PATH, RUN_SCOPE, SCHEMA, SHADOW_SCOPE,
-    CheckVerifier, read_config, reject_credentials)
+    CheckVerifier, read_config, reject_credentials, MARKET_READ_SCOPE, MARKET_SUBMIT_SCOPE)
 from cloud_mcp_check_ledger import FORMAT, SHADOW_LABELS, Conflict, Ledger, NotFound, digest, new_check_id
 from cloud_mcp_d0 import RequestLimits, activated_socket
 import pretrade_features
@@ -56,6 +56,8 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "market_watch_snapshot": (set(), set()),
+    "market_watch_submit": ({"operation_id", "input_id", "view", "main", "alternative", "invalidation", "change_summary", "forecasts", "message_intent", "prompt_version"}, {"previous_read_id", "correction_of_read_id", "model_id"}),
     "candles": ({"symbol", "interval"}, {"bars"}),
     "shadow_setup": ({"candidate_id"}, set()),
     "shadow_decide": ({"candidate_id", "decision", "reason"}, set()),
@@ -79,6 +81,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name in ("market_watch_snapshot", "market_watch_submit"):
+        return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name == "market_watch_submit" else [])
     if name in ("shadow_setup", "shadow_decide"):
         return [READ_SCOPE, SHADOW_SCOPE]
     if name in READ_ONLY_TOOLS:
@@ -351,7 +355,7 @@ class CheckMCP(FastMCP):
             # offline_access makes the client request it, so Auth0 issues a refresh token and the
             # five-minute access token renews without a reconnect. The tools never require it.
             authorization_servers=[self.settings.auth.issuer_url],
-            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"])
+            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"] + ([MARKET_READ_SCOPE, MARKET_SUBMIT_SCOPE] if getattr(self, "market_watch_enabled", False) else []))
         paths = {route.path for route in metadata}
         app.routes[:] = [route for route in app.routes if route.path not in paths] + metadata
         return RequestLimits(app)
@@ -421,6 +425,45 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         return checked
 
     server.audit_call = lambda name: authenticated(name, log=True)
+    server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
+    if config.market_watch_snapshots_dir:
+        from market_watch_ledger import MarketWatchLedger
+        from app.engine.market_watch_snapshot import read_latest_snapshot
+        market_ledger = MarketWatchLedger(ledger)
+
+        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+            meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("market_watch_snapshot")}]})
+        async def market_watch_snapshot() -> dict[str, Any]:
+            """Freeze an actor-bound market input receipt. Never call between shadow_setup and shadow_decide.
+            Public SPY/QQQ evidence only; no provider requests, trades or delivery."""
+            checked = await authenticated("market_watch_snapshot")
+            try:
+                snapshot = await asyncio.to_thread(read_latest_snapshot, config.market_watch_snapshots_dir, clock())
+                if snapshot is None:
+                    return {"status": "unavailable", "reason": "no_current_session_snapshot"}
+                return await asyncio.to_thread(market_ledger.serve, checked.claims["profile_id"], snapshot, clock)
+            except (ValueError, OSError, sqlite3.Error):
+                raise ToolError("Market snapshot unavailable; no input receipt issued") from None
+
+        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+            meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("market_watch_submit")}]})
+        async def market_watch_submit(operation_id: str, input_id: str, view: str, main: dict, alternative: dict,
+                invalidation: dict, change_summary: str, forecasts: list[dict], message_intent: str,
+                prompt_version: str, previous_read_id: str | None = None,
+                correction_of_read_id: str | None = None, model_id: str | None = None) -> dict[str, Any]:
+            """Append a market read, forecasts and optional message intent; never sends anything.
+            Exact retries recover the receipt; use the latest same-session read as parent.
+            Never insert this call between shadow_setup and shadow_decide."""
+            checked = await authenticated("market_watch_submit")
+            request = dict(operation_id=operation_id, input_id=input_id, view=view, main=main,
+                alternative=alternative, invalidation=invalidation, change_summary=change_summary,
+                forecasts=forecasts, message_intent=message_intent, prompt_version=prompt_version,
+                previous_read_id=previous_read_id, correction_of_read_id=correction_of_read_id, model_id=model_id)
+            try:
+                return await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock)
+            except (ValueError, Conflict, NotFound, sqlite3.Error):
+                raise ToolError("Market read refused: invalid input, parent, content or unavailable ledger") from None
+
 
     def live_context(idea, receipt):
         # Swing ideas use the same packet; their verdict reads its completed daily bars.
