@@ -204,7 +204,9 @@ def exercise(archive, scratch):
     tools = listing.json()["result"]["tools"]
     assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
     assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide"}
+        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide", "candles"}
+    candle_tool = next(t for t in tools if t["name"] == "candles")
+    assert candle_tool["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]
     assert rpc("pre_trade_check", {}, token(aud="https://check.example.test/mcp")).status_code == 401
     assert rpc("pre_trade_check", {}, token(scope="journal:read")).status_code == 403
     operation = str(uuid.uuid4())
