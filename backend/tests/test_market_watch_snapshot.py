@@ -238,3 +238,32 @@ def test_resealed_future_five_minute_bar_is_refused():
     packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
     with pytest.raises(ValueError, match='five-minute bars'):
         validate_snapshot(seal(packet))
+
+
+@pytest.mark.parametrize('field', ['bars_5m', 'price', 'vwap', 'session_open', 'or15_high', 'or15_low'])
+def test_empty_manifest_cannot_carry_resealed_derived_evidence(field):
+    packet = fixture_snapshot(missing_qqq=True)
+    group = packet['indices']['QQQ']
+    if field == 'bars_5m':
+        group[field] = [{'start': NOW.isoformat(), 'end': (NOW + timedelta(minutes=5)).isoformat(),
+                         'open': 100, 'high': 102, 'low': 99, 'close': 101, 'volume': 100}]
+    else:
+        group[field]['value'] = 100
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='empty source bars'):
+        validate_snapshot(seal(packet))
+
+
+def test_every_manifest_bar_must_be_an_exact_regular_session_minute():
+    packet = fixture_snapshot()
+    entry = next(item for item in packet['input_manifest'] if item['group'] == 'indices.SPY.bars_1m')
+    entry['bars'][2]['end'] = (parse_time(entry['bars'][2]['start']) + timedelta(minutes=2)).isoformat()
+    entry['payload_sha256'] = digest(entry['bars'])
+    packet['indices']['SPY']['source_sha256'] = entry['payload_sha256']
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='exact regular-session minute'):
+        validate_snapshot(seal(packet))

@@ -319,3 +319,19 @@ def test_import_rejects_cross_actor_tamper_and_store_actor_mixing(tmp_path):
     other_ledger.submit(OTHER, request(other_input["input_id"], message_intent="none"), lambda: NOW)
     with pytest.raises(MarketWatchEvaluationError, match="different owner actor"):
         store.import_export(other_ledger.export(other_ledger.ledger.path, OTHER))
+
+
+def test_same_clock_linked_reads_import_in_append_order(tmp_path):
+    from cloud_mcp_check_ledger import Ledger
+    from market_watch_ledger import MarketWatchLedger
+    from tests.test_market_watch_ledger import ACTOR, request
+    from tests.test_market_watch_snapshot import fixture_snapshot, NOW
+    ledger = MarketWatchLedger(Ledger(tmp_path / 'same-clock.sqlite'))
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    first = ledger.submit(ACTOR, request(inp['input_id']), lambda: NOW)
+    ledger.submit(ACTOR, request(inp['input_id'], operation_id='second', previous_read_id=first['read_id']), lambda: NOW)
+    exported = ledger.export(ledger.ledger.path, ACTOR)
+    store = MarketWatchOutcomeStore(tmp_path / 'outcomes.sqlite')
+    assert store.import_export(exported) is False
+    assert store.import_export(exported) is True
+    assert len(store.imported_exports()[0]['reads']) == 2

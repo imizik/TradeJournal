@@ -203,7 +203,16 @@ def validate_snapshot(record: dict) -> None:
         starts = [parse_time(bar["start"]) for bar in bars]
         if starts != sorted(set(starts)):
             raise ValueError("minute bar ordering or duplicates are invalid")
+        if not bars:
+            if group["bars_5m"] or group["bar_1m"] is not None or any(
+                group[field].get("value") is not None for field in ("price", "session_open", "vwap", "or15_high", "or15_low")
+            ) or group["return_vs_prior_close"] is not None or group["distance_to_vwap"] is not None:
+                raise ValueError("empty source bars cannot supply derived price evidence")
         for bar in bars:
+            bar_start, bar_end = parse_time(bar["start"]), parse_time(bar["end"])
+            if (bar_start.second or bar_start.microsecond or bar_end - bar_start != timedelta(minutes=1)
+                    or record["session_open_at"] is None or bar_start < parse_time(record["session_open_at"])):
+                raise ValueError("source minute bar must be an exact regular-session minute")
             vals = [bar.get(name) for name in ("open", "high", "low", "close", "volume")]
             if any(type(number) not in (int, float) or not math.isfinite(number) for number in vals):
                 raise ValueError("minute bar values are invalid")

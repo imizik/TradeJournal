@@ -496,11 +496,14 @@ class MarketWatchOutcomeStore:
                 raise MarketWatchEvaluationError("comparator probabilities are invalid")
             if any(v is not None and (not _finite(v) or not 0 <= v <= 1) for v in probabilities.values()):
                 raise MarketWatchEvaluationError("comparator probability is invalid")
+        read_order = {read_id: index for index, read_id in enumerate(maps["reads"])}
         for read in maps["reads"].values():
             for ref in (read.get("previous_read_id"), read.get("correction_of_read_id")):
                 if ref is not None:
                     parent = maps["reads"].get(ref)
-                    if not parent or parent.get("session_date") != read.get("session_date") or parent.get("received_at") >= read.get("received_at"):
+                    if (not parent or parent.get("session_date") != read.get("session_date")
+                            or read_order[ref] >= read_order[read["read_id"]]
+                            or _time(parent["received_at"]) > _time(read["received_at"])):
                         raise MarketWatchEvaluationError("read parent reference is invalid")
         for message in maps["messages"].values():
             if message.get("read_id") not in maps["reads"] or message.get("actor") != actor:
