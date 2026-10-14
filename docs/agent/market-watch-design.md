@@ -539,6 +539,67 @@ unproven; no trial, schedule or market-message delivery was activated.
 
 ## Wake-ups and messages (MW-2)
 
+### Selected first slice: four scheduled reads
+
+On October 14 the owner requested a scheduled market read at 09:50, 11:00,
+12:30 and 14:00 ET and a market-context exception to setup Go-only messages.
+This selects the fixed-schedule/chat-advice slice below; deterministic event
+detectors, other instruments/predicates, an app message sender, automated
+continuation acquisition and the twenty-session acceptance run remain deferred.
+Implementation and activation evidence for this slice are pending.
+
+The proposed task needed two concrete additions to MW-1: an opt-in app-side
+publisher before each wake, and server-owned recovery of the latest parent.
+The publisher runs at 09:49, 10:59, 12:29 and 13:59 America/New_York using the
+same bounded IEX sources and read-only database access. The exchange calendar
+suppresses holiday and out-of-session half-day slots. Its app-owned immutable
+publication success/failure receipts establish producer attempts, not Jo wakes.
+No missed slot is silently backfilled or labelled an on-time read.
+
+`market_watch_snapshot` additionally returns `context`: the authenticated
+actor's current-session `latest_read`, `latest_message_intent` (including its
+read), discretionary intent count/remaining budget, and
+`delivery_status=unverified`. This is mutable recovery metadata alongside the
+immutable input packet, never part of snapshot evidence. It contains no other
+actor's records, setup/check history or private account data. The same context
+is available with a typed unavailable snapshot response so task memory need
+not invent a parent. Existing scope requirements and audit/clean-order rules
+are unchanged.
+
+Ordinary update intents share a hard limit of three per actor/session across
+scheduled and setup-context reads, checked inside the append transaction.
+Linked corrections to an earlier same-session message intent are exempt;
+an unmessaged read cannot manufacture an exemption. Exact operation retries
+recover before budget/age checks. A quota rejection commits nothing; Jo can
+still save that observation with `message_intent=none`. This counts reservations
+conservatively, including an intent whose chat delivery is uncertain. It does
+not establish a hard transport-delivery count or delivery proof.
+
+The [scheduled task prompt](../../deploy/market-watch/jo-task.md) retains all
+three `mw-v1` SPY predicate/horizon slots. QQQ supplies context. A stale core
+packet becomes a saved `no_view` with abstentions; an unavailable packet leaves
+its audit call and a one-line native task failure. Missing calendar observation
+and release values are preserved, rather than gating every otherwise usable
+read. Unchanged reads stay quiet. A discretionary chat update requires a
+material directional change (named-horizon down probability >= .65 or <= .35),
+a strengthening of >= .10 on the same horizon with new evidence, or a specific
+conditional opportunity. These are notification-policy constants, not a
+calibration/edge claim. Invalidation of previously messaged advice is a linked
+correction even over budget. Chat is sent only after a new committed intent;
+replayed receipts never send another chat message.
+
+The [setup task addendum](../../deploy/market-watch/setup-task-addendum.md)
+runs only after the existing shadow commit and co-pilot verdict. Two distinct
+same-session call/long Pass/Wait reviews due to below-VWAP/failed-bounce evidence
+prompt a fresh market reassessment; they do not automatically assert a bearish
+forecast. Existing fresh Go alerts remain, while market notes share the same
+three-intent budget and correction policy. S1 decisions and independence
+labels remain unchanged. Native Jo task history, producer receipts and input/
+read records must be reconciled before claiming wake coverage; neither an
+installed timer nor fixture tests complete the live-session acceptance gate.
+Owner export and frozen evaluation remain explicitly operated as in MW-1.
+
+
 **Observe often, message rarely.** TradeJournal runs the event detector; Jo
 is called on:
 

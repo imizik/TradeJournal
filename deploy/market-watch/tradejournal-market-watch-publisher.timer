@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the opt-in MW publisher shortly before each scheduled Jo market read
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:49:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 10:59:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 12:29:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 13:59:00 America/New_York
+AccuracySec=1s
+Persistent=false
+Unit=tradejournal-market-watch-publisher.service
+
+[Install]
+WantedBy=timers.target
