@@ -1,5 +1,5 @@
 [Unit]
-Description=Publish one immutable MW-1 snapshot for a scheduled Jo market read
+Description=Publish one immutable MW-1 snapshot refresh during regular-session hours
 Wants=network-online.target
 After=network-online.target
 
@@ -12,7 +12,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 LoadCredential=backend.env:/etc/tradejournal/backend.env
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/backend/market_watch_schedule.py --public-directory /var/lib/tradejournal-market-watch-public --receipt-directory /var/lib/tradejournal/market-watch/schedule-receipts
 TimeoutStartSec=5min
-UMask=0077
+UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

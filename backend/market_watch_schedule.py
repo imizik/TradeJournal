@@ -1,4 +1,4 @@
-"""Opt-in MW-2 publisher for the four fixed Jo market-read slots.
+"""Opt-in MW-2 publisher for bounded regular-session snapshot refreshes.
 
 This process publishes only the existing MW-1 snapshot. It does not wake Jo,
 submit a read, send a message, or create a trade. Units under deploy/market-watch
@@ -19,11 +19,14 @@ import tempfile
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
-PUBLISH_SLOTS = ("09:49", "10:59", "12:29", "13:59")
+PUBLISH_START_MINUTE = 9 * 60 + 49
+PUBLISH_END_MINUTE = 15 * 60 + 59
+PUBLISH_INTERVAL_MINUTES = 2
+JO_WAKE_PREP_SLOTS = frozenset({"09-49", "10-59", "12-29", "13-59"})
 PUBLIC_DIRECTORY = Path("/var/lib/tradejournal-market-watch-public")
 RECEIPT_DIRECTORY = Path("/var/lib/tradejournal/market-watch/schedule-receipts")
 READ_MINUTES = 1
-MAX_START_LATE_SECONDS = 180
+MAX_START_LATE_SECONDS = 90
 MAX_PRICE_AGE_SECONDS = 180
 ENV_ALLOWLIST = frozenset({
     "DATABASE_URL", "ALPACA_API_KEY", "ALPACA_API_SECRET", "TRADIER_API_KEY",
@@ -84,22 +87,28 @@ def _write_immutable(path: Path, record: dict) -> None:
 
 
 def scheduled_slot(now: datetime) -> tuple[date, str] | None:
-    """Return today's slot only during its three-minute start grace window."""
+    """Return the current odd-minute slot within its 90-second start window."""
     if now.tzinfo is None:
         raise ValueError("scheduler clock must be timezone-aware")
     local = now.astimezone(ET)
     if local.weekday() >= 5:
         return None
-    for clock in PUBLISH_SLOTS:
-        hour, minute = (int(part) for part in clock.split(":"))
-        expected = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        late = (local - expected).total_seconds()
-        if 0 <= late <= MAX_START_LATE_SECONDS:
-            return local.date(), clock.replace(":", "-")
+    minute_of_day = local.hour * 60 + local.minute
+    if minute_of_day < PUBLISH_START_MINUTE:
+        return None
+    elapsed = minute_of_day - PUBLISH_START_MINUTE
+    scheduled_minute = PUBLISH_START_MINUTE + (elapsed // PUBLISH_INTERVAL_MINUTES) * PUBLISH_INTERVAL_MINUTES
+    if scheduled_minute > PUBLISH_END_MINUTE:
+        return None
+    hour, minute = divmod(scheduled_minute, 60)
+    expected = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    late = (local - expected).total_seconds()
+    if 0 <= late <= MAX_START_LATE_SECONDS:
+        return local.date(), f"{hour:02d}-{minute:02d}"
     return None
 
 
-def _slot_rth_status(day: date, slot: str, calendar_reader) -> str:
+def _slot_rth_status(day: date, slot: str, calendar_reader, now: datetime) -> str:
     """Use the exchange calendar's actual hours; unknown hours fail closed."""
     hours = calendar_reader(day)
     if not isinstance(hours, dict):
@@ -109,8 +118,11 @@ def _slot_rth_status(day: date, slot: str, calendar_reader) -> str:
     if hours.get("status") != "open" or type(hours.get("open")) is not int or type(hours.get("close")) is not int:
         return "exchange_calendar_unavailable"
     hour, minute = (int(part) for part in slot.split("-"))
-    read_minute = hour * 60 + minute + READ_MINUTES
-    if read_minute < hours["open"] or read_minute >= hours["close"]:
+    publish_minute = hour * 60 + minute
+    actual = now.astimezone(ET)
+    actual_minute = actual.hour * 60 + actual.minute
+    if (publish_minute < hours["open"] or publish_minute >= hours["close"]
+            or actual.date() != day or actual_minute < hours["open"] or actual_minute >= hours["close"]):
         return "outside_regular_session"
     return "eligible"
 
@@ -226,12 +238,16 @@ def run_slot(now: datetime, public_directory: str | Path, receipt_directory: str
         attempt += 1
         read_hour, read_minute = divmod(int(slot[:2]) * 60 + int(slot[3:]) + READ_MINUTES, 60)
         common = {"schema_version": 1, "session_date": day.isoformat(), "slot": slot,
-                  "scheduled_read_slot": f"{read_hour:02d}:{read_minute:02d} ET", "attempt": attempt,
+                  "purpose": "planned_jo_wake_packet" if slot in JO_WAKE_PREP_SLOTS else "background_refresh",
+                  "scheduled_read_slot": (f"{read_hour:02d}:{read_minute:02d} ET"
+                                          if slot in JO_WAKE_PREP_SLOTS else None),
+                  "attempt": attempt,
                   "recorded_at": now.astimezone(UTC).isoformat().replace("+00:00", "Z")}
         stem = f"attempt-{attempt:02d}"
         _write_immutable(day_dir / f"{stem}-started.json", {**common, "phase": "started", "status": "started"})
+        publication_started = False
         try:
-            gate = _slot_rth_status(day, slot, calendar_reader)
+            gate = _slot_rth_status(day, slot, calendar_reader, now)
             if gate == "exchange_calendar_unavailable":
                 raise ScheduleRefused(gate)
             if gate != "eligible":
@@ -241,6 +257,10 @@ def run_slot(now: datetime, public_directory: str | Path, receipt_directory: str
                 return result
             snapshot = snapshot_builder()
             quality_flags = _snapshot_quality(snapshot, now, slot=slot)
+            # From this point, even a thrown error can follow a visible
+            # content-addressed write. Preserve `started` as unknown instead
+            # of allowing --retry-failed to collect or publish a duplicate.
+            publication_started = True
             path = publisher(public, snapshot)
             result = {**common, "recorded_at": receipt_clock().astimezone(UTC).isoformat().replace("+00:00", "Z"),
                       "phase": "published", "status": "published_partial" if quality_flags else "published",
@@ -250,6 +270,8 @@ def run_slot(now: datetime, public_directory: str | Path, receipt_directory: str
             _write_immutable(day_dir / f"{stem}-published.json", result)
             return result
         except Exception as exc:
+            if publication_started:
+                raise ScheduleRefused("publication_outcome_unknown_owner_recovery_required") from None
             # Exception text can contain credentials or URLs; retain only stable codes.
             code = str(exc) if isinstance(exc, ScheduleRefused) else f"source_error:{type(exc).__name__}"
             result = {**common, "recorded_at": receipt_clock().astimezone(UTC).isoformat().replace("+00:00", "Z"),
@@ -285,8 +307,9 @@ def _runtime_env(credential: Path) -> dict[str, str]:
 
 _CHILD_COLLECTOR = r'''
 import json, sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from app.engine.chart_calendar import chart_calendar
 day = date.fromisoformat(sys.argv[1])
 slot = sys.argv[2]
@@ -300,8 +323,12 @@ for offset in range(1, 15):
     if previous and previous.get("status") == "open":
         break
 hour, minute = (int(part) for part in slot.split("-"))
-read_minute = hour * 60 + minute + 1
-eligible = hours.get("status") == "open" and type(hours.get("open")) is int and type(hours.get("close")) is int and hours["open"] <= read_minute < hours["close"]
+publish_minute = hour * 60 + minute
+actual = datetime.now(ZoneInfo("America/New_York"))
+actual_minute = actual.hour * 60 + actual.minute
+eligible = (hours.get("status") == "open" and type(hours.get("open")) is int and
+            type(hours.get("close")) is int and hours["open"] <= publish_minute < hours["close"] and
+            actual.date() == day and hours["open"] <= actual_minute < hours["close"])
 if not eligible:
     print(json.dumps({"hours": hours, "snapshot": None}))
     raise SystemExit(0)

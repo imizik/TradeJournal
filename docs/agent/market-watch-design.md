@@ -550,11 +550,17 @@ Implementation and activation evidence for this slice are pending.
 
 The proposed task needed two concrete additions to MW-1: an opt-in app-side
 publisher before each wake, and server-owned recovery of the latest parent.
-The publisher runs at 09:49, 10:59, 12:29 and 13:59 America/New_York using the
-same bounded IEX sources and read-only database access. The exchange calendar
-suppresses holiday and out-of-session half-day slots. Its app-owned immutable
+The publisher refreshes the same bounded SPY/QQQ IEX packet every two minutes
+from 09:49 through 15:59 America/New_York, including the four pre-wake times
+09:49, 10:59, 12:29 and 13:59, with read-only database access. Four daily
+publications alone cannot support fresh setup-triggered reassessments between
+wakes. This source cadence adds no Jo/model wakes or event detector. The
+exchange calendar suppresses holiday and out-of-session half-day refreshes. Its app-owned immutable
 publication success/failure receipts establish producer attempts, not Jo wakes.
-No missed slot is silently backfilled or labelled an on-time read.
+No missed refresh is silently backfilled or labelled an on-time Jo read.
+A provider failure before publication is explicitly retryable within its slot;
+a crash or uncertain error after publication begins stays unknown and
+nonretryable until owner reconciliation.
 
 `market_watch_snapshot` additionally returns `context`: the authenticated
 actor's current-session `latest_read`, `latest_message_intent` (including its
