@@ -65,6 +65,7 @@ WAKE_POLICY = {
     "jo_scheduled_local_times": ["09:50", "11:00", "12:30", "14:00"],  # #315's scheduled task, not sent here
     "jo_scheduled_operation_prefix": "mw-scheduled-v1",
     "coalesce_before_scheduled_minutes": 5,
+    "setup_guard_minutes": 10,  # no event wake while an emailed S1 setup still awaits Jo's shadow commit
     "event_min_gap_minutes": 15,
     "event_wakes_per_session": 6,
     "send_freshness_minutes": 5,
@@ -426,6 +427,31 @@ def _default_push(title: str, body: str) -> str | None:
     return ntfy.publish(title, body, priority=4, tags=("chart_with_downwards_trend",))
 
 
+def _default_setup_window(now: datetime) -> bool:
+    """Read-only: did S1 email a setup recently that has no shadow decision yet?
+
+    A market-watch call inside that window would make the shadow commit
+    ``clean_order=false``. Unknown state counts as busy, protecting S1.
+    """
+    try:
+        from sqlmodel import Session, select
+        from app.database import engine
+        from app.models import ScannerEvent
+        since = (now - timedelta(minutes=WAKE_POLICY["setup_guard_minutes"])).astimezone(UTC).replace(tzinfo=None)
+        with Session(engine) as db:
+            emailed = db.exec(select(ScannerEvent).where(ScannerEvent.event_type == "email")
+                              .where(ScannerEvent.effective_at >= since)).all()
+            pending = {e.candidate_id for e in emailed if json.loads(e.data_json).get("status") == "sent"}
+            if not pending:
+                return False
+            decided = {e.candidate_id for e in db.exec(select(ScannerEvent).where(ScannerEvent.candidate_id.in_(pending))
+                       .where(ScannerEvent.event_type.in_(("shadow_decision", "shadow_unresolved")))).all()}
+        return bool(pending - decided)
+    except Exception:
+        log.warning("Market watch could not read S1 setup state; event wakes wait")
+        return True
+
+
 def _default_daily(day: date) -> list[dict]:
     from app.engine import alpaca
     result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
@@ -439,13 +465,13 @@ class MarketWatchRunner:
 
     def __init__(self, store: MarketWatchWakeStore, snapshots_dir: str | Path, *, outbox_dir: str | Path | None = None,
                  clock=lambda: datetime.now(UTC), bounds=None, mail=_default_mail, push=_default_push,
-                 daily=_default_daily):
+                 daily=_default_daily, setup_window=_default_setup_window):
         self.store = store
         self.snapshots_dir = Path(snapshots_dir)
         self.outbox_dir = Path(outbox_dir) if outbox_dir else None
         self.clock = clock
         self.bounds = bounds
-        self.mail, self.push, self.daily = mail, push, daily
+        self.mail, self.push, self.daily, self.setup_window = mail, push, daily, setup_window
         self._atr: dict[date, dict | None] = {}
 
     # The real exchange calendar is warmed once per pass; tests inject bounds.
@@ -519,6 +545,7 @@ class MarketWatchRunner:
         scheduled = [slot for slot in WAKE_POLICY["jo_scheduled_local_times"]
                      if _at_local(day, slot) < closed and now - gap < _at_local(day, slot) <= now + ahead]
         events = [e for e in self.store.records("event", session) if e["event_id"] not in planned and e["kind"] not in NO_WAKE_EVENTS]
+        busy = self.setup_window(now) if events else False
         for event in events:
             wakes = self.store.records("wake", session)
             sent = [w for w in wakes if w["decision"] == "send"]
@@ -531,6 +558,8 @@ class MarketWatchRunner:
                 decision, reason = "coalesced", f"within {WAKE_POLICY['event_min_gap_minutes']} minutes of {recent[-1]['wake_id']}"
             elif scheduled:
                 decision, reason = "coalesced", f"next to Jo's scheduled {scheduled[0]} read"
+            elif busy:
+                decision, reason = "setup_guard", "an emailed S1 setup still awaits Jo's shadow commit"
             else:
                 decision, reason = "send", None
             self._wake(now, day, snapshot, "event", event["event_id"], parse_time(event["detected_at"]), decision, reason,
@@ -738,11 +767,14 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             if operations.get(operation):
                 attributed[key] = (operations[operation], "operation_id")
                 claimed.add(operations[operation])
+        # Exported reads carry their operation ID, so one that matched no trigger above (setup-context,
+        # manual, an expired wake) is never credited to a trigger by time: that would hide a missed read.
+        by_time = sorted(((rid, t) for rid, t in read_times.items() if rid not in exported), key=lambda kv: kv[1])
         for index, (at, key, _) in enumerate(triggers):
             if key in attributed:
                 continue
             until = min(at + window, triggers[index + 1][0] if index + 1 < len(triggers) else at + window)
-            first = next((rid for rid, t in sorted(read_times.items(), key=lambda kv: kv[1]) if at <= t < until and rid not in claimed), None)
+            first = next((rid for rid, t in by_time if at <= t < until and rid not in claimed), None)
             attributed[key] = (first, "time_window") if first else None
             if first:
                 claimed.add(first)
@@ -823,5 +855,6 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             "scores": outcome_store.report(exported_reads) if outcome_store is not None else None,
             "limits": ["reads link to a trigger by operation_id when exported, else by time window; wakes with an unknown send count as sent",
                   "scheduled reads are #315's Jo task; MW-2 did not send them and cannot see a scheduled run that saved nothing",
+                  "without an imported export the session close is unknown, so slots after an early close show no_read_seen",
                        "independence-unverified: reads are advice to Isaac and never feed Shadow Isaac or S1",
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}

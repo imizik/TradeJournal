@@ -676,7 +676,12 @@ shadow S1; market-watch reads never reach Shadow Isaac.
 - **Event wakes (route a).** An event wakes Jo unless a wake went out in the
   last 15 minutes or one of Jo's scheduled reads is 5 minutes ahead or up to
   15 minutes behind (`coalesced`), or 6 event wakes were already sent that
-  session (`rate_limited`). Each wake is one email through the scanner's
+  session (`rate_limited`). It is also withheld (`setup_guard`) while an S1
+  setup emailed in the last 10 minutes has no shadow decision yet: a market
+  call in that window would make the shadow commit `clean_order=false`. The
+  app reads the scanner's events for this and never writes them; unknown state
+  withholds the wake. A setup email arriving after a wake can still overlap;
+  that residual risk to shadow S1's clean-order count is Isaac's to accept. Each wake is one email through the scanner's
   existing mail path, subject `TJ Market Watch: <wake ID>`, body only the wake
   ID; the [event task prompt](../../deploy/market-watch/jo-event-task.md) uses
   operation ID `mw-event-v1:<wake ID>`. Each attempt is recorded `sending`
@@ -724,7 +729,9 @@ shadow S1; market-watch reads never reach Shadow Isaac.
   read whose exported `operation_id` names its trigger (`mw-event-v1:<wake ID>`
   or `mw-scheduled-v1:<date>:<HH:MM>`) is linked exactly; otherwise the first
   unclaimed read within 30 minutes (and before the next trigger) is linked by
-  time. Reads with neither are `unprompted`. MW-2 cannot see a scheduled run
+  time, and only for reads known from notices alone: an exported read whose
+  operation ID names another workflow is never credited to a slot by time.
+  Reads with neither are `unprompted`. MW-2 cannot see a scheduled run
   that saved nothing; that stays in Jo's native task history and #315's receipts.
 
 Fixture tests: `backend/tests/test_market_watch_wakes.py`. They are not live

@@ -82,7 +82,8 @@ def env(tmp_path):
         return f"ntfy-{len(pushed)}"
 
     runner = mw.MarketWatchRunner(mw.MarketWatchWakeStore(tmp_path / "wakes.sqlite"), snapshots, outbox_dir=outbox,
-                                  clock=clock, bounds=lambda day: BOUNDS, mail=mail, push=push, daily=lambda day: [])
+                                  clock=clock, bounds=lambda day: BOUNDS, mail=mail, push=push, daily=lambda day: [],
+                                  setup_window=lambda now: False)
     return runner, clock, sent, pushed, tmp_path
 
 
@@ -232,6 +233,41 @@ def test_event_wakes_coalesce_with_jos_scheduled_reads(env):
         assert wake["decision"] == expected, local
         if expected == "coalesced":
             assert "scheduled 11:00" in wake["reason"]
+
+
+def test_event_wakes_wait_while_an_s1_setup_awaits_its_shadow_commit(env, tmp_path, monkeypatch):
+    runner, clock, sent, _, _ = env
+    runner.setup_window = lambda now: True
+    publish_cross(runner)
+    runner.run_once()
+    assert sent == [] and {w["decision"] for w in runner.store.records("wake")} <= {"setup_guard", "coalesced"}
+    assert any(w["decision"] == "setup_guard" for w in runner.store.records("wake"))
+    # The default reader only reads S1's events: a sent email without a shadow decision is busy; decided or old is not.
+    import uuid as _uuid
+    from sqlmodel import Session, SQLModel, create_engine
+    from app import database
+    from app.models import ScannerCandidate, ScannerEvent
+    engine = create_engine(f"sqlite:///{tmp_path / 's1.sqlite'}")
+    SQLModel.metadata.create_all(engine, tables=[ScannerCandidate.__table__, ScannerEvent.__table__])
+    monkeypatch.setattr(database, "engine", engine)
+    now = START
+
+    def add(candidate, kind, minutes_ago, status=None):
+        with Session(engine) as db:
+            at = (now - timedelta(minutes=minutes_ago)).replace(tzinfo=None)
+            db.add(ScannerEvent(candidate_id=candidate, key=kind, event_type=kind, effective_at=at, recorded_at=at,
+                                data_json=json.dumps({"status": status} if status else {})))
+            db.commit()
+    assert mw._default_setup_window(now) is False
+    old, fresh = _uuid.uuid4(), _uuid.uuid4()
+    add(old, "email", 30, "sent")
+    assert mw._default_setup_window(now) is False
+    add(fresh, "email", 2, "sent")
+    assert mw._default_setup_window(now) is True
+    add(fresh, "shadow_decision", 1)
+    assert mw._default_setup_window(now) is False
+    monkeypatch.setattr(database, "engine", None)
+    assert mw._default_setup_window(now) is True  # unknown state protects S1
 
 
 def test_wake_failures_retry_within_freshness_then_expire(env):
@@ -474,6 +510,16 @@ def test_session_report_links_wakes_reads_messages_and_evaluator_outcomes(env, t
     assert day["outcomes"]["forecast_status_counts"] == {"unavailable": 9}
     assert report["scores"]["total_submitted_slots"] == 9
     assert report["policy_sha256"] == mw.POLICY_SHA256
+    # A setup-context read just after a scheduled slot that saved nothing is never credited to that slot.
+    clock.now = datetime(2026, 10, 14, 16, 32, 0, tzinfo=UTC)  # 12:32 ET
+    setup_read = _submit_notice(ledger, runner.outbox_dir, later, "mw-setup-context-v1:2026-10-14:x", clock.now,
+                                manual["read_id"], message_intent="none")
+    runner.ingest_notices(clock.now)
+    second = MarketWatchOutcomeStore(tmp_path / "outcomes2.sqlite")
+    second.evaluate_export(MarketWatchLedger.export(ledger.ledger.path, ACTOR), bars_by_session={}, evaluated_at=CLOSE + timedelta(hours=1))
+    slots = {r["slot"]: r for r in mw.session_report(runner.store, second)["sessions"]["2026-10-14"]["scheduled_reads"]}
+    assert slots["12:30"]["outcome"] == "no_read_seen" and slots["12:30"]["read_id"] is None
+    assert setup_read["read_id"]
     # Without the export, the event read is still linked by time.
     plain = mw.session_report(runner.store)["sessions"]["2026-10-14"]
     assert next(w for w in plain["wakes"] if w["wake_id"] == wake_id)["attribution"] == "time_window"
