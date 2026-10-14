@@ -4625,7 +4625,9 @@ test("saved layouts keep their chart sizes, layouts saved before the dividers op
 test("two browsers share the chart proportions but not the dock's width, merge a conflicting save, and keep proportions through an older build's save", { tag: "@real-settings" }, async ({ page, browser, request }) => {
   const settingsNow = async () => (await (await request.get("/api/backend/charts/settings")).json()) as { revision: number; data: Record<string, unknown> & { proportions?: Sizes | null; layoutProportions?: Record<string, Sizes>; layouts?: SavedLayouts; intervals?: string[] } };
   const start = await settingsNow();
-  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
+  // Always save the defaults, even on an empty database: with no settings at all a new setup opens compact, not at
+  // EMPTY_SETTINGS' "normal" size, so the drag below would land somewhere else depending on which test ran first.
+  expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gmail(page, true);
   await stub(page);
