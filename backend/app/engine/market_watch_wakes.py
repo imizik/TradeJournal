@@ -24,8 +24,8 @@ refused notice, message decision and failure is an append-only row in an
 owner-selected SQLite file, separate from the journal database and from the
 check ledger. A send whose outcome is uncertain (crash mid-send, a transport
 timeout after the request went out) is recorded ``unknown`` and never resent. Nothing here places, sizes or arms an
-order, touches S1 or shadow S1, or feeds Shadow Isaac: reads are advice to
-Isaac only. Thresholds are frozen and versioned; changing one is a new version.
+order, writes S1 or shadow S1 (it only reads S1's email and shadow events for
+the setup guard), or feeds Shadow Isaac: reads are advice to Isaac only. Thresholds are frozen and versioned; changing one is a new version.
 """
 from __future__ import annotations
 

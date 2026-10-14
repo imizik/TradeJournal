@@ -656,8 +656,9 @@ runs one pass about every 30 seconds during the regular session, only when
 `MARKET_WATCH_ENABLED` is true and `MARKET_WATCH_SNAPSHOTS_DIR` (#315's
 publication directory) and `MARKET_WATCH_STORE` are absolute paths; a bad
 setting logs and leaves MW-2 off without blocking API startup. Nothing places,
-sizes or arms an order, and nothing reads or writes S1, its acceptance or
-shadow S1; market-watch reads never reach Shadow Isaac.
+sizes or arms an order, and nothing writes S1, its acceptance or shadow S1
+(the setup guard below only reads S1's email and shadow events); market-watch
+reads never reach Shadow Isaac.
 
 - **Detector.** Runs on the latest current-session snapshot from #315's
   two-minute publisher and replays its frozen SPY minutes from the open, so the
