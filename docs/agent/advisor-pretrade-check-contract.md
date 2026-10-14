@@ -299,7 +299,7 @@ was, and what overriding cost.
 
 | # | Step | Done when | Status |
 |---|---|---|---|
-| 1 | Stay signed in: Auth0 Allow Offline Access on the check API, and the server advertises `offline_access` so ChatGPT requests a refresh token | A check more than an hour after connecting works without reconnecting | Done: offline access deployed Oct 12; plugin v4 passed the 6- and 60-minute checks Oct 13 ([shadow S1 evidence](shadow-s1-contract.md#activation-evidence--october-13-2026)) |
+| 1 | Stay signed in: Auth0 Allow Offline Access on the check API, and the server advertises `offline_access` so ChatGPT requests a refresh token | A check more than an hour after connecting works without reconnecting | Done: plugin v4 passed the 6- and 60-minute checks Oct 13 ([shadow S1 evidence](shadow-s1-contract.md#activation-evidence--october-13-2026)) |
 | 2 | Jo saves its own verdict on every check (`next_step`) | At least 9 of 10 saved checks carry Jo's verdict and summary | Live; confirm on real days |
 | 3 | Checks visible on `/advisor-review` | Every saved check reopens identical to the server copy, including after a restart | Live |
 | 4 | Link each check to what happened (`review_checks`) | One day's links agree with a hand check of that day's fills | Live |
