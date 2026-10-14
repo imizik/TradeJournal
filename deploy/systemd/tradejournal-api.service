@@ -29,7 +29,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/tradejournal
-# Optional until the operator enables the shadow exchange.
+# Optional until the operator enables the shadow exchange (setups and rolling candles).
 ReadWritePaths=-/var/lib/tradejournal-shadow
 
 [Install]

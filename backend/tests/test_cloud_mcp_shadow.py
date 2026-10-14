@@ -181,3 +181,98 @@ def test_decision_clock_and_clean_order_are_taken_under_commit_lock(harness, exc
     assert result['timing'] == 'late'
     assert not result['clean_order']
     assert result['committed_at'] == '2026-10-09T14:22:00Z'
+
+
+@pytest.mark.parametrize("version", ["shadow-setup-v1", "shadow-setup-v2"])
+def test_packet_candles_unchanged_and_missing_explicit(harness, exchange, version):
+    candidate, path, _ = exchange
+    candidate['format'] = version
+    path.write_text(json.dumps(hashed(candidate)))
+    args = {'candidate_id': candidate['candidate_id']}
+    token = harness.token(scope='check:read shadow:decide')
+    with TestClient(harness.server().streamable_http_app()) as client:
+        missing = call(client, 'shadow_setup', args, token)['structuredContent']
+        assert missing['candles'] is None and missing['candles_unavailable']
+        packet = {'source': 'tradier_timesales_1min', 'feed': 'full_market',
+            'last_bar_time': RECEIPT.isoformat(), '1m': [{'close': 100}], '5m': []}
+        candidate.update(format='shadow-setup-v2', candles=packet, candles_as_of=RECEIPT.isoformat())
+        path.write_text(json.dumps(hashed(candidate)))
+        view = call(client, 'shadow_setup', args, token)['structuredContent']
+        assert view['candles'] == packet and view['candles_as_of'] == RECEIPT.isoformat()
+        assert view['schema_version'] == 'shadow-setup-v2'
+        assert 'candles_unavailable' not in view
+        call(client, 'candles', {'symbol': 'SPY', 'interval': '1m'}, token)
+        decision = call(client, 'shadow_decide', {**args, 'decision': 'skip', 'reason': 'test'}, token)['structuredContent']
+        assert decision['clean_order'] is False
+
+
+def test_candles_fresh_stale_failure_and_scope(harness, exchange):
+    candidate, path, _ = exchange
+    directory = path.parent.parent / 'candles'
+    directory.mkdir()
+    row = {'time': RECEIPT.timestamp() - 60, 'end_time': RECEIPT.timestamp(),
+        'open': 1, 'high': 2, 'low': 1, 'close': 2, 'volume': 10}
+    packet = {'format': 'scanner-candles-v1', 'symbol': 'SPY', 'source': 'tradier_timesales_1min',
+        'feed': 'full_market', 'last_bar_time': RECEIPT.isoformat(), '1m': [row], '5m': []}
+    file = directory / 'SPY.json'
+    file.write_text(json.dumps(packet))
+    args = {'symbol': 'SPY', 'interval': '1m', 'bars': 60}
+    with TestClient(harness.server().streamable_http_app()) as client:
+        assert rpc(client, 'candles', args, harness.token(scope='check:run')).status_code == 403
+        assert not harness.requests
+        fresh = call(client, 'candles', args, harness.token(scope='check:read'))['structuredContent']
+        assert fresh['candles'] == [row] and fresh['feed'] == 'full_market' and fresh['age_seconds'] == 0
+        assert not harness.requests
+        file.write_text(json.dumps({**packet, 'last_bar_time': (RECEIPT - timedelta(seconds=121)).isoformat()}))
+        stale = call(client, 'candles', args, harness.token())['structuredContent']
+        assert stale['source'] == 'alpaca_data_api' and stale['feed'] == 'iex'
+        assert len(harness.requests) == 1
+        query = harness.requests[0].url.params
+        assert query['feed'] == 'iex' and query['limit'] == '60' and query['end']
+        assert call(client, 'candles', {**args, 'bars': 121}, harness.token())['isError']
+        assert call(client, 'candles', {**args, 'symbol': '../secret'}, harness.token())['isError']
+    with TestClient(harness.server(fail=True).streamable_http_app()) as client:
+        unavailable = call(client, 'candles', args, harness.token())['structuredContent']
+        assert unavailable['candles_unavailable'] == 'provider HTTP 503'
+        assert unavailable['last_bar_time'] is None and unavailable['age_seconds'] is None
+
+
+def test_candles_hard_deadline(harness, monkeypatch):
+    import cloud_mcp_check as service
+    import threading
+    import time
+    release = threading.Event()
+    def slow(*args):
+        release.wait(5)
+        return {}
+    monkeypatch.setattr(service.Provider, 'get', slow)
+    monkeypatch.setattr(service, 'CANDLES_TIMEOUT', .05)
+    with TestClient(harness.server().streamable_http_app()) as client:
+        started = time.monotonic()
+        try:
+            result = call(client, 'candles', {'symbol': 'MU', 'interval': '1m'}, harness.token())['structuredContent']
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        assert result['candles_unavailable'] == 'deadline exceeded'
+        assert elapsed < .5
+
+
+@pytest.mark.parametrize('interval,seconds', [('1m', 60), ('5m', 300)])
+def test_direct_candles_excludes_incomplete_bars_and_has_bounded_window(interval, seconds):
+    import cloud_mcp_check as service
+    from types import SimpleNamespace
+    requests = []
+    def get(path, params):
+        requests.append((path, params))
+        end = RECEIPT
+        return {'bars': {'MU': [
+            {'t': (end - timedelta(seconds=seconds)).isoformat(), 'o': 1, 'h': 2, 'l': 1, 'c': 2, 'v': 10},
+            {'t': end.isoformat(), 'o': 2, 'h': 3, 'l': 2, 'c': 3, 'v': 10}]}, 'next_page_token': 'unused'}
+    result = service.candle_read(None, SimpleNamespace(get=get), 'MU', interval, 120, RECEIPT)
+    assert len(result['candles']) == 1 and result['age_seconds'] == 0
+    assert result['last_bar_time'] == RECEIPT.isoformat() and result['truncated']
+    assert len(requests) == 1
+    params = requests[0][1]
+    assert params['timeframe'] == ('1Min' if interval == '1m' else '5Min')
+    assert params['feed'] == 'iex' and params['limit'] == 120

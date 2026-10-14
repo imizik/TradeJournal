@@ -51,10 +51,12 @@ import pretrade_features
 
 UNAVAILABLE = "Check permission unavailable; reconnect or contact the owner. No fallback."
 CONTEXT_TIMEOUT = 6.0
+CANDLES_TIMEOUT = 4.0  # Entire file/provider work, below the proxy response-header budget.
 MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "candles": ({"symbol", "interval"}, {"bars"}),
     "shadow_setup": ({"candidate_id"}, set()),
     "shadow_decide": ({"candidate_id", "decision", "reason"}, set()),
     "pre_trade_check": ({"ticker", "side", "instrument", "horizon"},
@@ -66,7 +68,7 @@ TOOL_ARGUMENTS = {
     "preopen_watchlist": (set(), {"tickers"}),
     "grade_checks": (set(), {"days"}),
 }
-READ_ONLY_TOOLS = ("review_checks", "position_check", "get_notes", "preopen_watchlist", "grade_checks")
+READ_ONLY_TOOLS = ("candles", "review_checks", "position_check", "get_notes", "preopen_watchlist", "grade_checks")
 POSITION_LIMIT = 5
 PREOPEN_LIMIT = 8
 PREOPEN_BUDGET = 20.0  # Seconds for the whole pass; tickers left over are named, not guessed.
@@ -216,7 +218,7 @@ def read_shadow_setup(directory, candidate_id, now):
         body = json.loads(os.read(fd, 1024 * 1024 + 1))
     finally:
         os.close(fd)
-    if not isinstance(body, dict) or body.get("format") != "shadow-setup-v1" or body.get("candidate_id") != candidate_id:
+    if not isinstance(body, dict) or body.get("format") not in ("shadow-setup-v1", "shadow-setup-v2") or body.get("candidate_id") != candidate_id:
         raise ValueError("Shadow setup identity or format mismatch")
     if digest({k: v for k, v in body.items() if k != "content_sha256"}) != body.get("content_sha256"):
         raise ValueError("Shadow setup hash mismatch")
@@ -229,6 +231,80 @@ def read_shadow_setup(directory, candidate_id, now):
     if datetime.fromisoformat(body["detected_at"]) > now:
         raise ValueError("Shadow setup is from the future")
     return body
+
+
+def candle_unavailable(reason, *, source="alpaca_data_api", feed="iex"):
+    return {"candles_unavailable": reason, "source": source, "feed": feed,
+        "last_bar_time": None, "age_seconds": None}
+
+
+def candle_read(setups_dir, provider, symbol, interval, count, now):
+    """One bounded file read, then at most one direct provider request. No pagination/retries."""
+    from zoneinfo import ZoneInfo
+    seconds = 60 if interval == "1m" else 300
+    stamp = now.timestamp()
+    if setups_dir:
+        try:
+            path = Path(setups_dir).parent / "candles" / f"{symbol}.json"
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                    raise ValueError("invalid rolling file")
+                packet = json.loads(os.read(fd, 1024 * 1024 + 1))
+            finally:
+                os.close(fd)
+            last = datetime.fromisoformat(packet["last_bar_time"])
+            age = stamp - last.timestamp()
+            if (packet["format"] == "scanner-candles-v1" and packet["symbol"] == symbol
+                    and packet["source"] == "tradier_timesales_1min" and packet["feed"] == "full_market"
+                    and last.tzinfo is not None and 0 <= age <= 120
+                    and packet["1m"][-1]["end_time"] == last.timestamp()):
+                rows = packet[interval]
+                end_key = "end_time" if interval == "1m" else "end"
+                if rows and all(row[end_key] <= stamp for row in rows):
+                    selected = rows[-count:]
+                    selected_last = datetime.fromtimestamp(selected[-1][end_key], timezone.utc)
+                    return {"candles": selected, "source": packet["source"], "feed": packet["feed"],
+                        "symbol": symbol, "interval": interval, "last_bar_time": selected_last.isoformat(),
+                        "age_seconds": round(stamp - selected_last.timestamp(), 3)}
+        except (OSError, ValueError, TypeError, KeyError, IndexError):
+            pass  # Missing/stale/invalid scanner data falls back to the isolated provider.
+    # RTH only; server supplies an explicit completed-bar cutoff and bounded window.
+    local = now.astimezone(ZoneInfo("America/New_York"))
+    opening = local.replace(hour=9, minute=30, second=0, microsecond=0)
+    close = local.replace(hour=16, minute=0, second=0, microsecond=0)
+    end = min(now, close).replace(second=0, microsecond=0)
+    if interval == "5m":
+        end -= timedelta(minutes=end.minute % 5)
+    start = max(opening, end - timedelta(seconds=seconds * count))
+    if end <= start:
+        return candle_unavailable("no completed regular-session bars")
+    try:
+        body = provider.get("/v2/stocks/bars", {"symbols": symbol, "timeframe": "1Min" if interval == "1m" else "5Min",
+            "start": start.isoformat(), "end": (end - timedelta(microseconds=1)).isoformat(),
+            "feed": "iex", "sort": "desc", "limit": count, "adjustment": "raw"})
+        rows = []
+        for row in body.get("bars", {}).get(symbol, []):
+            at = datetime.fromisoformat(row["t"].replace("Z", "+00:00"))
+            if at.tzinfo is None:
+                raise ValueError("bar time has no timezone")
+            if start <= at and at + timedelta(seconds=seconds) <= end:
+                rows.append({"time" if interval == "1m" else "start": at.timestamp(),
+                    "end_time" if interval == "1m" else "end": at.timestamp() + seconds,
+                    **{k: row[v] for k, v in (("open", "o"), ("high", "h"), ("low", "l"), ("close", "c"), ("volume", "v"))}})
+        rows.sort(key=lambda row: row["time" if interval == "1m" else "start"])
+        rows = rows[-count:]
+        if not rows:
+            return candle_unavailable("provider returned no completed bars")
+        last = datetime.fromtimestamp(rows[-1]["end_time" if interval == "1m" else "end"], timezone.utc)
+        return {"candles": rows, "source": "alpaca_data_api", "feed": "iex", "symbol": symbol,
+            "interval": interval, "last_bar_time": last.isoformat(),
+            "age_seconds": round(stamp - last.timestamp(), 3), "truncated": bool(body.get("next_page_token"))}
+    except ProviderError as exc:
+        return candle_unavailable(str(exc))
+    except Exception as exc:
+        return candle_unavailable(f"provider response invalid ({type(exc).__name__})")
 
 
 def write_shadow_decision(directory, decision):
@@ -313,6 +389,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
 
     clock = clock or (lambda: datetime.now(timezone.utc))
     slots = asyncio.Semaphore(MAX_CONCURRENT)
+    candle_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
     resource = urlsplit(config.resource_url)
     server = CheckMCP("tradejournal-pretrade-check", json_response=True, stateless_http=True,
         streamable_http_path=RESOURCE_PATH,
@@ -400,6 +477,31 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         except (OSError, ValueError, KeyError, TypeError):
             raise ToolError("Shadow setup unavailable or invalid") from None
 
+    @server.tool(title="Candles", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False,
+        openWorldHint=True, idempotentHint=True), structured_output=True,
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("candles")}]})
+    async def candles(symbol: Annotated[str, Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")],
+            interval: Literal["1m", "5m"], bars: Annotated[int, Field(ge=1, le=120)] = 60) -> dict[str, Any]:
+        """Fresh candles for manual questions AFTER shadow_decide. Before committing, use shadow_setup's
+        frozen candles only: calling this tool before commit makes clean_order false. Never forward-fills.
+        """
+        await authenticated("candles")
+        now = clock()
+        def read():
+            # Timed-out synchronous reads keep their slot until the provider actually finishes.
+            if not candle_slots.acquire(blocking=False):
+                return candle_unavailable("candle reader busy")
+            try:
+                return candle_read(config.shadow_setups_dir, provider, symbol.upper(), interval, bars, now)
+            finally:
+                candle_slots.release()
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(read), CANDLES_TIMEOUT)
+        except asyncio.TimeoutError:
+            return candle_unavailable("deadline exceeded")
+        except Exception as exc:
+            return candle_unavailable(f"read failed ({type(exc).__name__})")
+
     @server.tool(title="Shadow setup", annotations=run_hints, structured_output=True,
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("shadow_setup")}]})
     async def shadow_setup(candidate_id: str) -> dict[str, Any]:
@@ -433,7 +535,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         card = {k: v for k, v in answer["history"].items() if k != "source_fill_keys"}
         card.update({"as_of_ny": cutoff.isoformat(), "available": features["state"] != "missing",
             "source_state": features["state"]})
-        return {"schema_version": "shadow-setup-v1", "candidate": setup,
+        return {"schema_version": setup["format"], "candidate": setup,
+            "candles": setup.get("candles"), "candles_as_of": setup.get("candles_as_of"),
+            **({"candles_unavailable": setup.get("candles_unavailable", "v1 setup has no frozen candles")}
+               if not setup.get("candles") else {}),
             "live": {**answer["live"], "option": answer.get("option")}, "history": card,
             "history_cutoff": cutoff.isoformat(), "labels": list(SHADOW_LABELS),
             "published_at": setup["detected_at"], "expired": now >= datetime.fromisoformat(setup["expires_at"])}

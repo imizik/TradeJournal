@@ -1005,3 +1005,80 @@ def test_shadow_recovery_after_file_write_without_handoff_event(engine, monkeypa
     with Session(engine) as db:
         score = setup_scanner.day_view(db, DAY)["scorecard"]["day"]
     assert score["take"] == 1 and score["not_published"] == score["no_response"] == 0
+
+
+def test_v2_frozen_bars_survive_restart_and_v2_decision_import(engine, monkeypatch, tmp_path):
+    setups, outbox = tmp_path / 'setups', tmp_path / 'outbox'
+    setups.mkdir()
+    (tmp_path / 'candles').mkdir()
+    monkeypatch.setenv('SHADOW_SETUPS_DIR', str(setups))
+    monkeypatch.setenv('SHADOW_OUTBOX_DIR', str(outbox))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    # Future observations must never leak into the frozen packet.
+    watch.feed.add(at(10, 0), at(10, 5), 150, 151, 100)
+    watch.run()
+    candidate = _candidate(engine)
+    path = setups / f'setup-{candidate.id}.json'
+    packet = json.loads(path.read_text())
+    assert packet['format'] == 'shadow-setup-v2'
+    candles = packet['candles']
+    assert candles['source'] == 'tradier_timesales_1min'
+    assert len(candles['1m']) <= 60
+    cutoff = setup_scanner._epoch(candidate.detected_at)
+    assert all(row['end_time'] <= cutoff for row in candles['1m'])
+    assert all(row['end'] <= cutoff for row in candles['5m'])
+    frozen = path.read_bytes()
+    _decision_file(outbox, candidate, decision='skip', setup_sha256=packet['content_sha256'])
+    restarted, _ = scanner(engine, at(9, 51))
+    restarted.run()
+    assert path.read_bytes() == frozen
+    assert rows(engine)[1]['shadow_decision']['decision'] == 'skip'
+    assert 'shadow_unresolved' not in rows(engine)[1]
+
+
+def test_rolling_updates_between_scans_preserves_signal(engine, monkeypatch, tmp_path):
+    setups = tmp_path / 'setups'
+    setups.mkdir()
+    rolling = tmp_path / 'candles'
+    rolling.mkdir()
+    monkeypatch.setenv('SHADOW_SETUPS_DIR', str(setups))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    # The legacy candidate projection is identical with/without the v2 data.
+    v1 = shadow_exchange.setup_payload(candidate)
+    v2 = json.loads((setups / f'setup-{candidate.id}.json').read_text())
+    assert {k: v for k, v in v2.items() if k not in ('format', 'content_sha256', 'candles', 'candles_as_of')} == {
+        k: v for k, v in v1.items() if k not in ('format', 'content_sha256')}
+    path = rolling / 'SPY.json'
+    first = json.loads(path.read_text())
+    assert path.stat().st_mode & 0o777 == 0o640
+    watch.feed.add(at(9, 50), at(9, 52), 101, 102, 100)
+    clock.now = at(9, 52, 10)
+    watch.run()  # Same judged five-minute bar: rolling data still refreshes.
+    latest = json.loads(path.read_text())
+    assert latest['last_bar_time'] > first['last_bar_time']
+    assert all(row['end_time'] <= clock.now for row in latest['1m'])
+    assert all(row['end'] <= clock.now for row in latest['5m'])
+    assert len(rows(engine)[0]) == 1
+    assert shadow_exchange.setup_payload(_candidate(engine)) == v1
+
+
+def test_candle_packet_limits_and_completion_without_forward_fill():
+    minutes = [{'time': OPEN + i * 60, 'end_time': OPEN + (i + 1) * 60,
+        'open': 100, 'high': 101, 'low': 99, 'close': 100, 'volume': 10}
+        for i in range(133) if i != 30]
+    cutoff = OPEN + 132 * 60 + 30
+    complete = [m for m in minutes if m['end_time'] <= cutoff]
+    five = rules.five_minute_bars(complete, OPEN, CLOSE)
+    frozen = shadow_exchange.candle_packet(complete, five, cutoff, limit=60)
+    rolling = shadow_exchange.candle_packet(complete, five, cutoff, limit=120)
+    assert len(frozen['1m']) == 60 and len(rolling['1m']) == 120
+    assert frozen['5m'] == rolling['5m'] and len(frozen['5m']) == 26
+    assert frozen['5m'][0]['start'] == OPEN
+    assert all(m['end_time'] <= cutoff for m in frozen['1m'])
+    assert all(m['end'] <= cutoff for m in frozen['5m'])
+    assert not any(m['time'] == OPEN + 30 * 60 for m in rolling['1m'])
+    assert shadow_exchange.candle_packet([], [], cutoff, limit=60) is None
