@@ -212,6 +212,11 @@ password (separate from the read-only Gmail OAuth token that imports fills).
 At most 15 a day; a setup past its 10-minute expiry is never sent; a failed
 send is retried each pass while fresh. Each send is a `ScannerEvent` with key
 `email` (`sent`, `expired` or `skipped_daily_cap`).
+Gmail's iPhone app cannot notify for one label, so each sent email is also
+pushed once to the phone through ntfy (`app/engine/ntfy.py`, the topic in
+`alerts.env`; tapping opens `/scanner`). The push is best effort and not
+retried: the `email` event records `push` as `sent`, `failed` or `off`, and a
+failed push never holds back the email.
 
 Subject: `TJ Setup: <SYMBOL> <CALL|PUT> <setup> <HH:MM> ET`. The body holds
 only market facts and rule output (no journal data) and one JSON line with

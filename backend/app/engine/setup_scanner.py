@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine import scanner_rules as rules
-from app.engine import scanner_mail, tradier
+from app.engine import ntfy, scanner_mail, tradier
 from app.engine import shadow_exchange
 from app.engine import scanner_settings
 from app.engine.chart_feed import ChartFeedError
@@ -94,6 +94,30 @@ def setup_email(candidate: ScannerCandidate) -> tuple[str, str]:
         "Rule-generated paper setup, not advice. The rules-only paper trade is recorded in TradeJournal either way.",
     ]
     return subject, "\n".join(lines)
+
+
+def setup_push(candidate: ScannerCandidate) -> tuple[str, str]:
+    """Short phone notification for a setup whose email was just sent."""
+    contract = json.loads(candidate.contract_json)
+    at_et = candidate.bar_end.replace(tzinfo=UTC).astimezone(ET)
+    expires_et = candidate.expires_at.replace(tzinfo=UTC).astimezone(ET)
+    title = f"Setup: {candidate.symbol} {contract['option_type'].upper()} {SETUP_NAMES[candidate.setup]} {at_et:%H:%M} ET"
+    message = (f"{contract['expiration']} {contract['strike']} {contract['option_type']}, "
+               f"bid {contract['bid']} / ask {contract['ask']}. Stop {candidate.stop}, target {candidate.target}. "
+               f"Stale after {expires_et:%H:%M} ET.")
+    return title, message
+
+
+def _push(candidate: ScannerCandidate) -> str:
+    """Best effort, sent once: a failed push never holds back the email record."""
+    if not ntfy.configured():
+        return "off"
+    try:
+        ntfy.publish(*setup_push(candidate), path="/scanner")
+    except ntfy.NtfyError as exc:
+        log.warning("Setup push for %s not sent: %s", candidate.id, exc)
+        return "failed"
+    return "sent"
 
 
 def status_of(candidate: ScannerCandidate, state: dict) -> str:
@@ -429,7 +453,7 @@ class SetupScanner:
                 except scanner_mail.MailError as exc:
                     log.warning("Setup email for %s not sent this pass: %s", candidate.id, exc)
                     continue  # retried on the next pass until the setup goes stale
-                self._store(candidate, "email", self.clock(), {"status": "sent"})
+                self._store(candidate, "email", self.clock(), {"status": "sent", "push": _push(candidate)})
                 sent += 1
 
     def _enter(self, candidate: ScannerCandidate, now: float, prefix: str = "", decided: float | None = None) -> None:

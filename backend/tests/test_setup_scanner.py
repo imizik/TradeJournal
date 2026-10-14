@@ -538,6 +538,30 @@ def test_a_failed_send_is_retried_while_fresh(engine, monkeypatch):
     assert len(calls) == 2 and rows(engine)[1]["email"]["status"] == "sent"
 
 
+def test_a_sent_setup_email_also_pushes_once_and_a_failed_push_does_not_block_it(engine, monkeypatch):
+    pushes = []
+    mail_env(monkeypatch)
+    monkeypatch.setattr(setup_scanner.scanner_mail, "send", lambda title, body: None)
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    assert rows(engine)[1]["email"] == {"status": "sent", "push": "off"}  # no NTFY_URL
+
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(setup_scanner.ntfy, "publish", lambda title, message, path: pushes.append((title, message, path)))
+    candidate = rows(engine)[0][0]
+    title, message = setup_scanner.setup_push(candidate)
+    assert title == "Setup: SPY CALL opening-range break 09:50 ET"
+    assert "2026-10-07 101.0 call" in message and "Stale after 10:00 ET" in message
+    assert setup_scanner._push(candidate) == "sent" and pushes == [(title, message, "/scanner")]
+
+    def down(*args, **kwargs):
+        raise setup_scanner.ntfy.NtfyError("down")
+
+    monkeypatch.setattr(setup_scanner.ntfy, "publish", down)
+    assert setup_scanner._push(candidate) == "failed"
+
+
 def _decision_file(path, candidate, decision="take", timing="on_time", committed_at=None, **changes):
     path.mkdir(parents=True, exist_ok=True)
     setup_hash = shadow_exchange.setup_payload(candidate)["content_sha256"]
