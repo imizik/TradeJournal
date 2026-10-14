@@ -71,7 +71,7 @@ def env(tmp_path):
     snapshots, outbox = tmp_path / "public", tmp_path / "outbox"
     snapshots.mkdir()
     outbox.mkdir()
-    clock = Clock(datetime(2026, 10, 14, 13, 50, 20, tzinfo=UTC))
+    clock = Clock(START)
     sent, pushed = [], []
 
     def mail(subject, body):
@@ -82,9 +82,19 @@ def env(tmp_path):
         return f"ntfy-{len(pushed)}"
 
     runner = mw.MarketWatchRunner(mw.MarketWatchWakeStore(tmp_path / "wakes.sqlite"), snapshots, outbox_dir=outbox,
-                                  clock=clock, bounds=lambda day: BOUNDS, build=lambda now: snapshot_at(now),
-                                  mail=mail, push=push, daily=lambda day: [])
+                                  clock=clock, bounds=lambda day: BOUNDS, mail=mail, push=push, daily=lambda day: [])
     return runner, clock, sent, pushed, tmp_path
+
+
+START = datetime(2026, 10, 14, 14, 20, 20, tzinfo=UTC)  # 10:20 ET: clear of Jo's 09:50 and 11:00 scheduled reads
+
+
+def publish_cross(runner, now=START):
+    """Publish (as #315's timer would) a snapshot whose newest bar crosses VWAP and the opening range."""
+    minutes = int((now - OPEN).total_seconds() // 60)
+    snapshot = snapshot_at(now, [100.0] * 15 + [100.5] * (minutes - 16) + [99.0])
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    return snapshot
 
 
 def kinds(events):
@@ -188,24 +198,45 @@ def test_store_is_append_only_and_refuses_foreign_databases(tmp_path):
         store.append("event", tampered, ident="b")
 
 
-def test_scheduled_wakes_send_only_an_id_record_results_and_never_resend(env):
+def test_event_wake_sends_only_an_id_publishes_nothing_and_never_resends(env):
     runner, clock, sent, _, _ = env
     runner.run_once()
-    wakes = {w["ref"]: w for w in runner.store.records("wake", "2026-10-14")}
-    assert wakes["08:50"]["decision"] == "missed_late" and wakes["09:50"]["decision"] == "send"
-    assert "11:00" not in wakes
-    wake_id = wakes["09:50"]["wake_id"]
+    assert sent == [] and runner.store.records("wake") == []  # no snapshot published yet: nothing to detect, no scheduled wakes
+    publish_cross(runner)
+    files = sorted(p.name for p in runner.snapshots_dir.rglob("*"))
+    runner.run_once()
+    assert sorted(p.name for p in runner.snapshots_dir.rglob("*")) == files  # MW-2 never publishes snapshots
+    wakes = runner.store.records("wake", "2026-10-14")
+    assert {w["trigger"] for w in wakes} == {"event"}
+    sent_wakes = [w for w in wakes if w["decision"] == "send"]
+    assert len(sent_wakes) == 1 and all(w["decision"] == "coalesced" for w in wakes if w not in sent_wakes)
+    wake_id = sent_wakes[0]["wake_id"]
     assert sent == [(f"TJ Market Watch: {wake_id}", f"Wake ID: {wake_id}\n")]
     clock.now += timedelta(seconds=30)
     runner.run_once()
     assert len(sent) == 1
     attempts = runner.store.records("wake_attempt")
     assert [(a["wake_id"], a["result"], a["channel"]) for a in attempts] == [(wake_id, "sending", "email"), (wake_id, "accepted", "email")]
-    assert wakes["09:50"]["snapshot_id"] and (runner.snapshots_dir / "latest.json").exists()
+
+
+def test_event_wakes_coalesce_with_jos_scheduled_reads(env):
+    runner, clock, sent, _, _ = env
+    for local, expected in (("10:56", "coalesced"), ("11:02", "coalesced"), ("11:20", "send")):
+        hour, minute = map(int, local.split(":"))
+        now = datetime(2026, 10, 14, hour + 4, minute, 20, tzinfo=UTC)
+        snapshot = snapshot_at(now)
+        e = mw._event(snapshot, "new_session_low", [local], now.isoformat(), now, {})
+        runner.store.append("event", e, ident=e["event_id"])
+        runner.plan_wakes(now, now.date(), CLOSE, snapshot)
+        wake = next(w for w in runner.store.records("wake") if w["event_id"] == e["event_id"])
+        assert wake["decision"] == expected, local
+        if expected == "coalesced":
+            assert "scheduled 11:00" in wake["reason"]
 
 
 def test_wake_failures_retry_within_freshness_then_expire(env):
     runner, clock, _, _, _ = env
+    publish_cross(runner)
     calls = []
 
     def broken(subject, body):
@@ -213,17 +244,18 @@ def test_wake_failures_retry_within_freshness_then_expire(env):
         raise OSError("smtp down")
     runner.mail = broken
     for seconds in (0, 30, 61, 122, 183, 300):
-        clock.now = datetime(2026, 10, 14, 13, 50, 20, tzinfo=UTC) + timedelta(seconds=seconds)
+        clock.now = START + timedelta(seconds=seconds)
         runner.run_once()
     results = [(a["attempt"], a["result"], a["error_code"]) for a in runner.store.records("wake_attempt") if a["result"] != "sending"]
     assert results == [(1, "failed", "OSError"), (2, "failed", "OSError"), (3, "failed", "OSError"), (3, "expired", "attempts_exhausted")]
     assert len(calls) == 3
     report = mw.session_report(runner.store)["sessions"]["2026-10-14"]
-    assert next(w for w in report["wakes"] if w["ref"] == "09:50")["attempts"] == 3
+    assert next(w for w in report["wakes"] if w["decision"] == "send")["attempts"] == 3
 
 
 def test_wake_past_freshness_expires_without_sending(env):
     runner, clock, sent, _, _ = env
+    publish_cross(runner)
     runner.mail = lambda subject, body: (_ for _ in ()).throw(OSError("down"))
     runner.run_once()
     runner.mail = lambda subject, body: sent.append(subject)
@@ -236,6 +268,7 @@ def test_uncertain_and_interrupted_sends_are_unknown_and_never_resent(env):
     import httpx
     from app.engine import ntfy
     runner, clock, sent, _, _ = env
+    publish_cross(runner)
     tries = []
 
     def timeout(subject, body):
@@ -256,33 +289,32 @@ def test_uncertain_and_interrupted_sends_are_unknown_and_never_resent(env):
     runner.store.append("event", e, ident=e["event_id"])
     clock.now += timedelta(minutes=20)
     runner.plan_wakes(clock.now, clock.now.date(), CLOSE, snapshot)
-    wake = next(w for w in runner.store.records("wake") if w["trigger"] == "event")
+    wake = next(w for w in runner.store.records("wake") if w["event_id"] == e["event_id"])
     runner._attempt("wake_attempt", clock.now, "2026-10-14", "wake_id", wake["wake_id"], 1, "sending", "email")
     runner.mail = lambda subject, body: sent.append(subject)
     runner.send_wakes(clock.now, clock.now.date())
     assert sent == [] and [a["result"] for a in runner.store.records("wake_attempt") if a["wake_id"] == wake["wake_id"]] == ["sending", "unknown"]
 
 
-
 def test_event_wakes_are_rate_limited_coalesced_and_late_events_never_wake(env):
     runner, clock, sent, _, _ = env
-    runner.run_once()  # 09:50 scheduled wake sent at 13:50:20Z
     snapshot = snapshot_at(clock.now)
+
     def event(minute, late=False):
         at = clock.now - timedelta(minutes=30 if late else 0)
         return mw._event(snapshot, "level_cross", ["vwap", "down", str(minute)], at.isoformat(), clock.now, {"level": "vwap"})
-    for e in (event(1), event(2, late=True)):
+    for e in (event(0), event(1), event(2, late=True)):
         runner.store.append("event", e, ident=e["event_id"])
     runner.plan_wakes(clock.now, clock.now.date(), CLOSE, snapshot)
-    decisions = {w["event_id"]: w["decision"] for w in runner.store.records("wake") if w["trigger"] == "event"}
-    assert sorted(decisions.values()) == ["coalesced", "event_late"]
+    assert sorted(w["decision"] for w in runner.store.records("wake")) == ["coalesced", "event_late", "send"]
+    clock.now = datetime(2026, 10, 14, 15, 20, 20, tzinfo=UTC)  # 11:20 ET, past the 11:00 scheduled read
     for i in range(8):
         clock.now += timedelta(minutes=16)
         e = event(10 + i)
         runner.store.append("event", e, ident=e["event_id"])
         runner.plan_wakes(clock.now, clock.now.date(), CLOSE, snapshot)
         runner.send_wakes(clock.now, clock.now.date())
-    event_wakes = [w for w in runner.store.records("wake") if w["trigger"] == "event"]
+    event_wakes = runner.store.records("wake")
     assert sum(w["decision"] == "send" for w in event_wakes) == mw.WAKE_POLICY["event_wakes_per_session"]
     assert any(w["decision"] == "rate_limited" for w in event_wakes)
 
@@ -410,27 +442,41 @@ def test_tampered_or_unpublished_notices_are_refused(env, tmp_path):
 
 def test_session_report_links_wakes_reads_messages_and_evaluator_outcomes(env, tmp_path):
     runner, clock, _, _, _ = env
-    runner.run_once()  # 09:50 wake accepted
+    snapshot = publish_cross(runner)
+    runner.run_once()  # one event wake accepted
+    wake_id = next(w["wake_id"] for w in runner.store.records("wake") if w["decision"] == "send")
     ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
-    from app.engine.market_watch_snapshot import read_latest_snapshot
-    snapshot = read_latest_snapshot(runner.snapshots_dir, clock.now)
     clock.now += timedelta(minutes=2)
-    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "op", clock.now)
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, f"mw-event-v1:{wake_id}", clock.now)
     runner.run_once()
+    # Jo's own 11:00 scheduled read (#315), linked by its operation ID; a manual read stays unprompted.
+    clock.now = datetime(2026, 10, 14, 15, 0, 40, tzinfo=UTC)
+    later = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, later)
+    scheduled = _submit_notice(ledger, runner.outbox_dir, later, "mw-scheduled-v1:2026-10-14:11:00", clock.now,
+                               receipt["read_id"], message_intent="none")
+    clock.now += timedelta(minutes=40)
+    manual = _submit_notice(ledger, runner.outbox_dir, later, "manual", clock.now, scheduled["read_id"], message_intent="none")
+    runner.ingest_notices(clock.now)
     outcomes = MarketWatchOutcomeStore(tmp_path / "outcomes.sqlite")
     export = MarketWatchLedger.export(ledger.ledger.path, ACTOR)
     outcomes.evaluate_export(export, bars_by_session={}, evaluated_at=CLOSE + timedelta(hours=1))
     report = mw.session_report(runner.store, outcomes)
     day = report["sessions"]["2026-10-14"]
-    sent = next(w for w in day["wakes"] if w["ref"] == "09:50")
-    assert sent["delivery"] == "accepted" and sent["read_id"] == receipt["read_id"] and sent["attribution"] == "time_window"
-    assert next(w for w in day["wakes"] if w["ref"] == "08:50")["outcome"] == "missed_late"
-    assert day["reads"]["attributed_to_wake"] == 1 and day["reads"]["notices_missing_from_export"] == []
-    assert day["reads"]["notice_hash_mismatches"] == []
+    sent = next(w for w in day["wakes"] if w["wake_id"] == wake_id)
+    assert sent["delivery"] == "accepted" and sent["read_id"] == receipt["read_id"] and sent["attribution"] == "operation_id"
+    slots = {r["slot"]: r for r in day["scheduled_reads"]}
+    assert slots["11:00"]["read_id"] == scheduled["read_id"] and slots["11:00"]["attribution"] == "operation_id"
+    assert slots["09:50"]["outcome"] == "no_read_seen" and slots["14:00"]["outcome"] == "no_read_seen"
+    assert day["reads"]["attributed_to_wake"] == 2 and day["reads"]["unprompted"] == 1 and manual["read_id"] in day["reads"]["read_ids"]
+    assert day["reads"]["notices_missing_from_export"] == [] and day["reads"]["notice_hash_mismatches"] == []
     assert day["message_summary"]["discretionary_accepted"] == 1 and day["messages"][0]["read_id"] == receipt["read_id"]
-    assert day["outcomes"]["forecast_status_counts"] == {"unavailable": 3}
-    assert report["scores"]["total_submitted_slots"] == 3
+    assert day["outcomes"]["forecast_status_counts"] == {"unavailable": 9}
+    assert report["scores"]["total_submitted_slots"] == 9
     assert report["policy_sha256"] == mw.POLICY_SHA256
+    # Without the export, the event read is still linked by time.
+    plain = mw.session_report(runner.store)["sessions"]["2026-10-14"]
+    assert next(w for w in plain["wakes"] if w["wake_id"] == wake_id)["attribution"] == "time_window"
 
 
 def test_runner_is_off_by_default_and_needs_absolute_paths(monkeypatch, tmp_path):
@@ -448,7 +494,8 @@ def test_runner_is_off_by_default_and_needs_absolute_paths(monkeypatch, tmp_path
 
 def test_no_wakes_outside_window_or_on_closed_days(env):
     runner, clock, sent, _, _ = env
-    clock.now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)  # 08:00 ET, before the snapshot window
+    publish_cross(runner)
+    clock.now = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)  # 09:00 ET, before the open
     runner.run_once()
     runner.bounds = lambda day: None
     clock.now = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)

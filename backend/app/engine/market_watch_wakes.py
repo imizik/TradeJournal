@@ -1,15 +1,20 @@
-"""MW-2: scheduled and event wake-ups for Jo's market watch, and selective messages.
+"""MW-2: event wake-ups for Jo's market watch, and selective messages.
 
-Off unless ``MARKET_WATCH_ENABLED`` is true and ``MARKET_WATCH_SNAPSHOTS_DIR``
-and ``MARKET_WATCH_STORE`` are absolute paths. Each pass (about every 30
-seconds in the API process) does, in order:
+Complements the selected first slice (#315): Jo's own scheduled reads at
+09:50, 11:00, 12:30 and 14:00 and its snapshot publisher
+(``market_watch_schedule``). This module publishes no snapshots and sends no
+scheduled wakes. Off unless ``MARKET_WATCH_ENABLED`` is true and
+``MARKET_WATCH_SNAPSHOTS_DIR`` (the #315 publication directory) and
+``MARKET_WATCH_STORE`` are absolute paths. Each pass (about every 30 seconds in
+the API process) does, in order:
 
 1. read new sealed read notices from ``MARKET_WATCH_OUTBOX_DIR`` (written by the
    check service on ``market_watch_submit``), when that outbox is configured;
-2. publish a fresh MW-1 snapshot every few minutes from 08:25 ET to the close;
-3. run the deterministic detector (``DETECTOR``) on the latest snapshot;
-4. plan scheduled and event wakes under ``WAKE_POLICY`` and email each wake ID
-   to Jo through the scanner's mail path (``scanner_mail``);
+2. read the latest published current-session snapshot;
+3. run the deterministic detector (``DETECTOR``) on it;
+4. plan event wakes under ``WAKE_POLICY`` (coalesced with recent wakes and with
+   Jo's scheduled reads) and email each wake ID to Jo through the scanner's
+   mail path (``scanner_mail``);
 5. push Jo's notify reads to Isaac through the server's ntfy alerts
    (``MESSAGE_POLICY``), within a daily discretionary budget; a correction of a
    message that reached Isaac skips the budget (once per message, capped).
@@ -57,16 +62,16 @@ DETECTOR = {
 }
 WAKE_POLICY = {
     "wake_policy_version": "mw-wake-v1",
-    "scheduled_local_times": ["08:50", "09:50", "11:00", "12:30", "14:00"],
-    "scheduled_grace_minutes": 10,
+    "jo_scheduled_local_times": ["09:50", "11:00", "12:30", "14:00"],  # #315's scheduled task, not sent here
+    "jo_scheduled_operation_prefix": "mw-scheduled-v1",
+    "coalesce_before_scheduled_minutes": 5,
     "event_min_gap_minutes": 15,
     "event_wakes_per_session": 6,
     "send_freshness_minutes": 5,
     "max_attempts": 3,
     "retry_seconds": 60,
-    "snapshot_every_minutes": 5,
-    "snapshot_from_local_time": "08:25",
     "email_subject_prefix": "TJ Market Watch:",
+    "event_operation_prefix": "mw-event-v1",
     "read_attribution_minutes": 30,
 }
 MESSAGE_POLICY = {
@@ -433,16 +438,14 @@ class MarketWatchRunner:
     """One idempotent pass at a time; every decision is reconstructed from the store."""
 
     def __init__(self, store: MarketWatchWakeStore, snapshots_dir: str | Path, *, outbox_dir: str | Path | None = None,
-                 clock=lambda: datetime.now(UTC), bounds=None, build=None, mail=_default_mail, push=_default_push,
+                 clock=lambda: datetime.now(UTC), bounds=None, mail=_default_mail, push=_default_push,
                  daily=_default_daily):
         self.store = store
         self.snapshots_dir = Path(snapshots_dir)
         self.outbox_dir = Path(outbox_dir) if outbox_dir else None
         self.clock = clock
         self.bounds = bounds
-        self.build = build
         self.mail, self.push, self.daily = mail, push, daily
-        self._last_build: datetime | None = None
         self._atr: dict[date, dict | None] = {}
 
     # The real exchange calendar is warmed once per pass; tests inject bounds.
@@ -469,28 +472,14 @@ class MarketWatchRunner:
         if bounds is None:
             return
         opened, closed = bounds
-        start = _at_local(day, WAKE_POLICY["snapshot_from_local_time"])
-        if not start <= now <= closed + timedelta(minutes=1):
+        if not opened <= now <= closed + timedelta(minutes=1):
             return
-        snapshot = self.refresh_snapshot(now, day)
+        from app.engine.market_watch_snapshot import read_latest_snapshot
+        snapshot = read_latest_snapshot(self.snapshots_dir, now)  # published by #315's timer, never here
         if snapshot is not None:
             self.record_events(snapshot, now, day)
         self.plan_wakes(now, day, closed, snapshot)
-        self.send_wakes(self.clock(), day)  # snapshot and ATR reads above may have taken a while
-
-    def refresh_snapshot(self, now: datetime, day: date) -> dict | None:
-        from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot, read_latest_snapshot
-        due_slot = any(_at_local(day, slot) <= now and (self._last_build is None or self._last_build < _at_local(day, slot))
-                       for slot in WAKE_POLICY["scheduled_local_times"])
-        if self._last_build is None or due_slot or now - self._last_build >= timedelta(minutes=WAKE_POLICY["snapshot_every_minutes"]):
-            try:
-                record = (self.build or build_snapshot)(now)
-                publish_snapshot(self.snapshots_dir, record)
-            except Exception:
-                log.exception("Market watch snapshot could not be published this pass")
-            finally:
-                self._last_build = now  # a failing source waits for the next cadence instead of hammering it
-        return read_latest_snapshot(self.snapshots_dir, now)
+        self.send_wakes(self.clock(), day)  # the ATR read above may have taken a while
 
     def _last_read(self, day: date) -> dict | None:
         notices = sorted(self.store.records("read_notice", day.isoformat()), key=lambda n: n["received_at"])
@@ -524,25 +513,24 @@ class MarketWatchRunner:
     def plan_wakes(self, now: datetime, day: date, closed: datetime, snapshot: dict | None) -> None:
         session = day.isoformat()
         planned = {w["ref"] for w in self.store.records("wake", session)}
-        grace = timedelta(minutes=WAKE_POLICY["scheduled_grace_minutes"])
-        for slot in WAKE_POLICY["scheduled_local_times"]:
-            due = _at_local(day, slot)
-            if slot in planned or due > now or due >= closed:
-                continue
-            late = now - due > grace
-            self._wake(now, day, snapshot, "scheduled", slot, due, "missed_late" if late else "send",
-                       "service was not running at the slot" if late else None)
+        gap = timedelta(minutes=WAKE_POLICY["event_min_gap_minutes"])
+        ahead = timedelta(minutes=WAKE_POLICY["coalesce_before_scheduled_minutes"])
+        # Jo's own scheduled reads (#315) count as wakes: an event just after one, or just before one, adds nothing.
+        scheduled = [slot for slot in WAKE_POLICY["jo_scheduled_local_times"]
+                     if _at_local(day, slot) < closed and now - gap < _at_local(day, slot) <= now + ahead]
         events = [e for e in self.store.records("event", session) if e["event_id"] not in planned and e["kind"] not in NO_WAKE_EVENTS]
         for event in events:
             wakes = self.store.records("wake", session)
             sent = [w for w in wakes if w["decision"] == "send"]
-            recent = [w for w in sent if now - parse_time(w["created_at"]) < timedelta(minutes=WAKE_POLICY["event_min_gap_minutes"])]
+            recent = [w for w in sent if now - parse_time(w["created_at"]) < gap]
             if event["late"]:
                 decision, reason = "event_late", "detected after the lag limit"
             elif sum(w["trigger"] == "event" for w in sent) >= WAKE_POLICY["event_wakes_per_session"]:
                 decision, reason = "rate_limited", "daily event-wake cap reached"
             elif recent:
                 decision, reason = "coalesced", f"within {WAKE_POLICY['event_min_gap_minutes']} minutes of {recent[-1]['wake_id']}"
+            elif scheduled:
+                decision, reason = "coalesced", f"next to Jo's scheduled {scheduled[0]} read"
             else:
                 decision, reason = "send", None
             self._wake(now, day, snapshot, "event", event["event_id"], parse_time(event["detected_at"]), decision, reason,
@@ -702,9 +690,11 @@ def runner_from_env() -> MarketWatchRunner | None:
 def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
     """Wakes → reads → messages → outcomes per session, plus the MW-1 evaluator's score groups.
 
-    A read is attributed to the first accepted wake before it (within the
-    attribution window and before the next accepted wake); reads carry no
-    wake ID, so this link is by time and labelled as such.
+    Triggers are MW-2 event wakes that went out plus Jo's scheduled reads (#315).
+    A read whose exported ``operation_id`` names its trigger
+    (``mw-event-v1:<wake ID>``, ``mw-scheduled-v1:<date>:<HH:MM>``) is linked
+    exactly; otherwise the first unclaimed read within the attribution window
+    (and before the next trigger) is linked by time and labelled so.
     """
     exported_reads, outcomes, session_outcomes = [], [], []
     if outcome_store is not None:
@@ -725,18 +715,35 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
         message_attempts = store.records("message_attempt", session)
         events = store.records("event", session)
         refusals = store.records("notice_refusal", session)
-        # Wakes that went out, or may have (``unknown``), can be answered by a read.
-        accepted = sorted(((parse_time(a["occurred_at"]), a["wake_id"]) for a in wake_attempts if a["result"] in ("accepted", "unknown")))
         read_times = {n["read_id"]: parse_time(n["received_at"]) for n in notices}
+        operations = {}
+        close_at = None
         for read in exported_reads:
             if read["session_date"] == session:
                 read_times.setdefault(read["read_id"], parse_time(read["received_at"]))
-        attributed: dict[str, str | None] = {}
+                operations[read.get("operation_id")] = read["read_id"]
+        for export in (outcome_store.imported_exports() if outcome_store is not None else []):
+            for inp in export["inputs"]:
+                if inp["snapshot_json"]["session_date"] == session and inp["snapshot_json"]["session_close_at"]:
+                    close_at = parse_time(inp["snapshot_json"]["session_close_at"])
+        day = date.fromisoformat(session)
+        # Event wakes that went out, or may have (``unknown``), and Jo's scheduled reads can be answered by a read.
+        triggers = sorted([(parse_time(a["occurred_at"]), a["wake_id"], f"{WAKE_POLICY['event_operation_prefix']}:{a['wake_id']}")
+                           for a in wake_attempts if a["result"] in ("accepted", "unknown")] +
+                          [(_at_local(day, slot), "scheduled:" + slot, f"{WAKE_POLICY['jo_scheduled_operation_prefix']}:{session}:{slot}")
+                           for slot in WAKE_POLICY["jo_scheduled_local_times"] if close_at is None or _at_local(day, slot) < close_at])
+        attributed: dict[str, tuple[str, str] | None] = {}
         claimed = set()
-        for index, (at, wake_id) in enumerate(accepted):
-            until = min(at + window, accepted[index + 1][0] if index + 1 < len(accepted) else at + window)
+        for _, key, operation in triggers:
+            if operations.get(operation):
+                attributed[key] = (operations[operation], "operation_id")
+                claimed.add(operations[operation])
+        for index, (at, key, _) in enumerate(triggers):
+            if key in attributed:
+                continue
+            until = min(at + window, triggers[index + 1][0] if index + 1 < len(triggers) else at + window)
             first = next((rid for rid, t in sorted(read_times.items(), key=lambda kv: kv[1]) if at <= t < until and rid not in claimed), None)
-            attributed[wake_id] = first
+            attributed[key] = (first, "time_window") if first else None
             if first:
                 claimed.add(first)
         wake_rows = []
@@ -744,13 +751,19 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             results = [a["result"] for a in wake_attempts if a["wake_id"] == wake["wake_id"]]
             delivery = next((r for r in TERMINAL if r in results), None) or ("failed_pending" if results else
                 "pending" if wake["decision"] == "send" else "not_sent")
-            read_id = attributed.get(wake["wake_id"])
+            read_id, link = attributed.get(wake["wake_id"]) or (None, None)
             outcome = "read" if read_id else "no_read" if delivery in ("accepted", "unknown") else (
                 "recorded_failure" if delivery in ("expired", "failed_pending") else wake["decision"])
             wake_rows.append({"wake_id": wake["wake_id"], "trigger": wake["trigger"], "ref": wake["ref"], "due_at": wake["due_at"],
                               "decision": wake["decision"], "reason": wake["reason"], "delivery": delivery,
-                              "attempts": results.count("sending"), "read_id": read_id, "attribution": "time_window" if read_id else None,
+                              "attempts": results.count("sending"), "read_id": read_id, "attribution": link,
                               "outcome": outcome})
+        scheduled_rows = []
+        for _, key, _ in triggers:
+            if key.startswith("scheduled:"):
+                read_id, link = attributed.get(key) or (None, None)
+                scheduled_rows.append({"slot": key.removeprefix("scheduled:"), "sent_by": "jo_scheduled_task (#315)",
+                                       "read_id": read_id, "attribution": link, "outcome": "read" if read_id else "no_read_seen"})
         message_rows = []
         for d in decisions:
             results = [a for a in message_attempts if a["message_id"] == d["message_id"]]
@@ -768,13 +781,14 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             status_counts[o["status"]] = status_counts.get(o["status"], 0) + 1
         notice_ids = {n["read_id"] for n in notices}
         mismatched = [n["read_id"] for n in notices if n["read_id"] in exported and exported[n["read_id"]]["content_sha256"] != n["read_sha256"]]
-        scheduled = [w for w in wake_rows if w["trigger"] == "scheduled"]
-        triggered = [w for w in wake_rows if w["trigger"] == "event"]
+        triggered = wake_rows
         by_session[session] = {
             "events": {"total": len(events), "late": sum(e["late"] for e in events),
                        "by_kind": {k: sum(e["kind"] == k for e in events) for k in sorted({e["kind"] for e in events})}},
             "wakes": wake_rows,
-            "wake_summary": {"scheduled": len(scheduled), "scheduled_sent": sum(w["delivery"] == "accepted" for w in scheduled),
+            "scheduled_reads": scheduled_rows,
+            "wake_summary": {"jo_scheduled_slots": len(scheduled_rows),
+                             "jo_scheduled_with_read": sum(r["outcome"] == "read" for r in scheduled_rows),
                              "event_wakes_sent": sum(w["delivery"] == "accepted" for w in triggered),
                              "event_wakes_withheld": sum(w["decision"] != "send" for w in triggered),
                              "with_read": sum(w["outcome"] == "read" for w in wake_rows),
@@ -807,6 +821,7 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
             "wake_policy_version": WAKE_POLICY["wake_policy_version"],
             "message_policy_version": MESSAGE_POLICY["message_policy_version"], "sessions": by_session,
             "scores": outcome_store.report(exported_reads) if outcome_store is not None else None,
-            "limits": ["read-to-wake links are by time window, not by an ID in the read; wakes with an unknown send count as sent",
+            "limits": ["reads link to a trigger by operation_id when exported, else by time window; wakes with an unknown send count as sent",
+                  "scheduled reads are #315's Jo task; MW-2 did not send them and cannot see a scheduled run that saved nothing",
                        "independence-unverified: reads are advice to Isaac and never feed Shadow Isaac or S1",
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}
