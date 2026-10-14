@@ -47,6 +47,7 @@ send the evidence, not a retry.
 | SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
 | SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
 | SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
+| Candle access | Frozen v2 packet + rolling/direct candle tool | lead | Sol, high | 2 | SH-3/SH-4 | Implemented in this PR — frozen packets, rolling exchange, direct fallback and focused regression coverage; merge/deployment pending |
 | SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange and SMTP active at `23b7c6c`; self-sent Gmail wake-up repaired with a tested owner-account relay; enabled v4 production task restored; actual Jo decision and first-session acceptance pending |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Built — display-only links and day/cumulative comparisons |
@@ -75,7 +76,7 @@ send the evidence, not a retry.
 written by the API with an atomic rename, mode 0640, group `tj-check`:
 
 ```json
-{"format": "shadow-setup-v1", "candidate_id": "<uuid>", "scanner_version": "s1-v1",
+{"format": "shadow-setup-v2", "candidate_id": "<uuid>", "scanner_version": "s1-v1",
  "params_hash": "<64 hex>", "session_date": "YYYY-MM-DD", "symbol": "SPY",
  "setup": "orb|fade", "direction": "long|short", "bar_start": "<ISO UTC Z>",
  "bar_end": "<ISO UTC Z>", "detected_at": "<ISO UTC Z>", "expires_at": "<ISO UTC Z>",
@@ -85,6 +86,14 @@ written by the API with an atomic rename, mode 0640, group `tj-check`:
 
 `facts` and `contract` are copied unchanged from `scanner_candidate`. The check
 service rejects a file whose hash, name or `format` disagree.
+
+New v2 files additionally carry `candles`, `candles_as_of`, and an explicit
+`candles_unavailable` reason when detection bars were not persisted. `candles`
+contains `source`, `feed`, `last_bar_time`, `1m` (last 60) and `5m` (session).
+Rows are completed and frozen with the candidate. Existing v1 files/decision
+hashes remain supported. Rolling `scanner-candles-v1` files beside setups carry
+up to 120 one-minute bars and the session five-minute bars; SH-3 provisions the
+same API-owner/check-reader setgid permissions, and SH-4 publishes each pass.
 
 **Decision file** `/var/lib/tradejournal-check/shadow-outbox/decision-<candidate_id>.json`,
 written by the check service with an atomic rename:
@@ -326,7 +335,9 @@ Isaac-only steps are marked ⚑.
    press **Refresh tools**.
 4. ⚑ Replace Jo's Gmail task instructions with: "For each `TJ Setup:` email
    still before its stale time: first call `shadow_setup` with the setup ID,
-   then `shadow_decide` with take or skip and one reason. Do not call any other
+   use its frozen packet candles (or explicitly note they are unavailable),
+   then `shadow_decide` with take or skip and one reason. Use `candles` only
+   after committing, never the hosted Alpaca connector. Do not call any other
    tool before that. Then run `pre_trade_check` with the JSON inputs and
    `attach_model_verdict`. Message me only when your co-pilot verdict is Go."
 5. First session: confirm every setup has a decision or no-response, at least
@@ -470,3 +481,29 @@ Only with both can a shadow result drop `independence-unverified`. Sol, high.
 ### S4 — shadow chooses contract and exits
 A new versioned policy where `shadow_decide` may pick strike/expiration within
 the contract rule's limits and its own stop/target. Needs S2 evidence first.
+
+
+### Candle v2 rollout — after merge only
+
+This change is not activated by the PR. Schedule the merge/autodeploy and all
+operator work outside **09:25–16:15 America/New_York**. Follow the existing
+release sequence above: successful exact-main deployment package, verified
+hashes, stage, `check_control.py upgrade` with its exact manifest approval.
+Rerun the idempotent `enable-shadow-exchange` to create the `candles` sibling
+(mode 2750, API owner, tj-check group). Legacy exchange receipts upgrade in
+place; unknown ACLs/ownership still refuse. The API's existing optional
+`ReadWritePaths=-/var/lib/tradejournal-shadow` covers both directories; no new
+socket, route, database role, OAuth grant or credential is needed. Then restart
+under the normal outside-market-hours procedure and check health.
+
+Verify in the actual service mount namespaces: API can write rolling files,
+tj-check can read but cannot write them, files are 0640 with group tj-check,
+and API still cannot read the check ledger. Verify fresh scanner provenance,
+stale-file fallback to direct IEX, unavailable responses, and tool call logging
+using approved non-decision checks. Do not manufacture live shadow decisions.
+
+**Owner handoff:** Refresh tools in ChatGPT and confirm `candles` is listed.
+Apply the task-text suggestion above separately: packet candles for decisions,
+`candles` only after commit, Go-only alerts unchanged. Record the rollout cutoff
+for SC-0 and report pre-v2/post-v2 sessions separately. No live task or deployment
+is changed by this implementation PR.

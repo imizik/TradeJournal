@@ -35,9 +35,9 @@ def utc_z(value: datetime) -> str:
     return aware.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def setup_payload(candidate) -> dict:
+def setup_payload(candidate, candles=None, *, version=SETUP_FORMAT) -> dict:
     payload = {
-        "format": SETUP_FORMAT,
+        "format": version,
         "candidate_id": str(candidate.id),
         "scanner_version": candidate.scanner_version,
         "params_hash": candidate.params_hash,
@@ -55,6 +55,10 @@ def setup_payload(candidate) -> dict:
         "facts": json.loads(candidate.facts_json),
         "contract": json.loads(candidate.contract_json),
     }
+    if version == "shadow-setup-v2":
+        payload.update({"candles": candles, "candles_as_of": candles.get("last_bar_time") if candles else None})
+        if not candles:
+            payload["candles_unavailable"] = "scanner bars were not frozen at detection"
     payload["content_sha256"] = digest(payload)
     return payload
 
@@ -83,13 +87,13 @@ def atomic_write(path: Path, value: dict) -> None:
             raise
 
 
-def write_setup(directory: str | Path, candidate) -> dict:
-    payload = setup_payload(candidate)
+def write_setup(directory: str | Path, candidate, candles=None) -> dict:
+    payload = setup_payload(candidate, candles, version="shadow-setup-v2")
     atomic_write(Path(directory) / f"setup-{candidate.id}.json", payload)
     return payload
 
 
-def read_decision(directory: str | Path, candidate) -> dict | None:
+def read_decision(directory: str | Path, candidate, candles=None) -> dict | None:
     path = Path(directory) / f"decision-{candidate.id}.json"
     try:
         raw = path.read_bytes()
@@ -109,8 +113,9 @@ def read_decision(directory: str | Path, candidate) -> dict | None:
         raise ShadowExchangeError("decision candidate ID or filename is invalid")
     if not isinstance(supplied_hash, str) or supplied_hash != digest(unhashed):
         raise ShadowExchangeError("decision content hash is invalid")
-    expected_setup_hash = setup_payload(candidate)["content_sha256"]
-    if value.get("setup_sha256") != expected_setup_hash:
+    expected_hashes = {setup_payload(candidate)["content_sha256"],
+        setup_payload(candidate, candles, version="shadow-setup-v2")["content_sha256"]}
+    if value.get("setup_sha256") not in expected_hashes:
         raise ShadowExchangeError("decision setup hash does not match the saved candidate")
     if value.get("decision") not in ("take", "skip") or value.get("timing") not in ("on_time", "late"):
         raise ShadowExchangeError("decision or timing value is invalid")
@@ -122,3 +127,14 @@ def read_decision(directory: str | Path, candidate) -> dict | None:
         raise ShadowExchangeError("decision commit time is invalid") from exc
     return value
 
+
+
+def candle_packet(minutes, five_minutes, cutoff, *, limit):
+    """Copy observed completed rows only; no resampling or filling missing minutes."""
+    one = [dict(row) for row in minutes if row["end_time"] <= cutoff][-limit:]
+    five = [dict(row) for row in five_minutes if row["end"] <= cutoff]
+    if not one:
+        return None
+    return {"source": "tradier_timesales_1min", "feed": "full_market",
+        "last_bar_time": utc_z(datetime.fromtimestamp(one[-1]["end_time"], UTC)),
+        "1m": one, "5m": five}

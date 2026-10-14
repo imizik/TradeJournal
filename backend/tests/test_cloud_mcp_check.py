@@ -133,7 +133,7 @@ def test_catalog_metadata_and_scopes(harness):
         assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == [*SCOPES.split(), "shadow:decide", "offline_access"]
         tools = {t["name"]: t for t in rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]}
         assert set(tools) == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide"}
+        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide", "candles"}
         assert tools["review_checks"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]
         assert tools["pre_trade_check"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:run"]}]
         assert tools["attach_model_verdict"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:note"]}]

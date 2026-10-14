@@ -331,7 +331,7 @@ def shadow_host(tmp_path, monkeypatch):
             values = list(info)
             values[4] = 0  # This fixture models the root-only operator.
             return os.stat_result(values)
-        if path in (control.SHADOW, control.SHADOW / 'setups', control.STATE / 'shadow-outbox'):
+        if path in (control.SHADOW, control.SHADOW / 'setups', control.SHADOW / 'candles', control.STATE / 'shadow-outbox'):
             values = list(info)
             values[0] = (info.st_mode & ~0o7777) | modes.get(str(path), info.st_mode & 0o7777)
             values[4] = uid if path.name == 'shadow-outbox' else uid + 1
@@ -405,3 +405,21 @@ def test_shadow_disable_removes_only_existing_grants(shadow_host):
     calls.clear()
     control.shadow_exchange(False)
     assert not any(c[0] == 'setfacl' for c in calls)
+
+
+def test_candle_exchange_legacy_receipt_permissions_and_acl(shadow_host):
+    calls, acls, _ = shadow_host
+    result = control.shadow_exchange(True)
+    candles = control.SHADOW / 'candles'
+    assert candles.stat().st_mode & 0o7777 == 0o2750
+    assert candles.stat().st_uid == result['api_uid']
+    assert candles.stat().st_gid == control.installed()['gid']
+    # An existing activation receipt upgrades without weakening its identity check.
+    receipt = control.ROOT / 'shadow-exchange.json'
+    receipt.write_text(json.dumps({k: v for k, v in result.items() if k != 'candles'}))
+    assert control.shadow_exchange(True)['candles'] == str(candles)
+    calls.clear()
+    acls[str(candles)] = 'user::rwx\ngroup::r-x\nother::r-x\n'
+    with pytest.raises(ValueError, match='Unknown shadow exchange ACL'):
+        control.shadow_exchange(True)
+    assert not any(c[0] in ('chown', 'setfacl') for c in calls)

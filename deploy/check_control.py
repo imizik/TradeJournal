@@ -451,15 +451,18 @@ def shadow_exchange(enable):
     if api.pw_uid == service_uid or api.pw_gid == gid or gid in os.getgrouplist(API_USER, api.pw_gid):
         raise ValueError("API identity must not belong to the check group")
     outbox, setups = STATE / "shadow-outbox", SHADOW / "setups"
+    candles = SHADOW / "candles"
     receipt = exact(ROOT / "shadow-exchange.json", exists=False)
     result = {"enabled": enable, "ledger_readable_by_api": False, "api_uid": api.pw_uid,
-        "setups": str(setups), "outbox": str(outbox)}
+        "setups": str(setups), "outbox": str(outbox), "candles": str(candles)}
     if receipt.exists():
         info = receipt.stat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
             raise ValueError("Require a root-private shadow exchange receipt")
         previous = json.loads(receipt.read_text())
-        if not isinstance(previous, dict) or type(previous.get("enabled")) is not bool or previous != {**result, "enabled": previous["enabled"]}:
+        expected = {**result, "enabled": previous.get("enabled")} if isinstance(previous, dict) else {}
+        legacy = {k: v for k, v in expected.items() if k != "candles"}
+        if not isinstance(previous, dict) or type(previous.get("enabled")) is not bool or previous not in (expected, legacy):
             raise ValueError("Unknown shadow exchange receipt")
     ledger = exact(STATE / "ledger.db")
     if not ledger.is_file() or ledger.stat().st_uid != service_uid or ledger.stat().st_mode & 0o077:
@@ -470,6 +473,7 @@ def shadow_exchange(enable):
         raise ValueError("Unknown check state ownership")
     state_acl = _exchange_acl(STATE, {"user::rwx", "group::---", "other::---", reader + "--x", "mask::--x", "mask::---"})
     directories = ((SHADOW, api.pw_uid, gid, 0o2750), (setups, api.pw_uid, gid, 0o2750),
+        (candles, api.pw_uid, gid, 0o2750),
         (outbox, service_uid, gid, 0o750))
     outbox_acl = set()
     for path, uid, group, mode in directories:

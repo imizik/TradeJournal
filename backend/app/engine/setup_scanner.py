@@ -138,9 +138,11 @@ class SetupScanner:
         self.engine, self.feed, self.calendar, self.options, self.clock = engine, feed, calendar, options, clock
         self.quote = quote
         self._scanned: dict[str, int] = {}  # per symbol, the newest 5-minute bar end already judged
+        self._pass_minutes = {}
         self._atr: dict[tuple[str, date], float | None] = {}
 
     def run(self) -> None:
+        self._pass_minutes = {}
         now = self.clock()
         today = datetime.fromtimestamp(now, ET).date()
         session = regular_session(today, self.calendar.hours(today))
@@ -158,6 +160,10 @@ class SetupScanner:
                     self.email(today)  # a setup saved on this pass goes out now, not 20 seconds later
                 except Exception:
                     log.exception("Setup emails failed this pass")
+                try:
+                    self.publish_candles(today, session)
+                except Exception:
+                    log.exception("Scanner candle publication failed this pass")
 
     # -------------------------------------------------------------- scanning
 
@@ -220,6 +226,13 @@ class SetupScanner:
         with Session(self.engine) as db:
             db.add(candidate)
             try:
+                db.flush()
+                # Persist with the candidate; recovery never refetches decision bars.
+                if contract is not None:
+                    frozen = shadow_exchange.candle_packet(complete, bars, min(bar_end, detected), limit=60)
+                    db.add(ScannerEvent(candidate_id=candidate.id, key="shadow_candles", event_type="shadow_candles",
+                        effective_at=_utc(detected), recorded_at=_utc(detected),
+                        data_json=json.dumps({"candles": frozen})))
                 db.commit()
             except IntegrityError:
                 db.rollback()
@@ -251,7 +264,8 @@ class SetupScanner:
 
     def _minutes(self, symbol: str, today: date) -> list[dict]:
         # The same request the Practice paper watcher makes for a same-day plan, so a shared cache entry.
-        data, _, issue = self.feed.read("/v1/markets/timesales", {
+        observed_at = self.clock()
+        data, fetched_at, issue = self.feed.read("/v1/markets/timesales", {
             "symbol": symbol, "interval": "1min", "session_filter": "all",
             "start": today.strftime("%Y-%m-%d 04:00"), "end": today.strftime("%Y-%m-%d 20:00"),
         }, 15)
@@ -259,7 +273,36 @@ class SetupScanner:
             raise ChartFeedError(f"minute bars not current: {issue}")
         series = (data or {}).get("series") or {}
         rows = series.get("data") if isinstance(series, dict) else None
-        return normalize_bars(rows if isinstance(rows, list) else [rows] if isinstance(rows, dict) else [])
+        result = normalize_bars(rows if isinstance(rows, list) else [rows] if isinstance(rows, dict) else [])
+        self._pass_minutes[symbol] = (result, min(observed_at, fetched_at))
+        return result
+
+    def publish_candles(self, today, session):
+        """Refresh the scanner universe each pass independently of signal eligibility."""
+        setups = os.environ.get("SHADOW_SETUPS_DIR")
+        if not setups or not session.open_at <= self.clock() <= session.close_at:
+            return
+        from pathlib import Path
+        directory = Path(setups).parent / "candles"
+        # The operator owns directory creation and its setgid/read permissions.
+        if not directory.is_dir():
+            return
+        with Session(self.engine) as db:
+            symbols = scanner_settings.read_settings(db)["symbols"]
+        for symbol in symbols:
+            try:
+                if symbol not in self._pass_minutes:
+                    self._minutes(symbol, today)
+                minutes, observed_at = self._pass_minutes[symbol]
+                cutoff = min(observed_at, session.close_at)
+                complete = [m for m in minutes if session.open_at <= m["time"] and m["end_time"] <= cutoff]
+                five = rules.five_minute_bars(complete, session.open_at, session.close_at)
+                packet = shadow_exchange.candle_packet(complete, five, cutoff, limit=120)
+                if packet:
+                    shadow_exchange.atomic_write(directory / f"{symbol}.json",
+                        {"format": "scanner-candles-v1", "symbol": symbol, **packet})
+            except Exception:
+                log.exception("Scanner candle publication failed for %s", symbol)
 
     # -------------------------------------------------------------- the paper trades
 
@@ -309,7 +352,7 @@ class SetupScanner:
                     self._store(candidate, "shadow_handoff", now, {"status": "expired"})
                 else:
                     try:
-                        shadow_exchange.write_setup(setups_dir, candidate)
+                        shadow_exchange.write_setup(setups_dir, candidate, state.get("shadow_candles", {}).get("candles"))
                     except Exception as exc:
                         log.warning("Shadow setup handoff for %s failed this pass: %s", candidate.id, exc)
                     else:
@@ -323,7 +366,7 @@ class SetupScanner:
                 if "shadow_decision" in state or "shadow_unresolved" in state:
                     continue
                 try:
-                    decision = shadow_exchange.read_decision(outbox_dir, candidate)
+                    decision = shadow_exchange.read_decision(outbox_dir, candidate, state.get("shadow_candles", {}).get("candles"))
                 except shadow_exchange.ShadowExchangeError as exc:
                     self._store(candidate, "shadow_unresolved", self.clock(), {"reason": str(exc)})
                     continue

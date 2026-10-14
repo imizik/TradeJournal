@@ -6,6 +6,9 @@ order IDs or raw fill keys (the entry fill key is replaced by its SHA-256).
 """
 import argparse
 
+# candles reads only public market data under existing check:read. It uses the
+# scanner file exchange or the already-scoped Provider; no SQL view/grant changes.
+
 VIEW = "pretrade_feature_source"
 POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"

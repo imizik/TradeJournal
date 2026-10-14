@@ -38,6 +38,8 @@ plan, work split and model guidance are in the [shadow build plan](shadow-build-
 `shadow_setup` returns only:
 
 - the frozen setup as saved (facts, rule stop/target, contract, `expires_at`);
+- v2 packet candles: the last 60 completed one-minute bars actually scanned and
+  session-to-date completed five-minute bars, frozen at detection;
 - the live packet the pre-trade check builds for that ticker (price, VWAP,
   opening range, relative volume, levels, option quote), with source times;
 - Isaac's closed-trade aggregates from the published feature rows, computed
@@ -67,9 +69,9 @@ S1 therefore records evidence instead of claiming isolation:
 **Setup handoff (private backend → check service).** When the scanner saves a
 setup with a contract, the private backend writes it at once as a
 content-addressed `setup-<candidate_id>.json` (the frozen `scanner_candidate`
-fields only: ID, symbol, setup, direction, bar times, `detected_at`,
+fields: ID, symbol, setup, direction, bar times, `detected_at`,
 `expires_at`, stop, target, flags, facts, contract, scanner version and
-params hash) into `/var/lib/tradejournal-shadow/setups/`, written by the API
+params hash, plus frozen candles in `shadow-setup-v2`) into `/var/lib/tradejournal-shadow/setups/`, written by the API
 user and readable by `tj-check`. The check service already reads any path its
 unit does not hide, so this needs no database role, view or timer and adds no
 publication lag. The API unit gains `ReadWritePaths=-/var/lib/tradejournal-shadow` (optional until activation).
@@ -77,12 +79,42 @@ publication lag. The API unit gains `ReadWritePaths=-/var/lib/tradejournal-shado
 **Tools on `/check/mcp`, new scope `shadow:decide`:**
 
 - `shadow_setup(candidate_id)` → `{schema_version, candidate, live, history,
-  history_cutoff, labels, published_at}`. Read-only, logged.
+  history_cutoff, labels, published_at, candles, candles_as_of}`. Read-only, logged.
+  v1 remains readable; absent candles return `candles_unavailable` with a reason.
+  The returned candles are unchanged from the handoff. No bars are forward-filled.
 - `shadow_decide(candidate_id, decision: "take"|"skip", reason ≤ 1000 chars)`
   → `{decision_id, candidate_id, decision, reason, committed_at, timing:
   "on_time"|"late", clean_order, labels, content_sha256}`. One immutable row
   per (actor, candidate); an identical retry returns the original, different
   content conflicts. An unknown or non-today candidate is refused.
+
+
+**Manual candles, existing `check:read` scope.** `candles(symbol, interval:
+"1m"|"5m", bars=60)` accepts 1–120 bars. Use the packet candles for the shadow
+decision; use this tool only **after committing**, or for a separate manual
+question. It is logged like every other tool. A call between publication and
+commit makes `clean_order=false`; no exception is added for candle reads.
+
+Each scanner pass atomically publishes per-symbol rolling files in
+`/var/lib/tradejournal-shadow/candles/`, beside setups, with up to 120 completed
+one-minute bars and session-to-date completed five-minute bars. Rows have Unix
+UTC start/end timestamps; `last_bar_time` is the last completed bar's end in ISO
+UTC. Source is `tradier_timesales_1min`, feed `full_market`. The tool uses a file
+only when its latest one-minute bar is at most 120 seconds old (never future).
+Otherwise it makes one bounded regular-session request through the existing
+Provider directly to Alpaca's data API, explicitly labelled `feed=iex`. There
+is no hosted Alpaca MCP dependency, pagination loop, retry, or new credential.
+Every response carries source, feed, last-bar time and age; unavailable data
+has null time/age and `candles_unavailable`. The response deadline for file and
+provider work is four seconds, below the 15-second proxy response-header budget;
+the provider keeps its existing three-second timeout and short cache. Up to four
+reads may remain in flight; a timed-out worker retains its slot until completion.
+The hosted ChatGPT caller's budget is not configurable here.
+
+Packet candles are persisted with the candidate before handoff, so a restart
+cannot replace them with later observations. Original v1 setup hashes remain
+valid for importing old decisions. Candidate facts, detection, rules and email
+payloads are unchanged. Missing bars are missing observations, never synthetic.
 
 **Decision export (check service → private backend).** On each commit the
 check service also writes the row as `decision-<candidate_id>.json` (atomic
@@ -101,6 +133,9 @@ decision to priced entry or exit, quotes updated at or after the decision, a
 late-noticed exit condition ends `shadow_unresolved`. No new table or migration.
 
 ## Scorecard (S1 version)
+
+Report sessions before and after the v2 candle rollout separately; they have
+different information available to Jo and must not be pooled as equivalent evidence.
 
 Per day and cumulative: setups; Shadow Isaac TAKE / SKIP / late / no response;
 rules-only P&L over all priced setups; Shadow Isaac P&L over its priced TAKEs;
