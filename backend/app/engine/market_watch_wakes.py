@@ -14,9 +14,11 @@ seconds in the API process) does, in order:
    (``MESSAGE_POLICY``), within a daily discretionary budget; corrections
    always go out.
 
-Every event, wake, attempt, notice, message decision and failure is an
-append-only row in an owner-selected SQLite file, separate from the journal
-database and from the check ledger. Nothing here places, sizes or arms an
+Every event, wake, send attempt (recorded before the send starts), notice,
+refused notice, message decision and failure is an append-only row in an
+owner-selected SQLite file, separate from the journal database and from the
+check ledger. A send whose outcome is uncertain (crash mid-send, a transport
+timeout after the request went out) is recorded ``unknown`` and never resent. Nothing here places, sizes or arms an
 order, touches S1 or shadow S1, or feeds Shadow Isaac: reads are advice to
 Isaac only. Thresholds are frozen and versioned; changing one is a new version.
 """
@@ -77,10 +79,13 @@ MESSAGE_POLICY = {
     "max_attempts": 3,
     "retry_seconds": 60,
     "max_chars": 3500,
+    "budget_free_corrections_per_session": 3,
     "cautions": ["puts in the first 15 minutes", "chasing extended moves", "late-day holds"],
 }
 POLICY_SHA256 = digest({"detector": DETECTOR, "wakes": WAKE_POLICY, "messages": MESSAGE_POLICY})
-KINDS = ("event", "wake", "wake_attempt", "read_notice", "message_decision", "message_attempt")
+KINDS = ("event", "wake", "wake_attempt", "read_notice", "notice_refusal", "message_decision", "message_attempt")
+NO_WAKE_EVENTS = ("minute_gap",)  # recorded so a blind spot is visible, never a reason to wake Jo
+TERMINAL = ("accepted", "expired", "unknown")
 APPLICATION_ID = 0x4D574431  # MWD1: the isolated MW-2 wake/delivery file.
 NOTICE_LIMIT = 64 * 1024
 
@@ -215,16 +220,18 @@ def detect_events(snapshot: dict, *, detected_at: datetime, atr: dict | None = N
         return events
     opened = parse_time(snapshot["session_open_at"])
     bars = _spy_bars(snapshot)
-    contiguous = []
-    for bar in bars:
-        expected = opened + timedelta(minutes=len(contiguous))
-        if parse_time(bar["start"]) != expected:
-            break  # a missing minute ends the reproducible VWAP/OR path; nothing is invented after it
-        contiguous.append(bar)
+    # A missing minute ends the reproducible VWAP (nothing is invented after it) and is
+    # recorded once; OR levels, session extremes and ATR moves keep using the real bars.
+    gap_at = next((i for i, bar in enumerate(bars) if parse_time(bar["start"]) != opened + timedelta(minutes=i)), None)
+    if gap_at is not None:
+        expected = opened + timedelta(minutes=gap_at)
+        events.append(_event(snapshot, "minute_gap", [_iso(expected)], _iso(expected + timedelta(minutes=1)), detected_at,
+                             {"missing_from": _iso(expected), "next_bar_start": bars[gap_at]["start"],
+                              "effect": "vwap_events_stop_for_the_session"}))
     or_high = or_low = None
-    if len(contiguous) >= 15:
-        or_high = max(bar["high"] for bar in contiguous[:15])
-        or_low = min(bar["low"] for bar in contiguous[:15])
+    if all(parse_time(bar["start"]) == opened + timedelta(minutes=i) for i, bar in enumerate(bars[:15])) and len(bars) >= 15:
+        or_high = max(bar["high"] for bar in bars[:15])
+        or_low = min(bar["low"] for bar in bars[:15])
     extreme_after = _local_minutes(DETECTOR["session_extreme_after_local_time"])
     pv = volume = 0.0
     high = low = None
@@ -237,11 +244,13 @@ def detect_events(snapshot: dict, *, detected_at: datetime, atr: dict | None = N
         previous = last_fire.get(key)
         return previous is None or at - previous >= timedelta(minutes=minutes)
 
-    for index, bar in enumerate(contiguous):
+    for index, bar in enumerate(bars):
         end = parse_time(bar["end"])
-        pv += ((bar["high"] + bar["low"] + bar["close"]) / 3) * bar["volume"]
-        volume += bar["volume"]
-        vwap = pv / volume if volume > 0 else None
+        vwap = None
+        if gap_at is None or index < gap_at:
+            pv += ((bar["high"] + bar["low"] + bar["close"]) / 3) * bar["volume"]
+            volume += bar["volume"]
+            vwap = pv / volume if volume > 0 else None
         local = end.astimezone(ET)
         bar_brief = {k: bar[k] for k in ("start", "end", "open", "high", "low", "close")}
         if high is not None and local.hour * 60 + local.minute >= extreme_after:
@@ -252,7 +261,7 @@ def detect_events(snapshot: dict, *, detected_at: datetime, atr: dict | None = N
                                          {"prior_extreme": level, "bar": bar_brief}))
         high = bar["high"] if high is None else max(high, bar["high"])
         low = bar["low"] if low is None else min(low, bar["low"])
-        if index >= DETECTOR["levels_from_minutes_after_open"]:
+        if end - opened > timedelta(minutes=DETECTOR["levels_from_minutes_after_open"]):
             for name, value in (("vwap", vwap), ("or15_high", or_high), ("or15_low", or_low)):
                 if value is None:
                     continue
@@ -327,7 +336,10 @@ def validate_notice(notice: dict, snapshots_dir: str | Path, now: datetime) -> d
     for field in ("main_text", "alternative_text", "invalidation_text", "change_summary"):
         if not isinstance(notice[field], str) or not notice[field].strip() or len(notice[field]) > 2000:
             raise ValueError("read notice text is invalid")
-    if not isinstance(notice["forecasts"], list) or {f.get("horizon") for f in notice["forecasts"]} != {"30m", "60m", "close"}:
+    forecasts = notice["forecasts"]
+    if (not isinstance(forecasts, list) or len(forecasts) != 3 or not all(isinstance(f, dict) and set(f) == {"horizon", "probability"} for f in forecasts)
+            or {f["horizon"] for f in forecasts} != {"30m", "60m", "close"}
+            or not all(f["probability"] is None or (type(f["probability"]) in (int, float) and 0 <= f["probability"] <= 1) for f in forecasts)):
         raise ValueError("read notice forecasts are invalid")
     received = parse_time(notice["received_at"])
     if received > now:
@@ -374,6 +386,24 @@ def message_text(notice: dict) -> tuple[str, str]:
 
 
 # ----------------------------------------------------------------- runner
+
+def _classify(exc: BaseException) -> tuple[str, str]:
+    """``failed`` when the request surely never reached the transport, else ``unknown`` (never resent)."""
+    import httpx
+    import smtplib
+    if str(exc) in ("mail_not_configured", "ntfy_not_configured"):
+        return "failed", str(exc)
+    chain, seen = [], exc
+    while seen is not None and len(chain) < 5:
+        chain.append(seen)
+        seen = seen.__cause__ or seen.__context__
+    if any(isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError,
+                          smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, ConnectionRefusedError)) for e in chain):
+        return "failed", type(chain[-1]).__name__
+    if any(isinstance(e, (TimeoutError, httpx.TimeoutException, smtplib.SMTPServerDisconnected)) for e in chain):
+        return "unknown", type(chain[-1]).__name__
+    return "failed", type(chain[-1]).__name__
+
 
 def _default_mail(subject: str, body: str) -> str | None:
     from app.engine import scanner_mail
@@ -426,11 +456,10 @@ class MarketWatchRunner:
         return session_bounds(day)
 
     def run_once(self) -> None:
-        now = self.clock()
-        day = now.astimezone(ET).date()
+        day = self.clock().astimezone(ET).date()
         for step in (self.ingest_notices, lambda n: self.pass_session(n, day), self.deliver_messages):
             try:
-                step(now)
+                step(self.clock())  # freshness is judged when each step starts, not when the pass began
             except Exception:
                 log.exception("Market watch pass step failed")
 
@@ -446,7 +475,7 @@ class MarketWatchRunner:
         if snapshot is not None:
             self.record_events(snapshot, now, day)
         self.plan_wakes(now, day, closed, snapshot)
-        self.send_wakes(now, day)
+        self.send_wakes(self.clock(), day)  # snapshot and ATR reads above may have taken a while
 
     def refresh_snapshot(self, now: datetime, day: date) -> dict | None:
         from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot, read_latest_snapshot
@@ -502,7 +531,7 @@ class MarketWatchRunner:
             late = now - due > grace
             self._wake(now, day, snapshot, "scheduled", slot, due, "missed_late" if late else "send",
                        "service was not running at the slot" if late else None)
-        events = [e for e in self.store.records("event", session) if e["event_id"] not in planned]
+        events = [e for e in self.store.records("event", session) if e["event_id"] not in planned and e["kind"] not in NO_WAKE_EVENTS]
         for event in events:
             wakes = self.store.records("wake", session)
             sent = [w for w in wakes if w["decision"] == "send"]
@@ -526,23 +555,34 @@ class MarketWatchRunner:
 
     def _deliver(self, kind, now, session, parent_field, parent_id, created, freshness, policy, channel, send, extra=None):
         attempts = [a for a in self.store.records(kind, session) if a.get(parent_field) == parent_id]
-        if any(a["result"] in ("accepted", "expired") for a in attempts):
+        if any(a["result"] in TERMINAL for a in attempts):
+            return
+        started = [a for a in attempts if a["result"] == "sending"]
+        settled = {a["attempt"] for a in attempts if a["result"] == "failed"}
+        orphan = next((a for a in started if a["attempt"] not in settled), None)
+        if orphan is not None:
+            # The process stopped between starting a send and recording its result: it may have gone out.
+            self._attempt(kind, now, session, parent_field, parent_id, orphan["attempt"], "unknown", channel,
+                          error="result_not_recorded", extra=extra)
             return
         tries = [a for a in attempts if a["result"] == "failed"]
-        if now - created > timedelta(minutes=freshness) or len(tries) >= policy["max_attempts"]:
-            reason = "past_freshness" if now - created > timedelta(minutes=freshness) else "attempts_exhausted"
-            self._attempt(kind, now, session, parent_field, parent_id, len(tries), "expired", channel, error=reason, extra=extra)
+        stale = now - created > timedelta(minutes=freshness)
+        if stale or len(tries) >= policy["max_attempts"]:
+            self._attempt(kind, now, session, parent_field, parent_id, len(tries), "expired", channel,
+                          error="past_freshness" if stale else "attempts_exhausted", extra=extra)
             return
         if tries and now - parse_time(tries[-1]["occurred_at"]) < timedelta(seconds=policy["retry_seconds"]):
             return
+        number = len(tries) + 1
+        self._attempt(kind, self.clock(), session, parent_field, parent_id, number, "sending", channel, extra=extra)
         try:
             receipt = send()
         except Exception as exc:
-            code = str(exc) if str(exc) in ("mail_not_configured", "ntfy_not_configured") else type(exc).__name__
-            self._attempt(kind, now, session, parent_field, parent_id, len(tries) + 1, "failed", channel, error=code, extra=extra)
-            log.warning("Market watch %s %s attempt failed: %s", channel, parent_id, code)
+            result, code = _classify(exc)
+            self._attempt(kind, self.clock(), session, parent_field, parent_id, number, result, channel, error=code, extra=extra)
+            log.warning("Market watch %s %s attempt %s: %s", channel, parent_id, result, code)
             return
-        self._attempt(kind, self.clock(), session, parent_field, parent_id, len(tries) + 1, "accepted", channel, receipt=receipt, extra=extra)
+        self._attempt(kind, self.clock(), session, parent_field, parent_id, number, "accepted", channel, receipt=receipt, extra=extra)
 
     def send_wakes(self, now: datetime, day: date) -> None:
         session = day.isoformat()
@@ -559,18 +599,29 @@ class MarketWatchRunner:
             return
         from app.engine.market_watch_snapshot import _read_bounded
         known = {n["read_id"] for n in self.store.records("read_notice")}
+        refused = {r["refusal_id"] for r in self.store.records("notice_refusal")}
         found = []
         for path in self.outbox_dir.glob("read-mwr_*.json"):
             read_id = path.name[len("read-"):-len(".json")]
             if read_id in known:
                 continue
+            raw = None
             try:
-                notice = json.loads(_read_bounded(path.absolute(), NOTICE_LIMIT))
+                raw = _read_bounded(path.absolute(), NOTICE_LIMIT)
+                notice = json.loads(raw)
                 validate_notice(notice, self.snapshots_dir, now)
                 if notice["read_id"] != read_id:
                     raise ValueError("read notice file name does not match its read")
-            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                log.warning("Market watch read notice %s refused: %s", path.name, exc)
+            except Exception as exc:  # one bad file never stalls the others
+                refusal_id = "mwn_" + digest({"file": path.name, "content": digest(raw) if raw is not None else None,
+                                               "reason": type(exc).__name__})[:32]
+                if refusal_id not in refused:
+                    log.warning("Market watch read notice %s refused: %s", path.name, exc)
+                    record = seal({"refusal_id": refusal_id, "session_date": now.astimezone(ET).date().isoformat(),
+                                   "file": path.name, "read_id": read_id, "content_sha256": digest(raw) if raw is not None else None,
+                                   "reason": f"{type(exc).__name__}: {str(exc)[:200]}", "created_at": _iso(now)})
+                    self.store.append("notice_refusal", record, ident=refusal_id, ref=read_id)
+                    refused.add(refusal_id)
                 continue
             found.append(notice)
         # Receipt order decides the message budget, so store notices in the order Jo submitted them.
@@ -586,23 +637,37 @@ class MarketWatchRunner:
             received = parse_time(notice["received_at"])
             decisions = self.store.records("message_decision", session)
             attempts = self.store.records("message_attempt", session)
-            spent = 0
+            def reached(message_id):
+                results = {a["result"] for a in attempts if a["message_id"] == message_id}
+                return "accepted" in results or "unknown" in results
+
+            spent = free = 0
             for d in decisions:
-                if d["decision"] != "send" or d["is_correction"]:
+                if d["decision"] != "send":
+                    continue
+                if d.get("budget_free"):
+                    free += 1
                     continue
                 results = {a["result"] for a in attempts if a["message_id"] == d["message_id"]}
-                if "accepted" in results or "expired" not in results:
-                    spent += 1  # accepted, or still in flight; a send that expired undelivered is refunded
+                if "expired" not in results or "accepted" in results or "unknown" in results:
+                    spent += 1  # reached Isaac, may have, or still in flight; a send that expired undelivered is refunded
+            # A correction skips the budget only when it corrects a message that reached (or may have
+            # reached) Isaac, once per corrected message, and at most a few times a session.
+            budget_free = (notice["is_correction"] and reached(notice["corrects_message_id"])
+                           and not any(d.get("budget_free") and d["corrects_message_id"] == notice["corrects_message_id"] for d in decisions)
+                           and free < MESSAGE_POLICY["budget_free_corrections_per_session"])
             if now - received > timedelta(minutes=MESSAGE_POLICY["freshness_minutes"]):
                 decision, reason = "expired_before_send", "notice arrived after the freshness limit"
-            elif not notice["is_correction"] and spent >= MESSAGE_POLICY["discretionary_per_session"]:
-                decision, reason = "suppressed_budget", f"{spent} discretionary messages already used"
+            elif not budget_free and spent >= MESSAGE_POLICY["discretionary_per_session"]:
+                decision, reason = "suppressed_budget", f"{spent} discretionary messages already used" + (
+                    "; this correction's original never reached Isaac or its budget-free correction was used" if notice["is_correction"] else "")
             else:
                 decision, reason = "send", None
             record = seal({"message_id": notice["message_id"], "read_id": notice["read_id"], "session_date": session,
                            "policy_sha256": POLICY_SHA256, "message_policy_version": MESSAGE_POLICY["message_policy_version"],
                            "is_correction": notice["is_correction"], "corrects_message_id": notice["corrects_message_id"],
                            "decision": decision, "reason": reason, "budget_used_before": spent,
+                           "budget_free": bool(budget_free and decision == "send"),
                            "channel": MESSAGE_POLICY["channel"], "created_at": _iso(now)})
             self.store.append("message_decision", record, ident="decision:" + notice["message_id"], ref=notice["read_id"])
             decided[notice["message_id"]] = record
@@ -658,6 +723,7 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
         decisions = store.records("message_decision", session)
         message_attempts = store.records("message_attempt", session)
         events = store.records("event", session)
+        refusals = store.records("notice_refusal", session)
         accepted = sorted(((parse_time(a["occurred_at"]), a["wake_id"]) for a in wake_attempts if a["result"] == "accepted"))
         read_times = {n["read_id"]: parse_time(n["received_at"]) for n in notices}
         for read in exported_reads:
@@ -674,21 +740,22 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
         wake_rows = []
         for wake in wakes:
             results = [a["result"] for a in wake_attempts if a["wake_id"] == wake["wake_id"]]
-            delivery = "accepted" if "accepted" in results else "expired" if "expired" in results else "failed_pending" if results else (
+            delivery = next((r for r in TERMINAL if r in results), None) or ("failed_pending" if results else
                 "pending" if wake["decision"] == "send" else "not_sent")
             read_id = attributed.get(wake["wake_id"])
-            outcome = "read" if read_id else "no_read" if delivery == "accepted" else (
+            outcome = "read" if read_id else "no_read" if delivery in ("accepted", "unknown") else (
                 "recorded_failure" if delivery in ("expired", "failed_pending") else wake["decision"])
             wake_rows.append({"wake_id": wake["wake_id"], "trigger": wake["trigger"], "ref": wake["ref"], "due_at": wake["due_at"],
                               "decision": wake["decision"], "reason": wake["reason"], "delivery": delivery,
-                              "attempts": len(results), "read_id": read_id, "attribution": "time_window" if read_id else None,
+                              "attempts": results.count("sending"), "read_id": read_id, "attribution": "time_window" if read_id else None,
                               "outcome": outcome})
         message_rows = []
         for d in decisions:
             results = [a for a in message_attempts if a["message_id"] == d["message_id"]]
-            final = next((a for a in results if a["result"] in ("accepted", "expired")), None)
+            final = next((a for a in results if a["result"] in TERMINAL), None)
             message_rows.append({"message_id": d["message_id"], "read_id": d["read_id"], "is_correction": d["is_correction"],
-                                 "decision": d["decision"], "reason": d["reason"], "attempts": sum(a["result"] != "expired" for a in results),
+                                 "decision": d["decision"], "reason": d["reason"], "budget_free": d.get("budget_free", False),
+                                 "attempts": sum(a["result"] == "sending" for a in results),
                                  "delivery": final["result"] if final else ("failed_pending" if results else "pending" if d["decision"] == "send" else "not_sent"),
                                  "transport_receipt_id": final.get("transport_receipt_id") if final else None,
                                  "error_code": final.get("error_code") if final else None})
@@ -715,7 +782,8 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                       "unprompted": len(session_reads) - len(claimed), "read_ids": session_reads,
                       "notices_missing_from_export": sorted(notice_ids - set(exported)) if outcome_store is not None else None,
                       "exported_without_notice": sorted(r for r in read_times if r in exported and r not in notice_ids),
-                      "notice_hash_mismatches": mismatched},
+                      "notice_hash_mismatches": mismatched,
+                      "refused_notices": [{"file": r["file"], "reason": r["reason"]} for r in refusals]},
             "messages": message_rows,
             "message_summary": {"intents": len(message_rows),
                                 "discretionary_accepted": sum(m["delivery"] == "accepted" and not m["is_correction"] for m in message_rows),
@@ -724,6 +792,7 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                                 "suppressed_budget": sum(m["decision"] == "suppressed_budget" for m in message_rows),
                                 "failed_or_expired": sum(m["delivery"] in ("expired", "failed_pending") or m["decision"] == "expired_before_send"
                                                          for m in message_rows),
+                                "uncertain": sum(m["delivery"] == "unknown" for m in message_rows),
                                 "budget": MESSAGE_POLICY["discretionary_per_session"],
                                 "delivery_evidence": "ntfy accepted the push; phone display is not observed"},
             "outcomes": {"forecast_status_counts": status_counts,

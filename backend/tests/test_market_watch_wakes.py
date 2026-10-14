@@ -30,10 +30,14 @@ def _rows(closes):
     return rows
 
 
-def snapshot_at(now, closes=None, calendar_events=()):
+def snapshot_at(now, closes=None, calendar_events=(), highs=None, drop=()):
     minutes = max(0, int((min(now, CLOSE) - OPEN).total_seconds() // 60))
     closes = (closes or [100.0] * 400)[:minutes]
-    bars = {"SPY": _rows(closes), "QQQ": _rows([c * 4 for c in closes])} if closes else {"SPY": [], "QQQ": []}
+    spy = _rows(closes)
+    for index, high in (highs or {}).items():
+        spy[index]["h"] = high
+    spy = [row for i, row in enumerate(spy) if i not in drop]
+    bars = {"SPY": spy, "QQQ": _rows([c * 4 for c in closes])} if closes else {"SPY": [], "QQQ": []}
     stamp = now.isoformat().replace("+00:00", "Z")
     events = list(calendar_events)
     return build_snapshot(now, bars_reader=lambda *_: bars, daily_reader=lambda *_: {},
@@ -109,18 +113,52 @@ def test_detector_is_deterministic_versioned_and_flags_late_events():
     assert [e["event_id"] for e in later] == [e["event_id"] for e in events]
 
 
-def test_failed_reclaim_cooldown_and_atr_move_since_last_read():
-    closes = [100.0] * 15 + [100.5, 99.0] + [99.2] * 5
-    rows_now = OPEN + timedelta(minutes=len(closes) + 1)
-    snap = snapshot_at(rows_now, closes + [99.3])
-    events = mw.detect_events(snap, detected_at=rows_now)
-    crosses = [e for e in events if e["detail"].get("level") == "vwap"]
-    assert len(crosses) == 1  # 30-minute cooldown holds later VWAP touches on the same level
+def test_level_cooldown_is_real_and_failed_reclaims_are_detected(monkeypatch):
+    # Cross down at bar 16, back up at bar 27 (inside 30 minutes), down again at bar 55 (after 30 minutes).
+    closes = [100.0] * 15 + [100.5] + [99.0] * 11 + [100.5] * 28 + [99.0] * 5
+    now = OPEN + timedelta(minutes=len(closes))
+    snap = snapshot_at(now, closes)
+    vwap = [e for e in mw.detect_events(snap, detected_at=now) if e["detail"].get("level") == "vwap"]
+    assert [(e["kind"], e["detail"]["direction"]) for e in vwap] == [("level_cross", "down"), ("level_cross", "down")]
+    assert parse(vwap[1]["occurred_at"]) - parse(vwap[0]["occurred_at"]) >= timedelta(minutes=30)
+    monkeypatch.setitem(mw.DETECTOR, "level_cooldown_minutes", 0)
+    assert len([e for e in mw.detect_events(snap, detected_at=now) if e["detail"].get("level") == "vwap"]) == 3
+    # Below VWAP, a wick reaches it and the bar closes back below: a failed reclaim.
+    closes = [100.0] * 15 + [100.5] + [99.0] * 40
+    snap = snapshot_at(OPEN + timedelta(minutes=len(closes)), closes, highs={50: 100.2})
+    fails = [e for e in mw.detect_events(snap, detected_at=now) if e["kind"] == "level_fail"]
+    assert ("vwap", "down") in [(e["detail"]["level"], e["detail"]["direction"]) for e in fails]
+
+
+def test_atr_move_since_last_read_fires_per_multiple():
+    closes = [100.0] * 15 + [100.5, 99.0] + [99.2] * 5 + [98.4]
+    now = OPEN + timedelta(minutes=len(closes))
+    snap = snapshot_at(now, closes)
     read = {"read_id": "mwr_00000000-0000-4000-8000-000000000001", "received_at": (OPEN + timedelta(minutes=17)).isoformat(), "price": 100.6}
-    atr_events = [e for e in mw.detect_events(snap, detected_at=rows_now, atr={"atr14": 2.0, "bars_sha256": "x"}, last_read=read)
+    atr_events = [e for e in mw.detect_events(snap, detected_at=now, atr={"atr14": 2.0, "bars_sha256": "x"}, last_read=read)
                   if e["kind"] == "atr_move_since_read"]
-    assert [(e["detail"]["direction"], e["detail"]["multiple"]) for e in atr_events] == [("down", 1)]
-    assert mw.detect_events(snap, detected_at=rows_now, atr=None, last_read=read) == events
+    assert [(e["detail"]["direction"], e["detail"]["multiple"]) for e in atr_events] == [("down", 1), ("down", 2)]
+    assert not any(e["kind"] == "atr_move_since_read" for e in mw.detect_events(snap, detected_at=now, atr=None, last_read=read))
+
+
+def test_missing_minute_is_recorded_and_only_vwap_stops(env):
+    runner, clock, _, _, _ = env
+    closes = [100.0] * 15 + [100.5] + [99.0] * 74 + [97.0]
+    now = OPEN + timedelta(minutes=len(closes))
+    snap = snapshot_at(now, closes, drop={5})
+    events = mw.detect_events(snap, detected_at=now)
+    gap = [e for e in events if e["kind"] == "minute_gap"]
+    assert len(gap) == 1 and gap[0]["detail"]["missing_from"] == "2026-10-14T13:35:00.000000Z"
+    assert any(e["kind"] == "new_session_low" for e in events)  # extremes still watch the real bars
+    assert not any(e["detail"].get("level") in ("vwap", "or15_high", "or15_low") for e in events)  # no VWAP, no full OR
+    for e in events:
+        runner.store.append("event", e, ident=e["event_id"])
+    runner.plan_wakes(now, now.date(), CLOSE, snap)
+    assert all(w["event_id"] != gap[0]["event_id"] for w in runner.store.records("wake"))
+
+
+def parse(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def test_prior_atr_uses_only_complete_prior_sessions():
@@ -162,7 +200,7 @@ def test_scheduled_wakes_send_only_an_id_record_results_and_never_resend(env):
     runner.run_once()
     assert len(sent) == 1
     attempts = runner.store.records("wake_attempt")
-    assert [(a["wake_id"], a["result"], a["channel"]) for a in attempts] == [(wake_id, "accepted", "email")]
+    assert [(a["wake_id"], a["result"], a["channel"]) for a in attempts] == [(wake_id, "sending", "email"), (wake_id, "accepted", "email")]
     assert wakes["09:50"]["snapshot_id"] and (runner.snapshots_dir / "latest.json").exists()
 
 
@@ -177,9 +215,53 @@ def test_wake_failures_retry_within_freshness_then_expire(env):
     for seconds in (0, 30, 61, 122, 183, 300):
         clock.now = datetime(2026, 10, 14, 13, 50, 20, tzinfo=UTC) + timedelta(seconds=seconds)
         runner.run_once()
-    results = [(a["attempt"], a["result"], a["error_code"]) for a in runner.store.records("wake_attempt")]
+    results = [(a["attempt"], a["result"], a["error_code"]) for a in runner.store.records("wake_attempt") if a["result"] != "sending"]
     assert results == [(1, "failed", "OSError"), (2, "failed", "OSError"), (3, "failed", "OSError"), (3, "expired", "attempts_exhausted")]
     assert len(calls) == 3
+    report = mw.session_report(runner.store)["sessions"]["2026-10-14"]
+    assert next(w for w in report["wakes"] if w["ref"] == "09:50")["attempts"] == 3
+
+
+def test_wake_past_freshness_expires_without_sending(env):
+    runner, clock, sent, _, _ = env
+    runner.mail = lambda subject, body: (_ for _ in ()).throw(OSError("down"))
+    runner.run_once()
+    runner.mail = lambda subject, body: sent.append(subject)
+    clock.now += timedelta(minutes=6)
+    runner.run_once()
+    assert sent == [] and [a["error_code"] for a in runner.store.records("wake_attempt") if a["result"] == "expired"] == ["past_freshness"]
+
+
+def test_uncertain_and_interrupted_sends_are_unknown_and_never_resent(env):
+    import httpx
+    from app.engine import ntfy
+    runner, clock, sent, _, _ = env
+    tries = []
+
+    def timeout(subject, body):
+        tries.append(subject)
+        try:
+            raise httpx.ReadTimeout("slow")
+        except httpx.ReadTimeout as exc:
+            raise ntfy.NtfyError("ntfy could not be reached (ReadTimeout).") from exc
+    runner.mail = timeout
+    runner.run_once()
+    clock.now += timedelta(minutes=2)
+    runner.run_once()
+    assert len(tries) == 1
+    assert [a["result"] for a in runner.store.records("wake_attempt")] == ["sending", "unknown"]
+    # A crash after "sending" but before the result: the next pass records unknown and sends nothing.
+    snapshot = snapshot_at(clock.now)
+    e = mw._event(snapshot, "level_cross", ["vwap", "up", "x"], clock.now.isoformat(), clock.now, {"level": "vwap"})
+    runner.store.append("event", e, ident=e["event_id"])
+    clock.now += timedelta(minutes=20)
+    runner.plan_wakes(clock.now, clock.now.date(), CLOSE, snapshot)
+    wake = next(w for w in runner.store.records("wake") if w["trigger"] == "event")
+    runner._attempt("wake_attempt", clock.now, "2026-10-14", "wake_id", wake["wake_id"], 1, "sending", "email")
+    runner.mail = lambda subject, body: sent.append(subject)
+    runner.send_wakes(clock.now, clock.now.date())
+    assert sent == [] and [a["result"] for a in runner.store.records("wake_attempt") if a["wake_id"] == wake["wake_id"]] == ["sending", "unknown"]
+
 
 
 def test_event_wakes_are_rate_limited_coalesced_and_late_events_never_wake(env):
@@ -235,12 +317,23 @@ def test_messages_budget_corrections_links_and_freshness(env, tmp_path):
     runner.ingest_notices(clock.now)
     runner.deliver_messages(clock.now)
     final = {d["read_id"]: d for d in runner.store.records("message_decision")}[correction["read_id"]]
-    assert final["decision"] == "send" and final["is_correction"] and final["corrects_message_id"] == receipts[0]["message_id"]
+    assert final["decision"] == "send" and final["budget_free"] and final["corrects_message_id"] == receipts[0]["message_id"]
     assert len(pushed) == 4 and pushed[-1][0].startswith("Jo correction: DOWN")
+    # Correcting a message Isaac never got, or correcting the same message twice, gets no budget bypass.
+    for operation, target in (("fix-unsent", receipts[3]), ("fix-again", receipts[0])):
+        clock.now += timedelta(seconds=10)
+        previous = runner.store.records("read_notice")[-1]["read_id"]
+        r = _submit_notice(ledger, runner.outbox_dir, snapshot, operation, clock.now, previous,
+                           message_intent="correction", correction_of_read_id=target["read_id"])
+        runner.ingest_notices(clock.now)
+        runner.deliver_messages(clock.now)
+        decision = {d["read_id"]: d for d in runner.store.records("message_decision")}[r["read_id"]]
+        assert decision["decision"] == "suppressed_budget" and not decision["budget_free"]
+    assert len(pushed) == 4
     title, body = pushed[0]
     assert title == "Jo market read: DOWN" and "Weak tape" in body and "Wrong if: Reclaim VWAP" in body
     assert "30m 0.60" in body and receipts[0]["read_id"] in body and "late-day holds" in body
-    attempts = runner.store.records("message_attempt")
+    attempts = [a for a in runner.store.records("message_attempt") if a["result"] != "sending"]
     assert all(a["result"] == "accepted" and a["transport_receipt_id"].startswith("ntfy-") for a in attempts)
     assert {a["read_id"] for a in attempts} == {r["read_id"] for r in receipts[:3]} | {correction["read_id"]}
     runner.deliver_messages(clock.now + timedelta(minutes=1))
@@ -263,7 +356,7 @@ def test_failed_messages_are_recorded_and_never_retried_past_freshness(env, tmp_
     start = clock.now
     for seconds in (0, 70, 140, 700):
         runner.deliver_messages(start + timedelta(seconds=seconds))
-    results = [(a["result"], a["error_code"]) for a in runner.store.records("message_attempt")]
+    results = [(a["result"], a["error_code"]) for a in runner.store.records("message_attempt") if a["result"] != "sending"]
     assert results[:3] == [("failed", "ntfy_not_configured")] * 3 and results[3][0] == "expired" and len(tries) == 3
     # A refunded failure does not consume the budget; a notice arriving stale is never sent.
     first_read = runner.store.records("read_notice")[0]["read_id"]
@@ -287,7 +380,13 @@ def test_tampered_or_unpublished_notices_are_refused(env, tmp_path):
     notice = json.loads(path.read_text())
     path.write_text(json.dumps({**notice, "main_text": "Buy everything"}))
     runner.ingest_notices(clock.now)
+    runner.ingest_notices(clock.now)
     assert runner.store.records("read_notice") == []
+    refusals = runner.store.records("notice_refusal")
+    assert len(refusals) == 2 and {r["read_id"] for r in refusals} == {receipt["read_id"]}  # unpublished, then tampered; once each
+    # A malformed but correctly sealed notice beside a valid one never stalls ingestion.
+    junk = seal({**{k: v for k, v in notice.items() if k not in ("content_sha256",)}, "read_id": "mwr_00000000-0000-4000-8000-0000000000ff", "forecasts": [1, 2, 3]})
+    (runner.outbox_dir / f"read-{junk['read_id']}.json").write_text(json.dumps(junk))
     with pytest.raises(ValueError, match="disagree"):
         write_read_notice(runner.outbox_dir, notice)
     path.write_text(json.dumps(notice))
@@ -403,3 +502,16 @@ def _read_and_intent(ledger, read_id):
     export = MarketWatchLedger.export(ledger.ledger.path, ACTOR)
     read = next(r for r in export["reads"] if r["read_id"] == read_id)
     return read, next((m for m in export["messages"] if m["read_id"] == read_id and m["kind"] == "intent"), None)
+
+
+def test_bad_market_watch_settings_never_stop_the_api(monkeypatch, tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+    from app import main
+    foreign = tmp_path / "foreign.sqlite"
+    sqlite3.connect(foreign).execute("CREATE TABLE fills(id)").connection.commit()
+    monkeypatch.setenv("MARKET_WATCH_ENABLED", "true")
+    monkeypatch.setenv("MARKET_WATCH_SNAPSHOTS_DIR", str(tmp_path / "public"))
+    monkeypatch.setenv("MARKET_WATCH_STORE", str(foreign))
+    app_ = SimpleNamespace(state=SimpleNamespace())
+    assert asyncio.run(main._maybe_start_market_watch(app_)) is None and app_.state.market_watch is None

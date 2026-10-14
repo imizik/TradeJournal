@@ -207,7 +207,13 @@ async def _maybe_start_market_watch(app_: FastAPI):
     """Jo's market-watch wakes and messages (MW-2); off unless MARKET_WATCH_ENABLED."""
     from app.engine.market_watch_wakes import runner_from_env
 
-    app_.state.market_watch = runner = runner_from_env()
+    try:
+        runner = runner_from_env()
+    except Exception:
+        # A bad store or path must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Market watch could not start; it stays off")
+        runner = None
+    app_.state.market_watch = runner
     if runner is None:
         return None
 

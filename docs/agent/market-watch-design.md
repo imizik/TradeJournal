@@ -590,38 +590,49 @@ acceptance or shadow S1; market-watch reads never reach Shadow Isaac.
   close back), from 09:45, 30-minute cooldown per level; a new session high or
   low on a bar ending at or after 11:00, 30-minute cooldown; a SPY move of each
   0.5 × prior ATR14 (14 complete prior sessions, Alpaca IEX daily bars) since
-  Jo's last read, priced from that read's served snapshot. A missing minute ends
-  the VWAP/OR path rather than inventing one. Events detected more than
-  10 minutes after their bar are recorded `late` and never wake Jo.
+  Jo's last read, priced from that read's served snapshot. A missing minute is
+  recorded once as a `minute_gap` event (never a wake) and ends VWAP events for
+  the session rather than inventing a VWAP; OR levels need all 15 opening bars;
+  session extremes and ATR moves keep using the real bars. Events detected more
+  than 10 minutes after their bar are recorded `late` and never wake Jo.
 - **Wakes (route a).** Scheduled 08:50, 09:50, 11:00, 12:30 and 14:00 ET (slots
   at or after an early close are skipped; a slot more than 10 minutes overdue is
   recorded `missed_late`). Event wakes need 15 minutes since any sent wake
   (otherwise `coalesced`) and at most 6 per session (otherwise `rate_limited`).
   Each wake is one email through the scanner's existing mail path, subject
   `TJ Market Watch: <wake ID>`, body only the wake ID; Jo fetches evidence with
-  `market_watch_snapshot`. Gmail acceptance is recorded `accepted`; failures
-  are recorded and retried at most 3 times, 60 seconds apart, within 5 minutes,
-  then recorded `expired`. Wake IDs are deterministic per slot or event, so a
-  restart never doubles a wake.
+  `market_watch_snapshot`. Each attempt is recorded `sending` before the send;
+  Gmail acceptance is recorded `accepted`; a refusal or unreachable server is
+  `failed` and retried at most 3 times, 60 seconds apart, within 5 minutes, then
+  `expired`. A timeout after the request went out, or a `sending` row with no
+  result (crash mid-send), is recorded `unknown` and never resent. Wake IDs are
+  deterministic per slot or event, so a restart never plans a wake twice.
 - **Read notices.** With `market_watch_outbox_dir` set in the check
   configuration, `market_watch_submit` writes a sealed, deterministic notice of
   the committed read (public read fields, message ID and links) as a write-once
   outbox file — the shadow-outbox pattern. A failed handoff refuses the call and
-  an identical retry recovers it. The app verifies each notice's seal and that
-  its snapshot is one the app published, then stores it. The app still gets no
+  an identical retry recovers it. The seal is an integrity hash, not a
+  signature: the boundary is that only the check service can write the outbox.
+  The app checks the hash, field types and that the snapshot is one the app
+  published, then stores the notice; a refused file is recorded once as a
+  `notice_refusal` and never stalls other notices. The app still gets no
   check-ledger access.
 - **Messages.** Channel: **phone push through the server's existing ntfy alerts**
   (`NTFY_URL`), chosen because it is the established path to Isaac and keeps
   Jo's messages out of the Gmail inbox that wakes Jo. A read with
   `message_intent` `update` or `correction` gets one decision: `send`,
   `suppressed_budget` (3 discretionary messages per session; a send that expires
-  undelivered is refunded) or `expired_before_send`. Corrections bypass the
-  budget. The push carries the read's main text, the three named forecast
+  undelivered is refunded) or `expired_before_send`. A correction bypasses the
+  budget when the message it corrects reached Isaac (`accepted` or `unknown`),
+  once per corrected message and at most 3 times a session; any other
+  correction is budgeted like an update. A budget decision is final even if an
+  earlier send later expires. The push carries the read's main text, the three named forecast
   probabilities, invalidation, alternative, change summary, Isaac's recorded
   cautions as flags, and the read ID. ntfy's reply ID is recorded as `accepted`
   — evidence ntfy took it, not that the phone showed it. Failures are recorded
   and retried at most 3 times within 10 minutes of the read, then `expired`;
-  nothing is sent after that.
+  nothing is sent after that. Timeouts and interrupted sends are `unknown`, as
+  for wakes.
 - **Records.** Events, wakes, wake attempts, read notices, message decisions and
   message attempts are immutable rows in an explicitly selected SQLite file
   (application ID `MWD1`), separate from the journal database, the MW-1 outcome
@@ -647,10 +658,15 @@ of mail, push, Jo's Gmail trigger or the 20-session acceptance.
 2. Create a check-owned outbox (for example beside `shadow-outbox`) with the same
    read-only ACL for the API user, set `market_watch_outbox_dir`, and restart the
    check service. Set `MARKET_WATCH_OUTBOX_DIR` for the API to the same path.
-3. Confirm `SCANNER_EMAIL_TO`/SMTP and `NTFY_URL` are present in the API
-   environment, and add a Jo Gmail trigger for subjects starting
-   `TJ Market Watch:` whose prompt fetches the snapshot and submits a read (with
-   `message_intent` only when the read changes what Isaac should consider).
+3. Confirm the scanner SMTP settings and `NTFY_URL` are present in the API
+   environment. `SCANNER_EMAIL_TO` is the owner's Outlook relay inbox, whose
+   rule forwards only scanner mail with `TJ Setup:` (see the
+   [shadow S1 route](shadow-s1-contract.md)); self-sent Gmail did not wake Jo.
+   With Isaac's approval, widen that rule to also forward `TJ Market Watch:`
+   from the scanner sender, and add a Jo task trigger on `^FW: TJ Market Watch:`
+   whose prompt fetches the snapshot and submits a read (with `message_intent`
+   only when the read changes what Isaac should consider). Keep the shadow S1
+   `^FW: TJ Setup:` filter unchanged.
 4. Set `MARKET_WATCH_ENABLED=true`, `MARKET_WATCH_SNAPSHOTS_DIR` and
    `MARKET_WATCH_STORE` in `backend.env`, restart the API under the usual
    market-hours safeguards, and watch the first scheduled wake, one read notice and one
