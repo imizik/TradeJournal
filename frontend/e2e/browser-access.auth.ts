@@ -37,6 +37,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   const forbidden = await page.request.post("/api/backend/fills", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} });
   expect(forbidden.status()).toBe(403);
   expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
+  expect((await page.request.get("/api/backend/scanner/settings")).status()).toBe(403);
+  expect((await page.request.put("/api/backend/scanner/settings", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { symbols: ["MU"], base_revision: 0 } })).status()).toBe(403);
   for (const action of ["advisor-handoff", "advisor-import"]) {
     expect((await page.request.post(`/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001/${action}`, { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} })).status()).toBe(403);
   }
@@ -101,6 +103,22 @@ test("owner credential UI, CSRF refusal, and access key dismissal", async ({ bro
   const saved = page.locator("details[data-decision-id]").filter({ hasText: condition });
   await saved.locator("summary").click();
   await expect(saved.getByText(condition, { exact: true })).toBeVisible();
+  await owner.close();
+});
+
+test("owner can save scanner tickers through the authenticated UI", async ({ browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  const page = await owner.newPage();
+  await page.goto("/scanner");
+  const panel = page.getByRole("region", { name: "Scanner tickers" });
+  await panel.getByRole("button", { name: "Edit tickers" }).click();
+  await panel.getByRole("button", { name: "Remove AAPL", exact: true }).click();
+  await panel.getByLabel("Add tickers").fill("NVDA");
+  await panel.getByRole("button", { name: "Save tickers", exact: true }).click();
+  await expect(panel.getByRole("status")).toContainText("Saved");
+  await page.reload();
+  await expect(panel.getByLabel("Saved tickers")).toContainText("NVDA");
+  await expect(panel.getByLabel("Saved tickers")).not.toContainText("AAPL");
   await owner.close();
 });
 

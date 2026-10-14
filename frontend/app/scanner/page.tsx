@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ScannerTickers from "@/components/ScannerTickers";
 import { api } from "@/lib/serverApi";
 import type { ScannerCandidateRow, ScannerScorecard, ScannerIsaacScore } from "@/lib/api";
 
@@ -263,6 +264,8 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         )}
       </div>
 
+      <ScannerTickers />
+
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link href={`/scanner?day=${shiftDay(data.date, -1)}`} className="inline-flex min-h-11 items-center rounded border px-3 hover:bg-secondary">
           ← Previous day
@@ -322,6 +325,11 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                       <td className="px-4 py-2 font-medium text-foreground">{c.symbol}</td>
                       <td className="px-4 py-2">
                         <div className="whitespace-nowrap">{setupLabel(c)}</div>
+                        <details className="mt-1 text-xs text-muted-foreground">
+                          <summary className="min-h-11 cursor-pointer">Scanner configuration</summary>
+                          <p>{c.scanner_version} · {c.params_hash.slice(0, 12)}</p>
+                          <p>{Array.isArray(c.facts.scanner_universe) ? c.facts.scanner_universe.join(", ") : "Original 12-ticker universe"}</p>
+                        </details>
                         {c.flags.length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {c.flags.map((f) => (
@@ -367,7 +375,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         )}
       </section>
       <p className="text-xs text-muted-foreground">
-        Rules {data.scanner_version} · {data.params_hash.slice(0, 12)}. Paper results describe these rules only; they are not
+        Baseline rules {data.scanner_version} · {data.params_hash.slice(0, 12)}. Results include the ticker lists used at detection, including earlier selections. Paper results are not
         evidence of an edge until enough trades have closed.
       </p>
     </div>

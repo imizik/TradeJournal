@@ -28,15 +28,33 @@ starting rules; they are not evidence that the rules have an edge.
 
 ## Universe and session
 
-`AAPL AMZN GOOGL META SPY QQQ NBIS MU CRDO MRVL LLY AMD`. MSFT, NVDA and TSLA
-are left out of version 1 at Isaac's choice (they lost money for him); adding
-them back is a new scanner version. Regular session only, scanning completed
+The default remains `AAPL AMZN GOOGL META SPY QQQ NBIS MU CRDO MRVL LLY AMD`.
+The owner can add/remove any US stock or ETF ticker on `/scanner`, up to 12
+at once, and explicitly save the selection. `GET/PUT /scanner/settings`
+stores it separately from chart settings in the existing `chart_settings`
+table's `scanner-universe` row, with revision checks to reject stale saves.
+The monitor reads the selection each scan pass; no restart is needed. An empty
+list pauses new setups. Saving never enables the scanner, modifies past setups,
+or stops monitoring existing rules/shadow paper trades. Ticker syntax is checked;
+provider data and qualifying options are still required for a paper entry.
+
+The original universe retains `s1-v1`; a different universe is `s1-v2`, with
+the sorted selection included in its parameter hash. New candidates freeze the
+selected universe and settings revision in their facts. Restoring the default
+restores the baseline identity; cooldowns, duplicate checks, daily caps and
+open-trade protection span both versions. Historical replays retain their fixed
+baseline universe. Day/cumulative results include prior selections; each setup
+keeps its original identity. MSFT, NVDA and TSLA remain absent from the default,
+but the owner may now explicitly include them.
+
+Regular session only, scanning completed
 5-minute underlying bars from 09:45 ET. No new candidate after 15:00 ET.
 
 ## Setups (scanner `s1-v1`)
 
 Prices are underlying prices from completed bars. Daily ATR is the 14-day ATR
-as of the prior close. Parameters are versioned; changing one creates `s1-v2`.
+as of the prior close. Parameters are versioned; `s1-v2` changes only the
+selected universe, with the same setup and paper-trade rules.
 
 **VWAP fade (calls and puts).** Long version (call): price has been at least
 0.35 daily ATR below session VWAP, then a completed 5-minute bar closes above

@@ -132,10 +132,20 @@ def test_cross_audience_and_missing_configuration(boundary):
     ("POST", "/sync/pipeline/run"), ("POST", "/decisions"), ("POST", "/practice/prepare"),
     ("POST", "/practice/opportunities/09f6afdc-cc00-4487-ad2e-b50f51c17838/choice"),
     ("POST", "/decisions/468aa876-bcb4-4bef-bf6a-33fd621b86bb/arm"),
-    ("PUT", "/charts/settings"), ("POST", "/access/assistants")])
+    ("PUT", "/charts/settings"), ("GET", "/scanner/settings"), ("PUT", "/scanner/settings"),
+    ("POST", "/access/assistants")])
 def test_read_only_inspector_denied(boundary, method, path):
     assert signin(boundary).status_code == 200
     assert boundary.public.request(method, path, json={} if method != "GET" else None).status_code == 403
+
+
+def test_scanner_settings_require_owner_and_csrf(boundary):
+    current = boundary.owner.get("/scanner/settings")
+    assert current.status_code == 200
+    body = {"symbols": ["MU"], "base_revision": current.json()["revision"]}
+    assert boundary.owner.put("/scanner/settings", json=body, headers={"x-tj-csrf": "wrong"}).status_code == 403
+    assert boundary.owner.put("/scanner/settings", json=body).status_code == 200
+    assert boundary.owner.get("/scanner/settings").json()["symbols"] == ["MU"]
 
 
 def test_symbols_checked_before_provider(boundary):

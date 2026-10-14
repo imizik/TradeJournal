@@ -16,9 +16,9 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.database import get_session
 from app.engine import scanner_rules as rules
 from app.engine import shadow_exchange
-from app.engine import setup_scanner
+from app.engine import setup_scanner, scanner_settings
 from app.engine.options_models import OptionContract
-from app.models import Account, Fill, Trade, ScannerCandidate, ScannerEvent
+from app.models import Account, ChartSettingsRecord, Fill, Trade, ScannerCandidate, ScannerEvent
 from app.routers import scanner as routes
 
 ET = ZoneInfo("America/New_York")
@@ -227,6 +227,80 @@ def rows(engine):
         cands = db.exec(select(ScannerCandidate)).all()
         events = db.exec(select(ScannerEvent)).all()
         return cands, {e.event_type: json.loads(e.data_json) for e in events}
+
+
+@pytest.fixture
+def scanner_client(engine):
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/scanner")
+    def session():
+        with Session(engine) as db:
+            yield db
+    app.dependency_overrides[get_session] = session
+    with TestClient(app) as client:
+        yield client
+
+
+def test_scanner_settings_validate_persist_and_refuse_stale_saves(scanner_client, engine):
+    client = scanner_client
+    assert client.get("/scanner/settings").json() == {"symbols": ["SPY"], "revision": 0, "max_symbols": 12}
+    with Session(engine) as db:
+        db.add(ChartSettingsRecord(name="default", data_json='{"watchlist":["AAPL"]}', revision=9))
+        db.commit()
+    saved = client.put("/scanner/settings", json={"symbols": [" mu ", "NVDA", "MU", "BRK.B"], "base_revision": 0})
+    assert saved.status_code == 200
+    assert saved.json()["symbols"] == ["MU", "NVDA", "BRK.B"]
+    assert client.get("/scanner/settings").json() == saved.json()
+    assert client.put("/scanner/settings", json={"symbols": ["AMD"], "base_revision": 0}).status_code == 409
+    for symbols in (["SPY"] * 13, ["bad ticker"], [""], ["AAPL?"], [12]):
+        assert client.put("/scanner/settings", json={"symbols": symbols, "base_revision": 1}).status_code == 422
+    assert client.get("/scanner/settings").json() == saved.json()
+    assert client.put("/scanner/settings", json={"symbols": [], "base_revision": 1}).status_code == 200
+    assert client.put("/scanner/settings", json={"symbols": ["SPY"], "base_revision": 1}).status_code == 409
+    assert client.get("/scanner/settings").json()["symbols"] == []
+    with Session(engine) as db:
+        assert db.get(ChartSettingsRecord, "default").revision == 9
+        assert json.loads(db.get(ChartSettingsRecord, "default").data_json) == {"watchlist": ["AAPL"]}
+
+
+def test_selection_applies_without_restart_and_freezes_universe(scanner_client, engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    assert scanner_client.put("/scanner/settings", json={"symbols": [], "base_revision": 0}).status_code == 200
+    watch.run()
+    assert rows(engine)[0] == []
+    # Same watcher and bar, but the newly selected ticker is scanned.
+    assert scanner_client.put("/scanner/settings", json={"symbols": ["MU"], "base_revision": 1}).status_code == 200
+    watch.run()
+    [candidate], _ = rows(engine)
+    assert candidate.symbol == "MU" and candidate.scanner_version == "s1-v2"
+    assert candidate.params_hash == scanner_settings.identity(["MU"])[1] != rules.PARAMS_HASH
+    assert json.loads(candidate.facts_json)["scanner_universe"] == ["MU"]
+    assert json.loads(candidate.facts_json)["scanner_settings_revision"] == 2
+    restarted, _ = scanner(engine, at(9, 50, 50))
+    restarted.feed = watch.feed
+    restarted.run()
+    assert len(rows(engine)[0]) == 1
+    assert scanner_settings.identity(["MU", "SPY"]) == scanner_settings.identity(["SPY", "MU"])
+
+
+def test_removed_ticker_still_exits_and_universe_edits_do_not_duplicate(scanner_client, engine):
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    [candidate], _ = rows(engine)
+    assert scanner_client.put("/scanner/settings", json={"symbols": [], "base_revision": 0}).status_code == 200
+    watch.feed.add(at(9, 51), at(9, 52), 100.9, candidate.target + 0.1)
+    clock.now = at(9, 52, 40)
+    watch.run()
+    assert rows(engine)[1]["exit_intent"]["reason"] == "target"
+    # A restarted process with a different universe/version still recognizes the old candidate.
+    scanner_client.put("/scanner/settings", json={"symbols": ["SPY", "MU"], "base_revision": 1})
+    restarted, _ = scanner(engine, at(9, 50, 50))
+    restarted.feed = watch.feed
+    restarted.run()
+    assert [c.symbol for c in rows(engine)[0]].count("SPY") == 1
+    assert json.loads(rows(engine)[0][0].facts_json)["scanner_universe"] == ["SPY"]
 
 
 def test_breakout_is_saved_entered_and_exits_at_target(engine):

@@ -694,6 +694,8 @@ export type ScannerScorecard = {
 
 export type ScannerCandidateRow = {
   id: string;
+  scanner_version: string;
+  params_hash: string;
   symbol: string;
   setup: "fade" | "orb";
   direction: "long" | "short";
@@ -702,7 +704,7 @@ export type ScannerCandidateRow = {
   stop: number;
   target: number;
   flags: string[];
-  facts: Record<string, number | string>;
+  facts: Record<string, number | string | string[]>;
   contract: {
     symbol: string;
     expiration: string;
@@ -717,6 +719,8 @@ export type ScannerCandidateRow = {
   isaac: ScannerIsaacRow;
   events: Record<string, ScannerEventRow>;
 };
+
+export type ScannerSettings = { symbols: string[]; revision: number; max_symbols: number };
 
 export type ScannerDay = {
   date: string;
@@ -912,6 +916,8 @@ return {
   advancedResyncAll: (confirm?: string) => post<{ run_id: string }>("/sync/advanced/resync-all", confirm ? { confirm } : undefined),
   health: () => get<Health>("/health"),
   scannerDay: (day?: string) => get<ScannerDay>(`/scanner/day${day ? `?day=${encodeURIComponent(day)}` : ""}`),
+  scannerSettings: () => get<ScannerSettings>("/scanner/settings"),
+  saveScannerSettings: (symbols: string[], base_revision: number) => put<ScannerSettings>("/scanner/settings", { symbols, base_revision }),
   tradingViewAlerts: (params?: string) =>
     get<TradingViewAlert[]>(`/tradingview/alerts${params ? `?${params}` : ""}`),
   tradingViewAlert: (alertId: string) =>
