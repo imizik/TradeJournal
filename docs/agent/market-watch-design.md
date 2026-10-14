@@ -1,6 +1,6 @@
 # Jo's market watch — design (proposed October 14, 2026)
 
-**Status: MW-1 implemented; owner-authorized activation is partial as of October 14, 2026. Calendar repair and instructed connector proof are complete; actual Jo use remains unproven.** Written at Isaac's request
+**Status: MW-1 implemented; owner-authorized activation and instructed Jo tool proof completed October 14, 2026. Eligible intraday scoring and later session trials remain unproven.** Written at Isaac's request
 after the October 14 CPI session. It extends the
 [shadow trader design](shadow-trader-design.md) and reuses rules already
 written in the [agentic trading roadmap](../agentic-trading-roadmap.md)
@@ -524,9 +524,18 @@ Jo use or independent market reasoning. The narrow owner export was identical
 on retry. The app-side evaluator used only the snapshot's frozen IEX bars and
 recorded three `not_eligible` outcomes, zero scores and an unavailable session
 label because required history/roster were absent. Repeating import/evaluation
-inserted no extra outcomes. Actual Jo read/submit use and eligible intraday
-scoring remain unproven; no trial, schedule or market-message delivery was
-activated.
+inserted no extra outcomes.
+
+The owner then explicitly authorized one manual Jo test. Jo fetched the same
+snapshot, saved one separately labelled post-close `no_view` read linked to the
+Codex proof, and repeated the exact submission. Jo's displayed input/read IDs
+and hashes matched the server's immutable records; the audit showed one
+snapshot call and two submit calls, with one new read and no message event.
+The narrow owner export/evaluator added three ineligible horizons for Jo and
+zero scores; exact export/import/evaluation retries added no duplicate records.
+This establishes actual Jo access for the instructed test only. Eligible
+intraday scoring, independent reasoning and later session trials remain
+unproven; no trial, schedule or market-message delivery was activated.
 
 ## Wake-ups and messages (MW-2)
 
