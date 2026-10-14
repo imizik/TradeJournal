@@ -1,0 +1,1921 @@
+[
+ {
+  "day": "2026-03-02",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.365
+   },
+   "VIXY confirms|up": {
+    "at": 630,
+    "follow": 0.365
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.365
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.106
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.017
+   }
+  }
+ },
+ {
+  "day": "2026-03-03",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -1.261
+   },
+   "SPY volume 1.3x|down": {
+    "at": 630,
+    "follow": -1.261
+   },
+   "VIXY confirms|down": {
+    "at": 630,
+    "follow": -1.261
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -1.261
+   },
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.12
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.328
+   },
+   "2 of breadth/volume/VIXY + base|down": {
+    "at": 630,
+    "follow": -1.261
+   }
+  }
+ },
+ {
+  "day": "2026-03-04",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.152
+   }
+  }
+ },
+ {
+  "day": "2026-03-05",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.549
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": -0.549
+   }
+  }
+ },
+ {
+  "day": "2026-03-06",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-09",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.79
+   }
+  }
+ },
+ {
+  "day": "2026-03-10",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.524
+   }
+  }
+ },
+ {
+  "day": "2026-03-11",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.222
+   }
+  }
+ },
+ {
+  "day": "2026-03-12",
+  "type": "trend_down",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": 0.215
+   }
+  }
+ },
+ {
+  "day": "2026-03-13",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 660,
+    "follow": 0.304
+   },
+   "VIXY confirms|down": {
+    "at": 660,
+    "follow": 0.304
+   },
+   "coiled prior day + base|down": {
+    "at": 660,
+    "follow": 0.304
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.033
+   }
+  }
+ },
+ {
+  "day": "2026-03-16",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-17",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-18",
+  "type": "trend_down",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-19",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-20",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.327
+   },
+   "SPY volume 1.3x|down": {
+    "at": 660,
+    "follow": 0.353
+   },
+   "VIXY confirms|down": {
+    "at": 630,
+    "follow": 0.327
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": 0.327
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.282
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": 0.282
+   },
+   "2 of breadth/volume/VIXY + base|down": {
+    "at": 660,
+    "follow": 0.353
+   }
+  }
+ },
+ {
+  "day": "2026-03-23",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.543
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.02
+   }
+  }
+ },
+ {
+  "day": "2026-03-24",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 720,
+    "follow": -0.181
+   },
+   "VIXY confirms|up": {
+    "at": 720,
+    "follow": -0.181
+   }
+  }
+ },
+ {
+  "day": "2026-03-25",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-03-26",
+  "type": "trend_down",
+  "fired": {
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.855
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.158
+   }
+  }
+ },
+ {
+  "day": "2026-03-27",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.462
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.462
+   }
+  }
+ },
+ {
+  "day": "2026-03-30",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.399
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": 0.399
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.161
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.341
+   }
+  }
+ },
+ {
+  "day": "2026-03-31",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.79
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.367
+   },
+   "failed bounce|up": {
+    "at": 780,
+    "follow": 0.367
+   }
+  }
+ },
+ {
+  "day": "2026-04-01",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-02",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.525
+   },
+   "VIXY confirms|up": {
+    "at": 630,
+    "follow": 0.525
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.525
+   },
+   "coiled prior day + base|up": {
+    "at": 630,
+    "follow": 0.525
+   }
+  }
+ },
+ {
+  "day": "2026-04-06",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-07",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-08",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 660,
+    "follow": -0.284
+   },
+   "VIXY confirms|down": {
+    "at": 660,
+    "follow": -0.284
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.165
+   }
+  }
+ },
+ {
+  "day": "2026-04-09",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.0
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.094
+   }
+  }
+ },
+ {
+  "day": "2026-04-10",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-13",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 780,
+    "follow": 0.356
+   },
+   "VIXY confirms|up": {
+    "at": 780,
+    "follow": 0.356
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.619
+   },
+   "coiled prior day + base|up": {
+    "at": 780,
+    "follow": 0.356
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.356
+   }
+  }
+ },
+ {
+  "day": "2026-04-14",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.339
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.144
+   }
+  }
+ },
+ {
+  "day": "2026-04-15",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.232
+   }
+  }
+ },
+ {
+  "day": "2026-04-16",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-17",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.086
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.086
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.196
+   }
+  }
+ },
+ {
+  "day": "2026-04-20",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-21",
+  "type": "trend_down",
+  "fired": {
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.719
+   },
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.16
+   }
+  }
+ },
+ {
+  "day": "2026-04-22",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-23",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": -0.223
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.223
+   }
+  }
+ },
+ {
+  "day": "2026-04-24",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.042
+   }
+  }
+ },
+ {
+  "day": "2026-04-27",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.034
+   }
+  }
+ },
+ {
+  "day": "2026-04-28",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-29",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-04-30",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.982
+   },
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.209
+   }
+  }
+ },
+ {
+  "day": "2026-05-01",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.516
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.516
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": -0.391
+   }
+  }
+ },
+ {
+  "day": "2026-05-04",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.227
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.072
+   }
+  }
+ },
+ {
+  "day": "2026-05-05",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.041
+   }
+  }
+ },
+ {
+  "day": "2026-05-06",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 660,
+    "follow": 0.246
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.25
+   }
+  }
+ },
+ {
+  "day": "2026-05-07",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.067
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.067
+   }
+  }
+ },
+ {
+  "day": "2026-05-08",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 660,
+    "follow": 0.069
+   },
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.05
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.094
+   }
+  }
+ },
+ {
+  "day": "2026-05-11",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 660,
+    "follow": -0.056
+   },
+   "coiled prior day + base|up": {
+    "at": 660,
+    "follow": -0.056
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.01
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": -0.134
+   }
+  }
+ },
+ {
+  "day": "2026-05-12",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-05-13",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.037
+   }
+  }
+ },
+ {
+  "day": "2026-05-14",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.049
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.062
+   }
+  }
+ },
+ {
+  "day": "2026-05-15",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-05-18",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.289
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.318
+   }
+  }
+ },
+ {
+  "day": "2026-05-19",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.105
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": -0.411
+   }
+  }
+ },
+ {
+  "day": "2026-05-20",
+  "type": "trend_up",
+  "fired": {}
+ },
+ {
+  "day": "2026-05-21",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.125
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": -0.125
+   }
+  }
+ },
+ {
+  "day": "2026-05-22",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-05-26",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.14
+   }
+  }
+ },
+ {
+  "day": "2026-05-27",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-05-28",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.277
+   },
+   "VIXY confirms|up": {
+    "at": 840,
+    "follow": -0.009
+   },
+   "coiled prior day + base|up": {
+    "at": 630,
+    "follow": 0.277
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.012
+   }
+  }
+ },
+ {
+  "day": "2026-05-29",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-06-01",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.072
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.256
+   }
+  }
+ },
+ {
+  "day": "2026-06-02",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 660,
+    "follow": -0.04
+   }
+  }
+ },
+ {
+  "day": "2026-06-03",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.143
+   }
+  }
+ },
+ {
+  "day": "2026-06-04",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.48
+   },
+   "VIXY confirms|up": {
+    "at": 630,
+    "follow": 0.48
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.042
+   }
+  }
+ },
+ {
+  "day": "2026-06-05",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 1.13
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": 1.453
+   }
+  }
+ },
+ {
+  "day": "2026-06-08",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.256
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.366
+   }
+  }
+ },
+ {
+  "day": "2026-06-09",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.587
+   },
+   "SPY volume 1.3x|down": {
+    "at": 660,
+    "follow": 0.099
+   },
+   "VIXY confirms|down": {
+    "at": 720,
+    "follow": -1.126
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": 0.587
+   },
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -1.47
+   },
+   "2 of breadth/volume/VIXY + base|down": {
+    "at": 720,
+    "follow": -1.126
+   }
+  }
+ },
+ {
+  "day": "2026-06-10",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -1.423
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -1.423
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.63
+   }
+  }
+ },
+ {
+  "day": "2026-06-11",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.31
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": -1.284
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.31
+   }
+  }
+ },
+ {
+  "day": "2026-06-12",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.297
+   }
+  }
+ },
+ {
+  "day": "2026-06-15",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.126
+   }
+  }
+ },
+ {
+  "day": "2026-06-16",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": 0.172
+   }
+  }
+ },
+ {
+  "day": "2026-06-17",
+  "type": "trend_down",
+  "fired": {}
+ },
+ {
+  "day": "2026-06-18",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-06-22",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-06-23",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.466
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.466
+   },
+   "failed bounce|up": {
+    "at": 780,
+    "follow": -0.336
+   }
+  }
+ },
+ {
+  "day": "2026-06-24",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.106
+   }
+  }
+ },
+ {
+  "day": "2026-06-25",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": 0.073
+   }
+  }
+ },
+ {
+  "day": "2026-06-26",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.359
+   },
+   "VIXY confirms|up": {
+    "at": 630,
+    "follow": -0.359
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.359
+   }
+  }
+ },
+ {
+  "day": "2026-06-29",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.396
+   },
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.039
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.039
+   }
+  }
+ },
+ {
+  "day": "2026-06-30",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.147
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.036
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": 0.042
+   }
+  }
+ },
+ {
+  "day": "2026-07-01",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 720,
+    "follow": -0.275
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.1
+   }
+  }
+ },
+ {
+  "day": "2026-07-02",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.242
+   }
+  }
+ },
+ {
+  "day": "2026-07-06",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-07-07",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.095
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.095
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": -0.095
+   }
+  }
+ },
+ {
+  "day": "2026-07-08",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-07-09",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.12
+   }
+  }
+ },
+ {
+  "day": "2026-07-10",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 780,
+    "follow": 0.093
+   }
+  }
+ },
+ {
+  "day": "2026-07-13",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.014
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.082
+   }
+  }
+ },
+ {
+  "day": "2026-07-14",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-07-15",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-07-16",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-07-17",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.37
+   },
+   "SPY volume 1.3x|up": {
+    "at": 630,
+    "follow": -0.37
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": -0.37
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": -0.434
+   }
+  }
+ },
+ {
+  "day": "2026-07-20",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 660,
+    "follow": 0.262
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": 0.467
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.319
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.378
+   }
+  }
+ },
+ {
+  "day": "2026-07-21",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.051
+   }
+  }
+ },
+ {
+  "day": "2026-07-22",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.335
+   }
+  }
+ },
+ {
+  "day": "2026-07-23",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.149
+   }
+  }
+ },
+ {
+  "day": "2026-07-24",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.366
+   }
+  }
+ },
+ {
+  "day": "2026-07-27",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.1
+   },
+   "VIXY confirms|down": {
+    "at": 630,
+    "follow": -0.1
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.1
+   },
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": -0.174
+   }
+  }
+ },
+ {
+  "day": "2026-07-28",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.254
+   }
+  }
+ },
+ {
+  "day": "2026-07-29",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.754
+   },
+   "VIXY confirms|down": {
+    "at": 660,
+    "follow": 0.74
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": 0.754
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": 0.754
+   },
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.747
+   }
+  }
+ },
+ {
+  "day": "2026-07-30",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.4
+   },
+   "SPY volume 1.3x|up": {
+    "at": 630,
+    "follow": 0.4
+   },
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.252
+   },
+   "failed bounce|up": {
+    "at": 780,
+    "follow": 0.355
+   }
+  }
+ },
+ {
+  "day": "2026-07-31",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.783
+   },
+   "SPY volume 1.3x|down": {
+    "at": 630,
+    "follow": -0.783
+   },
+   "VIXY confirms|down": {
+    "at": 630,
+    "follow": -0.783
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.783
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": -0.783
+   },
+   "2 of breadth/volume/VIXY + base|down": {
+    "at": 630,
+    "follow": -0.783
+   }
+  }
+ },
+ {
+  "day": "2026-08-03",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.378
+   },
+   "SPY volume 1.3x|up": {
+    "at": 660,
+    "follow": 0.274
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.378
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.173
+   }
+  }
+ },
+ {
+  "day": "2026-08-04",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.762
+   },
+   "SPY volume 1.3x|up": {
+    "at": 720,
+    "follow": 0.317
+   },
+   "SPY+QQQ+IWM aligned|up": {
+    "at": 630,
+    "follow": 0.762
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.111
+   }
+  }
+ },
+ {
+  "day": "2026-08-05",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.218
+   }
+  }
+ },
+ {
+  "day": "2026-08-06",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.042
+   }
+  }
+ },
+ {
+  "day": "2026-08-07",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-10",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-11",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.081
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": 0.178
+   }
+  }
+ },
+ {
+  "day": "2026-08-12",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-13",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.165
+   }
+  }
+ },
+ {
+  "day": "2026-08-14",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.071
+   }
+  }
+ },
+ {
+  "day": "2026-08-17",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": 0.091
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": 0.091
+   }
+  }
+ },
+ {
+  "day": "2026-08-18",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-19",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-20",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": 0.287
+   }
+  }
+ },
+ {
+  "day": "2026-08-21",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-08-24",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.029
+   }
+  }
+ },
+ {
+  "day": "2026-08-25",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.222
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.155
+   }
+  }
+ },
+ {
+  "day": "2026-08-26",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 840,
+    "follow": 0.068
+   }
+  }
+ },
+ {
+  "day": "2026-08-27",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 660,
+    "follow": 0.142
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.193
+   }
+  }
+ },
+ {
+  "day": "2026-08-28",
+  "type": "trend_down",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": 0.072
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": 0.072
+   }
+  }
+ },
+ {
+  "day": "2026-08-31",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.397
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.301
+   }
+  }
+ },
+ {
+  "day": "2026-09-01",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.419
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": -0.523
+   }
+  }
+ },
+ {
+  "day": "2026-09-02",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": -0.025
+   },
+   "failed bounce|up": {
+    "at": 840,
+    "follow": -0.008
+   }
+  }
+ },
+ {
+  "day": "2026-09-03",
+  "type": "trend_up",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": -0.023
+   }
+  }
+ },
+ {
+  "day": "2026-09-04",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 660,
+    "follow": -0.142
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.14
+   }
+  }
+ },
+ {
+  "day": "2026-09-08",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.138
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": 0.138
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": 0.264
+   }
+  }
+ },
+ {
+  "day": "2026-09-09",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.031
+   }
+  }
+ },
+ {
+  "day": "2026-09-10",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 780,
+    "follow": -0.253
+   }
+  }
+ },
+ {
+  "day": "2026-09-11",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-09-14",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.38
+   },
+   "failed bounce|up": {
+    "at": 720,
+    "follow": -0.174
+   }
+  }
+ },
+ {
+  "day": "2026-09-15",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.017
+   },
+   "VIXY confirms|down": {
+    "at": 660,
+    "follow": -0.163
+   },
+   "failed bounce|down": {
+    "at": 840,
+    "follow": -0.019
+   }
+  }
+ },
+ {
+  "day": "2026-09-16",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-09-17",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-09-18",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.343
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": -0.394
+   }
+  }
+ },
+ {
+  "day": "2026-09-21",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.692
+   },
+   "SPY volume 1.3x|up": {
+    "at": 660,
+    "follow": 0.663
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.185
+   }
+  }
+ },
+ {
+  "day": "2026-09-22",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-09-23",
+  "type": "trend_down",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": 0.165
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": 0.165
+   },
+   "coiled prior day + base|down": {
+    "at": 630,
+    "follow": 0.165
+   },
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.049
+   },
+   "failed bounce|down": {
+    "at": 720,
+    "follow": 0.13
+   }
+  }
+ },
+ {
+  "day": "2026-09-24",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": -0.146
+   }
+  }
+ },
+ {
+  "day": "2026-09-25",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.022
+   },
+   "failed bounce|up": {
+    "at": 780,
+    "follow": 0.129
+   }
+  }
+ },
+ {
+  "day": "2026-09-28",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-09-29",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 780,
+    "follow": -0.177
+   }
+  }
+ },
+ {
+  "day": "2026-09-30",
+  "type": "trend_down",
+  "fired": {
+   "failed bounce|up": {
+    "at": 720,
+    "follow": -0.897
+   }
+  }
+ },
+ {
+  "day": "2026-10-01",
+  "type": "choppy",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|down": {
+    "at": 630,
+    "follow": -0.499
+   },
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.499
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": -0.438
+   }
+  }
+ },
+ {
+  "day": "2026-10-02",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-10-05",
+  "type": "trend_up",
+  "fired": {
+   "base (SPY 0.3 ATR + VWAP side)|up": {
+    "at": 630,
+    "follow": 0.313
+   },
+   "afternoon new extreme|up": {
+    "at": 780,
+    "follow": 0.115
+   }
+  }
+ },
+ {
+  "day": "2026-10-06",
+  "type": "choppy",
+  "fired": {}
+ },
+ {
+  "day": "2026-10-07",
+  "type": "choppy",
+  "fired": {
+   "failed bounce|up": {
+    "at": 840,
+    "follow": -0.02
+   }
+  }
+ },
+ {
+  "day": "2026-10-08",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|down": {
+    "at": 840,
+    "follow": -0.298
+   },
+   "failed bounce|down": {
+    "at": 780,
+    "follow": -0.113
+   }
+  }
+ },
+ {
+  "day": "2026-10-09",
+  "type": "choppy",
+  "fired": {
+   "afternoon new extreme|up": {
+    "at": 840,
+    "follow": 0.023
+   }
+  }
+ },
+ {
+  "day": "2026-10-12",
+  "type": "choppy",
+  "fired": {
+   "SPY+QQQ+IWM aligned|down": {
+    "at": 630,
+    "follow": -0.022
+   }
+  }
+ },
+ {
+  "day": "2026-10-13",
+  "type": "choppy",
+  "fired": {}
+ }
+]
