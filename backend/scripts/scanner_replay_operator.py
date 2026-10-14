@@ -2,8 +2,8 @@
 
 This operator reads private captures and writes only frozen replay rows or a
 private Markdown report. It issues no login, starts no service, and never reads
-production journal data. Export historical feature rows and Isaac trades to
-private JSON files separately if their optional comparisons are desired.
+production journal data. Prefer cutoff aggregates from the approved publisher
+host for history. Optional Isaac trade snapshots remain a separate comparison.
 """
 
 from __future__ import annotations
@@ -94,9 +94,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--seed", type=int, required=True, help="Recorded practice/exam split seed")
     prepare.add_argument("--exam-count", type=int, required=True, help="Number of held-out exam sessions")
     prepare.add_argument("--allow-holdout", action="store_true", help="Explicitly permit sessions on/after 2026-09-14")
-    prepare.add_argument("--history-rows", type=Path, help="Optional private precomputed historical feature rows")
+    history = prepare.add_mutually_exclusive_group()
+    history.add_argument("--history-rows", type=Path, help="Optional private precomputed historical feature rows")
+    history.add_argument("--history-cards", type=Path, help="Private cutoff aggregate cards; no per-trade rows required")
     prepare.add_argument("--prompt-file", type=Path, help="Optional private frozen Jo prompt text")
-    prepare.add_argument("--prompt-version", default="tj-shadow-selection-v2")
+    prepare.add_argument("--prompt-version", default="tj-shadow-selection-v3")
     prepare.add_argument("--decision-delay-seconds", type=int, default=60)
     prepare.add_argument("--cost-per-share", type=float, default=0, help="Proxy dollars per share per side")
     prepare.add_argument("--slippage-bps", type=float, default=0, help="Adverse proxy slippage per side")
@@ -130,13 +132,16 @@ def main(argv: list[str] | None = None) -> None:
             history = private_json(args.history_rows, MAX_SNAPSHOT_BYTES) if args.history_rows else []
             if not isinstance(history, list):
                 raise ValueError("Historical feature file must contain a list")
+            cards = private_json(args.history_cards, MAX_SNAPSHOT_BYTES) if args.history_cards else None
+            if cards is not None and not isinstance(cards, dict):
+                raise ValueError("History aggregate file must contain an object")
             prompt = (private_bytes(args.prompt_file, MAX_PROMPT_BYTES).decode("utf-8")
                       if args.prompt_file else scanner_replay.DEFAULT_PROMPT)
             with access._LOCK, Session(engine) as db:
                 access._serialized(db)
                 runs = scanner_replay.prepare_batch(db, bundles, identifier=args.identifier, seed=args.seed,
                     exam_count=args.exam_count, prompt_text=prompt, prompt_version=args.prompt_version,
-                    history_rows=history, allow_holdout=args.allow_holdout,
+                    history_rows=history, history_cards=cards, allow_holdout=args.allow_holdout,
                     policy=scanner_replay.market.scoring_policy(args.decision_delay_seconds,
                                                                args.cost_per_share, args.slippage_bps))
                 run_ids = [str(run.id) for run in runs]

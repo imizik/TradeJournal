@@ -1,16 +1,18 @@
 """Isolated operator guards, sealed reports and S2 snapshot matching."""
 
 from datetime import UTC, datetime, timedelta
+import copy
 import json
 from pathlib import Path
 import uuid
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine import scanner_replay, scanner_replay_market
 from app.engine import scanner_replay_report as report
-from app.models import Account, Fill, PracticeRun
+from app.models import Account, DecisionContext, Fill, JobRun, PracticeRun
+from scripts import scanner_replay_history as history
 from scripts import scanner_replay_operator as operator
 from tests.test_scanner_replay_market import bundle
 
@@ -64,6 +66,21 @@ def prepare(trial, tmp_path, capsys, *, exam_count=0, identifier="scanner-operat
     operator.main(["--trial-root", str(root), "prepare", "--bundle", str(source), "--identifier", identifier,
                    "--seed", "17", "--exam-count", str(exam_count)])
     return json.loads(capsys.readouterr().out)["run_ids"][0]
+
+
+def cutoff_cards(source):
+    packet = scanner_replay_market.generate_session(source)["setups"][0]["packet"]
+    features = packet["history"]["cohorts"][0]["definition"]
+    request = {"format": "scanner-replay-history-requests-v1", "requests": [{
+        "candidate_id": packet["candidate"]["candidate_id"], "session_date": source["session_date"],
+        "history_cutoff": packet["history_cutoff"], "features": features}]}
+    row = {**features, "closed_at": "2026-08-24T16:01:00", "opened_at": "2026-08-24T14:00:00",
+           "realized_pnl": 10, "pnl_pct": 0.1, "mfe_pct": 0.2, "mae_pct": -0.1,
+           "source_fill_key": "private-fill-key"}
+    snapshot = {"state": "fresh", "features_sha256": "f" * 64,
+                "generated_at": datetime(2026, 10, 13, tzinfo=UTC).isoformat(),
+                "rows": [row, {**row, "closed_at": "2026-08-25T04:00:00+00:00"}]}
+    return history.aggregate(request, snapshot)
 
 
 def test_wrong_database_refused_before_input_or_app_work(tmp_path, monkeypatch):
@@ -142,6 +159,67 @@ def test_prepare_records_split_and_report_after_commit(trial, tmp_path, capsys):
     assert "entry-minute stop not checked (optimistic)" in markdown.lower()
     assert "Daily ATR coverage" in markdown and "Missing-minute impact" in markdown
     assert "Lost setup count is unknowable" in markdown
+
+
+def test_operator_history_cards_freeze_manifest_and_packet_then_refuse_changed_card(trial, tmp_path, capsys):
+    root, engine = trial
+    source = resolved_bundle()
+    bundle_path = private_file(tmp_path / "capture.json", source)
+    cards = cutoff_cards(source)
+    cards_path = private_file(tmp_path / "history-cards.json", cards)
+    command = ["--trial-root", str(root), "prepare", "--bundle", str(bundle_path),
+               "--identifier", "scanner-cards", "--seed", "17", "--exam-count", "0",
+               "--history-cards", str(cards_path)]
+    operator.main(command)
+    run_id = json.loads(capsys.readouterr().out)["run_ids"][0]
+    with Session(engine) as db:
+        run = db.get(PracticeRun, uuid.UUID(run_id))
+        manifest = scanner_replay.metadata(run)["manifest"]
+        assert manifest["prompt_version"] == "tj-shadow-selection-v3"
+        assert manifest["history_source"] == "cutoff_aggregates"
+        assert manifest["history_sha256"] == scanner_replay.digest(cards)
+        assert manifest["history_source_sha256"] == "f" * 64
+        assert manifest["history_generated_at"] == cards["generated_at"]
+        packet = scanner_replay.view(db, run, "scanner-cards", scanner_replay_market.rules.UNIVERSE)["next_setup"]
+        assert packet["history_cutoff"] == "2026-08-25T00:00:00-04:00"
+        assert packet["history"] == next(iter(cards["cards"].values()))["history"]
+        assert packet["history"]["available"] and packet["history"]["source_state"] == "fresh"
+        assert "private-fill-key" not in json.dumps(packet)
+    changed = copy.deepcopy(cards)
+    next(iter(changed["cards"].values()))["history"]["cohorts"][0]["note"] = "changed after freeze"
+    private_file(cards_path, changed)
+    with pytest.raises(Exception, match="frozen|Actor already"):
+        operator.main(command)
+    with Session(engine) as db:
+        assert len(db.exec(select(PracticeRun)).all()) == 1
+        assert scanner_replay.metadata(db.get(PracticeRun, uuid.UUID(run_id)))["manifest"]["history_sha256"] == scanner_replay.digest(cards)
+    assert not capsys.readouterr().out
+
+
+def test_operator_refuses_cross_cutoff_cards_without_partial_rows(trial, tmp_path):
+    root, engine = trial
+    source = resolved_bundle()
+    bundle_path = private_file(tmp_path / "capture.json", source)
+    cards = cutoff_cards(source)
+    next(iter(cards["cards"].values()))["history_cutoff"] = "2026-08-26T00:00:00-04:00"
+    cards_path = private_file(tmp_path / "cross-cutoff.json", cards)
+    with pytest.raises(ValueError, match="Missing or mismatched pre-session history aggregate"):
+        operator.main(["--trial-root", str(root), "prepare", "--bundle", str(bundle_path),
+                       "--identifier", "scanner-bad-card", "--seed", "17", "--exam-count", "0",
+                       "--history-cards", str(cards_path)])
+    with Session(engine) as db:
+        assert not db.exec(select(PracticeRun)).all()
+        assert not db.exec(select(DecisionContext)).all()
+        assert not db.exec(select(JobRun)).all()
+
+
+def test_operator_history_input_flags_are_mutually_exclusive(tmp_path):
+    parser = operator._parser()
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["--trial-root", str(tmp_path), "prepare", "--bundle", "capture.json",
+                           "--identifier", "scanner-flags", "--seed", "1", "--exam-count", "0",
+                           "--history-rows", "rows.json", "--history-cards", "cards.json"])
+    assert error.value.code == 2
 
 
 def test_exam_abandon_does_not_publish_report(trial, tmp_path, capsys):

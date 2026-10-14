@@ -132,6 +132,9 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
              "A dash in a legacy sensitivity column means that frozen snapshot predates this comparison.", "",
              "## Frozen scoring policy", "", "```json", json.dumps(policy, sort_keys=True, indent=2), "```", "",
              "## Session scorecard", ""]
+    source = manifest.get("history_source", "unavailable" if manifest["history_sha256"] == scanner_replay.digest([]) else "legacy feature rows")
+    lines[1:1] = ["", f"Prior-trade history source: {escape(source)}; frozen input hash: `{manifest['history_sha256']}`.",
+                  "Legacy immutable packet labels are preserved; displayed labels now distinguish missing history from supplied matching aggregates.", ""]
     lines.extend(_score_table(result["scorecard"]))
     lines.extend(["", f"Sessions: {result['scorecard']['sessions']}; decisions: {decision_text}; "
                   f"uncommitted: {result['scorecard']['uncommitted']}.",
@@ -208,12 +211,13 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
     if coverage is None:
         lines.append("Legacy snapshot: symbol-time loss was not recorded.")
     else:
-        lines.extend(["| Symbol | Expected minutes | Supplied minutes | Missing minutes | Scan minutes lost | Blocked scan slots | Setups emitted |",
-                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"])
+        lines.extend(["| Symbol | Expected minutes | Supplied minutes | Missing minutes | Scan minutes lost | Blocked scan slots | Setups emitted | Strict v1 setups | Change |",
+                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"])
         for symbol, row in sorted(coverage["symbols"].items()):
             lines.append("| " + " | ".join((escape(symbol), str(row["expected_minutes"]), str(row["provided_minutes"]),
                 str(row["missing_minutes"]), str(row["scan_minutes_lost"]), str(row["blocked_scan_slots"]),
-                str(row["setups_emitted"]))) + " |")
+                str(row["setups_emitted"]), str(row.get("strict_v1_setups_emitted", "—")),
+                str(row.get("parity_minus_strict_setups", "—")))) + " |")
         totals = coverage["totals"]
         completeness = "complete" if totals["missing_minutes"] == 0 else "incomplete"
         lines.extend(["", f"Session data: {completeness}. Session totals: {totals['missing_minutes']} missing symbol-minutes; "
@@ -221,6 +225,12 @@ def render_markdown(db, run, *, isaac_trades: list[dict] | None = None) -> str:
                       f"{totals['setups_emitted']} setups emitted.",
                       "Lost setup count is unknowable when bars are absent. Blocked scan slots are opportunities to evaluate "
                       "a signal, not claimed missing setups; a quiet complete session has zero lost symbol-time."])
+        if "strict_v1_setups_emitted" in totals:
+            lines.extend([f"Live-bucket parity: {totals['partial_scan_buckets']} partial scan buckets evaluated; "
+                          f"{totals['empty_scan_buckets']} empty scan buckets skipped. "
+                          f"Strict v1 selected {totals['strict_v1_setups_emitted']}; parity selected {totals['setups_emitted']} "
+                          f"(change {totals['parity_minus_strict_setups']:+d}). Missing minutes are not forward-filled "
+                          "or treated as proof of no trades. Missing required entry/hold minutes still make scores unresolved."])
     lines.extend(["", "Coverage gaps:", ""])
     if meta["coverage_gaps"]:
         lines.extend(f"- {escape(gap.get('symbol'))}: {escape(gap.get('reason'))}"

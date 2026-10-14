@@ -25,6 +25,7 @@ DEFAULT_PROMPT = (
     "read its next_setup, then commit TAKE, SKIP or INSUFFICIENT_DATA with a reason of at most 1000 characters. "
     "The scanner's direction, stop, target and exits are fixed; decide only whether to take the setup. "
     "Use only the supplied frozen setup, historical market packet, candles and prior closed-trade aggregates. "
+    "Inspect history.available, source_state and cohort counts; distinguish missing history from zero matching prior trades. "
     "Do not call other trading, journal, email or co-pilot tools. Missing historical option fields are unavailable, "
     "not a failed liquidity check. After each commit read the same run for its next setup. "
     "Resume interruptions at the next uncommitted setup. Do not request outcomes during a run. "
@@ -73,7 +74,8 @@ def split_dates(days, seed, exam_count=0, *, allow_holdout=False):
 
 
 def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DEFAULT_PROMPT,
-                  prompt_version="tj-shadow-selection-v2", policy=None, history_rows=None, allow_holdout=False):
+                  prompt_version="tj-shadow-selection-v3", policy=None, history_rows=None, history_cards=None,
+                  allow_holdout=False):
     """Operator-only import. Split/freeze BEFORE generating or observing results."""
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == "owner":
         raise decisions.DecisionError("Use a fresh isolated actor")
@@ -82,14 +84,22 @@ def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DE
     phases = split_dates([b["session_date"] for b in bundles], seed, exam_count, allow_holdout=allow_holdout)
     policy = policy or market.scoring_policy()
     history_rows = history_rows or []
+    if history_cards is not None and (not isinstance(history_cards, dict) or history_rows):
+        raise decisions.DecisionError("Choose feature rows or cutoff aggregate cards")
+    history_input = history_cards if history_cards is not None else history_rows
+    history_source = "cutoff_aggregates" if history_cards is not None else "feature_rows" if history_rows else "unavailable"
     inputs = {b["session_date"]: digest(b) for b in bundles}
     identity = digest({"actor": identifier, "inputs": inputs, "phases": phases, "seed": seed, "exam_count": exam_count,
                        "prompt_text": prompt_text, "prompt_version": prompt_version, "policy": policy,
-                       "history_sha256": digest(history_rows), "allow_holdout": allow_holdout})
+                       "history_sha256": digest(history_input), "history_source": history_source,
+                       "allow_holdout": allow_holdout})
     ids = {day: str(uuid.uuid5(uuid.NAMESPACE_URL, PREFIX + identity + ":" + day)) for day in phases}
     manifest = {"schema": SCHEMA, "actor": identifier, "batch_id": identity, "run_ids": ids,
                 "phases": phases, "seed": seed, "exam_count": exam_count, "prompt_text": prompt_text, "prompt_version": prompt_version,
-                "scoring_policy": policy, "input_sha256": inputs, "history_sha256": digest(history_rows),
+                "scoring_policy": policy, "input_sha256": inputs, "history_sha256": digest(history_input),
+                "history_source": history_source,
+                "history_generated_at": history_cards.get("generated_at") if history_cards is not None else None,
+                "history_source_sha256": history_cards.get("source_sha256") if history_cards is not None else None,
                 "allow_holdout": allow_holdout, "scanner_version": market.rules.VERSION,
                 "params_hash": market.rules.PARAMS_HASH}
     previous = [db.get(PracticeRun, uuid.UUID(value)) for value in ids.values()]
@@ -110,7 +120,8 @@ def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DE
     runs = []
     try:
         for bundle in sorted(bundles, key=lambda b: b["session_date"]):
-            generated = market.generate_session(bundle, scoring_policy=policy, history_rows=history_rows, allow_holdout=allow_holdout)
+            generated = market.generate_session(bundle, scoring_policy=policy, history_rows=history_rows,
+                                                history_cards=history_cards, allow_holdout=allow_holdout)
             if decisions._utc(generated["retrieved_at"], "retrieval") > now:
                 raise decisions.DecisionError("Provider retrieval cannot be in the future")
             if len(generated["setups"]) > MAX_SETUPS:
@@ -122,7 +133,7 @@ def prepare_batch(db, bundles, *, identifier, seed, exam_count=0, prompt_text=DE
                 policy_version=SCHEMA, policy_hash=digest(manifest),
                 brief_json=canonical({"schema": SCHEMA, "manifest": manifest, "phase": phases[day],
                     "differences": generated["differences"], "coverage_gaps": generated["gaps"],
-                    "coverage": generated["coverage"], "daily_atr": generated["daily_atr"],
+                    "coverage": generated["coverage"], "daily_atr": generated["daily_atr"], "labels": generated["labels"],
                     "retrieved_at": generated["retrieved_at"]}))
             db.add(run)
             db.flush()
@@ -226,7 +237,7 @@ def view(db, run, actor, symbols, *, details=True, resume=False):
         "schema_version": SCHEMA, "setups": len(values) if revealed else None, "committed": len(records),
         "prompt_version": meta["manifest"]["prompt_version"], "prompt_text": meta["manifest"]["prompt_text"],
         "scoring_policy": meta["manifest"]["scoring_policy"], "policy_hash": run.policy_hash,
-        "differences_from_live": meta["differences"], "labels": market.LABELS,
+        "differences_from_live": meta["differences"], "labels": run_labels(run),
         "retrieved_at": meta["retrieved_at"], "coverage_gaps": meta["coverage_gaps"] if revealed else None,
         "coverage": meta.get("coverage") if revealed else None,
         "daily_atr": meta.get("daily_atr") if revealed else None,
@@ -404,7 +415,16 @@ def report(db, run):
     return {"scorecard": scorecard(rows, 1), "setups": rows, "cumulative": cumulative_report(db, run),
         "by_setup": {kind: scorecard([r for r in rows if r["candidate"]["setup"] == kind], 1)
                      for kind in sorted({r["candidate"]["setup"] for r in rows})},
-        "contract_eligibility": "all unknown; with/without-contract cohort omitted", "labels": market.LABELS}
+        "contract_eligibility": "all unknown; with/without-contract cohort omitted", "labels": run_labels(run)}
+
+
+def run_labels(run):
+    meta = metadata(run)
+    if "labels" in meta:
+        return meta["labels"]
+    # Correct display only: legacy immutable context/choice bytes remain intact.
+    available = meta["manifest"]["history_sha256"] != digest([])
+    return [*market.LABELS, "informed-by-history" if available else "prior-trade-history-unavailable"]
 
 
 def cumulative_report(db, run):
