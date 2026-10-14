@@ -427,7 +427,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     server.audit_call = lambda name: authenticated(name, log=True)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
     if config.market_watch_snapshots_dir:
-        from market_watch_ledger import MarketWatchLedger
+        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
 
@@ -435,12 +435,14 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("market_watch_snapshot")}]})
         async def market_watch_snapshot() -> dict[str, Any]:
             """Freeze an actor-bound market input receipt. Never call between shadow_setup and shadow_decide.
-            Public SPY/QQQ evidence only; no provider requests, trades or delivery."""
+            Public SPY/QQQ evidence and own latest read/message-intent context only.
+            No provider requests, trades or delivery. Context recovers the same-session parent and message budget."""
             checked = await authenticated("market_watch_snapshot")
             try:
                 snapshot = await asyncio.to_thread(read_latest_snapshot, config.market_watch_snapshots_dir, clock())
                 if snapshot is None:
-                    return {"status": "unavailable", "reason": "no_current_session_snapshot"}
+                    context = await asyncio.to_thread(market_ledger.context, checked.claims["profile_id"], clock)
+                    return {"status": "unavailable", "reason": "no_current_session_snapshot", "context": context}
                 return await asyncio.to_thread(market_ledger.serve, checked.claims["profile_id"], snapshot, clock)
             except (ValueError, OSError, sqlite3.Error):
                 raise ToolError("Market snapshot unavailable; no input receipt issued") from None
@@ -461,6 +463,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 previous_read_id=previous_read_id, correction_of_read_id=correction_of_read_id, model_id=model_id)
             try:
                 return await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock)
+            except MessageBudgetExceeded:
+                raise ToolError("Daily message-intent budget exhausted; resubmit the read with message_intent=none") from None
             except (ValueError, Conflict, NotFound, sqlite3.Error):
                 raise ToolError("Market read refused: invalid input, parent, content or unavailable ledger") from None
 
