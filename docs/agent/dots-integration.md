@@ -13,21 +13,26 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
-Checkpoint: October 11, 2026 (evening ET), against merged source through PR #260 and the
-operational evidence below. PR and host state can change; verify them before
-acting. Built means merged implementation, activated means enabled in the
-named environment, observed means the actual path ran, and accepted means the
+Checkpoint: October 13, 2026 (evening ET), against merged source through PR #304.
+This board is the one place that answers "what is built, switched on, seen
+working and accepted" for Dots; the linked contracts hold the evidence. Move
+the checkpoint whenever a row changes, and verify host state before acting.
+Built means merged implementation, activated means enabled in the named
+environment, observed means the actual path ran, and accepted means the
 slice's stated exit criteria were met. None implies trading edge.
 
-| Capability | Delivered evidence | Remaining boundary |
-|---|---|---|
-| D0/D1 connection and sample reads | Actual synthetic OAuth call and assigned sample tool/UI comparison recorded in the [connector scope](cloud-mcp-integration-scope.md); Mac-asleep synthetic result was owner-reported | This does not prove laptop-off acceptance for every later role or write path |
-| D2/historical sample choices | Scoped own-choice/receipt implementation exists; [D2](cloud-mcp-d2-contract.md) and [historical contract](cloud-mcp-historical-contract.md) retain their evidence requirements | Do not infer every live save/UI/restart gate passed from code or an earlier sample; reconcile actual receipts for a selected exercise |
-| Journal coach | **Initial integration accepted.** Continuous scoped read-only publication and actual Jo reads passed October 10 ET; one actual coaching review followed. [Durable acceptance summary](cloud-mcp-journal-contract.md#observed-continuous-journal-acceptance) | Eight approved fields over closed/expired Roth trades; no open positions, intentions or automatic coaching. Repeated usefulness and current health are separate questions |
-| Advisor handoff | **Connected trial observed October 11, 2026 ET** on the retained #251 v2 install: actual Jo (ChatGPT plugin, dedicated Auth0 advisor user) read the replacement invented request and saved one cited answer over OAuth MCP (received 7:11:24 PM ET, receipt `e98582d6…79939`, request `a4b178f7…`); the server read back the identical receipt after one bounded three-service restart, and the owner `/advisor-review` page showed the same saved answer after that restart. Discovery first needed `client_claim` `azp` (Auth0 JWT profile), a fresh login as the bound advisor user, and ChatGPT **Refresh tools**; the first save was refused because `answer` carried the whole contract wrapper | The owner screenshot did not expand the exact receipt panel; owner-deferred revoke/recover check remains. Public keys still expire hourly without upkeep (step 3). Invented data only; not trading advice or AV0 |
-| Repeatable advisor questions | [PR #257](https://github.com/imizik/TradeJournal/pull/257) (merged) implements the [bounded assignment contract](advisor-assignment-contract.md): owner create/assign/list/reopen/revoke, one selected invented request and preserved cited receipts | Local generated-token two-question proof and desktop/390px authenticated UI create/reopen/revoke/restart passed; Not retained-activated or actual Jo accepted. `advisor_trial_control.py upgrade`/`downgrade` plus a separate additive `migrate-ledger` (the #251 ledger is one revision behind main) can carry it to the v2 install; fake-host and CI-smoke tested, not run on the VPS |
-| Shadow and A3 | Manual fixture assignments/choices and disclosure records implemented; A1/A2 infrastructure exists and A2 has one observed live operational lifecycle | Actual cloud-runner isolation, forward comparison and A3 human-timed acceptance remain unproven; latest A3 record is 0/3 sessions, not a current production-data audit |
-| D3 follow-through | Bounded design exists | No accepted user-facing subscription/scheduled follow-through. Journal export/key maintenance timers do not establish D3 |
+| Capability | Built | Activated | Observed | Accepted | Remaining boundary |
+|---|---|---|---|---|---|
+| Journal coach ([contract](cloud-mcp-journal-contract.md#observed-continuous-journal-acceptance)) | Yes | Yes | Oct 10 | **Initial integration, Oct 10** | Eight approved fields over closed/expired Roth trades; no open positions, intentions or automatic coaching. Repeated usefulness and current health are separate questions |
+| Invented-data advisor: connected trial, repeatable questions, owner status ([assignment](advisor-assignment-contract.md), [upkeep](advisor-connection-upkeep-contract.md)) | Yes | v2 trial upgraded Oct 12 per the operator record (owner page lists checks); not recorded in the repo's evidence | Connected trial Oct 11 | **Closed by the owner Oct 12**, not against every contract gate | Repeatable-question and key-upkeep acceptance with actual Jo were not recorded; owner-deferred revoke/recover check remains. Invented data only |
+| Pre-trade check, real data ([contract](advisor-pretrade-check-contract.md#next-steps)) | Yes | Oct 12 | First checks Oct 12; sign-in survived a 60-minute gap Oct 13 | Per step in its next-steps table | Grading (followed vs overrode) needs weeks of saved checks; swing outcome linking and sector moves open |
+| Setup scanner S1 ([contract](setup-scanner-contract.md#daily-health-acceptance-notes)) | Yes | Oct 12 (`SETUP_SCANNER_ENABLED`) | Oct 13 baseline session | No — ten full sessions from Oct 14 | Restart and pricing gates per the contract; no tuning before 50 paper trades |
+| Shadow Isaac S1 ([contract](shadow-s1-contract.md#acceptance)) | SH-1 to SH-5; SH-6 (activation runbook, first session) in progress | VPS file exchange and Jo task, Oct 13 | Email relay wakes Jo's task; **zero recorded Jo decisions** so far | No | One full live session with a decision, late or no-response record for every setup; restart and refusal gates |
+| Shadow S2: Isaac's trades in the scorecard ([plan](shadow-build-plan.md#s2--built-isaac-in-the-scorecard)) | Yes, display-only (#304) | Pending: merged after the last recorded deploy (`23b7c6c`) | No | No | Comparisons say "not enough evidence" under 30 decisions |
+| Shadow S3 (independence) / S4 (shadow picks contract and exits) | No | No | No | No | S3 research-gated; S4 needs S2 evidence. Hold both until S1 is accepted |
+| Manual A1/A2/A3 fixtures ([contract](advisor-shadow-contract.md)) | Yes | — | A2 one lifecycle | No | Cloud-runner isolation, forward comparison and A3 human-timed acceptance unproven; latest A3 record is 0/3 sessions. Separate from Shadow Isaac S1 |
+| D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
+| D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 
 ### Functionality sequence
 
@@ -37,12 +42,12 @@ Resolve an actual blocked user action before adding another infrastructure slice
 
 | Order | Outcome | Completion evidence |
 |---|---|---|
-| **1 — Observed: connected advisor trial** | Finish the existing advisor chat's one invented-data end-to-end trial | Actual Jo reads the frozen request, saves a cited answer, and the owner sees the identical receipt in TradeJournal after reload and service restart; existing isolation/activation gates remain applicable |
-| **2 — Next: repeatable advisor questions** | Owner creates, assigns, revokes and reopens questions through the app | A second distinct assignment works without OAuth edits or service restart; answers bind to the correct immutable request, and prior answers remain recoverable. Write a bounded assignment-management contract first |
-| **3 — Current: dependable connection** | Routine use survives normal credential/key lifecycle and service maintenance | Supported refresh/reconnect, health/failure visibility and recovery are observed; connection maintenance stays separate from agent schedules and trading automation. Scoped in the [connection upkeep contract](advisor-connection-upkeep-contract.md). Optional key upkeep for the v2 install is built (`deploy/advisor_keys_control.py`); not installed, activated or observed. The owner status view on `/advisor-review` is built as dormant source (keys, advisor enabled, selected question, last Jo save); it reaches the VPS only through the v2 upgrade command |
-| **4 — Useful approved real-data advisor** | Move beyond invented packets to a narrowly selected real question and data scope | Separately approved fields/sources, frozen provenance, stale/missing-input handling and actual useful answer; do not call the fixture advisor the live AV0 Go/Wait/Pass product. Slice 1 (pre-trade check, live data and own-trade aggregates approved October 11) is planned in the [pre-trade check contract](advisor-pretrade-check-contract.md); engine, the disabled check service/installer (step 2) and the dormant owner view (step 3) are built, not installed or activated |
+| **1 — Observed Oct 11: connected advisor trial** | Finish the existing advisor chat's one invented-data end-to-end trial | Actual Jo reads the frozen request, saves a cited answer, and the owner sees the identical receipt in TradeJournal after reload and service restart; existing isolation/activation gates remain applicable |
+| **2 — Closed by owner Oct 12: repeatable advisor questions** | Owner creates, assigns, revokes and reopens questions through the app | A second distinct assignment works without OAuth edits or service restart; answers bind to the correct immutable request, and prior answers remain recoverable. Write a bounded assignment-management contract first |
+| **3 — Closed by owner Oct 12: dependable connection** | Routine use survives normal credential/key lifecycle and service maintenance | Supported refresh/reconnect, health/failure visibility and recovery are observed; connection maintenance stays separate from agent schedules and trading automation. Scoped in the [connection upkeep contract](advisor-connection-upkeep-contract.md). Key upkeep (`deploy/advisor_keys_control.py`) and the owner status view were installed with the v2 trial upgrade on October 12 per the operator record; the refresh/reconnect lifecycle was not observed before the owner closed this step |
+| **4 — Live Oct 12: useful approved real-data advisor** | Move beyond invented packets to a narrowly selected real question and data scope | Separately approved fields/sources, frozen provenance, stale/missing-input handling and actual useful answer; do not call the fixture advisor the live AV0 Go/Wait/Pass product. Slice 1 (pre-trade check, live data and own-trade aggregates approved October 11) is in the [pre-trade check contract](advisor-pretrade-check-contract.md); activated October 12, 2026 and tracked in its next-steps table |
 | **5 — Coach in the same workspace** | Request/review coaching without extra setup or copy/paste | Preserve the completed read-only journal connector and link displayed work to its approved snapshot. Define saved-result scope explicitly; UI unification is not broader data access |
-| **6 — Current (selected October 12, 2026): bounded shadow** | Obtain a separately formed decision for comparison. Direction selected October 12, 2026: an informed shadow trader with its own paper book plus a setup co-pilot sharing one scanner ([design](shadow-trader-design.md)) | Learns from closed history up to a cutoff; blind to Isaac's same-day decisions until it commits (commit-then-reveal), then applicable forward/paper gates. Dots feasibility checks (event wake-up, plan usage, identity) started; none observed on Isaac's account. First slice: [shadow S1](shadow-s1-contract.md) |
+| **6 — Current (selected October 12, 2026; S1 activated Oct 13): bounded shadow** | Obtain a separately formed decision for comparison. Direction selected October 12, 2026: an informed shadow trader with its own paper book plus a setup co-pilot sharing one scanner ([design](shadow-trader-design.md)) | Learns from closed history up to a cutoff; blind to Isaac's same-day decisions until it commits (commit-then-reveal), then applicable forward/paper gates. First slice [shadow S1](shadow-s1-contract.md) uses an email-triggered Jo task (observed waking Oct 13), so independence stays unverified until S3 |
 
 After these bounded outcomes, select one follow-through capability only when a
 real recurring need justifies it. Do not build a general agent platform, widen
@@ -51,10 +56,10 @@ Independent shadow acceptance does not block the already accepted coach.
 
 ### Coordination and acceptance
 
-The existing advisor/shadow chat (“Implement advisor shadow handoff”) owns the
-current connected trial and its prepared grouped activation packet. The owner
-assigned the repeatable-question contract/implementation to “Build repeatable
-advisor assignments”; the journal chat owns journal refresh/coaching. Research
+The lead Codex chat owns shadow S1 activation and the weekday scanner health
+check ([acceptance notes](setup-scanner-contract.md#daily-health-acceptance-notes));
+the journal chat owns journal refresh/coaching. The advisor chats closed when
+the owner declared the advisor done on October 12, 2026. Research
 retains its already-selected comparison/prospective slice and user acceptance,
 then yields new feature priority to Dots. Other chats should consult this board
 and the product priorities before starting adjacent work.

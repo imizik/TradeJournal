@@ -87,6 +87,18 @@ migrations require an explicit server setting and a fresh verified backup.
 Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
+Two Dots pieces sit beside the API on the VPS. The **check service**
+(`backend/cloud_mcp_check.py`, installed by `deploy/check_control.py`) is
+Jo's OAuth MCP endpoint for pre-trade checks and the shadow tools. It runs
+under its own UID with its own SQLite ledger, holds no database credential,
+and reads history only from files a publisher writes through narrow read-only
+views ([contract](advisor-pretrade-check-contract.md#where-it-runs)). The
+**setup scanner** (`app/engine/setup_scanner.py`) runs inside the level alert
+monitor when `SETUP_SCANNER_ENABLED` is true; it hands setups to the check
+service and reads shadow decisions back through two one-way file directories
+(`app/engine/shadow_exchange.py`), with no socket or route between them
+([shadow S1 interfaces](shadow-s1-contract.md#interfaces)).
+
 The nightly daily reviews run on the server itself
 (`tradejournal-plan-reviews.timer`, opt-in): Claude Code, pinned in the release
 as `bin/claude`, asks Claude on the owner's Claude plan token, never API

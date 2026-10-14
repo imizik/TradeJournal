@@ -7,7 +7,10 @@ trial (step 1) was observed the same evening on the retained v2 install.
 Status: scope item 1 and the runbook (item 4) are built as the optional
 `deploy/advisor_keys_control.py` component for that v2 install
 ([bundle runbook](../../deploy/cloud-mcp-advisor/README.md#optional-public-key-upkeep-for-the-v2-trial)).
-It is not installed, activated or observed. The v2 install has no repository
+Per the operator record it was installed on the VPS and extended to the owner
+status layout during the October 12, 2026 v2 trial upgrade; the refresh and
+reconnect lifecycle below was not observed, and the owner closed the advisor
+the same day. The v2 install has no repository
 activation command; its operator activation identity must follow item 2.
 
 The owner status view (item 3) is built as dormant source: the owner reader's
@@ -19,7 +22,7 @@ reported: socket reachability (the owner reader cannot see the advisor
 sockets; an unavailable status says to check the units), and the last Jo read
 (the advisor records no reads). Key upkeep `install` adds the read grant
 ([runbook](../../deploy/cloud-mcp-advisor/README.md#owner-connection-status)).
-None of it is on the VPS until the separate v2 upgrade command installs it.
+It reached the VPS with that October 12 upgrade (operator record).
 
 ## Problem
 

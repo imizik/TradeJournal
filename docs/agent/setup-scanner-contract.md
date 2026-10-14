@@ -144,7 +144,7 @@ This is a property of the rules to watch forward, not a reason to tune them.
 
 ## Build status (October 12, 2026)
 
-Built, not activated. `app/engine/scanner_rules.py` holds the rules and
+Built October 12; enabled on the VPS the same day. `app/engine/scanner_rules.py` holds the rules and
 `app/engine/setup_scanner.py` runs them inside the level alert monitor's
 pass when `SETUP_SCANNER_ENABLED=true` (default off, and level alerts must
 also be running). Migration `a7c3e9f1b2d4` adds `scanner_candidate` and
@@ -180,7 +180,8 @@ chart reads during the first live sessions.
 Fixture tests cover the rules, duplicate suppression across a restarted
 process, entry and exit pricing, missing quotes, late exits and the
 review-time flag. A seeded local page was checked at desktop and 375px
-widths. No live session has run.
+widths. The first live session (October 13) is recorded under
+[daily health acceptance notes](#daily-health-acceptance-notes).
 
 ## Setup emails for Jo (co-pilot trial)
 

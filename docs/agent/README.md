@@ -30,6 +30,11 @@ the next-work sequence. Check it before starting another roadmap slice.
 | [shadow-build-plan.md](shadow-build-plan.md) | Codex execution plan for the remaining scanner and shadow work: packages, model per package, parallel lanes, frozen file formats, tests and traps |
 | [shadow-s1-contract.md](shadow-s1-contract.md) | Current Dots priority: Jo as Shadow Isaac takes or skips scanner setups for its own paper book; tools, visibility cutoff, labels and acceptance |
 | [setup-scanner-contract.md](setup-scanner-contract.md) | Setup scanner S1: universe, VWAP-fade and opening-range rules, contract choice, rules-only options paper baseline and switch-on gates |
+| [advisor-pretrade-check-contract.md](advisor-pretrade-check-contract.md) | Jo's live pre-trade check service: approved data, tools, isolation, build status and the advisor next-steps table |
+| [advisor-assignment-contract.md](advisor-assignment-contract.md) | Repeatable invented advisor questions: owner create/assign/revoke/reopen and activation layers |
+| [advisor-connection-upkeep-contract.md](advisor-connection-upkeep-contract.md) | Advisor key upkeep, owner connection status and reconnect acceptance |
+| [cloud-mcp-historical-contract.md](cloud-mcp-historical-contract.md) | Assigned historical MU/NBIS demo choices on the existing connector |
+| [a3-implementation-contract.md](a3-implementation-contract.md) | A3 daily preparation, independent choices and review acceptance; [a3-sol-handoff.md](a3-sol-handoff.md) is its handoff prompt |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [advisor-shadow-contract.md](advisor-shadow-contract.md) | Manual invented advisor/shadow session, atomic A3 assignment, disclosure/provenance and separate cloud/forward gates |
 | [cloud-mcp-advisor-contract.md](cloud-mcp-advisor-contract.md) | Dormant separate advisor OAuth catalog, singleton Unix backend binding, immutable cited receipt and later activation gates |
