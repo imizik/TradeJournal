@@ -1,0 +1,19 @@
+{
+  "family": "recovery_swing",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 2.5,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "spy_vol",
+      "min": 0.75
+    },
+    {
+      "feature": "opening_range_low",
+      "max": -0.5
+    }
+  ]
+}
