@@ -59,6 +59,15 @@ invent the intended receipt time.
    {text,supporting_refs,contradicting_refs}; invalidation is exactly
    {text,evidence_refs}. Include change_summary. model_id stays null unless
    actually known. On a parent conflict, stop and record it; never guess or fork.
+   Before submitting, check EVERY supporting_refs, contradicting_refs and
+   evidence_refs list: each permits at most 10 pointers, all resolving inside
+   the returned snapshot (not the response envelope). Prefer a shared parent
+   pointer such as /indices/SPY over enumerating its fields when necessary.
+   Keep each text/change_summary/abstention_reason within 2000 characters and
+   the complete request within 16 KiB. Do not weaken or invent evidence to fit.
+   Completion requires a successful receipt with read_id and received_at.
+   A tool error or attempted call is not a saved read: record its exact error
+   in the native task result and mark the run failed, never quiet-success.
 8. Do not send chat for market reads or market notes. TradeJournal pushes each
    newly committed update/correction to Isaac's phone. Still save
    message_intent update/correction exactly as before. A replayed receipt never
