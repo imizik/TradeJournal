@@ -17,7 +17,8 @@
 #   frontend=true|false  whether anything under frontend/ changed
 #   advisor=true|false   whether the slow advisor native smoke should run on
 #                        this pull request: deployment code, migrations,
-#                        dependencies, access/auth, or anything named advisor.
+#                        dependencies, access, the shared backend modules the
+#                        advisor bridge imports, or anything named advisor.
 #                        Every main push runs it regardless, and Release
 #                        publishes nothing that has not passed it.
 set -euo pipefail
@@ -40,6 +41,8 @@ while IFS= read -r file; do
   case "$file" in
     deploy/* | .github/workflows/deployment.yml | scripts/ci_scope.sh | backend/pyproject.toml \
       | backend/alembic/* | backend/alembic.ini | backend/cloud_mcp_d0* | backend/app/*access* \
+      | backend/app/models.py | backend/app/schema.py | backend/app/database.py \
+      | backend/app/engine/decisions.py | backend/app/engine/practice.py | backend/app/engine/paper.py \
       | *advisor* | *Advisor*) advisor=true ;;
   esac
 done <<< "$files"

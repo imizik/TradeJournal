@@ -85,7 +85,8 @@ def test_frontend_changes_are_reported(repo: Path) -> None:
     "path",
     ["deploy/advisor_mcp_control.py", "deploy/smoke.py", ".github/workflows/deployment.yml", "scripts/ci_scope.sh",
      "backend/pyproject.toml", "backend/alembic/versions/0099_new.py", "backend/app/engine/advisor_shadow.py",
-     "backend/app/access_middleware.py", "backend/cloud_mcp_d0.py", "frontend/components/AdvisorOwnerReview.tsx"],
+     "backend/app/access_middleware.py", "backend/cloud_mcp_d0.py", "frontend/components/AdvisorOwnerReview.tsx",
+     "backend/app/models.py", "backend/app/engine/decisions.py"],
 )
 def test_advisor_relevant_changes_run_the_advisor_smoke(repo: Path, path: str) -> None:
     change(repo, path)
