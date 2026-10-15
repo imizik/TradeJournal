@@ -64,7 +64,7 @@ def change(repo: Path, *paths: str) -> None:
 )
 def test_documentation_only_diffs_skip_runtime(repo: Path, paths: list[str]) -> None:
     change(repo, *paths)
-    assert scope(repo) == {"runtime": "false", "frontend": "false"}
+    assert scope(repo) == {"runtime": "false", "frontend": "false", "advisor": "false"}
 
 
 @pytest.mark.parametrize(
@@ -78,7 +78,25 @@ def test_anything_else_runs_runtime(repo: Path, path: str) -> None:
 
 def test_frontend_changes_are_reported(repo: Path) -> None:
     change(repo, "frontend/page.tsx")
-    assert scope(repo) == {"runtime": "true", "frontend": "true"}
+    assert scope(repo) == {"runtime": "true", "frontend": "true", "advisor": "false"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["deploy/advisor_mcp_control.py", "deploy/smoke.py", ".github/workflows/deployment.yml", "scripts/ci_scope.sh",
+     "backend/pyproject.toml", "backend/alembic/versions/0099_new.py", "backend/app/engine/advisor_shadow.py",
+     "backend/app/access_middleware.py", "backend/cloud_mcp_d0.py", "frontend/components/AdvisorOwnerReview.tsx",
+     "backend/app/models.py", "backend/app/engine/decisions.py"],
+)
+def test_advisor_relevant_changes_run_the_advisor_smoke(repo: Path, path: str) -> None:
+    change(repo, path)
+    assert scope(repo)["advisor"] == "true"
+
+
+@pytest.mark.parametrize("path", ["backend/app.py", "frontend/page.tsx", ".github/workflows/ci.yml", "docs/guide.md"])
+def test_other_changes_leave_the_advisor_smoke_to_main(repo: Path, path: str) -> None:
+    change(repo, path)
+    assert scope(repo)["advisor"] == "false"
 
 
 def test_moving_runtime_code_into_docs_counts_the_removal(repo: Path) -> None:
@@ -97,7 +115,7 @@ def test_merge_commit_ignores_what_main_did_since_the_branch(repo: Path) -> None
     git(repo, "switch", "-q", "main")
     change(repo, "backend/app.py", "frontend/page.tsx")
     git(repo, "merge", "-q", "--no-ff", "-m", "merge", "docs-only")
-    assert scope(repo) == {"runtime": "false", "frontend": "false"}
+    assert scope(repo) == {"runtime": "false", "frontend": "false", "advisor": "false"}
 
 
 def test_a_failed_diff_fails(repo: Path) -> None:

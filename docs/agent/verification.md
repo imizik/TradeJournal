@@ -83,7 +83,8 @@ builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
 Postgres for every pull request outside the same documentation allowlist.
 Documentation-only pull requests skip the disposable installation. Pushes to `main` and manual
-runs always build it. The updated package confirms the retired ingress unit is
+runs always build it. The slower advisor native smoke runs on a pull request only
+when `scripts/ci_scope.sh` marks it advisor-relevant, and on every `main` push. The updated package confirms the retired ingress unit is
 removed during an upgrade and that no service listens on port 8090. Signals row
 rendering remains covered by the browser fixture suite.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
