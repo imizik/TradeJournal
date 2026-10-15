@@ -731,7 +731,12 @@ reads never reach Shadow Isaac.
   The app checks the hash, field types and that the snapshot exists in the
   publication directory, then stores the notice; a refused file is recorded
   once as a `notice_refusal` and never stalls other notices. The app gets no
-  check-ledger access. Notices cover every read: scheduled, setup-context,
+  check-ledger access. On Linux the bounded reader uses `O_PATH` directory
+  descriptors to traverse the private Check parent without permission to list
+  it; every component still refuses symlinks and the final file still requires
+  read permission and a bounded regular-file check. Other platforms retain the
+  existing read-only directory-open fallback. No private-parent ACL widening
+  is required. Notices cover every read: scheduled, setup-context,
   event and manual.
 - **Messages.** Channel: **phone push through the server's existing ntfy alerts**
   (`NTFY_URL`). Every committed `update` or `correction` intent gets one

@@ -510,14 +510,18 @@ def read_latest_snapshot(directory: str | Path, now: datetime) -> dict | None:
 
 
 def _read_bounded(path: Path, limit: int) -> str:
-    """Read one regular file without following its final symlink or trusting its size."""
+    """Read a bounded regular file through non-symlink, traverse-only parents."""
     absolute = path.absolute()
     if any(part in {".", ".."} for part in absolute.parts[1:]):
         raise ValueError("published snapshot path is invalid")
-    directory_fd = os.open(absolute.anchor, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    # Linux O_PATH needs search permission, not directory-list permission. The
+    # API can traverse the private Check parent to its explicitly readable
+    # outbox without gaining permission to list that private directory.
+    directory_flags = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(absolute.anchor, directory_flags)
     try:
         for component in absolute.parts[1:-1]:
-            child = os.open(component, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+            child = os.open(component, directory_flags, dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = child
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)

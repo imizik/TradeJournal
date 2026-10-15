@@ -1,10 +1,12 @@
 from datetime import UTC, date, datetime, timedelta
 import json
+import os
 
 import pytest
 
 from market_watch_common import PROTOCOL, canonical, digest, parse_time, seal, validate_snapshot, verify
 from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot, read_latest_snapshot
+from app.engine.market_watch_snapshot import _read_bounded
 
 
 DAY = date(2026, 10, 14)
@@ -201,6 +203,43 @@ def test_schema_refuses_private_fields_and_content_address_symlinks(tmp_path):
     content.symlink_to(tmp_path / "external.json")
     with pytest.raises(ValueError, match="symlink"):
         publish_snapshot(tmp_path, packet)
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH") or os.geteuid() == 0,
+                    reason="Requires Linux O_PATH and an unprivileged process")
+def test_bounded_reader_traverses_private_parent_without_listing_it(tmp_path):
+    private = tmp_path / "check-private"
+    outbox = private / "outbox"
+    outbox.mkdir(parents=True)
+    notice = outbox / "notice.json"
+    notice.write_text('{"notice":"fixture"}')
+    private.chmod(0o111)
+    try:
+        with pytest.raises(PermissionError):
+            list(private.iterdir())
+        with pytest.raises(PermissionError):
+            os.open(private, os.O_RDONLY | os.O_DIRECTORY)
+        assert _read_bounded(notice, 100) == '{"notice":"fixture"}'
+        with pytest.raises(ValueError, match="size"):
+            _read_bounded(notice, 2)
+    finally:
+        private.chmod(0o700)
+
+
+@pytest.mark.parametrize("link_parent", [False, True])
+def test_bounded_reader_refuses_symlink_at_every_path_component(tmp_path, link_parent):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "notice.json").write_text("fixture")
+    if link_parent:
+        link = tmp_path / "alias"
+        link.symlink_to(real, target_is_directory=True)
+        path = link / "notice.json"
+    else:
+        path = real / "alias.json"
+        path.symlink_to(real / "notice.json")
+    with pytest.raises(OSError):
+        _read_bounded(path, 100)
 
 
 def test_protocol_id_is_content_bound_and_cached_session_bounds_do_not_fetch(monkeypatch):
