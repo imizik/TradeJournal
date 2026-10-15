@@ -45,9 +45,10 @@ operator recovery; see [background jobs](../docs/agent/background-jobs.md).
 
 ## Build and obtain the release
 
-The `Deployment package` GitHub Actions workflow builds on Ubuntu 24.04 x86_64,
-then installs the artifact on a disposable runner and exercises real systemd
-services against disposable Postgres. Only a successful smoke test uploads
+The `Deployment package` GitHub Actions workflow builds once on Ubuntu 24.04
+x86_64, then installs those exact bytes on two disposable runners in parallel
+(the package and MCP smokes, and the slower advisor smoke) and exercises real
+systemd services against disposable Postgres. Only when both pass does it upload
 `tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Choose a successful
 run for the exact reviewed commit; after merging, prefer the `main` run.
 
