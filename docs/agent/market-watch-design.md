@@ -561,6 +561,16 @@ The four enabled native tasks were verified under Trader Jo with the complete
 saved workflow, explicit SLOT and weekday ET times, first due October 15. The
 existing setup task's bounded exception was saved and verified after reload;
 its original source/expiry guards and shadow-first sequence remain intact.
+
+October 15 first-session diagnosis: the 09:49 publisher packet was available
+and the 09:50 native task reached both market tools, but its submission listed
+13 supporting references against the existing maximum of 10 per list. The
+ledger correctly refused it without saving a read. The shared task workflow
+now states that limit, recommends existing parent pointers, and requires a
+successful `read_id`/`received_at` receipt before reporting completion. An
+instructed late recovery is distinct from on-time scheduled execution; task
+activation and attempted calls alone do not close that acceptance gap.
+
 The optional MW-2 event/email wakes, read-notice outboxes and market-watch
 phone-push delivery remain disabled and unconfigured. A later push activation
 must reconcile the chat route to avoid duplicate messages. No live scheduled
@@ -721,7 +731,12 @@ reads never reach Shadow Isaac.
   The app checks the hash, field types and that the snapshot exists in the
   publication directory, then stores the notice; a refused file is recorded
   once as a `notice_refusal` and never stalls other notices. The app gets no
-  check-ledger access. Notices cover every read: scheduled, setup-context,
+  check-ledger access. On Linux the bounded reader uses `O_PATH` directory
+  descriptors to traverse the private Check parent without permission to list
+  it; every component still refuses symlinks and the final file still requires
+  read permission and a bounded regular-file check. Other platforms retain the
+  existing read-only directory-open fallback. No private-parent ACL widening
+  is required. Notices cover every read: scheduled, setup-context,
   event and manual.
 - **Messages.** Channel: **phone push through the server's existing ntfy alerts**
   (`NTFY_URL`). Every committed `update` or `correction` intent gets one

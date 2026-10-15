@@ -173,6 +173,27 @@ def test_invalid_probability_refused(ledger, bad):
         ledger.submit(ACTOR, req, lambda: NOW)
 
 
+def test_overlong_evidence_list_refuses_atomically_and_parent_pointers_recover(ledger):
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    req = request(inp['input_id'], message_intent='none')
+    # The first live scheduled read enumerated 13 valid fields. Its request
+    # must remain rejected; the caller can cite their existing parent instead.
+    fields = ('price', 'return_vs_prior_close', 'session_open', 'vwap', 'or15_high', 'or15_low')
+    req['main']['supporting_refs'] = [f'/indices/{symbol}/{field}'
+        for symbol in ('SPY', 'QQQ') for field in fields] + ['/gaps']
+    with pytest.raises(ValueError, match='Invalid evidence references'):
+        ledger.submit(ACTOR, req, lambda: NOW)
+    exported = ledger.export(ledger.ledger.path, ACTOR)
+    assert exported['reads'] == exported['comparators'] == exported['messages'] == []
+    req['main']['supporting_refs'] = ['/indices/SPY', '/indices/QQQ', '/gaps']
+    receipt = ledger.submit(ACTOR, req, lambda: NOW)
+    replay = ledger.submit(ACTOR, req, lambda: NOW)
+    assert replay['read_id'] == receipt['read_id'] and replay['replayed']
+    exported = ledger.export(ledger.ledger.path, ACTOR)
+    assert len(exported['reads']) == len(exported['comparators']) == 1
+    assert exported['messages'] == []
+
+
 def test_scope_config_rejects_private_path_aliases(harness, tmp_path):
     from cloud_mcp_check_common import CheckConfig
     body = json.loads(harness.config_path.read_text())

@@ -71,7 +71,14 @@ def db():
 
 
 @pytest.fixture
-def client(db):
+def client(db, monkeypatch):
+    # Keep September fixtures inside the rolling review window as real time advances.
+    class Clock(datetime):
+        @staticmethod
+        def utcnow():
+            return datetime(2026, 9, 16, 12)
+
+    monkeypatch.setattr(capture_links, "datetime", Clock)
     app = FastAPI()
     app.include_router(captures_router.router, prefix="/charts")
     app.dependency_overrides[get_session] = lambda: db
