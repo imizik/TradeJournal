@@ -77,6 +77,7 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
   await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
+  await openLevelForm(page);
   await page.getByLabel("Level label").fill("Breakout");
   await page.getByLabel("Level price", { exact: true }).fill("263.50");
   await page.getByRole("button", { name: "Save price level" }).click();
@@ -1459,11 +1460,16 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
 // ---- Server-saved settings: shared levels and layout, revision conflicts, offline copy ----
 
 const levelsPanel = (page: Page) => page.getByRole("region", { name: "Saved price levels" });
+/** The levels section starts folded when the symbol has none: its header's + opens the form. */
+async function openLevelForm(page: Page) {
+  if (!(await page.getByLabel("Level label").isVisible())) await page.getByRole("button", { name: "Add level" }).click();
+}
 const syncStatus = (page: Page) => page.getByRole("status", { name: "Chart settings" });
 /** Save a level from the watchlist's level form, opening the dock first when it is closed (on a phone, a sheet it then closes). */
 async function addLevel(page: Page, label: string, value: string) {
-  const opened = !(await page.getByLabel("Level label").isVisible());
+  const opened = !(await levelsPanel(page).isVisible());
   if (opened) await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await openLevelForm(page);
   await page.getByLabel("Level label").fill(label);
   await page.getByLabel("Level price", { exact: true }).fill(value);
   await page.getByRole("button", { name: "Save price level" }).click();
@@ -2516,6 +2522,7 @@ test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields an
   await chartedSymbol(page).click();
   await page.keyboard.type("hd 15");
   await expect(chartedSymbol(page)).toHaveValue("HD 15");
+  await openLevelForm(page);
   await page.getByLabel("Level label").click();
   await page.keyboard.type("4 W");
   await expect(page.getByLabel("Level label")).toHaveValue("4 W");
@@ -3996,10 +4003,28 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(drawn(page, "main").locator("canvas").first()).toBeVisible();
   const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
   expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
+  await page.screenshot({ path: test.info().outputPath("navigation-rail-desktop.png") });
   // Every page is still a named link, the current one marked, with sync status and the Sync drawer reachable.
-  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research Studio", "AI Buildout"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
   await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
+  for (const name of ["Dashboard", "Charts", "Research Studio", "AI Buildout"]) {
+    await rail.getByRole("link", { name, exact: true }).hover();
+    await expect(page.getByRole("tooltip")).toHaveText(name);
+    expect((await page.getByRole("tooltip").boundingBox())!.x).toBeGreaterThan(48);
+  }
+  await page.screenshot({ path: test.info().outputPath("navigation-hover-desktop.png") });
+  // Hover does not move focus into the rail: Escape must still dismiss the label.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await rail.getByRole("link", { name: "Charts", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Charts");
+  await page.mouse.move(300, 100);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await rail.getByRole("link", { name: "Research Studio", exact: true }).focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Research Studio");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   const narrow = (await drawn(page, "main").boundingBox())!.width;
   await rail.getByRole("button", { name: "Expand navigation" }).click();
   await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
@@ -4016,6 +4041,11 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(page).toHaveURL(/\/fills$/);
   await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "AI Buildout", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "AI Buildout", exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("navigation-menu-phone.png") });
 });
 
 test("dock, navigation and window resizes keep every chart, the selection, the scrolled-back view and the live stream, with no new requests", async ({ page, context }) => {
@@ -4117,7 +4147,7 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   const toolbar = page.locator("header[aria-label='Chart toolbar']");
   expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
-  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder", "Level 2"]) {
     const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
     await expect(control.first(), name).toBeInViewport();
   }
@@ -4140,8 +4170,8 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   await clickAway(page);
   await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
 
-  // Focus order: the toolbar's last control (the strike ladder's dock tab, C4.5), then the tool rail, then the charts, with the dock last.
-  await page.getByRole("button", { name: "Strike ladder", exact: true }).focus();
+  // Focus order: the toolbar's last control (the Level 2 dock tab, after the strike ladder's, C4.5), then the tool rail, then the charts, with the dock last.
+  await page.getByRole("button", { name: "Level 2", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(tool(page, "price level")).toBeFocused(); // Undo and Redo are disabled, so the first tool is next
   await page.getByRole("button", { name: "Magnet" }).focus();
@@ -4595,7 +4625,9 @@ test("saved layouts keep their chart sizes, layouts saved before the dividers op
 test("two browsers share the chart proportions but not the dock's width, merge a conflicting save, and keep proportions through an older build's save", { tag: "@real-settings" }, async ({ page, browser, request }) => {
   const settingsNow = async () => (await (await request.get("/api/backend/charts/settings")).json()) as { revision: number; data: Record<string, unknown> & { proportions?: Sizes | null; layoutProportions?: Record<string, Sizes>; layouts?: SavedLayouts; intervals?: string[] } };
   const start = await settingsNow();
-  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
+  // Always save the defaults, even on an empty database: with no settings at all a new setup opens compact, not at
+  // EMPTY_SETTINGS' "normal" size, so the drag below would land somewhere else depending on which test ran first.
+  expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gmail(page, true);
   await stub(page);
@@ -4789,6 +4821,11 @@ async function stubAutoLevels(page: Page, configure?: (data: ChartData) => void)
 }
 type AutoProbe = Map<string, { y(id: string): number | null }>;
 const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
+// Fixes a chart's price range (as a drag on its axis would), for a level the automatic fit leaves just off the pane.
+const showPrices = (page: Page, panel: string, from: number, to: number) => page.evaluate(async ([key, low, high]) => {
+  (window as unknown as { __tjCharts: Map<string, import("lightweight-charts").IChartApi> }).__tjCharts.get(key)!.priceScale("right").setVisibleRange({ from: low, to: high });
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}, [panel, from, to] as const);
 const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
 
 test("level cards stay on the chart under the pointer through linked crosshair redraws and interval changes", async ({ page }) => {
@@ -5298,6 +5335,9 @@ test("a level's menu sets an alert, its bell turns gray once it fires, and the l
   const server = await stubAlerts(page);
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+  await expect(alertsPanel(page).getByRole("button", { name: /^Alerts/ })).toHaveAttribute("aria-expanded", "false"); // nothing active: folded
+  await alertsPanel(page).getByRole("button", { name: "About Alerts" }).click();
   await expect(alertsPanel(page)).toContainText("Right-click (long-press on a phone) a level");
   await addLevel(page, "Breakout", "256.00");
   const onLevel = async () => ({ x: 220, y: await levelY(page, "main", 256) });
@@ -5329,6 +5369,8 @@ test("a level's menu sets an alert, its bell turns gray once it fires, and the l
     level: 256, price: 255.98, source: "stream", event_at: at("12:01"), detected_at: at("12:01"), delivery: "sent", attempts: 1, delivered_at: at("12:01"), error: null } })) };
   await page.reload();
   await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:fired");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+  await alertsPanel(page).getByRole("button", { name: /^Alerts/ }).click(); // a fired alert whose phone message went is not urgent: folded until asked
   const fired = alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, fired" });
   await expect(fired).toContainText("Fired Sep 14, 2026 12:01 PM ET at 255.98 · Sent to phone 12:01 PM ET");
   await page.screenshot({ path: test.info().outputPath("alert-fired.png") });
@@ -5361,10 +5403,51 @@ test("an automatic level's menu sets a close-beyond alert on that chart's interv
   expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 254.3, condition: "closes_beyond", interval: "5m", source_kind: "auto", source_id: zone.id, label: "PDH + 254" });
   await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server");
   await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "254.30:active");
-  // A 15m chart offers its own candle.
+  // A 15m chart offers its own candle (its fit leaves the zone just below the pane).
+  await showPrices(page, "Panel 2", 252, 262);
   await rightClick(page, "Panel 2", { x: 120, y: await autoY(page, "Panel 2", zone.id) });
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Alert on a 15m close beyond" })).toBeVisible();
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Remove 5m close below 254.30" })).toBeVisible();
+});
+
+test("the dock's levels, alerts and journal sections are one-line headers that keep their counts, fold, and remember the fold", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  await registerCharts(page);
+  await stubAlerts(page, false);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const levelsHead = levelsPanel(page).getByRole("button", { name: /^MRVL levels/ });
+  const alertsHead = alertsPanel(page).getByRole("button", { name: /^Alerts/ });
+  const journalHead = page.getByRole("region", { name: "Journal executions" }).getByRole("button", { name: /^On your journal/ });
+  // Nothing saved yet: all three are folded, counts and the add action stay on the header line, help is behind (i).
+  await expect(levelsHead).toHaveText(/MRVL levels\s*0\/30/);
+  await expect(alertsHead).toHaveText(/Alerts\s*0\/20 active/);
+  for (const head of [levelsHead, alertsHead, journalHead]) await expect(head).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("Level label")).toHaveCount(0);
+  await expect(levelsPanel(page)).not.toContainText("Save support, resistance");
+  await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server"); // status is not folded away
+  await levelsPanel(page).getByRole("button", { name: "About MRVL levels" }).click();
+  await expect(levelsPanel(page)).toContainText("Save support, resistance");
+  // + opens the form with the price ready to type.
+  await levelsPanel(page).getByRole("button", { name: "Add level" }).click();
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Level price", { exact: true })).toBeFocused();
+  await page.getByLabel("Level label").fill("Breakout");
+  await page.getByLabel("Level price", { exact: true }).fill("263.50");
+  await page.getByRole("button", { name: "Save price level" }).click();
+  await expect(levelsHead).toHaveText(/MRVL levels\s*1\/30/);
+  await page.screenshot({ path: test.info().outputPath("dock-tidy-sections-desktop.png"), animations: "disabled" });
+  // Folding keeps the count, and the choice is remembered on this device.
+  await levelsHead.click();
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "false");
+  await expect(levelsHead).toHaveText(/1\/30/);
+  await expect(page.getByLabel("Level label")).toHaveCount(0);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "false");
+  await levelsHead.click();
+  await expect(levelsPanel(page)).toContainText("Breakout");
 });
 
 test.describe("phone alerts list", () => {
@@ -5660,6 +5743,7 @@ test("max pain always draws with the options levels, labelled inferred, with its
   // Far below the nearest strikes, and still drawn: like the walls, max pain is not ranked away.
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", `Max pain,${OI_LEVELS}`);
   const box = (await drawn(page, "main").boundingBox())!;
+  await showPrices(page, "main", 247, 263);
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", "max_pain@248.5"));
   const card = page.getByRole("tooltip", { name: "Max pain level card" });
   await expect(card).toContainText("Max pain Max pain: least paid out at expiry248.50");
@@ -6483,4 +6567,283 @@ test("indicator colors change the lines and legend, persist, reject bad values a
   await expect(panel).toBeInViewport({ ratio: 1 });
   await panel.getByRole("button", { name: "Reset colors" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
+});
+
+// ---- Level 2 dock tab: owner-only, manual, one US ticker at a time. Provider responses are synthetic; nothing here proves live behavior or entitlements. ----
+const L2_PATH = "**/api/level2-lab/session**";
+const l2Book = [
+  { event: "status", phase: "authenticated" },
+  { event: "status", phase: "subscribed", kind: "order_book", code: 0 },
+  { event: "book", symbol: "US.NVDA", received_ms: 1791657000123, books: [{ exchange: "UNKNOWN", source_time_ms: null, estimated_age_ms: null, order_volume_precision: 3,
+    bids: [{ price: 123.4567, volume: 100.25, order_count: null, mpid: null }], asks: [] }] },
+  { event: "summary", report: { authentication: { status: "success", code: 0 }, status: "completed", subscriptions: { order_book: { status: "success", code: 0 } }, message_counts: { ORDER_BOOK: 1 }, unsubscribe: { status: "success", code: 0 }, closed: true } },
+].map((record) => JSON.stringify(record)).join("\n") + "\n";
+type L2Window = Window & { l2Posts: { aborted: boolean }[]; l2Urls: string[] };
+/** Records every Level 2 POST and whether its request was aborted; `hold` keeps the response open so the session stays active. */
+async function level2Service(page: Page, options: { enabled?: boolean; hold?: boolean } = {}) {
+  const calls = { get: 0, post: 0 };
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    (window as unknown as L2Window).l2Posts = [];
+    (window as unknown as L2Window).l2Urls = [];
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if ((init?.method ?? "GET").toUpperCase() === "POST" && url.includes("/api/level2-lab/session") && init?.signal) {
+        const record = { aborted: init.signal.aborted };
+        (window as unknown as L2Window).l2Posts.push(record);
+        (window as unknown as L2Window).l2Urls.push(url.replace(location.origin, ""));
+        init.signal.addEventListener("abort", () => { record.aborted = true; }, { once: true });
+      }
+      return original(input, init);
+    }) as typeof window.fetch;
+  });
+  await page.route(L2_PATH, async (route) => {
+    if (route.request().method() === "GET") { calls.get += 1; return route.fulfill({ json: { enabled: options.enabled ?? true } }); }
+    calls.post += 1;
+    if (options.hold) await new Promise((resolve) => setTimeout(resolve, 30_000));
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: options.hold ? "" : l2Book }).catch(() => undefined);
+  });
+  return calls;
+}
+const l2Aborted = (page: Page) => page.evaluate(() => (window as unknown as L2Window).l2Posts.map((post) => post.aborted));
+const l2Tab = (page: Page) => page.getByRole("button", { name: "Level 2", exact: true });
+const l2Connect = (page: Page) => page.getByRole("button", { name: "Connect", exact: true });
+const setSymbol = async (page: Page, symbol: string) => { const input = page.getByLabel("Chart symbol"); await input.fill(symbol); await input.press("Enter"); };
+
+test("Level 2 opens in the dock without starting a session, shows a replaced latest book, and gives another ticker its own Connect", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByRole("region", { name: /NVDA .* chart/ })).toHaveCount(5);
+  expect(calls).toEqual({ get: 0, post: 0 }); // a closed Level 2 tab does not even check the service
+  await l2Tab(page).click();
+  const panel = sidePanel(page).getByTestId("live-depth-session");
+  await expect(l2Connect(page)).toBeEnabled();
+  expect(calls.post).toBe(0);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-idle-desktop.png") });
+  await l2Connect(page).click();
+  await expect(panel.getByText("Freshness unavailable")).toBeVisible();
+  await expect(panel.getByText("123.4567")).toBeVisible();
+  await expect(panel.getByText("Subscription: success · code 0").first()).toBeVisible();
+  expect(calls.post).toBe(1);
+  // The heatmap (opt-in) leaves out an update with no usable source time rather than guessing one.
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
+  await expect(sidePanel(page).getByText("Nothing collected for this book yet · 1 updates without a usable source time left out")).toBeVisible({ timeout: 3_000 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-book-desktop.png") });
+  // The dock's other tabs still work; the session belongs to the page, so returning shows it again without reconnecting.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(sidePanel(page).getByRole("region", { name: "Layers" })).toBeVisible();
+  await l2Tab(page).click();
+  await expect(panel.getByText("123.4567")).toBeVisible();
+  expect(calls.post).toBe(1);
+  // Another ticker gets its own Connect and never shows NVDA's finished book under its name.
+  await setSymbol(page, "MRVL");
+  await expect(sidePanel(page).getByText("MRVL Level 2")).toBeVisible();
+  await expect(l2Connect(page)).toBeEnabled();
+  await expect(panel.getByText("123.4567")).toHaveCount(0);
+  expect(calls.post).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as L2Window).l2Urls)).toEqual(["/api/level2-lab/session?symbol=NVDA"]);
+});
+
+test("a saved Level 2 dock tab restores without a session, and a disabled service leaves Connect off", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page, { enabled: false });
+  await page.addInitScript(() => localStorage.setItem("tradejournal.charts.dock.v1", JSON.stringify({ open: true, tab: "level2" })));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByText("Local live service is disabled.")).toBeVisible();
+  await expect(l2Connect(page)).toBeDisabled();
+  expect(calls.post).toBe(0);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  expect(calls.post).toBe(0);
+});
+
+test("Level 2: the session outlives the dock, other tabs, symbols and a hidden page; Stop and leaving Charts end it, with no reconnect", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page, { hold: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  const running = page.getByRole("status", { name: "Level 2 session" });
+  await l2Tab(page).click();
+  await l2Connect(page).click();
+  await expect(page.getByRole("button", { name: "Session running…" })).toBeVisible();
+  await l2Tab(page).click(); // a second press closes the dock; the heatmap keeps collecting
+  await expect(running).toBeVisible();
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await setSymbol(page, "MRVL");
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); });
+  await page.waitForTimeout(200);
+  expect(await l2Aborted(page)).toEqual([false]);
+  // One ticker streams at a time: MRVL's panel offers only to stop NVDA.
+  await l2Tab(page).click();
+  await expect(sidePanel(page).getByText("One symbol streams at a time, and NVDA is running for its heatmap.")).toBeVisible();
+  await expect(l2Connect(page)).toHaveCount(0);
+  await sidePanel(page).getByRole("button", { name: "Stop NVDA" }).click();
+  await expect.poll(() => l2Aborted(page)).toEqual([true]);
+  await expect(running).toHaveCount(0);
+  await setSymbol(page, "NVDA");
+  await expect(l2Connect(page)).toBeEnabled();
+  expect(calls.post).toBe(1);
+  // The status strip's Stop works with the dock closed.
+  await l2Connect(page).click();
+  await l2Tab(page).click();
+  await running.getByRole("button", { name: "Stop" }).click();
+  await expect.poll(() => l2Aborted(page)).toEqual([true, true]);
+  await page.reload();
+  await expect(running).toHaveCount(0); // a reload starts idle, with nothing collected
+  expect(calls.post).toBe(2);
+  await l2Tab(page).click();
+  await l2Connect(page).click();
+  await expect(running).toBeVisible();
+  await page.getByRole("link", { name: "Dashboard" }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect.poll(() => l2Aborted(page)).toEqual([true]); // the active request's signal was aborted on leaving Charts
+  await page.waitForTimeout(300);
+  expect(calls.post).toBe(3);
+});
+
+test("Level 2 heatmap fills behind the NVDA candles from synthetic books placed at their source times", async ({ page }) => {
+  await stub(page);
+  // Synthetic ARCA-labelled books every 2 s across the fixture's last ten 5m candles, with a resting
+  // wall that is pulled halfway through, plus one market-maker book that must not appear in the ARCA view.
+  const end = 1789392600 + 3 * 86400 + 6 * 300;
+  const lines: string[] = [JSON.stringify({ event: "status", phase: "authenticated" })];
+  for (let t = end - 3000; t < end; t += 2) {
+    const i = 239 - Math.floor((end - 1 - t) / 300);
+    const mid = Math.round((245 + i * 0.06 + Math.sin(i / 8) * 2) * 100) / 100;
+    const level = (k: number) => ({ price: Math.round((mid + k * 0.01) * 100) / 100, volume: 40 + Math.abs((k * 37) % 90), order_count: 3, mpid: "ARCA" });
+    const bids = Array.from({ length: 30 }, (_, n) => level(-1 - n));
+    const asks = Array.from({ length: 30 }, (_, n) => level(1 + n));
+    if (t < end - 1500) asks[12] = { ...asks[12], volume: 2400 };
+    lines.push(JSON.stringify({ event: "book", symbol: "US.NVDA", received_ms: t * 1000 + 40, books: [{ exchange: "", source_time_ms: t * 1000, estimated_age_ms: 40, order_volume_precision: null, bids, asks }] }));
+  }
+  await page.route(L2_PATH, (route) => route.request().method() === "GET" ? route.fulfill({ json: { enabled: true } })
+    : route.fulfill({ status: 200, contentType: "application/x-ndjson", body: lines.join("\n") + "\n" }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await l2Tab(page).click();
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("50 min of ARCA-labelled book collected")).toBeVisible({ timeout: 5_000 });
+  await page.waitForTimeout(1_500); // the layer repaints at most once a second
+  await page.getByRole("region", { name: /NVDA .* chart/ }).first().screenshot({ path: test.info().outputPath("level2-heatmap-main-chart.png") });
+  // Zoomed in on the last candles, where each 2-second column has its own pixels.
+  const chart = page.getByRole("region", { name: /NVDA .* chart/ }).first();
+  const box = (await chart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4);
+  for (let n = 0; n < 12; n++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(50); }
+  await page.waitForTimeout(1_200);
+  await chart.screenshot({ path: test.info().outputPath("level2-heatmap-zoomed.png") });
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).uncheck();
+  await page.waitForTimeout(300);
+  await page.getByRole("region", { name: /NVDA .* chart/ }).first().screenshot({ path: test.info().outputPath("level2-heatmap-off.png") });
+});
+
+test("recorded depth draws liquidity levels and a depth profile with no Connect, and the heatmap stays opt-in", async ({ page }) => {
+  await stub(page);
+  // Synthetic recorder answer around the fixture's last 5m candle: two bid walls (one pulled), one ask wall,
+  // a 30-level profile per side and 10-second heatmap columns over the last ten candles.
+  const end = 1789392600 + 3 * 86400 + 6 * 300;
+  const mid = Math.round((245 + 239 * 0.06 + Math.sin(239 / 8) * 2) * 100) / 100;
+  const at = (k: number) => Math.round((mid + k * 0.01) * 100) / 100;
+  const size = (k: number) => 40 + Math.abs((k * 37) % 90) + (k === -40 ? 9000 : k === 35 ? 2600 : 0);
+  const columns: [number, number, number[]][] = [];
+  for (let t = end - 3000; t < end; t += 10) columns.push([t * 1000, 10_000, Array.from({ length: 60 }, (_, n) => n < 30 ? [at(-1 - n), size(-1 - n)] : [at(n - 29), size(n - 29)]).flat()]);
+  const requests: string[] = [];
+  let live = true;
+  await page.route("**/api/level2-lab/depth**", (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url.search);
+    return route.fulfill({ json: { symbol: "NVDA", recorded: true, recording: live, day: "2026-09-17", kind: "arca", bucket_ms: 10_000, last_ms: end * 1000,
+      columns: url.searchParams.get("minutes") === "1" ? [] : columns,
+      walls: { bids: [{ price: at(-40), size: 9040, mean: 9010, since: (end - 660) * 1000, last_seen: end * 1000, pulled: false, share: 0.31 },
+        { price: at(-20), size: 3100, mean: 3000, since: (end - 900) * 1000, last_seen: (end - 60) * 1000, pulled: true, share: 0.1 }],
+      asks: [{ price: at(35), size: 2640, mean: 2600, since: (end - 300) * 1000, last_seen: end * 1000, pulled: false, share: 0.2 }] },
+      profile: { t: end * 1000, bids: Array.from({ length: 30 }, (_, n) => [at(-30 + n), size(-30 + n)]), asks: Array.from({ length: 30 }, (_, n) => [at(n + 1), size(n + 1)]) } } });
+  });
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  const main = page.getByRole("region", { name: /NVDA .* chart/ }).first();
+  const canvas = page.getByTestId("canvas-main");
+  // Levels and the profile are the quiet default: drawn from the recorder with no Connect and no provider session.
+  await expect(canvas).toHaveAttribute("data-walls", `bid:${at(-40).toFixed(2)},bid:${at(-20).toFixed(2)}:pulled,ask:${at(35).toFixed(2)}`, { timeout: 15_000 });
+  expect(calls.post).toBe(0);
+  expect(requests.every((search) => search.includes("minutes=1"))).toBe(true); // no heatmap history unless asked for
+  await page.waitForTimeout(500);
+  await main.screenshot({ path: test.info().outputPath("orderflow-levels-profile.png") });
+  const box = (await main.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4);
+  for (let n = 0; n < 14; n++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(40); }
+  await page.keyboard.press("End"); // back to the latest candles at this zoom
+  await page.waitForTimeout(600);
+  await main.screenshot({ path: test.info().outputPath("orderflow-levels-zoomed.png") });
+  await l2Tab(page).click();
+  await expect(sidePanel(page).getByText("Recorded · about 5 seconds behind live, back to 4 AM")).toBeVisible();
+  await expect(sidePanel(page).getByLabel("Heatmap", { exact: true })).not.toBeChecked();
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
+  await expect.poll(() => requests.some((search) => search.includes("minutes=240"))).toBe(true);
+  await page.waitForTimeout(1_500);
+  await main.screenshot({ path: test.info().outputPath("orderflow-heatmap-on.png") });
+  // When the recorder stops receiving, walls stay but are marked not live (and drawn faint, ending at the last update).
+  live = false;
+  await expect(canvas).toHaveAttribute("data-walls", /bid:\d+\.\d{2}:stale/, { timeout: 15_000 });
+  await expect(sidePanel(page).getByText("Recorded today · not receiving right now")).toBeVisible();
+  live = true;
+  // Turning levels off removes the lines; the choice is remembered on this device.
+  await sidePanel(page).getByLabel("Liquidity levels").uncheck();
+  await expect(canvas).not.toHaveAttribute("data-walls", /.+/);
+  await page.reload();
+  await expect(canvas).not.toHaveAttribute("data-walls", /.+/, { timeout: 5_000 });
+  // The dock restores open on Level 2 with the remembered choices.
+  await expect(sidePanel(page).getByLabel("Heatmap", { exact: true })).toBeChecked();
+  // Wider candles keep the heatmap off and say why.
+  await page.getByRole("button", { name: "15m", exact: true }).first().click();
+  await expect(sidePanel(page).getByText("· 1m–5m candles only")).toBeVisible();
+});
+
+test("on a phone Level 2 is in the More menu as a sheet, with no page overflow", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/charts?symbol=NVDA");
+  await page.getByRole("button", { name: "More chart controls" }).click();
+  await page.getByRole("button", { name: "Level 2", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Level 2" });
+  await expect(sheet.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+  expect(calls.post).toBe(0);
+  await sheet.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(sheet.getByText("123.4567")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-book-phone.png") });
+  await sheet.getByRole("button", { name: "Close Level 2" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("Level 2 stays readable at the dock's minimum width and in full screen", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  const min = 200; // DOCK_WIDTH.min
+  await page.addInitScript((width) => {
+    localStorage.setItem("tradejournal.charts.dock.v1", JSON.stringify({ open: true, tab: "level2" }));
+    localStorage.setItem("tradejournal.charts.dock.width.v1", String(width));
+  }, min);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("123.4567")).toBeVisible();
+  expect((await sidePanel(page).boundingBox())?.width).toBeLessThanOrEqual(min + 1);
+  expect(await sidePanel(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-min-width.png") });
+  await page.getByRole("button", { name: "Enter full-screen charts" }).click();
+  if (!(await sidePanel(page).isVisible())) await l2Tab(page).click();
+  await expect(l2Connect(page)).toBeEnabled();
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("123.4567")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-fullscreen.png") });
+  expect(calls.post).toBe(2);
 });

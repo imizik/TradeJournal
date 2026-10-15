@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from contextlib import suppress
 from datetime import datetime, timezone
 from getpass import GetPassWarning, getpass
 import hashlib
@@ -38,9 +39,15 @@ QUOTE_PATH = "/api/v1.0/quote/stock-quote"
 BOOK_PATH = "/api/v1.0/quote/order-book"
 TIME_PATH = "/api/v1.0/server-time"
 SYMBOL = "US.NVDA"
+# A US stock or ETF ticker in moomoo form; streaming accepts any that matches.
+STREAM_SYMBOL = re.compile(r"US\.[A-Z]{1,5}(\.[A-Z])?")
 KEY_DIR = Path.home() / ".config/tradejournal/moomoo"
 WS_URL = "wss://webapi-quote.moomoo.com/ws"
 STREAM_TYPES = ("quote", "order_book", "ticker")
+# A refreshed manual session still ends by itself; it is never a background collector.
+MAX_REFRESHED_SECONDS = 8 * 3600
+REFRESH_ACK_SECONDS = 30
+MIN_REFRESH_SECONDS = 30
 
 
 class NoRedirectConnect(connect):
@@ -52,6 +59,27 @@ class NoRedirectConnect(connect):
 
 class DiagnosticError(Exception):
     """Only fixed, credential-free messages may reach this exception."""
+
+
+async def bounded_await(awaitable, timeout: float):
+    """Bound an operation without Python 3.11 wait_for's cancellation race.
+
+    asyncio.wait never treats downstream cancellation as a completed result.
+    Always cancel/await a pending child so no receive remains on the socket.
+    """
+    child = asyncio.create_task(awaitable)
+    try:
+        done, _ = await asyncio.wait({child}, timeout=timeout)
+        if not done:
+            raise asyncio.TimeoutError
+        return child.result()
+    finally:
+        if not child.done():
+            child.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await child
+        elif not child.cancelled():
+            child.exception()  # Retrieve any raced error without wire logging.
 
 
 def secure_read(path: Path) -> bytes:
@@ -297,6 +325,12 @@ def websocket_auth(appkey: str, key: Ed25519PrivateKey, timestamp_ms: int, nonce
     }}
 
 
+def websocket_refresh(appkey: str, key: Ed25519PrivateKey, timestamp_ms: int, nonce: str, request_id: str) -> dict:
+    """Documented in-session AppKey refresh: a fresh signature over the auth layout."""
+    frame = websocket_auth(appkey, key, timestamp_ms, nonce)["data"]
+    return {"id": request_id, "action": "refresh", "data": {field: frame[field] for field in ("credential_id", "authorization", "timestamp_ms", "nonce")}}
+
+
 def protocol_summary(message: dict) -> dict:
     """Never echo messages/session identifiers; retain only safe protocol evidence."""
     code = number(message.get("code", message.get("ret_code")))
@@ -314,10 +348,10 @@ def protocol_summary(message: dict) -> dict:
             "error_present": bool(message.get("error")) or (code is not None and code != 0)}
 
 
-def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> dict | None:
+def push_summary(message: dict, received_ms: int, offset_ms: float | None, symbol: str = SYMBOL) -> dict | None:
     kind = message.get("type")
     data = message.get("data")
-    if message.get("symbol") != SYMBOL or kind not in ("QUOTE", "ORDER_BOOK", "TICKER") or not isinstance(data, dict):
+    if message.get("symbol") != symbol or kind not in ("QUOTE", "ORDER_BOOK", "TICKER") or not isinstance(data, dict):
         return None
     result = {"type": kind, "freshness": freshness(data.get("data_time_ms"), received_ms, offset_ms)}
     if kind == "QUOTE":
@@ -368,13 +402,66 @@ def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> di
     return result
 
 
-async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect) -> dict:
-    # No reusable long-lived connection: the hard cap is well below the
-    # documented ten-minute auth refresh limit (recommended cycle five minutes).
-    if not 1 <= seconds <= 60:
-        raise DiagnosticError("Streaming diagnostic duration must be 1..60 seconds.")
-    report = {"symbol": SYMBOL, "started_at_utc": datetime.now(timezone.utc).isoformat(),
-              "requested_seconds": seconds, "refresh_policy": "Hard cap 60 seconds; below the 10-minute refresh requirement.",
+def display_book(message: dict, received_ms: int, offset_ms: float | None, symbol: str = SYMBOL) -> dict:
+    """Allowlisted latest-book view, never infer venue from MPID or missing time.
+
+    No delta merging: each push is displayed independently. Partial sides stay
+    empty rather than borrowing levels from a previous message.
+    """
+    data = message.get("data")
+    if message.get("symbol") != symbol or message.get("type") != "ORDER_BOOK" or not isinstance(data, dict):
+        raise DiagnosticError("Unexpected lab book message.")
+    books = data.get("books", [data])
+    if not isinstance(books, list) or len(books) > 10:
+        raise DiagnosticError("Book count exceeds the lab bound.")
+    output = []
+    for book in books:
+        if not isinstance(book, dict):
+            raise DiagnosticError("Book is malformed.")
+        clock = freshness(book.get("exchange_data_time_ms", data.get("data_time_ms")), received_ms, offset_ms)
+        entry = {"exchange": book.get("exchange") if book.get("exchange") in ("ARCA", "NASDAQ", "") else "UNKNOWN",
+                 "source_time_ms": clock["source_time_ms"], "estimated_age_ms": clock["estimated_age_ms"],
+                 "order_volume_precision": number(book.get("order_volume_precision"))}
+        for source, target in (("bid", "bids"), ("ask", "asks")):
+            levels = book.get(source + "_list")
+            if levels is None:
+                levels = []  # Absent/null sides are unavailable, never deltas.
+            if not isinstance(levels, list) or len(levels) > 60:
+                raise DiagnosticError("Book level count exceeds the lab bound.")
+            entry[target] = []
+            flag = book.get(source + "_flag")
+            if flag is not None and (isinstance(flag, bool) or flag != 1):
+                continue
+            for level in levels:
+                if not isinstance(level, dict):
+                    raise DiagnosticError("Book level is malformed.")
+                price, volume = number(level.get("price")), number(level.get("volume"))
+                if price is None or price <= 0 or volume is None or volume < 0:
+                    raise DiagnosticError("Book price or size is unavailable.")
+                count = number(level.get("order_count"))
+                mpid = level.get("mpid")
+                entry[target].append({"price": price, "volume": volume,
+                    "order_count": count if isinstance(count, int) and count >= 0 else None,
+                    "mpid": mpid if isinstance(mpid, str) and re.fullmatch(r"[A-Z0-9]{1,8}", mpid) else None})
+        output.append(entry)
+    return {"event": "book", "symbol": symbol, "received_ms": received_ms, "books": output}
+
+
+async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None,
+                       refresh_seconds: int | None = None, symbol: str = SYMBOL) -> dict:
+    # Without refresh the hard cap stays well below the documented ten-minute
+    # auth refresh limit. A longer manual session must refresh in place
+    # (recommended cycle five minutes); an unconfirmed refresh ends it.
+    if refresh_seconds is not None and not MIN_REFRESH_SECONDS <= refresh_seconds <= 300:
+        raise DiagnosticError("Refresh interval must be 30..300 seconds.")
+    if not 1 <= seconds <= (MAX_REFRESHED_SECONDS if refresh_seconds else 60):
+        raise DiagnosticError("Streaming diagnostic duration is outside the permitted cap.")
+    if not isinstance(symbol, str) or not STREAM_SYMBOL.fullmatch(symbol):
+        raise DiagnosticError("Streaming symbol must be a US stock or ETF ticker.")
+    report = {"symbol": symbol, "started_at_utc": datetime.now(timezone.utc).isoformat(),
+              "requested_seconds": seconds, "refresh_policy": f"Refresh every {refresh_seconds} seconds; ends if unconfirmed." if refresh_seconds
+              else "Hard cap 60 seconds; below the 10-minute refresh requirement.",
+              "refreshes": {"sent": 0, "confirmed": 0},
               "subscriptions": {kind: {"status": "not_attempted"} for kind in STREAM_TYPES},
               "message_counts": {kind: 0 for kind in ("QUOTE", "ORDER_BOOK", "TICKER")},
               "samples": {}, "protocol_samples": [], "unsubscribe": {"status": "not_needed"}, "closed": False}
@@ -384,10 +471,14 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
     deadline = started + seconds
     socket = None
 
+    def notify(event):
+        if observer is not None:
+            observer(event)
+
     def capture(message):
         nonlocal offset
         try:
-            sample = push_summary(message, time.time_ns() // 1_000_000, offset)
+            sample = push_summary(message, time.time_ns() // 1_000_000, offset, symbol)
         except DiagnosticError:
             report["invalid_data_messages"] = report.get("invalid_data_messages", 0) + 1
             return
@@ -397,6 +488,16 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             saved = report["samples"].setdefault(kind, {})
             saved.setdefault("first", sample)
             saved["last"] = sample
+            if kind == "ORDER_BOOK" and observer is not None and report.get("authentication", {}).get("status") == "success":
+                notify(display_book(message, time.time_ns() // 1_000_000, offset, symbol))
+
+    def correlated(message: dict, request_id: str) -> dict | None:
+        if message.get("id") == request_id:
+            return message
+        nested = message.get("data")
+        if number(message.get("ret_code")) == 0 and isinstance(nested, dict) and nested.get("id") == request_id:
+            return nested
+        return None
 
     async def receive_until(request_id: str, timeout: float) -> dict:
         until = time.perf_counter() + timeout
@@ -404,14 +505,12 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             remaining = until - time.perf_counter()
             if remaining <= 0:
                 raise asyncio.TimeoutError
-            message = json.loads(await asyncio.wait_for(socket.recv(), remaining))
+            message = json.loads(await bounded_await(socket.recv(), remaining))
             if not isinstance(message, dict):
                 raise DiagnosticError("WebSocket protocol message is malformed.")
-            if message.get("id") == request_id:
-                return message
-            nested = message.get("data")
-            if number(message.get("ret_code")) == 0 and isinstance(nested, dict) and nested.get("id") == request_id:
-                return nested
+            reply = correlated(message, request_id)
+            if reply is not None:
+                return reply
             if message.get("type") not in ("QUOTE", "ORDER_BOOK", "TICKER"):
                 summary = protocol_summary(message)
                 if len(report["protocol_samples"]) < 4:
@@ -421,6 +520,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             capture(message)
 
     try:
+        notify({"event": "status", "phase": "connecting"})
         # Independent silent logger prevents wire logging of signed auth frames.
         logger = logging.Logger("moomoo.diagnostic", level=logging.CRITICAL)
         async with connector(WS_URL, proxy=None, open_timeout=min(10, seconds), close_timeout=5,
@@ -433,8 +533,10 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                 report["authentication"] = protocol_summary(auth)
                 if not auth.get("session_id") or report["authentication"]["error_present"]:
                     report["authentication"]["status"] = "failed"
+                    notify({"event": "status", "phase": "failed", "code": report["authentication"]["code"]})
                     return report
                 report["authentication"]["status"] = "success"
+                notify({"event": "status", "phase": "authenticated"})
                 server_us = number(auth.get("server_time"))
                 if server_us and server_us > 0:
                     offset = server_us / 1000 - (auth_start_ms + time.time_ns() / 1e6) / 2
@@ -442,24 +544,47 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                     request_id = "sub-" + kind
                     attempted.append(kind)
                     report["subscriptions"][kind] = {"status": "sent_unconfirmed"}
-                    await socket.send(json.dumps({"id": request_id, "action": "subscribe", kind: [SYMBOL]}))
+                    await socket.send(json.dumps({"id": request_id, "action": "subscribe", kind: [symbol]}))
                     ack = await receive_until(request_id, min(5, max(0, deadline - time.perf_counter())))
                     result = protocol_summary(ack)
                     result["status"] = "success" if result["code"] == 0 and not result["error_present"] else "failed"
                     report["subscriptions"][kind] = result
-                while time.perf_counter() < deadline:
+                    notify({"event": "status", "phase": "subscribed" if result["status"] == "success" else "failed",
+                            "kind": kind, "code": result["code"]})
+                next_refresh = time.perf_counter() + refresh_seconds if refresh_seconds else None
+                pending = None  # (request id, give-up time) of the one unconfirmed refresh
+                while (now := time.perf_counter()) < deadline:
+                    if pending is None and next_refresh is not None and now >= next_refresh:
+                        request_id = f"refresh-{report['refreshes']['sent'] + 1}"
+                        await socket.send(json.dumps(websocket_refresh(appkey, key, time.time_ns() // 1_000_000,
+                                                                       secrets.token_urlsafe(24), request_id), separators=(",", ":")))
+                        report["refreshes"]["sent"] += 1
+                        pending = (request_id, now + REFRESH_ACK_SECONDS)
+                    if pending is not None and now >= pending[1]:
+                        report["refresh_failed"] = True
+                        raise DiagnosticError("Refresh was not acknowledged.")
+                    wake = min(deadline, pending[1] if pending else next_refresh or deadline)
                     try:
-                        message = json.loads(await asyncio.wait_for(socket.recv(), deadline - time.perf_counter()))
+                        message = json.loads(await bounded_await(socket.recv(), max(0.01, wake - now)))
                     except asyncio.TimeoutError:
-                        break
+                        continue
                     if not isinstance(message, dict):
                         raise DiagnosticError("WebSocket protocol message is malformed.")
+                    reply = correlated(message, pending[0]) if pending else None
+                    if reply is not None:
+                        if protocol_summary(reply)["error_present"]:
+                            report["refresh_failed"] = True
+                            raise DiagnosticError("Refresh was refused.")
+                        report["refreshes"]["confirmed"] += 1
+                        notify({"event": "status", "phase": "refreshed"})
+                        pending, next_refresh = None, time.perf_counter() + refresh_seconds
+                        continue
                     capture(message)
                 report["status"] = "completed"
             finally:
                 if attempted:
                     try:
-                        await socket.send(json.dumps({"id": "unsub-1", "action": "unsubscribe", **{kind: [SYMBOL] for kind in attempted}}))
+                        await socket.send(json.dumps({"id": "unsub-1", "action": "unsubscribe", **{kind: [symbol] for kind in attempted}}))
                         ack = await receive_until("unsub-1", 5)
                         result = protocol_summary(ack)
                         result["status"] = "success" if result["code"] == 0 and not result["error_present"] else "failed"

@@ -337,7 +337,30 @@ is verifiable rather than hopeful.
   `GET /market-context/coverage`
   reports these rows as `*_incomplete`.
 - Daily review is intentionally **not** part of "Sync Everything" or the Gmail
-  push pipeline. It runs only on explicit request. Do not re-add it.
+  push pipeline. Do not re-add it. It runs on request (the Daily Review button)
+  and from its own opt-in nightly timer (`app/jobs/plan_reviews.py`), both on
+  the Claude plan through `app/ai/plan_runner.py`: never API credits, and
+  never a fallback to them. `AI_REVIEW_BACKEND=api` is the only way back to
+  the Anthropic API. The nightly run reviews only the latest trading day (when
+  it has no review, gained trades since, or went stale) and never backfills:
+  a past day gets a review from its own button. It stops on a sign-in other
+  than the plan token. One trade's review (`app/ai/reviewer.py`, the trade
+  page's button) follows the same rule and reads the same day context for the
+  trade's New York open date.
+- The monthly review (`app/ai/monthly_reviewer.py`) counts a trade in the month
+  it closed (New York), the dashboard's rule. The nightly run writes last
+  month's review on its first run of a new month, and again later only if the
+  saved one was written before the month ended or covers fewer trades than
+  have since closed in it; a month can be (re)written from its own page. It reads statistics, never fills, on the plan.
+- The review's day context (`app/ai/review_context.py`) is read as of the
+  review day, except the trader's saved chart levels, which are their current
+  levels and are labelled so to the model. Every part degrades on its own into
+  the review's gaps; none may fail the review. `app/data/macro_calendar.json`
+  (FOMC, CPI, jobs reports, from the Fed and BLS) must be extended before its
+  `covers_through` date; after it, reviews report the calendar as a gap. Its
+  `market_closed` NYSE holidays make "next trading day" skip closures; a
+  release on a closed day (the BLS publishes on Good Friday) is shown as
+  landing before the next open.
 - `webull_listener` is a persistent listener, not a finite sync job.
 
 ## Strategy Lab

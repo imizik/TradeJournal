@@ -1,11 +1,16 @@
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, PositionQuote } from "@/lib/api";
+import type { AppAccess } from "@/lib/accessTypes";
+import { Suspense } from "react";
 import { requireAccess } from "@/lib/accessServer";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
+import OwnerDashboard from "@/components/dashboard/OwnerDashboard";
+import DashboardLoading from "@/components/dashboard/DashboardLoading";
+import DashboardError from "@/components/dashboard/DashboardError";
 import { money, newYorkToday } from "@/lib/format";
 import {
   buildOpenPositionMeta,
@@ -21,15 +26,32 @@ function pnlColor(val: number | null | undefined) {
 
 const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cents: false });
 
-// Main dashboard route.
+type DashboardParams = { account?: string; type?: string; decision?: string; practice_run?: string };
+
+// Keep loading/error disclosure local to this route: other pages' refresh
+// transitions and assistant authorization branches retain their existing flow.
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string; type?: string; decision?: string }>;
+  searchParams: Promise<DashboardParams>;
 }) {
   const access = await requireAccess();
   if (access.grants.decision_write || access.grants.market_decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
   if (!access.owner && !access.grants.journal_read) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /><PracticeDecisions records={(await api.decisions()).decisions} /></div>;
+  if (access.owner) return <Suspense fallback={<DashboardLoading />}><DashboardData access={access} searchParams={searchParams} /></Suspense>;
+  return <DashboardData access={access} searchParams={searchParams} />;
+}
+
+async function DashboardData({ access, searchParams }: { access: AppAccess; searchParams: Promise<DashboardParams> }) {
+  try {
+    return await loadDashboard(access, searchParams);
+  } catch (error) {
+    if (!access.owner) throw error;
+    return <DashboardError searchParams={await searchParams} />;
+  }
+}
+
+async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardParams>) {
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();
 
@@ -105,15 +127,24 @@ export default async function DashboardPage({
     openTrades.filter((t) => t.instrument_type === "stock").map((t) => t.ticker)
   )];
 
+  let quoteError = false;
   const [bulkFills, optionQuotes, stockPrices] = await Promise.all([
     openTrades.length > 0
       ? api.bulkTradeFills(openTrades.map((t) => t.id))
       : Promise.resolve({} as Record<string, Fill[]>),
     optionPositions.length > 0
-      ? api.positionQuotes(optionPositions)
+      ? api.positionQuotes(optionPositions).catch((error) => {
+          if (!access.owner) throw error;
+          quoteError = true;
+          return [] as PositionQuote[];
+        })
       : Promise.resolve([] as PositionQuote[]),
     stockTickers.length > 0
-      ? api.stockQuotes(stockTickers)
+      ? api.stockQuotes(stockTickers).catch((error) => {
+          if (!access.owner) throw error;
+          quoteError = true;
+          return {} as Record<string, number | null>;
+        })
       : Promise.resolve({} as Record<string, number | null>),
   ]);
 
@@ -171,6 +202,13 @@ export default async function DashboardPage({
   );
 
   const recentClosed = trades.filter((trade) => trade.status !== "open").slice(0, 10);
+
+  if (access.owner) return <OwnerDashboard
+    trades={trades} accounts={accounts} stats={stats} rows={openPositionRows}
+    quotes={quotesByTradeId} today={newYorkToday()} unrealized={totalUnrealizedPnl}
+    quotedCount={quotedPositions.length} grossValue={grossMarkedValue} netValue={netMarkedValue}
+    largest={largestMarkedPosition} decisions={decisions.decisions} params={resolvedParams} quoteError={quoteError}
+  />;
 
   return (
     <div className="space-y-6">

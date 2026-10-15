@@ -141,3 +141,45 @@ def test_the_enrichers_loader_reads_the_cache_and_never_fetches(monkeypatch):
     # A ticker the cache does not hold is an empty list, not a KeyError.
     monkeypatch.setattr(alpaca_enricher, "fetch_minute_bars_for_date", lambda *a, **k: {})
     assert alpaca_enricher._cached_minute_bars("NVDA", _FILL_DATE) == []
+
+
+def test_enrichment_fetches_the_rvol_history_it_compares_against(monkeypatch):
+    # Only the fill's own day used to be fetched; the history was whatever the
+    # cache already held, so a ticker traded once had no RVOL. Enrichment now
+    # caches the prior sessions first, one request per day for all tickers.
+    import uuid
+    from sqlmodel import Session, SQLModel, create_engine
+    from app.models import Account, Fill, FillMarketContext
+
+    provider = {_FILL_DATE: 200.0} | {d: 100.0 for d in _PRIOR_DAYS}
+    cache: dict[tuple[str, date], list[dict]] = {}
+    requests: list[tuple[frozenset[str], date]] = []
+
+    def fake_minute_fetch(tickers, day, cache_only=False):
+        if not cache_only:
+            requests.append((frozenset(tickers), day))
+            for ticker in tickers:
+                if day in provider:
+                    cache[(ticker, day)] = _minute_bars(day, provider[day])
+        return {t: cache[(t, day)] for t in tickers if (t, day) in cache}
+
+    monkeypatch.setattr(alpaca_enricher, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(alpaca_enricher, "fetch_minute_bars_for_date", fake_minute_fetch)
+    monkeypatch.setattr(alpaca_enricher, "fetch_daily_bars", lambda tickers, start, end: {
+        t: [_daily_bar(d) for d in _PRIOR_DAYS] for t in tickers})
+
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        account = Account(id=uuid.uuid4(), name="Roth IRA", type="roth_ira", last4="8267")
+        fills = [Fill(id=uuid.uuid4(), account_id=account.id, ticker=ticker, instrument_type="stock", side="buy",
+                      contracts=1, price=1, executed_at=_FILL_DT, raw_email_id=ticker) for ticker in ("NVDA", "AMD")]
+        session.add_all([account, *fills])
+        session.commit()
+
+        assert alpaca_enricher.enrich_fills_alpaca(fills, session) == 2
+
+        for fill in fills:
+            assert session.get(FillMarketContext, fill.id).rvol_time_adjusted == 2.0
+    both = frozenset({"AMD", "NVDA"})
+    assert sorted(requests, key=lambda r: r[1]) == [(both, d) for d in [*_PRIOR_DAYS, _FILL_DATE]]

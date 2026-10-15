@@ -32,6 +32,36 @@ CLOSED_DATES = frozenset(date.fromisoformat(x) for x in (
     "2024-06-19", "2024-07-04", "2024-09-02",
 ))
 ROSTER_VERSION = "r0-spy-roster-335-v1"
+# Explicit MU comparison protocol selected by the owner on 2026-10-11.
+# V1 discovery bounds/roster/canonical identities are preserved.
+NEWER_PROTOCOL = "mu-fixed-rules-20261011-v1"
+NEWER_END = date(2026, 10, 9)
+NEWER_PERIODS = (
+    ("Late 2024", date(2024, 10, 1), date(2024, 12, 31)),
+    ("2025", date(2025, 1, 1), date(2025, 12, 31)),
+    ("2026 through October 9", date(2026, 1, 1), NEWER_END),
+)
+PROSPECTIVE_PROTOCOL = "mu-prospective-20261012-v1"
+PROSPECTIVE_START = date(2026, 10, 12)
+PROSPECTIVE_END = date(2027, 4, 9)
+# Published NYSE closures, including the Jan 9, 2025 mourning closure.
+NEWER_CLOSED = CLOSED_DATES | frozenset(date.fromisoformat(x) for x in (
+    "2024-11-28", "2024-12-25",
+    "2025-01-01", "2025-01-09", "2025-01-20", "2025-02-17", "2025-04-18",
+    "2025-05-26", "2025-06-19", "2025-07-04", "2025-09-01", "2025-11-27", "2025-12-25",
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
+    "2026-06-19", "2026-07-03", "2026-09-07",
+))
+PROSPECTIVE_CLOSED = NEWER_CLOSED | frozenset(date.fromisoformat(x) for x in (
+    "2026-11-26", "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26",
+))
+
+
+def validate_source_version(version: int) -> None:
+    if type(version) is not int or version not in (1, 2, 3):
+        raise ValueError("unsupported source protocol")
+
+
 FEATURE_UNITS = MappingProxyType({
     "minutes": "minutes since 09:30 ET at completed bar close",
     "rvol": "cumulative volume / up-to-10 prior clock observations (minimum 5)",
@@ -59,15 +89,18 @@ def session_close(day: date) -> int:
 
 
 @lru_cache(maxsize=512)
-def session_dates(through: date = DISCOVERY_END) -> tuple[date, ...]:
-    validate_source_date(through)
+def session_dates(through: date = DISCOVERY_END, *, version: int = 1) -> tuple[date, ...]:
+    validate_source_date(through, version=version)
+    closed = CLOSED_DATES if version == 1 else NEWER_CLOSED if version == 2 else PROSPECTIVE_CLOSED
     return tuple(WARMUP_START + timedelta(days=k) for k in range((through - WARMUP_START).days + 1)
                  if (WARMUP_START + timedelta(days=k)).weekday() < 5
-                 and WARMUP_START + timedelta(days=k) not in CLOSED_DATES)
+                 and WARMUP_START + timedelta(days=k) not in closed)
 
 
-def validate_source_date(day: date) -> None:
-    if type(day) is not date or not WARMUP_START <= day <= DISCOVERY_END:
+def validate_source_date(day: date, *, version: int = 1) -> None:
+    validate_source_version(version)
+    limit = DISCOVERY_END if version == 1 else NEWER_END if version == 2 else PROSPECTIVE_END
+    if type(day) is not date or not WARMUP_START <= day <= limit:
         raise ValueError("source date outside approved warm-up/discovery interval")
 
 
@@ -118,7 +151,7 @@ class Definition:
     version: int = VERSION
 
     def __post_init__(self):
-        if type(self.version) is not int or self.version != VERSION:
+        if type(self.version) is not int or self.version not in (VERSION, 2, 3):
             raise ValueError("unsupported event definition version")
         if type(self.predicates) is not tuple or not 1 <= len(self.predicates) <= 3:
             raise ValueError("one to three AND predicates required")
@@ -129,21 +162,39 @@ class Definition:
         for symbol in self.universe:
             validate_symbol(symbol)
         if (type(self.start) is not date or type(self.end) is not date
-                or not DISCOVERY_START <= self.start <= self.end <= DISCOVERY_END):
+                or not DISCOVERY_START <= self.start <= self.end <= (DISCOVERY_END if self.version == 1 else NEWER_END if self.version == 2 else PROSPECTIVE_END)):
             raise ValueError("event dates must remain inside discovery")
         if (type(self.window_start) is not int or type(self.window_end) is not int
                 or not 575 <= self.window_start <= self.window_end <= 960
                 or self.window_start % 5 or self.window_end % 5):
             raise ValueError("window uses aligned completed-bar close minutes in RTH")
 
+        if self.version in (2, 3):
+            expected = {("move_15m_atr", None, -0.25), ("rvol", 1.5, None)}
+            actual = {(p.feature, p.minimum, p.maximum) for p in self.predicates}
+            variant = {("move_15m_atr", None, -0.25), ("rvol", 2.0, None)}
+            periods = {(a, b) for _, a, b in NEWER_PERIODS} if self.version == 2 else {(PROSPECTIVE_START, PROSPECTIVE_END)}
+            if (self.universe != ("MU",) or (self.start, self.end) not in periods
+                    or (self.window_start, self.window_end) != (600, 690)
+                    or len(self.predicates) != 2 or actual not in (expected, variant)):
+                raise ValueError("newer MU study requires a fixed period and the unchanged MU rules")
+
     def canonical(self) -> dict:
-        return {
+        result = {
             "version": self.version, "predicates": sorted((p.canonical() for p in self.predicates), key=_json),
             "universe": sorted(self.universe), "start": self.start.isoformat(), "end": self.end.isoformat(),
             "window_start": self.window_start, "window_end": self.window_end,
             "timeframe_minutes": 5, "rule": "first_qualifying_completed_bar_per_ticker_session",
             "direction": "price_decline_negative", "feature_units": dict(FEATURE_UNITS),
         }
+
+        if self.version == 2:
+            result["protocol"] = NEWER_PROTOCOL
+            result["exploratory_exposure"] = True
+        elif self.version == 3:
+            result["protocol"] = PROSPECTIVE_PROTOCOL
+            result["prospective_registration_required"] = True
+        return result
 
     @property
     def identity(self) -> str:
@@ -154,6 +205,10 @@ def parse_definition(raw: dict) -> Definition:
     allowed = {"version", "predicates", "universe", "start", "end", "window_start", "window_end"}
     metadata = {"timeframe_minutes": 5, "rule": "first_qualifying_completed_bar_per_ticker_session",
                 "direction": "price_decline_negative", "feature_units": dict(FEATURE_UNITS)}
+    if type(raw) is dict and raw.get("version") == 2:
+        metadata.update(protocol=NEWER_PROTOCOL, exploratory_exposure=True)
+    elif type(raw) is dict and raw.get("version") == 3:
+        metadata.update(protocol=PROSPECTIVE_PROTOCOL, prospective_registration_required=True)
     if (type(raw) is not dict or set(raw) - allowed - metadata.keys()
             or "predicates" not in raw or "version" not in raw):
         raise ValueError("invalid event definition fields")
@@ -221,17 +276,20 @@ class Snapshot:
     manifest: tuple[tuple[str, str, str, int], ...]  # symbol, date, byte hash/state, length
     engine_fingerprint: str
     provenance: str = "SIP directory/current raw writer; supplier receipt unavailable"
+    source_version: int = 1
     prepared_fingerprint: str = field(init=False)
 
     def __post_init__(self):
-        validate_source_date(self.through)
+        validate_source_date(self.through, version=self.source_version)
         if type(self.symbols) is not tuple or type(self.manifest) is not tuple:
             raise ValueError("snapshot collections must be immutable")
         names = [x.symbol for x in self.symbols]
         if len(set(names)) != len(names) or MARKET not in names:
             raise ValueError("distinct snapshot symbols and SPY required")
-        allowed_days = frozenset(session_dates(self.through))
-        expected = {(name, str(day)) for name in names for day in session_dates(self.through)}
+        if self.source_version in (2, 3) and set(names) != {"MU", MARKET}:
+            raise ValueError("newer source is bounded to MU and SPY")
+        allowed_days = frozenset(session_dates(self.through, version=self.source_version))
+        expected = {(name, str(day)) for name in names for day in session_dates(self.through, version=self.source_version)}
         if (any(type(row) is not tuple or len(row) != 4 for row in self.manifest)
                 or len(self.manifest) != len(expected) or {(row[0], row[1]) for row in self.manifest} != expected):
             raise ValueError("manifest must describe exactly the bounded source roster")
@@ -240,7 +298,7 @@ class Snapshot:
             validate_symbol(source.symbol, market=True)
             prepared.update(source.symbol.encode())
             if (type(source.bars) is not tuple or type(source.coverage) is not tuple
-                    or tuple(c.day for c in source.coverage) != session_dates(self.through)):
+                    or tuple(c.day for c in source.coverage) != session_dates(self.through, version=self.source_version)):
                 raise ValueError("snapshot needs immutable complete roster coverage")
             coverage_by_day = {c.day: c for c in source.coverage}
             present_buckets: dict[date, int] = {}
@@ -276,12 +334,17 @@ class Snapshot:
 
     @property
     def identity(self) -> str:
-        return _hash({"version": VERSION, "through": str(self.through), "manifest": self.manifest,
+        metadata = {"version": VERSION, "through": str(self.through), "manifest": self.manifest,
                       "engine": self.engine_fingerprint, "provenance": self.provenance,
                       "prepared": self.prepared_fingerprint,
                       "feed": "sip", "adjustment": "Factory inferred splits within source cutoff; no dividends",
-                      "roster": ROSTER_VERSION, "sessions": [str(d) for d in session_dates(self.through)],
-                      "hours": [[str(d), 570, session_close(d)] for d in session_dates(self.through)]})
+                      "roster": ROSTER_VERSION, "sessions": [str(d) for d in session_dates(self.through, version=self.source_version)],
+                      "hours": [[str(d), 570, session_close(d)] for d in session_dates(self.through, version=self.source_version)]}
+        if self.source_version == 2:
+            metadata.update(source_protocol=NEWER_PROTOCOL, roster="nyse-mu-20261009-v1")
+        elif self.source_version == 3:
+            metadata.update(source_protocol=PROSPECTIVE_PROTOCOL, roster="nyse-mu-20270409-v1")
+        return _hash(metadata)
 
 
 @dataclass(frozen=True)
@@ -309,12 +372,12 @@ class _Grid:
 
 
 class _Quality:
-    def __init__(self, source: SymbolSnapshot):
+    def __init__(self, source: SymbolSnapshot, *, version: int = 1):
         self.coverage = {x.day: x for x in source.coverage}
         complete = {day: c.complete for day, c in self.coverage.items()}
         self.daily_reasons = {}
         for day in self.coverage:
-            before = session_dates(day)[:-1]
+            before = session_dates(day, version=version)[:-1]
             self.daily_reasons[day] = {
                 count: ("daily_warmup" if len(before) < count else
                         "daily_history_gap" if not all(complete.get(d, False) for d in before[-count:]) else None)
@@ -359,7 +422,7 @@ class Observations:
     _data_id: str = field(init=False, repr=False)
 
     def __post_init__(self):
-        quality = {x.symbol: _Quality(x) for x in self.snapshot.symbols}
+        quality = {x.symbol: _Quality(x, version=self.snapshot.source_version) for x in self.snapshot.symbols}
         market = quality[MARKET].series
         object.__setattr__(self, "_quality", MappingProxyType(quality))
         object.__setattr__(self, "_contexts", MappingProxyType(
@@ -440,7 +503,7 @@ class Observations:
         names = tuple(sorted({p.feature for p in definition.predicates}))
         for symbol in sorted(definition.universe):
             q = self._quality[symbol]
-            for day in session_dates(definition.end):
+            for day in session_dates(definition.end, version=definition.version):
                 if day < definition.start:
                     continue
                 for minute in range(definition.window_start, min(definition.window_end, session_close(day)) + 1, 5):
@@ -477,7 +540,8 @@ class Observations:
                      tuple(sorted(unavailable.items())), MappingProxyType(coverage))
 
     def _grid(self, definition: Definition) -> _Grid:
-        if definition.end > self.snapshot.through or set(definition.universe) - self._quality.keys():
+        if (definition.version != self.snapshot.source_version
+                or definition.end > self.snapshot.through or set(definition.universe) - self._quality.keys()):
             raise ValueError("definition exceeds snapshot dates or symbols")
         names = tuple(sorted({p.feature for p in definition.predicates}))
         key = (tuple(sorted(definition.universe)), definition.start, definition.end,

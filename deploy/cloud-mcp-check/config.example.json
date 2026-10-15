@@ -1,0 +1,18 @@
+{
+  "enabled": false,
+  "check_only": true,
+  "issuer_url": "https://identity.example.test/",
+  "resource_url": "https://check.example.test/check/mcp",
+  "jwks_url": "https://identity.example.test/.well-known/jwks.json",
+  "jwks_file": "/var/lib/tradejournal-check-keys/public-keys.json",
+  "client_id": "replace-with-approved-client-id",
+  "client_claim": "azp",
+  "profiles": [
+    {"subject": "replace-with-approved-subject", "id": "check_00000000-0000-4000-8000-000000000000", "enabled": false}
+  ],
+  "ledger_file": "/var/lib/tradejournal-check/ledger.db",
+  "features_pointer": "/var/lib/tradejournal-check-features/current.json",
+  "max_feature_age_seconds": 129600,
+  "provider_feed": "iex",
+  "provider_timeout_seconds": 3.0
+}

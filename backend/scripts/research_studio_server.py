@@ -13,7 +13,7 @@ from app.engine.research_studio_data import DiscoveryCache  # noqa: E402
 from app.engine.research_studio_store import ResearchStore  # noqa: E402
 from app.engine.research_studio_session import Busy, ResearchSession  # noqa: E402
 
-ACTIONS = frozenset({"preview", "enqueue", "runs", "status", "result", "cancel", "retry", "execute", "recover", "chart"})
+ACTIONS = frozenset({"preview", "enqueue", "runs", "status", "result", "cancel", "retry", "execute", "recover", "chart", "variant", "compare", "conclude", "notes", "describe"})
 
 
 class Command(BaseModel):
@@ -40,6 +40,8 @@ def create_app(session, token):
             methods = {"preview": session.preview, "enqueue": session.enqueue, "runs": session.runs,
                        "status": session.store.status, "result": session.store.result,
                        "execute": session.execute, "recover": session.store.recover, "chart": session.chart}
+            methods.update(variant=session.variant, compare=session.compare,
+                           conclude=session.variants.conclude, notes=session.variants.notes, describe=session.describe)
             if body.action in ("cancel", "retry"):
                 return session.store.control(action=body.action, **body.arguments)
             return methods[body.action](**body.arguments)
@@ -55,9 +57,10 @@ def main():
     parser.add_argument("--cache-root", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8097)
+    parser.add_argument("--allow-newer-mu", action="store_true", help="owner-approved fixed MU study through 2026-10-09; marks dates exposed")
     args = parser.parse_args()
     token = os.environ.get("TJ_RESEARCH_TOKEN", "")
-    source = DiscoveryCache(args.cache_root)
+    source = DiscoveryCache(args.cache_root, allow_newer_mu=args.allow_newer_mu)
     session = ResearchSession(source, ResearchStore(args.store_root, source_root=source.root))
     import uvicorn
     uvicorn.run(create_app(session, token), host="127.0.0.1", port=args.port, workers=1)

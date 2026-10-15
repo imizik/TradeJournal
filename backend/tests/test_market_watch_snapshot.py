@@ -1,0 +1,326 @@
+from datetime import UTC, date, datetime, timedelta
+import json
+import os
+
+import pytest
+
+from market_watch_common import PROTOCOL, canonical, digest, parse_time, seal, validate_snapshot, verify
+from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot, read_latest_snapshot
+from app.engine.market_watch_snapshot import _read_bounded
+
+
+DAY = date(2026, 10, 14)
+OPEN = datetime(2026, 10, 14, 13, 30, tzinfo=UTC)
+NOW = datetime(2026, 10, 14, 14, 0, tzinfo=UTC)
+
+
+def _bar(start, n):
+    price = 100 + n / 10
+    return {"t": start.isoformat().replace("+00:00", "Z"), "o": price, "h": price + .2,
+            "l": price - .2, "c": price + .1, "v": 1000}
+
+
+def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_minute=False, missing_open=False, missing_at=10):
+    bars = {}
+    for symbol in ("SPY", "QQQ"):
+        bars[symbol] = [_bar(OPEN + timedelta(minutes=i), i) for i in range(30)]
+        # A partially formed, future minute must not enter the packet or aggregate.
+        bars[symbol].append(_bar(NOW, 31))
+    if missing_qqq:
+        bars["QQQ"] = []
+    daily = {symbol: [{"t": "2026-10-13T00:00:00Z", "c": 99}] for symbol in ("SPY", "QQQ")}
+    if stale:
+        bars["SPY"] = [_bar(OPEN + timedelta(minutes=i), i) for i in range(10)]
+    if missing_open:
+        bars["SPY"] = bars["SPY"][1:]
+    if missing_minute:
+        bars["SPY"] = [row for i, row in enumerate(bars["SPY"]) if i != missing_at]
+    if duplicate_minute:
+        bars["SPY"].append(dict(bars["SPY"][10]))
+    return bars, daily
+
+
+def fixture_snapshot(**options):
+    now = options.pop("now", NOW)
+    bounds = options.pop("bounds", (OPEN, datetime(2026, 10, 14, 20, 0, tzinfo=UTC)))
+    vix = options.pop("vix", {"observed_at": now - timedelta(minutes=5), "value": 17.2, "change_pct": 2.1})
+    news_items = options.pop("news_items", [])
+    fail_calendar = options.pop("fail_calendar", False)
+    trades_reader = options.pop("trades_reader", None)
+    bars, daily = _sources(**options)
+    return build_snapshot(
+        now, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily, trades_reader=trades_reader,
+        vix_reader=lambda: vix,
+        calendar_reader=lambda day, at: (_ for _ in ()).throw(OSError("fixture outage")) if fail_calendar else {"status": "fresh", "reason": None, "source": "official_calendar",
+            "observed_at": at.isoformat().replace("+00:00", "Z"), "retrieved_at": at.isoformat().replace("+00:00", "Z"),
+            "age_seconds": 0, "source_sha256": digest({"coverage_start": "2026-01-01", "coverage_end": "2027-01-01",
+                "calendar_version": "fixture", "events": []}), "coverage_start": "2026-01-01", "coverage_end": "2027-01-01",
+            "calendar_version": "fixture", "events": []},
+        news_reader=lambda start, end: {"status": "fresh", "reason": None, "source": "Alpaca Benzinga",
+            "observed_at": end.isoformat().replace("+00:00", "Z"), "retrieved_at": end.isoformat().replace("+00:00", "Z"),
+            "age_seconds": 0, "source_sha256": digest(news_items), "query_symbols": ["SPY", "QQQ"],
+            "window_start": start.isoformat().replace("+00:00", "Z"), "window_end": end.isoformat().replace("+00:00", "Z"),
+            "coverage": "fixture", "errors": [], "items": news_items},
+        bounds_reader=lambda day: bounds,
+    )
+
+
+def test_protocol_hashes_and_timestamp_offsets_are_strict():
+    assert PROTOCOL["protocol_id"] == "mw-v1"
+    sealed = seal({"record": "fixture"})
+    verify(sealed)
+    assert canonical({"b": 1, "a": 2}) == b'{"a":2,"b":1}'
+    assert digest({"a": 2, "b": 1}) == digest({"b": 1, "a": 2})
+    with pytest.raises(ValueError, match="offset"):
+        parse_time("2026-10-14T10:00:00")
+    sealed["record"] = "changed"
+    with pytest.raises(ValueError, match="hash"):
+        verify(sealed)
+
+
+def test_snapshot_has_exact_universe_completed_bars_and_reproducible_manifest():
+    packet = fixture_snapshot()
+    validate_snapshot(packet)
+    assert packet["session_date"] == "2026-10-14"
+    assert set(packet["indices"]) == {"SPY", "QQQ"}
+    spy = packet["indices"]["SPY"]
+    assert spy["bar_1m"]["start"] == "2026-10-14T13:59:00.000000Z"
+    assert spy["bar_1m"]["end"] == "2026-10-14T14:00:00.000000Z"
+    assert len(spy["bars_5m"]) == 6
+    assert spy["or15_high"]["value"] is not None
+    assert packet["input_manifest"][0]["payload_sha256"] == spy["source_sha256"]
+    assert packet["content_sha256"] == digest({k: v for k, v in packet.items() if k != "content_sha256"})
+
+
+def test_default_calendar_retains_bundled_cpi_without_claiming_freshness():
+    bars, daily = _sources()
+    packet = build_snapshot(
+        NOW, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
+        vix_reader=lambda: None,
+        bounds_reader=lambda _: (OPEN, datetime(2026, 10, 14, 20, 0, tzinfo=UTC)),
+    )
+    validate_snapshot(packet)
+    calendar = packet["calendar"]
+    assert calendar["reason"] == "observation_time_unknown"
+    assert calendar["status"] == "missing"
+    assert calendar["observed_at"] is None
+    assert calendar["coverage_start"] <= DAY.isoformat() <= calendar["coverage_end"]
+    assert any(event["kind"] == "cpi" and event["scheduled_at"] == "2026-10-14T12:30:00.000000Z"
+               for event in calendar["events"])
+
+
+def test_partial_source_is_explicit_and_future_bars_never_enter(tmp_path):
+    packet = fixture_snapshot(missing_qqq=True)
+    assert packet["indices"]["QQQ"]["bar_1m"] is None
+    assert packet["indices"]["QQQ"]["vwap"]["status"] == "missing"
+    assert any(gap["group"] == "indices.QQQ" for gap in packet["gaps"])
+    publish_snapshot(tmp_path, packet)
+    assert (tmp_path / "protocols" / f"{packet['protocol_sha256']}.json").exists()
+    assert read_latest_snapshot(tmp_path, NOW)["content_sha256"] == packet["content_sha256"]
+    assert read_latest_snapshot(tmp_path, NOW + timedelta(days=1)) is None
+    stored = json.loads((tmp_path / "latest.json").read_text())
+    content = tmp_path / f"{stored['content_sha256']}.json"
+    tampered = json.loads(content.read_text())
+    tampered["indices"]["SPY"]["price"]["value"] = 999
+    content.write_text(json.dumps(tampered))
+    assert read_latest_snapshot(tmp_path, NOW) is None
+
+
+def test_latest_publication_never_regresses_with_older_collection(tmp_path):
+    newer = fixture_snapshot()
+    publish_snapshot(tmp_path, newer)
+    older_time = NOW - timedelta(minutes=10)
+    older = fixture_snapshot(now=older_time)
+    publish_snapshot(tmp_path, older)
+    assert read_latest_snapshot(tmp_path, NOW)["content_sha256"] == newer["content_sha256"]
+
+
+def test_stale_last_bar_and_unpublished_inputs_remain_visible():
+    packet = fixture_snapshot(stale=True)
+    assert packet["indices"]["SPY"]["status"] == "stale"
+    assert packet["indices"]["SPY"]["price"]["status"] == "stale"
+    assert packet["headlines"]["coverage"] == "fixture"
+
+
+def test_snapshot_rejects_unclosed_bar_and_future_source_time():
+    packet = fixture_snapshot()
+    packet["indices"]["SPY"]["bar_1m"]["end"] = (NOW + timedelta(minutes=1)).isoformat()
+    packet.pop("content_sha256")
+    packet.pop("snapshot_id")
+    packet["snapshot_id"] = "mws_" + digest(packet)[:32]
+    packet = seal({k: v for k, v in packet.items() if k != "content_sha256"})
+    with pytest.raises(ValueError, match="after collection|future|minute bar"):
+        validate_snapshot(packet)
+
+
+def test_opening_range_is_ready_after_first_15_bars_and_vwap_requires_contiguous_minutes():
+    packet = fixture_snapshot()
+    assert packet["indices"]["SPY"]["or15_high"]["status"] == "fresh"
+    broken = fixture_snapshot(missing_minute=True)
+    spy = broken["indices"]["SPY"]
+    assert spy["vwap"]["value"] is None
+    assert spy["vwap"]["status"] == "missing"
+    assert any(gap["group"] == "indices.SPY.vwap" for gap in broken["gaps"])
+
+
+def test_duplicate_minute_is_a_typed_gap_and_does_not_choose_a_duplicate():
+    packet = fixture_snapshot(duplicate_minute=True)
+    assert packet["indices"]["SPY"]["status"] == "missing"
+    assert any(gap == {"group": "indices.SPY", "reason": "duplicate_minute_bar"} for gap in packet["gaps"])
+
+
+def test_missing_exchange_calendar_does_not_invent_session_times_or_request_bars():
+    before_open = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    packet = fixture_snapshot(now=before_open, bounds=None)
+    assert packet["market_phase"] == "calendar_unavailable"
+    assert packet["session_open_at"] is None and packet["session_close_at"] is None
+    assert packet["indices"]["SPY"]["bar_1m"] is None
+    assert any(gap["group"] == "session_calendar" for gap in packet["gaps"])
+
+
+def test_nested_future_market_inputs_are_rejected():
+    with pytest.raises(ValueError, match="source timestamp"):
+        fixture_snapshot(vix={"observed_at": NOW + timedelta(seconds=1), "value": 18, "change_pct": 1})
+    future_article = {"article_id": "1", "provider": "fixture", "url": "https://example.com/story",
+        "headline": "fixture", "published_at": NOW.isoformat(), "provider_updated_at": None,
+        "first_observed_at": None, "retrieved_at": (NOW + timedelta(seconds=1)).isoformat(),
+        "payload_sha256": "0" * 64, "truncated": False}
+    future_article["payload_sha256"] = digest({k: v for k, v in future_article.items() if k != "payload_sha256"})
+    with pytest.raises(ValueError, match="headline source timestamp"):
+        fixture_snapshot(news_items=[future_article])
+
+
+def test_schema_refuses_private_fields_and_content_address_symlinks(tmp_path):
+    packet = fixture_snapshot()
+    private = dict(packet)
+    private["api_key"] = "credential-like"
+    private.pop("content_sha256")
+    private.pop("snapshot_id")
+    private["snapshot_id"] = "mws_" + digest(private)[:32]
+    private = seal(private)
+    with pytest.raises(ValueError, match="outside the public market schema"):
+        validate_snapshot(private)
+    content = tmp_path / f"{packet['content_sha256']}.json"
+    content.symlink_to(tmp_path / "external.json")
+    with pytest.raises(ValueError, match="symlink"):
+        publish_snapshot(tmp_path, packet)
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH") or os.geteuid() == 0,
+                    reason="Requires Linux O_PATH and an unprivileged process")
+def test_bounded_reader_traverses_private_parent_without_listing_it(tmp_path):
+    private = tmp_path / "check-private"
+    outbox = private / "outbox"
+    outbox.mkdir(parents=True)
+    notice = outbox / "notice.json"
+    notice.write_text('{"notice":"fixture"}')
+    private.chmod(0o111)
+    try:
+        with pytest.raises(PermissionError):
+            list(private.iterdir())
+        with pytest.raises(PermissionError):
+            os.open(private, os.O_RDONLY | os.O_DIRECTORY)
+        assert _read_bounded(notice, 100) == '{"notice":"fixture"}'
+        with pytest.raises(ValueError, match="size"):
+            _read_bounded(notice, 2)
+    finally:
+        private.chmod(0o700)
+
+
+@pytest.mark.parametrize("link_parent", [False, True])
+def test_bounded_reader_refuses_symlink_at_every_path_component(tmp_path, link_parent):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "notice.json").write_text("fixture")
+    if link_parent:
+        link = tmp_path / "alias"
+        link.symlink_to(real, target_is_directory=True)
+        path = link / "notice.json"
+    else:
+        path = real / "alias.json"
+        path.symlink_to(real / "notice.json")
+    with pytest.raises(OSError):
+        _read_bounded(path, 100)
+
+
+def test_protocol_id_is_content_bound_and_cached_session_bounds_do_not_fetch(monkeypatch):
+    import market_watch_common as common
+    from app.engine.chart_calendar import chart_calendar
+    day = date(2026, 10, 14)
+    monkeypatch.setattr(chart_calendar, "hours", lambda *_: (_ for _ in ()).throw(AssertionError("network path used")))
+    monkeypatch.setattr(chart_calendar, "cached", lambda value: {"status": "open", "open": 570, "close": 960})
+    assert common.session_bounds(day) == (datetime(2026, 10, 14, 13, 30, tzinfo=UTC), datetime(2026, 10, 14, 20, 0, tzinfo=UTC))
+    packet = fixture_snapshot()
+    packet["protocol_sha256"] = "0" * 64
+    packet.pop("content_sha256")
+    packet.pop("snapshot_id")
+    packet["snapshot_id"] = "mws_" + digest(packet)[:32]
+    packet = seal(packet)
+    with pytest.raises(ValueError, match="protocol hash"):
+        validate_snapshot(packet)
+
+
+def test_postmarket_retains_stale_prices_without_rejecting_descriptive_snapshot():
+    packet = fixture_snapshot(now=datetime(2026, 10, 14, 20, 4, tzinfo=UTC))
+    assert packet["market_phase"] == "post_market"
+    assert packet["indices"]["SPY"]["status"] == "stale"
+    validate_snapshot(packet)
+
+
+def test_calendar_failure_keeps_valid_partial_snapshot_and_source_hash(tmp_path):
+    packet = fixture_snapshot(fail_calendar=True)
+    assert packet["calendar"]["status"] == "missing"
+    assert packet["calendar"]["reason"] == "source_error:OSError"
+    assert packet["indices"]["SPY"]["price"]["value"] is not None
+    publish_snapshot(tmp_path, packet)
+    assert read_latest_snapshot(tmp_path, NOW) == packet
+
+
+def test_missing_open_stays_missing_and_five_minute_buckets_stay_clock_aligned():
+    packet = fixture_snapshot(missing_open=True, missing_minute=True)
+    spy = packet["indices"]["SPY"]
+    assert spy["session_open"] == {"value": None, "at": None, "status": "missing", "reason": "session_open_bar_missing"}
+    assert spy["vwap"]["value"] is None
+    assert spy["bars_5m"]
+    for bar in spy["bars_5m"]:
+        assert (parse_time(bar["start"]) - OPEN).total_seconds() % 300 == 0
+    assert spy["bars_5m"][0]["start"] == "2026-10-14T13:35:00.000000Z"
+
+
+def test_resealed_future_five_minute_bar_is_refused():
+    packet = fixture_snapshot()
+    packet['indices']['SPY']['bars_5m'][-1]['end'] = (NOW + timedelta(minutes=5)).isoformat()
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='five-minute bars'):
+        validate_snapshot(seal(packet))
+
+
+@pytest.mark.parametrize('field', ['bars_5m', 'price', 'vwap', 'session_open', 'or15_high', 'or15_low'])
+def test_empty_manifest_cannot_carry_resealed_derived_evidence(field):
+    packet = fixture_snapshot(missing_qqq=True)
+    group = packet['indices']['QQQ']
+    if field == 'bars_5m':
+        group[field] = [{'start': NOW.isoformat(), 'end': (NOW + timedelta(minutes=5)).isoformat(),
+                         'open': 100, 'high': 102, 'low': 99, 'close': 101, 'volume': 100}]
+    else:
+        group[field]['value'] = 100
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='empty source bars'):
+        validate_snapshot(seal(packet))
+
+
+def test_every_manifest_bar_must_be_an_exact_regular_session_minute():
+    packet = fixture_snapshot()
+    entry = next(item for item in packet['input_manifest'] if item['group'] == 'indices.SPY.bars_1m')
+    entry['bars'][2]['end'] = (parse_time(entry['bars'][2]['start']) + timedelta(minutes=2)).isoformat()
+    entry['payload_sha256'] = digest(entry['bars'])
+    packet['indices']['SPY']['source_sha256'] = entry['payload_sha256']
+    packet.pop('content_sha256')
+    packet.pop('snapshot_id')
+    packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
+    with pytest.raises(ValueError, match='exact regular-session minute'):
+        validate_snapshot(seal(packet))

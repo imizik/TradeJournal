@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 import uuid
 
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 import pytest
@@ -20,6 +21,11 @@ from app.routers import charts, quotes, symbol_info
 
 OWNER_KEY, PUBLIC_KEY = "o" * 43, "p" * 43
 OWNER_ORIGIN, PUBLIC_ORIGIN = "http://127.0.0.1:3100", "http://127.0.0.1:3101"
+# Production Argon2 costs about 0.1 s per hash or verify, and this fixture (shared by
+# the sample, replay and cloud MCP suites) hashes and verifies on every test. Keys
+# are still hashed and verified with Argon2id, only at the cheapest parameters;
+# test_production_key_hashing_parameters_are_unchanged pins the real ones.
+FIXTURE_HASHER = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
 
 
 @pytest.fixture
@@ -32,6 +38,7 @@ def boundary(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(access, "engine", engine)
     monkeypatch.setattr(access_middleware, "engine", engine)
+    monkeypatch.setattr(access, "HASHER", FIXTURE_HASHER)
     def session():
         with Session(engine) as db:
             yield db
@@ -48,6 +55,13 @@ def boundary(tmp_path, monkeypatch):
     owner.close()
     public.close()
     engine.dispose()
+
+
+def test_production_key_hashing_parameters_are_unchanged():
+    key = "k" * 43
+    hashed = access.HASHER.hash(key)
+    assert hashed.startswith("$argon2id$v=19$m=65536,t=3,p=1$")
+    assert access.HASHER.verify(hashed, key)
 
 
 def signin(b, *, identifier="dot", key=None):
@@ -111,14 +125,27 @@ def test_cross_audience_and_missing_configuration(boundary):
     assert boundary.owner.get("/access/me").status_code == 503
 
 
+# Fixed ids, not uuid4(): parametrized ids must be identical in every pytest-xdist
+# worker, or collection fails before any test runs.
 @pytest.mark.parametrize("method,path", [("GET", "/fills"), ("GET", "/accounts"), ("GET", "/charts/settings"),
     ("GET", "/charts/symbol/SPY/you"), ("GET", "/gmail/health"), ("GET", "/access/assistants"),
     ("POST", "/sync/pipeline/run"), ("POST", "/decisions"), ("POST", "/practice/prepare"),
-    ("POST", f"/practice/opportunities/{uuid.uuid4()}/choice"), ("POST", f"/decisions/{uuid.uuid4()}/arm"),
-    ("PUT", "/charts/settings"), ("POST", "/access/assistants")])
+    ("POST", "/practice/opportunities/09f6afdc-cc00-4487-ad2e-b50f51c17838/choice"),
+    ("POST", "/decisions/468aa876-bcb4-4bef-bf6a-33fd621b86bb/arm"),
+    ("PUT", "/charts/settings"), ("GET", "/scanner/settings"), ("PUT", "/scanner/settings"),
+    ("POST", "/access/assistants")])
 def test_read_only_inspector_denied(boundary, method, path):
     assert signin(boundary).status_code == 200
     assert boundary.public.request(method, path, json={} if method != "GET" else None).status_code == 403
+
+
+def test_scanner_settings_require_owner_and_csrf(boundary):
+    current = boundary.owner.get("/scanner/settings")
+    assert current.status_code == 200
+    body = {"symbols": ["MU"], "base_revision": current.json()["revision"]}
+    assert boundary.owner.put("/scanner/settings", json=body, headers={"x-tj-csrf": "wrong"}).status_code == 403
+    assert boundary.owner.put("/scanner/settings", json=body).status_code == 200
+    assert boundary.owner.get("/scanner/settings").json()["symbols"] == ["MU"]
 
 
 def test_symbols_checked_before_provider(boundary):

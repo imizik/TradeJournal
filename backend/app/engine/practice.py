@@ -93,6 +93,8 @@ def recover_view(db, run):
 
 
 def view(db: Session, run: PracticeRun, *, details=True, recover=True):
+    if run.session_key.startswith("scanner-replay:"):
+        raise decisions.DecisionError("Scanner replay refuses generic projections of sealed storage")
     if recover:
         recover_view(db, run)
     call = db.exec(select(PracticeAgentCall).where(PracticeAgentCall.run_id == run.id)).first()

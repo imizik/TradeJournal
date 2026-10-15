@@ -8,6 +8,12 @@ retained as a pre-cutover recovery source; it is no longer the live database.
 
 ## Access and layout
 
+The [disabled advisor bundle](cloud-mcp-advisor/README.md) is a separate manual
+proposal for one invented request. Its source/templates ship in this archive,
+but this installer does not install or start advisor units, publish its proxy,
+create grants or change existing journal/practice permissions. Retained
+installation, grants, ingress and startup require separate owner approval.
+
 | Component | Address / location |
 |---|---|
 | Frontend | `127.0.0.1:3000`, reached through private Tailscale Serve |
@@ -39,10 +45,15 @@ operator recovery; see [background jobs](../docs/agent/background-jobs.md).
 
 ## Build and obtain the release
 
-The `Deployment package` GitHub Actions workflow builds on Ubuntu 24.04 x86_64,
-then installs the artifact on a disposable runner and exercises real systemd
-services against disposable Postgres. Only a successful smoke test uploads
-`tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Choose a successful
+The `Deployment package` GitHub Actions workflow builds once on Ubuntu 24.04
+x86_64, then installs those exact bytes on two disposable runners in parallel
+(the package and MCP smokes, and the slower advisor smoke) and exercises real
+systemd services against disposable Postgres. Only when both pass does it upload
+`tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Pull requests run the
+advisor smoke only when `scripts/ci_scope.sh` marks them advisor-relevant
+(deployment code, migrations, dependencies, access, shared backend modules the
+advisor imports, or advisor files); every
+`main` push always runs it, so a release has always passed it. Choose a successful
 run for the exact reviewed commit; after merging, prefer the `main` run.
 
 For every `main` commit on which both that workflow and CI pass, the Release
@@ -172,6 +183,80 @@ outside the backed-up data. The first transcription downloads the model
 never leave the server. `CAPTURE_TRANSCRIBER=off` in `backend.env` keeps
 recordings and skips transcription.
 
+## Manual moomoo Level 2 connection
+
+The optional market-depth lab uses a dedicated `tradejournal-moomoo` systemd
+service. It binds only to `127.0.0.1:8196`, has no database or journal-state
+access, and makes no provider request at startup. The browser can request one
+stream for one validated US ticker, which refreshes its auth in place and runs until stopped
+(eight hours at most), after the operator starts the lab. There is no
+timer or scheduled work.
+
+Provision it explicitly with the reviewed appkey and Ed25519 PEM stored as
+mode-0600 files. The helper validates the private HTTPS Tailscale origin,
+creates the dedicated service account, copies the credentials into
+root-owned mode-0600 files under `/etc/tradejournal/moomoo`, and writes the
+shared token to root-owned mode-0600 environment files. It refuses to overwrite
+existing credentials or configuration and never prints the generated token:
+
+```bash
+sudo /opt/tradejournal/current/backend/.venv/bin/python \
+  /opt/tradejournal/current/deploy/moomoo_config.py \
+  --appkey-file /secure/source/appkey \
+  --private-key-file /secure/source/phase1-ed25519.pem \
+  --web-origin https://YOUR_SERVER.YOUR_TAILNET.ts.net
+```
+
+Provisioning does not start or enable the service. For a separately approved
+manual activation, enable the bridge and restart the frontend so systemd loads
+its optional environment file:
+
+```bash
+sudo systemctl enable --now tradejournal-moomoo.service
+sudo systemctl restart tradejournal-frontend.service
+```
+
+Deployments stop the bridge before replacing the frontend or release, then
+restart it only when the unit is explicitly enabled and
+`TJ_MOOMOO_LAB_ENABLED=true` is present in
+`/etc/tradejournal/moomoo-frontend.env`. A rollback to a release without the
+unit stops, disables and removes it while preserving operator credentials and
+configuration. Disable the bridge with `sudo systemctl disable --now
+tradejournal-moomoo.service`; the frontend lab route is unavailable until the
+operator explicitly enables the bridge again.
+
+### Depth recorder and its R2 upload
+
+The [depth recorder](../docs/level2-manual-connection.md#depth-recorder) reuses the
+provisioned `tradejournal-moomoo` account and credentials. Releases install its
+units but never enable them. To change the default watchlist, write
+`TJ_DEPTH_TICKERS=SPY,MU,NBIS,SNDK,NVDA` (plain tickers, at most 20) to a
+root-owned 0600 `/etc/tradejournal/depth-recorder.env`, then:
+
+```bash
+sudo systemctl enable --now tradejournal-depth-recorder.service
+sudo cat /var/lib/tradejournal-depth/status.json
+```
+
+For the upload, create a separate private R2 bucket and an Object Read & Write
+token scoped to that bucket only (not the offsite backup's). Put its account
+endpoint, bucket and keys in a root-owned 0600 `/etc/tradejournal/depth-r2.env`:
+
+```
+TJ_DEPTH_R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
+TJ_DEPTH_R2_BUCKET=trade-journal-depth
+TJ_DEPTH_R2_ACCESS_KEY_ID=...
+TJ_DEPTH_R2_SECRET_ACCESS_KEY=...
+```
+
+then `sudo systemctl enable --now tradejournal-depth-upload.timer`. Deployments
+stop both before switching releases and start them again only when enabled; a
+recorder that fails to start is reported, not a reason to roll back. A rollback
+to a release without these units disables and removes them, so enable them
+again after returning to a release that has them.
+`sudo systemctl disable --now tradejournal-depth-recorder.service` stops recording;
+recorded files stay until removed.
+
 ## Backups and scheduled Robinhood import
 
 The release installs five timers:
@@ -210,6 +295,10 @@ The release installs five timers:
   at the open. A stored session is never fetched again. If the job cannot be
   queued within ten minutes the run is skipped, not failed: RVol waits for the
   next slot.
+- `tradejournal-market-context.timer` queues the earnings and VIX refresh for
+  Jo's pre-trade check every 15 minutes, 06:00–16:45 New York on weekdays
+  ([market_context.py](../backend/app/engine/market_context.py), Tradier). A
+  busy lane skips that slot; the check shows older rows with their age.
 - `tradejournal-alerts.timer` checks every two minutes whether anything above,
   the API or real-time Gmail has stopped working, and sends a phone alert.
   Without `/etc/tradejournal/alerts.env` the check is skipped; see
@@ -415,6 +504,13 @@ sudo systemctl start tradejournal-alerts.service
 sudo journalctl --no-pager -u tradejournal-alerts.service -n 20
 ```
 
+If ntfy's anonymous quota is exhausted on a shared hosting IPv6 `/64`, set
+`NTFY_IPV4_ONLY=true` in `alerts.env` and restart `tradejournal-api.service`.
+This binds API, health and deployment notifications to the server's fixed IPv4
+address; it does not change the topic, TLS verification or provider limits.
+There is no retry through another address after a refusal. ntfy acceptance is
+separate from confirming the notification appeared on the subscribed phone.
+
 The server cannot report its own death. Set `HEALTHCHECK_PING_URL` to an
 outside dead-man's switch, such as a free healthchecks.io check with a
 five-minute period and ten-minute grace that notifies the same ntfy topic.
@@ -581,6 +677,51 @@ The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
 
+### Nightly reviews on the Claude plan (opt-in)
+
+`tradejournal-plan-reviews.timer` writes the Daily Review for the latest
+trading day at 20:10 New York (after Sync Everything, enrichment, the options
+catch-up and the day's final minute bars), with Claude Code on the owner's Claude plan, never API
+credits. It reviews that day when it has no review, gained trades since its
+review, or went stale; it never backfills older days, which get a review from
+their own Daily Review button. On its first run of a new month it also writes
+last month's monthly review. The buttons use the same plan. The release
+carries Claude Code at the version `deploy/claude-code/package.json` pins, as
+`bin/claude`; its state is under `/var/lib/tradejournal/claude` and the last
+run's status in `/var/lib/tradejournal/plan-reviews/status.json`, which the
+Daily Review calendar shows. A failed run, or the enabled timer being off,
+reaches the phone through the alert check.
+
+Turn it on once, after a release that contains it:
+
+1. On a computer signed in to the Claude plan, run `claude setup-token` and
+   copy the token it prints.
+2. On the VPS, create the token file. `read -rs` waits for the token without
+   showing it; paste it and press Enter:
+
+   ```bash
+   sudo install -m 600 -o root -g root /dev/null /etc/tradejournal/claude-plan.env
+   read -rs TOKEN && printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" | sudo tee /etc/tradejournal/claude-plan.env > /dev/null; unset TOKEN
+   sudo systemctl restart tradejournal-api
+   ```
+
+3. Try one run by hand, then enable the schedule:
+
+   ```bash
+   sudo systemctl start tradejournal-plan-reviews.service
+   sudo journalctl -u tradejournal-plan-reviews.service -n 40
+   sudo systemctl enable --now tradejournal-plan-reviews.timer
+   ```
+
+An enabled timer survives releases; a release never enables it. A rollback to
+a release from before this feature removes the units, so after rolling forward
+again, enable the timer once more. To stop the
+nightly reviews, `sudo systemctl disable --now tradejournal-plan-reviews.timer`.
+The run uses the plan's usage like any Claude Code session, about one review a
+trading day; a failed call (for example the plan's limit) is recorded and the
+next run tries again. `claude-plan.env.example` lists the optional model,
+timeout and budget.
+
 ### A3 Practice preparation (opt-in, disabled)
 
 The package includes a dedicated `practice` worker lane and
@@ -734,6 +875,9 @@ the selected-source backend archive and portable standalone frontend archive.
 It validates archives before stopping trial processes, preserves Linux
 dependencies and old code/assets/permission flags, and rolls back on startup
 failure. Root-private recovery files remain under the isolated trial root.
+The selected backend bundle includes the Research Studio forwarding router
+required by app startup on older trials. It does not install or start the
+research sidecar; no research token or new permission is enabled.
 Then [dot_trial_seed.py](dot_trial_seed.py) prepares today's immutable simulated
 MU/NBIS packets and privately saves the separate login. Existing credentials
 require explicit `--rotate`; resets invalidate prior sessions. Never print the

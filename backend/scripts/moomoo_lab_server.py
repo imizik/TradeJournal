@@ -1,0 +1,278 @@
+"""Explicitly started loopback-only, memory-only manual moomoo lab bridge (one US ticker per session).
+
+Never imported by app.main, never loads the journal or starts on deployment.
+Run with python -m scripts.moomoo_lab_server after configuring an ephemeral
+TJ_MOOMOO_LAB_TOKEN shared with the local frontend server. No provider work
+happens before an authenticated POST /session. Use one process/worker only.
+"""
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import stat
+import struct
+import time
+from zoneinfo import ZoneInfo
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+import uvicorn
+
+from scripts import depth_history
+from scripts import moomoo_diagnostic as diagnostic
+
+# A manual session runs until the browser stops it, refreshing auth in place
+# inside the documented five-minute cycle, and ends by itself at this ceiling.
+SESSION_SECONDS = diagnostic.MAX_REFRESHED_SECONDS
+REFRESH_SECONDS = 240
+# Below the Next proxy's (undici) default five-minute body timeout.
+KEEPALIVE_SECONDS = 30
+
+
+def book_kind(event) -> str:
+    """ARCA-labelled or other market-maker book, as the Charts heatmap separates them."""
+    books = event.get("books") or []
+    mpids = {level.get("mpid") for book in books for side in ("bids", "asks") for level in book.get(side, [])} - {None}
+    if mpids:
+        return "arca" if mpids == {"ARCA"} else "mpid"
+    exchange = books[0].get("exchange") if books else None
+    return "arca" if exchange == "ARCA" else "mpid" if exchange == "NASDAQ" else "unknown"
+SYSTEMD_CREDENTIAL_DIR = Path("/run/credentials/tradejournal-moomoo.service")
+# The depth recorder runs as the same service user with its own unit's copies.
+SYSTEMD_CREDENTIAL_DIRS = (SYSTEMD_CREDENTIAL_DIR, Path("/run/credentials/tradejournal-depth-recorder.service"))
+
+
+def validate_systemd_mode(info, *, directory=False):
+    """systemd uses root-owned copies and a read-only service-user ACL."""
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    expected = 0o550 if directory else 0o440
+    if not kind(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != expected:
+        raise diagnostic.DiagnosticError("Invalid systemd credential permissions.")
+
+
+def validate_systemd_acl(raw, *, directory=False):
+    permission = 5 if directory else 4
+    undefined = 0xffffffff
+    expected = {(1, permission, undefined), (2, permission, os.getuid()),
+                (4, 0, undefined), (16, permission, undefined), (32, 0, undefined)}
+    if len(raw) != 44 or struct.unpack("<I", raw[:4])[0] != 2 or {
+        struct.unpack("<HHI", raw[offset:offset + 8]) for offset in range(4, 44, 8)
+    } != expected:
+        raise diagnostic.DiagnosticError("Invalid systemd credential access list.")
+
+
+def read_systemd_credential(path):
+    if path.parent not in SYSTEMD_CREDENTIAL_DIRS:
+        raise diagnostic.DiagnosticError("Unexpected systemd credential directory.")
+    validate_systemd_mode(path.parent.lstat(), directory=True)
+    validate_systemd_acl(os.getxattr(path.parent, "system.posix_acl_access", follow_symlinks=False), directory=True)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as file:
+        validate_systemd_mode(os.fstat(file.fileno()))
+        validate_systemd_acl(os.getxattr(file.fileno(), "system.posix_acl_access"))
+        data = file.read(16385)
+        if len(data) > 16384:
+            raise diagnostic.DiagnosticError("Credential file exceeds the size limit.")
+        return data
+
+
+def credentials():
+    managed = os.environ.get("CREDENTIALS_DIRECTORY")
+    directory = Path(managed or os.environ.get("TJ_MOOMOO_CREDENTIAL_DIR", str(diagnostic.KEY_DIR)))
+    if not directory.is_absolute():
+        raise diagnostic.DiagnosticError("Absolute credential directory required.")
+    reader = read_systemd_credential if managed else diagnostic.secure_read
+    appkey = reader(directory / "appkey").decode("ascii").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", appkey):
+        raise diagnostic.DiagnosticError("Invalid credential format.")
+    key = serialization.load_pem_private_key(reader(directory / "phase1-ed25519.pem"), password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise diagnostic.DiagnosticError("Ed25519 key required.")
+    return appkey, key
+
+
+def check_credentials():
+    """systemd preflight: reject bad setup without logging key parser errors."""
+    try:
+        credentials()
+    except Exception:
+        raise SystemExit("Secured moomoo credentials unavailable; details withheld.") from None
+
+
+DEPTH_DIR = Path(os.environ.get("TJ_DEPTH_DIR", "/var/lib/tradejournal-depth"))
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials, depth_root: Path = DEPTH_DIR, clock=time.time) -> FastAPI:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+        raise ValueError("Local lab token must contain 32..128 URL-safe characters.")
+    active = None
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        if active is not None:
+            active.cancel()
+            with suppress(asyncio.CancelledError):
+                await active
+
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    def authorize(request):
+        if request.client is None or request.client.host not in ("127.0.0.1", "::1"):
+            raise HTTPException(403, "Local requests only")
+        if not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + token):
+            raise HTTPException(403, "Local lab authorization required")
+
+    @app.get("/status")
+    async def status(request: Request):
+        authorize(request)
+        # Capability only: deliberately never open credential files here.
+        return {"enabled": True}
+
+    history = depth_history.History(depth_root)
+
+    @app.get("/depth")
+    async def depth(request: Request):
+        """The depth recorder's data for one recorded ticker today: heatmap columns, walls and the latest profile.
+
+        Reads only the recorder's local day files; never credentials or the provider.
+        """
+        authorize(request)
+        params = request.query_params
+        ticker, kind = params.get("symbol", ""), params.get("kind", "arca")
+        try:
+            minutes, bucket = int(params.get("minutes", "120")), int(params.get("bucket", "10"))
+        except ValueError:
+            raise HTTPException(400, "Invalid depth request") from None
+        if (set(params) - {"symbol", "kind", "minutes", "bucket"} or not diagnostic.STREAM_SYMBOL.fullmatch("US." + ticker)
+                or kind not in depth_history.KINDS or not 1 <= minutes <= 960 or bucket not in (10, 30, 60)):
+            raise HTTPException(400, "Invalid depth request")
+        now_ms = int(clock() * 1000)
+        day = datetime.fromtimestamp(now_ms / 1000, NEW_YORK).date().isoformat()
+        found = await asyncio.to_thread(history.query, ticker, day, kind, now_ms - minutes * 60_000, bucket * 1000)
+        recorder = history.status()
+        if found is None:
+            return {"symbol": ticker, "recorded": False, "watched": ticker in recorder.get("tickers", [])}
+        last_book = recorder.get("last_book_ms", {}).get(ticker, 0)
+        return {"symbol": ticker, "recorded": True, "day": day, "kind": kind, "bucket_ms": bucket * 1000,
+                "recording": recorder.get("state") == "recording" and now_ms - last_book < 60_000, **found}
+
+    @app.post("/session")
+    async def session(request: Request):
+        nonlocal active
+        authorize(request)
+        # The one argument is a ticker, checked to a strict pattern before any
+        # credential read; it only names what to subscribe to.
+        ticker = request.query_params.get("symbol", "NVDA")
+        if (request.headers.get("content-type") != "application/x-level2-start"
+                or set(request.query_params) - {"symbol"} or len(request.query_params.getlist("symbol")) > 1
+                or not diagnostic.STREAM_SYMBOL.fullmatch("US." + ticker)):
+            raise HTTPException(400, "Fixed lab session required")
+        # The frontend sends no body. Bound the read before credential access.
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(400, "Session takes no arguments")
+        if active is not None and not active.done():
+            raise HTTPException(409, "One lab session is already active")
+        try:
+            appkey, key = loader()
+        except (OSError, ValueError, UnicodeError, diagnostic.DiagnosticError):
+            raise HTTPException(503, "Local secured moomoo credentials unavailable") from None
+
+        # Status events only: a handful per session plus one per auth refresh,
+        # so the session ceiling bounds it; a full queue must never fail a session.
+        control = asyncio.Queue()
+        # The latest book per book kind. moomoo alternates an ARCA-labelled book
+        # and a book of other market-maker IDs on one subscription; coalescing
+        # them together would let the frequent one starve the other.
+        latest = {}
+
+        def observe(event):
+            if event["event"] == "book":
+                latest[book_kind(event)] = event  # Replace, never append market-depth history.
+            else:
+                control.put_nowait(event)
+
+        async def run():
+            try:
+                report = await runner(appkey, key, SESSION_SECONDS, observer=observe, refresh_seconds=REFRESH_SECONDS, symbol="US." + ticker)
+                control.put_nowait({"event": "summary", "report": report})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Do not log or reflect provider/credential-bearing exceptions.
+                control.put_nowait({"event": "status", "phase": "failed"})
+            finally:
+                control.put_nowait({"event": "status", "phase": "closed"})
+
+        active = asyncio.create_task(run())
+        task = active
+
+        def line(event):
+            return json.dumps(event, separators=(",", ":"), allow_nan=False) + "\n"
+
+        async def events():
+            sent = time.monotonic()
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await diagnostic.bounded_await(control.get(), 0.25)
+                    except asyncio.TimeoutError:
+                        if latest:
+                            books = list(latest.values())
+                            latest.clear()
+                            for book in books:
+                                yield line(book)
+                            sent = time.monotonic()
+                        elif time.monotonic() - sent >= KEEPALIVE_SECONDS:
+                            # A quiet book must not trip a proxy's idle body timeout.
+                            yield line({"event": "keepalive"})
+                            sent = time.monotonic()
+                        continue
+                    if event.get("event") == "summary" and latest:
+                        books = list(latest.values())
+                        latest.clear()
+                        for book in books:
+                            yield line(book)
+                    yield line(event)
+                    sent = time.monotonic()
+                    if event.get("phase") == "closed":
+                        break
+            finally:
+                if not task.done():
+                    task.cancel()
+                # The provider finally-block unsubscribes and closes. Retain
+                # ownership until it finishes; a new session cannot overlap it.
+                with suppress(asyncio.CancelledError):
+                    await asyncio.shield(task)
+                latest.clear()
+
+        return StreamingResponse(events(), media_type="application/x-ndjson", headers={
+            "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff"})
+
+    return app
+
+
+def main():
+    try:
+        app = create_app(token=os.environ.get("TJ_MOOMOO_LAB_TOKEN", ""))
+    except ValueError:
+        raise SystemExit("Set a private ephemeral TJ_MOOMOO_LAB_TOKEN before starting the local lab.") from None
+    # Fixed local endpoint. No reload, extra workers, file logging or startup
+    # provider connections. Ctrl+C shuts down the active bounded session.
+    uvicorn.run(app, host="127.0.0.1", port=8196, access_log=False, log_level="critical")
+
+
+if __name__ == "__main__":
+    main()

@@ -116,7 +116,8 @@ async def add_tag(
 
 
 @router.post("/{trade_id}/review", response_model=Trade)
-async def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_session)):
+def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_session)):
+    # Sync on purpose: the review waits up to minutes for Claude, so it runs in the threadpool, not on the event loop.
     trade = session.get(Trade, trade_id)
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
@@ -146,16 +147,18 @@ async def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_sessi
     all_trades = session.exec(select(Trade)).all()
     stats = _compute_stats_for_context(all_trades, session)
 
-    # Call AI reviewer. Keep this import lazy so the core API can still boot
-    # in environments that have not installed the optional AI dependency yet.
-    try:
-        from app.ai.reviewer import review_trade as ai_review_trade
+    # Claude on the owner's plan (app.ai.plan_runner); the API only with AI_REVIEW_BACKEND=api.
+    from app.ai import plan_runner
+    from app.ai.reviewer import review_trade as ai_review_trade
 
+    try:
         review_result = ai_review_trade(trade, fills, companion_trades, stats, session)
         trade.ai_review = json.dumps(review_result)
         session.add(trade)
         session.commit()
         session.refresh(trade)
+    except plan_runner.PlanUnavailable as e:
+        raise HTTPException(status_code=503, detail=f"Trade review is not set up on the Claude plan: {e}") from e
     except ModuleNotFoundError as e:
         if e.name == "anthropic":
             raise HTTPException(

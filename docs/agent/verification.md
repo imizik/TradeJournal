@@ -1,88 +1,56 @@
-# Verification
+# Verification reference
 
-How to prove a change works in this repository. The standard is evidence, not
-"this should work".
+**Read only the section needed for the affected behavior.** This is a catalog
+of checks and coverage limits, not a checklist to execute on every task.
+[CLAUDE.md](../../CLAUDE.md) and [review tiers](pr-review.md#choose-the-review-depth)
+set the required depth; feature-specific safety/acceptance gates still apply.
 
 ## The commands
 
+For ordinary work, run the affected test module/case and relevant lint/typecheck.
+For changed UI, inspect the affected screen and exercise changed interactions in
+a running app; a copy/layout edit does not require every browser workflow.
+Use a regression test for a meaningful bug, not a test that mirrors a trivial edit.
+Broaden only for a concrete dependency, failure, risk or acceptance requirement.
+
 ```bash
-bash scripts/setup.sh          # clean clone -> runnable (idempotent)
-bash scripts/verify.sh         # all local checks; CI also runs Postgres/systemd
-bash scripts/verify.sh --fast  # lint + tests + typecheck, no builds (inner loop)
+bash scripts/setup.sh          # only when dependencies are missing
+bash startdev.sh               # run the app
+bash scripts/verify.sh --fast  # broad local check, optional for ordinary work
+bash scripts/verify.sh         # full local coverage when appropriate
 bash scripts/verify.sh --backend
 bash scripts/verify.sh --frontend
-bash scripts/verify.sh --e2e   # browser smoke tests only (slowest)
+bash scripts/verify.sh --e2e
 ```
 
-A Claude Code cloud session clones the repository without `backend/.venv` or
-`frontend/node_modules`, so run `setup.sh` there first. Its sandbox ships a
-Chromium that `verify.sh` finds on its own (see [browser tests](#browser-tests)).
-
-`verify.sh` runs every check even after one fails, so one run reports every
-problem. It exits non-zero if any check failed. Passing checks print their last
-result line, including pytest's warning count. A failed check prints the last
-40 lines and the path to its complete log. Failed runs retain all check logs in
-a private temporary directory; successful runs remove them.
-
-On Windows, run these through Git Bash or WSL. `startdev.ps1` remains the
-native PowerShell launcher for the app itself.
+`verify.sh` retains failure logs and checks every selected layer. It is available
+when needed, not a prerequisite for saying a focused fix passed its checks.
+On Windows use Git Bash/WSL; `startdev.ps1` is the native launcher.
 
 ## Verification ownership
 
-The owner assigns checks and remains responsible for the full verification
-required by `CLAUDE.md` and the feature's acceptance criteria. Workers may run
-focused checks for their assigned scope; they report the tested revision,
-any uncommitted changes, command, environment and result. Their report must
-identify which required checks remain for the owner to complete.
-
-Reuse a passing result when the tested code, dependencies, configuration and
-relevant environment are unchanged. Record the tested revision and why later
-changes do not affect the check; if that cannot be established, rerun it.
-Neither an agent handoff nor a new SHA alone invalidates local evidence.
-Required CI still passes on the exact final pushed head, and the
-[review coverage rules](pr-review.md#owner-sequence), including proof-pending
-and catch-up requirements, remain unchanged.
+The owner chooses checks for the changed behavior and reports what actually ran.
+Reuse evidence if code, dependencies, configuration and relevant environment are
+unchanged, including another worker's checks. Rerun affected proof after changes.
+Do not repeat tests simply because the SHA, owner or chat changed. Never weaken
+assertions, ignore a known failure or relabel fixture evidence as live acceptance.
 
 ## CI-backed verification
 
-Use this path when the change's required full automated checks run in CI and
-its environment-specific acceptance can be established locally. The default
-full local `verify.sh` remains available, including for offline work or checks
-that CI does not cover. This changes where proof runs, not which proof is needed.
+CI remains enabled for every PR. Ordinary work may be handed back after focused
+checks and push with CI explicitly pending; that is not merge-ready. For broad
+work, cover relevant integration paths; for tier 2, retain full applicable checks.
+Full CI can supply that coverage without also running the full suite locally.
 
-1. Diagnose known failures and run the changed area's causal regressions locally.
-   Batch browser scenarios in one invocation. For frontend changes, run whole
-   frontend typecheck and lint, and the specified interaction/DOM acceptance.
-   A prior failure is not closed by an unexplained retry. Preserve its evidence
-   and show that the repair addresses its cause with the original assertions.
-2. Freeze the candidate and record its revision, changed-file/harness hashes,
-   commands, environment and results. Reuse unchanged evidence under
-   [verification ownership](#verification-ownership); invalidate affected proof
-   when code, dependencies, configuration or relevant environment changes.
-3. Push a draft once local acceptance passes. Native review and the existing full
-   CI checks may run in parallel. Review may be `clean, proof pending` until
-   the exact named CI proof arrives; the existing review rules still apply.
-4. Before reporting verified work, confirm the final pushed head and inspect
-   actual job/step outcomes. Backend tests, frontend typecheck/lint/build, both
-   ordinary browser shards, authenticated and sample browser tests, Postgres
-   checks and deployment packaging must have executed and passed when applicable.
-   A green aggregate does not prove steps that were skipped or cancelled. A
-   documentation-only exception is limited to the existing CI scope contract.
+Freeze the candidate, push, and inspect final-head job/step results before claiming
+merge readiness. Existing documentation-only exclusions still apply. Review (when
+required) and CI may overlap. Do not restart CI or integrate unrelated main changes
+just while waiting; diagnose failures and rerun only when justified. A known
+unresolved local failure remains a blocker even when CI passes.
 
-Do not additionally launch a full local backend/browser suite merely because
-review or CI is pending. Run extra local checks only for a concrete missing
-boundary, a new failure, an affected dependency or an acceptance criterion CI
-cannot establish. Repair failures and rerun affected checks; do not rerun an
-unchanged CI failure until it happens to pass. Known unresolved local failures
-remain findings even when CI passes; repair proof must close them or the user
-must explicitly decide them.
-
-Report local targeted, full-local, CI and human acceptance separately. A quick
-human visual check can supplement automated interaction evidence; it cannot
-replace delayed-response, persistence, authorization or other required checks.
-Keep progress updates to new results, decisions and blockers. Record actual
-check/pipeline elapsed times when evaluating this path; do not infer model
-resource savings from elapsed time alone.
+Report focused, full-local, CI and live/human proof separately and briefly. Do not
+re-prove unrelated providers, deployment, data scopes or user routines. Read the
+coverage reference below only to identify a relevant gap, not to expand the task.
 
 ## What each check covers
 
@@ -101,7 +69,8 @@ resource savings from elapsed time alone.
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs backend, frontend and Postgres jobs on
-every pull request. It runs the two browser shards unless the diff contains only
+every pull request. It runs the browser shards (three for the ordinary suite,
+one for the authenticated and sample suites) unless the diff contains only
 Markdown under `docs/`, root README/agent guides or the PR template
 (`scripts/ci_scope.sh`, shared with the deployment workflow and covered by
 `test_ci_scope_script.py`). Documentation-only pull requests skip that
@@ -114,7 +83,8 @@ builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
 Postgres for every pull request outside the same documentation allowlist.
 Documentation-only pull requests skip the disposable installation. Pushes to `main` and manual
-runs always build it. The updated package confirms the retired ingress unit is
+runs always build it. The slower advisor native smoke runs on a pull request only
+when `scripts/ci_scope.sh` marks it advisor-relevant, and on every `main` push. The updated package confirms the retired ingress unit is
 removed during an upgrade and that no service listens on port 8090. Signals row
 rendering remains covered by the browser fixture suite.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
@@ -130,14 +100,9 @@ commit is never published. The decisions the VPS makes are covered by
 unit against a local stand-in for GitHub. The Release workflow itself and the
 live GitHub polling run only after a merge.
 
-Native subagent review is a separate layer, not proof that runtime behavior
-works. The [pre-PR review workflow](pr-review.md) sends findings directly to the
-active owner, requires review to cover the final head, and bounds repair rounds. Missing or
-partial results never pass. CI remains required even when the narrow docs-only
-policy or an explicit user instruction skips model review. The former CLI
-runner, hooks and receipt gate are retired; the guide notes what remains of
-them. Native review is instruction-driven, while
-GitHub enforces CI. Neither resumes an ended local owning session automatically.
+Independent review applies to tiers 1/2 under [pr-review.md](pr-review.md),
+not ordinary changes. It does not prove runtime behavior. Required CI stays
+in place for all PRs; the retired CLI review hooks/gate stay retired.
 
 If another checkout owns the default browser-test ports, set
 `E2E_BACKEND_PORT=8199 E2E_FRONTEND_PORT=3199 bash scripts/verify.sh --e2e`.

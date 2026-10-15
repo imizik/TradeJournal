@@ -1,7 +1,7 @@
 # Research Studio R2: reproducible discovery analysis
 
 **R2 selected and implemented in this chat after R1. Review and final verification gates are recorded in the PR.**
-R3 was subsequently selected for app screens; see the [R3 contract](research-studio-r3.md). R4, Factory promotion, provider fetching and deployment/activation remain unselected. [R1](research-studio-r1.md) remains the observation/source
+R3 was subsequently selected for app screens; see the [R3 contract](research-studio-r3.md). R4 was subsequently selected; its [contract](research-studio-r4.md) owns variants/conclusions and pending human usefulness. Factory promotion and provider fetching remain unselected. [R1](research-studio-r1.md) remains the observation/source
 contract; [the roadmap](../strategy-workbench-roadmap.md) owns later phases.
 
 ## Computation
@@ -92,8 +92,8 @@ A repeat operation UUID with the identical action/run is idempotent; conflicting
 reuse refuses. Reopening completed results appends one exposure for a new UUID;
 repeating the same UUID does not duplicate it. Status does not reveal outcomes.
 There is no claim that this captures arbitrary manual inspection outside Studio.
-Parent variants, notes/verdicts and richer per-occurrence browser exposure belong
-to later phases; they are not implemented here.
+R4 adds parent variants and notes/verdicts in separate research artifacts; R3 owns
+per-occurrence browser exposure. Those phases preserve this R2 request/schema contract.
 
 ## Manual use
 

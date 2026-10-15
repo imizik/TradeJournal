@@ -15,6 +15,15 @@ function fmtExpiry(value: string, thisYear: number) {
   return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(year === thisYear ? {} : { year: "numeric" }) });
 }
 
+/** Keep the full option identity visible even when its detail columns are hidden. */
+function contractName(trade: Trade) {
+  const expiry = trade.expiration;
+  const date = expiry ? fmtExpiry(expiry, Number(expiry.slice(0, 4))) : null;
+  const year = expiry?.slice(2, 4);
+  const side = trade.option_type === "call" ? "C" : trade.option_type === "put" ? "P" : "";
+  return `${trade.ticker} ${trade.strike ?? "—"}${side}${date ? ` · ${date} '${year}` : ""}`;
+}
+
 /** The entry-time bucket in words ("open" → "Open"). */
 const bucketName = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
 
@@ -158,14 +167,14 @@ export default function TradesTable({
         <thead className="bg-muted text-xs text-muted-foreground uppercase">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
+            <Th {...thProps("realized_pnl")}>P&amp;L</Th>
             {showAccount && <Th {...thProps("account", true)}>Account</Th>}
             <Th {...thProps("strike", true)}>Strike</Th>
             <Th {...thProps("option_type", true)}>Type</Th>
             <Th {...thProps("expiration", true)}>Expiry</Th>
-            <Th {...thProps("contracts")}>Contracts</Th>
+            <Th {...thProps("contracts")}>Quantity</Th>
             <Th {...thProps("avg_entry_premium", true)}>Entry</Th>
             <Th {...thProps("avg_exit_premium", true)}>Exit</Th>
-            <Th {...thProps("realized_pnl")}>P&amp;L</Th>
             <Th {...thProps("pnl_pct", true)}>P&amp;L %</Th>
             <Th {...thProps("hold_duration_mins", true)}>Hold</Th>
             <Th {...thProps("entry_time_bucket", true)}>Entered</Th>
@@ -186,7 +195,11 @@ export default function TradesTable({
                 <a href={`/trades/${t.id}`} className="font-semibold hover:underline">
                   {t.ticker}
                 </a>
+                {t.instrument_type === "option" && (
+                  <div className="mt-0.5 text-xs text-muted-foreground sm:whitespace-nowrap">{contractName(t)}</div>
+                )}
               </Td>
+              <Td><span className={cn("whitespace-nowrap", pnlColor(t.realized_pnl))}>{fmt$(t.realized_pnl)}</span></Td>
               {showAccount && (
                 <Td wide>
                   <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
@@ -201,10 +214,9 @@ export default function TradesTable({
               <Td wide>{t.strike != null ? money(t.strike) : <span className="text-muted-foreground/40">—</span>}</Td>
               <Td wide>{t.option_type ? <span className="uppercase">{t.option_type}</span> : <span className="text-muted-foreground/40">—</span>}</Td>
               <Td wide><span className="whitespace-nowrap">{t.expiration ? fmtExpiry(t.expiration, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
-              <Td>{t.contracts}</Td>
+              <Td>{t.contracts} <span className="block text-xs text-muted-foreground sm:inline">{t.instrument_type === "stock" ? "shares" : "contracts"}</span></Td>
               <Td wide>{money(t.avg_entry_premium)}</Td>
               <Td wide>{t.avg_exit_premium != null ? money(t.avg_exit_premium) : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td><span className={pnlColor(t.realized_pnl)}>{fmt$(t.realized_pnl)}</span></Td>
               <Td wide><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
               <Td wide><span className="whitespace-nowrap">{t.hold_duration_mins != null ? formatHoldDuration(t.hold_duration_mins) : "—"}</span></Td>
               <Td wide>{t.entry_time_bucket ? bucketName(t.entry_time_bucket) : "—"}</Td>

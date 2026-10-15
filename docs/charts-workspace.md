@@ -17,7 +17,16 @@ access. Keys remain on the private backend.
 
 The section below the watchlist in the Watchlist dock tab follows the main
 chart's underlying. On a phone it lives inside the Watchlist bottom sheet. Its
-tabs keep their full names and wrap onto a second row in a narrow dock. Its
+tabs keep their full names on one row that scrolls sideways in a narrow dock
+(the chosen tab is kept in view). Every tab shows facts as one-line
+label-and-value rows and ends in one source line (sources read at the same
+time share the time; each block's source is in its hover title); stale,
+partial, estimated, inferred and unofficial notes stay inline where they apply.
+An absent value reads "—"; Tradier's all-zero 13F summary (it sends 0, not
+null, when it has none) reads "not reported", and "Held by institutions"
+appears once (in Ownership when 13F is reported, otherwise in Key statistics).
+News shows one "+N" ticker mark and "Sentiment: positive" (Polygon's, in the
+hover title). Its
 **You** tab reads all accounts' journal history through
 `GET /charts/symbol/{symbol}/you`, independently of candles or the stream.
 It shows completed-trade count, realized P&L, win rate, average stored hold
@@ -101,12 +110,16 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 
-**News markers** (T3.5) put the same Focused headlines on the main chart: a small
-square floating about 26 px above the high of the candle that holds an article's
-publish time (clear of the candle and of a fill arrow on it), labelled "N" for
-one article or "N3" for three. They are their own marker set that the price
-scale ignores, so a marker above the frame is clipped, never a reason to
-shrink the candles; hover and click work on the marker where it is drawn. The **News markers** group of the Layers panel
+**News markers** (T3.5) put the same Focused headlines on the main chart as a
+quiet event strip along the bottom of the price pane, never on the candles: a
+small hollow slate ring under the candle that holds an article's publish time,
+and a larger ring with a count where stories on nearby candles join (markers
+within 30 px of each other at the current zoom are one, so the grouping follows
+the zoom). They are drawn by the marks layer (`frontend/lib/chartMarks.ts`), a
+series primitive the price scale ignores, so they never shrink the candles;
+hover and click work on the ring where it is drawn. Smaller charts show none
+unless **News on small charts** (in the same Layers group, saved as the
+`newsOnSmall` setting, off by default) is checked. The **News markers** group of the Layers panel
 (and the chart menu's layer list) hides them; it is on by default and saved with
 the other layers (a `newsHidden` settings field of its own, for the same reason
 as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
@@ -121,17 +134,27 @@ the next candle, because a 1D or 1W candle is a regular session, 09:30 to 16:00
 New York; after the last candle it sits on the last one, before the first
 loaded candle it has no marker, and one inside a hole in the loaded history
 (more than 5 days intraday, 10 for 1D, 21 for 1W) has none. Several articles on
-one candle are one marker. Hover (a mouse) lists up to five headlines, newest
+one candle are one marker, and a joined marker lists every member's headlines. Hover (a mouse) lists up to five headlines, newest
 first, then "+N more", with the candle's date and time; a click opens the dock
 on the News tab with that candle's articles highlighted for a few seconds. On a
 phone a tap pins the headlines in a popover whose **Read in News** button opens
-the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
+the Watchlist sheet on the News tab. News rings sit in their own strip, apart from fill chevrons and earnings
 dates without covering them, and a level or drawing under the pointer still wins
 a click. Historical chart mode shows only the articles whose candles are loaded.
 
-A **Peers** strip (T3.4) sits at the top of the **Overview** tab:
-Polygon's related companies for the active symbol as chips, each with today's
-percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
+The **Overview** tab is a stack of edged, foldable blocks (Price and range,
+Company, Key statistics, Valuation, Ownership, Peers); each block's fold is
+kept on the device. Key numbers (52-week range, market cap, enterprise value,
+shares, institutional ownership, average volume and the valuation ratios) have
+a dotted label: a tap shows what the number means and what it is usually
+compared with, as general context rather than a verdict on the symbol.
+
+A **Peers** block (T3.4) is the last block of the **Overview** tab: the
+active symbol's peers as chips, each with today's percent change, from
+`GET /charts/symbol/{symbol}/peers`. A symbol in a hand-picked group
+(`backend/app/data/peer_groups.json`, written for the symbols the owner
+trades) takes that group's other members and names the group under the chips;
+any other symbol uses Polygon's related companies. The Polygon list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
 is (never waits more than 2 s, never retried, a 429 or failure serves the
 cached copy with its age and mutes Polygon for five minutes). The changes come
@@ -141,7 +164,13 @@ without a quote keeps its chip with "—". Funds and ETFs (SPY) have no related
 companies: the strip says so. Clicking a chip runs the watchlist row's handler
 (chart switches, and the phone sheet closes), so it does not add the peer to
 the watchlist. The strip fetches once after the ticker settles for 300 ms and
-again each minute while the page is visible, independent of the open tab.
+again each minute while the page is visible and Overview is open; the read
+lives in the panel, so folding or moving the block does not read again.
+The same response carries the peers' median P/E, P/S, P/B and EV/EBITDA from
+one batched Tradier fundamentals read (cached a day, shared with Overview);
+only positive values count and a median needs three peers. The Valuation
+block shows it beside each ratio ("52.5 · peers 31.2"), with the count, group
+and read time in the row's tooltip; a failed read leaves the chips alone.
 
 Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
 the last eight fiscal quarters of revenue, gross margin, operating margin, net
@@ -261,7 +290,7 @@ cd backend
 - **Workspace shell (C7.3).** On a screen at least 1024px wide `/charts` fills
   the browser window like TradingView: no page padding and no page scrolling.
   The journal navigation is an icon rail (`frontend/components/Nav.tsx`; each
-  page a named link with a tooltip, sync state and the Sync drawer at the
+  page a named link with an immediate hover/keyboard-focus label, sync state and the Sync drawer at the
   bottom) that **Expand navigation** widens to the full sidebar, remembered on
   the device; other pages keep the sidebar and their padding
   (`frontend/components/AppMain.tsx`), and an actionable Gmail banner still
@@ -273,7 +302,13 @@ cd backend
   second row rather than hiding anything. Undo, redo and the drawing tools
   are a slim rail left of the charts. The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
-  and latest fills under it, or the layers panel. Pressing the open tab's
+  and latest fills under it, or the layers panel. Those three sections are
+  one-line folds with their counts ("MU levels 0/30", "Alerts 0/20 active",
+  "On your journal"), an (i) for the first-use help and, for levels, a + that
+  opens the form; levels open when the symbol has any, alerts when one is
+  waiting or a phone message failed, the journal when it has fills, and the
+  person's own fold is remembered on the device. The "Phone alerts are not set
+  up" warning shows even when alerts are folded. Pressing the open tab's
   button closes the dock;
   whether it is open, and on which tab, is remembered on the device (a device
   that had left the C1.4 layers panel open opens it on Layers). A status strip
@@ -2037,3 +2072,25 @@ Tradier latency or complete G0 market-session acceptance. REST budgets and
 cadences are unchanged; recovery gaps may request an exceptional refresh through
 that same budgeted cache. Connection pooling, recent-symbol caching, progressive
 loading and live studies remain separate work.
+
+
+## Fill, report and news marks (declutter)
+
+Fills, report dates and news are one series primitive, `MarkLayer` in
+`frontend/lib/chartMarks.ts`, replacing the library's arrow, circle and square
+markers (which cannot be slim, merge or stay out of the price fit). Fills merge
+to one slim open chevron per candle per side: a buy under the low, a sell over
+the high, five pixels off the wick, in the candles' up and down colors, with a
+small count beside it only when several merged and there is room (a crowded zoom drops the count, never adds a shape; a merged chevron is just slightly heavier and brighter). Nothing is hidden by
+merging: hover lists every fill in the candle (its label and candle time; the
+marker data carries no price), a click on a single fill opens its trade card and
+on a merged one pins a list whose rows each open their own trade. Report dates
+are a ring with an E (dashed when estimated), under the candle and its buy
+chevron. Smaller charts draw fills as tiny dots, never text.
+
+Text labels are off by default. **Layers, Journal, Fill labels** chooses Off,
+Latest trade or All (the shared `fillLabels` setting). Labels sit under a buy and
+over a sell and a crowded one is skipped, never overlapped; hover still lists it.
+The markers carry no trade id, so "Latest trade" labels the fills on the newest
+candle that has any. `e2e/chart-markers.spec.ts` holds the merge, hover, label,
+cluster and small-chart checks and the pictures.

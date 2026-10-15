@@ -45,7 +45,7 @@ test.describe("dashboard", () => {
     const main = page.locator("main").first();
     const order = await main.evaluate((root) => {
       const text = root.textContent ?? "";
-      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Shows what is still open"), performance: text.indexOf("Trading Performance") };
+      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Active Options"), performance: text.indexOf("Trading Performance") };
     });
     expect(order.today).toBeGreaterThanOrEqual(0);
     expect(order.positions).toBeGreaterThanOrEqual(0);
@@ -55,6 +55,9 @@ test.describe("dashboard", () => {
     await expect(main).not.toContainText("$-");
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.screenshot({ path: test.info().outputPath("dashboard-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: test.info().outputPath("dashboard-phone.png") });
+    await page.setViewportSize({ width: 1440, height: 1100 });
 
     // Aggregates computed from the seeded, reconstructed closed trades.
     await expect(page.getByText("+$1,019.00").first()).toBeVisible();
@@ -66,16 +69,17 @@ test.describe("dashboard", () => {
     await page.getByRole("button", { name: "1M" }).click();
     await expect(page.getByText("1M Closed P&L")).toBeVisible();
     await expect(page.getByText("-$281.00", { exact: true })).toBeVisible();
-    await expect(page.getByText("Closed Trades", { exact: true }).locator("xpath=..")).toContainText("2");
+    await expect(page.getByText("2 closed trades in the selected period", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "ALL" }).click();
-    await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();
 
     // All three open positions reach the table, and the two AAPL positions
     // stay separated by account rather than merging.
     const openPositions = page.getByRole("table").first();
-    await expect(openPositions.getByText("RNXT").first()).toBeVisible();
     await expect(openPositions.getByText("Roth IRA").first()).toBeVisible();
     await expect(openPositions.getByText("Individual").first()).toBeVisible();
+    await page.getByTestId("stock-holdings").locator("summary").click();
+    await expect(page.getByTestId("stock-holdings").getByText("RNXT", { exact: true })).toBeVisible();
   });
 
   test("refreshes server-rendered tables when a sync job finishes", async ({ page }) => {
@@ -113,7 +117,7 @@ test.describe("trades", () => {
 
     for (const ticker of ["NVDA", "AAPL", "TSLA", "RNXT", "RCAT"]) {
       await expect(
-        page.getByRole("cell", { name: ticker, exact: true }).first(),
+        page.getByRole("link", { name: ticker, exact: true }).first(),
         `${ticker} is missing from the trades table`,
       ).toBeVisible();
     }
@@ -123,6 +127,15 @@ test.describe("trades", () => {
     await expect(page.getByText("+$19").first()).toBeVisible();
     // Short calendar expiries, cents on prices, hold in hours and days.
     const table = page.getByRole("table");
+    await expect(table.getByRole("columnheader").nth(1)).toHaveText(/P&L/);
+    await expect(table.getByRole("columnheader", { name: /Quantity/ })).toBeVisible();
+    await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "NVDA", exact: true }) })).toContainText("5 contracts");
+    await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "RCAT", exact: true }) })).toContainText("9.5 shares");
+    await expect(table.getByRole("link", { name: "AAPL", exact: true }).first().locator("..")).toContainText(/AAPL 230C · [A-Z][a-z]{2} \d{1,2} '\d{2}/);
+    await expect(page.getByRole("heading", { name: "Research & labs" })).toBeVisible();
+    const nav = page.getByRole("navigation").filter({ has: page.getByRole("heading", { name: "Research & labs" }) });
+    expect((await nav.getByRole("link").allTextContents()).slice(0, 5)).toEqual(["Dashboard", "Charts", "Daily Review", "Trades", "Analytics"]);
+    await page.screenshot({ path: test.info().outputPath("trades-desktop.png") });
     // Seed dates move with the run date, so the check is on the form, not a fixed day.
     await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();
     await expect(table).not.toContainText(/\d{4}-\d{2}-\d{2}/);
@@ -151,7 +164,7 @@ test.describe("trades", () => {
     await page.goto("/trades");
 
     // Navigate the way a user does, so the row link is covered too.
-    await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+    await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
     await page.waitForURL(/\/trades\/[0-9a-f-]+$/);
 
     await expect(page.getByText("NVDA").first()).toBeVisible();

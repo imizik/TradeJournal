@@ -12,6 +12,11 @@ WorkingDirectory=/opt/tradejournal/current/backend
 EnvironmentFile=/etc/tradejournal/backend.env
 # Level alerts (Charts C5.1) send through the phone-alert topic; optional, as phone alerts are.
 EnvironmentFile=-/etc/tradejournal/alerts.env
+# The Daily Review button asks Claude on the plan, as the nightly reviews do; optional until provisioned.
+EnvironmentFile=-/etc/tradejournal/claude-plan.env
+Environment=TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude
+Environment=TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude
+Environment=TJ_PLAN_REVIEW_DIR=/var/lib/tradejournal/plan-reviews
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/launch.py api
 Restart=on-failure
 RestartSec=5
@@ -24,6 +29,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/tradejournal
+# Optional until the operator enables the shadow exchange (setups and rolling candles).
+ReadWritePaths=-/var/lib/tradejournal-shadow
 
 [Install]
 WantedBy=multi-user.target

@@ -20,8 +20,10 @@ Two layers, kept separate so scoring is unit-testable without network:
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -174,9 +176,17 @@ def _gather_packet(
     ]
 
     tickers = [symbol] + [t for t in MARKET_TICKERS if t != symbol]
-    snapshots = fetch_snapshots(tickers)
-    daily = fetch_daily_bars(tickers, session_date - timedelta(days=400), session_date)
-    minute = fetch_minute_bars_live(tickers, session_date)
+    # The four provider reads are independent: issue them together so the
+    # packet costs one round trip instead of four (pre-trade check budget).
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        def submit(fn, *args, **kwargs):
+            return pool.submit(contextvars.copy_context().run, fn, *args, **kwargs)
+
+        snapshots_job = submit(fetch_snapshots, tickers)
+        daily_job = submit(fetch_daily_bars, tickers, session_date - timedelta(days=400), session_date)
+        minute_job = submit(fetch_minute_bars_live, tickers, session_date)
+        news_job = submit(fetch_news, symbols=[symbol], start=now_et - timedelta(hours=24), limit=10)
+        snapshots, daily, minute = snapshots_job.result(), daily_job.result(), minute_job.result()
 
     snap = snapshots.get(symbol)
     sym_daily = daily.get(symbol, [])
@@ -204,7 +214,7 @@ def _gather_packet(
             missing.append(f"{t}: no market-context data")
 
     try:
-        articles = fetch_news(symbols=[symbol], start=now_et - timedelta(hours=24), limit=10)
+        articles = news_job.result()
         news_block = [
             {
                 "headline": a.get("headline"),

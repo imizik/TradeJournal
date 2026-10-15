@@ -88,8 +88,9 @@ async function hoverFill(page: Page, time: number, low: number) {
     return { x: chart.timeScale().timeToCoordinate(t), y: candles.priceToCoordinate(p) };
   }, [time, low]);
   const box = (await page.getByTestId("canvas-main").boundingBox())!;
-  for (let dy = 4; dy <= 40; dy += 3) {
+  for (let pass = 0; pass < 3; pass++) for (let dy = 4; dy <= 40; dy += 3) { // a few passes: the chevron is drawn a frame after the candles
     await page.mouse.move(box.x + at.x!, box.y + at.y! + dy);
+    await page.waitForTimeout(pass ? 20 : 0);
     if (await page.getByRole("tooltip", { name: "Fill summary" }).isVisible()) return { x: box.x + at.x!, y: box.y + at.y! + dy };
   }
   throw new Error("No fill arrow answered under the candle.");
@@ -148,19 +149,27 @@ for (const arrival of ["together", "main first", "main last"]) {
   test(`a trade opened from its page shows its months-old candles and arrows, its card, and goes back to live (${arrival})`, async ({ page }) => {
     await registerCharts(page);
     const now = Math.floor(Date.now() / 1000);
-    const history: { symbol: string | null; interval: string; before: number }[] = [];
+    const history: { symbol: string; interval: string; before: number }[] = [];
     const firstPages = new Set<string>();
-    await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now) }));
+    await page.route("**/api/backend/charts/workspace?**", (route) => {
+      const data = workspace(route.request().url(), now);
+      // A short live session needs an older page before the trader opens NVDA.
+      // Keep this prior-symbol request deterministic rather than timing-dependent.
+      if (data.symbol === "MRVL" && data.panels["5m"]) data.panels["5m"].bars = data.panels["5m"].bars.slice(-40);
+      return route.fulfill({ json: data });
+    });
     await page.route("**/api/backend/charts/history?**", async (route) => {
       const query = new URL(route.request().url()).searchParams;
+      const symbol = query.get("symbol") ?? "";
       const interval = query.get("interval") as Interval;
       const before = Number(query.get("before"));
-      history.push({ symbol: query.get("symbol"), interval, before });
+      history.push({ symbol, interval, before });
       // The panels load independently. Exercise either side of the focus race,
       // without relaxing the entry/exit, marker or back-to-live assertions.
-      if (!firstPages.has(interval)) {
-        firstPages.add(interval);
-        if (arrival !== "together" && (interval === "5m") !== (arrival === "main first")) await new Promise((resolve) => setTimeout(resolve, 750));
+      const frame = `${symbol}:${interval}`;
+      if (!firstPages.has(frame)) {
+        firstPages.add(frame);
+        if (symbol === "NVDA" && arrival !== "together" && (interval === "5m") !== (arrival === "main first")) await new Promise((resolve) => setTimeout(resolve, 750));
       }
       const step = STEP[interval];
       const page_ = bars(Math.floor(before / step) * step, step, 1200, 90);
@@ -175,6 +184,7 @@ for (const arrival of ["together", "main first", "main last"]) {
     // The trader was on MRVL; Back to live returns there (UX-C).
     await page.goto("/charts?symbol=MRVL");
     await expect(page.getByRole("region", { name: /MRVL 5m chart/ })).toHaveCount(1);
+    await expect.poll(() => history.some((h) => h.symbol === "MRVL" && h.interval === "5m")).toBe(true);
     await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
     const banner = page.getByRole("status", { name: "Past trade view" });
     await expect(banner).toContainText("Showing NVDA Jul 14, 2026, 9:40 AM–10:20 AM ET");

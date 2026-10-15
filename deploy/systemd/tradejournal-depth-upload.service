@@ -1,0 +1,26 @@
+[Unit]
+Description=Move finished TradeJournal depth days to the private R2 depth bucket
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/tradejournal/depth-r2.env
+
+[Service]
+Type=oneshot
+User=tradejournal-moomoo
+Group=tradejournal-moomoo
+WorkingDirectory=/opt/tradejournal/current/backend
+# Bucket-scoped token for the depth bucket only; never the offsite backup's.
+EnvironmentFile=/etc/tradejournal/depth-r2.env
+Environment=TJ_DEPTH_DIR=/var/lib/tradejournal-depth
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m scripts.depth_upload
+TimeoutStartSec=1h
+UMask=0027
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=-/var/lib/tradejournal-depth
+InaccessiblePaths=-/var/lib/tradejournal
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

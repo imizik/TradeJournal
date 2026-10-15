@@ -2,7 +2,7 @@
 
 import { useAppAccess } from "@/components/AccessProvider";
 import { useState } from "react";
-import { api, DailyReview } from "@/lib/api";
+import { api, DailyReview, PlanCheck, RuleCheck } from "@/lib/api";
 
 type Status = "idle" | "loading" | "done" | "error";
 
@@ -51,7 +51,7 @@ export default function DailyAiPanel({
             AI Analysis
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Full-day Anthropic review across the {tradeCount} trade(s) shown for {dayLabel}.
+            Full-day Claude review, on your Claude plan, across the {tradeCount} trade(s) shown for {dayLabel}.
           </p>
         </div>
         <button
@@ -68,7 +68,7 @@ export default function DailyAiPanel({
         {error ? (
           <p className="text-red-400">{error}</p>
         ) : status === "loading" ? (
-          <p>Generating review from trade, fill, and enrichment context...</p>
+          <p>Generating review from trade, fill, and enrichment context. This can take a minute…</p>
         ) : review ? (
           <div className="space-y-4">
             {review.source_data_stale && (
@@ -107,7 +107,14 @@ function DailyReviewResult({ review, generatedAt }: { review: DailyReview; gener
         <p className="text-foreground/90">{review.summary}</p>
       </div>
 
+      {review.market_read && <div>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">The Market That Day</h3>
+        <p className="text-foreground/80">{review.market_read}</p>
+      </div>}
+      <PlanVsExecution items={review.plan_vs_execution} />
+      <RulesCheck items={review.rules_check} />
       <ReviewList title="Key Takeaways" items={review.key_takeaways} />
+      <ReviewList title="Compared With Your Normal" items={review.vs_baseline} />
 
       <div className="grid gap-3 md:grid-cols-2">
         <TradeCallout title="Best Trade" trade={review.best_trade} tone="good" />
@@ -116,11 +123,70 @@ function DailyReviewResult({ review, generatedAt }: { review: DailyReview; gener
 
       <ReviewList title="Patterns" items={review.patterns} />
       <ReviewList title="Next Session Rules" items={review.next_session_rules} />
+      {!!review.data_gaps?.length && <div className="rounded border border-amber-500/40 p-3 text-xs text-amber-200">
+        <h3 className="mb-1 font-semibold uppercase tracking-wide">What the review could not see</h3>
+        <ul className="space-y-1">{review.data_gaps.map((gap, index) => <li key={index}>{gap}</li>)}</ul>
+      </div>}
+      {review.generated_by && <p className="text-xs text-muted-foreground">Written by {review.generated_by}.</p>}
     </div>
   );
 }
 
-function ReviewList({ title, items }: { title: string; items: string[] }) {
+const RESULT = {
+  kept: { label: "Kept", tone: "border-emerald-500/50 text-emerald-300" },
+  broken: { label: "Broken", tone: "border-red-500/50 text-red-300" },
+  partly: { label: "Partly", tone: "border-amber-500/50 text-amber-300" },
+  not_tested: { label: "Not tested", tone: "border-border text-muted-foreground" },
+} as const;
+
+const PLAN_RESULT = {
+  followed: { label: "Followed", tone: "border-emerald-500/50 text-emerald-300" },
+  deviated: { label: "Deviated", tone: "border-red-500/50 text-red-300" },
+  partly: { label: "Partly", tone: "border-amber-500/50 text-amber-300" },
+  no_plan: { label: "No plan", tone: "border-border text-muted-foreground" },
+} as const;
+
+/** Each captured plan against what was actually done. */
+function PlanVsExecution({ items }: { items?: PlanCheck[] }) {
+  if (!items?.length) return null;
+  return (
+    <div aria-label="Plan versus execution">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Your Plan vs What You Did</h3>
+      <ul className="space-y-2">
+        {items.map((item, index) => {
+          const result = PLAN_RESULT[item.result] ?? PLAN_RESULT.no_plan;
+          return <li key={index} className="flex gap-2">
+            <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${result.tone}`}>{result.label}</span>
+            <span className="min-w-0"><span className="font-medium text-foreground">{item.ticker}</span>
+              <span className="block text-xs text-muted-foreground">Planned: {item.planned}</span>
+              <span className="block text-xs text-muted-foreground">Did: {item.did}</span></span>
+          </li>;
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** The last review's rules, checked against this day. */
+function RulesCheck({ items }: { items?: RuleCheck[] }) {
+  if (!items?.length) return null;
+  return (
+    <div aria-label="Rules from the last review">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rules From {items[0].set_on}</h3>
+      <ul className="space-y-2">
+        {items.map((item, index) => {
+          const result = RESULT[item.result] ?? RESULT.not_tested;
+          return <li key={index} className="flex gap-2">
+            <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${result.tone}`}>{result.label}</span>
+            <span><span className="text-foreground/90">{item.rule}</span>{item.evidence && <span className="block text-xs text-muted-foreground">{item.evidence}</span>}</span>
+          </li>;
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function ReviewList({ title, items }: { title: string; items?: string[] }) {
   if (!items?.length) return null;
 
   return (

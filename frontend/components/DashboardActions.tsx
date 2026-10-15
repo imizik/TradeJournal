@@ -160,6 +160,16 @@ export default function DashboardActions() {
     }
   }
 
+  // `?sync=open` (from a Dashboard Attention item) opens the Sync Center once,
+  // then drops the parameter so a reload or Back does not reopen it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("sync") !== "open") return;
+    setOpen(true);
+    url.searchParams.delete("sync");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
   async function refreshSummary() {
     try {
       handleSummaryChange(await api.syncSummary());

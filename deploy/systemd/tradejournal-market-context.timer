@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh earnings dates and VIX for the pre-trade check every 15 minutes, 06:00-16:45 New York on weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06..16:00/15:00 America/New_York
+RandomizedDelaySec=60
+Persistent=true
+Unit=tradejournal-market-context.service
+
+[Install]
+WantedBy=timers.target

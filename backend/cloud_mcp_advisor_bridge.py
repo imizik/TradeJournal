@@ -5,7 +5,7 @@ import sys
 # Clean before importing engines that may load .env. Re-exec preserves the
 # inherited socket FD and PID; no token/database credentials enter the process.
 if __name__ == "__main__" and os.environ.get("TJ_ADVISOR_MCP_CLEAN_PROCESS") != "1":
-    os.execve(sys.executable, [sys.executable, *sys.argv], {
+    os.execve(sys.executable, [sys.executable, "-B", *sys.argv], {
         "PATH": os.environ.get("PATH", ""), "PYTHON_DOTENV_DISABLED": "1",
         "TJ_ADVISOR_MCP_CLEAN_PROCESS": "1", **{k: os.environ[k] for k in ("LISTEN_PID", "LISTEN_FDS") if k in os.environ}})
 
@@ -19,14 +19,15 @@ from sqlmodel import Session, create_engine
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
-from app.engine import advisor_shadow as service, decisions
+from app.engine import advisor_shadow as service, advisor_assignments as managed, decisions
 from app.models import PracticeAgentCall
 from app.schema import ensure_current
 from cloud_mcp_advisor_common import (AdvisorVerifier, PROFILE_SCOPE, READ_SCOPE,
-    WRITE_SCOPE, READ_PATH, WRITE_PATH, REQUEST_KEYS, SCHEMA, reject_credentials)
+    WRITE_SCOPE, READ_PATH, WRITE_PATH, REQUEST_KEYS, SCHEMA, private_fixture, read_config, reject_credentials)
 from cloud_mcp_d0 import RequestLimits, activated_socket
 
-PATHS = frozenset({("GET", READ_PATH), ("POST", WRITE_PATH)})
+MANAGE_PATH = "/owner/advisor/assignments"
+PATHS = frozenset({("GET", READ_PATH), ("POST", WRITE_PATH), ("GET", MANAGE_PATH), ("POST", MANAGE_PATH)})
 UNAVAILABLE = "Advisor request or permission unavailable"
 
 
@@ -84,12 +85,23 @@ def build_app(engine, config_path):
         return headers[0][7:]
 
     def authorize(token, write=False):
+        if verifier.config.owner_reader_uid is not None:
+            try:
+                private_fixture(engine.url.database, owner_reader_uid=verifier.config.owner_reader_uid)
+            except (ValueError, OSError):
+                raise HTTPException(503, UNAVAILABLE) from None
         checked = asyncio.run(verifier.verify_token(token))
         needed = {PROFILE_SCOPE, READ_SCOPE, *([WRITE_SCOPE] if write else [])}
         if checked is None or not needed <= set(checked.scopes):
             raise HTTPException(401, UNAVAILABLE)
 
     def project(db):
+        if verifier.config.assignment_management:
+            entry = managed.selected(db, profile)
+            return service.bounded({"schema_version": SCHEMA, "demo_only": True,
+                "delivery_transport": "oauth-mcp", "request_origin_transport": entry["request"]["transport"],
+                "request": entry["request"], "receipt": entry["receipt"],
+                "recovery": "Read the current request and compare its exact receipt before an explicit retry."})
         call = db.get(PracticeAgentCall, uuid.UUID(profile.assignment_id))
         if not call:
             raise decisions.DecisionError(UNAVAILABLE)
@@ -122,7 +134,8 @@ def build_app(engine, config_path):
         try:
             body = json.loads(await request.body())
             if (not isinstance(body, dict) or set(body) != {"packet_sha256", "request_sha256", "answer"}
-                    or body["packet_sha256"] != profile.packet_sha256 or body["request_sha256"] != profile.request_sha256):
+                    or (not verifier.config.assignment_management and
+                        (body["packet_sha256"] != profile.packet_sha256 or body["request_sha256"] != profile.request_sha256))):
                 raise ValueError()
         except (ValueError, UnicodeError):
             raise HTTPException(422, "Use the assigned packet/request hashes and one bounded answer") from None
@@ -137,6 +150,10 @@ def build_app(engine, config_path):
                 envelope = {"version": service.HANDOFF_VERSION, "assignment_id": profile.assignment_id,
                     "run_id": profile.run_id, **body}
                 try:
+                    if verifier.config.assignment_management:
+                        receipt = managed.save(db, profile, body, lambda: authorize(token, write=True))
+                        return service.bounded({"schema_version": SCHEMA, "demo_only": True,
+                            "delivery_transport": "oauth-mcp", "receipt": receipt})
                     result = service.advisor_import(db, uuid.UUID(profile.run_id), envelope,
                         transport="oauth-mcp", authorize=check)
                     return service.bounded({"schema_version": SCHEMA, "demo_only": True,
@@ -144,6 +161,53 @@ def build_app(engine, config_path):
                 except (decisions.DecisionError, KeyError, TypeError, ValueError):
                     raise HTTPException(409, "Advisor save refused; retrieve its immutable receipt before retrying") from None
         return await run_in_threadpool(commit)
+
+    def owner_authorize(request):
+        if not verifier.config.assignment_management:
+            raise HTTPException(404, "Not found")
+        current = verifier.active_config()
+        if (current is None or not current.assignment_management or current.owner_peer_uid is None
+                or request.scope.get("advisor_owner_peer_uid") != current.owner_peer_uid):
+            raise HTTPException(403, "Dedicated owner Unix peer required")
+        if any(k in request.headers for k in ("authorization", "cookie", "x-tj-gateway", "x-tj-service", "x-tj-bootstrap")):
+            raise HTTPException(403, "Owner management accepts no forwarded credentials")
+        private_fixture(engine.url.database, owner_reader_uid=current.owner_reader_uid)
+
+    @app.get(MANAGE_PATH)
+    def owner_questions(request: Request):
+        owner_authorize(request)
+        if set(request.query_params) - {"assignment_id"} or len(request.query_params.getlist("assignment_id")) > 1:
+            raise HTTPException(400, "Use one assignment selector")
+        if request.headers.get("content-length", "0") != "0" or request.headers.get("transfer-encoding"):
+            raise HTTPException(400, "Owner read accepts no body")
+        try:
+            with Session(engine) as db:
+                service.lock(db)
+                result = managed.owner_view(db, profile, request.query_params.get("assignment_id"))
+                owner_authorize(request)
+                return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except (decisions.DecisionError, ValueError, KeyError, TypeError):
+            raise HTTPException(409, "Advisor assignments unavailable") from None
+
+    @app.post(MANAGE_PATH)
+    async def owner_change(request: Request):
+        owner_authorize(request)
+        if request.query_params:
+            raise HTTPException(400, "Owner write accepts no selector")
+        try:
+            body = json.loads(await request.body())
+            if not isinstance(body, dict):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise HTTPException(422, "Supply a bounded management action") from None
+        def change():
+            with Session(engine) as db:
+                try:
+                    result = managed.mutate(db, profile, body, lambda: owner_authorize(request))
+                    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+                except (decisions.DecisionError, ValueError, KeyError, TypeError) as exc:
+                    raise HTTPException(409, str(exc) if isinstance(exc, decisions.DecisionError) else "Invalid management action") from None
+        return await run_in_threadpool(change)
 
     @app.exception_handler(Exception)
     async def unavailable(request, exc):
@@ -157,8 +221,9 @@ def create_app(config_path, database_path):
     if os.environ.get("PYTHON_DOTENV_DISABLED") != "1":
         raise ValueError("Advisor backend requires disabled dotenv loading")
     path = Path(database_path)
-    if not path.is_absolute() or str(path) != str(database_path) or ".." in path.parts or not path.is_file() or path.suffix != ".db" or path.stat().st_mode & 0o077:
+    if not path.is_absolute() or str(path) != str(database_path) or ".." in path.parts or not path.is_file():
         raise ValueError("Require an existing private isolated fixture SQLite file")
+    private_fixture(path, owner_reader_uid=read_config(config_path).owner_reader_uid)
     engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False, "timeout": 2})
     ensure_current(engine)
     verifier = AdvisorVerifier(config_path)
@@ -167,7 +232,10 @@ def create_app(config_path, database_path):
         if not call:
             raise ValueError("Assigned fixture unavailable")
         _, config, packet = service.assignment(db, call)
-        validate_binding(verifier.config.profiles[0], call, config, packet, config.get("advisor"))
+        if verifier.config.assignment_management:
+            managed.anchor(db, verifier.config.profiles[0])
+        else:
+            validate_binding(verifier.config.profiles[0], call, config, packet, config.get("advisor"))
     return build_app(engine, config_path)
 
 
@@ -180,5 +248,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     verifier = AdvisorVerifier(args.config)
     fd = activated_socket(verifier.config)
-    uvicorn.run(create_app(args.config, args.database), fd=fd, access_log=False,
+    from cloud_advisor_owner import OwnerProtocol
+    uvicorn.run(create_app(args.config, args.database), fd=fd, http=OwnerProtocol, access_log=False,
         proxy_headers=False, ws="none", loop="asyncio", log_level="warning", limit_concurrency=4, timeout_keep_alive=5)

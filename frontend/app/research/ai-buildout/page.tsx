@@ -2,7 +2,7 @@ import { WorkspaceProvider } from "@/lib/research/store";
 import Cockpit from "@/components/research/Cockpit";
 
 export const metadata = {
-  title: "AI Buildout · Research",
+  title: "AI Buildout · Trade Journal",
 };
 
 export default function AiBuildoutPage() {

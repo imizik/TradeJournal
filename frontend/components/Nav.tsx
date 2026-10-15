@@ -2,9 +2,10 @@
 
 import { useAppAccess } from "@/components/AccessProvider";
 import Link from "next/link";
+import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -16,16 +17,19 @@ const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/access", label: "Assistant access", icon: FileText },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/fills", label: "Fills", icon: Activity },
   { href: "/signals", label: "Signals", icon: Radio },
+  { href: "/scanner", label: "Scanner", icon: Radar },
+  { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
-  { href: "/research/ai-buildout", label: "Research", icon: FlaskConical },
+  { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
+  { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
+  { href: "/access", label: "Assistant access", icon: FileText },
 ];
 
 const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }> = {
@@ -134,15 +138,13 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
     <ul className="space-y-1">
       {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write)).map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
-        return (
-          <li key={href}>
+        const link = (
             <Link
               href={href}
               onClick={onNavigate}
               // The rail shows icons only: the name is the link's label and its tooltip.
               aria-label={rail ? label : undefined}
               aria-current={isActive ? "page" : undefined}
-              title={rail ? label : undefined}
               className={cn(
                 // min-h-11 keeps every row a comfortable tap target on a phone.
                 rail
@@ -156,8 +158,13 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
               <Icon className="h-4 w-4 shrink-0" />
               {!rail && label}
             </Link>
-          </li>
         );
+        return <li key={href}>
+          {href === "/fills" && (rail
+            ? <div role="separator" aria-label="Research & labs" className="my-2 border-t" />
+            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">Research &amp; labs</h2>)}
+          {rail ? <NavHint label={label}>{link}</NavHint> : link}
+        </li>;
       })}
     </ul>
   );
@@ -247,14 +254,13 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       {/* Desktop: on the charts page, a rail of icons that gives the charts the width */}
       {rail && (
         <nav className="sticky top-0 hidden h-screen w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-card py-2 md:flex">
-          <button
+          <NavHint label="Expand navigation"><button
             onClick={() => expand(true)}
             aria-label="Expand navigation"
-            title="Expand navigation"
             className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
             <PanelLeftOpen className="h-4 w-4" />
-          </button>
+          </button></NavHint>
           <NavLinks pathname={pathname} rail />
           <div className="mt-auto" />
           {owner && <SyncStatusDot />}
@@ -263,7 +269,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       )}
 
       {/* Desktop sidebar */}
-      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card p-4", !rail && "md:flex")}>
+      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-card p-4", !rail && "md:flex")}>
         <div className="mb-6 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>

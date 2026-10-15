@@ -19,7 +19,7 @@ import pytest
 
 from app.engine.factory_brief import IDEAS_SCHEMA, SYSTEM_PROMPT
 from app.engine.factory_data import NYSE_EARLY_CLOSES
-from app.engine.factory_gates import required_t
+from app.engine.factory_gates import _forward_summary, required_t
 from app.engine.factory_rules import canonical, parse_spec, spec_id
 from app.engine.market_map import ET
 
@@ -191,6 +191,21 @@ def test_the_committed_ledger_is_well_formed():
 # --- the weekly loop -------------------------------------------------------------------
 
 
+def no_evidence(spec, load):
+    """Discovery evidence with no trades, for tests about the weekly loop itself.
+
+    The real engine takes about 2 s per family on the stub's bars and these tests
+    only check how the evidence is asked for, cached and reported. The real
+    computation is covered by test_evidence_is_recomputed_when_the_engine_code_changes
+    here and by discovery_forward's own tests in test_factory.py."""
+    return [], _forward_summary([], {}, [])
+
+
+@pytest.fixture
+def without_discovery_runs(script, monkeypatch):
+    monkeypatch.setattr(script, "discovery_forward", no_evidence)
+
+
 def weekly_paths(tmp_path: Path) -> tuple[dict[str, Path], list[str]]:
     paths = {name: tmp_path / name for name in ("ledger.jsonl", "out", "reports", "specs")}
     args = ["--ledger", str(paths["ledger.jsonl"]), "--out", str(paths["out"]), "--reports", str(paths["reports"]),
@@ -211,6 +226,7 @@ ANSWER = {
 }
 
 
+@pytest.mark.usefixtures("without_discovery_runs")
 def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
     paths, args = weekly_paths(tmp_path)
     asked: list[tuple[str, str]] = []
@@ -247,6 +263,7 @@ def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
     assert "### 1. Daily EMA reclaim" in (paths["reports"] / f"{today}.md").read_text()
 
 
+@pytest.mark.usefixtures("without_discovery_runs")
 def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_path, capsys):
     paths, args = weekly_paths(tmp_path)
 
@@ -283,6 +300,7 @@ def test_the_week_runs_sunday_to_saturday(script):
     assert script.used_this_week(first_run, sunday) == 0  # the scheduled Sunday run starts a new week
 
 
+@pytest.mark.usefixtures("without_discovery_runs")
 def test_a_claude_code_session_can_answer_the_brief_instead_of_the_api(script, tmp_path, capsys):
     paths, args = weekly_paths(tmp_path)
     paths["ledger.jsonl"].write_text(used_week(script))
@@ -405,11 +423,11 @@ def test_prepare_asks_for_each_missing_day_once_and_skips_market_holidays(script
 def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, monkeypatch):
     paths, args = weekly_paths(tmp_path)
     computed: list[str] = []
-    real = script.discovery_forward
+    engine = {"run": script.discovery_forward}  # the real engine, for every family once
 
     def counting(spec, load):
         computed.append(spec.family)
-        return real(spec, load)
+        return engine["run"](spec, load)
 
     monkeypatch.setattr(script, "discovery_forward", counting)
     dry = [*args, "week", "--dry-run"]
@@ -426,6 +444,7 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
     fingerprint = script.engine_fingerprint()
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {f"{fingerprint}.json"}
     monkeypatch.setattr(script, "engine_fingerprint", lambda: "changed000")
+    engine["run"] = no_evidence  # what is recomputed is counted; the real results were checked above
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
     assert len(computed) == 8
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {"changed000.json"}

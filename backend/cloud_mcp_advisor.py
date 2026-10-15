@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -57,6 +58,8 @@ def create_server(config_path, *, backend_transport=None):
     reject_credentials()
     verifier = AdvisorVerifier(config_path)
     config = verifier.config
+    if config.assignment_management and config.owner_peer_uid == os.geteuid():
+        raise ValueError("Advisor adapter must not have the owner management UID")
     resource = urlsplit(config.resource_url)
     server = AdvisorMCP("tradejournal-advisor-fixture", json_response=True, stateless_http=True,
         streamable_http_path="/advisor/mcp",

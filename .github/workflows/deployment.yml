@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.scope.outputs.runtime }}
+      advisor: ${{ steps.scope.outputs.advisor }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'pull_request'
@@ -35,28 +36,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            printf 'runtime=true\nadvisor=true\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           bash scripts/ci_scope.sh | tee -a "$GITHUB_OUTPUT"
 
-  ubuntu:
-    name: Ubuntu package and systemd build
+  # Build once. Both smoke jobs below install these exact bytes, and only
+  # after both pass does the "Ubuntu package and systemd build" job (the
+  # required check) republish them as the verified release that release.yml
+  # and the VPS consume.
+  package:
+    name: Ubuntu package build
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: tj
-          POSTGRES_PASSWORD: tj
-          POSTGRES_DB: tj_deployment
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 10s
-          --health-timeout 5s --health-retries 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,13 +63,59 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Prepare host runtime
-        run: |
-          sudo apt-get update && sudo apt-get install -y python3.12-venv postgresql-client caddy
-          sudo systemctl disable --now caddy
       - name: Build committed source away from production
         run: python deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-${{ github.run_id }}-${{ github.run_attempt }}"
-      - name: Install and exercise actual services
+      - name: Hand the unverified package to the smoke jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-under-test
+          path: dist/
+          retention-days: 1
+
+  ubuntu:
+    name: Ubuntu package and MCP smokes
+    needs: [changes, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services: &postgres
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tj
+          POSTGRES_PASSWORD: tj
+          POSTGRES_DB: tj_deployment
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - &checkout
+        uses: actions/checkout@v4
+      - &setup_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - &setup_node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - &prepare_host
+        name: Prepare host runtime
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3.12-venv postgresql-client caddy nftables acl
+          sudo systemctl disable --now caddy
+      - &download_package
+        name: Download the package under test
+        uses: actions/download-artifact@v4
+        with:
+          name: package-under-test
+          path: dist/
+      - &install_package
+        name: Install and exercise actual services
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/smoke.py dist/*.tar.gz
       - name: Exercise isolated MCP HTTPS ingress and network denial
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d0/smoke.py
@@ -83,6 +123,62 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d1/smoke.py
       - name: Exercise isolated journal coach with invented approved export
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-journal/smoke.py
+      - name: Exercise disabled pre-trade check install, UID egress policy and isolated service
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-check/smoke.py dist/*.tar.gz
+
+  # The advisor proof alone takes ~9 minutes, so it runs on its own disposable
+  # runner, after the same package installation it relies on (current runtime
+  # and the tradejournal account), against the same downloaded bytes. Pull
+  # requests run it only when scripts/ci_scope.sh marks them advisor-relevant;
+  # every main push and manual run always does, so Release never publishes a
+  # package that skipped it.
+  advisor:
+    name: Ubuntu advisor native smoke
+    needs: [changes, package]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.advisor == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services: *postgres
+    steps:
+      - *checkout
+      - *setup_python
+      - *setup_node
+      - *prepare_host
+      - *download_package
+      - *install_package
+      - name: Exercise disabled advisor bundle and isolated native fixture services
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-advisor/smoke.py dist/*.tar.gz
+
+  # Keeps the required-check name. A job skipped because a dependency failed
+  # would satisfy a required check, so this one always runs when in scope and
+  # fails unless the build and both smoke runners succeeded.
+  release_artifact:
+    name: Ubuntu package and systemd build
+    needs: [changes, package, ubuntu, advisor]
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the build and both smoke runners
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ADVISOR_CHANGED: ${{ needs.changes.outputs.advisor }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          UBUNTU_RESULT: ${{ needs.ubuntu.result }}
+          ADVISOR_RESULT: ${{ needs.advisor.result }}
+        run: |
+          test "$PACKAGE_RESULT" = success
+          test "$UBUNTU_RESULT" = success
+          if [ "$EVENT_NAME" = pull_request ] && [ "$ADVISOR_CHANGED" != true ]; then
+            echo "Pull request outside advisor scope; main runs the advisor smoke before any release."
+            test "$ADVISOR_RESULT" = skipped
+          else
+            test "$ADVISOR_RESULT" = success
+          fi
+      - name: Download the package both smoke jobs passed
+        uses: actions/download-artifact@v4
+        with:
+          name: package-under-test
+          path: dist/
       - name: Save verified release
         uses: actions/upload-artifact@v4
         with:
@@ -95,7 +191,7 @@ jobs:
   # pull request reaches this tiny gate without provisioning Ubuntu services.
   deployment_gate:
     name: Ubuntu package and systemd
-    needs: [changes, ubuntu]
+    needs: [changes, package, ubuntu, advisor, release_artifact]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -104,11 +200,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime }}
+          ADVISOR_CHANGED: ${{ needs.changes.outputs.advisor }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
+          ADVISOR_RESULT: ${{ needs.advisor.result }}
+          RELEASE_RESULT: ${{ needs.release_artifact.result }}
         run: |
           test "$CHANGES_RESULT" = success
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$RUNTIME_CHANGED" != true ]; then
             echo "Documentation-only pull request; Ubuntu package test is not needed."
             exit 0
           fi
+          test "$PACKAGE_RESULT" = success
           test "$UBUNTU_RESULT" = success
+          if [ "$EVENT_NAME" = pull_request ] && [ "$ADVISOR_CHANGED" != true ]; then
+            test "$ADVISOR_RESULT" = skipped
+          else
+            test "$ADVISOR_RESULT" = success
+          fi
+          test "$RELEASE_RESULT" = success

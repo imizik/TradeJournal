@@ -18,7 +18,7 @@ test("trade detail distinguishes total peak, open peak, and context timing", asy
     } });
   });
   await page.goto("/trades");
-  await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+  await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
   await expect(page.getByText("Completed bars through 10:00 ET")).toBeVisible();
   await expect(page.getByText("Peak Total P&L").locator("..")).toContainText("+$190");
   await expect(page.getByText("Peak Open P&L").locator("..")).toContainText("+$100");
@@ -30,7 +30,7 @@ test("legacy calculations carry a recompute notice", async ({ page }) => {
     await route.fulfill({ json: { calculation_version: null, data_source: "alpaca_iex", underlying_mfe_pct: 2 } });
   });
   await page.goto("/trades");
-  await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+  await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
   await expect(page.getByText("Historical calculation. Recompute before comparing setups.")).toBeVisible();
 });
 
@@ -52,7 +52,7 @@ test("audit shows missing and stale evidence without a passing badge", async ({ 
     } });
   });
   await page.goto("/trades");
-  await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+  await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
   await page.getByRole("button", { name: "Show Audit" }).click();
   await expect(page.getByText("Matched 0 · Mismatch 0 · Stale 1 · Unavailable 1 · Error 0")).toBeVisible();
   await expect(page.getByText("Broker reconciliation has not been performed.", { exact: false })).toBeVisible();
@@ -74,7 +74,7 @@ test("audit distinguishes a changed accounting value from a cached match", async
     } });
   });
   await page.goto("/trades");
-  await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+  await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
   await page.getByRole("button", { name: "Show Audit" }).click();
   await expect(page.getByText("Matched 1 · Mismatch 1 · Stale 0 · Unavailable 0 · Error 0")).toBeVisible();
   await expect(page.getByText("999 → 10")).toBeVisible();

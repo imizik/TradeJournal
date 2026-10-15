@@ -17,7 +17,7 @@ import stat
 from app.engine.market_map import Bar, ET, resample
 from app.engine.research_studio import (
     CORE_UNIVERSE, DISCOVERY_START, MARKET, Coverage, Snapshot, SymbolSnapshot,
-    session_close, session_dates, validate_source_date, validate_symbol,
+    PROSPECTIVE_START, PROSPECTIVE_END, session_close, session_dates, validate_source_date, validate_symbol,
 )
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -78,7 +78,13 @@ class DiscoveryCache:
     POSIX no-follow support is required; unsupported platforms fail closed.
     """
 
-    def __init__(self, approved_root: Path):
+    def __init__(self, approved_root: Path, *, allow_newer_mu: bool = False, prospective_through: date | None = None):
+        if type(allow_newer_mu) is not bool:
+            raise ValueError("explicit newer MU approval required")
+        self.allow_newer_mu = allow_newer_mu
+        if prospective_through is not None and (type(prospective_through) is not date or not PROSPECTIVE_START <= prospective_through <= PROSPECTIVE_END):
+            raise ValueError("explicit bounded prospective cutoff required")
+        self.prospective_through = prospective_through
         self.root = Path(approved_root).resolve(strict=True)
         if self.root.name != "sip":
             raise ValueError("approved root must be the SIP minute-cache directory")
@@ -98,9 +104,17 @@ class DiscoveryCache:
         finally:
             os.close(directory)
 
-    def _read(self, symbol: str, day: date) -> bytes | None:
+    def _read(self, symbol: str, day: date, *, version: int = 1) -> bytes | None:
         validate_symbol(symbol, market=True)
-        validate_source_date(day)
+        validate_source_date(day, version=version)
+        if version == 2 and (not self.allow_newer_mu or symbol not in ("MU", MARKET)):
+            raise ValueError("newer MU source is not operator-approved")
+        if version == 3 and (self.prospective_through is None or day > self.prospective_through or symbol not in ("MU", MARKET)):
+            raise ValueError("prospective source is not operator-approved through this date")
+        if version == 3 and day < PROSPECTIVE_START:
+            # Forward raw storage never supplies historical warm-up. The study
+            # combines it with the immutable registered warm-up snapshot.
+            return None
         # A payload read is impossible until both request boundaries validate.
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(self.root, flags)
@@ -132,10 +146,14 @@ class DiscoveryCache:
             os.close(root_fd)
 
     def snapshot(self, symbols: tuple[str, ...] = CORE_UNIVERSE, *, through: date,
-                 cursor: date | None = None) -> Snapshot:
-        validate_source_date(through)
+                 cursor: date | None = None, version: int = 1) -> Snapshot:
+        validate_source_date(through, version=version)
+        if version == 2 and (not self.allow_newer_mu or symbols != ("MU",)):
+            raise ValueError("newer MU source is not operator-approved")
+        if version == 3 and (self.prospective_through is None or through > self.prospective_through or symbols != ("MU",)):
+            raise ValueError("prospective source is not operator-approved through this date")
         if cursor is not None:
-            validate_source_date(cursor)
+            validate_source_date(cursor, version=version)
             if cursor < DISCOVERY_START or cursor > through:
                 raise ValueError("cursor outside requested discovery interval")
             through = cursor
@@ -143,12 +161,12 @@ class DiscoveryCache:
             raise ValueError("distinct target symbols required")
         for symbol in symbols:
             validate_symbol(symbol)
-        dates = session_dates(through)
+        dates = session_dates(through, version=version)
         sources, manifest = [], []
         for symbol in (*sorted(symbols), MARKET):
             bars, coverage = [], []
             for day in dates:
-                payload = self._read(symbol, day)
+                payload = self._read(symbol, day) if version == 1 else self._read(symbol, day, version=version)
                 if payload is None:
                     manifest.append((symbol, str(day), "missing", 0))
                     coverage.append(Coverage(day, "missing"))
@@ -158,4 +176,4 @@ class DiscoveryCache:
                     bars.extend(rows)
                     coverage.append(cov)
             sources.append(SymbolSnapshot(symbol, tuple(bars), tuple(coverage)))
-        return Snapshot(through, tuple(sources), tuple(manifest), engine_fingerprint())
+        return Snapshot(through, tuple(sources), tuple(manifest), engine_fingerprint(), source_version=version)

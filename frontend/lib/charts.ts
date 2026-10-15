@@ -400,6 +400,10 @@ export type ChartSettings = {
   rangeBandsHidden: boolean;
   /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
   newsHidden: boolean;
+  /** Which fills the main chart writes a text label beside (Journal layer): none, the newest candle's, or all; off by default. A field of its own like `newsHidden`. */
+  fillLabels: FillLabels;
+  /** News markers on the smaller charts too; off by default (the main chart's layer, News markers). A field of its own like `newsHidden`. */
+  newsOnSmall: boolean;
   /** Each smaller chart's own studies, aligned with `intervals`; null follows the workspace's (slimmed while compact). A field of its own like `newsHidden`. */
   panelStudies: (PanelStudies | null)[];
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
@@ -442,13 +446,18 @@ export function cleanOptionsLayer(input: unknown): OptionsLayer {
 /** The workspace's `options` query for a shown layer (measure, scope, signed), or null while it is hidden. Only gamma has a sign. */
 export const optionsQuery = (layer: OptionsLayer) => layer.hidden ? null : `${layer.mode}.${layer.scope}.${layer.signed && layer.mode === "gamma" ? 1 : 0}`;
 
+/** The text beside a fill marker on the main chart: never, only on the newest candle that has fills, or on every one. */
+export type FillLabels = "off" | "latest" | "all";
+export const FILL_LABELS: FillLabels[] = ["off", "latest", "all"];
+export const cleanFillLabels = (value: unknown): FillLabels => value === "latest" || value === "all" ? value : "off";
+
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
   proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
@@ -502,6 +511,8 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
       newsHidden: value.newsHidden === true,
+      fillLabels: cleanFillLabels(value.fillLabels),
+      newsOnSmall: value.newsOnSmall === true,
       panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,

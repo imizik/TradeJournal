@@ -61,3 +61,33 @@ export function newsMarks(bars: ChartBar[], articles: NewsArticle[], interval: I
 export const newsLabel = (mark: NewsMark) => mark.articles.length > 1 ? `N${mark.articles.length}` : "N";
 /** The headlines a marker's hover lists, newest first, and how many more there are. */
 export const newsTip = (mark: NewsMark) => ({ lines: mark.articles.slice(0, NEWS_TIP_LINES).map((article) => article.headline), more: Math.max(0, mark.articles.length - NEWS_TIP_LINES) });
+
+/**
+ * Several candles' markers drawn as one. `x` is where it sits (the members' mean), `time` the first member's candle and `last` the final one's;
+ * `articles` are every member's, newest first.
+ */
+export type NewsCluster = { id: string; time: number; last: number; x: number; marks: number; articles: NewsArticle[] };
+
+/**
+ * Markers close together on screen become one with a count, so a run of stories on neighbouring candles reads as one event.
+ * `placed` is oldest first with each marker's x in pixels; a cluster starts at its first marker and takes every later one within
+ * `gap` pixels of it, so no cluster is wider than `gap` and the next one starts at least `gap` away. Same bar or nearby bars, whatever the zoom.
+ */
+export function clusterNews(placed: { mark: NewsMark; x: number }[], gap: number): NewsCluster[] {
+  const out: NewsCluster[] = [];
+  let run: { mark: NewsMark; x: number }[] = [];
+  const close = () => {
+    if (!run.length) return;
+    const articles = run.flatMap((item) => item.mark.articles).sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at) || a.id.localeCompare(b.id));
+    const [first, last] = [run[0].mark, run[run.length - 1].mark];
+    out.push({ id: `news:${first.time}:${last.time}:${articles.length}`, time: first.time, last: last.time, marks: run.length,
+      x: run.reduce((sum, item) => sum + item.x, 0) / run.length, articles });
+    run = [];
+  };
+  for (const item of placed) {
+    if (run.length && item.x - run[0].x > gap) close();
+    run.push(item);
+  }
+  close();
+  return out;
+}

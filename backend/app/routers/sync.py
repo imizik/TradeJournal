@@ -2,7 +2,7 @@ import json
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,7 +30,7 @@ from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
 from app.engine.options_recorder import record as record_option_snapshots
 from app.engine.rvol_history import store as store_rvol_history
-from app.models import Fill, JobRun, Trade
+from app.models import Fill, JobRun
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
     DestructiveConfirmation,
@@ -45,12 +45,12 @@ router = APIRouter()
 JOB_GMAIL_SYNC = "gmail_sync"
 JOB_FILL_CHECK = "fill_import_check"
 JOB_TRADE_REBUILD = "trade_rebuild"
-JOB_DAILY_REVIEW = "daily_review"
 JOB_FULL_PIPELINE = "full_pipeline"
 JOB_GMAIL_PUSH = "gmail_push"
 JOB_RESYNC_ALL = "resync_all"
 JOB_OPTIONS_SNAPSHOT = "options_snapshot"
 JOB_RVOL_HISTORY = "rvol_history"
+JOB_MARKET_CONTEXT = "market_context"
 
 JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
@@ -59,9 +59,9 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_POLYGON_ENRICH, "label": "Enrich missing market data", "description": "Fill missing Polygon-derived prices, IV, Greeks, and indicators.", "advanced": False, "progress_unit": "fill", "api_provider": "Polygon"},
     {"job_type": JOB_ALPACA_ENRICH, "label": "Alpaca context enrichment", "description": "Fetch fill-level market context and cached bars.", "advanced": False, "progress_unit": "fill", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
     {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False, "progress_unit": "trade", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
-    {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_OPTIONS_SNAPSHOT, "label": "Options positioning snapshot", "description": "Keep today's option open interest and volume for SPY, QQQ, SPX, open positions and watchlist names (16:15-20:00 New York).", "advanced": False, "progress_unit": "underlying", "api_provider": "Tradier", "rate_limit_per_minute": 30.0},
+    {"job_type": JOB_MARKET_CONTEXT, "label": "Earnings and VIX for Jo", "description": "Read the next earnings date for each held, recently traded or watched name and a live VIX quote, for the pre-trade check.", "advanced": True, "progress_unit": "symbol", "api_provider": "Tradier", "rate_limit_per_minute": 10.0},
     {"job_type": JOB_RVOL_HISTORY, "label": "Relative volume history", "description": "Store the 20 sessions before today for each chart watchlist name, so the charts' relative volume is ready at the open.", "advanced": False, "progress_unit": "symbol", "api_provider": "Alpaca", "rate_limit_per_minute": 30.0},
 ]
 
@@ -226,39 +226,14 @@ def _run_options_snapshot(session: Session, job_id: uuid.UUID) -> tuple[int, str
     return record_option_snapshots(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
 
 
+def _run_market_context(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
+    from app.engine.market_context import refresh
+    return refresh(session)
+
+
 def _run_rvol_history(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
     # Each session is published to disk as it arrives, so a restart resumes.
     return store_rvol_history(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
-
-
-def _latest_review_day(session: Session) -> tuple[date, list[uuid.UUID]] | None:
-    trades = session.exec(select(Trade).order_by(Trade.opened_at.desc())).all()
-    by_day: dict[date, set[uuid.UUID]] = {}
-    for trade in trades:
-        for value in (trade.opened_at, trade.closed_at):
-            if value:
-                by_day.setdefault(value.date(), set()).add(trade.id)
-    if not by_day:
-        return None
-    day = max(by_day)
-    return day, list(by_day[day])
-
-
-def _run_daily_review(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
-    latest = _latest_review_day(session)
-    if not latest:
-        return 0, "No trades available for daily review."
-    review_day, trade_ids = latest
-
-    from app.routers.daily_review import DailyReviewRequest, create_daily_review
-
-    # Call the existing implementation directly so behavior stays consistent.
-    result = create_daily_review(DailyReviewRequest(day=review_day.isoformat(), trade_ids=trade_ids), session)
-    if hasattr(result, "__await__"):
-        import asyncio
-
-        result = asyncio.run(result)  # type: ignore[assignment]
-    return len(trade_ids), f"Generated daily review for {review_day.isoformat()}."
 
 
 def _run_existing_enrichment(job_type: str, range_value: str, force: bool) -> JobRun:
@@ -622,9 +597,9 @@ async def run_sync_job(job_type: str, range: str = "week", force: bool = False, 
         JOB_GMAIL_SYNC: _run_gmail_sync,
         JOB_FILL_CHECK: _run_fill_check,
         JOB_TRADE_REBUILD: _run_trade_rebuild,
-        JOB_DAILY_REVIEW: _run_daily_review,
         JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
         JOB_RVOL_HISTORY: _run_rvol_history,
+        JOB_MARKET_CONTEXT: _run_market_context,
     }
     runner = runners.get(job_type)
     if not runner:
@@ -695,11 +670,11 @@ def execute_sync_job(job: JobRun) -> None:
             JOB_GMAIL_SYNC: _run_gmail_sync,
             JOB_FILL_CHECK: _run_fill_check,
             JOB_TRADE_REBUILD: _run_trade_rebuild,
-            JOB_DAILY_REVIEW: _run_daily_review,
             JOB_RESYNC_ALL: _run_resync_all,
             JOB_GMAIL_WATCH_RENEW: _run_gmail_watch_renew,
             JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
             JOB_RVOL_HISTORY: _run_rvol_history,
+            JOB_MARKET_CONTEXT: _run_market_context,
         }
         runner = runners.get(job.job_type)
         if runner is None:

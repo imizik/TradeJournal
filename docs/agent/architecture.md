@@ -38,7 +38,7 @@ Selected R3 adds the owner `/research-studio` workspace and two owner-only
 forwarding routes to a manually started bearer-authenticated loopback research
 sidecar. Cache preparation and R2 computation remain outside the app API/sync
 process. No deployment unit or startup hook is installed; see the
-[R3 contract](research-studio-r3.md).
+[R3 contract](research-studio-r3.md). [R4](research-studio-r4.md) adds frozen-parent comparisons in a finite child and append-only conclusions within the same research-owned store, preserving the R2 schema and private forwarding boundary.
 
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
@@ -86,6 +86,24 @@ because nothing outside the tailnet can reach the server. Automatic schema
 migrations require an explicit server setting and a fresh verified backup.
 Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
+
+Two Dots pieces sit beside the API on the VPS. The **check service**
+(`backend/cloud_mcp_check.py`, installed by `deploy/check_control.py`) is
+Jo's OAuth MCP endpoint for pre-trade checks and the shadow tools. It runs
+under its own UID with its own SQLite ledger, holds no database credential,
+and reads history only from files a publisher writes through narrow read-only
+views ([contract](advisor-pretrade-check-contract.md#where-it-runs)). The
+**setup scanner** (`app/engine/setup_scanner.py`) runs inside the level alert
+monitor when `SETUP_SCANNER_ENABLED` is true; it hands setups to the check
+service and reads shadow decisions back through two one-way file directories
+(`app/engine/shadow_exchange.py`), with no socket or route between them
+([shadow S1 interfaces](shadow-s1-contract.md#interfaces)).
+
+The nightly daily reviews run on the server itself
+(`tradejournal-plan-reviews.timer`, opt-in): Claude Code, pinned in the release
+as `bin/claude`, asks Claude on the owner's Claude plan token, never API
+credits, and the reviews are saved to the production database
+(`app/jobs/plan_reviews.py`, `deploy/README.md`).
 
 Two scheduled processes run off the server, neither touching a database (the
 first is started by launchd on the development Mac):

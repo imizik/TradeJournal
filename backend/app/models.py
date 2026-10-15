@@ -202,6 +202,18 @@ class DailyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class MonthlyReviewRecord(SQLModel, table=True):
+    """One calendar month's review across all its trades (app/ai/monthly_reviewer.py)."""
+    __tablename__ = "monthly_review"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    month: str = Field(index=True, unique=True)  # "YYYY-MM", New York calendar
+    review_json: str = Field(sa_column=Column(Text, nullable=False))
+    trade_count: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ResearchWorkspace(SQLModel, table=True):
     """Durable editable state for a research module (e.g. the AI Buildout
     cockpit). Single-user, local-first: the whole workspace is one JSON blob
@@ -297,7 +309,8 @@ class ChartSettingsRecord(SQLModel, table=True):
     indicators and layout, as one JSON document the frontend validates. The
     symbol on screen stays per device. ``revision`` is bumped on every save and
     a save based on an older revision is refused, so a phone and a desktop
-    cannot silently overwrite each other. The app uses the ``default`` row."""
+    cannot silently overwrite each other. Charts uses the ``default`` row;
+    the scanner's independent ticker selection uses ``scanner-universe``."""
 
     __tablename__ = "chart_settings"
 
@@ -1334,3 +1347,75 @@ class PracticeAgentCall(SQLModel, table=True):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     finished_at: Optional[datetime] = None
     error: Optional[str] = None
+
+
+class ScannerCandidate(SQLModel, table=True):
+    """One setup the scanner found (S1, ``docs/agent/setup-scanner-contract.md``).
+
+    Frozen at detection and never rewritten. The unique (version, symbol, setup,
+    bar end) keeps a restart or a second pass from recording the same bar twice.
+    ``contract_json`` is null when no contract met the choice rule."""
+
+    __tablename__ = "scanner_candidate"
+    __table_args__ = (
+        UniqueConstraint("scanner_version", "symbol", "setup", "bar_end", name="uq_scanner_candidate_bar"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    scanner_version: str
+    params_hash: str
+    session_date: date = Field(index=True)
+    symbol: str
+    setup: str  # fade | orb
+    direction: str  # long | short
+    bar_start: datetime  # UTC, the 5-minute bar that confirmed the setup
+    bar_end: datetime
+    detected_at: datetime  # UTC, when this server saved it
+    expires_at: datetime
+    stop: float
+    target: float
+    flags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    facts_json: str = Field(sa_column=Column(Text, nullable=False))
+    contract_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    source: str
+
+
+class ScannerEvent(SQLModel, table=True):
+    """One append-only rules-only paper event for a scanner candidate.
+
+    The trade's state is always the fold of these rows; the unique (candidate,
+    key) pair keeps a retry or restart from recording a fact twice."""
+
+    __tablename__ = "scanner_event"
+    __table_args__ = (UniqueConstraint("candidate_id", "key", name="uq_scanner_event_key"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    candidate_id: uuid.UUID = Field(foreign_key="scanner_candidate.id", index=True)
+    key: str
+    event_type: str  # entry | exit_intent | exit | unresolved
+    effective_at: datetime  # UTC: the quote or market moment the event is about
+    recorded_at: datetime  # UTC: when this server stored it
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+
+
+class MarketContextItem(SQLModel, table=True):
+    """External market context for the pre-trade check (advisor step 9): each
+    tracked symbol's next earnings date and a live VIX quote, from Tradier.
+
+    A current snapshot, not history: each refresh replaces the rows of the kinds
+    it read, in one transaction. A kind whose read failed keeps its older rows,
+    which carry their own ``fetched_at`` so a reader can tell their age."""
+
+    __tablename__ = "market_context_item"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    kind: str = Field(index=True)            # "earnings" | "vix"
+    symbol: str
+    event_date: Optional[date] = None        # earnings: the next report date (New York)
+    status: Optional[str] = None             # earnings: "confirmed" | "estimated"
+    label: Optional[str] = None              # earnings: the quarter, e.g. "Q3 2026"
+    value: Optional[float] = None            # vix: last
+    change_pct: Optional[float] = None       # vix: change since the prior close, percent
+    observed_at: Optional[datetime] = None   # vix: provider trade time (UTC)
+    fetched_at: datetime                     # UTC, when the provider data was read (a cached calendar keeps its age)
+    source: str

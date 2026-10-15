@@ -37,6 +37,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   const forbidden = await page.request.post("/api/backend/fills", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} });
   expect(forbidden.status()).toBe(403);
   expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
+  expect((await page.request.get("/api/backend/scanner/settings")).status()).toBe(403);
+  expect((await page.request.put("/api/backend/scanner/settings", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { symbols: ["MU"], base_revision: 0 } })).status()).toBe(403);
   for (const action of ["advisor-handoff", "advisor-import"]) {
     expect((await page.request.post(`/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001/${action}`, { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} })).status()).toBe(403);
   }
@@ -104,6 +106,22 @@ test("owner credential UI, CSRF refusal, and access key dismissal", async ({ bro
   await owner.close();
 });
 
+test("owner can save scanner tickers through the authenticated UI", async ({ browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  const page = await owner.newPage();
+  await page.goto("/scanner");
+  const panel = page.getByRole("region", { name: "Scanner tickers" });
+  await panel.getByRole("button", { name: "Edit tickers" }).click();
+  await panel.getByRole("button", { name: "Remove AAPL", exact: true }).click();
+  await panel.getByLabel("Add tickers").fill("NVDA");
+  await panel.getByRole("button", { name: "Save tickers", exact: true }).click();
+  await expect(panel.getByRole("status")).toContainText("Saved");
+  await page.reload();
+  await expect(panel.getByLabel("Saved tickers")).toContainText("NVDA");
+  await expect(panel.getByLabel("Saved tickers")).not.toContainText("AAPL");
+  await owner.close();
+});
+
 test("assistant login fits phone width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/login");
@@ -151,4 +169,36 @@ test("native login submission never puts an access key in the URL", async ({ bro
   expect(request.postData()).toContain("synthetic-native-proof-key");
   expect((await context.request.get("/api/backend/trades")).status()).toBe(401);
   await context.close();
+});
+
+test("an assistant with a saved Level 2 dock preference gets no Level 2 tab, panel or request, and the endpoint denies it", async ({ page, browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  const ownerPage = await owner.newPage();
+  await ownerPage.goto("/");
+  const ownerSession = await (await owner.request.get("/api/access/me")).json();
+  const identifier = `dot-l2-${Date.now()}`;
+  const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": ownerSession.csrf }, data: { identifier, grants: { symbols: ["MU", "NVDA"], run_ids: [], journal_read: false } } });
+  expect(created.status()).toBe(201);
+  const credential = await created.json();
+  await page.goto("/login");
+  await page.getByLabel("Assistant ID").fill(identifier);
+  await page.getByLabel("Access key").fill(credential.key);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByText("Read-only assistant access")).toBeVisible();
+  const assistantSession = await (await page.request.get("/api/access/me")).json();
+  // A saved Level 2 dock preference gives an assistant no tab, no panel and no Level 2 request; the endpoint itself still denies it.
+  const level2Requests: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/level2-lab")) level2Requests.push(`${request.method()} ${request.url()}`); });
+  await page.evaluate(() => localStorage.setItem("tradejournal.charts.dock.v1", JSON.stringify({ open: true, tab: "level2" })));
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByRole("button", { name: "Watchlist", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Level 2", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Level 2" })).toHaveCount(0);
+  await expect(page.getByTestId("live-depth-session")).toHaveCount(0);
+  expect(level2Requests).toEqual([]);
+  const level2Get = await page.request.get("/api/level2-lab/session");
+  expect(level2Get.status()).toBe(403);
+  const level2Post = await page.request.post("/api/level2-lab/session", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf, "Content-Type": "application/x-level2-start" } });
+  expect(level2Post.status()).toBe(403);
+  await expect(page.getByRole("link", { name: "Charts", exact: true }).first()).toBeVisible();
 });

@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
+import DockSection from "./DockSection";
 import TradeCard from "./TradeCard";
 import { fetchFillCard, fetchTradeCard, openedOn, parsePastView, pastPageEnd, stockOpenPnl, type ChartPosition, type PastView, type TradeCardData } from "@/lib/chartJournal";
 import ChartMenu from "./ChartMenu";
@@ -13,6 +14,8 @@ import HotkeySheet from "./HotkeySheet";
 import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
+import Level2Panel, { cleanFlow, DEFAULT_FLOW, FLOW_KEY } from "./Level2Panel";
+import type { OrderFlow } from "./Level2Panel";
 import OptionsLadder from "./OptionsLadder";
 import PlanSheet from "./PlanSheet";
 import type { ChartSnapshot } from "./PlanSheet";
@@ -27,10 +30,10 @@ import SymbolInfo from "./SymbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
-import { cleanIndicatorColors, INDICATOR_COLORS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
-import type { ColorKey, ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import type { ColorKey, ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { receiveChartTick, startSymbolTiming, useQuoteTiming } from "@/lib/chartPerformance";
@@ -45,6 +48,11 @@ import { addCaptureNote, captureTitle, fetchCaptures, fetchReview, fetchSetup, l
 import LinkReview from "./LinkReview";
 import type { Capture, CaptureNote, CaptureReview, CaptureSetup, OutboxItem } from "@/lib/captures";
 import { summary } from "./SelectionBar";
+import { useDepthSession } from "@/components/level2/useDepthSession";
+import { DepthHeatmap, heatBookKind, wallLines } from "@/lib/depthHeatmap";
+import type { DepthProfile } from "@/lib/depthHeatmap";
+import { useRecordedDepth } from "@/components/level2/useRecordedDepth";
+import type { RecordedDepth } from "@/components/level2/useRecordedDepth";
 
 const INDICATORS = Object.entries(INDICATOR_NAMES) as [keyof Indicators, string][];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -94,7 +102,7 @@ const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} $
  * symbol's levels and fills) or the layers. Whether it is open, and on which,
  * is this device's choice; a phone's sheet always starts closed.
  */
-type DockTab = "watchlist" | "layers" | "options";
+type DockTab = "watchlist" | "layers" | "options" | "level2";
 const DOCK_KEY = "tradejournal.charts.dock.v1";
 /** C1.4 remembered only an open layers panel; a device that left it open opens the dock on Layers. */
 const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
@@ -244,6 +252,7 @@ export default function ChartWorkspace() {
   const [fresh, setFresh] = useState<string | null>(null);
   const [drawError, setDrawError] = useState("");
   const [levelPrice, setLevelPrice] = useState("");
+  const levelPriceInput = useRef<HTMLInputElement>(null);
   const [levelLabel, setLevelLabel] = useState("");
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -650,12 +659,12 @@ export default function ChartWorkspace() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "null") as { open?: unknown; tab?: unknown } | null;
-      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" || saved.tab === "options" ? saved.tab : "watchlist" });
+      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" || saved.tab === "options" || (saved.tab === "level2" && owner) ? saved.tab : "watchlist" });
       else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
       const wide = Number(localStorage.getItem(DOCK_WIDTH_KEY));
       if (Number.isFinite(wide) && wide > 0) setDockWidth(clamp(Math.round(wide), DOCK_WIDTH.min, DOCK_WIDTH.max));
     } catch { /* open on the watchlist, at the default width */ }
-  }, []);
+  }, [owner]);
   // Full screen's dock was shared until C7.4: a device without its own choice yet starts from the shared one, once loaded.
   useEffect(() => {
     if (!ready || fullDock !== null) return;
@@ -935,6 +944,8 @@ export default function ChartWorkspace() {
   const toggleOptions = () => setOptions({ hidden: !settings.optionsLayer.hidden });
   const toggleRanges = () => setSettings((s) => ({ ...s, rangeBandsHidden: !s.rangeBandsHidden }));
   const toggleNews = () => setSettings((s) => ({ ...s, newsHidden: !s.newsHidden }));
+  const setFillLabels = (fillLabels: FillLabels) => setSettings((s) => ({ ...s, fillLabels: cleanFillLabels(fillLabels) }));
+  const setNewsSmall = (newsOnSmall: boolean) => setSettings((s) => ({ ...s, newsOnSmall }));
   // News markers (T3.5): the main symbol's news is read while the layer is on, shared with the News tab so the two never ask twice.
   const newsOn = !settings.newsHidden;
   const newsFeed = useSymbolNews(settings.symbol, newsOn && ready); // not before the saved symbol is known: the default one is not worth a read
@@ -1178,8 +1189,10 @@ export default function ChartWorkspace() {
     { key: "ranges", name: "Range bands", hidden: settings.rangeBandsHidden,
       info: "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. VWAP ±1σ (dashed) and ±2σ (dotted) on intraday charts. Hover or tap an expected-move level for its card.",
       status: rangesOn ? rangesStatus(symbol) || undefined : undefined },
-    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, info: "Your fills as arrows on the candles they fall in (click one for its trade), and open positions as lines: a stock at its average cost, an option at the underlying price when it was bought." },
-    { key: "news", name: "News markers", hidden: settings.newsHidden, info: "A marker on the main chart's candle where each Focused headline for the symbol was published (articles tagging more than three symbols are left out). An article published when the market is closed sits on the next candle. Hover for the headlines; click to read them in the News tab." },
+    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, labels: settings.fillLabels,
+      info: "Your fills as slim chevrons on the candles they fall in: a buy under the low, a sell over the high, one per candle per side with a count when several merged. Hover one to list its fills; click for the trade (a merged one lists them to pick from). Fill labels add text beside them on the main chart: none, the newest candle's, or all; smaller charts never show text. Open positions are lines: a stock at its average cost, an option at the underlying price when it was bought." },
+    { key: "news", name: "News markers", hidden: settings.newsHidden, small: settings.newsOnSmall,
+      info: "A quiet ring along the bottom of the main chart under the candle where each Focused headline for the symbol was published (articles tagging more than three symbols are left out). An article published when the market is closed sits on the next candle. Stories on nearby candles join into one ring with a count. Hover for the headlines; click to read them in the News tab. Smaller charts show none unless News on small charts is checked." },
     { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
       studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
   ];
@@ -1223,8 +1236,10 @@ export default function ChartWorkspace() {
   }
   const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
     highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
+  // Level 2 is the owner's: an assistant with a saved Level 2 tab sees the watchlist and starts no request.
+  const level2Panel = (sheet: boolean) => <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={recorded.heatmap ?? heatmaps.get(symbol) ?? null} flow={flow} onFlow={setFlow} recorded={recorded.state} recording={recorded.recording} heatAllowed={heatAllowed} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
-    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions}
+    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
     onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
     onStudy={(key) => toggleIndicator(key as keyof Indicators)} />;
@@ -1241,6 +1256,68 @@ export default function ChartWorkspace() {
   // the smaller charts leave, measured by the browser, not estimated (C7.3).
   const fill = !narrow || immersive;
   const dockShown = narrow ? sheet : immersive ? fullDock ?? settings.immersiveWatchlist : dock.open;
+  // Level 2 (owner, NVDA): one manual session for the whole Charts page, so the
+  // heatmap behind the candles keeps filling with the dock closed or the page in
+  // the background. The service is checked only once the panel has been shown;
+  // the provider is contacted only on Connect. Leaving Charts ends it; the
+  // heatmap is memory only and starts empty on every visit.
+  const [level2Seen, setLevel2Seen] = useState(false);
+  const level2Open = owner && dockShown && dock.tab === "level2";
+  useEffect(() => { if (level2Open) setLevel2Seen(true); }, [level2Open]);
+  // One heatmap per ticker, created on its first Connect, so looking at another
+  // symbol never discards what an earlier one collected on this visit.
+  const [heatmaps] = useState(() => new Map<string, DepthHeatmap>());
+  // Order flow (owner): which layers draw on the main chart, remembered on this device only.
+  const [flow, setFlowState] = useState<OrderFlow>(DEFAULT_FLOW);
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(FLOW_KEY) ?? "null");
+      if (saved && typeof saved === "object") setFlowState(cleanFlow(saved as Partial<OrderFlow>));
+    } catch { /* defaults */ }
+  }, []);
+  const setFlow = useCallback((next: OrderFlow) => {
+    setFlowState(next);
+    try { localStorage.setItem(FLOW_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
+  }, []);
+  const addBook = useCallback((event: { symbol: string; books: Parameters<DepthHeatmap["add"]>[0] }) => heatmaps.get(event.symbol.slice(3))?.add(event.books), [heatmaps]);
+  const depthSession = useDepthSession({ active: owner && level2Seen, onBook: addBook });
+  const { connect: startDepth } = depthSession;
+  const connectDepth = useCallback((ticker: string) => {
+    if (!heatmaps.has(ticker)) heatmaps.set(ticker, new DepthHeatmap());
+    startDepth(ticker);
+  }, [heatmaps, startDepth]);
+  // The session's ticker joins the inputs so the main chart picks up a heatmap created on Connect.
+  const depthTicker = depthSession.symbol;
+  // The heatmap is drawn only on 1m-5m candles; wider candles turn it into a smear.
+  const heatAllowed = (INTERVAL_SECONDS[slots[0]?.interval] ?? Infinity) <= 300;
+  // Recorded tickers need no Connect: the recorder's data, about five seconds behind.
+  const recorded = useRecordedDepth(symbol, { active: owner && (flow.levels || flow.profile || flow.heatmap), history: flow.heatmap && heatAllowed, kind: flow.kind });
+  const liveHere = depthTicker === symbol && depthSession.started;
+  const depth = useMemo(() => {
+    if (!owner || !flow.heatmap || !heatAllowed) return null;
+    const map = recorded.heatmap ?? (liveHere ? heatmaps.get(symbol) : undefined);
+    return map ? { map, kind: flow.kind } : null;
+  }, [owner, flow, heatAllowed, recorded.heatmap, liveHere, heatmaps, symbol]);
+  const liveBook = depthSession.bookEvent;
+  // Walls change at most each poll and their tags by the minute: keep one array per content so the
+  // chart's price lines are rebuilt only when a wall, its age or the live state actually changes.
+  const wallStale = recorded.state === "ready" && !recorded.recording;
+  const wallsKey = flow.levels && recorded.state === "ready" ? JSON.stringify([recorded.walls, Math.floor(recorded.lastMs / 60_000) * 60_000, wallStale]) : "";
+  const walls = useMemo(() => {
+    if (!wallsKey) return [];
+    const [found, minute, stale] = JSON.parse(wallsKey) as [RecordedDepth["walls"], number, boolean];
+    return wallLines(found, minute, stale);
+  }, [wallsKey]);
+  const liquidity = useMemo(() => {
+    if (!owner) return null;
+    let profile: DepthProfile | null = recorded.profile;
+    if (!profile && liveHere && liveBook) {
+      const book = liveBook.books.find((entry) => heatBookKind(entry) === flow.kind);
+      if (book) profile = { t: book.source_time_ms ?? liveBook.received_ms, bids: book.bids.map((level) => [level.price, level.volume]), asks: book.asks.map((level) => [level.price, level.volume]) };
+    }
+    if (!walls.length && !(flow.profile && profile)) return null;
+    return { walls, profile: flow.profile ? profile : null, stale: recorded.state === "ready" ? !recorded.recording : !depthSession.running };
+  }, [owner, flow.profile, flow.kind, walls, recorded.profile, recorded.state, recorded.recording, liveHere, liveBook, depthSession.running]);
   /**
    * Open the dock on a tab, or close it (null). A desktop remembers both on
    * this device. Full screen keeps its own choice of showing it, on this
@@ -1382,8 +1459,11 @@ export default function ChartWorkspace() {
   // The dock's tabs: a press opens that panel, a second press closes the dock. A phone's top row has room for two;
   // its strike ladder opens from the More menu.
   const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"],
-    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"]] as const).filter(([tab]) => !narrow || tab !== "options").map(([tab, name, Icon, hint]) =>
+    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"], ["level2", "Level 2", ListOrdered, "Level 2: a manual depth session and heatmap"]] as const)
+    .filter(([tab]) => (!narrow || (tab !== "options" && tab !== "level2")) && (tab !== "level2" || owner)).map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
+  const level2Button = (close: () => void) => owner && <button aria-label="Level 2" title="Level 2: a manual depth session and heatmap" onClick={() => { close(); showDock("level2"); }}
+    className={`${plain(false)} ${control} text-[11px]`}><ListOrdered size={13} /><span>Level 2</span></button>;
   const ladderButton = (close: () => void) => <button aria-label="Strike ladder" title="Strike ladder: open interest, volume and gamma by strike" onClick={() => { close(); showDock("options"); }}
     className={`${plain(false)} ${control} text-[11px]`}><Rows3 size={13} /><span>Strike ladder</span></button>;
 
@@ -1444,25 +1524,26 @@ export default function ChartWorkspace() {
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
     <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />
-    <section className="border-t border-slate-700/40 p-3" aria-label="Saved price levels">
-      <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
-        {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button>
-          : <span className="text-[10px] text-slate-600">{levels.length}/30</span>}</div>
+    <DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
+      info="Save support, resistance, or a price you’re watching."
+      status={settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button> : undefined}
+      action={(reveal) => <button aria-label="Add level" title={`Add a ${settings.symbol} level`} onClick={() => { reveal(); window.setTimeout(() => levelPriceInput.current?.focus(), 0); }}
+        className={`inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200 ${narrow ? "h-11 w-11" : "h-6 w-6"}`}><Plus size={13} /></button>}>
       {levels.map((level) => <div key={level.id} className={`mb-2 flex items-center gap-2 text-[11px] ${level.hidden ? "opacity-60" : ""}`}><span className="h-px w-3" style={{ background: level.color ?? "#60a5fa" }} /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span>
         {level.locked && <Lock size={11} className="text-slate-500" aria-label="Locked" />}
         {level.hidden && <button aria-label={`Show ${level.label}`} title="Hidden on the charts. Show it." onClick={() => editItem(settings.symbol, level.id, { hidden: false })} className={`inline-flex items-center justify-center text-slate-500 hover:text-slate-200 ${narrow ? "h-11 w-11" : "p-1"}`}><Eye size={12} /></button>}
         <span className="font-mono text-blue-300" style={level.color ? { color: level.color } : undefined} title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className={`inline-flex items-center justify-center text-slate-600 hover:text-rose-300 ${narrow ? "h-11 w-11" : "p-1"}`}><Trash2 size={12} /></button></div>)}
-      {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
       <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
         <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className={`w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} />
-        <div className="flex gap-2"><input aria-label="Level price" type="number" step="any" min="0.000001" required placeholder="Price" value={levelPrice} onChange={(e) => setLevelPrice(e.target.value)} className={`min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} /><button type="submit" aria-label="Save price level" className={button(narrow ? "h-11 w-11" : "h-8 px-2.5")}><Plus size={14} /></button></div>
+        <div className="flex gap-2"><input ref={levelPriceInput} aria-label="Level price" type="number" step="any" min="0.000001" required placeholder="Price" value={levelPrice} onChange={(e) => setLevelPrice(e.target.value)} className={`min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} /><button type="submit" aria-label="Save price level" className={button(narrow ? "h-11 w-11" : "h-8 px-2.5")}><Plus size={14} /></button></div>
       </form>
       {levelError && <p role="alert" className="mt-2 text-[11px] text-amber-300">{levelError}</p>}
-    </section>
+    </DockSection>
     <AlertsPanel data={alertData} prices={alertPrices} moved={movedWalls} narrow={narrow} onRearm={rearm} onRemove={dropAlert} />
-    <section className="border-t border-slate-700/40 p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
-      {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
-    </section>
+    <DockSection name="journal" ariaLabel="Journal executions" title="On your journal" count={current?.fills.length ?? 0} defaultOpen={!!current?.fills.length} narrow={narrow}
+      info="Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.">
+      {current?.fills.length ? <div className="space-y-3">{current.fills.length > 5 && <p className="text-[10px] text-slate-500">Latest 5 of {current.fills.length}</p>}{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">No executions on this chart yet.</p>}
+    </DockSection>
   </>;
   // ---- C3.4, C3.5: pre-trade capture ----
   const refreshCaptures = useCallback(() => {
@@ -1627,7 +1708,7 @@ export default function ChartWorkspace() {
           {narrow
             // A phone keeps one row of controls: the rest wait in a menu.
             ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
-              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{focusButton(close)}{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
+              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{focusButton(close)}{secondary}{ladderButton(close)}{level2Button(close)}{pauseButton}{refreshButton}{keysButton}
                 <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
             : <>{planButton}{sep}{pauseButton}{refreshButton}{keysButton}</>}
           {immersive
@@ -1653,7 +1734,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} liquidity={slot.symbol === symbol ? liquidity : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -1680,7 +1761,7 @@ export default function ChartWorkspace() {
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={settings.newsOnSmall ? newsMarkers : null} newsSmall={settings.newsOnSmall} onNews={openNews} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -1704,7 +1785,7 @@ export default function ChartWorkspace() {
           onDrag={dragDock} onStep={(by) => { const most = dockLimit(); keepDockWidth(clamp((dockBox.current?.getBoundingClientRect().width ?? dockWidth) - by * 16, DOCK_WIDTH.min, most)); }}
           onEdge={(to) => keepDockWidth(to === "min" ? DOCK_WIDTH.min : dockLimit())} onReset={() => keepDockWidth(DOCK_WIDTH.default)} />}
         {!narrow && dockShown && <aside ref={dockBox} aria-label="Side panel" style={{ width: dockWidth, maxWidth: `max(${DOCK_WIDTH.min}px, calc(100% - ${GRID_MIN_PX + 40}px))` }} className="shrink-0 overflow-y-auto overscroll-contain bg-[#121924]">
-          {dock.tab === "layers" ? layersPanel(false) : dock.tab === "options" ? ladderPanel(false) : watchlistPanel}
+          {dock.tab === "layers" ? layersPanel(false) : dock.tab === "options" ? ladderPanel(false) : dock.tab === "level2" && owner ? level2Panel(false) : watchlistPanel}
         </aside>}
       </div>
 
@@ -1715,6 +1796,9 @@ export default function ChartWorkspace() {
         {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
           {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
         <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />
+        {owner && depthSession.running && <span role="status" aria-label="Level 2 session" className="flex shrink-0 items-center gap-1 rounded bg-sky-400/10 px-1.5 py-px text-sky-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />{depthSession.symbol} Level 2 live
+          <button onClick={depthSession.stop} className="ml-1 rounded px-1 text-sky-100 underline-offset-2 hover:underline">Stop</button></span>}
         <div className={`ml-auto flex items-center gap-x-3 gap-y-1 ${fill && !narrow ? "shrink-0" : "min-w-0 flex-wrap"}`}>
           <span role="status" aria-label="Chart settings" className={`flex items-center gap-1 ${sync === "offline" || merged ? "text-amber-300" : ""}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
           {!narrow && <ToolbarMenu label="About chart data" above align="right" title="About this data" className={`${plain(false)} h-5 w-5`} content={() => about}>
@@ -1744,7 +1828,7 @@ export default function ChartWorkspace() {
       })()}
       {plan && <PlanSheet key={plan.key} symbol={plan.symbol} chartSymbol={symbol} setup={captureSetup} setupError={setupError} narrow={narrow} snapshot={snapshotFor}
         onSetup={setCaptureSetup} onSaved={planSaved} onQueued={() => void outboxAll().then(setOutbox)} onRejected={() => void loadSetup()} onClose={() => setPlan(null)} />}
-      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
+      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : dock.tab === "level2" && owner ? level2Panel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}

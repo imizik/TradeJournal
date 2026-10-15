@@ -1,0 +1,22 @@
+[Unit]
+Description=Constrain only the advisor public-key publisher network identity
+Before=tradejournal-advisor-keys.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/tradejournal-advisor-v2-keys/network.nft
+ExecStop=/usr/sbin/nft delete table inet tj_advisor_keys
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_NETLINK AF_UNIX
+SystemCallArchitectures=native
+TasksMax=8
+MemoryMax=128M
+TimeoutStartSec=15
+
+# The installed policy affects only the dedicated key publisher UID.
+# Never flush the host ruleset. The publisher requires this unit to start.

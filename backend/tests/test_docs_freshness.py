@@ -24,6 +24,7 @@ its own clock, and a week of prose edits would demand another pass.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -41,24 +42,24 @@ SKILL = ".claude/skills/docs-drift/SKILL.md"
 THRESHOLD = 30
 
 
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
+def _git(*args: str, repo: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True
+        ["git", *args], cwd=repo, capture_output=True, text=True
     )
 
 
-def code_commits_since(sha: str) -> int:
+def code_commits_since(sha: str, repo: Path = REPO_ROOT) -> int:
     """Non-merge commits since `sha` that touched something other than Markdown."""
     result = _git(
         "rev-list", "--count", "--no-merges", f"{sha}..HEAD",
-        "--", ".", ":(exclude)*.md",
+        "--", ".", ":(exclude)*.md", repo=repo,
     )
     if result.returncode != 0:
         raise RuntimeError(f"git rev-list failed: {result.stderr.strip()}")
     return int(result.stdout.strip())
 
 
-def marker_state(sha: str) -> str:
+def marker_state(sha: str, repo: Path = REPO_ROOT) -> str:
     """What this checkout can say about the marker commit.
 
     - `"usable"` -- present, and HEAD descends from it. Count against it.
@@ -68,44 +69,68 @@ def marker_state(sha: str) -> str:
     - `"unknown"` -- absent from a complete clone. The marker names a commit
       this repository does not have: a typo, a truncation, or a rewritten
       history. Not a reason to skip -- the guard is off until someone fixes it.
-    - `"not-ancestor"` -- present, but HEAD does not descend from it. A branch
-      cut before the marker landed; there is no range to count.
+    - `"not-ancestor"` -- present, but HEAD does not descend from it. Usually
+      a commit from a pull-request branch that was squash-merged, so it never
+      reached main. Counted from `fallback_base` instead; skipped only when
+      no commit in HEAD's history wrote the marker file.
     """
-    if _git("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
-        shallow = _git("rev-parse", "--is-shallow-repository").stdout.strip()
+    if _git("cat-file", "-e", f"{sha}^{{commit}}", repo=repo).returncode != 0:
+        shallow = _git("rev-parse", "--is-shallow-repository", repo=repo).stdout.strip()
         return "shallow" if shallow == "true" else "unknown"
-    if _git("merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
+    if _git("merge-base", "--is-ancestor", sha, "HEAD", repo=repo).returncode != 0:
         return "not-ancestor"
     return "usable"
+
+
+def fallback_base(repo: Path = REPO_ROOT) -> str:
+    """The last commit in HEAD's history that wrote the marker file.
+
+    The marker landed on main somehow, so this is always countable. It is a
+    little later than the commit the pass actually read up to, so the count is
+    slightly lenient -- a later warning, never a silent skip.
+    From October 5 to 13, 2026 a squash-merged marker (#130) left the check
+    skipping on every pull request while 192 code commits went unreconciled.
+    """
+    return _git(
+        "log", "-1", "--format=%H", "--", "docs/agent/last-reconciled.json",
+        repo=repo,
+    ).stdout.strip()
+
+
+def count_base(sha: str, repo: Path = REPO_ROOT) -> str | None:
+    """The commit to count from, or None when this checkout cannot count."""
+    state = marker_state(sha, repo)
+    if state == "shallow":
+        return None
+    if state == "usable":
+        return sha
+    if state == "not-ancestor":
+        return fallback_base(repo) or None
+    raise AssertionError(
+        f"{MARKER.relative_to(REPO_ROOT)} names commit {sha}, which this "
+        f"repository does not contain -- a typo, a truncated sha, a rewritten "
+        f"history, or a squash-merged branch that has since been deleted.\n\n"
+        f"Nothing is being counted while that is true, so this check is off "
+        f"until the marker names a real commit. Set it to the full "
+        f"40-character sha on main the documentation was last reconciled to."
+    )
 
 
 def test_the_drift_pass_is_not_overdue() -> None:
     marker = json.loads(MARKER.read_text(encoding="utf-8"))
     sha = marker["commit"]
-    state = marker_state(sha)
+    base = count_base(sha)
+    if base is None:
+        pytest.skip(f"{sha} is not countable here (shallow clone, or no marker in history)")
 
-    assert state != "unknown", (
-        f"{MARKER.relative_to(REPO_ROOT)} names commit {sha}, which this "
-        f"repository does not contain -- a typo, a truncated sha, or a "
-        f"rewritten history.\n\nNothing is being counted while that is true, "
-        f"so this check is off until the marker names a real commit. Set it "
-        f"to the full 40-character sha the documentation was last reconciled "
-        f"to."
-    )
-    if state != "usable":
-        pytest.skip(
-            f"{sha} is not countable here ({state}) -- a shallow clone, or a "
-            f"branch cut before the marker landed"
-        )
-
-    behind = code_commits_since(sha)
+    behind = code_commits_since(base)
     assert behind <= THRESHOLD, (
         f"{behind} code commits have landed since documentation was last "
-        f"reconciled at {sha} ({marker['date']}); the threshold is "
+        f"reconciled at {base} ({marker['date']}); the threshold is "
         f"{THRESHOLD}.\n\n"
         f"Run the drift pass -- {SKILL} -- over that range:\n"
-        f"    git log --oneline {sha}..HEAD\n"
-        f"    git diff --stat {sha}..HEAD\n\n"
+        f"    git log --oneline {base}..HEAD\n"
+        f"    git diff --stat {base}..HEAD\n\n"
         f"Then record what you reconciled to in "
         f"{MARKER.relative_to(REPO_ROOT)}:\n"
         f'    {{"commit": "<full sha>", "date": "<YYYY-MM-DD>", "note": "..."}}\n\n'
@@ -180,3 +205,54 @@ def test_a_marker_this_checkout_does_not_have_fails_rather_than_skips() -> None:
     assert marker_state(_git("rev-parse", "HEAD").stdout.strip()) == "usable", (
         "HEAD must always be countable, or every run would skip"
     )
+
+
+def test_a_squash_merged_marker_is_still_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The marker names a branch commit that main only received squashed.
+    That commit exists in a full clone but is not an ancestor of HEAD; the
+    check must count from where main wrote the marker rather than skip.
+    From October 5 to 13, 2026 it skipped instead."""
+    # Ignore the machine's git config (merge.ff, commit.gpgsign) and any
+    # GIT_DIR inherited from a hook, so the throwaway repo is the one used.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def write(name: str) -> None:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name, encoding="utf-8")
+        git("add", name)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    write("base.py")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    write("feature.py")
+    git("commit", "-qm", "feature")
+    branch_sha = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--squash", "feature")
+    write("docs/agent/last-reconciled.json")
+    git("commit", "-qm", "squashed, with the marker naming the branch commit")
+    marker_commit = git("rev-parse", "HEAD")
+    write("later.py")
+    git("commit", "-qm", "later code")
+
+    assert marker_state(branch_sha, repo) == "not-ancestor"
+    assert count_base(branch_sha, repo) == marker_commit, (
+        "a squash-merged marker must be counted, not skipped"
+    )
+    assert code_commits_since(marker_commit, repo) == 1

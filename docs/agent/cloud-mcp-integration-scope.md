@@ -24,6 +24,17 @@ physical laptop-off D1 observation remains separate. The actual Dot has called t
 and Isaac reported the same fresh result with his Mac asleep. The runbook
 separates live, fixture and user-reported evidence and remaining gates.
 
+## Current delivery checkpoint — October 11, 2026
+
+The D0–D2 introduction above records the original selection sequence. The
+[journal activation summary](cloud-mcp-journal-contract.md#observed-continuous-journal-acceptance)
+now records accepted continuous read-only journal access and a first actual
+coaching review. Advisor MCP and its owner view are implemented, with actual
+connected acceptance still open. The [Dots delivery board](dots-integration.md#current-delivery-board)
+owns the current Dots-first order: advisor trial, repeatability, connection
+upkeep, approved real-data advice, shared coach workspace, then shadow.
+Maintenance publication does not mark D3 follow-through complete.
+
 ## Recommended shape
 
 Create a private TradeJournal plugin backed by a **new restricted MCP adapter
@@ -257,19 +268,21 @@ acceptance; D2 has its own implementation and live acceptance gates. Each slice 
 this sequence does not promote writes, journal coaching or monitoring into D0/D1.
 
 Personal journal coaching is a separately selectable extension after D1:
-bounded trade summaries, statistics and explicitly shared review notes. It
-requires changing the current sample-only journal grant deliberately, selecting
-the permitted fields/date range and proving denial of accounts, credentials
-and unrelated records. Reuse the [product roadmap](../product-roadmap.md#dots-assisted-learning-extensions-proposed)
+bounded trade summaries, statistics and explicitly shared review notes. The
+first bounded journal slice was subsequently selected and accepted as
+recorded below. Any broader coaching scope still requires selecting the permitted
+fields/date range and proving denial of accounts, credentials and unrelated
+records. Reuse the [product roadmap](../product-roadmap.md#dots-assisted-learning-extensions-proposed)
 for later reflections and commitments; do not expand the independent runner's
 catalog to accommodate the personal coach.
 
 The first [journal coach snapshot slice](cloud-mcp-journal-contract.md) uses a
 separate offline OAuth gateway over an explicitly selected, hash-bound export
-of closed trades and statistics. It does not widen the browser/sample grant,
-share review notes, deploy a service or activate real-data access. Production
-role setup, approved account/date selection and actual Jo acceptance remain
-separate gates.
+of closed trades and statistics. It does not widen the browser/sample grant or
+share review notes. Its separately
+approved continuous activation passed the bounded SQL/installed/actual Jo checks
+recorded in the journal contract; this planning document grants no further
+activation or data access.
 
 D2 must call the existing domain validators and retain exact frozen context,
 policy/provenance and immutable receipts. Creating context is a write even

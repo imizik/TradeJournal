@@ -47,7 +47,7 @@ ROOT = Path("/opt/tradejournal")
 CONFIG = Path("/etc/tradejournal/autodeploy.env")
 # Phone alerts' ntfy settings, used unless autodeploy.env names its own topic.
 ALERTS_CONFIG = Path("/etc/tradejournal/alerts.env")
-NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "ALERT_APP_URL")
+NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL")
 STATE = Path("/var/lib/tradejournal/autodeploy")
 CONTROLLER = Path("/usr/local/sbin/tradejournal-deploy")
 BACKUPS = Path("/var/backups/tradejournal")

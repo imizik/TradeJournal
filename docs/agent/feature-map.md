@@ -12,13 +12,15 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 
 ## The screens
 
-The private legacy sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
-at its foot that opens a drawer on any page. Everything else is reached from
-one of these by a row link or a button.
+The private sidebar and phone More menu (`components/Nav.tsx`) put Dashboard,
+Charts, Daily Review, Trades and Analytics first, followed by **Research & labs**
+(Fills, Signals, Scanner, Advisor review, Strategy Lab, Research Studio, Level 2 lab
+and AI Buildout). Assistant access remains available when enabled. A **Sync**
+button opens a drawer on any page.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
 |---|---|---|---|---|
-| Dashboard | `/` | `app/page.tsx` | `GET /stats`, `/trades`, `/accounts`, `/trades/fills/bulk`, `/quotes?tickers=`, `POST /quotes/positions` | `DashboardActions`: `GET /sync/summary`, `/sync/jobs`, `/sync/runs`, `/health`, `/auth/gmail/start`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` |
+| Dashboard | `/` | `app/page.tsx` | `GET /stats`, `/trades`, `/accounts`, `/trades/fills/bulk`, `/quotes?tickers=`, `POST /quotes/positions`; Attention: `GET /charts/alerts`, `/sync/jobs`, `/gmail/health`, `/charts/symbol/{symbol}/events` | `DashboardActions`: `GET /sync/summary`, `/sync/jobs`, `/sync/runs`, `/health`, `/auth/gmail/start`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` |
 | Charts | `/charts` | `app/charts/page.tsx`, `components/charts/`, `components/AppMain.tsx` | — | the page fills the window beside a navigation rail (C7.3): one toolbar row, a drawing-tool rail, a side dock (watchlist or layers; a bottom sheet on a phone) and a status strip, charts sized by the browser; dividers between the main chart and the smaller row, between the smaller charts and at the dock's edge, and Maximize on each chart (C7.4, `components/charts/Splitter.tsx`; proportions shared, dock width and maximize per device); `GET /charts/workspace` every 15s while visible for Tradier today/quotes; `GET /charts/history` on scroll: intraday pages from completed Alpaca SIP sessions, 1D/1W pages from Tradier's whole daily history (read once per day); prices are split-adjusted with a basis chip and a warning when splits are unknown, and saved levels move with later splits; private stream, linked timeframes, fill markers, countdown, full screen, symbol search; `GET`/`PUT /charts/settings` shares levels, watchlist and layout across devices with a revision check (browser copy offline); smaller charts can hold their own symbol (three symbols at most, one request and one stream); named layouts (intervals, held symbols, chart sizes, linked ranges) are saved with those settings and switched from the Layouts menu (`components/charts/LayoutMenu.tsx`); hotkeys (`lib/hotkeys.ts`: typed minutes on Enter, H/4/D/W, Space watchlist steps, Alt+R reset, End to realtime, Delete and ⌘/Ctrl+Z undo for levels and drawings) listed by the `?` sheet (`components/charts/HotkeySheet.tsx`); the drawing layer (`lib/drawings.ts`): levels and drawings (horizontal ray, trend line, rectangle zone, text note from the tool buttons beside Undo/Redo, magnet to OHLC) select by click or tap, drag, restyle from the selection bar (`components/charts/SelectionBar.tsx`), delete and undo/redo; right-click or a long press opens the chart menu (`components/charts/ChartMenu.tsx`): add a level or copy the price there, reset that chart's scale, Layers (hide levels, drawings, fills and studies on every chart; show hidden items), and on a level or drawing its label and color inline, lock, hide, duplicate and delete; the Layers button opens the layers panel (`components/charts/LayersPanel.tsx`, a bottom sheet on a phone): hide My levels, Drawings, Journal or Indicators on every chart, lock or delete all levels or drawings (one undo step), hide/lock/delete one item, or click it to bring the chart to it; Layers → Options levels shows option walls, ranked strikes and max pain with their filters, Layers → Range bands the expected move and VWAP ±1σ/±2σ, and the dock's Strike ladder tab (`components/charts/OptionsLadder.tsx`) lists strikes around the price and marks one on the charts |
 | Symbol info / You, News, Events, Forecast, Short | `/charts`, below the watchlist | `components/charts/SymbolInfo.tsx`, `components/charts/SymbolInfoYou.tsx`, `components/charts/SymbolInfoNews.tsx`, `components/charts/SymbolInfoEvents.tsx`, `components/charts/SymbolInfoForecast.tsx`, `lib/symbolInfo.ts`; `app/engine/symbol_info_reactions.py` | — | `GET /charts/symbol/{symbol}/you`: all-account completed-trade stats, open records and recent links; `GET /charts/symbol/{symbol}/events`: next earnings with confirmed/estimated status, the last eight reports, dividends and splits; `GET /charts/symbol/{symbol}/forecast?spot=`: T2.1 implied moves; `GET /charts/symbol/{symbol}/reactions`: T2.2 inferred earnings reactions from the latest eight confirmed reports, using completed split-adjusted Tradier daily bars; `GET /charts/symbol/{symbol}/news`: merged Alpaca (Benzinga) and Polygon headlines with per-source status and Polygon-supplied sentiment; `GET /charts/symbol/{symbol}/short`: T3.1 FINRA short interest, short volume and the hard-to-borrow flag; T1.3 Overview with the T3.3 Ownership section (13F from the overview payload; `GET /charts/symbol/{symbol}/insiders`: 90-day open-market insider buys and sells from Yahoo, unofficial, cached a day); device-local tab choice and collapsed phone panel; `tests/test_symbol_info.py`, `tests/test_symbol_info_reactions.py`, `tests/test_symbol_info_events.py`, `tests/test_symbol_info_news.py`, `tests/test_symbol_info_insiders.py`, `tests/test_options_feed.py`, `e2e/symbol-info.spec.ts` |
 | Journal on the chart (trade card, position lines, historical mode) | `/charts`: hover or click a fill arrow; lines for open positions; **Open on chart** on a trade or fill page | `components/charts/TradeCard.tsx`, `lib/chartJournal.ts`, the arrows' hover and click in `components/charts/PriceChart.tsx`, the past-trade banner in `components/charts/ChartWorkspace.tsx`, `app/trades/[id]/page.tsx`, `app/fills/[id]/page.tsx` | — | `GET /charts/journal/fills/{id}`, `GET /charts/journal/trades/{id}` (`/mark` for an open option), `positions` in `GET /charts/workspace`; `tests/test_chart_journal.py`, `e2e/chart-journal.spec.ts` |
@@ -26,13 +28,16 @@ one of these by a row link or a button.
 | Pre-trade capture | `/charts`: **Plan trade** in the toolbar or Alt+P; the saved-plan strip above the charts; the gear in the sheet for templates and the default account | `components/charts/PlanSheet.tsx` (sheet, recorder, setup), `components/charts/PlanStrip.tsx`, `lib/captures.ts` (routes, outbox, image) | — | `/charts/captures` routes; template, Discretionary and voice plans with a frozen chart snapshot; `tests/test_captures.py`, `e2e/charts.spec.ts` |
 | Practice decisions (A1) | `/`: Practice decisions section on Today | `app/engine/decisions.py`, `app/routers/decisions.py`, `components/PracticeDecisions.tsx`, `components/PracticeDecisionForm.tsx`, `lib/api.ts`; `DecisionRecord` and `DecisionContext` in `app/models.py` | `POST /decisions/context/{symbol}`, `/decisions` (create/list), `/decisions/{id}` | `tests/test_decisions.py`; immutable server-owned context, typed choices, and practice drafts/unarmed |
 | Practice paper plans (A2) | Today page (`/`): a TAKE card under Practice decisions has an Arm paper plan button, the Practice paper timeline and base plus 3× costs outcome; `/?decision=<id>` opens that card | `app/engine/paper.py` (arming, watcher, phone outbox), `app/engine/paper_execution.py` (pure rules), `app/engine/level_alert_monitor.py` (runs the watcher); `DecisionEvent` in `app/models.py` | `POST /decisions/{id}/arm`, `GET /decisions/{id}/paper`; UI `frontend/components/PracticeDecisions.tsx`, `frontend/components/PracticePaperPlan.tsx`, `frontend/app/page.tsx`, `frontend/lib/api.ts` | `tests/test_paper_execution.py`, `tests/test_paper_plans.py`, `frontend/e2e/practice-decisions.spec.ts`; [live SPY phone, open-position restart and exit observation](practice-policy.md#a2-live-operational-observation-2026-10-08) recorded 2026-10-08; operational probe outside the on-time strategy cohort |
+| Pre-trade check service | Jo's `/check/mcp` endpoint: `pre_trade_check`, `attach_model_verdict`, `review_checks`, `position_check`, `preopen_watchlist`, `get_notes`, `grade_checks`, `shadow_setup`, `shadow_decide` | `backend/cloud_mcp_check.py`, `backend/cloud_mcp_check_common.py`, `backend/cloud_mcp_check_ledger.py`, `backend/cloud_check_owner.py`, `app/engine/pretrade_check.py`; installer `deploy/check_control.py` | OAuth MCP on the VPS; owner view on `/advisor-review` | `tests/test_pretrade_check.py`, `tests/test_cloud_mcp_check.py`, `tests/test_cloud_mcp_shadow.py`, `tests/test_cloud_check_owner.py`, `tests/test_check_deployment.py`; [contract](advisor-pretrade-check-contract.md); activated October 12, 2026 |
+| Setup scanner S1 | `/scanner`: the day's setups, rules paper results and separate shadow TAKE/SKIP decisions/results, with previous/next day and day+cumulative scorecards | `app/engine/scanner_rules.py` (unchanged rules), `app/engine/setup_scanner.py` (scan, paper trades, exchange, day view), `app/engine/shadow_exchange.py` (isolated shadow ledger), `app/engine/level_alert_monitor.py` (runs it when `SETUP_SCANNER_ENABLED` is true); `ScannerCandidate`, `ScannerEvent` in `app/models.py`; `alembic/versions/a7c3e9f1b2d4_add_setup_scanner_tables.py` | `GET /scanner/day`; UI `frontend/app/scanner/page.tsx`, `frontend/lib/api.ts` | `tests/test_setup_scanner.py`; [contract](setup-scanner-contract.md); scanner and shadow exchange off by default; scanner enabled on the VPS October 12 and shadow exchange October 13, 2026 ([contract](setup-scanner-contract.md), [shadow S1](shadow-s1-contract.md#activation-evidence--october-13-2026)) |
+| Jo's market watch (MW-1/MW-2) | No screen; owner commands in `market_watch_owner.py` (snapshot, export, report) | `market_watch_common.py`, `market_watch_ledger.py` (check-ledger records, read notice), `app/engine/market_watch_snapshot.py`, `app/engine/market_watch_evaluation.py`, `market_watch_schedule.py` (#315 publisher), `app/engine/market_watch_wakes.py` (event detector, event wakes, ntfy messages, report; started from `app/main.py` when `MARKET_WATCH_ENABLED` is true); Jo prompts in `deploy/market-watch/` | Check tools `market_watch_snapshot`, `market_watch_submit` | `tests/test_market_watch_*.py`; [design](market-watch-design.md#mw-2-implementation-and-activation-boundary); MW-2 event wakes/push off by default, not activated |
 | Level alerts | `/charts`: right-click (long-press) a level, horizontal ray or automatic level; the Alerts list in the dock | `components/charts/AlertsPanel.tsx`, `components/charts/ChartMenu.tsx`, `lib/alerts.ts` (bells: `AlertLayer`) | — | `GET`/`POST /charts/alerts`, `POST /charts/alerts/{id}/rearm`, `DELETE /charts/alerts/{id}`, and `alerts` in `GET /charts/workspace`; touches, crosses, closes beyond; judged and sent to the phone by the API with no tab open; `tests/test_level_alerts.py`, `e2e/charts.spec.ts` |
 | Daily Review | `/daily` (a month calendar: each trade day tinted by `closed_pnl`, the realized P&L of what closed that day, with a dot once reviewed) → `/daily/{YYYY-MM-DD}` | `app/daily/page.tsx`, `app/daily/[day]/page.tsx` | `GET /daily-review` (`closed_pnl` per day, `tests/test_daily_review_index.py`); per day `/daily-review/{day}`, `/trades`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/accounts`, quotes | `DailyAiPanel`: `POST /daily-review` |
 | Trades | `/trades` → `/trades/{id}` | `app/trades/page.tsx`, `app/trades/[id]/page.tsx`, `components/TradesTable.tsx` | list: `GET /trades?status=&ticker=&account=&type=`, `/accounts`. Detail (client page): `/trades/{id}`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/market-context/trade/{id}` | `AuditPanel`: `GET /market-context/audit/{id}`; review button: `POST /trades/{id}/review` |
 | Analytics | `/analytics` | `app/analytics/page.tsx`, `components/AnalyticsExplorer.tsx` | `GET /stats/analytics`, `/accounts`; pure metrics in `app/engine/analytics.py`; [definitions and proof](../analytics.md) | local grouping/sorting/drill-down, links to trade details |
 | Fills | `/fills` → `/fills/{id}` | `app/fills/page.tsx`, `app/fills/[id]/page.tsx` | `GET /fills`, `/accounts`; edit: `/fills/{id}` | `ManualFillForm`: `POST /fills`, `PUT /fills/{id}` |
 | Strategy Lab | `/strategy-lab` → `/strategies/{id}`, `/strategies/{id}/versions/new`, `/versions/{id}`, `/versions/{id}/import`, `/runs/{id}` | `app/strategy-lab/**`, `components/strategy-lab/`, `lib/strategy-lab/api.ts` | `GET /strategy-lab/strategies`, `/strategies/{id}`, `/versions/{id}`, `/runs`, `/runs/{id}`, `/runs/{id}/trades`, `/runs/{id}/metrics` | forms and wizard: `POST /strategy-lab/strategies`, `/strategies/{id}/versions`, `/versions/{id}/fork`, `/imports/preview`, `/runs/import`, `/runs/{id}/metrics/recalculate`; `PATCH /strategies/{id}`, `/versions/{id}` |
-| Research | `/research/ai-buildout` | `app/research/ai-buildout/page.tsx`, `components/research/`, `lib/research/` | — | `GET`/`PUT /research/workspaces/{slug}` |
+| AI Buildout | `/research/ai-buildout` | `app/research/ai-buildout/page.tsx`, `components/research/`, `lib/research/` | — | `GET`/`PUT /research/workspaces/{slug}` |
 | Sync (drawer) | any page | `components/StatusPanel.tsx` | — | polls `GET /fills/enrich/status`, `/market-context/enrich/status`, `/market-context/trade-path/status`, `/market-context/coverage` |
 
 Things worth knowing before you touch a page:
@@ -48,7 +53,8 @@ Things worth knowing before you touch a page:
   `/fills/{id}?returnTo=`. The trade detail page links nowhere.
 - The Sync Center's job types (`JOB_CONFIG` in `app/routers/sync.py`) are
   `gmail_sync`, `fill_import_check`, `trade_rebuild`, `polygon_enrich`,
-  `alpaca_enrich`, `trade_path`, `daily_review` and `gmail_push`;
+  `alpaca_enrich`, `trade_path` and `gmail_push` (`daily_review` is retired:
+  the opt-in nightly plan timer and the Daily Review button write reviews);
   `full_pipeline` and `resync_all` (`_EXTRA_JOB_CONFIG`) are the run types
   behind the pipeline button and the advanced resync, and
   `gmail_watch_renew` and `gmail_listener` are the run types the Gmail
@@ -90,7 +96,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Symbol info / You (T1.1) | `app/routers/symbol_info.py`, `app/engine/symbol_info_journal.py` (two read-only queries), `app/engine/symbol_info.py` (pure summary); `frontend/components/charts/SymbolInfo.tsx`, `frontend/components/charts/SymbolInfoYou.tsx` | private `GET /charts/symbol/{symbol}/you`; `/charts` side column | `tests/test_symbol_info.py`, `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Chart news markers (T3.5) | `frontend/lib/newsMarkers.ts` (candle alignment: pure), `frontend/lib/newsFeed.ts` (the one news read the News tab and the layer share), `frontend/components/charts/PriceChart.tsx` (series markers, hover headlines, click, touch popover), `ChartWorkspace.tsx` (the `newsHidden` layer, click-through to the dock), `SymbolInfo.tsx` / `SymbolInfoNews.tsx` (opens on and lights the clicked articles) | the private news endpoint above, unchanged; `/charts` main chart, Layers → News markers | `frontend/e2e/news-markers.spec.ts` (alignment unit tests and stubbed browser tests); [behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / News (T1.2) | `app/engine/symbol_info_news.py` (pure normalizers, merge, dedupe, Focused flag), `app/engine/symbol_info_news_feed.py` (Alpaca 60 s memory cache, Polygon 15 min disk cache, limiter, 429 fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoNews.tsx` | private `GET /charts/symbol/{symbol}/news`; `/charts` side column, News tab | `tests/test_symbol_info_news.py`, `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
-| Symbol info / Peers strip (T3.4) | `app/engine/symbol_info_peers.py` (pure: related tickers, chips), `app/engine/symbol_info_peers_feed.py` (Polygon 7-day disk cache, limiter, 429 fallback; one batched Tradier quote call via the chart feed); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoPeers.tsx` | private `GET /charts/symbol/{symbol}/peers`; `/charts` side column, top of the Overview tab | `tests/test_symbol_info_peers.py` (recorded Polygon and Tradier fixtures), `frontend/e2e/symbol-info-peers.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
+| Symbol info / Peers strip (T3.4) | `app/engine/symbol_info_peers.py` (pure: related tickers, chips, hand-picked groups from `app/data/peer_groups.json`, peer valuation medians), `app/engine/symbol_info_peers_feed.py` (Polygon 7-day disk cache, limiter, 429 fallback; one batched Tradier quote call via the chart feed; one batched ratios read via `symbol_info_tradier.peer_ratios`); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoPeers.tsx` | private `GET /charts/symbol/{symbol}/peers`; `/charts` side column, last block of the Overview tab | `tests/test_symbol_info_peers.py` (recorded Polygon and Tradier fixtures), `frontend/e2e/symbol-info-peers.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Financials (T3.2) | `app/engine/symbol_info_financials.py` (pure: quarter selection by 80-105 day span, comparatives, calculated margins, year-over-year, Q4 gaps), `app/engine/symbol_info_financials_feed.py` (SEC EDGAR reads, `SEC_USER_AGENT`, ticker map and normalized-only disk cache, pacing, failure fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoFinancials.tsx` | private `GET /charts/symbol/{symbol}/financials`; `/charts` side column, Financials tab | `tests/test_symbol_info_financials.py` (recorded NVDA and NBIS companyfacts in `tests/fixtures/sec/`), `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Short (T3.1) | `app/engine/symbol_info_short.py` (pure normalizers and view), `app/engine/symbol_info_short_feed.py` (Polygon short interest, short volume and ticker details plus Tradier easy-to-borrow list, one-day disk caches, limiter, 429 fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoShort.tsx` | private `GET /charts/symbol/{symbol}/short`; `/charts` side column, Short tab | `tests/test_symbol_info_short.py` (recorded fixtures in `tests/fixtures/symbol_info_short/`), `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Events (T1.4) and chart earnings (C2.5) | `app/engine/symbol_info_tradier.py` (Tradier fundamentals: budget, cache, background refresh), `app/engine/symbol_info_events.py` (pure normalizers); `app/routers/symbol_info.py`, `app/routers/charts.py` (`earnings` in the workspace); `frontend/components/charts/SymbolInfoEvents.tsx`, `frontend/components/charts/EarningsBadge.tsx`, `earningsMarks` in `frontend/lib/charts.ts` | private `GET /charts/symbol/{symbol}/events`, `GET /charts/workspace`; `/charts` side column and chart headers | `tests/test_symbol_info_events.py`, `frontend/e2e/symbol-info.spec.ts`, `frontend/e2e/charts.spec.ts`; [earnings](../charts-workspace.md#earnings-c25) |
@@ -112,7 +118,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Phone alerts (ntfy) | `deploy/alerts.py`, `deploy/systemd/tradejournal-alerts.*`; setup in [deploy/README.md](../../deploy/README.md#phone-alerts) | reads `GET /health`, `/gmail/health`, `/sync/runs` and `systemctl show` | `test_deployment.py` (grace periods, one alert per problem, recovery, merged pipeline failures, reboot); the deployment workflow runs the real unit against a loopback ntfy stand-in; live ntfy delivery is not tested |
 | Gmail status banner and live refresh | `app/engine/gmail_health.py`; `components/GmailStatusBanner.tsx`, `lib/useGmailHealth.ts`, status line in `components/Nav.tsx` | `GET /gmail/health` (polled every 30s while visible; `data_version` drives `router.refresh()`) | `test_gmail_realtime.py` (health states); rendering is not in the browser suite |
 | Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py`, `test_enrichment_gap_repair.py` (which empty fields are retried) |
-| Alpaca fill context | `app/engine/alpaca.py`, `app/engine/alpaca_enricher.py`, `app/engine/behavior.py` (sequence metrics) | `POST /market-context/enrich?range=&force=`, `GET /market-context/enrich/status`, `/market-context/fill/{id}`, `/market-context/fills/bulk?ids=`, `/market-context/coverage`; job `alpaca_enrich` | `test_alpaca_context_repair.py`, `test_indicators_rvol.py` (the injected cache-only bar loader) |
+| Alpaca fill context | `app/engine/alpaca.py`, `app/engine/alpaca_enricher.py`, `app/engine/behavior.py` (sequence metrics) | `POST /market-context/enrich?range=&force=`, `GET /market-context/enrich/status`, `/market-context/fill/{id}`, `/market-context/fills/bulk?ids=`, `/market-context/coverage`; job `alpaca_enrich` | `test_alpaca_context_repair.py`, `test_indicators_rvol.py` (the RVOL history prefetch and the injected cache-only bar loader) |
 | Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | `test_enrichment_gap_repair.py` (row selection, keep-existing merge); live Alpaca fetch untested, `test_seed_snapshot.py` stubs it |
 | Trade audit | `app/engine/auditor.py`, `app/engine/metric_reference.py`, `app/engine/metric_validation.py` | `GET /market-context/audit/{trade_id}`; offline `scripts/validate_trade_metrics.py` emits JSON/Markdown/HTML | `test_seed_snapshot.py` (cache emptied), `tests/test_metric_reference.py`, `frontend/e2e/trade-metric-quality.spec.ts` |
 | Journal data audit (D0) | `scripts/audit_journal_data.py` (read-only; writes a local report, never the database) | offline only: `--sqlite <journal.db> --output-dir backend/data/d0/...`; [contract and how to run it](../d0-data-audit.md) | `tests/test_d0_data_audit.py` |
@@ -123,7 +129,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Live quotes | `app/engine/quotes.py` (provider seam), `app/engine/tradier.py`, `app/engine/occ.py`, `app/routers/quotes.py` | `GET /quotes?tickers=`, `POST /quotes/positions` | `test_quotes_provider.py` (dispatch, batching, fallback), `test_tradier.py`, `test_occ.py` — the live call itself is uncovered; `scripts/compare_quote_providers.py` is how it gets checked |
 | Market packets, reports, ticker analysis | `app/engine/packets.py`, `app/engine/analyzer.py`, `app/engine/news.py`, `prompts/market_report.md` | `GET /packets/report`, `/packets/analyze`, `/packets/news` | — (live Alpaca and yfinance) |
 | Scalp analysis | `app/engine/scalper.py` (`score_scalp()` is pure) | `GET /packets/scalp` | `test_scalper.py` |
-| AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |
+| AI review | `app/ai/reviewer.py` (one trade, on the plan, with the day context), `app/ai/monthly_reviewer.py` (one month from statistics: overall, breakdowns by ticker, side, entry time, hold time, weekday, size, days to expiry, captured plan, SPY's day and entry flags; the month's daily reviews and rules; last month and its commitment; table `monthly_review`), `app/routers/monthly_review.py`, `/daily/month/{YYYY-MM}` (`components/MonthlyAiPanel.tsx`), `app/ai/daily_reviewer.py` (prompt v3: process grade, the last review's rules checked, the trader's 20-day baseline, data gaps, plan vs execution, the market read), `app/ai/review_context.py` (the day around the trades: captured plans, tags, SPY/QQQ/IWM/SMH, SPY's and QQQ's intraday shape, VIX and the 10-year yield from yfinance, sector-relative moves, earnings, headlines, open-interest walls, the trader's levels and fired alerts, `app/data/macro_calendar.json`), `app/ai/daily_review_service.py`, `app/ai/plan_runner.py` (`claude -p` on the Claude plan), `app/jobs/plan_reviews.py` (nightly run, opt-in `tradejournal-plan-reviews.timer`), `app/routers/daily_review.py` | `POST /trades/{id}/review` (on the plan); `GET /daily-review`, `/daily-review/{day}`, `/daily-review/runner`, `POST /daily-review` (on the plan); `GET /monthly-review`, `/monthly-review/{month}`, `POST /monthly-review` (on the plan); the Sync Center `daily_review` job is retired (the nightly timer replaced it) | `tests/test_monthly_review.py` (stats, context, first-of-month trigger, routes), `tests/test_review_context.py` (offline: each part and its gaps), `tests/test_plan_reviews.py` (fake Claude Code: sign-in check, history, day choice, status, one trade's review), `frontend/e2e/daily-plan-review.spec.ts`; the live plan call is uncovered |
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab (kept readable, not extended since 2026-10-02: [what comes next](../strategy-factory.md#what-comes-next)) | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Isaac Market Map backtester | `app/engine/market_map.py` (pure historical strategy research rules), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
@@ -140,6 +146,26 @@ you change it (`verification.md`, "What is NOT covered yet").
 | MCP tools for Claude Desktop | `mcp_server.py` | — | — |
 
 ## Getting evidence for a change
+
+The isolated **Level 2 lab** (`/level2-lab`, owner navigation) keeps its synthetic replay in
+`frontend/components/level2/Level2Lab.tsx` and `frontend/lib/level2Replay.ts`,
+covered by `frontend/e2e/level2-lab.spec.ts`. A separate manual provider section
+(`frontend/components/level2/LiveDepthSession.tsx`) uses the disabled-by-default
+`frontend/app/api/level2-lab/session/route.ts` and an explicitly started
+`backend/scripts/moomoo_lab_server.py` loopback bridge. Its tests are
+`frontend/e2e/level2-live.spec.ts`, `frontend/e2e/level2-route.spec.ts` and
+`backend/tests/test_moomoo_lab.py`. On Charts the session is owned by the page
+(`frontend/components/level2/useDepthSession.ts`) and feeds a memory-only
+heatmap behind the main chart's candles for one US ticker at a time (`frontend/lib/depthHeatmap.ts`, drawn from
+`frontend/components/charts/PriceChart.tsx`); its browser checks are in
+`frontend/e2e/charts.spec.ts`. The opt-in depth recorder and its R2 upload are
+`backend/scripts/moomoo_depth_recorder.py` and `backend/scripts/depth_upload.py`,
+tested in `backend/tests/test_moomoo_depth_recorder.py`. Charts reads it as liquidity levels, a depth
+profile and an opt-in heatmap through `backend/scripts/depth_history.py`,
+`frontend/app/api/level2-lab/depth/route.ts` and
+`frontend/components/level2/useRecordedDepth.ts` (`backend/tests/test_depth_history.py`). It changes no chart feed or saved metrics;
+see the [prototype notes](../level2-synthetic-prototype.md) and
+[manual connection contract](../level2-manual-connection.md).
 
 - **Engine or router change:** the test module in the table, or drive the
   route through `TestClient(app)` the way `test_fill_import.py` does.
@@ -188,10 +214,18 @@ you change it (`verification.md`, "What is NOT covered yet").
   cancel/retry; parent-owned research SQLite/artifacts and a pure calculation
   child, no app route/service/provider or journal/Factory writes. The
   [R2 contract](research-studio-r2.md) owns semantics, exposure and acceptance.
-  Selected R3 connects **Research Studio** (`/research-studio`) through
+  R3 connects **Research Studio** (`/research-studio`) through
   `frontend/components/research-studio/ResearchStudio.tsx`, its static chart,
   `backend/app/routers/research_studio.py`, and the manually started
   `backend/scripts/research_studio_server.py` sidecar. The
+  [R4](research-studio-r4.md) adds frozen-parent comparisons and append-only conclusions through the same owner workspace, with plain labels and separate finite comparison computation.
+  The [comparison extension](research-studio-comparison.md) adds every-event
+  endpoints, concentration checks and compatible saved-period summaries.
+  The [prospective MU study](research-studio-prospective-mu.md) is a separately
+  registered, scheduled cache/receipt workflow with a fixed formal review;
+  `backend/scripts/research_studio_prospective.py` and its explicit installer
+  `deploy/research_studio_prospective.py` own it. Future results stay separate
+  from the historical Studio UI and never enter Factory gates.
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
@@ -279,6 +313,44 @@ reason, and ruff lints them without importing them.
   The golden snapshot reads the Alpaca cache; `test_seed_snapshot.py` points
   it at an empty directory so a developer's cache cannot leak into the result.
 
+## Owner Dashboard foundation
+
+The owner root view mounts `frontend/components/dashboard/OwnerDashboard.tsx`:
+ET closed-P&L summary, factual session counts, compact active options, collapsed
+stock holdings, exposure disclosure, compact performance and five recent trades
+ordered by close time. Account/type filters and decision/run references stay in
+the URL. Full Practice remains below the summary links until relocation is
+complete. Journal-reader and decision-writer assistant branches retain their
+existing surfaces. See the [inventory and staged plan](../dashboard-redesign.md).
+`frontend/e2e/dashboard.spec.ts` exercises states, scopes, navigation and desktop
+and phone pictures; the browser harness has offline position quotes.
+
+## Dashboard Attention
+
+`frontend/components/dashboard/AttentionPanel.tsx` streams in beside Today's
+Session after the rest of the owner Dashboard; `frontend/lib/dashboardAttention.ts`
+holds the rules. It reads the positions the page already loaded plus
+`GET /charts/alerts`, `/sync/jobs`, `/gmail/health` and, per open-option
+underlying, `/charts/symbol/{symbol}/events`. Order: record integrity (expired but
+open, no price, no basis), import and sync data (Gmail down/degraded, failed job),
+expirations within three calendar days and earnings on or before expiry, price
+alerts fired in the last 24 hours, then the owner's own open WAIT choices. A failed
+source is listed as "Could not check", never read as quiet. Job and Gmail items
+open the Sync Center through `/?sync=open`. Pure rule tests and the panel picture
+are in `frontend/e2e/dashboard-attention.spec.ts`.
+
+## Open-position basis
+
+Dashboard and Daily Review share `frontend/lib/dashboard.ts` for remaining
+FIFO basis and unrealized P&L. Fill ordering matches reconstruction: ET wall
+time, opens before closes, then fill ID. The all-entry trade average remains
+historical; it is not the basis of lots left after a partial close. Missing or
+invalid lot evidence leaves basis/P&L unavailable. Option fill prices are per
+contract, so only quote marks are multiplied by 100. Pure browser-runner
+regressions in `frontend/e2e/dashboard-basis.spec.ts` cover partial FIFO closes,
+same-minute ordering, fractional shares and long/short option units. Backend
+`app/engine/chart_journal.py` remains the independent FIFO projection.
+
 ## A3 daily Practice routine
 
 Today and Daily Review mount `frontend/components/PracticeRoutine.tsx`: manual
@@ -343,3 +415,29 @@ and paper review. Checks are `backend/tests/test_advisor_shadow.py`,
 `backend/tests/test_advisor_shadow_cli.py`, the owner-route refusals in
 `backend/tests/test_browser_access.py` and `frontend/e2e/advisor-shadow.spec.ts`.
 See the [contract and activation boundaries](advisor-shadow-contract.md).
+
+The optional direct owner page `/advisor-review` uses
+`frontend/components/AdvisorOwnerReview.tsx` and the shared pure
+`frontend/components/AdvisorReceiptView.tsx`. Its Node-only `GET /api/advisor-owner` BFF requires an
+explicit authenticated owner profile/session before and after a fixed Unix read.
+`backend/cloud_advisor_owner.py` independently checks the exact kernel frontend
+UID and reads only one pinned existing invented request/receipt from read-only
+SQLite. Default legacy/assistant access cannot retrieve it. No journal database
+repoint, file import, write or advisor catalog/grant expansion is involved.
+Optional owner units remain excluded from the four-unit installer; checks are
+`backend/tests/test_cloud_advisor_owner.py`, `frontend/scripts/advisor-owner.test.js`,
+`frontend/e2e/advisor-owner.auth.ts` and the disposable advisor native smoke.
+See the [direct owner boundary](cloud-mcp-advisor-contract.md#direct-owner-review-in-tradejournal-dormant).
+
+
+### Repeatable invented advisor questions
+
+`/advisor-review/questions` is an explicitly enabled authenticated owner flow,
+linked from `/advisor-review`. `frontend/components/AdvisorAssignments.tsx` and the
+`/api/advisor-assignments` BFF use the isolated advisor bridge and
+`backend/app/engine/advisor_assignments.py`; they never use the journal database.
+The [bounded contract](advisor-assignment-contract.md) owns its assignment,
+revocation and dormant activation boundary. Proof lives in
+`backend/tests/test_advisor_assignments.py`, the existing owner transport test
+`frontend/scripts/advisor-owner.test.js`, and
+`frontend/e2e/advisor-assignments.auth.ts`. Actual Jo acceptance is separate.

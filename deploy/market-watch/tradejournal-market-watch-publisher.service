@@ -1,0 +1,28 @@
+[Unit]
+Description=Publish one immutable MW-1 snapshot refresh during regular-session hours
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/backend
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=backend.env:/etc/tradejournal/backend.env
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/backend/market_watch_schedule.py --public-directory /var/lib/tradejournal-market-watch-public --receipt-directory /var/lib/tradejournal/market-watch/schedule-receipts
+TimeoutStartSec=5min
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/tradejournal-market-watch-public
+ReadWritePaths=/var/lib/tradejournal/market-watch

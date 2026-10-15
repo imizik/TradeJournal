@@ -221,7 +221,47 @@ export type DailyReview = {
   };
   patterns: string[];
   next_session_rules: string[];
+  /** Prompt v2 (plan reviews): the last review's rules checked, today vs the trader's normal, what data was missing. */
+  rules_check?: RuleCheck[];
+  vs_baseline?: string[];
+  data_gaps?: string[];
+  /** Prompt v3: the day's market backdrop in a sentence or two, and each captured plan against what was done. */
+  market_read?: string;
+  plan_vs_execution?: PlanCheck[];
+  generated_by?: string;
 };
+
+export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };
+export type PlanCheck = { ticker: string; planned: string; did: string; result: "followed" | "deviated" | "partly" | "no_plan" };
+
+/** The nightly reviews on the Claude plan (backend app/jobs/plan_reviews.py): the last run's status file. */
+export type PlanRunnerStatus = {
+  configured: boolean;
+  status: null | {
+    started_at: string; finished_at: string | null;
+    state: "running" | "ok" | "failed" | "nothing" | "interrupted";
+    message: string; written: { day: string; reason: string; grade: string | null }[];
+    failed: { day: string; reason: string; error: string }[];
+    usage: { input_tokens: number; output_tokens: number; api_equivalent_usd: number }; model: string | null;
+  };
+};
+
+export type MonthlyFinding = { finding: string; evidence: string };
+export type MonthlyReview = {
+  summary: string;
+  month_grade: string;
+  edge: MonthlyFinding[];
+  leaks: MonthlyFinding[];
+  recurring_patterns: MonthlyFinding[];
+  rules_scorecard: { rule: string; kept: number; broken: number; verdict: "keep" | "tighten" | "drop" | "now_a_habit" }[];
+  last_commitment_check: { commitment: string; result: "kept" | "broken" | "partly" | "unclear"; evidence: string } | null;
+  one_commitment: string;
+  vs_last_month: string[];
+  data_gaps: string[];
+  generated_by?: string;
+};
+export type MonthlyReviewResponse = { month: string; review: MonthlyReview; generated_at: string | null; trade_count: number };
+export type MonthlyReviewIndexItem = { month: string; closed_trades: number; saved: boolean; grade: string | null; generated_at: string | null };
 
 export type DailyReviewResponse = {
   day: string;
@@ -557,6 +597,150 @@ export type TradingViewVerdict =
   | "long_scalp"
   | "short_scalp";
 
+export type ScannerEventRow = Record<string, unknown> & { at: string };
+
+export type ScannerShadowRow = {
+  publication: "written" | "expired" | null;
+  decision: "take" | "skip" | null;
+  reason: string | null;
+  unresolved_reason: string | null;
+  timing: "on_time" | "late" | null;
+  clean_order: boolean | null;
+  labels: string[];
+  status: "not_published" | "no_contract" | "awaiting_decision" | "no_response" | "skipped" | "late" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  entry: ScannerEventRow | null;
+  exit: ScannerEventRow | null;
+  exit_intent: ScannerEventRow | null;
+  result: { pnl: number; pnl_2x_spread: number; return_on_premium: number | null } | null;
+};
+
+export type ScannerIsaacTrade = {
+  trade_id: string;
+  contract: { ticker: string; option_type: string | null; strike: number | null; expiration: string | null };
+  opened_at: string;
+  status: string;
+  realized_pnl: number | null;
+  pnl_per_contract: number | null;
+  assisted: boolean;
+  contract_differs: boolean;
+};
+
+export type ScannerIsaacRow = {
+  traded: boolean;
+  trade_id: string | null;
+  contract: ScannerIsaacTrade["contract"] | null;
+  opened_at: string | null;
+  status: string | null;
+  realized_pnl: number | null;
+  pnl_per_contract: number | null;
+  assisted: boolean;
+  contract_differs: boolean;
+  extra_trade_ids: string[];
+  trades: ScannerIsaacTrade[];
+};
+
+type Evidence = "not enough" | "sufficient count";
+export type ScannerDisagreement = {
+  count: number;
+  rules_priced: number;
+  rules_pnl: number;
+  shadow_priced: number;
+  shadow_pnl: number;
+  isaac_priced: number;
+  isaac_pnl_per_contract: number;
+  isaac_pnl_dollars: number;
+  evidence: Evidence;
+};
+export type ScannerIsaacScore = {
+  setups: number;
+  traded: number;
+  assisted: number;
+  independent: number;
+  closed: number;
+  priced: number;
+  pnl_per_contract: number;
+  pnl_dollars: number;
+  evidence: Evidence;
+  group_evidence: { assisted: Evidence; independent: Evidence; closed: Evidence };
+  disagreements: Record<"shadow_only" | "isaac_only" | "both_took" | "both_passed", ScannerDisagreement>;
+};
+
+export type ScannerScorecard = {
+  not_published: number;
+  shadow_setups: number;
+  isaac: ScannerIsaacScore;
+  independent: ScannerIsaacScore;
+  setups: number;
+  decisions: number;
+  take: number;
+  skip: number;
+  late: number;
+  no_response: number;
+  unresolved: number;
+  rules_priced: number;
+  shadow_priced: number;
+  skipped_priced: number;
+  rules_pnl: number;
+  shadow_pnl: number;
+  skipped_rules_pnl: number;
+  clean_order: number;
+  evidence: "not enough" | "sufficient count";
+  group_evidence: {
+    rules: "not enough" | "sufficient count";
+    takes: "not enough" | "sufficient count";
+    skipped: "not enough" | "sufficient count";
+  };
+};
+
+export type ScannerCandidateRow = {
+  id: string;
+  scanner_version: string;
+  params_hash: string;
+  symbol: string;
+  setup: "fade" | "orb";
+  direction: "long" | "short";
+  bar_end: string;
+  detected_at: string;
+  stop: number;
+  target: number;
+  flags: string[];
+  facts: Record<string, number | string | string[]>;
+  contract: {
+    symbol: string;
+    expiration: string;
+    option_type: string;
+    strike: number;
+    delta: number;
+    bid: number;
+    ask: number;
+  } | null;
+  status: "no_contract" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  shadow: ScannerShadowRow;
+  isaac: ScannerIsaacRow;
+  events: Record<string, ScannerEventRow>;
+};
+
+export type ScannerSettings = { symbols: string[]; revision: number; max_symbols: number };
+
+export type ScannerDay = {
+  date: string;
+  scanner_version: string;
+  params_hash: string;
+  enabled: boolean;
+  totals: {
+    candidates: number;
+    trades: number;
+    resolved: number;
+    unresolved: number;
+    no_contract: number;
+    pnl: number;
+    pnl_2x_spread: number;
+    wins: number;
+  };
+  scorecard: { day: ScannerScorecard; cumulative: ScannerScorecard };
+  candidates: ScannerCandidateRow[];
+};
+
 export type TradingViewAlert = {
   alert_id: string;
   contract_version: number;
@@ -697,7 +881,11 @@ return {
   rebuild: () => post<{ status: string; trades_rebuilt: number; anomalies: string[] }>("/rebuild"),
   reviewTrade: (id: string) => post<Trade>(`/trades/${id}/review`),
   dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
+  planRunner: () => get<PlanRunnerStatus>("/daily-review/runner"),
   dailyReview: (day: string) => get<DailyReviewResponse | null>(`/daily-review/${day}`),
+  monthlyReviews: () => get<MonthlyReviewIndexItem[]>("/monthly-review"),
+  monthlyReview: (month: string) => get<MonthlyReviewResponse | null>(`/monthly-review/${month}`),
+  reviewMonth: (month: string) => post<MonthlyReviewResponse>("/monthly-review", { month }),
   reviewDay: (body: { day: string; trade_ids: string[] }) =>
     post<DailyReviewResponse>("/daily-review", body),
   positionQuotes: (positions: { ticker: string; expiration: string; strike: number; option_type: string }[]) =>
@@ -718,6 +906,8 @@ return {
   syncSummary: () => get<SyncSummary>("/sync/summary"),
   gmailHealth: () => get<GmailHealth>("/gmail/health"),
   syncJobs: () => get<SyncJob[]>("/sync/jobs"),
+  levelAlerts: () => get<import("./alerts").AlertsPayload>("/charts/alerts"),
+  symbolEvents: (symbol: string) => get<import("./symbolInfo").SymbolEvents>(`/charts/symbol/${encodeURIComponent(symbol)}/events`),
   syncRuns: () => get<SyncRun[]>("/sync/runs"),
   runSyncPipeline: () => post<{ pipeline_run_id: string }>("/sync/pipeline/run"),
   runSyncJob: (jobType: string, range: "day" | "week" | "month" | "all" = "week", force = false) =>
@@ -725,6 +915,9 @@ return {
   advancedRebuildAll: () => post<{ run_id: string }>("/sync/advanced/rebuild-all"),
   advancedResyncAll: (confirm?: string) => post<{ run_id: string }>("/sync/advanced/resync-all", confirm ? { confirm } : undefined),
   health: () => get<Health>("/health"),
+  scannerDay: (day?: string) => get<ScannerDay>(`/scanner/day${day ? `?day=${encodeURIComponent(day)}` : ""}`),
+  scannerSettings: () => get<ScannerSettings>("/scanner/settings"),
+  saveScannerSettings: (symbols: string[], base_revision: number) => put<ScannerSettings>("/scanner/settings", { symbols, base_revision }),
   tradingViewAlerts: (params?: string) =>
     get<TradingViewAlert[]>(`/tradingview/alerts${params ? `?${params}` : ""}`),
   tradingViewAlert: (alertId: string) =>

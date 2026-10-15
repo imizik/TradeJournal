@@ -12,7 +12,7 @@ import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoFinancials from "./SymbolInfoFinancials";
 import SymbolInfoForecast from "./SymbolInfoForecast";
 import SymbolInfoNews, { LIT_MS } from "./SymbolInfoNews";
-import SymbolInfoPeers from "./SymbolInfoPeers";
+import SymbolInfoPeers, { usePeers } from "./SymbolInfoPeers";
 import SymbolInfoShort from "./SymbolInfoShort";
 import SymbolInfoYou from "./SymbolInfoYou";
 
@@ -46,6 +46,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const [retry, setRetry] = useState(0);
   // A news marker was clicked (T3.5): show the News tab, expanded, whatever was open before. A panel that mounts with the click keeps it.
   const focused = useRef(false);
+  const tabRow = useRef<HTMLDivElement>(null);
   const [lit, setLit] = useState<NewsFocus | null>(null);
 
   useEffect(() => {
@@ -97,27 +98,54 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     try { localStorage.setItem(TAB_KEY, tab); } catch { /* keep working without storage */ }
   }
 
+  // The tab row scrolls sideways at a narrow width: bring the chosen tab into it (sideways only, so the dock itself does not jump).
+  useEffect(() => {
+    if (!view.expanded) return;
+    const tab = document.getElementById(`${id}-${view.tab}`);
+    const list = tab?.parentElement;
+    if (!tab || !list) return;
+    if (tab.offsetLeft < list.scrollLeft) list.scrollLeft = tab.offsetLeft;
+    else if (tab.offsetLeft + tab.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = tab.offsetLeft + tab.offsetWidth - list.clientWidth;
+  }, [id, view.tab, view.expanded]);
+
+  // A mouse wheel only scrolls up and down, and the row has no scrollbar: turn the wheel sideways while the row has room to move.
+  useEffect(() => {
+    const list = tabRow.current;
+    if (!view.expanded || !list) return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return; // trackpads already scroll sideways
+      const room = list.scrollWidth - list.clientWidth;
+      if (room <= 0 || (event.deltaY < 0 && list.scrollLeft <= 0) || (event.deltaY > 0 && list.scrollLeft >= room - 1)) return; // let the dock scroll
+      event.preventDefault();
+      list.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    };
+    list.addEventListener("wheel", onWheel, { passive: false });
+    return () => list.removeEventListener("wheel", onWheel);
+  }, [view.expanded]);
+
   const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
   const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
     : result?.key === `${view.tab}|${symbol}` ? result : null;
+  const peersResult = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview");
+  const peers = onSelectSymbol ? <SymbolInfoPeers symbol={symbol} result={peersResult} onSelect={onSelectSymbol} /> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
-      {/* Names never squeeze into each other: a narrow dock wraps the tabs onto a second row. */}
-      <div role="tablist" aria-label="Symbol info tabs" className="flex flex-wrap border-y border-slate-700/40">
+      {/* One row. Names never squeeze into each other: a narrow dock scrolls the row sideways, and the chosen tab is kept in view. */}
+      <div ref={tabRow} role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-slate-700/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
             const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
             if (next != null) { event.preventDefault(); event.stopPropagation(); select(TABS[next]); document.getElementById(`${id}-${TABS[next]}`)?.focus(); }
-          }} className={`min-h-11 flex-auto whitespace-nowrap px-2 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
+          }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-sky-400 bg-sky-400/5 text-sky-300" : "border-transparent text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
-      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
-        {/* Peers live in the Overview tab rather than above every tab. */}
-        {view.tab === "Overview" && onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
+      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
-          : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
+          : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
+              peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}
+              peerGroup={peersResult?.symbol === symbol && peersResult.data?.source.provider === "curated" ? peersResult.data.source.label.replace(/^Peer group: /, "") : undefined}>{peers}</SymbolInfoOverview>
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />
             : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={lit?.symbol === symbol ? lit : null} />
@@ -125,6 +153,8 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
           : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
           : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
+        {/* Peers are Overview's last block; while Overview loads or fails they still show below. */}
+        {view.tab === "Overview" && !shown?.data && peers && <div className="mt-3">{peers}</div>}
       </div>
     </div>}
   </section>;

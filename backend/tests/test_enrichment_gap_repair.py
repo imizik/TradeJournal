@@ -204,3 +204,24 @@ def test_recomputed_path_row_keeps_stored_values_when_fills_are_unchanged(sessio
     assert stored.underlying_mfe_pct == 1.0
     assert stored.mfe_atr_multiple == 0.5
     assert stored.post_exit_mfe_30m == 0.8
+
+
+def test_path_metrics_use_the_fill_underlying_price_when_context_has_none(session):
+    # A fill at exactly 09:30 has no completed bar, so its context has no entry
+    # price; the stored underlying price (a Decimal column) is the fallback.
+    entry = _fill(session, instrument_type="stock", side="buy", executed_at=datetime(2026, 5, 14, 10, 0),
+                  underlying_price_at_fill=100)
+    exit_ = _fill(session, instrument_type="stock", side="sell", executed_at=datetime(2026, 5, 14, 10, 30))
+    trade = _trade(session, instrument_type="stock", fills=[entry])
+    session.add(TradeFill(trade_id=trade.id, fill_id=exit_.id, role="exit"))
+    session.commit()
+    session.expire_all()
+    fills = [session.get(Fill, entry.id), session.get(Fill, exit_.id)]
+    assert type(fills[0].underlying_price_at_fill).__name__ == "Decimal"
+    bars = [{"t": f"2026-05-14T14:{minute:02d}:00Z", "o": 100, "h": 100 + minute / 10, "l": 99.5, "c": 100, "v": 1000}
+            for minute in range(0, 60)]
+
+    metrics = trade_path._compute(trade, fills, {}, {("NVDA", "2026-05-14"): bars})
+
+    assert metrics.underlying_mfe_pct == pytest.approx(2.9)
+    assert metrics.underlying_mae_pct == pytest.approx(0.5)

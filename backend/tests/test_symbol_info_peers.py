@@ -49,6 +49,8 @@ def test_one_symbol_quote_comes_back_as_an_object_not_a_list():
 
 # --------------------------------------------------------------------- fetch
 
+NO_RATIOS = lambda _: {"rows": {}, "fetched_at": None, "message": None}  # noqa: E731
+
 @pytest.fixture
 def polygon(monkeypatch):
     calls = []
@@ -71,7 +73,7 @@ def feed(tmp_path, clock, quote_calls=None, fail=False):
         if fail:
             raise ChartFeedError("Tradier is down.")
         return QUOTES, clock[0], None
-    return SymbolPeers(root=tmp_path, clock=lambda: clock[0], quotes=quotes)
+    return SymbolPeers(root=tmp_path, clock=lambda: clock[0], quotes=quotes, groups={}, ratios=NO_RATIOS)
 
 
 def test_one_batched_quote_call_serves_every_peer_and_polygon_is_cached_seven_days(tmp_path, polygon):
@@ -173,5 +175,67 @@ def test_class_share_tickers_use_polygons_dot_spelling_in_one_path_segment(tmp_p
     monkeypatch.setattr(module.enricher, "POLYGON_API_KEY", "test-secret")
     monkeypatch.setattr(module.httpx, "get", get)
     monkeypatch.setattr(module.enricher._limiter, "reserve_within", lambda _: 0)
-    SymbolPeers(root=tmp_path, clock=lambda: 1_000_000, quotes=lambda _: ({}, 0, None)).view("BRK/B")
+    SymbolPeers(root=tmp_path, clock=lambda: 1_000_000, quotes=lambda _: ({}, 0, None), groups={}, ratios=NO_RATIOS).view("BRK/B")
     assert urls == ["https://api.polygon.io/v1/related-companies/BRK.B"]
+
+
+# ------------------------------------------------------- curated groups and valuation
+
+def test_every_curated_group_member_gets_its_group_and_never_itself():
+    from app.engine.symbol_info_peers import MAX_PEERS, load_groups
+
+    groups = load_groups()
+    assert groups["MU"][0] == "Memory and storage" and groups["MU"][1][:2] == ["SNDK", "WDC"]
+    assert groups["MRVL"][0] == "GPUs and AI compute chips"  # in two groups, the first wins
+    assert groups["ALAB"][0] == "AI networking and connectivity"
+    for symbol, (_, peers) in groups.items():
+        assert symbol not in peers and 0 < len(peers) <= MAX_PEERS and len(set(peers)) == len(peers)
+
+
+def test_a_curated_symbol_never_asks_polygon_and_carries_the_peers_median(tmp_path, polygon):
+    calls, _ = polygon
+    rows = {"AMD": {"pe": 80, "price_to_sales": 9}, "AVGO": {"pe": 40, "price_to_sales": 20},
+            "INTC": {"pe": -5, "price_to_sales": 2}, "QCOM": {"pe": 15, "price_to_sales": 4}}
+    asked = []
+
+    def ratios(tickers):
+        asked.append(tickers)
+        return {"rows": rows, "fetched_at": 999, "message": None}
+
+    view = SymbolPeers(root=tmp_path, clock=lambda: 1_000_000.0, quotes=lambda _: (QUOTES, 0, None),
+                       groups={"NVDA": ("Chips", ["AMD", "AVGO", "INTC", "QCOM"])}, ratios=ratios).view("NVDA")
+    assert calls == [] and view["source"]["label"] == "Peer group: Chips" and [p["symbol"] for p in view["peers"]] == ["AMD", "AVGO", "INTC", "QCOM"]
+    assert asked == [["AMD", "AVGO", "INTC", "QCOM"]]  # one batched read
+    valuation = view["valuation"]
+    assert valuation["state"] == "ready" and valuation["fetched_at"] == 999
+    assert valuation["median"]["pe"] == 40 and valuation["counted"]["pe"] == 3  # INTC's loss is not a multiple
+    assert valuation["median"]["price_to_sales"] == 6.5 and valuation["median"]["price_to_book"] is None  # fewer than three
+
+
+def test_a_failed_ratio_read_keeps_the_chips(tmp_path, polygon):
+    def ratios(_):
+        raise RuntimeError("boom")
+
+    view = SymbolPeers(root=tmp_path, clock=lambda: 1_000_000.0, quotes=lambda _: (QUOTES, 0, None),
+                       groups={"NVDA": ("Chips", ["AMD", "AVGO"])}, ratios=ratios).view("NVDA")
+    assert view["state"] == "ready" and len(view["peers"]) == 2
+    assert view["valuation"]["state"] == "unavailable" and view["valuation"]["message"]
+
+
+def test_peer_ratios_is_one_batched_tradier_read(tmp_path, monkeypatch):
+    from app.engine import symbol_info_tradier as tradier_module
+
+    events = tradier_module.SymbolEvents(root=tmp_path, clock=lambda: 1_000_000.0)
+    reads = []
+    monkeypatch.setattr(tradier_module.tradier, "tradier_configured", lambda: True)
+    monkeypatch.setattr(events, "_read", lambda dataset, symbols: reads.append((dataset, symbols)) or {s: [{"pe": 10.0}] for s in symbols})
+    out = events.peer_ratios(["AMD", "AVGO", "QCOM"])
+    assert reads == [("ratios", ["AMD", "AVGO", "QCOM"])] and out["rows"]["AVGO"] == {"pe": 10.0} and out["message"] is None
+    events.peer_ratios(["AMD", "AVGO", "QCOM"])
+    assert len(reads) == 1  # cached a day
+
+
+def test_no_groups_file_means_polygon_for_every_symbol(tmp_path):
+    from app.engine.symbol_info_peers import load_groups
+
+    assert load_groups(tmp_path / "missing.json") == {}

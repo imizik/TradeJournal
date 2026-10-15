@@ -3,16 +3,11 @@ import DailyAiPanel from "@/components/DailyAiPanel";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
+import { buildOpenPositionMeta, computeUnrealizedPnl, isEntryFill, type OpenPositionMeta } from "@/lib/dashboard";
 
 type TradeWithFills = {
   trade: Trade;
   fills: Fill[];
-};
-
-type OpenPositionMeta = {
-  openedQty: number;
-  exitedQty: number;
-  qtyLeft: number;
 };
 
 function dateKey(value: string | null | undefined) {
@@ -64,23 +59,6 @@ function pnlColor(value: number | null | undefined) {
   return value >= 0 ? "text-emerald-400" : "text-red-400";
 }
 
-function isEntryFill(fill: Fill) {
-  return fill.side === "buy_to_open" || fill.side === "sell_to_open" || fill.side === "buy";
-}
-
-function buildOpenPositionMeta(trade: Trade, fills: Fill[]): OpenPositionMeta {
-  const entryQty = fills.filter(isEntryFill).reduce((sum, fill) => sum + fill.contracts, 0);
-  const exitedQty = fills.filter((fill) => !isEntryFill(fill)).reduce((sum, fill) => sum + fill.contracts, 0);
-  const openedQty = entryQty || trade.contracts;
-  const qtyLeft = Math.max(openedQty - exitedQty, 0);
-
-  return {
-    openedQty,
-    exitedQty,
-    qtyLeft,
-  };
-}
-
 function tradeActivityKeys(trade: Trade) {
   return [dateKey(trade.opened_at), dateKey(trade.closed_at)].filter(Boolean) as string[];
 }
@@ -114,17 +92,9 @@ function currentMark(trade: Trade, quote: PositionQuote | undefined) {
   return quote.option_mid ?? quote.option_last_price;
 }
 
-function markForPnl(trade: Trade, quote: PositionQuote | undefined) {
-  const mark = currentMark(trade, quote);
-  if (mark == null) return null;
-  return trade.instrument_type === "option" ? mark * 100 : mark;
-}
-
 function unrealizedPnl(trade: Trade, meta: OpenPositionMeta, quote: PositionQuote | undefined) {
   if (trade.status !== "open" || meta.qtyLeft <= 0) return null;
-  const mark = markForPnl(trade, quote);
-  if (mark == null) return null;
-  return (mark - trade.avg_entry_premium) * meta.qtyLeft;
+  return computeUnrealizedPnl(trade, meta, quote);
 }
 
 function buildFillChips(fill: Fill) {

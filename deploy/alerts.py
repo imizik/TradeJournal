@@ -18,7 +18,10 @@ from pathlib import Path
 import subprocess
 import time
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import httpx
 
 API = "http://127.0.0.1:8080"
 ENV_FILE = Path("/etc/tradejournal/alerts.env")
@@ -52,6 +55,18 @@ SERVICES = {
     "tradejournal-rvol-history.service": (
         "Relative volume history", "The morning relative-volume history couldn't be started, so chart RVol may be missing today."
     ),
+    "tradejournal-market-context.service": (
+        "Earnings and VIX for Jo", "The earnings and VIX refresh couldn't be started; Jo's checks show the older values with their age."
+    ),
+    "tradejournal-plan-reviews.service": (
+        "Nightly AI reviews", "Tonight's daily reviews on the Claude plan didn't run; the Daily page says why."
+    ),
+    "tradejournal-depth-recorder.service": (
+        "Depth recorder", "The Level 2 depth recorder stopped, so the watchlist isn't being recorded."
+    ),
+    "tradejournal-depth-upload.service": (
+        "Depth upload", "Finished depth days didn't reach R2; they stay on the VPS until an upload succeeds."
+    ),
 }
 TIMERS = {
     "tradejournal-backup.timer": "Nightly backup",
@@ -60,6 +75,12 @@ TIMERS = {
     "tradejournal-gmail-sync.timer": "Five-minute Gmail check",
     "tradejournal-options-snapshot.timer": "After-close options snapshot",
     "tradejournal-rvol-history.timer": "Morning relative volume history",
+    "tradejournal-market-context.timer": "Earnings and VIX for Jo",
+}
+# Opt-in schedules: only one the owner enabled can be "switched off".
+OPT_IN_TIMERS = {
+    "tradejournal-plan-reviews.timer": "Nightly AI reviews",
+    "tradejournal-depth-upload.timer": "Nightly depth upload",
 }
 
 
@@ -81,7 +102,7 @@ def load_config() -> dict[str, str]:
                 config[key.strip()] = value.strip().strip("'\"")
     except OSError:
         pass
-    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "ALERT_APP_URL", "HEALTHCHECK_PING_URL"}})
+    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL"}})
     return config
 
 
@@ -154,9 +175,9 @@ def unit_problems(units: dict[str, dict[str, str]]) -> dict[str, Problem | None]
         elif unit.get("Result") == "success" and unit.get("ExecMainExitTimestampMonotonic", "0") != "0":
             # Only a run since boot proves recovery; a reboot resets the result.
             observed[name] = None
-    for name, label in TIMERS.items():
+    for name, label in {**TIMERS, **OPT_IN_TIMERS}.items():
         unit = units.get(name, {})
-        if unit.get("LoadState") != "loaded":
+        if unit.get("LoadState") != "loaded" or (name in OPT_IN_TIMERS and unit.get("UnitFileState") != "enabled"):
             continue
         observed[name] = None if unit.get("ActiveState") == "active" else Problem(
             f"{label} is switched off",
@@ -169,8 +190,8 @@ def unit_problems(units: dict[str, dict[str, str]]) -> dict[str, Problem | None]
 
 def systemd_units() -> dict[str, dict[str, str]]:
     output = subprocess.run(
-        ["systemctl", "show", *SERVICES, *TIMERS,
-         "--property=Id,LoadState,ActiveState,Result,ExecMainExitTimestampMonotonic"],
+        ["systemctl", "show", *SERVICES, *TIMERS, *OPT_IN_TIMERS,
+         "--property=Id,LoadState,UnitFileState,ActiveState,Result,ExecMainExitTimestampMonotonic"],
         check=True, capture_output=True, text=True,
     ).stdout
     units = {}
@@ -258,6 +279,15 @@ def publish(config: dict[str, str], title: str, message: str, *, recovered: bool
     if config.get("NTFY_TOKEN"):
         headers["Authorization"] = f"Bearer {config['NTFY_TOKEN']}"
     request = Request(f"{target.scheme}://{target.netloc}/", data=json.dumps(body).encode(), headers=headers, method="POST")
+    if config.get("NTFY_IPV4_ONLY", "").strip().lower() == "true":
+        try:
+            with httpx.Client(transport=httpx.HTTPTransport(local_address="0.0.0.0"), timeout=15) as client:
+                response = client.post(request.full_url, content=request.data, headers=headers)
+        except httpx.HTTPError as exc:
+            raise URLError(f"ntfy could not be reached ({type(exc).__name__})") from exc
+        if not 200 <= response.status_code < 300:
+            raise HTTPError(request.full_url, response.status_code, "ntfy refused the notification", {}, None)
+        return
     with urlopen(request, timeout=15):
         pass
 

@@ -1,7 +1,7 @@
 # Research Studio R3: connected workspace
 
-R3 was selected by the user after R2 merged. R4 variants/conclusions, Factory
-promotion, provider fetching, new datasets and VPS provisioning remain unselected.
+R3 was selected by the user after R2 merged. R4 was subsequently selected for [variants, conclusions and UI clarity](research-studio-r4.md). Factory
+promotion, provider fetching and new datasets remain unselected; later manual activation is separate from this implementation.
 The [roadmap](../strategy-workbench-roadmap.md), [R1](research-studio-r1.md) and
 [R2](research-studio-r2.md) own observation and analysis semantics.
 

@@ -97,13 +97,18 @@ jobs:
       # On a push to main the docs-freshness tripwire is left out: a green CI
       # run on main is what publishes a release, and overdue documentation must
       # not hold a working fix off the server. Pull requests still run it.
+      #
+      # Four workers match the runner's four cores; tests/conftest.py gives
+      # each worker its own database and scratch directories. Durations are
+      # very uneven (a few factory tests take 10-20 s each), so worksteal
+      # rebalances instead of leaving one worker with the long tail.
       - name: Tests
         working-directory: backend
         run: |
           if [ "${{ github.event_name }}" = push ]; then
-            pytest -q --deselect tests/test_docs_freshness.py::test_the_drift_pass_is_not_overdue
+            pytest -q -n 4 --dist worksteal --deselect tests/test_docs_freshness.py::test_the_drift_pass_is_not_overdue
           else
-            pytest -q
+            pytest -q -n 4 --dist worksteal
           fi
 
   frontend:
@@ -132,6 +137,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Direct owner Unix transport boundary
+        working-directory: frontend
+        run: node --test scripts/advisor-owner.test.js
+
       # Catches server-component and route errors that typecheck alone misses.
       # next/font fetches Google Fonts at build time, which needs network.
       - name: Build
@@ -146,12 +155,19 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # Three shards of the ordinary suite, plus one runner for the
+      # authenticated and sample-decision suites, which used to run after
+      # shard 1 and made it the long pole.
       matrix:
         include:
-          - shard: "1/2"
+          - shard: "1/3"
             artifact: one
-          - shard: "2/2"
+          - shard: "2/3"
             artifact: two
+          - shard: "3/3"
+            artifact: three
+          - shard: access
+            artifact: access
     steps:
       - uses: actions/checkout@v4
 
@@ -196,16 +212,26 @@ jobs:
       # only check that proves a page renders; typecheck, lint and build all
       # pass on a component that is broken at runtime.
       - name: Browser smoke tests
+        if: matrix.shard != 'access'
         working-directory: frontend
         run: npm run e2e -- --shard=${{ matrix.shard }}
 
+      # The access suites start the built frontend without building it, so
+      # this runner builds it the way the ordinary suite does.
+      - name: Build frontend for access suites
+        if: matrix.shard == 'access'
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: /api/backend
+        run: npm run build
+
       - name: Authenticated browser boundaries
-        if: matrix.shard == '1/2'
+        if: matrix.shard == 'access'
         working-directory: frontend
         run: npx playwright test --config playwright.auth.config.ts
 
       - name: Sample decision browser boundaries
-        if: matrix.shard == '1/2'
+        if: matrix.shard == 'access'
         working-directory: frontend
         run: npx playwright test --config playwright.sample.config.ts
 
@@ -324,7 +350,7 @@ jobs:
             cp "$REPORT/comment.md" "$BODY"
           elif [ "$E2E_RESULT" = "failure" ]; then
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
-              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report-one\` and \`playwright-report-two\` downloads, one per browser shard: [test run]($RUN_URL)." \
+              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report-*\` downloads, one per browser shard: [test run]($RUN_URL)." \
               > "$BODY"
           else
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \

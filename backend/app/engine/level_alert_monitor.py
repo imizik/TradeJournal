@@ -65,9 +65,10 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
-                 clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None):
+                 clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
+        self.scanner = scanner  # Setup scanner S1 (off unless SETUP_SCANNER_ENABLED), same pass and feed
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -122,11 +123,15 @@ class LevelAlertMonitor:
             await self._run_alerts()
         finally:
             # Paper plans are judged even when a level-alert stage failed this pass.
-            if self.paper is not None:
-                try:
-                    await asyncio.to_thread(self.paper.run)
-                finally:
-                    await asyncio.to_thread(self.paper.deliver)
+            try:
+                if self.paper is not None:
+                    try:
+                        await asyncio.to_thread(self.paper.run)
+                    finally:
+                        await asyncio.to_thread(self.paper.deliver)
+            finally:
+                if self.scanner is not None:
+                    await asyncio.to_thread(self.scanner.run)
 
     async def _run_alerts(self) -> None:
         await self._record_found()

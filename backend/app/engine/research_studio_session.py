@@ -7,11 +7,12 @@ import threading
 import time
 import uuid
 
-from app.engine.research_studio import CORE_UNIVERSE, DISCOVERY_END, DISCOVERY_START, FEATURE_UNITS, Observations, parse_definition
+from app.engine.research_studio import CORE_UNIVERSE, DISCOVERY_END, DISCOVERY_START, FEATURE_UNITS, NEWER_PERIODS, NEWER_PROTOCOL, WARMUP_START, Observations, parse_definition
 from app.engine.research_studio_analysis import canonical_bytes
 from app.engine.market_map import ET
 from app.engine.research_studio_store import decode_snapshot
 from app.engine.research_studio_data import engine_fingerprint
+from app.engine.research_studio_variants import Variants
 
 
 class Busy(ValueError):
@@ -28,6 +29,7 @@ class ResearchSession:
         self.execution = threading.Lock()
         self.worker = None
         self.last_submission = None
+        self.variants = Variants(store)
 
     @contextmanager
     def _prepare(self):
@@ -38,27 +40,45 @@ class ResearchSession:
         finally:
             self.preparation.release()
 
-    def _observations(self, definition, *, fresh=False):
-        key = (tuple(sorted(definition.universe)), definition.end)
+    def _observations(self, definition, *, fresh=False, parent_run_id=None):
+        if parent_run_id:
+            self.variants.definition(parent_run_id, definition)
+        if definition.version == 2:
+            if not getattr(self.source, "allow_newer_mu", False):
+                raise ValueError("newer MU study is not operator-approved")
+            # Commit the source scope before reading newer bytes. This conservatively
+            # marks all loaded warm-up/analysis dates exposed for future research.
+            with self.store._root() as fd:
+                self.store._immutable(fd, f"source-exposure.{definition.end}.json", canonical_bytes({
+                    "protocol": NEWER_PROTOCOL, "symbols": ["MU", "SPY"],
+                    "source_start": str(WARMUP_START), "source_end": str(definition.end),
+                    "kind": "exploratory_source_exposure", "independent_validation": False}))
+        key = (definition.version, tuple(sorted(definition.universe)), definition.end, parent_run_id)
         if fresh or self.key != key:
             # Drop the old population before allocating a replacement.
             self.observations = None
             self.chart_snapshot = None
             self.key = None
-            self.observations = Observations(self.source.snapshot(definition.universe, through=definition.end))
+            snapshot = self._saved_snapshot(parent_run_id) if parent_run_id else (self.source.snapshot(definition.universe, through=definition.end) if definition.version == 1 else self.source.snapshot(definition.universe, through=definition.end, version=2))
+            self.observations = Observations(snapshot)
             self.chart_snapshot = self.observations.snapshot
             self.key = key
         return self.observations
 
     def config(self):
-        return {"universe": list(CORE_UNIVERSE), "start": str(DISCOVERY_START), "end": str(DISCOVERY_END),
-                "features": dict(FEATURE_UNITS), "enabled": True}
+        result = {"universe": list(CORE_UNIVERSE), "start": str(DISCOVERY_START), "end": str(DISCOVERY_END),
+                "features": dict(FEATURE_UNITS), "enabled": True, "capabilities": ["variants", "conclusions"]}
 
-    def preview(self, raw):
+        if getattr(self.source, "allow_newer_mu", False):
+            result["newer_mu"] = {"protocol": NEWER_PROTOCOL,
+                "periods": [{"label": label, "start": str(start), "end": str(end)} for label, start, end in NEWER_PERIODS]}
+        return result
+
+    def preview(self, raw, parent_run_id=None):
         definition = parse_definition(raw)
         with self._prepare():
             began = time.perf_counter()
-            result = self._observations(definition).preview(definition)
+            result = self._observations(definition, parent_run_id=parent_run_id).preview(definition)
             return {**result, "elapsed_ms": (time.perf_counter() - began) * 1000}
 
     def enqueue(self, raw, operation_id, outcome_informed=False):
@@ -66,18 +86,53 @@ class ResearchSession:
         if type(outcome_informed) is not bool or str(uuid.UUID(operation_id)) != operation_id:
             raise ValueError("canonical operation UUID and boolean provenance required")
         with self._prepare():
-            obs = self._observations(definition, fresh=True)
-            status = self.store.enqueue(obs.snapshot, definition, operation_id)
+            with self.store._lock("variants.lock", nonblocking=True):
+                if self.variants._artifact(f"r4-operation.{operation_id}.json") is not None:
+                    raise ValueError("operation id reused for another research action")
+                return self._enqueue_question(definition, operation_id, outcome_informed)
+
+    def _enqueue_question(self, definition, operation_id, outcome_informed):
+        obs = self._observations(definition, fresh=True)
+        status = self.store.enqueue(obs.snapshot, definition, operation_id)
+        self.last_submission = {"run_id": status["run_id"], "data_id": status["data_id"]}
+        with self.store._root() as fd:
+            self.store._immutable(fd, f"submission.{operation_id}.json", canonical_bytes(
+                {"run_id": status["run_id"], "outcome_informed": outcome_informed}))
+        return {**status, "definition": definition.canonical()}
+
+    def variant(self, raw, parent_run_id, operation_id, outcome_informed=False):
+        definition = parse_definition(raw)
+        if type(outcome_informed) is not bool or str(uuid.UUID(operation_id)) != operation_id:
+            raise ValueError("canonical operation UUID and boolean provenance required")
+        with self._prepare():
+            self.variants.definition(parent_run_id, definition)
+            # Reuse verified immutable parent bytes; submission needs neither
+            # the preview grid nor another decoded/re-serialized snapshot.
+            self.observations = self.chart_snapshot = self.key = None
+            gc.collect()
+            status = self.variants.enqueue(definition, parent_run_id, operation_id, outcome_informed)
             self.last_submission = {"run_id": status["run_id"], "data_id": status["data_id"]}
-            with self.store._root() as fd:
-                self.store._immutable(fd, f"submission.{operation_id}.json", canonical_bytes(
-                    {"run_id": status["run_id"], "outcome_informed": outcome_informed}))
-            return {**status, "definition": definition.canonical()}
+            return status
+
+    def compare(self, parent_run_id, variant_run_id, operation_id):
+        with self._prepare():
+            # Comparison has its own finite child in the existing execution lane.
+            # Drop warmed feature/snapshot objects before forking that child.
+            self.observations = self.chart_snapshot = self.key = None
+            gc.collect()
+            return self.variants.comparison(parent_run_id, variant_run_id, operation_id)
 
     def runs(self):
         with self.store._db() as db:
             ids = [r[0] for r in db.execute("SELECT id FROM run ORDER BY created DESC LIMIT 100")]
-            return {"runs": [{**self.store._status(db, r), "definition": self.store._request(db, r)["definition"]} for r in ids]}
+            runs = [{**self.store._status(db, r), "definition": self.store._request(db, r)["definition"]} for r in ids]
+        return {"runs": [{**r, "parent_run_id": self.variants.parent(r["run_id"])} for r in runs]}
+
+    def describe(self, run_id):
+        status = self.store.status(run_id)
+        with self.store._db() as db:
+            definition = self.store._request(db, run_id)["definition"]
+        return {**status, "definition": definition, "parent_run_id": self.variants.parent(run_id)}
 
     def execute(self):
         # Explicit finite dispatch; startup/restart never replays work.

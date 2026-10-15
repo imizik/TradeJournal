@@ -48,13 +48,6 @@ def nft_policy(export_uid: int, key_uid: int, dns_servers: list[str], host_ips: 
     export_uid, key_uid = _uid(export_uid), _uid(key_uid)
     if export_uid == key_uid:
         raise ValueError("publisher UIDs must be distinct canonical integers in range")
-    dns4, dns6 = _addresses(dns_servers, "DNS servers")
-    if not dns4 and not dns6:
-        raise ValueError("at least one DNS server is required")
-    host4, host6 = _addresses(host_ips, "host IPs")
-
-    v4_blocked = [ipaddress.ip_network(value) for value in _IPV4_BLOCKS] + host4
-    v6_blocked = [ipaddress.ip_network(value) for value in _IPV6_BLOCKS] + host6
     lines = [
         "table inet tj_journal_publishers {",
         "    chain output {",
@@ -62,7 +55,36 @@ def nft_policy(export_uid: int, key_uid: int, dns_servers: list[str], host_ips: 
         f"        meta skuid {export_uid} ip daddr 127.0.0.1 tcp dport 5432 accept",
         f"        meta skuid {export_uid} meta nfproto ipv4 drop",
         f"        meta skuid {export_uid} meta nfproto ipv6 drop",
+        *_key_rules(key_uid, dns_servers, host_ips),
+        "    }",
+        "}",
     ]
+    return "\n".join(lines) + "\n"
+
+
+def key_policy(key_uid: int, dns_servers: list[str], host_ips: list[str]) -> str:
+    """Return the same public-key-only rules for the advisor key publisher UID."""
+    lines = [
+        "table inet tj_advisor_keys {",
+        "    chain output {",
+        "        type filter hook output priority -50; policy accept;",
+        *_key_rules(_uid(key_uid), dns_servers, host_ips),
+        "    }",
+        "}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _key_rules(key_uid: int, dns_servers: list[str], host_ips: list[str]) -> list[str]:
+    """DNS to the named resolvers and public HTTPS only; private/host addresses denied."""
+    dns4, dns6 = _addresses(dns_servers, "DNS servers")
+    if not dns4 and not dns6:
+        raise ValueError("at least one DNS server is required")
+    host4, host6 = _addresses(host_ips, "host IPs")
+
+    v4_blocked = [ipaddress.ip_network(value) for value in _IPV4_BLOCKS] + host4
+    v6_blocked = [ipaddress.ip_network(value) for value in _IPV6_BLOCKS] + host6
+    lines = []
     if dns4:
         dns_set = _set(dns4)
         lines.extend((
@@ -82,7 +104,5 @@ def nft_policy(export_uid: int, key_uid: int, dns_servers: list[str], host_ips: 
         f"        meta skuid {key_uid} meta nfproto ipv6 tcp dport 443 accept",
         f"        meta skuid {key_uid} meta nfproto ipv4 drop",
         f"        meta skuid {key_uid} meta nfproto ipv6 drop",
-        "    }",
-        "}",
     ))
-    return "\n".join(lines) + "\n"
+    return lines

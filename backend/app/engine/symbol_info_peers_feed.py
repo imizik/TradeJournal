@@ -9,6 +9,10 @@
   ``BACKOFF_SECONDS``.
 * Tradier: one batched quote call for every peer, through the chart feed's budgeted read
   (``/v1/markets/quotes``, cached 15 s), so the peers share the chart's Tradier allowance.
+* A symbol in ``backend/app/data/peer_groups.json`` (hand-picked groups for the symbols the
+  owner trades) takes its peers from there and never asks Polygon.
+* The peers' valuation ratios: one batched Tradier fundamentals read for all of them, cached a
+  day like the Overview's own (``symbol_info_tradier``), reduced to a median per ratio.
 
 Normalizing is in ``symbol_info_peers``; this module only moves bytes.
 """
@@ -28,7 +32,7 @@ import httpx
 from app.engine import enricher
 from app.engine.api_wait import observed_sleep
 from app.engine.chart_feed import ChartFeedError, chart_feed
-from app.engine.symbol_info_peers import chips, normalize_related
+from app.engine.symbol_info_peers import chips, load_groups, normalize_related, valuation
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ TIMEOUT_SECONDS = 10
 URL = "https://api.polygon.io/v1/related-companies/{symbol}"
 POLYGON = {"provider": "polygon", "label": "Polygon related companies"}
 TRADIER = {"provider": "tradier", "label": "Tradier quotes"}
+RATIOS = "Tradier company fundamentals"
 
 
 class SourceError(Exception):
@@ -49,10 +54,14 @@ class SourceError(Exception):
 
 class SymbolPeers:
     def __init__(self, root: Path = CACHE_DIR, clock: Callable[[], float] = time.time,
-                 quotes: Callable[[list[str]], tuple[dict, float, str | None]] | None = None):
+                 quotes: Callable[[list[str]], tuple[dict, float, str | None]] | None = None,
+                 groups: dict[str, tuple[str, list[str]]] | None = None,
+                 ratios: Callable[[list[str]], dict] | None = None):
         self.root = root
         self._clock = clock
         self._quotes = quotes or self._read_quotes
+        self._groups = groups  # read on first use, not at import
+        self._ratios = ratios or self._read_ratios
         self._memory: dict[str, tuple[float, list[str]]] = {}
         self._quiet_until: dict[str, tuple[float, str]] = {}
         self._fetching = threading.Lock()
@@ -73,11 +82,33 @@ class SymbolPeers:
                 quotes.update(state="failed", message=str(exc))
         state = "unavailable" if tickers is None else "ready" if tickers else "none"
         return {"symbol": symbol, "as_of": datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "state": state, "source": source, "quotes": quotes, "peers": chips(tickers or [], data)}
+                "state": state, "source": source, "quotes": quotes, "peers": chips(tickers or [], data),
+                "valuation": self._valuation(tickers or [])}
+
+    def _valuation(self, tickers: list[str]) -> dict:
+        """The peers' median P/E, P/S, P/B and EV/EBITDA. Never raises: a failure is its message."""
+        out = {"source": RATIOS, "state": "none", "fetched_at": None, "message": None, "median": {}, "counted": {}}
+        if not tickers:
+            return out
+        try:
+            read = self._ratios(tickers)
+        except Exception as exc:  # the chips must not depend on the fundamentals read
+            log.warning("Peer ratios failed: %s", exc)
+            return {**out, "state": "unavailable", "message": "Peer valuation could not be read."}
+        found = valuation(read["rows"], tickers)
+        has = any(value is not None for value in found["median"].values())
+        return {**out, **found, "state": "ready" if has else "unavailable" if read["message"] else "none",
+                "fetched_at": read["fetched_at"], "message": read["message"]}
 
     @staticmethod
     def _read_quotes(tickers: list[str]) -> tuple[dict, float, str | None]:
         return chart_feed.read("/v1/markets/quotes", {"symbols": ",".join(sorted(tickers))}, 15)
+
+    @staticmethod
+    def _read_ratios(tickers: list[str]) -> dict:
+        from app.engine.symbol_info_tradier import symbol_events
+
+        return symbol_events.peer_ratios(tickers)
 
     # ----------------------------------------------------------------- polygon
 
@@ -107,6 +138,12 @@ class SymbolPeers:
             log.warning("Could not cache Polygon peers for %s: %s", symbol, exc)
 
     def _related(self, symbol: str, now: float) -> tuple[list[str] | None, dict]:
+        if self._groups is None:
+            self._groups = load_groups()
+        if symbol in self._groups:
+            name, tickers = self._groups[symbol]
+            return tickers, {"provider": "curated", "label": f"Peer group: {name}", "state": "ok", "fetched_at": None,
+                             "age_seconds": None, "message": None}
         cached = self._load(symbol)
         if cached and now - cached[0] < FRESH_SECONDS:
             return cached[1], status("ok", cached[0], now)

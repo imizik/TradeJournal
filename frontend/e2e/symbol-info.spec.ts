@@ -7,7 +7,9 @@ import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
 // The news markers (T3.5) are off here so these tests count the tabs' own reads; e2e/news-markers.spec.ts covers the markers.
+let quoteExtra: Record<string, unknown> = {}; // a test sets this before page.goto to give the chart's quote other numbers
 test.beforeEach(async ({ context, page }) => {
+  quoteExtra = {};
   await context.addInitScript(({ key, settings }) => {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
   }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"], newsHidden: true } });
@@ -19,7 +21,7 @@ test.beforeEach(async ({ context, page }) => {
     const bars = Array.from({ length: 10 }, (_, i) => ({ time: 1789392600 + i * 300, end_time: 1789392900 + i * 300, open: 100, high: 102, low: 99, close: 101, volume: 1000, extended: false }));
     await route.fulfill({ json: { symbol, session: "extended", provider: "Fixture", delayed: false, refresh_seconds: 15,
       checked_at: now, fetched_at: { intraday: now, quotes: now }, intraday_as_of: now, issues: [], quotes: [{ symbol, name: `${symbol} company`, instrument_type: symbol === "SPY" ? "etf" : "stock", last: 189.12, change: 2.2,
-        change_percentage: 1.18, volume: 112700000, previous_close: 186.92, trade_time: now, day_low: 185, day_high: 191, week_52_low: 86, week_52_high: 195 }], fills: [], fills_truncated: false,
+        change_percentage: 1.18, volume: 112700000, previous_close: 186.92, trade_time: now, day_low: 185, day_high: 191, week_52_low: 86, week_52_high: 195, ...quoteExtra }], fills: [], fills_truncated: false,
       panels: Object.fromEntries((query.get("intervals") ?? "5m").split(",").map((interval) => [interval, { bars, markers: [] }])), extras: {} } });
   });
   await page.route("**/api/backend/charts/stream?**", (route) => route.fulfill({ status: 503, body: "Fixture has no stream" }));
@@ -60,12 +62,12 @@ test("Overview combines the chart's existing quote with cached company fundament
   const info = panel(page);
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$189.12");
-  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00 – $191.00");
+  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00–191.00");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("NVDA company"); // Tradier fundamentals have no name; the quote's is used
   await expect(info.getByRole("heading", { name: "NVDA company" })).toHaveAttribute("title", /^Tradier chart quote/);
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
-  await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("68.00%"); // 13F share arrives as a fraction
+  await expect(info.getByRole("region", { name: "Key statistics" })).not.toContainText("Held by institutions"); // the 13F block below carries it, once
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
   await expect(info.getByText("52.5", { exact: true }).locator("..")).toHaveAttribute("title", /Tradier company fundamentals · read/);
   // Ownership: the 13F block comes from the overview payload; insiders are one separate Yahoo-backed read.
@@ -271,10 +273,11 @@ test("Events shows the next report with its status, the last eight reports, divi
   await expect(next.getByText("Time of day not published")).toHaveAttribute("title", /dates only/);
   await expect(next.getByRole("listitem")).toHaveCount(8);
   await expect(next.getByRole("listitem").first()).toContainText("Wed, Aug 26, 2026");
-  await expect(next).toContainText("Tradier corporate calendar · read Oct 5, 9:40 AM ET");
+  await expect(info.locator("[data-source-footer]")).toHaveText("Tradier corporate calendar + Tradier dividends + Tradier corporate actions · read Oct 5, 9:40 AM ET"); // one source line for the whole tab, not one per block
   const dividends = info.getByRole("region", { name: "Dividends" });
   await expect(dividends).toContainText("Next ex-dividend");
-  await expect(dividends).toContainText("Thu, Dec 3, 2026 · $0.25 · pays Sat, Dec 26, 2026");
+  await expect(dividends).toContainText("Thu, Dec 3, 2026 · $0.25");
+  await expect(dividends).toContainText("pays Sat, Dec 26, 2026");
   await expect(info.getByRole("region", { name: "Splits · last two years" })).toContainText("No splits in the last two years");
   expect(reads).toHaveLength(1);
   // Dense content scrolls inside the dock; the page itself does not grow.
@@ -299,7 +302,7 @@ test("Events shows the next report with its status, the last eight reports, divi
   // A failed calendar degrades only its own block.
   await choose(page, "AMD");
   await expect(next).toContainText("Tradier could not read the corporate calendar (503).");
-  await expect(next).toContainText("not read yet");
+  await expect(info.locator("[data-source-footer]")).toContainText("Tradier corporate calendar · not read yet");
   await expect(info.getByRole("region", { name: "Splits · last two years" })).toContainText("No splits in the last two years");
   expect(reads.map((url) => url.split("/").at(-2))).toEqual(["NVDA", "AAPL", "TSLA", "SPY", "AMD"]);
 });
@@ -442,16 +445,16 @@ test("News lists headlines with Focused on, expands summaries, shows provider se
   await expect(info.getByRole("link", { name: "Nvidia ships a chip" })).toHaveAttribute("target", "_blank");
   await expect(info.getByRole("link", { name: "Five stocks moving today" })).toHaveCount(0); // Focused hides the roundup
   await expect(info.getByText("Three tickers stay")).toBeVisible();
-  await expect(info.getByText("+2 tickers")).toBeVisible();
+  await expect(info.getByText("+2", { exact: true })).toHaveAttribute("title", /Tagged tickers: NVDA, AMD, AVGO/);
   await expect(info.getByText("5 min ago")).toHaveAttribute("title", "Oct 6, 10:55 AM ET");
-  await expect(info.getByText("Polygon: positive")).toHaveAttribute("title", /not ours: Strong demand\./);
+  await expect(info.getByText("Sentiment: positive")).toHaveAttribute("title", /not ours: Strong demand\./);
   await expect(info).toContainText("Polygon refused the read (429).");
   await expect(info).not.toContainText("Summary of Nvidia ships a chip");
   await info.getByRole("button", { name: /Show summary: Nvidia ships a chip/ }).click();
   await expect(info).toContainText("Summary of Nvidia ships a chip");
   await info.getByLabel("Focused").uncheck();
   await expect(info.getByRole("link", { name: "Five stocks moving today" })).toBeVisible();
-  await expect(info.getByText("+4 tickers")).toBeVisible();
+  await expect(info.getByText("+4", { exact: true })).toBeVisible();
 });
 
 test("News says so when the feed is empty", async ({ page }) => {
@@ -573,6 +576,8 @@ test("Short shows interest, days to cover, % of shares outstanding, ten sessions
   await expect(volume).toContainText("not of all trading");
   await expect(volume.getByText("51.5%", { exact: true })).toBeVisible();
   expect(reads).toEqual(["NVDA"]);
+  await expect(info.locator("[data-source-footer]")).toHaveCount(1); // one source line, not one per block
+  await expect(info.locator("[data-source-footer] > p")).toContainText("Polygon (FINRA short interest)");
   // A stale Polygon copy names its age; a symbol off the easy-to-borrow list is flagged; a missing share count omits only the percentage.
   await choose(page, "AMD");
   await expect(info.getByRole("region", { name: "Borrow" })).toContainText("Hard to borrow");
@@ -631,4 +636,169 @@ test("Financials draws eight quarters as bars with year-over-year growth, leaves
   await choose(page, "SPY");
   await expect(info).toContainText("Not available for ETFs or funds.");
   expect(reads).toEqual(["NVDA", "AMD", "SPY"]);
+});
+
+
+// ---- Dock tidy: one source line per tab, compact rows, missing is not zero, one row of tabs ----
+
+/** Micron's shape on a real read: Tradier sent every 13F count as 0, and the share count and prices are long. */
+function micron(): SymbolOverview {
+  const base = overview("NVDA");
+  const zeros = { as_of: "2026-09-30", holders: 0, percent_held: 0, buyers: 0, sellers: 0, new_holders: 0, sold_out_holders: 0, shares_bought: 0, shares_sold: 0 };
+  return { ...base, datasets: { ...base.datasets,
+    company: { ...base.datasets.company, name: "Micron Technology Inc", ownership: zeros },
+    statistics: { ...base.datasets.statistics, shares_outstanding: 1_120_000_000, institutional_ownership: 0, message: "Tradier refresh failed (503)." } } };
+}
+const INSIDERS = { symbol: "NVDA", state: "ready", source: "Yahoo, unofficial", fetched_at: OVERVIEW_READ, message: null, since: "2026-07-10", until: "2026-10-08", window_days: 90,
+  buys: { count: 0, shares: 0 }, sells: { count: 2, shares: 1_396_460 }, net_shares: -1_396_460, net_value: -306_933_628, excluded: 0, note: "Counts open-market purchases and sales only.",
+  latest: [{ date: "2026-08-21", insider: "MEHROTRA SANJAY", position: "President and Chief Executive Officer", kind: "sell", shares: 30460, value: 6786533 },
+    { date: "2026-08-18", insider: "STEVENS MARK A", position: "Director", kind: "sell", shares: 1366000, value: 300147095 }] };
+
+test("Overview is compact at the dock's width: one source line, one row per fact, no cut-off value, absent 13F is not zero", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  quoteExtra = { last: 1029, change: -6.84, change_percentage: -0.66, day_low: 1017, day_high: 1036.4, week_52_low: 186.25, week_52_high: 1255 };
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: micron() }));
+  await page.route("**/api/backend/charts/symbol/*/insiders", (route) => route.fulfill({ json: INSIDERS }));
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const ownership = info.getByRole("region", { name: "Ownership" });
+  await expect(ownership.getByRole("list", { name: "Latest insider transactions" })).toContainText("MEHROTRA SANJAY");
+  // The range fits on its row at a glance.
+  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$1,017.00–1,036.40");
+  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$186.25–1,255.00");
+  // One source line for the tab, not one per block; the block detail is in its hover title.
+  await expect(info.locator("[data-source-footer]")).toHaveCount(1);
+  const footer = info.locator("[data-source-footer] > p");
+  await expect(footer).toContainText("Tradier company fundamentals");
+  await expect(footer).toContainText("Yahoo, unofficial");
+  await expect(footer).toHaveAttribute("title", /Key statistics: Tradier company fundamentals/);
+  expect(((await info.innerText()).match(/Tradier company fundamentals/g) ?? []).length).toBe(1);
+  // Disclosures stay where they apply: a stale block and the unofficial insider source.
+  await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("Tradier refresh failed (503). Showing the cached copy (read Oct 5, 9:40 AM ET).");
+  await expect(ownership.getByRole("group", { name: "Insider activity" }).getByText("Yahoo, unofficial", { exact: true })).toBeVisible();
+  // Missing is not zero: all-zero 13F counts read as not reported, in both places that could show them.
+  await expect(ownership).toContainText("13F summary not reported by Tradier for this symbol.");
+  await expect(ownership.getByRole("group", { name: "13F institutional holders" })).not.toContainText("New holders");
+  await expect(ownership.getByRole("group", { name: "13F institutional holders" })).not.toContainText(/\b0\b/);
+  const held = info.getByRole("region", { name: "Key statistics" }).locator("div", { hasText: "Held by institutions" }).last();
+  await expect(held).toContainText("—");
+  await expect(info.getByText("Held by institutions")).toHaveCount(1);
+  // No value is cut off, and nothing pushes the dock sideways.
+  const cut = await info.evaluate((root) => [...root.querySelectorAll("dd")].filter((dd) => {
+    const row = dd.parentElement!.getBoundingClientRect();
+    const box = dd.getBoundingClientRect();
+    return dd.scrollWidth > dd.clientWidth || box.right > row.right + 0.5 || box.left < row.left - 0.5;
+  }).map((dd) => dd.textContent));
+  expect(cut).toEqual([]);
+  expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+  expect((await info.boundingBox())!.width).toBeLessThan(300);
+  // Seven tabs share one row at this width; the open one is marked.
+  const tops = await info.getByRole("tab").evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
+  expect(tops).toHaveLength(7);
+  await expect(info.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+  // A tab that scrolled out of the row is brought back when it is chosen.
+  await info.getByRole("tab", { name: "You", exact: true }).click();
+  const inRow = await info.getByRole("tab", { name: "You", exact: true }).evaluate((tab) => {
+    const row = tab.parentElement!.getBoundingClientRect(), box = tab.getBoundingClientRect();
+    return box.left >= row.left - 1 && box.right <= row.right + 1;
+  });
+  expect(inRow).toBe(true);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect(ownership).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 2200 }); // the whole tab in one picture
+  await page.screenshot({ path: test.info().outputPath("dock-tidy-overview-desktop.png"), animations: "disabled" });
+});
+
+test("a holder count of 0 beside other 13F activity reads as not reported, while real zeros stay zero", async ({ page }) => {
+  const odd = overview("NVDA");
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: { ...odd, datasets: { ...odd.datasets, company: { ...odd.datasets.company,
+    ownership: { as_of: "2026-09-30", holders: 0, percent_held: 0.41, buyers: 12, sellers: 9, new_holders: 0, sold_out_holders: 0, shares_bought: 1_000_000, shares_sold: 0 } } } } }));
+  await page.route("**/api/backend/charts/symbol/*/insiders", (route) => route.fulfill({ json: { ...INSIDERS, state: "none", latest: [], message: "No insider filings." } }));
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const group = info.getByRole("group", { name: "13F institutional holders" });
+  await expect(group.locator("div", { hasText: /^Holders/ }).last()).toContainText("—");
+  await expect(group.locator("div", { hasText: /^Held by institutions/ }).last()).toContainText("41.0%");
+  await expect(group.locator("div", { hasText: /^New holders/ }).last()).toContainText("0"); // a zero among real counts is a count
+  await expect(info.getByRole("region", { name: "Key statistics" })).not.toContainText("Held by institutions");
+});
+
+test("Events and You each end in one source line", async ({ page }) => {
+  await page.route("**/api/backend/charts/symbol/*/events", (route) => route.fulfill({ json: events("NVDA") }));
+  await page.goto("/charts");
+  const info = panel(page);
+  await expect(info.locator("dl")).toContainText("$1,300.00");
+  await expect(info.locator("[data-source-footer]")).toHaveCount(1);
+  await info.getByRole("tab", { name: "Events", exact: true }).click();
+  await expect(info.getByRole("region", { name: "Next earnings" })).toBeVisible();
+  await expect(info.locator("[data-source-footer]")).toHaveCount(1);
+});
+
+test("Overview blocks are edged and foldable, Peers sit last and stay folded, and a tap explains P/E", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  quoteExtra = { last: 1029, change: -6.84, change_percentage: -0.66, day_low: 1017, day_high: 1036.4, week_52_low: 186.25, week_52_high: 1255 };
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: micron() }));
+  await page.route("**/api/backend/charts/symbol/*/insiders", (route) => route.fulfill({ json: INSIDERS }));
+  const source = { provider: "polygon", label: "Polygon related companies", state: "ok", fetched_at: 1_790_000_000, age_seconds: 7200, message: null };
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: { symbol: "MU", as_of: "2026-10-08T15:00:00Z", state: "ready", source, quotes: { ...source, provider: "tradier", label: "Tradier quotes", age_seconds: null },
+    peers: [{ symbol: "WDC", name: "Western Digital", last: 120.5, change_percentage: 1.2 }, { symbol: "STX", name: "Seagate", last: 98.1, change_percentage: -0.4 }],
+    valuation: { source: "Tradier company fundamentals", state: "ready", fetched_at: 1_790_000_000, message: null, median: { pe: 31.2, price_to_sales: 4.1, price_to_book: null, ev_to_ebitda: null }, counted: { pe: 4, price_to_sales: 4, price_to_book: 2, ev_to_ebitda: 1 } } } }));
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect(info.getByRole("group", { name: "Peers" }).getByRole("button", { name: "Peer WDC" })).toBeVisible();
+  // Every block has its own edged header; Peers is the last block, after Ownership, above the one source line.
+  const order = await info.getByRole("tabpanel").evaluate((tab) => [...tab.querySelectorAll("section[aria-label]")].map((section) => section.getAttribute("aria-label")));
+  expect(order).toEqual(["Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
+  const peersBox = (await info.getByRole("region", { name: "Peers" }).boundingBox())!;
+  expect(peersBox.y).toBeGreaterThan((await info.getByRole("region", { name: "Ownership" }).boundingBox())!.y);
+  expect(peersBox.y).toBeLessThan((await info.locator("[data-source-footer]").boundingBox())!.y);
+  // A tap on a valuation label explains the number; the value stays on its row.
+  const valuation = info.getByRole("region", { name: "Valuation" });
+  await valuation.getByRole("button", { name: "P/E", exact: true }).click();
+  await expect(valuation.locator("[data-explain]")).toContainText("what you pay for $1 of profit");
+  await expect(valuation).toContainText("52.5");
+  // Beside the ratio: the peers' median, only where at least three peers report one.
+  await expect(valuation).toContainText("peers 31.2");
+  await expect(valuation).toContainText("peers 4.1");
+  expect(await valuation.getByText(/peers/).count()).toBe(2);
+  await page.setViewportSize({ width: 1440, height: 2200 });
+  await page.screenshot({ path: test.info().outputPath("dock-blocks-overview-desktop.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // A block with a stale copy inside cannot be folded away: the disclosure stays visible.
+  const stats = info.getByRole("region", { name: "Key statistics" });
+  await stats.getByRole("button", { name: "Key statistics" }).click();
+  await expect(stats.getByRole("button", { name: "Key statistics" })).toHaveAttribute("aria-expanded", "true");
+  await expect(stats).toContainText("Tradier refresh failed (503)");
+  // Folding Peers is kept on this device across a reload.
+  const peersHeader = info.getByRole("region", { name: "Peers" }).getByRole("button", { name: "Peers" });
+  await peersHeader.click();
+  await expect(peersHeader).toHaveAttribute("aria-expanded", "false");
+  await expect(info.getByRole("group", { name: "Peers" })).toHaveCount(0);
+  await page.reload();
+  await expect(info.getByRole("region", { name: "Valuation" })).toBeVisible();
+  await expect(info.getByRole("region", { name: "Peers" }).getByRole("button", { name: "Peers" })).toHaveAttribute("aria-expanded", "false");
+  // Nothing pushes the dock sideways.
+  expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+});
+
+test("a mouse wheel over the tab row scrolls it sideways, then hands back to the dock at the end", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
+  await page.goto("/charts");
+  const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
+  await row.getByRole("tab", { name: "Overview", exact: true }).click();
+  const left = () => row.evaluate((list) => list.scrollLeft);
+  expect(await row.evaluate((list) => list.scrollWidth > list.clientWidth)).toBe(true); // the dock is narrower than the row
+  await row.hover();
+  await page.mouse.wheel(0, 100);
+  await expect.poll(left).toBeGreaterThan(0);
+  await page.mouse.wheel(0, 2000);
+  const end = await row.evaluate((list) => list.scrollWidth - list.clientWidth);
+  await expect.poll(left).toBeGreaterThanOrEqual(end - 1);
+  await page.mouse.wheel(0, -2000);
+  await expect.poll(left).toBe(0);
 });
