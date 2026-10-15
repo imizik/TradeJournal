@@ -228,7 +228,17 @@ authorized activation; no existing grant is silently widened.
   bars or forward filling. Regular-session VWAP is cumulative
   `sum(((high+low+close)/3)*volume)/sum(volume)` from the same completed 1-minute
   bars; OR15 is the high/low of all 15 bars from the exchange open. Missing
-  required bars makes the affected aggregate unavailable. Before OR completion
+  required bars with an unknown cause makes the affected aggregate unavailable.
+  The publisher may reconcile at most eight interior minutes after OR15 through
+  complete, bounded IEX trade responses. A minute with no trades or only odd-lot
+  (`I`) trades has no provider price bar; its exact query window, retrieval time
+  and trade timestamps/conditions are retained as `omitted_minutes` in the bar
+  manifest (Alpaca's [bar-generation rules](https://docs.alpaca.markets/us/docs/market-data-faq)
+  explain these non-price-forming intervals). Those verified intervals contribute no invented OHLCV to the same
+  VWAP formula; the metric discloses `verified_iex_non_price_forming_minutes`.
+  Truncation, source errors, other trade conditions, unverified gaps and opening
+  range holes still withhold the affected metric. Five-minute buckets and
+  outcome/detector path-continuity rules stay strict. Before OR completion
   it is `not_ready`; regular-session metrics are not invented premarket.
   `input_manifest` retains the exact source bars needed to reproduce each
   aggregate, provider/feed, request window, retrieval time and payload hash.

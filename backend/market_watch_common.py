@@ -118,6 +118,42 @@ def previous_session_date(day: date) -> date | None:
     return None
 
 
+MAX_VERIFIED_OMISSIONS = 8
+MAX_OMISSION_TRADES = 200
+VERIFIED_OMISSION_REASON = "verified_iex_non_price_forming_minutes"
+
+
+def verified_omission_starts(proofs, *, opened, cutoff, finished):
+    """Reproduce bounded IEX no-bar evidence, without synthesizing OHLCV.
+
+    Alpaca does not emit a minute bar when only odd lots (condition I) trade,
+    or when no trades occur. Unknown/truncated/error responses never qualify.
+    Opening-range gaps remain unavailable under the existing strict rule.
+    """
+    if not isinstance(proofs, list) or len(proofs) > MAX_VERIFIED_OMISSIONS:
+        raise ValueError("invalid omitted-minute evidence")
+    starts = set()
+    for proof in proofs:
+        if not isinstance(proof, dict) or set(proof) != {"start", "end", "retrieved_at", "complete", "trades"} or proof["complete"] is not True:
+            raise ValueError("incomplete omitted-minute evidence")
+        start, end, retrieved = (parse_time(proof[k]) for k in ("start", "end", "retrieved_at"))
+        if (start.second or start.microsecond or end != start + timedelta(minutes=1)
+                or start < opened + timedelta(minutes=15) or end > cutoff
+                or not end <= retrieved <= finished or start in starts):
+            raise ValueError("invalid omitted-minute window")
+        trades = proof["trades"]
+        if not isinstance(trades, list) or len(trades) > MAX_OMISSION_TRADES:
+            raise ValueError("invalid omitted-minute trades")
+        for trade in trades:
+            if (not isinstance(trade, dict) or set(trade) != {"t", "c"}
+                    or not start <= parse_time(trade["t"]) < end
+                    or not isinstance(trade["c"], list) or not trade["c"]
+                    or any(not isinstance(c, str) for c in trade["c"]) or "I" not in trade["c"]):
+                raise ValueError("omitted minute contains unverified or price-forming trades")
+        starts.add(start)
+    return starts
+
+
 def validate_snapshot(record: dict) -> None:
     verify(record)
     allowed_top = {"schema_version", "created_at", "content_sha256", "snapshot_id", "protocol_id", "protocol_sha256",
@@ -204,6 +240,8 @@ def validate_snapshot(record: dict) -> None:
         if starts != sorted(set(starts)):
             raise ValueError("minute bar ordering or duplicates are invalid")
         if not bars:
+            if entries[0].get("omitted_minutes", []) != []:
+                raise ValueError("empty source bars cannot carry omitted-minute evidence")
             if group["bars_5m"] or group["bar_1m"] is not None or any(
                 group[field].get("value") is not None for field in ("price", "session_open", "vwap", "or15_high", "or15_low")
             ) or group["return_vs_prior_close"] is not None or group["distance_to_vwap"] is not None:
@@ -220,7 +258,12 @@ def validate_snapshot(record: dict) -> None:
                 raise ValueError("minute OHLCV is inconsistent")
         if bars:
             open_at = parse_time(record["session_open_at"])
-            contiguous = starts[0] == open_at and all(starts[i] == starts[i - 1] + timedelta(minutes=1) for i in range(1, len(starts)))
+            omitted = verified_omission_starts(entries[0].get("omitted_minutes", []), opened=open_at,
+                                              cutoff=parse_time(entries[0]["window_end"]), finished=finished)
+            required_minutes = {open_at + timedelta(minutes=i) for i in range(int((parse_time(bars[-1]["end"]) - open_at).total_seconds() // 60))}
+            if omitted & set(starts) or not omitted <= required_minutes:
+                raise ValueError("omitted-minute evidence overlaps bars or lies outside the bar path")
+            contiguous = starts[0] == open_at and required_minutes <= set(starts) | omitted
             opening_bar = bars[0] if starts[0] == open_at else None
             session_open = group["session_open"]
             if opening_bar:
@@ -236,6 +279,8 @@ def validate_snapshot(record: dict) -> None:
                 actual_vwap = group["vwap"].get("value")
                 if actual_vwap is None or not math.isclose(actual_vwap, expected_vwap, rel_tol=1e-12, abs_tol=1e-12):
                     raise ValueError("VWAP does not match its source bars")
+                if omitted and group["vwap"].get("reason") != VERIFIED_OMISSION_REASON:
+                    raise ValueError("VWAP must disclose verified IEX omissions")
             elif group["vwap"].get("value") is not None or group["vwap"].get("status") != "missing":
                 raise ValueError("VWAP must be unavailable when source bars are incomplete")
             buckets = []

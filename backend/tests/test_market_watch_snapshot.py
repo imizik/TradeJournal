@@ -20,7 +20,7 @@ def _bar(start, n):
             "l": price - .2, "c": price + .1, "v": 1000}
 
 
-def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_minute=False, missing_open=False):
+def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_minute=False, missing_open=False, missing_at=10):
     bars = {}
     for symbol in ("SPY", "QQQ"):
         bars[symbol] = [_bar(OPEN + timedelta(minutes=i), i) for i in range(30)]
@@ -34,7 +34,7 @@ def _sources(*, missing_qqq=False, stale=False, missing_minute=False, duplicate_
     if missing_open:
         bars["SPY"] = bars["SPY"][1:]
     if missing_minute:
-        bars["SPY"] = [row for i, row in enumerate(bars["SPY"]) if i != 10]
+        bars["SPY"] = [row for i, row in enumerate(bars["SPY"]) if i != missing_at]
     if duplicate_minute:
         bars["SPY"].append(dict(bars["SPY"][10]))
     return bars, daily
@@ -46,9 +46,10 @@ def fixture_snapshot(**options):
     vix = options.pop("vix", {"observed_at": now - timedelta(minutes=5), "value": 17.2, "change_pct": 2.1})
     news_items = options.pop("news_items", [])
     fail_calendar = options.pop("fail_calendar", False)
+    trades_reader = options.pop("trades_reader", None)
     bars, daily = _sources(**options)
     return build_snapshot(
-        now, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
+        now, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily, trades_reader=trades_reader,
         vix_reader=lambda: vix,
         calendar_reader=lambda day, at: (_ for _ in ()).throw(OSError("fixture outage")) if fail_calendar else {"status": "fresh", "reason": None, "source": "official_calendar",
             "observed_at": at.isoformat().replace("+00:00", "Z"), "retrieved_at": at.isoformat().replace("+00:00", "Z"),
