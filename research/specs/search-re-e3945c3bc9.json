@@ -1,0 +1,19 @@
+{
+  "family": "recovery_swing",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 3.0,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "day_move",
+      "max": 0.0
+    },
+    {
+      "feature": "spy_trend",
+      "max": -0.5
+    }
+  ]
+}
