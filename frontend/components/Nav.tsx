@@ -17,8 +17,6 @@ const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/access", label: "Assistant access", icon: FileText },
-  { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
@@ -26,10 +24,12 @@ const navItems = [
   { href: "/fills", label: "Fills", icon: Activity },
   { href: "/signals", label: "Signals", icon: Radio },
   { href: "/scanner", label: "Scanner", icon: Radar },
+  { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
   { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
+  { href: "/access", label: "Assistant access", icon: FileText },
 ];
 
 const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }> = {
@@ -159,7 +159,12 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
               {!rail && label}
             </Link>
         );
-        return <li key={href}>{rail ? <NavHint label={label}>{link}</NavHint> : link}</li>;
+        return <li key={href}>
+          {href === "/fills" && (rail
+            ? <div role="separator" aria-label="Research & labs" className="my-2 border-t" />
+            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">Research &amp; labs</h2>)}
+          {rail ? <NavHint label={label}>{link}</NavHint> : link}
+        </li>;
       })}
     </ul>
   );
@@ -264,7 +269,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       )}
 
       {/* Desktop sidebar */}
-      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card p-4", !rail && "md:flex")}>
+      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-card p-4", !rail && "md:flex")}>
         <div className="mb-6 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>

@@ -48,7 +48,14 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
   expect(sidebarWidth).toBe(0);
 
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "Trades" }).click();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  await expect(menu.getByRole("heading", { name: "Research & labs" })).toBeVisible();
+  expect((await menu.getByRole("link").allTextContents()).slice(0, 5)).toEqual(["Dashboard", "Charts", "Daily Review", "Trades", "Analytics"]);
+  for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
+    await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
+    await expect(menu.getByRole("link", { name, exact: true })).toBeInViewport();
+  }
+  await menu.getByRole("link", { name: "Trades", exact: true }).click();
 
   await expect(page).toHaveURL(/\/trades$/);
   await expect(page.getByRole("button", { name: "Close menu" })).toHaveCount(0); // menu closed on navigate
@@ -89,6 +96,17 @@ test("main content gets the width, and key numbers are readable", async ({ page 
 
 test("a trade opens to a readable detail page", async ({ page }) => {
   await page.goto("/trades");
+  const table = page.getByRole("table");
+  const headers = table.getByRole("columnheader");
+  await expect(headers.nth(1)).toHaveText(/P&L/);
+  await expect(table.getByRole("columnheader", { name: /Strike/ })).toBeHidden();
+  await expect(table.getByRole("link", { name: "AAPL", exact: true }).first().locator("..")).toContainText(/AAPL 230C · [A-Z][a-z]{2} \d{1,2} '\d{2}/);
+  await expect(table.getByRole("cell", { name: "9.5 shares", exact: true })).toBeInViewport();
+  await expect(headers.nth(1)).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: test.info().outputPath("trades-phone.png") });
+  const lastQuantity = table.getByRole("cell", { name: "5 contracts", exact: true });
+  await lastQuantity.scrollIntoViewIfNeeded();
+  await expect(lastQuantity).toBeInViewport({ ratio: 1 });
   await page.locator('tbody a[href^="/trades/"]').first().click();
   await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+$/);
 

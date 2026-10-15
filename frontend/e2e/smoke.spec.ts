@@ -117,7 +117,7 @@ test.describe("trades", () => {
 
     for (const ticker of ["NVDA", "AAPL", "TSLA", "RNXT", "RCAT"]) {
       await expect(
-        page.getByRole("cell", { name: ticker, exact: true }).first(),
+        page.getByRole("link", { name: ticker, exact: true }).first(),
         `${ticker} is missing from the trades table`,
       ).toBeVisible();
     }
@@ -127,6 +127,15 @@ test.describe("trades", () => {
     await expect(page.getByText("+$19").first()).toBeVisible();
     // Short calendar expiries, cents on prices, hold in hours and days.
     const table = page.getByRole("table");
+    await expect(table.getByRole("columnheader").nth(1)).toHaveText(/P&L/);
+    await expect(table.getByRole("columnheader", { name: /Quantity/ })).toBeVisible();
+    await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "NVDA", exact: true }) })).toContainText("5 contracts");
+    await expect(table.getByRole("row").filter({ has: page.getByRole("link", { name: "RCAT", exact: true }) })).toContainText("9.5 shares");
+    await expect(table.getByRole("link", { name: "AAPL", exact: true }).first().locator("..")).toContainText(/AAPL 230C · [A-Z][a-z]{2} \d{1,2} '\d{2}/);
+    await expect(page.getByRole("heading", { name: "Research & labs" })).toBeVisible();
+    const nav = page.getByRole("navigation").filter({ has: page.getByRole("heading", { name: "Research & labs" }) });
+    expect((await nav.getByRole("link").allTextContents()).slice(0, 5)).toEqual(["Dashboard", "Charts", "Daily Review", "Trades", "Analytics"]);
+    await page.screenshot({ path: test.info().outputPath("trades-desktop.png") });
     // Seed dates move with the run date, so the check is on the form, not a fixed day.
     await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();
     await expect(table).not.toContainText(/\d{4}-\d{2}-\d{2}/);
@@ -155,7 +164,7 @@ test.describe("trades", () => {
     await page.goto("/trades");
 
     // Navigate the way a user does, so the row link is covered too.
-    await page.getByRole("cell", { name: "NVDA", exact: true }).first().click();
+    await page.getByRole("link", { name: "NVDA", exact: true }).first().click();
     await page.waitForURL(/\/trades\/[0-9a-f-]+$/);
 
     await expect(page.getByText("NVDA").first()).toBeVisible();
