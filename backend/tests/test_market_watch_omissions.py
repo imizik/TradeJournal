@@ -38,9 +38,12 @@ def test_verified_non_price_minute_restores_vwap_without_inventing_a_bar(reader)
 
 @pytest.mark.parametrize("response", [
     {}, {"trades": [], "next_page_token": "more"},
+    {"trades": []}, {"trades": [], "next_page_token": ""},
     {"trades": [{"t": (OPEN + timedelta(minutes=20, seconds=1)).isoformat(), "c": ["@"]}]},
     {"trades": [{"t": (OPEN + timedelta(minutes=20, seconds=1)).isoformat(), "c": []}]},
     {"trades": "malformed"},
+    {"trades": [{"t": (OPEN + timedelta(minutes=20, seconds=1)).isoformat(), "c": ["I", "UNRECOGNIZED"]}], "next_page_token": None},
+    {"trades": [{"t": (OPEN + timedelta(minutes=21, seconds=1)).isoformat(), "c": ["@"]}], "next_page_token": None},
 ])
 def test_unverified_or_incomplete_trade_response_keeps_vwap_missing(response):
     packet = fixture_snapshot(missing_minute=True, missing_at=20, trades_reader=lambda *_: response)
@@ -58,13 +61,15 @@ def test_source_failure_and_opening_range_holes_remain_missing():
     assert packet["indices"]["SPY"]["or15_high"]["status"] == "missing"
 
 
-@pytest.mark.parametrize("change", ["price_trade", "incomplete", "future", "overlap", "private_field", "missing_disclosure", "wrong_vwap"])
+@pytest.mark.parametrize("change", ["price_trade", "unknown_condition", "incomplete", "future", "overlap", "private_field", "missing_disclosure", "wrong_vwap"])
 def test_resealed_bad_evidence_is_refused(change):
     packet = repaired()
     entry = next(x for x in packet["input_manifest"] if x["group"] == "indices.SPY.bars_1m")
     proof = entry["omitted_minutes"][0]
     if change == "price_trade":
         proof["trades"][0]["c"] = ["@"]
+    elif change == "unknown_condition":
+        proof["trades"][0]["c"] = ["I", "UNRECOGNIZED"]
     elif change == "incomplete":
         proof["complete"] = False
     elif change == "future":
@@ -95,6 +100,13 @@ def test_trade_queries_are_bounded_and_only_for_interior_non_or_gaps():
         return odd_lots(symbol, start, end)
     fixture_snapshot(missing_minute=True, missing_at=20, trades_reader=reader)
     assert calls == [("SPY", OPEN + timedelta(minutes=20), OPEN + timedelta(minutes=21))]
+
+
+def test_only_the_exact_inclusive_end_boundary_is_excluded():
+    packet = fixture_snapshot(missing_minute=True, missing_at=20,
+                              trades_reader=lambda symbol, start, end: {"trades": [{"t": end.isoformat(), "c": ["@"]}],
+                                                                        "next_page_token": None})
+    assert packet["indices"]["SPY"]["vwap"]["status"] == "fresh"
 
 
 def test_many_unknown_holes_do_not_start_unbounded_trade_queries():

@@ -148,7 +148,9 @@ def verified_omission_starts(proofs, *, opened, cutoff, finished):
             if (not isinstance(trade, dict) or set(trade) != {"t", "c"}
                     or not start <= parse_time(trade["t"]) < end
                     or not isinstance(trade["c"], list) or not trade["c"]
-                    or any(not isinstance(c, str) for c in trade["c"]) or "I" not in trade["c"]):
+                    or any(not isinstance(c, str) for c in trade["c"])
+                    or len(trade["c"]) != len(set(trade["c"]))
+                    or set(trade["c"]) not in ({"I"}, {"@", "I"})):
                 raise ValueError("omitted minute contains unverified or price-forming trades")
         starts.add(start)
     return starts

@@ -290,7 +290,8 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
                     try:
                         end = start + timedelta(minutes=1)
                         response = trades_reader(symbol, start, end)
-                        if not isinstance(response, dict) or "trades" not in response or response.get("next_page_token"):
+                        if (not isinstance(response, dict) or "trades" not in response
+                                or "next_page_token" not in response or response["next_page_token"] is not None):
                             continue
                         raw_trades = response["trades"]
                         if raw_trades is None:
@@ -299,7 +300,13 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
                             continue
                         # The provider's inclusive end may include exactly the
                         # next minute boundary; it is outside this proof window.
-                        trades = [{"t": t["t"], "c": t["c"]} for t in raw_trades if _raw_time(t["t"]) < end]
+                        trades = []
+                        for trade in raw_trades:
+                            at = _raw_time(trade["t"])
+                            if not start <= at <= end:
+                                raise ValueError("trade lies outside its queried omission window")
+                            if at < end:
+                                trades.append({"t": trade["t"], "c": trade["c"]})
                         proof = {"start": _time(start), "end": _time(end), "retrieved_at": _time(source_clock()),
                                  "complete": True, "trades": trades}
                         verified_omission_starts([proof], opened=opened, cutoff=cutoff, finished=source_clock())
