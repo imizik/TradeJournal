@@ -434,11 +434,11 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         from app.engine.market_watch_snapshot import _read_bounded
         stock_ledger = StockWatchLedger(ledger)
 
-        def stock_input(alert_id, now):
+        def stock_input(alert_id, now, *, current_session=True):
             stock_identifier(alert_id, 'sta')
             value = json.loads(_read_bounded((Path(config.market_watch_snapshots_dir) / f'stock-{alert_id}.json').absolute(), 1024*1024))
             validate_alert(value)
-            if value['alert_id'] != alert_id or value['session_date'] != now.astimezone(ET).date().isoformat():
+            if value['alert_id'] != alert_id or (current_session and value['session_date'] != now.astimezone(ET).date().isoformat()):
                 raise ValueError('Stock alert identity/session mismatch')
             return value
 
@@ -470,7 +470,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             try:
                 if not config.market_watch_outbox_dir:
                     raise ValueError('Stock review outbox not enabled')
-                alert = await asyncio.to_thread(stock_input, alert_id, clock())
+                # Historical exact retries may recover a committed export; the
+                # ledger still refuses every expired NEW assessment.
+                alert = await asyncio.to_thread(stock_input, alert_id, clock(), current_session=False)
                 result = await asyncio.to_thread(stock_ledger.submit, checked.claims['profile_id'], alert,
                     stance, summary, invalidation, notify, clock)
                 await asyncio.to_thread(write_review, config.market_watch_outbox_dir, result)

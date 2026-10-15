@@ -152,6 +152,11 @@ def test_actor_bound_review_retry_conflict_expiry_and_immutability(tmp_path):
         )
     with sqlite3.connect(tmp_path / "ledger.db") as db:
         assert db.execute("SELECT count(*) FROM shadow_decision").fetchone()[0] == 0
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT OR REPLACE INTO stock_watch_review VALUES(?,?,?)",
+                ("other", p["alert_id"], "{}"),
+            )
         for table in ["stock_watch_input", "stock_watch_review"]:
             for sql in [
                 f"DELETE FROM {table}",
@@ -324,6 +329,25 @@ def test_real_mcp_auth_source_boundary_saved_receipt_export_and_no_provider(
             {**submit, "decision": "take"},
             harness.token(scope=SCOPE),
         )["isError"]
+    # Recover an interrupted export through the real tool after the session
+    # changes, without allowing a late new assessment or historical input read.
+    exported = outbox / f"stock-review-{r['review_id']}.json"
+    exported.unlink()
+    late = alert()
+    (public / f"stock-{late['alert_id']}.json").write_text(json.dumps(late))
+    with TestClient(
+        harness.server(now=NOW + timedelta(days=1)).streamable_http_app()
+    ) as client:
+        assert call(client, "stock_alert", args, harness.token(scope=SCOPE))["isError"]
+        assert call(
+            client, "stock_alert_submit", submit, harness.token(scope=SCOPE)
+        )["structuredContent"] == r
+        assert call(
+            client,
+            "stock_alert_submit",
+            {**submit, "alert_id": late["alert_id"]},
+            harness.token(scope=SCOPE),
+        )["isError"]
     assert len(harness.requests) == before
     assert json.loads((outbox / f"stock-review-{r['review_id']}.json").read_text()) == r
     with sqlite3.connect(
@@ -356,6 +380,30 @@ def test_capture_precedes_failed_option_selection_and_remains_stock_only(
         w.store.records("stock_alert")[0]["trade_eligibility"]["status"]
         == "not_evaluated"
     )
+
+
+def test_mail_checks_expiry_after_prior_slow_send(engine, monkeypatch, tmp_path):
+    from app.engine import stock_watch
+
+    monkeypatch.setattr(
+        stock_watch.scanner_settings,
+        "read_settings",
+        lambda _: {"symbols": ["NBIS", "MU"], "revision": 1},
+    )
+    clock = [NOW + timedelta(minutes=9, seconds=59)]
+    sent = []
+
+    def mail(subject, body):
+        sent.append(subject)
+        clock[0] += timedelta(seconds=5)
+        return "fixture"
+
+    w = watcher(tmp_path, clock=lambda: clock[0], mail=mail)
+    for symbol in ("NBIS", "MU"):
+        w.capture(alert(symbol=symbol, selected_symbols=["NBIS", "MU"]))
+    w.send(SimpleNamespace(engine=engine), NOW.date())
+    assert len(sent) == 1
+    assert "NBIS" in sent[0]
 
 
 def test_email_to_scoped_jo_tools_to_phone_fixture_flow(

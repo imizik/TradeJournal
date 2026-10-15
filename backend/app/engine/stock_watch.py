@@ -381,6 +381,15 @@ class StockWatcher:
                 self.status(alert["symbol"], "cooldown", alert_id=alert["alert_id"])
                 continue
             self.capture(alert)
+
+            def send_mail(p=alert):
+                if self.clock() >= parse_time(p["expires_at"]):
+                    raise ValueError("stock_alert_expired")
+                return self.mail(
+                    f"TJ Setup: STOCK {p['symbol']} {p['alert_id']}",
+                    f"Stock alert ID: {p['alert_id']}\n",
+                )
+
             self.runner._deliver(
                 "stock_mail_attempt",
                 now,
@@ -391,10 +400,7 @@ class StockWatcher:
                 POLICY["expiry_minutes"],
                 DELIVERY,
                 "email",
-                lambda p=alert: self.mail(
-                    f"TJ Setup: STOCK {p['symbol']} {p['alert_id']}",
-                    f"Stock alert ID: {p['alert_id']}\n",
-                ),
+                send_mail,
             )
             attempts = self.store.records("stock_mail_attempt", today.isoformat())
             reserved = {

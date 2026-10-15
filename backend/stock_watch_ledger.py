@@ -22,7 +22,7 @@ class StockWatchLedger:
               CREATE TRIGGER IF NOT EXISTS stock_review_no_delete BEFORE DELETE ON stock_watch_review
               BEGIN SELECT RAISE(ABORT,'immutable stock review'); END;
               CREATE TRIGGER IF NOT EXISTS stock_review_no_replace BEFORE INSERT ON stock_watch_review
-              WHEN EXISTS(SELECT 1 FROM stock_watch_review WHERE actor=NEW.actor AND alert_id=NEW.alert_id)
+              WHEN EXISTS(SELECT 1 FROM stock_watch_review WHERE alert_id=NEW.alert_id)
               BEGIN SELECT RAISE(ABORT,'immutable stock review'); END;""")
             db.executescript("""CREATE TABLE IF NOT EXISTS stock_watch_input (
               actor TEXT NOT NULL, alert_id TEXT NOT NULL, alert_sha256 TEXT NOT NULL,
