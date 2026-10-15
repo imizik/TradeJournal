@@ -285,7 +285,7 @@ def publish(config: dict[str, str], title: str, message: str, *, recovered: bool
                 response = client.post(request.full_url, content=request.data, headers=headers)
         except httpx.HTTPError as exc:
             raise URLError(f"ntfy could not be reached ({type(exc).__name__})") from exc
-        if response.status_code >= 400:
+        if not 200 <= response.status_code < 300:
             raise HTTPError(request.full_url, response.status_code, "ntfy refused the notification", {}, None)
         return
     with urlopen(request, timeout=15):

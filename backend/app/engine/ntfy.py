@@ -47,7 +47,7 @@ def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...
             response = httpx.post(endpoint, json=body, headers=headers, timeout=TIMEOUT_SECONDS)
     except httpx.HTTPError as exc:
         raise NtfyError(f"ntfy could not be reached ({type(exc).__name__}).") from exc
-    if response.status_code >= 400:
+    if not 200 <= response.status_code < 300:
         raise NtfyError(f"ntfy refused the notification ({response.status_code}).")
     try:
         receipt = response.json().get("id")

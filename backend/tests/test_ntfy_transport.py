@@ -23,7 +23,7 @@ def alerts():
 
 
 @pytest.mark.parametrize("sender", ["api", "health"])
-@pytest.mark.parametrize("status", [200, 429])
+@pytest.mark.parametrize("status", [200, 307, 429])
 def test_fixed_ipv4_publishes_once_and_preserves_payload(sender, status, alerts, monkeypatch):
     requests = []
     bindings = []
@@ -33,6 +33,8 @@ def test_fixed_ipv4_publishes_once_and_preserves_payload(sender, status, alerts,
             requests.append((self.path, self.headers.get("Authorization"),
                              json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
             self.send_response(status)
+            if status == 307:
+                self.send_header("Location", "/unexpected-redirect")
             self.end_headers()
             self.wfile.write(b'{"id":"receipt-123"}')
 
@@ -60,15 +62,15 @@ def test_fixed_ipv4_publishes_once_and_preserves_payload(sender, status, alerts,
         if sender == "api":
             for key, value in config.items():
                 monkeypatch.setenv(key, value)
-            if status == 429:
-                with pytest.raises(ntfy.NtfyError, match="429"):
+            if status != 200:
+                with pytest.raises(ntfy.NtfyError, match=str(status)):
                     ntfy.publish("Test → phone", "Test only")
             else:
                 assert ntfy.publish("Test → phone", "Test only") == "receipt-123"
-        elif status == 429:
+        elif status != 200:
             with pytest.raises(HTTPError) as error:
                 alerts.publish(config, "Test → phone", "Test only")
-            assert error.value.code == 429
+            assert error.value.code == status
         else:
             alerts.publish(config, "Test → phone", "Test only")
     finally:
