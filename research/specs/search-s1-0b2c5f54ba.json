@@ -1,0 +1,10 @@
+{
+  "family": "s1_research",
+  "name": "s1_research",
+  "filters": [
+    {
+      "feature": "prior_day_high",
+      "min": 0.0
+    }
+  ]
+}
