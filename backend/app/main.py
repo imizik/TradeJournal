@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import threading
@@ -202,6 +203,31 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     return monitor
 
 
+async def _maybe_start_market_watch(app_: FastAPI):
+    """Jo's market-watch wakes and messages (MW-2); off unless MARKET_WATCH_ENABLED."""
+    from app.engine.market_watch_wakes import runner_from_env
+
+    try:
+        runner = runner_from_env()
+    except Exception:
+        # A bad store or path must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Market watch could not start; it stays off")
+        runner = None
+    app_.state.market_watch = runner
+    if runner is None:
+        return None
+
+    async def loop():
+        while True:
+            try:
+                await asyncio.to_thread(runner.run_once)
+            except Exception:
+                logging.getLogger(__name__).exception("Market watch pass failed")
+            await asyncio.sleep(30)
+
+    return asyncio.create_task(loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -224,9 +250,12 @@ async def lifespan(_app: FastAPI):
     chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
     _app.state.chart_market_stream = chart_market_stream
     level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
+    market_watch = await _maybe_start_market_watch(_app)
     try:
         yield
     finally:
+        if market_watch is not None:
+            market_watch.cancel()
         if level_alerts is not None:
             await level_alerts.stop()
         await chart_market_stream.stop()

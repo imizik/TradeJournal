@@ -1,11 +1,17 @@
 """Opt-in append-only market-watch records in the isolated check ledger.
 
-No providers, app database, delivery or evaluator are imported here.
+No providers, app database, delivery or evaluator are imported here. The MW-2
+read notice is a sealed copy of one read's public fields, handed to the app
+through a write-once outbox file; the app delivers any message, never this process.
 """
 from datetime import datetime, timezone
 from contextlib import contextmanager
 import json
+import os
+from pathlib import Path
 import re
+import stat
+import tempfile
 import sqlite3
 import uuid
 from zoneinfo import ZoneInfo
@@ -291,6 +297,16 @@ class MarketWatchLedger:
         return {k: read[k] for k in ('read_id', 'received_at', 'snapshot_id', 'snapshot_sha256', 'content_sha256', 'quality_flags')} | {
             'comparator_id': comp['comparator_id'], 'message_id': intent['message_id'] if intent else None, 'replayed': replayed}
 
+    def read_notice(self, actor, read_id):
+        """Deterministic MW-2 notice for one committed read; identical on every replay."""
+        actor_valid(actor)
+        with self.connection() as db:
+            read = next((r for r in self.rows(db, TABLES[1], actor) if r['read_id'] == read_id), None)
+            if read is None:
+                raise NotFound('Read unavailable for actor')
+            intent = next((m for m in self.rows(db, TABLES[3], actor) if m['read_id'] == read_id and m['kind'] == 'intent'), None)
+        return read_notice(read, intent)
+
     def append_market_watch_message_event(self, message_id, operation_id, event, *, clock=lambda: datetime.now(timezone.utc)):
         """Internal owner/transport boundary only; never exposed through MCP."""
         text(operation_id, 'operation_id', 200)
@@ -351,3 +367,64 @@ class MarketWatchLedger:
         # Deterministic envelope makes repeated exports byte-identical.
         stamp = max((r['created_at'] for rows in collections.values() for r in rows), default='1970-01-01T00:00:00+00:00')
         return seal({'export_id': 'mwx_' + digest(collections), 'actor': actor, 'protocol_id': 'mw-v1', 'created_at': stamp, **collections})
+
+
+NOTICE_VERSION = 'mw-read-notice-v1'
+
+
+def read_notice(read, intent):
+    verify(read)
+    if intent is not None:
+        verify(intent)
+    return seal({'notice_version': NOTICE_VERSION, 'read_id': read['read_id'], 'actor': read['actor'],
+                 'received_at': read['received_at'], 'created_at': read['received_at'],
+                 'session_date': read['session_date'], 'protocol_id': read['protocol_id'],
+                 'snapshot_id': read['snapshot_id'], 'snapshot_sha256': read['snapshot_sha256'],
+                 'read_sha256': read['content_sha256'], 'previous_read_id': read.get('previous_read_id'),
+                 'view': read['view'], 'message_intent': read['message_intent'],
+                 'message_id': intent['message_id'] if intent else None,
+                 'is_correction': bool(intent and intent['is_correction']),
+                 'corrects_message_id': intent['corrects_message_id'] if intent else None,
+                 'correction_of_read_id': read.get('correction_of_read_id'),
+                 'main_text': read['main']['text'], 'alternative_text': read['alternative']['text'],
+                 'invalidation_text': read['invalidation']['text'], 'change_summary': read['change_summary'],
+                 'forecasts': [{'horizon': f['horizon'], 'probability': f['probability']} for f in read['forecasts']],
+                 'quality_flags': read['quality_flags']})
+
+
+def write_read_notice(directory, notice):
+    """Write once; an existing identical file recovers, a different one refuses."""
+    verify(notice)
+    if not re.fullmatch(r'mwr_[0-9a-f-]{36}', notice.get('read_id', '')):
+        raise ValueError('Invalid read notice identity')
+    destination = Path(directory) / f"read-{notice['read_id']}.json"
+    body = canonical(notice)
+    import fcntl
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = None
+    try:
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        try:
+            fd = os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            fd = None
+        if fd is not None:
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size != len(body) or os.read(fd, len(body) + 1) != body:
+                    raise ValueError('Market-watch ledger and outbox disagree')
+            finally:
+                os.close(fd)
+            return
+        fd, temporary = tempfile.mkstemp(prefix='.read-', dir=directory)
+        with os.fdopen(fd, 'wb') as handle:
+            os.fchmod(handle.fileno(), 0o640)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        os.fsync(directory_fd)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+        os.close(directory_fd)

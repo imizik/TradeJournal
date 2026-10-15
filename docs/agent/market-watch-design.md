@@ -640,7 +640,9 @@ Isaac only when the read changes what he should consider: a directional
 view forms or strengthens past a stated probability, a view is invalidated,
 or a specific opportunity appears. Another red candle is not a reason.
 Budget: about three discretionary messages a day; a **correction** to an
-earlier message is always sent, even over budget.
+earlier message is always sent, even over budget. (As implemented in MW-2: when
+the corrected message reached Isaac, once per corrected message and at most
+three a session; see below and "Choices for Isaac".)
 
 Message format: the read in one line, confidence as a probability on a named
 forecast, the evidence, what would prove it wrong, and which trades fit or
@@ -656,6 +658,132 @@ scheduled or event wake — available now, inherits the same
 (c) a scheduled Jo task, subject to plan usage limits. The market watch is
 advice to Isaac, so route (a) is acceptable for it; its reads must not feed
 Shadow Isaac decisions until independence is settled.
+
+## MW-2 implementation and activation boundary
+
+**Event wakes and phone push, complementing the selected first slice (#315).
+Off by default; activation needs Isaac's separate approval.** On October 14
+Isaac chose to keep #315's scheduled Jo reads (09:50, 11:00, 12:30, 14:00), its
+snapshot publisher and its ledger-side limit of three ordinary intents, and to
+add from this slice only the deterministic event detector, event wakes and
+ntfy delivery. This module therefore publishes no snapshots and sends no
+scheduled wakes.
+
+`backend/app/engine/market_watch_wakes.py` holds the frozen `DETECTOR`
+(`mw-detect-v1`), `WAKE_POLICY` (`mw-wake-v1`) and `MESSAGE_POLICY`
+(`mw-message-v1`); their joint hash is stamped on every record. The API process
+runs one pass about every 30 seconds during the regular session, only when
+`MARKET_WATCH_ENABLED` is true and `MARKET_WATCH_SNAPSHOTS_DIR` (#315's
+publication directory) and `MARKET_WATCH_STORE` are absolute paths; a bad
+setting logs and leaves MW-2 off without blocking API startup. Nothing places,
+sizes or arms an order, and nothing writes S1, its acceptance or shadow S1
+(the setup guard below only reads S1's email and shadow events); market-watch
+reads never reach Shadow Isaac.
+
+- **Detector.** Runs on the latest current-session snapshot from #315's
+  two-minute publisher and replays its frozen SPY minutes from the open, so the
+  same snapshot yields the same events: a SPY close crossing VWAP, OR15 high or
+  OR15 low by more than 0.05%, or a failed attempt (wick through, close back),
+  from 09:45, 30-minute cooldown per level; a new session high or low on a bar
+  ending at or after 11:00, 30-minute cooldown; a SPY move of each 0.5 × prior
+  ATR14 (14 complete prior sessions, Alpaca IEX daily bars) since Jo's last
+  read, priced from that read's served snapshot; a scheduled CPI/FOMC/jobs time
+  passed (time only; with publication starting 09:49, an 08:30 release is
+  recorded late and does not wake Jo). A missing minute is recorded once as a
+  `minute_gap` event (never a wake) and ends VWAP events for the session;
+  OR levels need all 15 opening bars; extremes and ATR moves keep using the
+  real bars. Events detected more than 10 minutes after their bar are `late`
+  and never wake Jo.
+- **Event wakes (route a).** An event wakes Jo unless a wake went out in the
+  last 15 minutes or one of Jo's scheduled reads is 5 minutes ahead or up to
+  15 minutes behind (`coalesced`), or 6 event wakes were already sent that
+  session (`rate_limited`). It is also withheld (`setup_guard`) while an S1
+  setup emailed in the last 10 minutes has no shadow decision yet: a market
+  call in that window would make the shadow commit `clean_order=false`. The
+  app reads the scanner's events for this and never writes them; unknown state
+  withholds the wake. A setup email arriving after a wake can still overlap;
+  that residual risk to shadow S1's clean-order count is Isaac's to accept. Each wake is one email through the scanner's
+  existing mail path, subject `TJ Market Watch: <wake ID>`, body only the wake
+  ID; the [event task prompt](../../deploy/market-watch/jo-event-task.md) uses
+  operation ID `mw-event-v1:<wake ID>`. Each attempt is recorded `sending`
+  before the send; Gmail acceptance is `accepted`; a refusal or unreachable
+  server is `failed` and retried at most 3 times, 60 seconds apart, within
+  5 minutes, then `expired`. A timeout or dropped connection after the request
+  went out, or a `sending` row with no result (crash mid-send), is `unknown`
+  and never resent, so a wake may be lost rather than sent twice. Wake IDs are
+  deterministic per event, so a restart never plans a wake twice.
+- **Read notices.** With `market_watch_outbox_dir` set in the check
+  configuration, `market_watch_submit` writes a sealed, deterministic notice of
+  each committed read (public read fields, message ID and links) as a write-once
+  outbox file — the shadow-outbox pattern. A failed handoff refuses the call and
+  an identical retry recovers it. The seal is an integrity hash, not a
+  signature: the boundary is that only the check service can write the outbox.
+  The app checks the hash, field types and that the snapshot exists in the
+  publication directory, then stores the notice; a refused file is recorded
+  once as a `notice_refusal` and never stalls other notices. The app gets no
+  check-ledger access. Notices cover every read: scheduled, setup-context,
+  event and manual.
+- **Messages.** Channel: **phone push through the server's existing ntfy alerts**
+  (`NTFY_URL`). Every committed `update` or `correction` intent gets one
+  decision: `send`, `suppressed_budget` or `expired_before_send`. The check
+  ledger already refuses a fourth ordinary `update` per session (#315); the
+  app's own budget of three is a second guard that refunds a send that expires
+  undelivered. A correction skips the app budget when the message it corrects
+  reached Isaac (`accepted` or `unknown`), once per corrected message and at
+  most 3 times a session; any other correction is budgeted like an update. A
+  budget decision is final. The push carries the read's main text, the three
+  named forecast probabilities, invalidation, alternative, change summary,
+  Isaac's recorded cautions as flags, and the read ID. ntfy's reply ID is
+  recorded as `accepted` — evidence ntfy took it, not that the phone showed it.
+  Failures are retried at most 3 times within 10 minutes of the read, then
+  `expired`; timeouts and interrupted sends are `unknown`.
+- **Records.** Events, wakes, wake attempts, read notices, notice refusals,
+  message decisions and message attempts are immutable rows in an explicitly
+  selected SQLite file (application ID `MWD1`), separate from the journal
+  database, the MW-1 outcome store, #315's publisher receipts and the check
+  ledger. Transport events stay in that app-side file because the app cannot
+  write the check ledger; the report joins them by message ID. Owner ratings
+  remain the check ledger's `rated` events.
+- **Report.** `python market_watch_owner.py report --store ABS --outcomes ABS`
+  prints, per session, event wakes and Jo's scheduled slots → reads → messages
+  → outcomes, plus the MW-1 evaluator's score groups over imported exports. A
+  read whose exported `operation_id` names its trigger (`mw-event-v1:<wake ID>`
+  or `mw-scheduled-v1:<date>:<HH:MM>`) is linked exactly; otherwise the first
+  unclaimed read within 30 minutes (and before the next trigger) is linked by
+  time, and only for reads known from notices alone: an exported read whose
+  operation ID names another workflow is never credited to a slot by time.
+  Reads with neither are `unprompted`. MW-2 cannot see a scheduled run
+  that saved nothing; that stays in Jo's native task history and #315's receipts.
+
+Fixture tests: `backend/tests/test_market_watch_wakes.py`. They are not live
+proof of mail, push, Jo's triggers or the 20-session acceptance.
+
+**Activation (separate, needs Isaac's approval).** Requires #315's publisher to
+be active. Name the release first, then:
+
+1. Create the app-side store under `/var/lib/tradejournal/market-watch/`. Give
+   the API service read access to `/var/lib/tradejournal-market-watch-public`
+   (MW-2 only reads it).
+2. Create a check-owned outbox (for example beside `shadow-outbox`) with the same
+   read-only ACL for the API user, set `market_watch_outbox_dir`, and restart the
+   check service. Set `MARKET_WATCH_OUTBOX_DIR` for the API to the same path.
+3. Confirm the scanner SMTP settings and `NTFY_URL` are present in the API
+   environment. `SCANNER_EMAIL_TO` is the owner's Outlook relay inbox, whose
+   rule forwards only scanner mail with `TJ Setup:` (see the
+   [shadow S1 route](shadow-s1-contract.md)); self-sent Gmail did not wake Jo.
+   With Isaac's approval, widen that rule to also forward `TJ Market Watch:`
+   from the scanner sender, and add a Jo task triggered on
+   `^FW: TJ Market Watch:` with the [event task prompt](../../deploy/market-watch/jo-event-task.md).
+   Keep the shadow S1 `^FW: TJ Setup:` filter unchanged.
+4. Push replaces chat for market messages: at the same time, change step 8 of
+   the [scheduled task](../../deploy/market-watch/jo-task.md) and the
+   [setup addendum](../../deploy/market-watch/setup-task-addendum.md) in Jo's
+   live tasks to "do not send chat; TradeJournal pushes committed intents".
+   Otherwise each message reaches Isaac twice.
+5. Set `MARKET_WATCH_ENABLED=true`, `MARKET_WATCH_SNAPSHOTS_DIR` and
+   `MARKET_WATCH_STORE` in `backend.env`, restart the API under the usual
+   market-hours safeguards, and watch one event wake, one read notice and one
+   push end to end. Disable by unsetting the flag; records stay.
 
 ## Replay as evidence, with limits (MW-3)
 
@@ -706,6 +834,10 @@ descriptive. Only a measured advantage justifies the idea book.
 ## Choices for Isaac
 
 - Whether to authorize the MW-1 activation steps above, then select an MW-2 slice.
-- Message channel and budget (email, phone push via the existing ntfy alerts).
+- Whether to authorize the MW-2 activation steps above (event wakes and ntfy
+  push on top of #315's schedule; push replaces chat).
+- Whether the MW-2 correction rule is right: a correction skips the budget only
+  when the message it corrects reached Isaac, once per corrected message and at
+  most three a session; a correction of a message he never got is budgeted.
 - Whether Jo's market reads may see his open positions (useful advice, but
   reads then cannot feed an independent shadow).

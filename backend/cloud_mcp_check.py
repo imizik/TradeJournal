@@ -427,7 +427,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     server.audit_call = lambda name: authenticated(name, log=True)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
     if config.market_watch_snapshots_dir:
-        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded
+        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded, write_read_notice
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
 
@@ -462,11 +462,19 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 forecasts=forecasts, message_intent=message_intent, prompt_version=prompt_version,
                 previous_read_id=previous_read_id, correction_of_read_id=correction_of_read_id, model_id=model_id)
             try:
-                return await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock)
+                receipt = await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock)
             except MessageBudgetExceeded:
                 raise ToolError("Daily message-intent budget exhausted; resubmit the read with message_intent=none") from None
             except (ValueError, Conflict, NotFound, sqlite3.Error):
                 raise ToolError("Market read refused: invalid input, parent, content or unavailable ledger") from None
+            if config.market_watch_outbox_dir:
+                # MW-2: the app reads this notice to deliver any message; this process sends nothing.
+                try:
+                    notice = await asyncio.to_thread(market_ledger.read_notice, checked.claims["profile_id"], receipt["read_id"])
+                    await asyncio.to_thread(write_read_notice, config.market_watch_outbox_dir, notice)
+                except (ValueError, OSError, NotFound, sqlite3.Error):
+                    raise ToolError("Market read saved but its notice handoff failed; retry identical content to recover") from None
+            return receipt
 
 
     def live_context(idea, receipt):

@@ -1,4 +1,4 @@
-"""Explicit owner-only MW-1 commands. No daemon, grants, delivery or activation.
+"""Explicit owner-only MW-1/MW-2 commands. No daemon, grants, delivery or activation.
 
 Snapshot collection is an app-side command; export is a read-only check-ledger
 command. Never install this as an MCP tool or expose it through the private API.
@@ -16,6 +16,9 @@ def main(argv=None):
     export = commands.add_parser('export', help='Read one actor’s market-watch records; write canonical JSON to stdout')
     export.add_argument('--ledger', required=True)
     export.add_argument('--actor', required=True)
+    report = commands.add_parser('report', help='MW-2 wakes → reads → messages → outcomes per session, as JSON')
+    report.add_argument('--store', required=True, help='absolute MW-2 wake/delivery store')
+    report.add_argument('--outcomes', help='absolute MW-1 outcome store with imported exports')
     args = parser.parse_args(argv)
     if args.command == 'snapshot':
         from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot
@@ -25,6 +28,13 @@ def main(argv=None):
         record = build_snapshot()
         publish_snapshot(directory, record)
         print(json.dumps({'snapshot_id': record['snapshot_id'], 'content_sha256': record['content_sha256']}))
+    elif args.command == 'report':
+        from app.engine.market_watch_evaluation import MarketWatchOutcomeStore
+        from app.engine.market_watch_wakes import MarketWatchWakeStore, session_report
+        if not all(Path(p).is_absolute() and Path(p).exists() for p in (args.store, args.outcomes) if p):
+            parser.error('Require existing absolute store paths')
+        outcomes = MarketWatchOutcomeStore(args.outcomes) if args.outcomes else None
+        print(json.dumps(session_report(MarketWatchWakeStore(args.store), outcomes), indent=2, sort_keys=True))
     else:
         from market_watch_common import canonical
         from market_watch_ledger import MarketWatchLedger
