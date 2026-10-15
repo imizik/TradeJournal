@@ -1,0 +1,22 @@
+{
+  "family": "s1_research",
+  "name": "Continuous setup search",
+  "params": {
+    "setup": "fade"
+  },
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 1,
+    "max_minutes": 20
+  },
+  "filters": [
+    {
+      "feature": "spy_vol",
+      "min": 2.0
+    },
+    {
+      "feature": "spy_day",
+      "max": 1.0
+    }
+  ]
+}
