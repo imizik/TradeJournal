@@ -368,7 +368,8 @@ class FeatureContext:
         for name in LEVEL_FEATURES:
             levels = self.levels[name][i]
             level = min(levels, key=lambda value: abs(close - value)) if levels else NA
-            values[name] = side * _ratio(close - level, day_atr)
+            distance = _ratio(close - level, day_atr)
+            values[name] = NA if math.isnan(distance) else side * distance
         m = self.market
         if m is not None:
             j = m.series.index_at(s.time[i])
