@@ -36,10 +36,19 @@ OWNER_CONFIG = Path("/etc/tradejournal-advisor-owner")
 OWNER_RUN = Path("/run/tradejournal-advisor-owner")
 OWNER_ACCOUNT = "tj-advisor-owner"
 OWNER_UNITS = ("tradejournal-advisor-owner.socket", "tradejournal-advisor-owner.service")
+STARTED = time.monotonic()
+
+
+def phase(name):
+    """Timestamped CI progress line; diagnostics only, never an assertion."""
+    print(f"[advisor smoke +{time.monotonic() - STARTED:7.1f}s] {name}", flush=True)
 
 
 def run(*args, check=True, **kwargs):
+    started = time.monotonic()
     result = subprocess.run([str(a) for a in args], capture_output=True, check=False, **kwargs)
+    if time.monotonic() - started >= 3:
+        phase(f"slow command {time.monotonic() - started:.1f}s: {' '.join(str(a) for a in args[:4])}")
     if check and result.returncode:
         sys.stderr.write(result.stdout.decode(errors="replace"))
         sys.stderr.write(result.stderr.decode(errors="replace"))
@@ -99,13 +108,17 @@ def exercise(archive, scratch):
                 if target.exists():
                     raise ValueError("Duplicate offline wheel")
                 target.write_bytes(package.extractfile(entry).read())
+    phase("wheels extracted")
     bundle = scratch / "bundle"
     staging.stage(bundle, wheels=wheels)
+    phase("bundle staged")
     staging.validate(bundle)
+    phase("bundle validated")
     record = control.install(bundle, approve_install=staging.digest(bundle / "manifest.json"))
     for unit in control.UNITS:
         assert run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0
         assert run("systemctl", "is-enabled", unit, check=False).stdout.strip() in (b"static", b"disabled")
+    phase("disabled bundle installed")
     assert not control.RUN.exists(), "Install activated a socket"
     try:
         control.activate(approve_activation="unapproved")
@@ -153,6 +166,7 @@ def exercise(archive, scratch):
     identity = control.activation_identity()
     approved = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     control.activate(approve_activation=approved)
+    phase("activated")
 
     # Extra positive/negative controls run via ExecStartPre inside the exact
     # installed service sandbox. These disposable drop-ins are removed before
@@ -204,7 +218,9 @@ print("advisor native boundary positive" if positive else "advisor native bounda
         dropin.mkdir()
         (dropin / "native-ci.conf").write_text(f"[Service]\nExecStartPre={python} -B {probe}\n")
     run("systemctl", "daemon-reload")
+    phase("boundary probes written")
     run("systemctl", "restart", *control.SERVICES)
+    phase("services restarted with boundary probes")
     for unit in control.SERVICES:
         pid = int(run("systemctl", "show", "--property=MainPID", "--value", unit).stdout)
         assert pid > 0
@@ -244,6 +260,7 @@ print("advisor native boundary positive" if positive else "advisor native bounda
     (control.UNIT_DIR / PROXY).write_text(f"[Service]\nUser=caddy\nGroup=caddy\nExecStart=/usr/bin/caddy run --config {caddyfile} --adapter caddyfile\n")
     run("systemctl", "daemon-reload")
     run("systemctl", "start", PROXY)
+    phase("TLS proxy started")
     context = ssl.create_default_context(cafile=str(tls / "cert.pem"))
     def token(**changes):
         claims = {"iss": ISSUER, "aud": RESOURCE, "sub": "advisor-ci-subject", "client_id": "advisor-ci-client",
@@ -260,6 +277,7 @@ print("advisor native boundary positive" if positive else "advisor native bounda
             time.sleep(0.1)  # Bounded process readiness, not a test retry.
         else:
             raise AssertionError("Advisor proxy did not become ready")
+        phase(f"TLS proxy ready after {attempt + 1} attempts")
         assert metadata.json()["resource"] == RESOURCE
         assert metadata.json()["scopes_supported"] == ["advisor:profile", "advisor:read", "advisor:write"]
         for path in ("/mcp", "/advisor/mcp/extra", "/health", "/.well-known/oauth-protected-resource", "/journal"):
@@ -309,6 +327,7 @@ print("advisor native boundary positive" if positive else "advisor native bounda
             assert service.owner_view(db, run_id)["advisor"]["receipt"] == receipt
             assert service.owner_view(db, run_id)["advisor"]["export"] == original_export
             assert not db.exec(select(DecisionRecord)).all() and not db.exec(select(DecisionEvent)).all()
+        phase("OAuth/save/retry/conflict checks done")
         run("systemctl", "restart", *control.SERVICES)
         assert rpc("get_advisor_request").json()["result"]["structuredContent"]["receipt"] == receipt
         assert owner_record()["receipt"] == receipt
@@ -349,16 +368,21 @@ print("advisor native boundary positive" if positive else "advisor native bounda
                     assert bridge.get("http://backend/cloud-mcp/advisor/request", headers=headers).status_code == 503
                     assert bridge.post("http://backend/cloud-mcp/advisor/answer", headers=headers, json=body).status_code == 503
             return revoked_acl_refused
+        phase("restart/expiry/revocation checks done")
         exercise_owner(config["profiles"][0], original_export, receipt, bridge_owner_grant)
+        phase("owner units exercised")
     for unit in control.SERVICES:
         shutil.rmtree(control.UNIT_DIR / (unit + ".d"))
     run("systemctl", "daemon-reload")
     before = staging.digest(control.STATE / "fixture.db")
     control.stop()
     assert staging.digest(control.STATE / "fixture.db") == before
+    phase("advisor stopped")
     from trial_smoke import exercise as exercise_trial
     exercise_trial(archive, scratch, run, context=context, token=token, identity=config, keys=keys, resource=RESOURCE, proxy=PROXY)
+    phase("trial upgrade exercised")
     control.rollback()
+    phase("rolled back")
     assert staging.digest(control.STATE / "fixture.db") == before
     assert all(not (control.UNIT_DIR / u).exists() for u in control.UNITS)
     assert record["original_fixture_sha256"] == staging.digest(bundle / "state/fixture.db")
@@ -536,10 +560,11 @@ def main():
         python = Path("/opt/tradejournal/current/backend/.venv/bin/python")
         if not python.is_file():
             raise ValueError("Existing disposable package smoke runtime required")
-        result = run(python, "-B", __file__, args.archive.resolve(), "--inner", env={"PATH": control.ADMIN_PATH,
-            "GITHUB_ACTIONS": "true", "TJ_DISPOSABLE_RUNNER": "1", "PYTHON_DOTENV_DISABLED": "1"})
-        sys.stdout.write(result.stdout.decode())
+        # Stream the inner proof's progress to the CI log as it happens.
+        subprocess.run([str(python), "-B", __file__, str(args.archive.resolve()), "--inner"], check=True, env={
+            "PATH": control.ADMIN_PATH, "GITHUB_ACTIONS": "true", "TJ_DISPOSABLE_RUNNER": "1", "PYTHON_DOTENV_DISABLED": "1"})
         return
+    phase("inner proof started")
     try:
         with tempfile.TemporaryDirectory(prefix="advisor-native-ci-") as directory:
             exercise(args.archive.resolve(), Path(directory))
@@ -550,6 +575,7 @@ def main():
         raise
     finally:
         cleanup()
+        phase("cleanup finished")
 
 
 if __name__ == "__main__":

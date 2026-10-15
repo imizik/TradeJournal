@@ -20,6 +20,12 @@ FIXTURE = Path("/opt/tradejournal-advisor-ci-owner-transition")
 API = "tradejournal-advisor-ci-owner-api.service"
 SESSION_PATH = "/api/access/me"
 GENERIC_SESSION_PATH = "/api/backend/access/me"
+STARTED = time.monotonic()
+
+
+def phase(name):
+    """Timestamped CI progress line; diagnostics only, never an assertion."""
+    print(f"[advisor trial smoke +{time.monotonic() - STARTED:7.1f}s] {name}", flush=True)
 
 
 def diagnosis(run, *, path, status=None, transport=None, detail=None):
@@ -192,8 +198,11 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             (runtime_override / "fixture.conf").unlink()
             runtime_override.rmdir()
             run("systemctl", "daemon-reload")
+        phase("trial bundle prepared")
         interrupted_install(bundle, run)
+        phase("interrupted install proven")
         record = control.install(bundle, staging.digest(bundle / "manifest.json"))
+        phase("trial bundle installed")
         assert staging.digest(old.STATE / "fixture.db") == old_ledger
         assert all(run("systemctl", "is-active", "--quiet", name, check=False).returncode != 0 for name in control.UNITS)
         # Explicit disposable-only restart, absent from the retained installer.
@@ -231,6 +240,7 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         run("systemctl", "start", *[u for u in control.UNITS if u.endswith(".service")])
         run("systemctl", "restart", trial.FRONTEND)
         assert authenticated() == before
+        phase("trial services started")
         with httpx.Client(verify=context, trust_env=False, timeout=10) as cloud:
             def rpc(name, arguments=None):
                 response = cloud.post(resource, headers={"Authorization": "Bearer " + token(), "Accept": "application/json"},
@@ -267,6 +277,7 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
             managed_questions(run, advisor_config, record, rpc, answer)
             assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
+        phase("trial MCP/owner/managed-question checks done")
         engine.dispose()
         runtime_override.mkdir()
         (runtime_override / "fixture.conf").write_text("[Service]\nEnvironment=UNREVIEWED_FIXTURE=true\n")
@@ -293,7 +304,9 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             raise AssertionError("Native executable drift accepted")
         dependency.write_bytes(original)
         control.installed()
+        phase("drift refusal checks done")
         upgraded_runtime(archive, scratch, run)
+        phase("runtime upgrade/downgrade proven")
         new_ledger = staging.digest(control.STATE / "fixture.db")
         control.rollback()
         # Rollback restores the unit definition; the operator must separately
@@ -330,8 +343,10 @@ def upgraded_runtime(archive, scratch, run):
     before = {path: staging.digest(path) for path in kept}
     bundle = scratch / "trial-upgrade"
     trial.prepare(bundle, archive=archive, archive_sha256=staging.digest(archive), wheels=scratch / "wheels", guards={})
+    phase("upgrade bundle prepared")
     approved = staging.digest(bundle / "manifest.json")
     assert control.upgrade(bundle, approved)["manifest_sha256"] == approved
+    phase("upgraded")
     assert {path: staging.digest(path) for path in kept} == before
     assert all(run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0 for unit in (*control.UNITS, trial.FRONTEND))
     restored = control.downgrade()
