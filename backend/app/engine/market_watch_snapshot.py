@@ -14,6 +14,7 @@ import tempfile
 from typing import Callable
 import fcntl
 from market_watch_common import PROTOCOL, PROTOCOL_SHA256, digest, parse_time, previous_session_date, seal, session_bounds, validate_snapshot, verify
+from market_watch_common import MAX_VERIFIED_OMISSIONS, MAX_OMISSION_TRADES, VERIFIED_OMISSION_REASON, verified_omission_starts
 
 ET_NAME = "America/New_York"
 
@@ -69,7 +70,7 @@ def _session_bars(rows: list[dict], opened: datetime, cutoff: datetime) -> list[
 
 
 def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dict | None,
-           opened: datetime, cutoff: datetime, retrieved: datetime, rth: bool) -> tuple[dict, list[dict]]:
+           opened: datetime, cutoff: datetime, retrieved: datetime, rth: bool, *, omitted=frozenset()) -> tuple[dict, list[dict]]:
     bars = _session_bars(rows, opened, cutoff)
     gaps = []
     last = bars[-1] if bars else None
@@ -78,9 +79,10 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
              "status": "fresh" if last and (retrieved - parse_time(last["end"])).total_seconds() <= 180 else "stale" if last else "missing",
              "reason": None if last else "no_completed_regular_session_bar"}
     opening_complete = len(bars) >= 15 and all(parse_time(bars[i]["start"]) == opened + timedelta(minutes=i) for i in range(15))
+    starts = {parse_time(bar["start"]) for bar in bars}
     complete_path = bool(bars) and parse_time(bars[0]["start"]) == opened and all(
-        parse_time(bars[i]["start"]) == parse_time(bars[i - 1]["start"]) + timedelta(minutes=1)
-        for i in range(1, len(bars)))
+        opened + timedelta(minutes=i) in starts | omitted
+        for i in range(int((parse_time(last["end"]) - opened).total_seconds() // 60)))
     if not bars:
         observed = None
     else:
@@ -100,7 +102,7 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
              "session_open": {"value": opening_bar["open"] if opening_bar else None, "at": opening_bar["start"] if opening_bar else None,
                               "status": "fresh" if opening_bar else "missing", "reason": None if opening_bar else "session_open_bar_missing"},
              "bar_1m": last, "vwap": {"value": vwap, "status": status if vwap is not None else "missing",
-                                         "reason": None if vwap is not None else "missing_minute_bar_or_nonpositive_volume"},
+                                         "reason": (VERIFIED_OMISSION_REASON if omitted else None) if vwap is not None else "missing_minute_bar_or_nonpositive_volume"},
              "or15_high": {"value": max((bar["high"] for bar in bars[:15]), default=None) if opening_complete else None, "status": or_status,
                            "reason": None if or_status == "fresh" else "opening_range_incomplete" if or_status == "not_ready" else "opening_range_bar_gap"},
              "or15_low": {"value": min((bar["low"] for bar in bars[:15]), default=None) if opening_complete else None, "status": or_status,
@@ -130,7 +132,7 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
     return group, gaps
 
 
-def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None = None,
+def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None = None, trades_reader: Callable | None = None,
                    daily_reader: Callable | None = None, vix_reader: Callable | None = None,
                    calendar_reader: Callable | None = None, news_reader: Callable | None = None,
                    bounds_reader: Callable | None = None) -> dict:
@@ -182,6 +184,11 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
                 "adjustment": "split", "feed": "iex", "limit": 10000,
             })
             return result.get("bars", {})
+        if trades_reader is None:
+            def trades_reader(symbol, start, end):
+                return alpaca._alpaca_get_fast(f"/v2/stocks/{symbol}/trades", {
+                    "start": _time(start), "end": _time(end), "feed": "iex", "limit": MAX_OMISSION_TRADES,
+                })
     if daily_reader is None:
         from app.engine import alpaca
         def daily_reader(symbols, d):
@@ -261,6 +268,7 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
     daily_retrieved = source_clock()
     indices = {}
     published_rows = {}
+    omitted_by_symbol = {}
     prior_manifest_rows = {}
     for symbol in ("SPY", "QQQ"):
         rows = raw.get(symbol) or []
@@ -270,6 +278,44 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
             gaps.append({"group": f"indices.{symbol}", "reason": str(exc)})
             rows = []
         published_rows[symbol] = rows
+        proofs = []
+        if trades_reader is not None and opened and rows:
+            session = _session_bars(rows, opened, cutoff)
+            starts = {parse_time(bar["start"]) for bar in session}
+            last_start = parse_time(session[-1]["start"]) if session else opened
+            missing = [opened + timedelta(minutes=i) for i in range(15, int((last_start - opened).total_seconds() // 60))
+                       if opened + timedelta(minutes=i) not in starts]
+            if len(missing) <= MAX_VERIFIED_OMISSIONS:
+                for start in missing:
+                    try:
+                        end = start + timedelta(minutes=1)
+                        response = trades_reader(symbol, start, end)
+                        if (not isinstance(response, dict) or "trades" not in response
+                                or "next_page_token" not in response or response["next_page_token"] is not None):
+                            continue
+                        raw_trades = response["trades"]
+                        if raw_trades is None:
+                            raw_trades = []
+                        if not isinstance(raw_trades, list) or len(raw_trades) > MAX_OMISSION_TRADES:
+                            continue
+                        # The provider's inclusive end may include exactly the
+                        # next minute boundary; it is outside this proof window.
+                        trades = []
+                        for trade in raw_trades:
+                            at = _raw_time(trade["t"])
+                            if not start <= at <= end:
+                                raise ValueError("trade lies outside its queried omission window")
+                            if at < end:
+                                trades.append({"t": trade["t"], "c": trade["c"]})
+                        proof = {"start": _time(start), "end": _time(end), "retrieved_at": _time(source_clock()),
+                                 "complete": True, "trades": trades}
+                        verified_omission_starts([proof], opened=opened, cutoff=cutoff, finished=source_clock())
+                        proofs.append(proof)
+                    except Exception:
+                        # Refusal, timeout, malformed or price-forming trades:
+                        # retain the missing aggregate; never manufacture bars.
+                        continue
+        omitted_by_symbol[symbol] = proofs
         prior = None
         prior_rows = []
         prior_day = previous_session_date(day) if bounds else None
@@ -290,7 +336,8 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
             except (KeyError, TypeError, ValueError):
                 prior = None
         if opened:
-            indices[symbol], found = _index(symbol, rows, rows, prior, opened, cutoff, bars_retrieved, phase == "regular_session")
+            omitted = {parse_time(p["start"]) for p in proofs}
+            indices[symbol], found = _index(symbol, rows, rows, prior, opened, cutoff, bars_retrieved, phase == "regular_session", omitted=omitted)
         else:
             indices[symbol] = {"symbol": symbol, "source": "Alpaca IEX", "observed_at": None, "retrieved_at": _time(now),
                 "age_seconds": None, "status": "missing", "reason": "session_calendar_unavailable", "source_sha256": digest([]),
@@ -364,6 +411,8 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
                          "adjustment": "split", "window_start": _time(opened) if opened else None, "window_end": _time(cutoff),
                          "retrieved_at": group["retrieved_at"], "payload_sha256": group["source_sha256"],
                          "bars": session_bars})
+        if omitted_by_symbol[symbol]:
+            manifest[-1]["omitted_minutes"] = omitted_by_symbol[symbol]
         previous = prior_manifest_rows.get(symbol)
         if previous:
             manifest.append({"group": f"indices.{symbol}.prior_daily_bar", "provider": "Alpaca", "feed": "iex",
