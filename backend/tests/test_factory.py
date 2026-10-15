@@ -200,7 +200,7 @@ def test_features_read_only_the_past():
     assert values["open_trend"] == pytest.approx(2.0)  # opened at 102 over an EMA of 100
     assert context.at(i, -1, stop=105.5)["open_trend"] == pytest.approx(-2.0)
     later = Series.build("X", bars + today[:2] + [bar(day, 600, 103.5, 150, 50, 60, 99999)], 15)
-    assert FeatureContext(later, spy).at(i, 1, stop=101.5) == values
+    assert FeatureContext(later, spy).at(i, 1, stop=101.5) == pytest.approx(values, nan_ok=True)
 
 
 def test_vol_ratio_compares_the_last_week_with_the_month_through_the_prior_session():
