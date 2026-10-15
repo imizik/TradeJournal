@@ -12,9 +12,11 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 
 ## The screens
 
-The private legacy sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
-at its foot that opens a drawer on any page. Everything else is reached from
-one of these by a row link or a button.
+The private sidebar and phone More menu (`components/Nav.tsx`) put Dashboard,
+Charts, Daily Review, Trades and Analytics first, followed by **Research & labs**
+(Fills, Signals, Scanner, Advisor review, Strategy Lab, Research Studio, Level 2 lab
+and AI Buildout). Assistant access remains available when enabled. A **Sync**
+button opens a drawer on any page.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
 |---|---|---|---|---|
