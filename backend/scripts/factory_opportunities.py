@@ -31,7 +31,8 @@ from app.engine.factory_gates import PERIODS
 from app.engine.factory_data import FeatureContext
 
 VERSION = 'opportunity-pilot-v1'
-IDS = ('s1-0b2c5f54ba', 's1-455b2eabc7', 'op-7f71884194')
+IDS = ('s1-0b2c5f54ba', 's1-455b2eabc7', 'op-7f71884194',
+       'vw-977e9301a5', 'fa-51ce18820a', 're-e3945c3bc9')
 # Fixed prospectively for this historical pilot, before loading/scoring its trades.
 DAYS = tuple(date(2024, 2, 5) + timedelta(days=i) for i in range(5))
 SEED = 10415
@@ -39,7 +40,7 @@ MAX_PER_DAY = 18
 MAX_PER_TICKER_DAY = 3
 MIN_TARGET_R = 1.25
 MAX_COST_R = 0.25
-BATCH = ROOT/'backend/data/factory/opportunities/pilot-20261015-v1'
+BATCH = ROOT/'backend/data/factory/opportunities/pilot-20261015-v2'
 
 
 def canonical(value):
@@ -92,7 +93,7 @@ def packet(spec, trade, series):
     identity = dict(spec_id=search.rules.spec_id(spec), ticker=trade.ticker,
                     signal_time=trade.signal_time.isoformat(), side=trade.side)
     card = dict(id=digest(identity)[:20], schema=VERSION, candidate=identity,
-                family=spec.family, setup=dict(spec.params).get('setup', spec.family),
+                family=spec.family, setup=dict(spec.params).get('setup', spec.family), timeframe_minutes=series.timeframe,
                 simulated_as_of=cutoff.isoformat(), entry_reference=reference*factor,
                 stop=trade.stop*factor, target_reference=(reference+trade.side*target_r*risk)*factor,
                 target_r=target_r, max_minutes=spec.exits.max_minutes,
@@ -322,7 +323,7 @@ def budgeted_build():
             signal.alarm(0)
             atomic(budget,used+min(allocation,math.ceil(time.monotonic()-started)))
             quality['runtime_seconds']=math.ceil(time.monotonic()-started)
-            atomic(ROOT/'research/reports/2026-10-15-opportunity-pilot.json',quality)
+            atomic(ROOT/'research/reports/2026-10-15-opportunity-pilot-v2.json',quality)
             print(json.dumps(quality,indent=2))
         finally:
             (week/'search-pid').unlink(missing_ok=True);week.rmdir()

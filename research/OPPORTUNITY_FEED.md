@@ -6,9 +6,10 @@ the factory profitability screen. This is a separate research track, never a
 strategy pass or permission to replace live S1.
 
 `backend/scripts/factory_opportunities.py` freezes a five-session discovery
-pilot, February 5–9, 2024, using three already counted specs:
+pilot, February 5–9, 2024, using six already counted specs:
 `s1-0b2c5f54ba` (S1 ORB), `s1-455b2eabc7` (S1 fade), and
-`op-7f71884194` (15-minute ORB). Specs and dates are fixed before loading
+`op-7f71884194` (15-minute ORB), `vw-977e9301a5` (VWAP reclaim),
+`fa-51ce18820a` (failed breakout), and `re-e3945c3bc9` (recovery). Specs and dates are fixed before loading
 pilot outcomes. No confirmation, exam, recent holdout or forward results are
 used. Existing factory gates, counts and continuous search remain unchanged.
 
@@ -38,7 +39,7 @@ seconds from the current two-hour time cap. Successful runtime replaces the
 reservation; interrupted runtime stays consumed. It reuses already tried IDs
 rather than resetting/counting them again. The frozen batch cannot be replaced.
 
-The batch is under `backend/data/factory/opportunities/pilot-20261015-v1/`.
+The batch is under `backend/data/factory/opportunities/pilot-20261015-v2/`.
 Freeze every card under `operator-private/manifest.json`. The operator runs
 `view` and gives Jo **only** `public/current-setup.json` and the public
 assignment. Repeated views return the same setup until its choice is committed;
@@ -65,3 +66,8 @@ mean/total R after factory costs and a descriptive random percentile. Five
 correlated discovery sessions cannot establish selection skill or profitability.
 A follow-on frozen out-of-sample study requires separate selection of untouched
 dates and cannot reuse this pilot's outcomes as an exam.
+
+The initial v1 pool is retained unchanged: 63 cards, 60 from generic ORB and
+3 S1 ORB, no fade cards. Before any Jo decisions or outcome reads, v2 adds
+three previously counted families to test diversity. This revision uses feed
+coverage only, never hidden continuation or returns; it remains development.
