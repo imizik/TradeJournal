@@ -76,3 +76,10 @@ the whitelisted ledger digest. Each next scheduled call must explain which
 failure its hypothesis addresses. A preview and three-candidate feedback
 receipt were prepared October 15 without making an extra model call.
 The one-call-per-window limit, candidate/time caps and every gate are unchanged.
+
+The separately authorized opportunity-feed pilot is documented in
+`research/OPPORTUNITY_FEED.md`. Its two discovery-only builds reused already
+counted IDs and consumed 32 + 63 seconds from the existing time budget. They
+added no factory candidates, changed no gates and made no model calls. The
+v2 pilot has 90 outcome-blind cards awaiting real Jo choices; it is not a
+passed strategy and is not connected to the live scanner or Jo task.
