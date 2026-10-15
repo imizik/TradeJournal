@@ -103,3 +103,28 @@ def test_scanner_adapter_prefix_causality_with_injected_minutes(monkeypatch):
         signals = [family.on_bar(i, Context(flat=True, halted=False, accept=lambda _: True)) for i in range(len(series))]
         observed.append([s for s in signals if s and s.index <= len(minutes)//5 + 3])
     assert observed[0] and observed[0] == observed[1]
+
+
+@pytest.mark.parametrize('bound,value', [('low', 0.0), ('high', -0.5)])
+def test_claude_canonical_filters_preserve_spec_id_and_gate_boundaries(bound, value):
+    public = {'low': 'min', 'high': 'max'}[bound]
+    proposal = {'family': 's1_research', 'params': {'setup': 'fade'},
+                'filters': [{'feature': 'prior_day_high', bound: value,
+                             'high' if bound == 'low' else 'low': None}],
+                'note': 'Claude idea'}
+    normalized = search.validate(proposal)
+    expected = search.validate({'family': 's1_research', 'params': {'setup': 'fade'},
+                               'filters': [{'feature': 'prior_day_high', public: value}]})
+    assert search.rules.spec_id(normalized) == search.rules.spec_id(expected)
+    assert proposal['filters'][0][bound] == value  # raw answer is retained
+    with pytest.raises(ValueError, match='conflicting filter bounds'):
+        search.validate({'family': 's1_research', 'filters': [
+            {'feature': 'prior_day_high', 'low': 0, 'min': 1}]})
+    with pytest.raises(ValueError, match='universe/costs'):
+        search.validate({**proposal, 'costs': {'slippage_bps': 0}})
+
+
+def test_claude_format_translation_does_not_broaden_intraday_scope():
+    with pytest.raises(ValueError, match='intraday only'):
+        search.validate({'family': 'recovery_swing',
+                         'filters': [{'feature': 'trend', 'low': 0, 'high': None}]})

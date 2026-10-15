@@ -58,3 +58,15 @@ Pause: `launchctl bootout gui/$(id -u)/com.tradejournal.factory-search`.
 Resume: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradejournal.factory-search.plist`.
 The actual unattended-night and real restart receipts must be recorded after
 observation; installation, fixture tests and a daytime run do not satisfy them.
+
+
+October 15 proposal intake repair: the first 16 completed trials were all random.
+Claude had produced four proposals, but canonical ledger-style `low`/`high`
+filter bounds were rejected by the CLI-style `min`/`max` parser. The search now
+translates those equivalent spellings (and `note` to `notes`) before strict
+validation, rejecting conflicting bounds. No numeric bound, gate, cost or
+budget is changed. The original answer is retained. Three saved proposals
+now validate; the fourth remains refused for an invalid window and is not
+silently altered. Claude validation refusals are logged to the main log and
+`backend/data/factory/search/<window>-proposal-rejections.jsonl`. Rejected
+proposals are not evaluated candidates and are not ledger trials.

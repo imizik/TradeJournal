@@ -134,6 +134,22 @@ def validate(raw):
     raw = dict(raw)
     if 'note' in raw and 'notes' not in raw:
         raw['notes'] = raw.pop('note')
+    # Claude sees canonical ledger specs (low/high), while CLI specs use
+    # min/max. Accept an unambiguous spelling translation without altering
+    # a bound, cost, exit, timeframe or gate.
+    if isinstance(raw.get('filters'), (list, tuple)):
+        filters = []
+        for item in raw['filters']:
+            item = dict(item)
+            for stored, public in (('low', 'min'), ('high', 'max')):
+                if stored in item:
+                    value = item.pop(stored)
+                    if public in item and item[public] != value:
+                        raise ValueError(f'conflicting filter bounds: {stored}/{public}')
+                    if value is not None:
+                        item[public] = value
+            filters.append(item)
+        raw['filters'] = filters
     spec = rules.parse_spec(raw)
     if spec.model is not None or spec.tickers != rules.CORE_UNIVERSE or spec.costs != rules.Costs() or len(spec.filters) > 2:
         raise ValueError('Search may not alter universe/costs, train models, or use more than two filters')
@@ -299,7 +315,13 @@ def tick(force=False):
             for raw in ideas + [sample(rng) for _ in range(100)]:
                 try:
                     spec = validate(raw)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as exc:
+                    if raw in ideas:
+                        refusal = {'at': datetime.now(ET).isoformat(), 'origin': 'claude-plan',
+                                   'reason': str(exc), 'spec': raw}
+                        with (OUT / f'{night}-proposal-rejections.jsonl').open('a') as log:
+                            log.write(json.dumps(refusal) + '\n')
+                        print(f'Claude proposal rejected: {exc}', flush=True)
                     continue
                 if rules.spec_id(spec) not in seen:
                     chosen = spec
