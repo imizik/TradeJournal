@@ -196,7 +196,10 @@ def build(batch=BATCH):
     public['sealed_outcomes_sha256']=digest(private)
     atomic(batch/'operator-private/outcomes.json',private)
     (batch/'operator-private').chmod(0o700);(batch/'operator-private/outcomes.json').chmod(0o600)
-    atomic(batch/'public/packets.json',public)
+    atomic(batch/'operator-private/manifest.json',public)
+    (batch/'operator-private/manifest.json').chmod(0o600)
+    atomic(batch/'public/manifest.json',{'schema':VERSION,'cards':len(chosen),
+           'manifest_sha256':digest(public),'notice':'Sequential reveal only; request view, then commit before next view'})
     quality={'schema':VERSION,'status':'awaiting Jo choices; no selection value measured',
              'sessions':[str(d) for d in DAYS],'raw_setups_per_session':dict(raw_counts),
              'geometry_rejections_per_session':dict(rejected),'cards_per_session':dict(Counter(c['simulated_as_of'][:10] for c in chosen)),
@@ -210,8 +213,33 @@ def build(batch=BATCH):
     return quality
 
 
+def view(batch):
+    public=json.loads((batch/'operator-private/manifest.json').read_text())
+    path=batch/'decisions.jsonl'
+    with (batch/'decisions.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        previous={r['id']:r for r in map(json.loads,path.read_text().splitlines())} if path.exists() else {}
+        if any(r.get('manifest_sha256')!=digest(public) for r in previous.values()):
+            raise ValueError('Frozen manifest changed')
+        next_card=next((c for c in public['cards'] if c['id'] not in previous),None)
+        if next_card is None:
+            response={'status':'all choices committed; operator may score'}
+        else:
+            response={'card':next_card,'manifest_sha256':digest(public),
+                      'card_sha256':digest(next_card),'committed':len(previous),'total':len(public['cards'])}
+            served=batch/'served.jsonl'
+            marks={r['id']:r for r in map(json.loads,served.read_text().splitlines())} if served.exists() else {}
+            if next_card['id'] not in marks:
+                with served.open('a') as handle:
+                    handle.write(canonical({'id':next_card['id'],'manifest_sha256':digest(public),
+                        'card_sha256':digest(next_card),'served_at':datetime.now(search.ET).isoformat()})+'\n')
+                    handle.flush();os.fsync(handle.fileno())
+        atomic(batch/'public/current-setup.json',response)
+        return response
+
+
 def decide(batch, source):
-    public=json.loads((batch/'public/packets.json').read_text())
+    public=json.loads((batch/'operator-private/manifest.json').read_text())
     ids={c['id'] for c in public['cards']}
     # Caller supplies Jo-authored choices; this local import is not identity authentication.
     choices=json.loads(source.read_text())
@@ -220,13 +248,20 @@ def decide(batch, source):
     with (batch/'decisions.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         previous={r['id']:r for r in map(json.loads,path.read_text().splitlines())} if path.exists() else {}
+        served=batch/'served.jsonl'
+        marks={r['id']:r for r in map(json.loads,served.read_text().splitlines())} if served.exists() else {}
         pending={}
         for row in choices:
             if set(row)!={'id','decision','reason'} or row['id'] not in ids or row['decision'] not in ('take','skip','insufficient_data') or not isinstance(row['reason'],str) or not 1<=len(row['reason'].strip())<=1000:
                 raise ValueError('Unknown card or invalid choice')
             old=previous.get(row['id']) or pending.get(row['id'])
             if old and any(old[k]!=row[k] for k in row):raise ValueError('Immutable choice conflicts')
-            if not old:pending[row['id']]={**row,'received_at':datetime.now(search.ET).isoformat(),
+            if not old:
+                next_card=next(c for c in public['cards'] if c['id'] not in previous and c['id'] not in pending)
+                mark=marks.get(row['id'],{})
+                if row['id']!=next_card['id'] or mark.get('manifest_sha256')!=digest(public) or mark.get('card_sha256')!=digest(next_card):
+                    raise ValueError('Read and commit only the next chronological setup')
+                pending[row['id']]={**row,'received_at':datetime.now(search.ET).isoformat(),
                 'source':'operator import; Jo identity not authenticated','manifest_sha256':digest(public)}
         with path.open('a') as handle:
             for row in pending.values():handle.write(canonical(row)+'\n')
@@ -241,7 +276,7 @@ def summary(ids,outcomes):
 
 
 def score(batch):
-    public=json.loads((batch/'public/packets.json').read_text())
+    public=json.loads((batch/'operator-private/manifest.json').read_text())
     choices={r['id']:r for r in map(json.loads,(batch/'decisions.jsonl').read_text().splitlines())}
     cards=public['cards'];ids={c['id'] for c in cards}
     if not ids or set(choices)!=ids or any(r.get('manifest_sha256')!=digest(public) for r in choices.values()):
@@ -295,9 +330,10 @@ def budgeted_build():
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['build','decide','score']);parser.add_argument('--choices',type=Path)
+    parser.add_argument('command',choices=['build','view','decide','score']);parser.add_argument('--choices',type=Path)
     args=parser.parse_args()
     if args.command=='build':budgeted_build()
+    elif args.command=='view':print(json.dumps(view(BATCH),indent=2))
     elif args.command=='decide':
         if args.choices is None:parser.error('--choices is required')
         print(decide(BATCH,args.choices))

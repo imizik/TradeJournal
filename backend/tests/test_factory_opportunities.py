@@ -63,7 +63,8 @@ def frozen(tmp_path):
              '1':{'resolved':True,'r':2},'2':{'resolved':False,'r':None}}}
     public={'cards':cards,'sealed_outcomes_sha256':op.digest(private)}
     op.atomic(tmp_path/'operator-private/outcomes.json',private)
-    op.atomic(tmp_path/'public/packets.json',public)
+    op.atomic(tmp_path/'operator-private/manifest.json',public)
+    op.atomic(tmp_path/'public/manifest.json',{'manifest_sha256':op.digest(public),'cards':len(cards)})
     return public
 
 
@@ -74,6 +75,7 @@ def choices(tmp_path,rows):
 def test_choices_are_immutable_idempotent_and_unknown_ids_refused(tmp_path):
     frozen(tmp_path)
     data=[{'id':'0','decision':'skip','reason':'fixture reason'}]
+    op.view(tmp_path)
     assert op.decide(tmp_path,choices(tmp_path,data))==1
     assert op.decide(tmp_path,choices(tmp_path,data))==0
     with pytest.raises(ValueError,match='conflicts'):
@@ -86,7 +88,9 @@ def test_choices_are_immutable_idempotent_and_unknown_ids_refused(tmp_path):
 
 def test_sealed_score_only_after_complete_choices_and_preserves_unresolved(tmp_path):
     frozen(tmp_path)
-    op.decide(tmp_path,choices(tmp_path,[{'id':str(i),'decision':'take' if i else 'skip','reason':'fixture reason'} for i in range(3)]))
+    for i in range(3):
+        op.view(tmp_path)
+        op.decide(tmp_path,choices(tmp_path,[{'id':str(i),'decision':'take' if i else 'skip','reason':'fixture reason'}]))
     result=op.score(tmp_path)
     assert result['jo_take']=={'selected':2,'resolved':1,'total_r':2,'mean_r':2}
     assert result['take_all']['total_r']==1
@@ -100,3 +104,21 @@ def test_gate_rejects_invalid_geometry_without_consulting_outcomes():
     day=date(2024,2,5);series=Series.build('TEST',[bar(day,570,100,101,99,100)],5)
     signal=SimpleNamespace(signal_index=0,signal_time=series.time[0],ticker='TEST',side=1,stop=101,features={})
     assert op.packet(spec(),signal,series) is None
+
+
+
+def test_later_cards_cannot_be_revealed_before_prior_choice(tmp_path):
+    frozen(tmp_path)
+    public=json.loads((tmp_path/'operator-private/manifest.json').read_text())
+    public['cards'][1]['candles']=[{'future_of_first_card':'PRIVATE_LATER_CONTINUATION'}]
+    op.atomic(tmp_path/'operator-private/manifest.json',public)
+    first=op.view(tmp_path)
+    assert first['card']['id']=='0'
+    assert 'PRIVATE_LATER_CONTINUATION' not in json.dumps(first)
+    assert op.view(tmp_path)==first  # repeated reads never advance
+    with pytest.raises(ValueError,match='next chronological'):
+        op.decide(tmp_path,choices(tmp_path,[{'id':'1','decision':'take','reason':'future guess'}]))
+    op.decide(tmp_path,choices(tmp_path,[{'id':'0','decision':'skip','reason':'first committed'}]))
+    second=op.view(tmp_path)
+    assert second['card']['id']=='1'
+    assert 'PRIVATE_LATER_CONTINUATION' in json.dumps(second)

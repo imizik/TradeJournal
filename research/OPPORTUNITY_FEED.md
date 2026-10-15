@@ -39,9 +39,13 @@ reservation; interrupted runtime stays consumed. It reuses already tried IDs
 rather than resetting/counting them again. The frozen batch cannot be replaced.
 
 The batch is under `backend/data/factory/opportunities/pilot-20261015-v1/`.
-Give Jo **only** `public/packets.json` and the public assignment. Do not give
-Jo `operator-private/`, the ledger, or scoring output before all choices are
-committed. This local file separation is an operator workflow, not a new
+Freeze every card under `operator-private/manifest.json`. The operator runs
+`view` and gives Jo **only** `public/current-setup.json` and the public
+assignment. Repeated views return the same setup until its choice is committed;
+`decide` refuses an unserved/future card. Only then may `view` reveal the next
+chronological card. Later candles must never be shared before earlier choices.
+Do not give Jo `operator-private/`, the ledger, or scoring output before all
+choices are committed. This local file separation is an operator workflow, not a new
 identity-authenticated endpoint. No live task or exchange is changed. Actual Jo
 decisions must be collected separately; never substitute another model and
 label those choices Jo.
