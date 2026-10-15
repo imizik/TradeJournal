@@ -292,7 +292,7 @@ def command_run(args: argparse.Namespace, store: BarStore, progress: Callable[[s
     records = read_ledger(args.ledger)
     # Hand-research lines share an id with the spec they describe, so a spec
     # tried by hand still runs here once; it is counted once either way.
-    known = {record["id"]: record for record in records if record.get("source") == "factory"}
+    known = {record["id"]: record for record in records if record.get("source") in ("factory", "continuous-search")}
     queue = [spec]
     parent = spec.parent()
     if parent is not None and spec_id(parent) not in known:
