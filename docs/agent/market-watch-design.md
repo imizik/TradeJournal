@@ -546,7 +546,27 @@ On October 14 the owner requested a scheduled market read at 09:50, 11:00,
 This selects the fixed-schedule/chat-advice slice below; deterministic event
 detectors, other instruments/predicates, an app message sender, automated
 continuation acquisition and the twenty-session acceptance run remain deferred.
-Implementation and activation evidence for this slice are pending.
+PR #315 implemented this slice. Its final head passed CI and the Ubuntu
+deployment checks, both required native reviews, and 179 focused market-watch
+and documentation tests. Owner-authorized activation completed October 14:
+the merged code is deployed, the isolated Check runtime preserves its config
+and ledger records, and the publisher timer is enabled with its first
+publication due October 15 at 09:49 ET. The publisher's database connection
+was verified read-only; the Check namespace can read public snapshots but
+cannot write them or read the private app environment/outcomes. A live
+connector call recovered Jo's existing latest read and the unused three-intent
+budget without submitting a new market read.
+
+The four enabled native tasks were verified under Trader Jo with the complete
+saved workflow, explicit SLOT and weekday ET times, first due October 15. The
+existing setup task's bounded exception was saved and verified after reload;
+its original source/expiry guards and shadow-first sequence remain intact.
+The optional MW-2 event/email wakes, read-notice outboxes and market-watch
+phone-push delivery remain disabled and unconfigured. A later push activation
+must reconcile the chat route to avoid duplicate messages. No live scheduled
+publication, Jo wake, eligible forecast or delivered market note was claimed
+by this configuration proof.
+Frozen outcome collection/evaluation and later session trials remain separate.
 
 The proposed task needed two concrete additions to MW-1: an opt-in app-side
 publisher before each wake, and server-owned recovery of the latest parent.
