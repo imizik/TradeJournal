@@ -212,6 +212,8 @@ def authorized(run, actor, symbols):
 
 def reveal_allowed(db, run):
     meta = metadata(run)
+    if meta["manifest"].get("kind") == "opportunity_feed":
+        return run.status == "committed"
     if meta["phase"] == "practice":
         return run.status in {"committed", "abandoned"}
     manifest = meta["manifest"]
@@ -224,12 +226,20 @@ def reveal_allowed(db, run):
     return True
 
 
+def accepting_policy(run):
+    manifest = metadata(run)["manifest"]
+    if manifest.get("kind") == "opportunity_feed":
+        from app.engine.opportunity_replay import POLICY
+        return manifest["scoring_policy"] == POLICY
+    return manifest["scoring_policy"]["version"] == market.VERSION
+
+
 def view(db, run, actor, symbols, *, details=True, resume=False):
     authorized(run, actor, symbols)
     meta = metadata(run)
     values = entries(run)
     records = own_records(db, run, actor)
-    read_only = meta["manifest"]["scoring_policy"]["version"] != market.VERSION
+    read_only = not accepting_policy(run)
     next_entry = next((e for e in values if operation(run, e) not in records), None) if run.status == "prepared" and not read_only else None
     state = json.loads(run.timings_json)
     revealed = reveal_allowed(db, run)
@@ -296,7 +306,7 @@ def choose(db, run, entry, actor, symbols, payload):
         if saved["decision"] != payload["decision"] or saved["reason"] != payload["rationale"]:
             raise decisions.DecisionError("Opportunity already has different content")
         return records[key], False
-    if metadata(run)["manifest"]["scoring_policy"]["version"] != market.VERSION:
+    if not accepting_policy(run):
         raise decisions.DecisionError("Legacy scanner run is read-only; its frozen policy cannot accept new choices")
     if run.status != "prepared" or next((e for e in entries(run) if operation(run, e) not in records), None) != entry:
         raise decisions.DecisionError("Commit only the next uncommitted setup")
@@ -332,6 +342,9 @@ def choose(db, run, entry, actor, symbols, payload):
 
 def score_results(db, run):
     meta = metadata(run)
+    if meta["manifest"].get("kind") == "opportunity_feed":
+        from app.engine.opportunity_replay import score_rows
+        return score_rows(db, run)
     policy = meta["manifest"]["scoring_policy"]
     session = json.loads(run.calendar_json)["session"]
     records = own_records(db, run, meta["manifest"]["actor"])
@@ -412,6 +425,10 @@ def report(db, run):
     if not reveal_allowed(db, run):
         raise decisions.DecisionError("Results are sealed")
     rows = snapshot_results(run)
+    if metadata(run)["manifest"].get("kind") == "opportunity_feed":
+        from app.engine.opportunity_replay import report as opportunity_report
+        return {"scorecard": opportunity_report(rows, metadata(run)["manifest"]["seed"]),
+                "labels": run_labels(run), "contract_eligibility": "unknown; underlying development only"}
     return {"scorecard": scorecard(rows, 1), "setups": rows, "cumulative": cumulative_report(db, run),
         "by_setup": {kind: scorecard([r for r in rows if r["candidate"]["setup"] == kind], 1)
                      for kind in sorted({r["candidate"]["setup"] for r in rows})},

@@ -298,12 +298,15 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write", "historical_replay", "scanner_replay"}:
+    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write", "historical_replay", "scanner_replay", "opportunity_feed"}:
         raise HTTPException(422, "Invalid permission grant")
     if type(grants.get("scanner_replay", False)) is not bool:
         raise HTTPException(422, "Invalid scanner replay permission")
     scanner = grants.get("scanner_replay") is True
-    if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > (12 if scanner else 10) or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
+    opportunity = grants.get("opportunity_feed", False)
+    if type(opportunity) is not bool or (opportunity and not scanner):
+        raise HTTPException(422, "Opportunity feed requires its explicit scanner replay assignment")
+    if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > (18 if opportunity else 12 if scanner else 10) or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
     import uuid
     try:
@@ -336,9 +339,8 @@ def grant_valid(grants):
     if grants.get("historical_replay") and (not historical_replays_enabled() or grants.get("market_decision_write") is not True):
         raise HTTPException(403, "Historical replay requires its explicit isolated market writer grant")
     if scanner:
-        from app.engine.scanner_rules import UNIVERSE
         if (grants.get("historical_replay") is not True or grants.get("market_decision_write") is not True
-                or not grants["run_ids"] or not set(grants["symbols"]) <= set(UNIVERSE)):
+                or not grants["run_ids"] or not set(grants["symbols"]) <= scanner_symbols(grants)):
             raise HTTPException(403, "Scanner replay requires its explicit historical assignment")
 
 
@@ -385,14 +387,22 @@ def historical_writer(request):
         and historical_replays_enabled() and getattr(request.app.state, "historical_replay_isolated", False) is True)
 
 
-def scanner_replay_writer(request):
+def scanner_symbols(grants):
+    """New opportunity actors use a separate explicit subtype, never legacy widening."""
+    if grants.get("opportunity_feed") is True:
+        from app.engine.opportunity_replay import SYMBOLS
+        return SYMBOLS
     from app.engine.scanner_rules import UNIVERSE
+    return frozenset(UNIVERSE)
+
+
+def scanner_replay_writer(request):
     who = getattr(request.state, "access", None)
     return bool(who and not who.owner and not who.service and who.grants.get("scanner_replay") is True
         and who.grants.get("market_decision_write") is True and who.grants.get("historical_replay") is True
         and not any(who.grants.get(k) for k in ("journal_read", "decision_write", "sample_replay"))
         and 1 <= len(who.grants.get("run_ids", [])) <= 30
-        and bool(who.grants.get("symbols")) and set(who.grants["symbols"]) <= set(UNIVERSE)
+        and bool(who.grants.get("symbols")) and set(who.grants["symbols"]) <= scanner_symbols(who.grants)
         and historical_replays_enabled()
         and getattr(request.app.state, "market_decisions_isolated", False) is True
         and getattr(request.app.state, "historical_replay_isolated", False) is True)
@@ -424,6 +434,9 @@ def grant_targets_valid(db, identifier, grants):
             try:
                 scanner_replay.authorized(run, identifier, grants["symbols"])
                 manifest = scanner_replay.metadata(run)["manifest"]
+                if ((manifest.get("kind") == "opportunity_feed") != (grants.get("opportunity_feed") is True)
+                        or (grants.get("opportunity_feed") and set(grants["symbols"]) != set(manifest["symbols"]))):
+                    raise ValueError()
                 if set(manifest["run_ids"].values()) != set(grants["run_ids"]):
                     raise ValueError()
             except (ValueError, TypeError, KeyError, AttributeError):

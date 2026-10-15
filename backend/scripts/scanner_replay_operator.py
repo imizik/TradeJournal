@@ -102,6 +102,9 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--decision-delay-seconds", type=int, default=60)
     prepare.add_argument("--cost-per-share", type=float, default=0, help="Proxy dollars per share per side")
     prepare.add_argument("--slippage-bps", type=float, default=0, help="Adverse proxy slippage per side")
+    opportunity = actions.add_parser("prepare-opportunities", help="Import an unchanged discovery-only Mac opportunity pilot")
+    opportunity.add_argument("--bundle", type=Path, required=True, help="Private 0600 frozen bridge bundle")
+    opportunity.add_argument("--identifier", required=True, help="Fresh isolated opportunity identity")
     report = actions.add_parser("report", help="Write a sealed run's Markdown report")
     report.add_argument("--run-id", required=True)
     report.add_argument("--output", type=Path, required=True, help="Fresh absolute 0600 Markdown path")
@@ -123,7 +126,18 @@ def main(argv: list[str] | None = None) -> None:
 
     engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
     try:
-        if args.action == "prepare":
+        if args.action == "prepare-opportunities":
+            from app.engine import opportunity_replay
+            bundle = private_json(args.bundle, MAX_BUNDLE_BYTES)
+            with access._LOCK, Session(engine) as db:
+                access._serialized(db)
+                runs = opportunity_replay.prepare(db, bundle, args.identifier)
+                manifest = scanner_replay.metadata(runs[0])["manifest"]
+            grants = {"symbols": manifest["symbols"], "run_ids": [str(r.id) for r in runs],
+                      "journal_read": False, "market_decision_write": True,
+                      "historical_replay": True, "scanner_replay": True, "opportunity_feed": True}
+            print(json.dumps({"run_ids": grants["run_ids"], "grants": grants}, sort_keys=True))
+        elif args.action == "prepare":
             if len(args.bundle) > MAX_BUNDLES:
                 raise ValueError("Too many capture files")
             bundles = [private_json(path, MAX_BUNDLE_BYTES) for path in args.bundle]
@@ -167,7 +181,12 @@ def main(argv: list[str] | None = None) -> None:
                     snapshot = private_json(args.isaac_trades, MAX_SNAPSHOT_BYTES) if args.isaac_trades else None
                     if snapshot is not None and not isinstance(snapshot, list):
                         raise ValueError("Isaac snapshot must contain a list")
-                    markdown = scanner_replay_report.render_markdown(db, run, isaac_trades=snapshot)
+                    if scanner_replay.metadata(run)["manifest"].get("kind") == "opportunity_feed":
+                        if snapshot is not None:
+                            raise ValueError("Opportunity pilot does not link real trades")
+                        markdown = "# Opportunity selection development\n\n```json\n" + json.dumps(scanner_replay.report(db, run), indent=2) + "\n```\n"
+                    else:
+                        markdown = scanner_replay_report.render_markdown(db, run, isaac_trades=snapshot)
                     write_private_report(args.output, markdown)
                     print(json.dumps({"run_id": args.run_id, "report": str(args.output)}))
     finally:

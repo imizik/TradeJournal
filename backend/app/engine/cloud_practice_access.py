@@ -123,13 +123,14 @@ def identify(request, *, write=False):
             grants = json.loads(row.grants_json)
             # This first slice cannot turn an OAuth link into journal/live access.
             scanner = config.exercise_kind == "scanner_replay"
-            from app.engine.scanner_rules import UNIVERSE
+            if type(grants.get("opportunity_feed", False)) is not bool or (grants.get("opportunity_feed") and not scanner):
+                raise ValueError()
             if (not isinstance(grants, dict) or grants.get("journal_read") is not False
                     or not isinstance(grants.get("run_ids"), list)
                     or not 1 <= len(grants["run_ids"]) <= (30 if scanner else 1)
                     or not isinstance(grants.get("symbols"), list)
-                    or not 1 <= len(grants["symbols"]) <= (12 if scanner else 2)
-                    or not set(grants["symbols"]) <= (set(UNIVERSE) if scanner else {"MU", "NBIS"})
+                    or not 1 <= len(grants["symbols"]) <= (18 if grants.get("opportunity_feed") is True else 12 if scanner else 2)
+                    or not set(grants["symbols"]) <= (access.scanner_symbols(grants) if scanner else {"MU", "NBIS"})
                     or bool(grants.get("scanner_replay")) != scanner):
                 raise ValueError()
             import uuid
