@@ -1,0 +1,19 @@
+{
+  "family": "opening_range_breakout",
+  "name": "Continuous setup search",
+  "params": {
+    "range_minutes": 30,
+    "stop_at": "mid"
+  },
+  "exits": {
+    "target_r": 2.5,
+    "max_sessions": 1,
+    "max_minutes": 120
+  },
+  "filters": [
+    {
+      "feature": "vol_ratio",
+      "max": 2.0
+    }
+  ]
+}
