@@ -18,7 +18,10 @@ from pathlib import Path
 import subprocess
 import time
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import httpx
 
 API = "http://127.0.0.1:8080"
 ENV_FILE = Path("/etc/tradejournal/alerts.env")
@@ -99,7 +102,7 @@ def load_config() -> dict[str, str]:
                 config[key.strip()] = value.strip().strip("'\"")
     except OSError:
         pass
-    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "ALERT_APP_URL", "HEALTHCHECK_PING_URL"}})
+    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL"}})
     return config
 
 
@@ -276,6 +279,15 @@ def publish(config: dict[str, str], title: str, message: str, *, recovered: bool
     if config.get("NTFY_TOKEN"):
         headers["Authorization"] = f"Bearer {config['NTFY_TOKEN']}"
     request = Request(f"{target.scheme}://{target.netloc}/", data=json.dumps(body).encode(), headers=headers, method="POST")
+    if config.get("NTFY_IPV4_ONLY", "").strip().lower() == "true":
+        try:
+            with httpx.Client(transport=httpx.HTTPTransport(local_address="0.0.0.0"), timeout=15) as client:
+                response = client.post(request.full_url, content=request.data, headers=headers)
+        except httpx.HTTPError as exc:
+            raise URLError(f"ntfy could not be reached ({type(exc).__name__})") from exc
+        if response.status_code >= 400:
+            raise HTTPError(request.full_url, response.status_code, "ntfy refused the notification", {}, None)
+        return
     with urlopen(request, timeout=15):
         pass
 
