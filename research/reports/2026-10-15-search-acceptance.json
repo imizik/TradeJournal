@@ -1,0 +1,24 @@
+{
+  "before_restart": {
+    "lines": 26,
+    "distinct_ids": 24,
+    "candidate": "re-3dfc671beb",
+    "candidate_records": 2
+  },
+  "after_restart": {
+    "lines": 26,
+    "distinct_ids": 24,
+    "candidate_records": 2
+  },
+  "no_double_count": true,
+  "summary_sent": true,
+  "recorded": "2026-10-15T13:44:56.768086-04:00",
+  "unattended_night_observed": false,
+  "trial_result": "re-3dfc671beb failed_screen; discovery only; no holdout loaded",
+  "final_search_code": "4d394cdf5eeef209a97701976acd4c6aff08d3c5",
+  "review": "clean, third review round",
+  "focused_tests": "166 passed",
+  "launchd": "com.tradejournal.factory-search, 22:00-06:00 America/New_York, 300-second ticks",
+  "summary": "research/reports/2026-10-14-continuous.json (daytime acceptance uses prior night budget key)",
+  "next_check": "October 16, 2026 07:15 America/New_York, this chat follow-up"
+}
