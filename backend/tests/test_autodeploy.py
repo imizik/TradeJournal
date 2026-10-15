@@ -447,9 +447,9 @@ def test_settings_come_from_a_root_only_file(autodeploy, tmp_path, monkeypatch):
     assert autodeploy.load_settings(config).auto_migrate is True
 
     # With no topic of its own it reports on the phone alerts' topic...
-    (tmp_path / "alerts.env").write_text("NTFY_URL=https://ntfy.sh/alerts-topic\nNTFY_TOKEN=tk_secret\nALERT_APP_URL=https://server.ts.net\n")
+    (tmp_path / "alerts.env").write_text("NTFY_URL=https://ntfy.sh/alerts-topic\nNTFY_TOKEN=tk_secret\nNTFY_IPV4_ONLY=true\nALERT_APP_URL=https://server.ts.net\n")
     assert autodeploy.load_settings(config).ntfy == {
-        "NTFY_URL": "https://ntfy.sh/alerts-topic", "NTFY_TOKEN": "tk_secret", "ALERT_APP_URL": "https://server.ts.net",
+        "NTFY_URL": "https://ntfy.sh/alerts-topic", "NTFY_TOKEN": "tk_secret", "NTFY_IPV4_ONLY": "true", "ALERT_APP_URL": "https://server.ts.net",
     }
     # ...and a topic of its own wins, without mixing in the alerts' token.
     config.write_text(config.read_text().replace("NTFY_URL=\n", "NTFY_URL=https://ntfy.sh/deploys\n"))

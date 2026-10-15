@@ -37,10 +37,17 @@ def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...
     if token := os.environ.get("NTFY_TOKEN", "").strip():
         headers["Authorization"] = f"Bearer {token}"
     try:
-        response = httpx.post(f"{target.scheme}://{target.netloc}/", json=body, headers=headers, timeout=TIMEOUT_SECONDS)
+        endpoint = f"{target.scheme}://{target.netloc}/"
+        if os.environ.get("NTFY_IPV4_ONLY", "").strip().lower() == "true":
+            # A fixed source family avoids shared IPv6 /64 quotas. Never
+            # change addresses or retry via another family after a refusal.
+            with httpx.Client(transport=httpx.HTTPTransport(local_address="0.0.0.0"), timeout=TIMEOUT_SECONDS) as client:
+                response = client.post(endpoint, json=body, headers=headers)
+        else:
+            response = httpx.post(endpoint, json=body, headers=headers, timeout=TIMEOUT_SECONDS)
     except httpx.HTTPError as exc:
         raise NtfyError(f"ntfy could not be reached ({type(exc).__name__}).") from exc
-    if response.status_code >= 400:
+    if not 200 <= response.status_code < 300:
         raise NtfyError(f"ntfy refused the notification ({response.status_code}).")
     try:
         receipt = response.json().get("id")

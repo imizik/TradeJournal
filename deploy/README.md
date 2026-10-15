@@ -504,6 +504,13 @@ sudo systemctl start tradejournal-alerts.service
 sudo journalctl --no-pager -u tradejournal-alerts.service -n 20
 ```
 
+If ntfy's anonymous quota is exhausted on a shared hosting IPv6 `/64`, set
+`NTFY_IPV4_ONLY=true` in `alerts.env` and restart `tradejournal-api.service`.
+This binds API, health and deployment notifications to the server's fixed IPv4
+address; it does not change the topic, TLS verification or provider limits.
+There is no retry through another address after a refusal. ntfy acceptance is
+separate from confirming the notification appeared on the subscribed phone.
+
 The server cannot report its own death. Set `HEALTHCHECK_PING_URL` to an
 outside dead-man's switch, such as a free healthchecks.io check with a
 five-minute period and ten-minute grace that notifies the same ntfy topic.
