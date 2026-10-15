@@ -4,8 +4,14 @@ Runs only in `/Users/user/TradeJournal-factory`, branch `factory/ledger`.
 This branch is never merged and no unproven strategy PR is created.
 
 `backend/scripts/factory_search.py --tick` runs at most one new candidate.
-launchd calls it every five minutes. New work runs 22:00–06:00 New York;
-at other times it recovers finished work and sends one daily ntfy summary.
+launchd calls it every five minutes with `--force`, enabled by Isaac on
+October 15 to continue searching during the day as well as at night. The same
+24-candidate / two-hour budget remains in force; its existing window rolls
+over at 22:00 New York. Already consumed attempts and time are retained.
+A tick acquires the same exclusive writer lock, so evaluations do not overlap.
+Without `--force`, new work remains restricted to 22:00–06:00 New York.
+Daily summary files/ntfy receipts are snapshots; tomorrow's verifier must
+compare them against the latest ledger while continuous work is active.
 The Mac must be awake. SIP cache only; no VPS computation or database access.
 
 Nightly limits: 24 reserved candidates, two hours of reserved process time,
