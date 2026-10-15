@@ -1,0 +1,19 @@
+{
+  "family": "s1_research",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "prior_day_high",
+      "min": 0.0
+    },
+    {
+      "feature": "spy_trend",
+      "max": 1.0
+    }
+  ]
+}
