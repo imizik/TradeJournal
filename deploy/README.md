@@ -49,7 +49,10 @@ The `Deployment package` GitHub Actions workflow builds once on Ubuntu 24.04
 x86_64, then installs those exact bytes on two disposable runners in parallel
 (the package and MCP smokes, and the slower advisor smoke) and exercises real
 systemd services against disposable Postgres. Only when both pass does it upload
-`tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Choose a successful
+`tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Pull requests run the
+advisor smoke only when `scripts/ci_scope.sh` marks them advisor-relevant
+(deployment code, migrations, dependencies, access, or advisor files); every
+`main` push always runs it, so a release has always passed it. Choose a successful
 run for the exact reviewed commit; after merging, prefer the `main` run.
 
 For every `main` commit on which both that workflow and CI pass, the Release
