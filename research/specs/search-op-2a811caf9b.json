@@ -1,0 +1,22 @@
+{
+  "family": "opening_range_breakout",
+  "name": "Continuous setup search",
+  "params": {
+    "stop_at": "mid"
+  },
+  "exits": {
+    "target_r": 1.5,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "swing_low",
+      "min": 0.0
+    },
+    {
+      "feature": "trend_slope",
+      "max": 0.5
+    }
+  ]
+}
