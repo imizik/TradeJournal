@@ -1,0 +1,18 @@
+{
+  "family": "opening_range_breakout",
+  "name": "opening_range_breakout",
+  "params": {
+    "range_minutes": 15
+  },
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 1,
+    "max_minutes": null
+  },
+  "filters": [
+    {
+      "feature": "prior_day_high",
+      "min": 0.0
+    }
+  ]
+}
