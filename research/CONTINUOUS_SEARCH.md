@@ -70,3 +70,9 @@ now validate; the fourth remains refused for an invalid window and is not
 silently altered. Claude validation refusals are logged to the main log and
 `backend/data/factory/search/<window>-proposal-rejections.jsonl`. Rejected
 proposals are not evaluated candidates and are not ledger trials.
+
+Claude feedback now includes origin and recorded discovery screen failures in
+the whitelisted ledger digest. Each next scheduled call must explain which
+failure its hypothesis addresses. A preview and three-candidate feedback
+receipt were prepared October 15 without making an extra model call.
+The one-call-per-window limit, candidate/time caps and every gate are unchanged.

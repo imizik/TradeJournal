@@ -61,9 +61,24 @@ def night_key(now):
 def safe_digest(records):
     # Whitelist only discovery/confirmation data. Neither exam outcome nor
     # holdout numbers, notes or hand summaries can reach the idea model.
-    return [dict(id=r['id'], spec=r.get('spec'), periods={k: v for k, v in r.get('periods', {}).items()
+    return [dict(id=r['id'], spec=r.get('spec'), origin=r.get('search_origin'),
+            screen={'passed': r.get('gates', {}).get('screen', {}).get('passed'),
+                    'failed_checks': [text for text, passed in r.get('gates', {}).get('screen', {}).get('checks', []) if not passed]},
+            periods={k: v for k, v in r.get('periods', {}).items()
             if k in ('discovery', 'confirm_a', 'confirm_b', 'confirm', 'confirm_x3')})
             for r in latest(records).values() if r.get('spec')]
+
+
+def idea_prompt(records):
+    return ('Propose up to four simple independent underlying setup specs from the catalog and ledger summaries. '
+              'Only discovery and confirm evidence is provided. Never request or infer exam/holdout results. '
+              'Use core tickers, default costs, no model, at most two filters, timeframe 5 for s1_research. '
+              'Learn from the recorded failed screen checks, especially your own claude-plan ideas. '
+              'Separate insufficient samples from negative net R and insufficient evidence against random. '
+              'Do not repeat a tried spec. State the failure addressed and the new testable hypothesis in notes; '
+              'do not assume that an exit change will rescue an entry with no demonstrated edge. '
+              'Mix S1 orb/fade, other families, day/week and past-level context, and exits. Use notes, never note. Return {"specs":[...]}.\n' + SPEC_FORMAT + '\n'
+              + json.dumps({'catalog': catalog(), 'ledger': safe_digest(records)}))
 
 
 def claude_ideas(records, night, lock_fd=None):
@@ -86,11 +101,7 @@ def claude_ideas(records, night, lock_fd=None):
         raise RuntimeError('Claude plan preflight refused sign-in')
     schema = {'type': 'object', 'properties': {'specs': {'type': 'array', 'maxItems': 4,
               'items': {'type': 'object'}}}, 'required': ['specs']}
-    prompt = ('Propose up to four simple independent underlying setup specs from the catalog and ledger summaries. '
-              'Only discovery and confirm evidence is provided. Never request or infer exam/holdout results. '
-              'Use core tickers, default costs, no model, at most two filters, timeframe 5 for s1_research. '
-              'Mix S1 orb/fade, other families, day/week and past-level context, and exits. Use notes, never note. Return {"specs":[...]}.\n' + SPEC_FORMAT + '\n'
-              + json.dumps({'catalog': catalog(), 'ledger': safe_digest(records)}))
+    prompt = idea_prompt(records)
     (OUT / f'{night}-brief.json').write_text(prompt)
     command = [cli, '-p', '--restricted', '--strict-mcp-config', '--tools', '', '--model', 'opus',
                '--effort', 'high', '--system-prompt', 'Follow the supplied factory research brief only.',

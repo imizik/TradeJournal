@@ -128,3 +128,22 @@ def test_claude_format_translation_does_not_broaden_intraday_scope():
     with pytest.raises(ValueError, match='intraday only'):
         search.validate({'family': 'recovery_swing',
                          'filters': [{'feature': 'trend', 'low': 0, 'high': None}]})
+
+
+
+def test_next_claude_brief_contains_failures_and_excludes_exam_evidence():
+    records = [{'id': 'claude-failed', 'search_origin': 'claude-plan',
+                'spec': {'family': 's1_research'}, 'verdict': 'failed_exam',
+                'notes': 'PRIVATE_EXAM_NUMBER',
+                'periods': {'discovery': {'n': 214, 'mean_r': -0.088874, 'edge_t': -0.795647},
+                            'holdout': {'PRIVATE_EXAM_NUMBER': 999}},
+                'gates': {'screen': {'passed': False, 'checks': [
+                    ['214 trades (at least 100)', True],
+                    ['average -0.089R after costs (above 0)', False]]},
+                          'exam': {'passed': False, 'checks': [['PRIVATE_EXAM_NUMBER', False]]}}}]
+    brief = search.idea_prompt(records)
+    assert 'claude-plan' in brief and 'claude-failed' in brief
+    assert 'average -0.089R after costs' in brief
+    assert '-0.088874' in brief and '-0.795647' in brief
+    assert 'PRIVATE_EXAM_NUMBER' not in brief and 'failed_exam' not in brief
+    assert 'Learn from the recorded failed screen checks' in brief
