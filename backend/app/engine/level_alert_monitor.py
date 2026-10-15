@@ -68,7 +68,7 @@ class LevelAlertMonitor:
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
-        self.scanner = scanner  # Setup scanner S1 (off unless SETUP_SCANNER_ENABLED), same pass and feed
+        self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.stream = stream
         self.feed = feed
         self.calendar = calendar

@@ -258,3 +258,87 @@ count as live decision/entry evidence.
 
 Co-pilot alerts, Dot wake-ups, shadow decisions, real orders, intraday
 re-entry rules and any change to Isaac's own trade records.
+
+## Selected-stock awareness, separate from option eligibility
+
+Owner-selected October 15, 2026 after NBIS's large rebound received no Jo setup
+review. Two saved NBIS short-fade candidates were `no_contract`: October 16 was
+1 DTE and October 23 was 8 DTE. Both original email and shadow handoff paths
+required a selected contract. This was a stock-awareness coverage failure;
+absence of a Jo decision did not mean Jo reviewed and rejected the move.
+
+The 0-or-3–7-DTE policy remains only the original rules-only paper baseline.
+Its motivating aggregate journal results above do not establish a causal DTE
+edge or justify suppressing stock observations. The new advisory path does not
+change that baseline's contract choice, entry/exit pricing, cooldowns, replay
+identity, eligibility, or Shadow Isaac TAKE/SKIP records.
+
+With `STOCK_WATCH_ENABLED=true` (default off and independent of the paper
+scanner enable flag), [stock_watch.py](../../backend/app/engine/stock_watch.py):
+
+- Captures a stock setup **before** option selection and before the baseline's
+  open-trade/cooldown gates. Option errors or no qualifying option cannot erase
+  this input. The frozen record says option eligibility is `not_evaluated` by
+  this advisory path; it grants no trade authority.
+- Monitors the same explicitly saved selected tickers once per minute through
+  the exchange calendar's regular-session close, independently of the paper
+  scanner's 15:00 cutoff. Empty selection pauses new stock alerts; removed
+  tickers receive no new stock email/push. Existing selected settings and
+  original paper monitoring retain their semantics.
+- Detects a completed 15-minute move of at least max(1%, 0.35 prior daily ATR),
+  or a rebound/drawdown from an **observed** session extreme of at least
+  max(3%, 0.5 ATR). It requires 16 contiguous completed minute bars for the
+  recent window, valid prices, prior ATR and source/bar freshness within 180 s.
+  No missing-minute filling, future bars, retrospective backfill or implicit
+  paid-feed fallback. It reads the existing shared Tradier minute/daily data.
+- Uses a 30-minute per-symbol email cooldown and bounds stock-only email wakes
+  to four per ticker and fifteen per session. A same-direction subsequent move
+  must additionally differ from its sent/reviewed anchor by max(1%, 0.25 ATR).
+  Shadow-pending setup guards take priority. Budget/cooldown/guard/source gaps
+  are recorded as immutable stock status, not disguised as a Jo assessment.
+- Publishes immutable, bounded `stock-alert-v1` files beside the existing public
+  market snapshots, and appends stock records to the existing explicitly
+  configured MW-2 store. The frozen selection/revision, evidence and hard
+  ten-minute expiry survive retries/restarts. Interrupted publication recovers
+  the original input, never extends its expiry.
+- Sends stock-only mail through the existing scanner/Outlook relay:
+  `TJ Setup: STOCK SYMBOL sta_UUID`, body only `Stock alert ID: sta_UUID`.
+  Eligible paper candidates retain their single original setup email, with the
+  separate stock-alert ID appended. The saved Jo task must use the
+  [stock branch](../../deploy/market-watch/jo-stock-task.md), with its existing
+  source checks and shadow-first ordering, before activation.
+- Exposes `stock_alert` / `stock_alert_submit` on the existing isolated Check
+  service under existing market-watch read/submit scopes. Public stock inputs
+  only; no journal/position access or provider calls. Actor-bound input
+  receipts and one immutable assessment per alert live in additive SQLite
+  `stock_watch_input` / `stock_watch_review` tables, separate from shadow
+  decisions and SPY forecast records. Exact retries recover a receipt; changed
+  retries conflict. Expired new assessments refuse.
+- Passes sealed reviews through the existing private outbox to the app.
+  `watch`/`avoid` with `notify=true` may deliver one phone update; `no_view`
+  stays quiet. New paper eligibility and TAKE/SKIP cannot be granted here.
+  Phone messages explicitly separate stock awareness from option eligibility.
+  Source expiry also bounds phone delivery; accepted or uncertain sends are
+  never resent. Receipt IDs prove ntfy acceptance, not owner-observed display.
+
+Activation and acceptance: merge reviewed green source, deploy normally, perform
+its controlled code-only Check upgrade (new root helper modules included), and
+preserve existing credentials, scopes, pinned SQL/units and original records.
+The two additive Check SQLite tables appear on startup; PostgreSQL needs no
+migration. Prepare/read back the native Jo stock branch while the flag is off,
+then enable the flag in the existing private API environment and restart only
+through the authorized service procedure. Never publish unreviewed runtime code
+or weaken a source check to make a test pass.
+
+After deployment, an explicit owner command
+`stock_watch_owner.py delivery-diagnostic --symbol NBIS --code STK-...` creates
+one labelled invented-data input for a selected ticker. The normal email relay
+must wake the actual saved Jo task, which reads the frozen diagnostic, commits
+its labelled assessment, and lets the app/ntfy deliver it. No typed replacement
+submission counts as wake proof. Match input/review IDs and hashes through the
+original native task history, isolated ledger, app notice, transport receipt and
+owner's phone confirmation. Distinguish that full-flow diagnostic from a natural
+market-session acceptance. Never relabel historical NBIS bars as live.
+
+Implementation is under review; no new stock watcher, native task branch or
+live phone acceptance is claimed here yet.

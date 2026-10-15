@@ -13,7 +13,7 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
-Checkpoint: October 13, 2026 (evening ET), against merged source through PR #304.
+Checkpoint: October 15, 2026; selected-stock awareness is under review against the current main baseline. Other rows retain their individually stated evidence dates.
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Move
 the checkpoint whenever a row changes, and verify host state before acting.
@@ -27,6 +27,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | Invented-data advisor: connected trial, repeatable questions, owner status ([assignment](advisor-assignment-contract.md), [upkeep](advisor-connection-upkeep-contract.md)) | Yes | v2 trial upgraded Oct 12 per the operator record (owner page lists checks); not recorded in the repo's evidence | Connected trial Oct 11 | **Closed by the owner Oct 12**, not against every contract gate | Repeatable-question and key-upkeep acceptance with actual Jo were not recorded; owner-deferred revoke/recover check remains. Invented data only |
 | Pre-trade check, real data ([contract](advisor-pretrade-check-contract.md#next-steps)) | Yes | Oct 12 | First checks Oct 12; sign-in survived a 60-minute gap Oct 13 | Per step in its next-steps table | Grading (followed vs overrode) needs weeks of saved checks; swing outcome linking and sector moves open |
 | Setup scanner S1 ([contract](setup-scanner-contract.md#daily-health-acceptance-notes)) | Yes | Oct 12 (`SETUP_SCANNER_ENABLED`) | Oct 13 baseline session | No — ten full sessions from Oct 14 | Restart and pricing gates per the contract; no tuning before 50 paper trades |
+| Selected-stock awareness ([contract](setup-scanner-contract.md#selected-stock-awareness-separate-from-option-eligibility)) | In review | No; flag defaults off | Detector replay/fixtures only | No | Native email → actual Jo → saved stock review → phone; stock advice remains separate from trade eligibility |
 | Shadow Isaac S1 ([contract](shadow-s1-contract.md#acceptance)) | SH-1 to SH-5; SH-6 (activation runbook, first session) in progress | VPS file exchange and Jo task, Oct 13 | Oct 15, 2026 read-only VPS audit supplied by Isaac: **19 on-time decisions since Oct 14, all SKIP**; 18 VWAP fades. Rules-only skipped setups Oct 14–15: **0 wins / 17 exits** (since Oct 13: 2/26, −$1,100 after 2× spread) | No | One full live session with a decision, late or no-response record for every setup; restart and refusal gates |
 | Shadow S2: Isaac's trades in the scorecard ([plan](shadow-build-plan.md#s2--built-isaac-in-the-scorecard)) | Yes, display-only (#304) | Pending: merged after the last recorded deploy (`23b7c6c`) | No | No | Comparisons say "not enough evidence" under 30 decisions |
 | Shadow S3 (independence) / S4 (shadow picks contract and exits) | No | No | No | No | S3 research-gated; S4 needs S2 evidence. Hold both until S1 is accepted |
