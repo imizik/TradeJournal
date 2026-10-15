@@ -52,11 +52,13 @@ def test_durable_reservation_and_restart_dedup(tmp_path, monkeypatch):
 
 def test_recovered_pass_emits_proposal_without_evaluation(tmp_path, monkeypatch):
     monkeypatch.setattr(search, 'ROOT', tmp_path)
-    record = {'id': 'pass', 'verdict': 'passed', 'periods': {'confirm': {'mean_r': 0.3}}}
-    search.proposal(record)
+    record = {'id': 'pass', 'verdict': 'passed', 'attempt_state': 'completed', 'search_night': '2026-10-15', 'periods': {'confirm': {'mean_r': 0.3}}}
+    search.reconcile_proposals([record])
     path = tmp_path / 'research/reports/s1-v3-proposal-pass.json'
     assert json.loads(path.read_text())['evidence'] == record
-    search.proposal(record)
+    path.unlink()  # simulate a supervisor loss after ledger completion
+    search.reconcile_proposals([record])
+    assert json.loads(path.read_text())['evidence'] == record
     assert len(list(path.parent.glob('s1-v3-proposal-*.json'))) == 1
 
 

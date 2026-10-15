@@ -66,7 +66,7 @@ def safe_digest(records):
             for r in latest(records).values() if r.get('spec')]
 
 
-def claude_ideas(records, night):
+def claude_ideas(records, night, lock_fd=None):
     flag = OUT / f'{night}-claude-started'
     if flag.exists():
         queue = OUT / f'{night}-ideas.json'
@@ -96,7 +96,9 @@ def claude_ideas(records, night):
                '--effort', 'high', '--system-prompt', 'Follow the supplied factory research brief only.',
                '--json-schema', json.dumps(schema), '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
                '--max-budget-usd', str(CLAUDE_USD_CAP), '--no-session-persistence', '--output-format', 'json']
-    answer = subprocess.run(command, input=prompt, env=env, capture_output=True, text=True, check=True, timeout=300)
+    answer = subprocess.run(command, input=prompt, env=env, capture_output=True, text=True, check=True, timeout=300,
+                            preexec_fn=lambda: signal.alarm(300),
+                            pass_fds=(() if lock_fd is None else (lock_fd,)))
     raw = json.loads(answer.stdout)
     if raw.get('is_error'):
         raise RuntimeError('Claude returned an error')
@@ -197,8 +199,17 @@ def proposal(record):
     if record.get('verdict') == 'passed':
         path = ROOT / 'research/reports' / f"s1-v3-proposal-{record['id']}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({'status': 'Isaac approval and forward paper required; no activation',
-                                    'evidence': record}, indent=2))
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps({'status': 'Isaac approval and forward paper required; no activation',
+                                        'evidence': record}, indent=2))
+        temporary.replace(path)
+
+
+def reconcile_proposals(records):
+    # Replay even when completion was appended before a supervisor interruption.
+    for record in latest(records).values():
+        if record.get('search_night'):
+            proposal(record)
 
 
 def persist_research():
@@ -252,6 +263,7 @@ def tick(force=False):
                     append(done)
                     records.append(done)
                     proposal(done)
+            reconcile_proposals(records)
             for night in sorted({r['search_night'] for r in records if r.get('search_night')}):
                 if night != night_key(now) or (6 <= now.hour < 22):
                     notify(records, night)
@@ -277,7 +289,7 @@ def tick(force=False):
             if not (OUT / f'{night}-claude-started').exists():
                 reserve_seconds(330)
             try:
-                ideas = claude_ideas(records, night)
+                ideas = claude_ideas(records, night, handle.fileno())
             except Exception as exc:
                 print('Claude proposal failed (random search continues):', type(exc).__name__, flush=True)
                 (OUT / f'{night}-claude-failure.txt').write_text(type(exc).__name__ + '\n')
