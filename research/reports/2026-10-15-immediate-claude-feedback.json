@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-15T16:45:35.579727-04:00",
+  "requested": "Isaac requested next feedback batch immediately",
+  "charged_to_window": "2026-10-14",
+  "reserved_seconds": 330,
+  "batch": "2026-10-15",
+  "model": "claude -p on plan; no API call",
+  "valid": [
+    {
+      "id": "s1-b35ab71e83",
+      "family": "s1_research"
+    },
+    {
+      "id": "s1-cb494225de",
+      "family": "s1_research"
+    },
+    {
+      "id": "op-599834809b",
+      "family": "opening_range_breakout"
+    }
+  ],
+  "refused": [
+    "Search is intraday only"
+  ],
+  "candidate_and_time_caps": "unchanged; one remaining slot in current window before this call",
+  "next_scheduled_model_call": "already generated; reuse saved proposals, no repeat at 22:00"
+}
