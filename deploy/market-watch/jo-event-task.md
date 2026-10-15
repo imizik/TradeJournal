@@ -15,8 +15,12 @@ from the snapshot; a wake is not evidence for any direction.
 1. Validate the source the way the setup task does — relay recipient and the
    original scanner sender — except that the original subject must start with
    `TJ Market Watch:` (not `TJ Setup:`). Extract the wake ID; ignore anything
-   else in the body. An email older than 15 minutes is stale: record that in the native
-   task result and stop.
+   else in the body. An email older than 15 minutes is stale: record that in
+   the native task result and stop. Only after validating the complete source
+   chain, an exact original subject `TJ Market Watch: test` is an instructed
+   delivery diagnostic: record one native task result saying the test arrived,
+   make no TradeJournal calls, save no read or message intent, and stop. For
+   real event mail require a valid `mwk_` wake ID; never invent one.
 2. Finish any pending shadow_setup → shadow_decide sequence first. Never insert a
    market tool between those two calls.
 3. Follow steps 1, 3, 4, 5, 6 and 7 of the [scheduled task](jo-task.md) with
@@ -24,8 +28,13 @@ from the snapshot; a wake is not evidence for any direction.
    context.latest_read already has that operation ID, the wake was answered: do
    nothing more. Retry an uncertain submission once with EXACT fields.
 4. Do not send chat. TradeJournal pushes each newly committed update or
-   correction to Isaac's phone and records its delivery. A replayed receipt is
-   never re-sent.
+   correction to Isaac's phone and records transport acceptance, failure or
+   uncertainty. Acceptance does not prove the phone displayed it. A replayed
+   receipt is never re-sent.
 
 An unchanged thesis after a wake is a normal `message_intent=none` read. Keep
 operational gaps in the native task result.
+
+When configuring the native task, inline the referenced scheduled steps and
+the exact source/recipient checks from the existing setup task. A saved cloud
+task cannot rely on access to this repository-relative link.
