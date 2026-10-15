@@ -118,9 +118,16 @@ export type OptionsInfo = {
   max_pain?: MaxPain | null;
   max_pain_reason?: string | null;
 };
+/** The at-the-money straddle of one expiration (T2.1): `move` and `percent` only when `ready`. */
+export type Straddle = { state: "ready" | "too_wide" | "stale" | "none"; expiration: string; strike?: number; move?: number; percent?: number; iv?: number | null; reason?: string };
 export type OptionsLadder = OptionsInfo & {
   signed: boolean; rows: OptionStrike[];
   walls: Partial<Record<"call_oi" | "put_oi" | "call_volume" | "put_volume", number | null>>;
+  /** The read, over every strike in scope: signed dollar gamma summed and its largest strike (assumed dealer side). */
+  net_gamma?: number | null; top_gamma?: number | null;
+  /** The scope's nearest expiration's straddle, and from its IV the modelled chance of touching each wall by then. */
+  expected_move?: Straddle | null;
+  touch?: { expiration: string; call_wall: number | null; put_wall: number | null } | null;
 };
 export type LevelEvent = { event: "tested" | "approached" | "broken" | "reclaimed"; time: number; bar_time?: number; direction?: "above" | "below" };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */

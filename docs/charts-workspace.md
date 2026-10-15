@@ -1174,18 +1174,37 @@ says so and the alert stays where it was.
 
 The side dock's third tab (Strike ladder), closed until opened; on a phone
 it opens from the More menu (the top row keeps its height for the chart) as a
-bottom sheet. It reads `GET /charts/options/{symbol}/ladder?scope=&signed=&spot=`
-with the chart's latest price, over the options layer's expirations and gamma
-sign (changing them here changes the layer's too), every minute while the page
-is visible. It shows 25 strikes each side of the price, which sits between the
-strikes around it, and opens scrolled to it inside the panel. Each row: put
-volume and put open interest left of the strike, call open interest and volume
-right, open interest shaded by its size, and dollar gamma as the bar under the
-strike (green and red by sign when signed). The open-interest walls are bold
-and named. A click or tap marks the strike on every chart of the symbol as a
-solid "Strike …" line and brings it onto the main chart's price scale; a
-second click clears it, and charting another symbol drops it. On a phone the
-tap also closes the sheet so the chart shows.
+bottom sheet. It reads `GET /charts/options/{symbol}/ladder?scope=&signed=1&spot=`
+with the chart's latest price, over the options layer's expirations (changing
+them here changes the layer's too), every minute while the page is visible.
+It is a dealer-positioning view, so its gamma is always signed on the assumed
+dealer side (`DEALER_SIDE`) whatever the layer's own sign setting; the header
+shows the symbol, the price and a NEG γ / POS γ badge from net gamma.
+
+- **Range bar.** The put wall, gamma flip, max pain and call wall as ticks on
+  one track spanning the ladder's strikes, each strike's stretch coloured by
+  its signed gamma, with the price as a dot under its value.
+- **Dealer ladder.** 25 strikes each side of the price, highest first, the
+  price as a separator between the strikes around it (those two are tinted)
+  and the panel opened scrolled to it. Each row: the strike (CW / PW on the
+  open-interest walls), a bar of its net dollar gamma for a 1% move sized
+  against the largest shown, green above zero and red below, and the amount.
+  The row's tooltip gives both sides' open interest and volume and the
+  open-interest change (C4.6). A click or tap marks the strike on every
+  chart of the symbol as a solid "Strike …" line and brings it onto the main
+  chart's price scale; a second click clears it, and charting another symbol
+  drops it. On a phone the tap also closes the sheet so the chart shows.
+- **The read.** Call and put walls; top gamma, the strike with the largest
+  net gamma in scope; the gamma flip (SPY, QQQ and SPX); max pain for the
+  scope's nearest expiration; net GEX, signed dollar gamma summed over every
+  strike in scope (`net_gamma`); the expected move, that expiration's
+  at-the-money straddle (T2.1's rule, without the fresh-quote requirement of
+  a captured band); P(touch) for each wall by that expiration; and the
+  put/call ratios. P(touch) is a model estimate: under a driftless lognormal
+  walk at the straddle's IV, about twice the chance of finishing beyond the
+  wall (`touch_probability` in `options_implied.py`). With no priced straddle
+  (one-sided or wide quotes after hours) the expected move and P(touch) show
+  a dash and say why.
 
 ### Open-interest change (C4.6)
 

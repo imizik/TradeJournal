@@ -41,6 +41,11 @@ export function gammaText(value: number | null | undefined, signed: boolean): st
   return signed ? `${value >= 0 ? "+" : "−"}${amount} net (assumed side)` : `${amount} (calculated)`;
 }
 
+/** Signed dollar gamma, short: "+$123.5M", "−$977.2M". */
+export const gexText = (value: number | null | undefined) => value == null ? "—" : `${value >= 0 ? "+" : "−"}$${compact.format(Math.abs(value))}`;
+/** A strike as the ladder prints it: "745", "257.5". */
+export const strikeText = (value: number | null | undefined) => value == null ? "—" : String(Number(value.toFixed(2)));
+
 const clock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 
 /** Where the numbers come from and how old each part is. */

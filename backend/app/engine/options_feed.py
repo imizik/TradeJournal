@@ -41,10 +41,11 @@ import time
 from app.engine.chart_levels import Level
 from app.engine.chart_math import ET
 from app.engine.options_chain import OptionsChainError, TradierOptions
-from app.engine.options_implied import days_to, expected_move_levels, straddle, targets
+from app.engine.options_implied import days_to, expected_move_levels, straddle, targets, touch_probability
 from app.engine.options_models import OptionChain
 from app.engine.options_positioning import (DEALER_SIDE, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
-                                            chart_levels, gamma_flip, max_pain, max_pain_missing, positioning, primary_root, scope_expirations)
+                                            chart_levels, gamma_flip, max_pain, max_pain_missing, positioning, primary_root, scope_expirations,
+                                            years_left)
 
 log = logging.getLogger(__name__)
 
@@ -215,14 +216,31 @@ class OptionsFeed:
         now = self._now()
         found, info, chains = self._read(symbol, scope, spot, now, issue)
         if found is None:
-            return {**info, "signed": signed, "rows": [], "walls": {}, "flip": None}
+            return {**info, "signed": signed, "rows": [], "walls": {}, "flip": None, "max_pain": None,
+                    "net_gamma": None, "top_gamma": None, "expected_move": None, "touch": None}
         strikes = list(found.strikes)
         centre = min(range(len(strikes)), key=lambda i: abs(strikes[i].strike - spot)) if spot and strikes else len(strikes) // 2
         near = strikes[max(0, centre - LADDER_STRIKES):centre + LADDER_STRIKES + 1]
         flip = self._flip(scope, found, chains, now) if signed else None
         walls = {f"{side}_{measure}": getattr(found.wall(measure, side), "strike", None)
                  for measure in ("oi", "volume") for side in ("call", "put")}
+        # The read: every strike in scope, signed on the assumed dealer side whatever the rows show.
+        net = [(row.strike, row.total("gamma", True)) for row in strikes]
+        net = [(strike, value) for strike, value in net if value is not None]
+        top = max(net, key=lambda pair: (abs(pair[1]), -pair[0]), default=None)
+        nearest = chains[0] if chains else None
+        move = straddle(nearest, spot, found.root) if nearest and spot else None
+        touch = None
+        if move and nearest:
+            years = years_left(nearest.expiration, found.root, now, self._closes([nearest.expiration]))
+            iv = move.get("iv") if move["state"] == "ready" else None
+            touch = {"expiration": nearest.expiration.isoformat(),
+                     **{name: None if walls[key] is None else touch_probability(spot, walls[key], iv, years)
+                        for name, key in (("call_wall", "call_oi"), ("put_wall", "put_oi"))}}
         return {**info, "signed": signed, "walls": walls, "flip": _flip_view(flip),
+                "max_pain": _pain_view(max_pain(nearest, found.root)) if nearest else None,
+                "net_gamma": sum(value for _, value in net) if net else None,
+                "top_gamma": top[0] if top else None, "expected_move": move, "touch": touch,
                 "rows": self._rows(found, near, "gamma", signed)}
 
     def forecast(self, symbol: str, spot: float | None, earnings: dict | None) -> dict:

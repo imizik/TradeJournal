@@ -5758,7 +5758,10 @@ function ladder(url: string): OptionsLadder {
     ...(strike === 260 ? { oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "unavailable" as const, calls: null, puts: null } } : {}),
     gamma: query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
   return { ...optionInfo("gamma", query.get("scope") ?? "week", query.get("signed") === "1", []), spot: Number(query.get("spot")) || null, rows,
-    signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 } };
+    signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 },
+    flip: { price: 256.4, low: 244, high: 270, note: "", assumption: "" }, max_pain: { price: 255, expiration: "2026-10-09", note: "" },
+    net_gamma: -977_200_000, top_gamma: 257.5, touch: { expiration: "2026-10-09", call_wall: 0.21, put_wall: 0.34 },
+    expected_move: { state: "ready", expiration: "2026-10-09", strike: 257.5, move: 4.12, percent: 0.016, iv: 0.22 } };
 }
 
 test("the strike ladder centres on the price, marks a strike on the charts and shares the layer's scope", async ({ page, context }) => {
@@ -5781,13 +5784,22 @@ test("the strike ladder centres on the price, marks a strike on the charts and s
   await expect(panel.getByRole("separator", { name: /^Price 257\.3/ })).toBeVisible();
   const order = await panel.locator("button[aria-label^='Strike '], [role='separator']").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
   const at = order.findIndex((label) => label?.startsWith("Price"));
-  expect([order[at - 1], order[at + 1]]).toEqual(["Strike 255.00", "Strike 257.50"]);
+  // Highest strike first, as the dealer ladder reads.
+  expect([order[at - 1], order[at + 1]]).toEqual(["Strike 257.50", "Strike 255.00"]);
+  // Gamma is always signed here: the ladder is the dealer-positioning view.
+  expect(new URL(reads[0]).searchParams.get("signed")).toBe("1");
   await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Strike 250.00, put wall" })).toBeVisible();
   await expect(panel).toContainText("OI change: Oct 1, 2026 → Oct 2, 2026");
-  await expect(panel.getByRole("button", { name: "Strike 255.00" })).toContainText("Δ +125");
-  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toContainText("Δ —");
-  await expect(panel).toContainText("P/C OI 1.17 · P/C vol 0.78");
+  await expect(panel.getByRole("button", { name: "Strike 255.00" })).toHaveAttribute("title", /Δ OI calls \+125 · puts −45/);
+  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toHaveAttribute("title", /Δ OI calls — · puts —/);
+  await expect(panel.getByRole("button", { name: "Strike 257.50" })).toContainText("257.5");
+  await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toContainText("CW");
+  await expect(panel.getByRole("figure", { name: "Dealer levels on a range bar" })).toContainText("Put wall 250");
+  await expect(panel).toContainText("NEG γ");
+  const read = panel.getByRole("region", { name: "The read" });
+  for (const text of ["Call wall265", "Put wall250", "Gamma flip256.4", "Max pain255", "Net GEX · in scope−$977.2M", "Expected move±4.12", "P(touch) call wall21%", "P(touch) put wall34%", "Put / call1.17 OI · 0.78 vol"])
+    await expect(read).toContainText(text);
   await page.screenshot({ path: test.info().outputPath("strike-ladder.png") });
 
   // A click marks the strike on every chart of the symbol; a second click clears it.
@@ -5800,9 +5812,7 @@ test("the strike ladder centres on the price, marks a strike on the charts and s
   // Its expirations and sign are the options layer's, saved with the workspace.
   await panel.getByRole("button", { name: "Within 45 days" }).click();
   await expect.poll(() => reads.at(-1)).toContain("scope=all");
-  await panel.getByLabel("Signed gamma (assumed dealer side)").check();
-  await expect.poll(() => reads.at(-1)).toContain("signed=1");
-  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: true, mode: "oi", scope: "all", nearest: 3, signed: true });
+  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: true, mode: "oi", scope: "all", nearest: 3, signed: false });
   // Another symbol's ladder; the mark belonged to MRVL.
   await panel.getByRole("button", { name: "Strike 255.00" }).click();
   await page.getByRole("button", { name: "Watchlist", exact: true }).click();

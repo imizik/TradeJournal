@@ -16,7 +16,7 @@ import pytest
 from app.engine.chart_math import ET
 from app.engine.options_chain import OptionsChainError
 from app.engine.options_feed import FAST_TTL, LADDER_STRIKES, PER_PASS, SLOW_TTL, Layer, OptionsFeed
-from app.engine.options_implied import straddle, targets
+from app.engine.options_implied import straddle, targets, touch_probability
 from app.engine.options_models import OptionChain, OptionContract
 
 START = datetime(2026, 10, 5, 10, 0, tzinfo=ET)  # Monday
@@ -207,6 +207,18 @@ def test_the_ladder_centres_on_the_price_and_reads_what_it_needs():
     row = ladder["rows"][LADDER_STRIKES]
     assert (row["call_oi"], row["put_oi"], row["call_volume"], row["put_volume"]) == (100, 100, 10, 10)
     assert row["gamma"] > 0 and ladder["flip"] is None
+    # The read: every listed strike, the nearest expiration's max pain and straddle.
+    assert ladder["net_gamma"] is not None and ladder["top_gamma"] is not None
+    assert ladder["max_pain"]["expiration"] == expiry.isoformat()
+    assert ladder["expected_move"]["strike"] == 600.0 and ladder["touch"]["expiration"] == expiry.isoformat()
+
+
+def test_touch_probability_is_twice_the_chance_of_finishing_beyond():
+    # One standard deviation away (20% IV over a quarter year is 10%; ln(1.10517) = 0.1): 2 x 15.87%.
+    assert touch_probability(100.0, 110.517, 0.2, 0.25) == pytest.approx(0.3173, abs=1e-3)
+    assert touch_probability(100.0, 90.484, 0.2, 0.25) == pytest.approx(0.3173, abs=1e-3)
+    assert touch_probability(100.0, 100.0, 0.2, 0.25) == 1.0
+    assert touch_probability(100.0, 110.0, None, 0.25) is None and touch_probability(100.0, 110.0, 0.2, 0) is None
 
 
 # --- the implied move (T2.1) -----------------------------------------------
