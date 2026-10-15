@@ -59,15 +59,16 @@ invent the intended receipt time.
    {text,supporting_refs,contradicting_refs}; invalidation is exactly
    {text,evidence_refs}. Include change_summary. model_id stays null unless
    actually known. On a parent conflict, stop and record it; never guess or fork.
-8. Send Isaac one chat message only after a new successful submission returning
-   a message_id for the update/correction. A replayed receipt must not trigger
-   another send: lost chat-delivery responses remain uncertain. Message format:
-   one-line read; named SPY horizon/probability; key evidence; invalidation;
-   conditional trade types that fit or should be avoided. Treat puts in the
-   first 15 minutes, chasing extended moves and long holds as caution flags,
-   not new trading rules. Do not select/price option contracts from this packet.
-   The server records an INTENT, not proof of delivery. Do not claim delivered
-   in the ledger or claim independence, calibrated edge or trial acceptance.
+8. Do not send chat for market reads or market notes. TradeJournal pushes each
+   newly committed update/correction to Isaac's phone. Still save
+   message_intent update/correction exactly as before. A replayed receipt never
+   requests another send. Keep the saved main text concise, with the evidence,
+   invalidation and conditional trade types that fit or should be avoided.
+   Treat puts in the first 15 minutes, chasing extended moves and long holds
+   as caution flags, not new trading rules. Do not select/price option
+   contracts from this packet. The check ledger records an INTENT; app-side
+   transport acceptance does not prove the phone displayed it. Do not claim
+   delivery, independence, calibrated edge or trial acceptance.
 
 Keep routine no-change reads and operational gaps in the native task result.
 No routine chat ping. No continuous monitoring or event detector. A snapshot or

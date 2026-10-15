@@ -13,8 +13,9 @@ as the scheduled task, with operation_id
 `mw-setup-context-v1:SESSION_DATE:CANDIDATE_ID` and
 prompt_version=mw-setup-context-v1. Fetch the fresh market snapshot, recover the
 parent and last message from its actor-scoped context, save the three fixed
-SPY forecast slots (or explicit abstentions), and send only after a new allowed
-message intent. Two opposite-way setup reviews are a reason to reassess, not
+SPY forecast slots (or explicit abstentions), and save any allowed update or
+correction intent exactly as before. Do not send chat for market reads or
+market notes; TradeJournal pushes newly committed intents to Isaac's phone. Two opposite-way setup reviews are a reason to reassess, not
 sufficient evidence to assert a directional day or a specific put opportunity.
 Apply the same material-change thresholds, quiet unchanged-read behavior and
 linked-correction exception. Preserve Go alerts already required by the setup
