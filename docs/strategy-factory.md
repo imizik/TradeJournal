@@ -278,6 +278,21 @@ alike:
 | `spy_vol` | SPY's daily ATR(14) as a percent of its close: the market's volatility level |
 | `open_trend` | the session's open against the prior day's daily EMA 20, in daily ATR |
 
+Past-level features (appended; explicitly name them in filters or model features):
+`prior_day_high`, `prior_day_low`, `prior_day_close`, `prior_week_high`,
+`prior_week_low`, `opening_range_high`, `opening_range_low`, `swing_high`,
+`swing_low`. Each is `side * (signal close - level) / prior daily ATR(14)`.
+Positive means the close is beyond that level in the trade's direction.
+Day/week levels use completed sessions; week means the previous calendar week.
+Opening range means 09:30–09:45 and requires complete, aligned chart bars;
+it becomes available on bars opening at or after 09:45. Missing coverage or
+an incompatible timeframe gives NaN. Swings match the chart's two-session
+pivot confirmation, searching the last 62 completed sessions; the nearest
+confirmed high and low are chosen separately by absolute price distance.
+All levels are known before the signal bar opens, on Series' split-adjusted
+scale. Missing levels or ATR remain NaN and filters reject them. No economic
+calendar feature is supplied without a historical point-in-time source.
+
 `vwap_distance`, `vol_ratio` and `spy_vol` were added for the weekly loop,
 which asked for them. So was `open_trend`, with the stall check: a
 daily-EMA reclaim on the session's first bar is often just a gap through the

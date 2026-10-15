@@ -828,7 +828,8 @@ class RuleFilter:
 
 # A model that names no features reads these, the ten the factory started
 # with. Features added since must be named, so a saved spec keeps its meaning
-# as the list grows.
+# as the list grows. Past-level features are registered in FEATURES and may
+# be named explicitly by filters or ModelSpec.features.
 MODEL_DEFAULT_FEATURES = ("minutes", "rvol", "gap", "day_move", "trend", "trend_slope", "rel_strength",
                           "spy_trend", "spy_day", "risk")
 

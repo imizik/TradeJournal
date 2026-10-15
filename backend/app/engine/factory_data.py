@@ -22,7 +22,7 @@ import math
 from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.engine.market_map import ET, Bar, DailyBar, daily_from_bars
 
@@ -286,7 +286,17 @@ FEATURES: dict[str, str] = {
     "spy_vol": "SPY's daily ATR(14) as a percent of its close: the market's volatility level",
     "open_trend": "the session's open against the prior day's daily EMA 20, in daily ATR: where the day started "
                   "against the level `trend` measures the signal from",
+    **{name: f"side * (signal close - {label}) / prior daily ATR(14); known before this bar"
+       for name, label in (
+           ("prior_day_high", "prior-day high"), ("prior_day_low", "prior-day low"),
+           ("prior_day_close", "prior-day close"), ("prior_week_high", "prior-week high"),
+           ("prior_week_low", "prior-week low"), ("opening_range_high", "completed 15-minute opening-range high"),
+           ("opening_range_low", "completed 15-minute opening-range low"),
+           ("swing_high", "nearest confirmed daily swing high"),
+           ("swing_low", "nearest confirmed daily swing low"))},
 }
+
+LEVEL_FEATURES = tuple(FEATURES)[14:]
 
 RVOL_SESSIONS = 10
 RVOL_MIN_SESSIONS = 5
@@ -322,6 +332,7 @@ class FeatureContext:
         self.chart_atr = atr(series.high, series.low, series.close, 14)
         self.vwap = session_vwap(series)
         self.rvol = _time_of_day_rvol(series)
+        self.levels = _past_levels(series)
 
     def at(self, i: int, side: int, stop: float) -> dict[str, float]:
         values = self.decision_at(i, side)
@@ -354,6 +365,10 @@ class FeatureContext:
             "spy_vol": NA,
             "open_trend": side * _ratio(session_open - day_ema, day_atr),
         }
+        for name in LEVEL_FEATURES:
+            levels = self.levels[name][i]
+            level = min(levels, key=lambda value: abs(close - value)) if levels else NA
+            values[name] = side * _ratio(close - level, day_atr)
         m = self.market
         if m is not None:
             j = m.series.index_at(s.time[i])
@@ -388,4 +403,58 @@ def _time_of_day_rvol(series: Series) -> list[float]:
         else:
             out.append(NA)
         past.append(cumulative)
+    return out
+
+
+def _past_levels(series: Series) -> dict[str, list[tuple[float, ...]]]:
+    """Levels frozen before each bar opens; 15-minute OR requires full coverage.
+
+    Daily pivots match chart_levels: two sessions on each side, strict against
+    the left and inclusive against the right, in the last 62 completed sessions.
+    Only completed prior dates enter day/week/pivot levels. Prices use Series'
+    split-adjusted scale, just like the daily ATR denominator.
+    """
+    out: dict[str, list[tuple[float, ...]]] = {name: [] for name in LEVEL_FEATURES}
+    session = -1
+    fixed: dict[str, tuple[float, ...]] = {}
+    opening: list[int] = []
+    for i in range(len(series)):
+        current = series.session[i]
+        if current != session:
+            session = current
+            opening = []
+            completed = series.daily[:session]
+            fixed = {name: () for name in LEVEL_FEATURES}
+            if completed:
+                previous = completed[-1]
+                for key in ("high", "low", "close"):
+                    fixed[f"prior_day_{key}"] = (getattr(previous, key),)
+            day = series.days[session]
+            monday = day - timedelta(days=day.weekday())
+            start = monday - timedelta(days=7)
+            week = [b for b in completed if start <= b.day < monday]
+            # A cache starting midweek cannot establish a complete prior week.
+            if week and series.days[0] <= start:
+                fixed["prior_week_high"] = (max(b.high for b in week),)
+                fixed["prior_week_low"] = (min(b.low for b in week),)
+            tail = completed[-62:]
+            for key, pick, strict, inclusive in (
+                ("high", max, lambda a, b: a > b, lambda a, b: a >= b),
+                ("low", min, lambda a, b: a < b, lambda a, b: a <= b),
+            ):
+                fixed[f"swing_{key}"] = tuple(
+                    getattr(tail[j], key) for j in range(2, len(tail) - 2)
+                    if strict(getattr(tail[j], key), pick(getattr(b, key) for b in tail[j-2:j]))
+                    and inclusive(getattr(tail[j], key), pick(getattr(b, key) for b in tail[j+1:j+3]))
+                )
+        # Do not use the signal bar to form a level: only earlier bars count.
+        if opening and series.minute[i] >= RTH_OPEN + 15:
+            starts = [series.minute[j] for j in opening]
+            if starts == list(range(RTH_OPEN, RTH_OPEN + 15, series.timeframe)) and 15 % series.timeframe == 0:
+                fixed["opening_range_high"] = (max(series.high[j] for j in opening),)
+                fixed["opening_range_low"] = (min(series.low[j] for j in opening),)
+        for name in LEVEL_FEATURES:
+            out[name].append(fixed[name])
+        if RTH_OPEN <= series.minute[i] and series.close_minute(i) <= RTH_OPEN + 15:
+            opening.append(i)
     return out
