@@ -99,7 +99,7 @@ def runtime_inventory(*, root=None, roles=("adapter", "backend"), python_roles=(
     for role in roles:
         tree = exact(root / role)
         for path in (tree, *sorted(tree.rglob("*"))):
-            relative = str(path.relative_to(root))
+            relative = os.path.relpath(path, root)  # Same string; relative_to walks every parent.
             info = path.lstat()
             mode = info.st_mode & 0o7777
             if info.st_uid != 0 or (not path.is_symlink() and mode & 0o022):
