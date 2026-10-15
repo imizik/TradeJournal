@@ -192,9 +192,11 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
 
     from app.engine.options_chain import options_chain
     from app.engine.setup_scanner import SetupScanner, enabled as scanner_enabled
+    from app.engine.stock_watch import enabled as stock_watch_enabled
 
     paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
-    scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time) if scanner_enabled() else None
+    scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time,
+                           paper_enabled=scanner_enabled()) if scanner_enabled() or stock_watch_enabled() else None
     monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper,
                                 scanner=scanner)
     stream.attach(monitor)

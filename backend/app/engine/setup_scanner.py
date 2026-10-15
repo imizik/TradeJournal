@@ -93,6 +93,10 @@ def setup_email(candidate: ScannerCandidate) -> tuple[str, str]:
         "",
         "Rule-generated paper setup, not advice. The rules-only paper trade is recorded in TradeJournal either way.",
     ]
+    from app.engine import stock_watch
+    if stock_watch.enabled():
+        lines += ["", "After the shadow TAKE/SKIP commit only, review the separate stock alert:",
+                  "Stock alert ID: " + stock_watch.signal_id(candidate.symbol, candidate.setup, _epoch(candidate.bar_end))]
     return subject, "\n".join(lines)
 
 
@@ -158,14 +162,43 @@ def _quote(occ: str):
 
 
 class SetupScanner:
-    def __init__(self, engine, feed, calendar, options, clock, quote=_quote):
+    def __init__(self, engine, feed, calendar, options, clock, quote=_quote, *, paper_enabled=True):
         self.engine, self.feed, self.calendar, self.options, self.clock = engine, feed, calendar, options, clock
         self.quote = quote
+        self.paper_enabled = paper_enabled
         self._scanned: dict[str, int] = {}  # per symbol, the newest 5-minute bar end already judged
         self._pass_minutes = {}
         self._atr: dict[tuple[str, date], float | None] = {}
 
     def run(self) -> None:
+        try:
+            if self.paper_enabled:
+                self._run()
+            else:
+                self._pass_minutes = {}
+                today = datetime.fromtimestamp(self.clock(), ET).date()
+                session = regular_session(today, self.calendar.hours(today))
+                if session is not None:
+                    self.scan(today, session, stock_only=True)
+        finally:
+            # Stock awareness must survive an option-chain failure, lack of a
+            # qualifying contract, and the paper scanner's 15:00 cutoff.
+            try:
+                from app.engine.stock_watch import for_scanner
+                watcher = for_scanner(self)
+                if watcher is not None:
+                    now = self.clock()
+                    today = datetime.fromtimestamp(now, ET).date()
+                    session = regular_session(today, self.calendar.hours(today))
+                    with Session(self.engine) as db:
+                        selected = scanner_settings.read_settings(db)["symbols"]
+                    watcher.ingest_and_deliver(selected)
+                    watcher.observe(self, today, session)
+                    watcher.send(self, today)
+            except Exception:
+                log.exception("Selected-stock awareness pass failed")
+
+    def _run(self) -> None:
         self._pass_minutes = {}
         now = self.clock()
         today = datetime.fromtimestamp(now, ET).date()
@@ -191,7 +224,7 @@ class SetupScanner:
 
     # -------------------------------------------------------------- scanning
 
-    def scan(self, today: date, session) -> None:
+    def scan(self, today: date, session, *, stock_only=False) -> None:
         now = self.clock()
         bar_end = session.open_at + (int(now - LATENESS) - session.open_at) // rules.BAR_SECONDS * rules.BAR_SECONDS
         last_end = min(int(datetime(today.year, today.month, today.day, rules.LAST_BAR_END_MINUTE // 60,
@@ -206,14 +239,14 @@ class SetupScanner:
             if self._scanned.get(symbol, 0) >= bar_end:
                 continue
             try:
-                self._scan_symbol(symbol, today, session, bar_end, last_end, settings)
+                self._scan_symbol(symbol, today, session, bar_end, last_end, settings, stock_only=stock_only)
                 self._scanned[symbol] = bar_end  # a failed read is retried on the next pass while still in time
             except (ChartFeedError, OptionsChainError, ValueError) as exc:
                 log.warning("Setup scanner could not judge %s at %s: %s", symbol, _utc(bar_end), exc)
             except Exception:
                 log.exception("Setup scanner failed on %s", symbol)
 
-    def _scan_symbol(self, symbol: str, today: date, session, bar_end: int, last_end: int, settings: dict) -> None:
+    def _scan_symbol(self, symbol: str, today: date, session, bar_end: int, last_end: int, settings: dict, *, stock_only=False) -> None:
         atr = self._daily_atr(symbol, today)
         if atr is None:
             return
@@ -230,9 +263,19 @@ class SetupScanner:
             busy = any(status_of(c, fold(self._events(db, c.id))) in ("pending_entry", "open", "exiting") for c in saved)
         signals = rules.scan(bars, atr, session.open_at, last_end, taken)
         signal = signals[-1] if signals and signals[-1]["bar_end"] == bar_end else None
-        if signal is None or busy:
+        if signal is None:
             return
-        if any(_epoch(c.bar_end) > bar_end - rules.COOLDOWN_SECONDS for c in saved):
+        # Freeze/send stock evidence independently, BEFORE option selection.
+        # Failure of this advisory path must not alter the paper baseline.
+        try:
+            from app.engine.stock_watch import for_scanner
+            watcher = for_scanner(self)
+            if watcher is not None:
+                watcher.capture_signal(self, symbol, signal, complete,
+                    datetime.fromtimestamp(self._pass_minutes[symbol][1], UTC), settings)
+        except Exception:
+            log.exception("Stock setup capture failed for %s", symbol)
+        if stock_only or busy or any(_epoch(c.bar_end) > bar_end - rules.COOLDOWN_SECONDS for c in saved):
             return
         contract, note = self._contract(symbol, today, signal["direction"])
         detected = self.clock()

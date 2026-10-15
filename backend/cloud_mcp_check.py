@@ -56,6 +56,8 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "stock_alert": ({"alert_id"}, set()),
+    "stock_alert_submit": ({"alert_id", "stance", "summary", "invalidation", "notify"}, set()),
     "market_watch_snapshot": (set(), set()),
     "market_watch_submit": ({"operation_id", "input_id", "view", "main", "alternative", "invalidation", "change_summary", "forecasts", "message_intent", "prompt_version"}, {"previous_read_id", "correction_of_read_id", "model_id"}),
     "candles": ({"symbol", "interval"}, {"bars"}),
@@ -81,8 +83,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
-    if name in ("market_watch_snapshot", "market_watch_submit"):
-        return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name == "market_watch_submit" else [])
+    if name in ("market_watch_snapshot", "market_watch_submit", "stock_alert", "stock_alert_submit"):
+        return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("market_watch_submit", "stock_alert_submit") else [])
     if name in ("shadow_setup", "shadow_decide"):
         return [READ_SCOPE, SHADOW_SCOPE]
     if name in READ_ONLY_TOOLS:
@@ -427,6 +429,59 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     server.audit_call = lambda name: authenticated(name, log=True)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
     if config.market_watch_snapshots_dir:
+        from stock_watch_common import identifier as stock_identifier, validate_alert
+        from stock_watch_ledger import StockWatchLedger, write_review
+        from app.engine.market_watch_snapshot import _read_bounded
+        stock_ledger = StockWatchLedger(ledger)
+
+        def stock_input(alert_id, now, *, current_session=True):
+            stock_identifier(alert_id, 'sta')
+            value = json.loads(_read_bounded((Path(config.market_watch_snapshots_dir) / f'stock-{alert_id}.json').absolute(), 1024*1024))
+            validate_alert(value)
+            if value['alert_id'] != alert_id or (current_session and value['session_date'] != now.astimezone(ET).date().isoformat()):
+                raise ValueError('Stock alert identity/session mismatch')
+            return value
+
+        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+            meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("stock_alert")}]})
+        async def stock_alert(alert_id: str) -> dict[str, Any]:
+            """Read one email's frozen selected-stock alert, including when no option qualifies.
+            Stock awareness only; no provider calls, journal/position data or trade authority.
+            For paper-eligible scanner mail finish shadow_setup -> shadow_decide FIRST.
+            Then save stock_alert_submit with an independent stock assessment and optional phone intent."""
+            checked = await authenticated('stock_alert')
+            try:
+                now = clock()
+                alert = await asyncio.to_thread(stock_input, alert_id, now)
+                return await asyncio.to_thread(stock_ledger.serve, checked.claims['profile_id'], alert, now)
+            except (ValueError, OSError, KeyError, TypeError, sqlite3.Error):
+                raise ToolError('Stock alert unavailable or invalid') from None
+
+        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False, idempotentHint=True),
+            meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("stock_alert_submit")}]})
+        async def stock_alert_submit(alert_id: str, stance: Literal['watch', 'avoid', 'no_view'],
+                summary: Annotated[str, Field(min_length=1, max_length=2000)],
+                invalidation: Annotated[str, Field(min_length=1, max_length=1000)], notify: bool) -> dict[str, Any]:
+            """Save stock advice, never a TAKE/SKIP or order. notify=true requests one phone update.
+            Use no_view/notify=false for insufficient evidence. Exact retry recovers a saved receipt;
+            never regenerate text after uncertainty. Expired new reviews refuse. Delivery diagnostics
+            must explicitly name the diagnostic code and say diagnostic, never invent a live setup."""
+            checked = await authenticated('stock_alert_submit')
+            try:
+                if not config.market_watch_outbox_dir:
+                    raise ValueError('Stock review outbox not enabled')
+                # Historical exact retries may recover a committed export; the
+                # ledger still refuses every expired NEW assessment.
+                alert = await asyncio.to_thread(stock_input, alert_id, clock(), current_session=False)
+                result = await asyncio.to_thread(stock_ledger.submit, checked.claims['profile_id'], alert,
+                    stance, summary, invalidation, notify, clock)
+                await asyncio.to_thread(write_review, config.market_watch_outbox_dir, result)
+                return result
+            except Conflict as exc:
+                raise ToolError(str(exc)) from None
+            except (ValueError, OSError, KeyError, TypeError, sqlite3.Error):
+                raise ToolError('Stock review/export refused; retry identical content only to recover') from None
+
         from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded, write_read_notice
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
