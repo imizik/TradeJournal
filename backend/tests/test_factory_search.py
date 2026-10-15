@@ -48,3 +48,56 @@ def test_durable_reservation_and_restart_dedup(tmp_path, monkeypatch):
     assert 'abc' in search.latest(recovered)  # proposal selection will skip it
     search.append({**record, 'attempt_state': 'completed'})
     assert len(search.latest(search.read_ledger(ledger))) == 1
+
+
+def test_recovered_pass_emits_proposal_without_evaluation(tmp_path, monkeypatch):
+    monkeypatch.setattr(search, 'ROOT', tmp_path)
+    record = {'id': 'pass', 'verdict': 'passed', 'periods': {'confirm': {'mean_r': 0.3}}}
+    search.proposal(record)
+    path = tmp_path / 'research/reports/s1-v3-proposal-pass.json'
+    assert json.loads(path.read_text())['evidence'] == record
+    search.proposal(record)
+    assert len(list(path.parent.glob('s1-v3-proposal-*.json'))) == 1
+
+
+def test_worker_deadline_survives_supervisor_exit(tmp_path):
+    import subprocess
+    import time
+    job = tmp_path / 'job.json'
+    job.write_text(json.dumps({'timeout_seconds': 1, 'spec': search.rules.canonical(search.rules.parse_spec({'family':'vwap_reclaim'})), 'prior_candidates': 0}))
+    code = '''import os,sys,time,subprocess
+sys.path.insert(0,sys.argv[1])
+worker_code = "import sys,time;sys.path.insert(0,sys.argv[1]);import factory_search as s;s.evaluate=lambda *a,**kw:time.sleep(30);s.worker(sys.argv[2])"
+p=subprocess.Popen([sys.executable,'-c',worker_code,sys.argv[1],sys.argv[2]])
+print(p.pid,flush=True)
+os._exit(0)
+'''
+    started = time.monotonic()
+    # Child retains stdout. communicate returns only after the orphan closes it.
+    parent = subprocess.Popen([sys.executable, '-c', code, str(Path(search.__file__).parent), str(job)], stdout=subprocess.PIPE)
+    parent.communicate(timeout=5)
+    assert time.monotonic() - started < 5
+    assert not job.with_suffix('.result.json').exists()
+
+
+def test_scanner_adapter_prefix_causality_with_injected_minutes(monkeypatch):
+    from app.engine import factory_search_family as adapter
+    from app.engine.factory_data import Series
+    from app.engine.market_map import resample
+    from tests.test_factory import weekdays, bar
+    from datetime import date
+    days = weekdays(date(2025, 6, 2), 17)
+    minutes = [bar(d, m, 100, 100.5, 99.5, 100) for d in days[:-1] for m in range(570, 590)]
+    today = [bar(days[-1], m, 100, 100.5, 99.5, 100) for m in range(570, 585)]
+    today += [bar(days[-1], m, 100.2, 100.9, 100.1, 100.8, 1500) for m in range(585, 590)]
+    today += [bar(days[-1], m, 100.8, 180, 10, 100.8) for m in range(590, 600)]
+    from app.engine.factory_rules import Context
+    observed = []
+    for count in (20, len(today)):
+        minute = Series.build('TEST', minutes + today[:count], 1)
+        monkeypatch.setattr(adapter, 'MINUTE_LOADER', lambda *args: minute)
+        series = Series.build('TEST', resample(minute.bars(), 5), 5)
+        family = adapter.ScannerFamily().start(series)
+        signals = [family.on_bar(i, Context(flat=True, halted=False, accept=lambda _: True)) for i in range(len(series))]
+        observed.append([s for s in signals if s and s.index <= len(minutes)//5 + 3])
+    assert observed[0] and observed[0] == observed[1]

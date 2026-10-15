@@ -29,7 +29,7 @@ for key, value in dotenv_values(ROOT / 'backend/.env').items():
         os.environ.setdefault(key, value)
 from app.engine import factory_rules as rules, scanner_rules
 from app.engine.factory_data import ET, FEATURES, LEVEL_FEATURES
-from app.engine.factory_brief import catalog, spec_changes
+from app.engine.factory_brief import catalog, spec_changes, SPEC_FORMAT
 from app.engine.factory_gates import evaluate, ledger_record, report, HOLDOUT_START
 from strategy_factory import AlpacaCache, BarStore, LEDGER, DEFAULT_OUT, read_ledger, code_version, publish
 
@@ -89,7 +89,7 @@ def claude_ideas(records, night):
     prompt = ('Propose up to four simple independent underlying setup specs from the catalog and ledger summaries. '
               'Only discovery and confirm evidence is provided. Never request or infer exam/holdout results. '
               'Use core tickers, default costs, no model, at most two filters, timeframe 5 for s1_research. '
-              'Mix S1 orb/fade, other families, day/week and past-level context, and exits. Return {"specs":[...]}.\n'
+              'Mix S1 orb/fade, other families, day/week and past-level context, and exits. Use notes, never note. Return {"specs":[...]}.\n' + SPEC_FORMAT + '\n'
               + json.dumps({'catalog': catalog(), 'ledger': safe_digest(records)}))
     (OUT / f'{night}-brief.json').write_text(prompt)
     command = [cli, '-p', '--restricted', '--strict-mcp-config', '--tools', '', '--model', 'opus',
@@ -129,6 +129,9 @@ def sample(rng):
 
 
 def validate(raw):
+    raw = dict(raw)
+    if 'note' in raw and 'notes' not in raw:
+        raw['notes'] = raw.pop('note')
     spec = rules.parse_spec(raw)
     if spec.model is not None or spec.tickers != rules.CORE_UNIVERSE or spec.costs != rules.Costs() or len(spec.filters) > 2:
         raise ValueError('Search may not alter universe/costs, train models, or use more than two filters')
@@ -140,6 +143,9 @@ def validate(raw):
 def worker(path):
     global STORE
     job = json.loads(Path(path).read_text())
+    # This deadline survives termination of the supervising launchd tick.
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    signal.alarm(job.get('timeout_seconds', 900))
     spec = rules.from_canonical(job['spec'])
     STORE = BarStore(AlpacaCache(), DEFAULT_OUT, lambda s: print(s, flush=True))
     # Existing April-2026 holdout is larger than four weeks; never shrink it.
@@ -187,6 +193,25 @@ def notify(records, night):
     flag.write_text(datetime.now(ET).isoformat())
 
 
+def proposal(record):
+    if record.get('verdict') == 'passed':
+        path = ROOT / 'research/reports' / f"s1-v3-proposal-{record['id']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'status': 'Isaac approval and forward paper required; no activation',
+                                    'evidence': record}, indent=2))
+
+
+def persist_research():
+    paths = [LEDGER, *ROOT.glob('research/specs/search-*.json'),
+             *ROOT.glob('research/reports/*-continuous.json'),
+             *ROOT.glob('research/reports/s1-v3-proposal-*.json')]
+    subprocess.run(['git', 'add', '--', *map(str, paths)], cwd=ROOT, check=True)
+    changed = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=ROOT).returncode
+    if changed:
+        subprocess.run(['git', 'commit', '-m', 'Continuous setup search: retain trials and daily evidence'], cwd=ROOT, check=True)
+    subprocess.run(['git', 'push', 'origin', 'factory/ledger'], cwd=ROOT, check=True, timeout=60)
+
+
 def tick(force=False):
     if ROOT != Path('/Users/user/TradeJournal-factory'):
         raise RuntimeError('Search runs only in the Mac factory checkout')
@@ -226,6 +251,7 @@ def tick(force=False):
                     done = json.loads(result.read_text()) if result.exists() else {**found, 'attempt_state': 'interrupted', 'verdict': 'interrupted'}
                     append(done)
                     records.append(done)
+                    proposal(done)
             for night in sorted({r['search_night'] for r in records if r.get('search_night')}):
                 if night != night_key(now) or (6 <= now.hour < 22):
                     notify(records, night)
@@ -276,7 +302,7 @@ def tick(force=False):
             ident = rules.spec_id(chosen)
             reservation = dict(id=ident, name=chosen.name, source='continuous-search', spec=rules.canonical(chosen),
                 recorded=now.isoformat(), code=code_version(), verdict='reserved', attempt_state='reserved',
-                reached_confirmation=False, search_night=night, prior_candidates=len(seen), search_origin=origin)
+                reached_confirmation=False, search_night=night, prior_candidates=len(seen), search_origin=origin, timeout_seconds=timeout)
             job = OUT / f'{ident}.job.json'
             job.write_text(json.dumps(reservation))
             spec_path = ROOT / 'research/specs' / f'search-{ident}.json'
@@ -300,16 +326,13 @@ def tick(force=False):
                 result = {**reservation, 'attempt_state': 'failed', 'verdict': 'evaluation_error'}
             append(result)
             print(f'{datetime.now(ET).isoformat()} {ident}: {result["verdict"]}', flush=True)
-            if result.get('verdict') == 'passed':
-                proposal = ROOT / 'research/reports' / f's1-v3-proposal-{ident}.json'
-                proposal.write_text(json.dumps({'status': 'Isaac approval and forward paper required; no activation', 'evidence': result}, indent=2))
-            # Save locally every attempt; push research branch without opening a PR.
-            subprocess.run(['git', 'add', 'research'], cwd=ROOT, check=True)
-            subprocess.run(['git', 'commit', '-m', f'Continuous setup search: {ident} {result["verdict"]}'], cwd=ROOT, check=True)
-            subprocess.run(['git', 'push', 'origin', 'factory/ledger'], cwd=ROOT, check=True, timeout=60)
+            proposal(result)
         finally:
-            (lock / 'search-pid').unlink(missing_ok=True)
-            lock.rmdir()
+            try:
+                persist_research()
+            finally:
+                (lock / 'search-pid').unlink(missing_ok=True)
+                lock.rmdir()
 
 
 if __name__ == '__main__':

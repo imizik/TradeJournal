@@ -973,11 +973,11 @@ def test_the_exam():
     assert not exam_gate(good(), parent=good(mean_r=0.3)).passed
 
 
-def test_prior_candidates_count_distinct_ideas_that_reached_confirmation():
+def test_prior_candidates_count_every_distinct_idea():
     records = [{"id": "hand-a", "reached_confirmation": True}, {"id": "x", "reached_confirmation": True},
                {"id": "x", "reached_confirmation": True}, {"id": "y", "reached_confirmation": False}]
-    assert prior_candidates(records) == 2
-    assert prior_candidates(records, excluding="x") == 1
+    assert prior_candidates(records) == 3
+    assert prior_candidates(records, excluding="x") == 2
 
 
 # --- the evaluation end to end ------------------------------------------------------------

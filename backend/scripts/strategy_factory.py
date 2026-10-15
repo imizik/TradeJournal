@@ -146,6 +146,8 @@ class BarStore:
         self.progress = progress
         self.memory: dict[tuple[str, int], list[Bar]] = {}
         self.requests: list[tuple[str, int, date | None]] = []
+        from app.engine import factory_search_family
+        factory_search_family.MINUTE_LOADER = self.load
 
     def _bars(self, ticker: str, timeframe: int) -> list[Bar]:
         key = (ticker, timeframe)
@@ -310,7 +312,7 @@ def command_run(args: argparse.Namespace, store: BarStore, progress: Callable[[s
         print(report(ev))
         print(f"\nWrote {run_dir} and a line in {args.ledger}", file=sys.stderr)
     count = prior_candidates(read_ledger(args.ledger))
-    print(f"\nThe ledger counts {count} candidates at confirmation; the next one there needs "
+    print(f"\nThe ledger counts {count} candidates tried; the next one needs "
           f"t >= {required_t(count + 1):.2f}.")
     return 0
 
@@ -502,7 +504,7 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
     after = read_ledger(args.ledger)
     count = prior_candidates(after)
     ledger_note = (f"The ledger holds {len({r['id'] for r in after})} ideas; {count} have reached confirmation, "
-                   f"so the next one there needs t >= {required_t(count + 1):.2f}.")
+                   f"so the next one needs t >= {required_t(count + 1):.2f}.")
     footer = f"Idea model: {usage}. Code {code_version()}; bars through {store.last_day(MARKET)}."
     markdown, summary = weekly_report(today, proposals, run_records, answer, ledger_note, footer)
     args.reports.mkdir(parents=True, exist_ok=True)
@@ -568,7 +570,7 @@ def command_ledger(args: argparse.Namespace) -> int:
             print(f"{'':20s} {'; '.join(numbers) or record.get('summary')}")
     count = prior_candidates(records)
     print(f"\n{len(records)} lines, {len({r['id'] for r in records})} distinct ideas, {count} reached confirmation; "
-          f"the next one there needs t >= {required_t(count + 1):.2f}.")
+          f"the next one needs t >= {required_t(count + 1):.2f}.")
     return 0
 
 

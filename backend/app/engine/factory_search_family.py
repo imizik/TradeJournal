@@ -4,6 +4,8 @@ from datetime import datetime
 from app.engine import factory_rules as rules, scanner_rules
 from app.engine.factory_data import ET
 
+MINUTE_LOADER = None
+
 @dataclass
 class ScannerFamily:
     """S1 underlying signals from SIP minutes, with factory exits/costs.
@@ -26,8 +28,11 @@ class ScannerFamily:
     def start(self, series):
         if series.timeframe != 5:
             raise ValueError('S1 research signals require 5-minute bars')
-        from strategy_factory import AlpacaCache, BarStore, DEFAULT_OUT
-        minute = BarStore(AlpacaCache(), DEFAULT_OUT).load(series.ticker, 1, series.days[-1])
+        if MINUTE_LOADER is None:
+            raise RuntimeError('S1 research requires an injected SIP minute loader')
+        minute = MINUTE_LOADER(series.ticker, 1, series.days[-1])
+        if minute is None:
+            raise RuntimeError('Missing minute bars for S1 research')
         by_day = {}
         for b in minute.bars():
             by_day.setdefault(b.time.astimezone(ET).date(), []).append(

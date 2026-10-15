@@ -130,7 +130,7 @@ def test_run_judges_a_spec_records_it_and_skips_a_repeat(script, tmp_path, capsy
     assert rows[0].startswith("ticker,period,side,signal_time") and len(rows) - 1 == record["periods"]["discovery"]["n"]
     printed = capsys.readouterr().out
     assert "Verdict: failed the screen" in printed
-    assert f"The ledger counts 0 candidates at confirmation; the next one there needs t >= {required_t(1):.2f}." in printed
+    assert f"The ledger counts 1 candidates tried; the next one needs t >= {required_t(2):.2f}." in printed
 
     assert script.main(args, source_factory=StubSource) == 0
     assert "already in the ledger: failed_screen" in capsys.readouterr().out
@@ -159,14 +159,14 @@ def test_a_model_spec_has_its_parent_judged_first(script, tmp_path):
     # The screen is in-sample for a trained model, so it goes to confirmation and counts toward the bar;
     # the stub has no bars after September 2024, so confirmation has nothing to go on.
     assert (learned["verdict"], learned["reached_confirmation"]) == ("failed_confirmation", True)
-    assert learned["bar_t"] == pytest.approx(required_t(1))
+    assert learned["bar_t"] == pytest.approx(required_t(2))
 
 
 def test_the_ledger_command_prints_the_count_and_the_bar(script, capsys):
     assert script.main(["ledger"]) == 0
     text = capsys.readouterr().out
-    count = sum(1 for r in read_lines(RESEARCH / "ledger.jsonl") if r["reached_confirmation"])
-    assert f"the next one there needs t >= {required_t(count + 1):.2f}" in text
+    count = len({r["id"] for r in read_lines(RESEARCH / "ledger.jsonl")})
+    assert f"the next one needs t >= {required_t(count + 1):.2f}" in text
 
 
 def test_the_committed_specs_parse_and_keep_their_ids():
@@ -184,7 +184,7 @@ def test_the_committed_ledger_is_well_formed():
     records = read_lines(RESEARCH / "ledger.jsonl")
     for record in records:
         assert {"id", "name", "source", "verdict", "reached_confirmation"} <= set(record), record
-        assert record["source"] in ("factory", "hand research")
+        assert record["source"] in ("factory", "hand research", "continuous-search")
     assert sum(r["source"] == "hand research" for r in records) == 9
 
 
@@ -436,9 +436,9 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
         raise AssertionError("a dry run asks no one")
 
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert sorted(computed) == ["failed_breakout", "opening_range_breakout", "recovery_swing", "vwap_reclaim"]
+    assert sorted(computed) == ["failed_breakout", "opening_range_breakout", "recovery_swing", "s1_research", "vwap_reclaim"]
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert len(computed) == 4  # cached
+    assert len(computed) == 5  # cached
     saved = [json.loads(path.read_text()) for path in (paths["out"] / "evidence").glob("*.json")]
     assert all({"after_fill", "cost_r", "to_close"} <= set(entry["forward"]) for entry in saved)
     fingerprint = script.engine_fingerprint()
@@ -446,5 +446,5 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
     monkeypatch.setattr(script, "engine_fingerprint", lambda: "changed000")
     engine["run"] = no_evidence  # what is recomputed is counted; the real results were checked above
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert len(computed) == 8
+    assert len(computed) == 10
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {"changed000.json"}
