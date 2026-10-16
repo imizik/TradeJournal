@@ -1,0 +1,15 @@
+{
+  "family": "vwap_reclaim",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 3.0,
+    "max_sessions": 1,
+    "max_minutes": 60
+  },
+  "filters": [
+    {
+      "feature": "prior_day_high",
+      "max": 0.5
+    }
+  ]
+}
