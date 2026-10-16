@@ -317,6 +317,33 @@ def _signed(inputs, price: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+# Air pockets (calculated)
+
+POCKET_SHARE = 0.15  # a strike under this share of the largest net gamma nearby is thin
+POCKET_STRIKES = 3  # thin strikes in a row before it counts as a pocket
+
+
+def air_pockets(rows: Iterable[tuple[float, float | None]], low: float | None = None, high: float | None = None) -> list[dict]:
+    """Runs of at least ``POCKET_STRIKES`` adjacent strikes whose net dollar gamma is under
+    ``POCKET_SHARE`` of the largest among the strikes considered (those within ``low``..``high``
+    when given): spans with little hedging either way, which price tends to cross quickly.
+    Each is ``{"low", "high", "strikes"}``, lowest first."""
+    rows = sorted((strike, value) for strike, value in rows
+                  if (low is None or strike >= low) and (high is None or strike <= high))
+    most = max((abs(value) for _, value in rows if value is not None), default=0.0)
+    if most <= 0:
+        return []
+    pockets, run = [], []
+    for strike, value in [*rows, (None, most)]:
+        if strike is not None and abs(value or 0.0) < POCKET_SHARE * most:
+            run.append(strike)
+            continue
+        if len(run) >= POCKET_STRIKES:
+            pockets.append({"low": run[0], "high": run[-1], "strikes": len(run)})
+        run = []
+    return pockets
+
+
 @dataclass(frozen=True, slots=True)
 class MaxPain:
     price: float  # the strike

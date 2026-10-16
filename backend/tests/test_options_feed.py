@@ -16,7 +16,7 @@ import pytest
 from app.engine.chart_math import ET
 from app.engine.options_chain import OptionsChainError
 from app.engine.options_feed import FAST_TTL, LADDER_STRIKES, PER_PASS, SLOW_TTL, Layer, OptionsFeed
-from app.engine.options_implied import straddle, targets, touch_probability
+from app.engine.options_implied import pressure, straddle, targets, touch_probability
 from app.engine.options_models import OptionChain, OptionContract
 
 START = datetime(2026, 10, 5, 10, 0, tzinfo=ET)  # Monday
@@ -211,6 +211,20 @@ def test_the_ladder_centres_on_the_price_and_reads_what_it_needs():
     assert ladder["net_gamma"] is not None and ladder["top_gamma"] is not None
     assert ladder["max_pain"]["expiration"] == expiry.isoformat()
     assert ladder["expected_move"]["strike"] == 600.0 and ladder["touch"]["expiration"] == expiry.isoformat()
+    assert isinstance(ladder["pressure"], list) and isinstance(ladder["air_pockets"], list)
+
+
+def test_pressure_ranks_levels_by_touch_and_merges_confluence():
+    levels = [("Call wall", 105.0), ("Put wall", 97.0), ("Top gamma", 105.1), ("Max pain", None), ("Gamma node", 101.0)]
+    ranked = pressure(100.0, levels, 0.2, 0.05, 2.0)
+    # 105.1 is within 0.15% of 100 from 105: one level, the wall's price, both names.
+    assert [(g["price"], g["names"]) for g in ranked] == [(101.0, ["Gamma node"]), (97.0, ["Put wall"]), (105.0, ["Call wall", "Top gamma"])]
+    assert [g["side"] for g in ranked] == ["above", "below", "above"]
+    assert ranked[0]["inside_move"] is True and ranked[2]["inside_move"] is False
+    assert ranked[0]["touch"] > ranked[1]["touch"] > ranked[2]["touch"]
+    # Without a volatility nothing is ranked by touch, nearest first, and nothing is framed.
+    blind = pressure(100.0, levels, None, 0.05, None)
+    assert [g["price"] for g in blind] == [101.0, 97.0, 105.0] and blind[0]["touch"] is None and blind[0]["inside_move"] is None
 
 
 def test_touch_probability_is_twice_the_chance_of_finishing_beyond():

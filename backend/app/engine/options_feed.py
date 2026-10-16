@@ -41,9 +41,9 @@ import time
 from app.engine.chart_levels import Level
 from app.engine.chart_math import ET
 from app.engine.options_chain import OptionsChainError, TradierOptions
-from app.engine.options_implied import days_to, expected_move_levels, straddle, targets, touch_probability
+from app.engine.options_implied import days_to, expected_move_levels, pressure, straddle, targets, touch_probability
 from app.engine.options_models import OptionChain
-from app.engine.options_positioning import (DEALER_SIDE, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
+from app.engine.options_positioning import (DEALER_SIDE, air_pockets, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
                                             chart_levels, gamma_flip, max_pain, max_pain_missing, positioning, primary_root, scope_expirations,
                                             years_left)
 
@@ -59,6 +59,7 @@ PACING = "Option reads are pacing to stay within their data allowance; the rest 
 RETRY_SECONDS = 30
 KEEP_SYMBOLS = 8
 LADDER_STRIKES = 25  # strikes shown on each side of the price
+PRESSURE_NODES = 3  # the largest net gamma strikes near the price added to the pressure levels
 FLIP_DRIFT = 0.01  # a flip computed within 1% of the current price, on the same chains, is reused
 SOURCE = "Tradier option chains"
 # Range bands (C2.7): a straddle is captured this many minutes after the regular open, once its quotes have settled.
@@ -217,7 +218,8 @@ class OptionsFeed:
         found, info, chains = self._read(symbol, scope, spot, now, issue)
         if found is None:
             return {**info, "signed": signed, "rows": [], "walls": {}, "flip": None, "max_pain": None,
-                    "net_gamma": None, "top_gamma": None, "expected_move": None, "touch": None}
+                    "net_gamma": None, "top_gamma": None, "expected_move": None, "touch": None,
+                    "pressure": [], "air_pockets": []}
         strikes = list(found.strikes)
         centre = min(range(len(strikes)), key=lambda i: abs(strikes[i].strike - spot)) if spot and strikes else len(strikes) // 2
         near = strikes[max(0, centre - LADDER_STRIKES):centre + LADDER_STRIKES + 1]
@@ -230,17 +232,32 @@ class OptionsFeed:
         top = max(net, key=lambda pair: (abs(pair[1]), -pair[0]), default=None)
         nearest = chains[0] if chains else None
         move = straddle(nearest, spot, found.root) if nearest and spot else None
-        touch = None
+        pain = max_pain(nearest, found.root) if nearest else None
+        touch, ranked = None, []
+        ready = bool(move) and move["state"] == "ready"
         if move and nearest:
             years = years_left(nearest.expiration, found.root, now, self._closes([nearest.expiration]))
-            iv = move.get("iv") if move["state"] == "ready" else None
+            iv = move.get("iv") if ready else None
             touch = {"expiration": nearest.expiration.isoformat(),
                      **{name: None if walls[key] is None else touch_probability(spot, walls[key], iv, years)
                         for name, key in (("call_wall", "call_oi"), ("put_wall", "put_oi"))}}
+            # Pressure: every named level, then the largest net gamma strikes near the price.
+            nearby = sorted(((row.strike, row.total("gamma", True)) for row in near), key=lambda pair: -abs(pair[1] or 0))
+            ranked = pressure(spot, [("Call wall", walls["call_oi"]), ("Put wall", walls["put_oi"]),
+                                     ("Gamma flip", flip.price if flip else None), ("Top gamma", top[0] if top else None),
+                                     ("Max pain", pain.price if pain else None),
+                                     ("Call vol wall", walls["call_volume"]), ("Put vol wall", walls["put_volume"]),
+                                     *(("Gamma node", strike) for strike, value in nearby[:PRESSURE_NODES] if value)],
+                              iv, years, move.get("move") if ready else None)
+        # Air pockets within twice the expected move, else across the strikes shown.
+        reach = 2 * move["move"] if ready else None
+        pockets = air_pockets(((row.strike, row.total("gamma", True)) for row in near),
+                              spot - reach if reach else None, spot + reach if reach else None)
         return {**info, "signed": signed, "walls": walls, "flip": _flip_view(flip),
-                "max_pain": _pain_view(max_pain(nearest, found.root)) if nearest else None,
+                "max_pain": _pain_view(pain),
                 "net_gamma": sum(value for _, value in net) if net else None,
                 "top_gamma": top[0] if top else None, "expected_move": move, "touch": touch,
+                "pressure": ranked, "air_pockets": pockets,
                 "rows": self._rows(found, near, "gamma", signed)}
 
     def forecast(self, symbol: str, spot: float | None, earnings: dict | None) -> dict:
