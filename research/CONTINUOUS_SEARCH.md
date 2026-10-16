@@ -85,10 +85,10 @@ v2 pilot has 90 outcome-blind cards awaiting real Jo choices; it is not a
 passed strategy and is not connected to the live scanner or Jo task.
 
 October 16 Codex preference: the search prefers the signed-in ChatGPT Codex
-plan for catalog-only ideas. NO ledger specs, results, notes, candidate IDs,
-real trades, holdout/exam numbers or credentials are sent to Codex. Duplicate
-checking stays local. Any future ledger-feedback mode requires Isaac's explicit
-approval; it is not enabled by this implementation.
+plan for ideas. Isaac explicitly approved sanitized candidate specs and
+discovery/confirmation feedback on October 16. Codex receives the same
+whitelisted digest as Claude, excluding free-text names/notes, holdout/exam
+evidence, real trades and credentials. Duplicate checking stays local.
 
 Request up to four ideas per batch, with another batch only when no valid
 untried Codex idea remains. At most six batches per 22:00 ET budget window;

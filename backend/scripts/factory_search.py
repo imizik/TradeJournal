@@ -72,7 +72,8 @@ def night_key(now):
 def safe_digest(records):
     # Whitelist only discovery/confirmation data. Neither exam outcome nor
     # holdout numbers, notes or hand summaries can reach the idea model.
-    return [dict(id=r['id'], spec=r.get('spec'), origin=r.get('search_origin'),
+    return [dict(id=r['id'], spec={k: v for k, v in r.get('spec', {}).items()
+            if k not in ('name', 'notes', 'note')}, origin=r.get('search_origin'),
             screen={'passed': r.get('gates', {}).get('screen', {}).get('passed'),
                     'failed_checks': [text for text, passed in r.get('gates', {}).get('screen', {}).get('checks', []) if not passed]},
             periods={k: v for k, v in r.get('periods', {}).items()
@@ -189,7 +190,7 @@ def codex_ideas(records, night, reserve_seconds, lock_fd=None):
         'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR')}
     cli = shutil.which('codex') or '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
     config = Path(env.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'config.toml'
-    receipt = {'origin': 'codex-plan', 'state': 'started', 'feedback_mode': 'catalog-only'}
+    receipt = {'origin': 'codex-plan', 'state': 'started', 'feedback_mode': 'discovery-confirm'}
     began = time.monotonic()
     deadline = began + IDEA_SECONDS
     try:
@@ -201,7 +202,7 @@ def codex_ideas(records, night, reserve_seconds, lock_fd=None):
             raise RuntimeError('Codex must use ChatGPT login; no API fallback')
         prompt = ('Use only this supplied research brief; do not use tools, files, memories or external data. '
                   'Encode the proposed specs array as JSON text in the required specs_json string field.\n'
-                  + idea_prompt([]))
+                  + idea_prompt(records))
         brief = base.with_suffix('.brief.txt')
         brief.write_text(prompt)
         receipt['brief_sha256'] = hashlib.sha256(prompt.encode()).hexdigest()
@@ -241,7 +242,7 @@ def codex_ideas(records, night, reserve_seconds, lock_fd=None):
             raise RuntimeError('Codex generation failed; see private generation receipt')
         events = [json.loads(line) for line in stdout.splitlines() if line.strip()]
         items = [e['item'].get('type') for e in events if isinstance(e.get('item'), dict)]
-        if set(items) - {'reasoning', 'agent_message'}:
+        if set(items) - {'reasoning', 'agent_message', 'error'}:
             raise RuntimeError('Unexpected Codex tool use; proposals refused')
         receipt['usage'] = [e.get('usage') for e in events if e.get('type') == 'turn.completed']
         raw = json.loads(json.loads(answer.read_text())['specs_json'])

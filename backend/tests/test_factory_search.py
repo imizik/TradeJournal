@@ -189,7 +189,8 @@ def codex_batch(tmp_path, monkeypatch):
         def communicate(self, prompt, timeout):
             assert timeout==300 and 'PRIVATE_EXAM' not in prompt
             Path(self.args[self.args.index('--output-last-message')+1]).write_text(json.dumps({'specs_json':json.dumps(state.raw)}))
-            events=[{'type':'turn.completed','usage':{'input_tokens':100,'output_tokens':50}}]
+            events=[{'type':'item.completed','item':{'type':'error','message':'Non-fatal CLI warning'}},
+                    {'type':'turn.completed','usage':{'input_tokens':100,'output_tokens':50}}]
             if state.tools:
                 events.append({'type':'item.completed','item':{'type':'command_execution'}})
             return '\n'.join(json.dumps(e) for e in events), ''
@@ -199,7 +200,7 @@ def codex_batch(tmp_path, monkeypatch):
 
 def test_codex_batch_reserves_before_launch_queues_then_reuses(codex_batch, tmp_path):
     state=codex_batch
-    rows=[{'id':'old','spec':{'family':'vwap_reclaim'},'notes':'PRIVATE_EXAM',
+    rows=[{'id':'old','spec':{'family':'vwap_reclaim', 'notes':'PRIVATE_EXAM'},'notes':'PRIVATE_EXAM',
            'periods':{'holdout':{'PRIVATE_EXAM':123}}}]
     ideas=search.codex_ideas(rows,'2026-10-15',state.reservations.append)
     assert len(ideas)==1 and len(state.processes)==1
@@ -207,8 +208,8 @@ def test_codex_batch_reserves_before_launch_queues_then_reuses(codex_batch, tmp_
     assert len(state.processes)==1
     receipt=json.loads(next(tmp_path.glob('*.receipt.json')).read_text())
     assert receipt['state']=='completed' and receipt['accepted']==1
-    assert receipt['feedback_mode']=='catalog-only'
-    assert json.loads(next(tmp_path.glob('*.brief.txt')).read_text().split('\n')[-1])['ledger']==[]
+    assert receipt['feedback_mode']=='discovery-confirm'
+    assert json.loads(next(tmp_path.glob('*.brief.txt')).read_text().split('\n')[-1])['ledger'][0]['id']=='old'
     assert receipt['usage']==[{'input_tokens':100,'output_tokens':50}]
     assert next(tmp_path.glob('*.started.json')).exists()
     assert 'PRIVATE_EXAM' not in next(tmp_path.glob('*.brief.txt')).read_text()
