@@ -94,7 +94,7 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
           {tag ? <span className="mr-1 text-[9px] text-slate-500">{tag}</span> : pocketed(row.strike) && <span title="Air pocket: thin gamma, price tends to cross fast" className="mr-1 text-[9px] text-violet-300/80">AIR</span>}{strikeText(row.strike)}</span>
         <span aria-hidden className="h-2.5 overflow-hidden rounded-full bg-slate-800/70">
           <span className={`block h-full rounded-full ${bar}`} style={{ width: `${Math.max(2, Math.round(Math.abs(gamma) / topGamma * 100))}%` }} /></span>
-        <span className={`text-right ${row.gamma == null ? "text-slate-600" : gamma < 0 ? "text-rose-400" : "text-emerald-400"}`}>{gexText(row.gamma)}</span>
+        <span className={`text-right ${row.gamma == null || Math.round(gamma) === 0 ? "text-slate-600" : gamma < 0 ? "text-rose-400" : "text-emerald-400"}`}>{gexText(row.gamma)}</span>
       </button>
     </div>;
   };
@@ -129,7 +129,7 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
         <Read data={data} />
         <p className="px-3 pb-3 text-[10px] leading-4 text-slate-500">
           Gamma is dollar gamma for a 1% move, signed with dealers assumed long calls and short puts: open interest does not say who holds a contract.
-          {data.rows[0]?.oi_change ? ` ${openInterestPeriodText(data.rows[0].oi_change)}.` : ""} {optionsAsOf(data)}</p>
+          {data.rows[0]?.oi_change ? ` ${openInterestPeriodText(data.rows[0].oi_change).replace(/\.$/, "")}.` : ""} {optionsAsOf(data)}</p>
       </>}
   </>;
 
@@ -151,18 +151,22 @@ function RangeBar({ data, rows }: { data: Ladder; rows: OptionStrike[] }) {
   const at = (value: number) => high === low ? 50 : (value - low) / (high - low) * 100;
   const step = rows.length > 1 ? Math.abs(rows[0].strike - rows[1].strike) : 1;
   const ascending = [...rows].reverse();
-  // Labels in lanes above the track so neighbours do not overlap.
+  // Labels in lanes above the track so neighbours do not overlap; near an edge a label
+  // runs inward from its tick instead of centring on it, so it stays inside the panel.
+  const WIDE = 32; // a label's rough width, in percent of the track
   const lanes: number[] = [];
   const placed = [...marks].sort((a, b) => a.value - b.value).map((mark) => {
-    const left = Math.min(88, Math.max(12, at(mark.value)));
-    let lane = lanes.findIndex((end) => left - end >= 30);
-    if (lane === -1) { lane = lanes.length; lanes.push(left); } else lanes[lane] = left;
-    return { ...mark, left, lane };
+    const spot = at(mark.value);
+    const anchor = spot < WIDE / 2 ? "start" : spot > 100 - WIDE / 2 ? "end" : "middle";
+    const start = anchor === "start" ? spot : anchor === "end" ? spot - WIDE : spot - WIDE / 2;
+    let lane = lanes.findIndex((end) => start >= end);
+    if (lane === -1) { lane = lanes.length; lanes.push(start + WIDE); } else lanes[lane] = start + WIDE;
+    return { ...mark, spot, anchor, lane };
   });
   return <figure aria-label="Dealer levels on a range bar" className="px-3 pb-3 pt-2">
     <div className="relative font-mono text-[9px] tracking-wider" style={{ height: `${Math.max(1, lanes.length) * 14}px` }}>
-      {placed.map((mark) => <span key={mark.name} className={`absolute -translate-x-1/2 whitespace-nowrap uppercase ${mark.text}`}
-        style={{ left: `${mark.left}%`, top: `${mark.lane * 14}px` }}>{mark.name} {strikeText(mark.value)}</span>)}
+      {placed.map((mark) => <span key={mark.name} className={`absolute whitespace-nowrap uppercase ${mark.anchor === "middle" ? "-translate-x-1/2" : ""} ${mark.text}`}
+        style={{ ...(mark.anchor === "end" ? { right: `${100 - mark.spot}%` } : { left: `${mark.spot}%` }), top: `${mark.lane * 14}px` }}>{mark.name} {strikeText(mark.value)}</span>)}
     </div>
     <div className="relative mt-1.5 h-2">
       {move && <span aria-hidden title="Expected move" className="absolute -inset-y-1.5 rounded border border-dashed border-sky-300/60 bg-sky-400/10"

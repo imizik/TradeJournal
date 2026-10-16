@@ -5756,10 +5756,11 @@ function ladder(url: string): OptionsLadder {
   const query = new URL(url).searchParams;
   const rows = Array.from({ length: 13 }, (_, i) => 245 + i * 2.5).map((strike) => ({ ...optionRow(strike, null),
     ...(strike === 260 ? { oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "unavailable" as const, calls: null, puts: null } } : {}),
-    gamma: query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
+    gamma: strike === 275 ? -0.3 : strike === 272.5 ? 461.2  // far strikes: next to nothing, as on a 0DTE chain
+      : query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
   return { ...optionInfo("gamma", query.get("scope") ?? "week", query.get("signed") === "1", []), spot: Number(query.get("spot")) || null, rows,
     signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 },
-    flip: { price: 256.4, low: 244, high: 270, note: "", assumption: "" }, max_pain: { price: 255, expiration: "2026-10-09", note: "" },
+    flip: { price: 256.4, low: 244, high: 270, note: "", assumption: "" }, max_pain: { price: 275, expiration: "2026-10-09", note: "" },
     net_gamma: -977_200_000, top_gamma: 257.5, touch: { expiration: "2026-10-09", call_wall: 0.21, put_wall: 0.34 },
     expected_move: { state: "ready", expiration: "2026-10-09", strike: 257.5, move: 4.12, percent: 0.016, iv: 0.22 },
     pressure: [
@@ -5811,10 +5812,22 @@ test("the strike ladder centres on the price, marks a strike on the charts and s
   await expect(pressure).toContainText("beyond EM");
   await expect(pressure).toContainText("245 – 247.5");
   await expect(panel.getByRole("button", { name: "Strike 245.00" })).toContainText("AIR");
+  // Next-to-nothing gamma reads "$0" without a sign, small amounts in whole dollars.
+  await expect(panel.getByRole("button", { name: "Strike 275.00" })).toContainText(/275\$0$/);
+  await expect(panel.getByRole("button", { name: "Strike 272.50" })).toContainText("+$461");
+  await expect(panel).not.toContainText("..");
+  // Every range-bar label stays over the track, the edge ones (max pain at the top strike) included.
+  const bar = panel.getByRole("figure", { name: "Dealer levels on a range bar" });
+  const edges = (await bar.locator("div.relative").first().boundingBox())!;
+  for (const label of await bar.locator("span.uppercase").all()) {
+    const box = (await label.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(edges.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(edges.x + edges.width);
+  }
   await panel.getByRole("figure", { name: "Dealer levels on a range bar" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("strike-ladder-pressure.png") });
   const read = panel.getByRole("region", { name: "The read" });
-  for (const text of ["Call wall265", "Put wall250", "Gamma flip256.4", "Max pain255", "Net GEX · in scope−$977.2M", "Expected move±4.12", "P(touch) call wall21%", "P(touch) put wall34%", "Put / call1.17 OI · 0.78 vol"])
+  for (const text of ["Call wall265", "Put wall250", "Gamma flip256.4", "Max pain275", "Net GEX · in scope−$977.2M", "Expected move±4.12", "P(touch) call wall21%", "P(touch) put wall34%", "Put / call1.17 OI · 0.78 vol"])
     await expect(read).toContainText(text);
   await page.screenshot({ path: test.info().outputPath("strike-ladder.png") });
 
