@@ -1,0 +1,15 @@
+{
+  "family": "failed_breakout",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 2.5,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "spy_day",
+      "max": 1.0
+    }
+  ]
+}
