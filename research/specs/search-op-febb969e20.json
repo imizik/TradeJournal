@@ -1,0 +1,19 @@
+{
+  "family": "opening_range_breakout",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 1.5,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "vol_ratio",
+      "min": 1.5
+    },
+    {
+      "feature": "spy_trend",
+      "max": 0.5
+    }
+  ]
+}
