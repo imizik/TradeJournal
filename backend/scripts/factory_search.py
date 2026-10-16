@@ -1,21 +1,23 @@
 """Mac-only continuous research. Lives on factory/ledger; never merge.
 
-24 candidates/night, two compute hours/night, one Claude-plan call/night.
+24 candidates/night, two compute hours/night, Codex-plan batches plus bounded Claude fallback.
 Reservations in the live ledger count before evaluation. Interrupted attempts
 are consumed, never reopened (especially exams). Run --tick from launchd.
 """
 from __future__ import annotations
 import argparse
+import hashlib
+import shutil
+import tempfile
+import tomllib
 import fcntl
 import json
-import math
 import os
 import random
 import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -23,20 +25,29 @@ os.environ['ALPACA_DATA_FEED'] = 'sip'
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'backend'))
 sys.path.insert(0, str(ROOT / 'backend/scripts'))
-from dotenv import dotenv_values
+from dotenv import dotenv_values  # noqa: E402 — bootstrap SIP and the local environment first
 for key, value in dotenv_values(ROOT / 'backend/.env').items():
     if value is not None:
         os.environ.setdefault(key, value)
-from app.engine import factory_rules as rules, scanner_rules
-from app.engine.factory_data import ET, FEATURES, LEVEL_FEATURES
-from app.engine.factory_brief import catalog, spec_changes, SPEC_FORMAT
-from app.engine.factory_gates import evaluate, ledger_record, report, HOLDOUT_START
-from strategy_factory import AlpacaCache, BarStore, LEDGER, DEFAULT_OUT, read_ledger, code_version, publish
+from app.engine import factory_rules as rules  # noqa: E402 — bootstrap SIP and the local environment first
+from app.engine.factory_data import ET, LEVEL_FEATURES  # noqa: E402 — bootstrap SIP and the local environment first
+from app.engine.factory_brief import catalog, spec_changes, SPEC_FORMAT  # noqa: E402 — bootstrap SIP and the local environment first
+from app.engine.factory_gates import evaluate, ledger_record, report, HOLDOUT_START  # noqa: E402 — bootstrap SIP and the local environment first
+from strategy_factory import AlpacaCache, BarStore, LEDGER, DEFAULT_OUT, read_ledger, code_version, publish  # noqa: E402 — bootstrap SIP and the local environment first
 
 OUT = DEFAULT_OUT / 'search'
 NIGHT_CAP = 24
 SECONDS_CAP = 7200
 CLAUDE_USD_CAP = 2.0
+CODEX_BATCH_CAP = 6
+IDEA_SECONDS = 330
+# The guardian survives loss of this supervisor. Its alarm kills its entire
+# process group (including the CLI and any descendants), releasing inherited locks.
+MODEL_GUARD = """import os,signal,subprocess,sys
+signal.signal(signal.SIGALRM, lambda *_: os.killpg(os.getpgrp(), signal.SIGKILL))
+signal.alarm(int(sys.argv[1]))
+sys.exit(subprocess.Popen(sys.argv[2:]).wait())
+"""
 STORE = None
 
 
@@ -61,7 +72,8 @@ def night_key(now):
 def safe_digest(records):
     # Whitelist only discovery/confirmation data. Neither exam outcome nor
     # holdout numbers, notes or hand summaries can reach the idea model.
-    return [dict(id=r['id'], spec=r.get('spec'), origin=r.get('search_origin'),
+    return [dict(id=r['id'], spec={k: v for k, v in r.get('spec', {}).items()
+            if k not in ('name', 'notes', 'note')}, origin=r.get('search_origin'),
             screen={'passed': r.get('gates', {}).get('screen', {}).get('passed'),
                     'failed_checks': [text for text, passed in r.get('gates', {}).get('screen', {}).get('checks', []) if not passed]},
             periods={k: v for k, v in r.get('periods', {}).items()
@@ -73,10 +85,11 @@ def idea_prompt(records):
     return ('Propose up to four simple independent underlying setup specs from the catalog and ledger summaries. '
               'Only discovery and confirm evidence is provided. Never request or infer exam/holdout results. '
               'Use core tickers, default costs, no model, at most two filters, timeframe 5 for s1_research. '
-              'Learn from the recorded failed screen checks, especially your own claude-plan ideas. '
+              'Learn from the recorded failed screen checks, including earlier model-generated ideas. '
               'Separate insufficient samples from negative net R and insufficient evidence against random. '
               'Do not repeat a tried spec. State the failure addressed and the new testable hypothesis in notes; '
               'do not assume that an exit change will rescue an entry with no demonstrated edge. '
+              'Every spec MUST explicitly set exits.max_sessions=1, including recovery_swing; this search is intraday only. '
               'Mix S1 orb/fade, other families, day/week and past-level context, and exits. Use notes, never note. Return {"specs":[...]}.\n' + SPEC_FORMAT + '\n'
               + json.dumps({'catalog': catalog(), 'ledger': safe_digest(records)}))
 
@@ -119,6 +132,140 @@ def claude_ideas(records, night, lock_fd=None):
     ideas = structured['specs']
     (OUT / f'{night}-ideas.json').write_text(json.dumps(ideas))
     return ideas
+
+
+def fresh_ideas(ideas, records):
+    seen = set(latest(records))
+    fresh = []
+    for raw in ideas:
+        try:
+            spec = validate(raw)
+        except (ValueError, TypeError):
+            continue
+        ident = rules.spec_id(spec)
+        if ident not in seen:
+            fresh.append(raw)
+            seen.add(ident)
+    return fresh
+
+
+def codex_command(cli, schema, answer, model=None):
+    command = [cli, 'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
+               '--sandbox', 'read-only', '--json', '--color', 'never',
+               '--output-schema', str(schema), '--output-last-message', str(answer)]
+    settings = {'forced_login_method': 'chatgpt', 'model_provider': 'openai',
+                'web_search': 'disabled', 'project_doc_max_bytes': 0,
+                'memories.use_memories': False, 'memories.generate_memories': False,
+                'mcp_servers': {}, 'agents.enabled': False}
+    for name, value in settings.items():
+        command += ['-c', name + '=' + json.dumps(value)]
+    for feature in ('shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories', 'view_image',
+                    'apps', 'browser_use', 'computer_use', 'image_generation', 'code_mode_host',
+                    'workspace_dependencies', 'sleep_tool', 'goals', 'tool_suggest', 'multi_agent_v2'):
+        command += ['--disable', feature]
+    command += ['-c', 'features.skip_host_skill_discovery=true']
+    if model:
+        command += ['--model', model]
+    return command + ['-']
+
+
+def codex_ideas(records, night, reserve_seconds, lock_fd=None):
+    queue = OUT / f'{night}-codex-ideas.json'
+    ideas = json.loads(queue.read_text()) if queue.exists() else []
+    available = fresh_ideas(ideas, records)
+    if available:
+        return available
+    started = list(OUT.glob(f'{night}-codex-batch-*.started.json'))
+    if len(started) >= CODEX_BATCH_CAP:
+        return []
+    # Reserve both time and batch identity before launching any model process.
+    reserve_seconds(IDEA_SECONDS)
+    number = len(started) + 1
+    base = OUT / f'{night}-codex-batch-{number:02}'
+    flag = base.with_suffix('.started.json')
+    flag.write_text(json.dumps({'started_at': datetime.now(ET).isoformat(),
+                                'reserved_seconds': IDEA_SECONDS, 'origin': 'codex-plan'}))
+    env = {k: v for k, v in os.environ.items() if k in (
+        'HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'CODEX_HOME',
+        'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR')}
+    cli = shutil.which('codex') or '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
+    config = Path(env.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'config.toml'
+    receipt = {'origin': 'codex-plan', 'state': 'started', 'feedback_mode': 'discovery-confirm'}
+    began = time.monotonic()
+    deadline = began + IDEA_SECONDS
+    try:
+        model = tomllib.loads(config.read_text()).get('model') if config.exists() else None
+        receipt['model'] = model
+        status = subprocess.run([cli, 'login', 'status'], env=env, capture_output=True,
+                                text=True, check=True, timeout=min(30, max(0.01, deadline - time.monotonic() - 15)))
+        if 'Logged in using ChatGPT' not in status.stdout + status.stderr:
+            raise RuntimeError('Codex must use ChatGPT login; no API fallback')
+        prompt = ('Use only this supplied research brief; do not use tools, files, memories or external data. '
+                  'Encode the proposed specs array as JSON text in the required specs_json string field.\n'
+                  + idea_prompt(records).replace('Return {"specs":[...]}.', ''))
+        brief = base.with_suffix('.brief.txt')
+        brief.write_text(prompt)
+        receipt['brief_sha256'] = hashlib.sha256(prompt.encode()).hexdigest()
+        schema = base.with_suffix('.schema.json')
+        schema.write_text(json.dumps({'type': 'object', 'properties': {'specs_json': {'type': 'string'}},
+                                     'required': ['specs_json'], 'additionalProperties': False}))
+        answer = base.with_suffix('.answer.json')
+        with tempfile.TemporaryDirectory(prefix='factory-codex-') as empty:
+            generation_seconds = min(300, int(deadline - time.monotonic() - 15))
+            if generation_seconds < 1:
+                raise RuntimeError('Codex generation deadline exhausted')
+            command = [sys.executable, '-c', MODEL_GUARD, str(generation_seconds),
+                       *codex_command(cli, schema, answer, model)]
+            process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=empty, env=env,
+                start_new_session=True,
+                pass_fds=(() if lock_fd is None else (lock_fd,)))
+            try:
+                stdout, stderr = process.communicate(prompt, timeout=generation_seconds)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.communicate(timeout=min(5, max(0.01, deadline - time.monotonic())))
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate(timeout=max(0.01, deadline - time.monotonic()))
+                raise
+        base.with_suffix('.events.jsonl').write_text(stdout)
+        base.with_suffix('.stderr.txt').write_text(stderr)
+        if process.returncode:
+            raise RuntimeError('Codex generation failed; see private generation receipt')
+        events = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+        items = [e['item'].get('type') for e in events if isinstance(e.get('item'), dict)]
+        if set(items) - {'reasoning', 'agent_message', 'error'}:
+            raise RuntimeError('Unexpected Codex tool use; proposals refused')
+        receipt['usage'] = [e.get('usage') for e in events if e.get('type') == 'turn.completed']
+        raw = json.loads(json.loads(answer.read_text())['specs_json'])
+        # Accept the same specs envelope as Claude, without changing any spec.
+        if isinstance(raw, dict) and set(raw) == {'specs'}:
+            raw = raw['specs']
+        if not isinstance(raw, list) or not 1 <= len(raw) <= 4 or not all(isinstance(x, dict) for x in raw):
+            raise ValueError('Codex must return one to four proposal objects')
+        accepted = fresh_ideas(raw, records)
+        receipt.update(state='completed', proposed=len(raw), accepted=len(accepted))
+        temporary = queue.with_suffix('.tmp')
+        temporary.write_text(json.dumps(ideas + accepted))
+        temporary.replace(queue)
+        print(f'Codex proposal batch {number}: {len(accepted)}/{len(raw)} valid new ideas', flush=True)
+        return accepted
+    except BaseException as exc:
+        receipt.update(state='failed', error=type(exc).__name__)
+        raise
+    finally:
+        receipt['elapsed_seconds'] = round(time.monotonic() - began, 3)
+        base.with_suffix('.receipt.json').write_text(json.dumps(receipt, indent=2))
+        for file in OUT.glob(base.name + '.*'):
+            file.chmod(0o600)
 
 
 def sample(rng):
@@ -308,18 +455,27 @@ def tick(force=False):
                 return
             def reserve_seconds(amount):
                 nonlocal used
+                if used + amount > SECONDS_CAP:
+                    raise RuntimeError('Not enough remaining time for a model batch')
                 used += amount
                 tmp = budget.with_suffix('.tmp')
                 tmp.write_text(json.dumps(used))
                 tmp.replace(budget)
             ideas = []
-            if not (OUT / f'{night}-claude-started').exists():
-                reserve_seconds(330)
+            idea_origin = 'codex-plan'
             try:
-                ideas = claude_ideas(records, night, handle.fileno())
+                ideas = codex_ideas(records, night, reserve_seconds, handle.fileno())
             except Exception as exc:
-                print('Claude proposal failed (random search continues):', type(exc).__name__, flush=True)
-                (OUT / f'{night}-claude-failure.txt').write_text(type(exc).__name__ + '\n')
+                print('Codex proposal unavailable (bounded fallback continues):', type(exc).__name__, flush=True)
+            if not ideas:
+                idea_origin = 'claude-plan'
+                try:
+                    if not (OUT / f'{night}-claude-started').exists():
+                        reserve_seconds(IDEA_SECONDS)
+                    ideas = claude_ideas(records, night, handle.fileno())
+                except Exception as exc:
+                    print('Claude proposal unavailable (random search continues):', type(exc).__name__, flush=True)
+                    (OUT / f'{night}-claude-failure.txt').write_text(type(exc).__name__ + '\n')
             seen = set(latest(records))
             rng = random.Random(os.urandom(16))
             chosen = None
@@ -328,15 +484,15 @@ def tick(force=False):
                     spec = validate(raw)
                 except (ValueError, TypeError) as exc:
                     if raw in ideas:
-                        refusal = {'at': datetime.now(ET).isoformat(), 'origin': 'claude-plan',
+                        refusal = {'at': datetime.now(ET).isoformat(), 'origin': idea_origin,
                                    'reason': str(exc), 'spec': raw}
                         with (OUT / f'{night}-proposal-rejections.jsonl').open('a') as log:
                             log.write(json.dumps(refusal) + '\n')
-                        print(f'Claude proposal rejected: {exc}', flush=True)
+                        print(f'{idea_origin} proposal rejected: {exc}', flush=True)
                     continue
                 if rules.spec_id(spec) not in seen:
                     chosen = spec
-                    origin = 'claude-plan' if raw in ideas else 'random'
+                    origin = idea_origin if raw in ideas else 'random'
                     break
             if chosen is None:
                 raise RuntimeError('No distinct valid proposal')

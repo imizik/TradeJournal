@@ -84,12 +84,44 @@ added no factory candidates, changed no gates and made no model calls. The
 v2 pilot has 90 outcome-blind cards awaiting real Jo choices; it is not a
 passed strategy and is not connected to the live scanner or Jo task.
 
-October 16 Codex experiment: the owner approved sanitized specs plus discovery/
-confirmation feedback (never holdout/exam, real trades or credentials). One
-ChatGPT-plan batch consumed its pre-reserved 330 seconds, retained in the
-existing budget. Its proposals were not imported as trials. The installed
-bundled CLI advertised additional execution/delegation tools despite disabling
-flags; the isolation review therefore blocked automatic Codex activation.
-Operational code was restored to the previously running Claude/random loop;
-the Codex experiment commits and private receipts remain for repair. The same
-24-candidate/7200-second limits continue without resetting consumed budget.
+October 16 Codex preference: the search prefers the signed-in ChatGPT Codex
+plan for ideas. Isaac explicitly approved sanitized candidate specs and
+discovery/confirmation feedback on October 16. Codex receives the same
+whitelisted digest as Claude, excluding free-text names/notes, holdout/exam
+evidence, real trades and credentials. Duplicate checking stays local.
+
+Request up to four ideas per batch, with another batch only when no valid
+untried Codex idea remains. At most six batches per 22:00 ET budget window;
+each conservatively reserves 330 seconds before launch. Candidate cap 24 and
+process-time cap 7200 seconds are unchanged. Started batches are never retried.
+The CLI forces ChatGPT login with no API fallback and uses the configured user
+model. It runs in an empty temporary directory, read-only, with shell, web,
+MCP, plugins, hooks and memories disabled. `agents.enabled=false` and
+`multi_agent_v2=false` remove delegation tools. The installed CLI still
+advertises an execution wrapper; its disabled host was verified to refuse
+execution in a synthetic local test, without creating the requested test file. Keep schema/answer,
+usage/events and generation receipts under the private search directory.
+Existing single-call Claude fallback and random sampling remain available.
+No gate, holdout, Bonferroni count, scanner setting or production task changes.
+
+Unattended-night acceptance October 16: 20 candidates completed in the October
+15 22:00–October 16 06:00 ET window, four after midnight. None passed the screen.
+The accepted ntfy receipt at 09:52 ET is a 20-candidate snapshot; the next result
+at 10:56 ET raised the active-window count to 21. The Mac slept on battery,
+so wall-clock gaps do not represent uninterrupted awake execution. It was on
+AC at audit. Existing restart-receipt.json proves unchanged distinct trial
+count after the actual supervisor restart; the complete ledger has no duplicate
+reservations, and every stored prior-candidate K matches all distinct earlier IDs.
+
+October 16 runtime proof: inspect both top-level tools and input.additional_tools;
+checking only the former misses advertised tools in the bundled CLI. Local
+request capture with synthetic credentials shows delegation removed with the
+explicit agents.enabled setting. A simulated functions.exec call returns
+"code-mode host is disabled". The model process uses the separate guardian
+so a lost parent cannot leave a running model or inherited writer lock beyond
+its reservation. Both bare-array and {"specs": [...]} proposal envelopes are
+accepted; their underlying specs still face unchanged strict validation.
+The first native batch used the signed-in ChatGPT plan, generated four specs,
+and made no tool calls; its initial envelope rejection consumed the full 330
+seconds. Two strictly valid unseen specs were recovered locally without a new
+model call or trial reservation; the two invalid specs remain refused.
