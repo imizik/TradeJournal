@@ -1,0 +1,22 @@
+{
+  "family": "opening_range_breakout",
+  "name": "Continuous setup search",
+  "params": {
+    "range_minutes": 15
+  },
+  "exits": {
+    "target_r": 3.0,
+    "max_sessions": 1,
+    "max_minutes": 30
+  },
+  "filters": [
+    {
+      "feature": "prior_day_high",
+      "min": 0.0
+    },
+    {
+      "feature": "day_move",
+      "min": -0.5
+    }
+  ]
+}
