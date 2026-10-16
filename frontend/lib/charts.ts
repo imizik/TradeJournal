@@ -128,7 +128,12 @@ export type OptionsLadder = OptionsInfo & {
   /** The scope's nearest expiration's straddle, and from its IV the modelled chance of touching each wall by then. */
   expected_move?: Straddle | null;
   touch?: { expiration: string; call_wall: number | null; put_wall: number | null } | null;
+  /** Levels ranked by modelled chance of a touch by that expiration; levels together merge their names. */
+  pressure?: PressureLevel[];
+  /** Runs of strikes with thin net gamma (calculated): spans price tends to cross fast. */
+  air_pockets?: { low: number; high: number; strikes: number }[];
 };
+export type PressureLevel = { price: number; names: string[]; side: "above" | "below" | "at"; distance: number; touch: number | null; inside_move: boolean | null };
 export type LevelEvent = { event: "tested" | "approached" | "broken" | "reclaimed"; time: number; bar_time?: number; direction?: "above" | "below" };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */
 export type LevelInteraction = {

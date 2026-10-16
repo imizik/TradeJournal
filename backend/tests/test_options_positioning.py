@@ -15,7 +15,7 @@ import pytest
 from app.engine import chart_levels
 from app.engine.chart_math import ET
 from app.engine.options_models import OptionChain, OptionContract
-from app.engine.options_positioning import (DEALER_SIDE, StrikeRow, bs_gamma, chart_levels as option_levels, dollar_gamma,
+from app.engine.options_positioning import (DEALER_SIDE, air_pockets, StrikeRow, bs_gamma, chart_levels as option_levels, dollar_gamma,
                                             expires_at, gamma_flip, max_pain, net_gamma_at, positioning, scope_expirations)
 
 NOW = datetime(2026, 10, 5, 10, 0, tzinfo=ET)  # a Monday morning
@@ -282,3 +282,12 @@ def test_max_pain_needs_complete_relevant_payout_weights_but_preserves_real_zero
     assert max_pain(chain([rows[0], zero])).price == 100
     # Unknown weights in another root do not contaminate the selected root.
     assert max_pain(chain(rows + [replace(rows[1], root="SPY1", open_interest=None)])).price == 110
+
+
+def test_air_pockets_are_runs_of_thin_net_gamma():
+    gamma = {95: 9e6, 96: 1e5, 97: -2e5, 98: None, 99: 8e6, 100: -10e6, 101: 1e5, 102: 3e6, 103: 0, 104: 1e5, 105: -1e5}
+    # 15% of the largest (10M) is 1.5M: 96-98 and 103-105 are thin; 101 alone is not a pocket.
+    assert air_pockets(gamma.items()) == [{"low": 96, "high": 98, "strikes": 3}, {"low": 103, "high": 105, "strikes": 3}]
+    # Within a window only, measured against the largest inside it.
+    assert air_pockets(gamma.items(), 99, 104) == []  # 103-104 is only two strikes
+    assert air_pockets([(1, None), (2, None), (3, None)]) == []

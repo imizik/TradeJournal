@@ -17,7 +17,9 @@ move either way by that expiration, not a forecast of where price will stay.
 
 The touch probability (strike ladder) is a model estimate: under a driftless
 lognormal walk at the straddle's IV, the chance price trades at a level before
-expiry is about twice the chance it finishes beyond it.
+expiry is about twice the chance it finishes beyond it. Pressure ranks the
+ladder's levels by that chance, merging levels that sit together (confluence),
+and says which lie inside the expected move.
 """
 
 from __future__ import annotations
@@ -92,6 +94,34 @@ def touch_probability(spot: float, level: float, iv: float | None, years: float)
         return None
     z = abs(log(level / spot)) / (iv * sqrt(years))
     return min(1.0, 2 * (1 - 0.5 * (1 + erf(z / sqrt(2)))))
+
+
+CONFLUENCE = 0.0015  # levels within 0.15% of the price of each other read as one
+
+
+def pressure(spot: float, levels: Iterable[tuple[str, float | None]], iv: float | None, years: float,
+             move: float | None) -> list[dict]:
+    """The levels ranked by their modelled chance of being touched by expiry, most likely first.
+
+    ``levels`` come in priority order; ones within ``CONFLUENCE`` of the price of an earlier
+    one join it (its price stays). ``inside_move`` says whether a level lies within the
+    straddle's move of the price, None without a move.
+    """
+    groups: list[dict] = []
+    for name, price in levels:
+        if price is None or price <= 0:
+            continue
+        group = next((g for g in groups if abs(g["price"] - price) <= CONFLUENCE * spot), None)
+        if group is None:
+            groups.append({"price": price, "names": [name]})
+        elif name not in group["names"]:
+            group["names"].append(name)
+    for group in groups:
+        group["side"] = "above" if group["price"] > spot else "below" if group["price"] < spot else "at"
+        group["distance"] = (group["price"] - spot) / spot
+        group["touch"] = touch_probability(spot, group["price"], iv, years)
+        group["inside_move"] = None if not move else abs(group["price"] - spot) <= move
+    return sorted(groups, key=lambda g: (g["touch"] is None, -(g["touch"] or 0), abs(g["distance"])))
 
 
 def _leg(contract: OptionContract) -> dict:

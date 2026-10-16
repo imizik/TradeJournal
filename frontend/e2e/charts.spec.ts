@@ -5761,7 +5761,13 @@ function ladder(url: string): OptionsLadder {
     signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 },
     flip: { price: 256.4, low: 244, high: 270, note: "", assumption: "" }, max_pain: { price: 255, expiration: "2026-10-09", note: "" },
     net_gamma: -977_200_000, top_gamma: 257.5, touch: { expiration: "2026-10-09", call_wall: 0.21, put_wall: 0.34 },
-    expected_move: { state: "ready", expiration: "2026-10-09", strike: 257.5, move: 4.12, percent: 0.016, iv: 0.22 } };
+    expected_move: { state: "ready", expiration: "2026-10-09", strike: 257.5, move: 4.12, percent: 0.016, iv: 0.22 },
+    pressure: [
+      { price: 257.5, names: ["Top gamma", "Gamma node"], side: "above", distance: 0.0006, touch: 0.93, inside_move: true },
+      { price: 255, names: ["Max pain", "Put vol wall"], side: "below", distance: -0.0091, touch: 0.62, inside_move: true },
+      { price: 250, names: ["Put wall"], side: "below", distance: -0.0284, touch: 0.34, inside_move: false },
+      { price: 265, names: ["Call wall"], side: "above", distance: 0.0299, touch: 0.21, inside_move: false }],
+    air_pockets: [{ low: 245, high: 247.5, strikes: 2 }] };
 }
 
 test("the strike ladder centres on the price, marks a strike on the charts and shares the layer's scope", async ({ page, context }) => {
@@ -5797,6 +5803,16 @@ test("the strike ladder centres on the price, marks a strike on the charts and s
   await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toContainText("CW");
   await expect(panel.getByRole("figure", { name: "Dealer levels on a range bar" })).toContainText("Put wall 250");
   await expect(panel).toContainText("NEG γ");
+  // Pressure (ranked by touch chance, framed by the expected move) and the air pockets.
+  const pressure = panel.getByRole("region", { name: "Pressure" });
+  await expect(pressure.getByRole("listitem")).toHaveCount(5);
+  await expect(pressure.getByRole("listitem").first()).toHaveAccessibleName("Top gamma + Gamma node 257.50, 93% touch chance");
+  await expect(pressure).toContainText("EM 253.22 – 261.46");
+  await expect(pressure).toContainText("beyond EM");
+  await expect(pressure).toContainText("245 – 247.5");
+  await expect(panel.getByRole("button", { name: "Strike 245.00" })).toContainText("AIR");
+  await panel.getByRole("figure", { name: "Dealer levels on a range bar" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("strike-ladder-pressure.png") });
   const read = panel.getByRole("region", { name: "The read" });
   for (const text of ["Call wall265", "Put wall250", "Gamma flip256.4", "Max pain255", "Net GEX · in scope−$977.2M", "Expected move±4.12", "P(touch) call wall21%", "P(touch) put wall34%", "Put / call1.17 OI · 0.78 vol"])
     await expect(read).toContainText(text);

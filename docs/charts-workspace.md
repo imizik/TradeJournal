@@ -1184,6 +1184,20 @@ shows the symbol, the price and a NEG γ / POS γ badge from net gamma.
 - **Range bar.** The put wall, gamma flip, max pain and call wall as ticks on
   one track spanning the ladder's strikes, each strike's stretch coloured by
   its signed gamma, with the price as a dot under its value.
+  The nearest expiration's expected move is a dashed band around the price,
+  and air pockets are hatched.
+- **Pressure.** The named levels (walls, volume walls, flip, top gamma, max
+  pain) and the three largest net-gamma strikes near the price, ranked by
+  P(touch) by the nearest expiration (`pressure` in `options_implied.py`).
+  Levels within 0.15% of the price of each other merge into one (×n names,
+  confluence); each says its side, distance and whether it lies inside the
+  expected move, and those beyond it are dimmed. Without a priced straddle
+  they are ranked by distance. **Air pockets** (`air_pockets` in
+  `options_positioning.py`, *calculated*) are runs of three or more adjacent
+  strikes whose net gamma is under 15% of the largest within twice the
+  expected move (or across the strikes shown without one): little hedging
+  either way, so price tends to cross them fast. They are listed here, tagged
+  AIR on the ladder, and the panel says when the price sits inside one.
 - **Dealer ladder.** 25 strikes each side of the price, highest first, the
   price as a separator between the strikes around it (those two are tinted)
   and the panel opened scrolled to it. Each row: the strike (CW / PW on the
