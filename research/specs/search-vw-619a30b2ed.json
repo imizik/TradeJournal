@@ -1,0 +1,10 @@
+{
+  "family": "vwap_reclaim",
+  "name": "Continuous setup search",
+  "filters": [
+    {
+      "feature": "rel_strength",
+      "max": -0.5
+    }
+  ]
+}
