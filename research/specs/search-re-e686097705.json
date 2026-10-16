@@ -1,0 +1,23 @@
+{
+  "family": "recovery_swing",
+  "name": "recovery_swing",
+  "params": {
+    "breakout_bars": 1,
+    "reclaim_level": "daily_ema"
+  },
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 1,
+    "max_minutes": null
+  },
+  "window": [
+    1000,
+    1500
+  ],
+  "filters": [
+    {
+      "feature": "vol_ratio",
+      "max": 1.0
+    }
+  ]
+}
