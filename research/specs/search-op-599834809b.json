@@ -1,0 +1,13 @@
+{
+  "family": "opening_range_breakout",
+  "name": "opening_range_breakout",
+  "params": {
+    "range_minutes": 15
+  },
+  "filters": [
+    {
+      "feature": "rvol",
+      "min": 1.5
+    }
+  ]
+}
