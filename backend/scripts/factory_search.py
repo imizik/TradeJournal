@@ -1,6 +1,6 @@
 """Mac-only continuous research. Lives on factory/ledger; never merge.
 
-24 candidates/night, two compute hours/night, Codex-plan batches plus bounded Claude fallback.
+288 candidates/window, 24 compute hours/window, Codex-plan batches plus bounded Claude fallback.
 Reservations in the live ledger count before evaluation. Interrupted attempts
 are consumed, never reopened (especially exams). Run --tick from launchd.
 """
@@ -36,10 +36,10 @@ from app.engine.factory_gates import evaluate, ledger_record, report, HOLDOUT_ST
 from strategy_factory import AlpacaCache, BarStore, LEDGER, DEFAULT_OUT, read_ledger, code_version, publish  # noqa: E402 — bootstrap SIP and the local environment first
 
 OUT = DEFAULT_OUT / 'search'
-NIGHT_CAP = 24
-SECONDS_CAP = 7200
+NIGHT_CAP = 288
+SECONDS_CAP = 86400
 CLAUDE_USD_CAP = 2.0
-CODEX_BATCH_CAP = 6
+CODEX_BATCH_CAP = 72
 IDEA_SECONDS = 330
 # The guardian survives loss of this supervisor. Its alarm kills its entire
 # process group (including the CLI and any descendants), releasing inherited locks.

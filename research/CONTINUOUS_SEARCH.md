@@ -5,8 +5,9 @@ This branch is never merged and no unproven strategy PR is created.
 
 `backend/scripts/factory_search.py --tick` runs at most one new candidate.
 launchd calls it every five minutes with `--force`, enabled by Isaac on
-October 15 to continue searching during the day as well as at night. The same
-24-candidate / two-hour budget remains in force; its existing window rolls
+October 15 to continue searching during the day as well as at night. Isaac
+increased the budget on October 16 to 288 candidates / 24 compute hours so
+the search can continue throughout the day. Its existing window rolls
 over at 22:00 New York. Already consumed attempts and time are retained.
 A tick acquires the same exclusive writer lock, so evaluations do not overlap.
 Without `--force`, new work remains restricted to 22:00–06:00 New York.
@@ -14,11 +15,11 @@ Daily summary files/ntfy receipts are snapshots; tomorrow's verifier must
 compare them against the latest ledger while continuous work is active.
 The Mac must be awake. SIP cache only; no VPS computation or database access.
 
-Nightly limits: 24 reserved candidates, two hours of reserved process time,
+Per-window limits: 288 reserved candidates, 24 hours of reserved process time,
 one Claude-plan call capped at $2 / 300 seconds, each evaluation at most
 15 minutes. Completed evaluation time is charged; a supervisor interruption
 consumes the entire reserved timeout. Process-time bounds are conservative,
-not a promise that 24 candidates finish. Failed Claude calls use random
+not a promise that 288 candidates finish. Failed Claude calls use random
 proposals and appear in logs. No API-key fallback. `--force` permits one
 acceptance tick outside the nightly window and uses the same budgets.
 
@@ -91,9 +92,9 @@ whitelisted digest as Claude, excluding free-text names/notes, holdout/exam
 evidence, real trades and credentials. Duplicate checking stays local.
 
 Request up to four ideas per batch, with another batch only when no valid
-untried Codex idea remains. At most six batches per 22:00 ET budget window;
-each conservatively reserves 330 seconds before launch. Candidate cap 24 and
-process-time cap 7200 seconds are unchanged. Started batches are never retried.
+untried Codex idea remains. At most 72 batches per 22:00 ET budget window;
+each conservatively reserves 330 seconds before launch. Candidate cap 288 and
+process-time cap 86400 seconds apply from the October 16 budget increase. Started batches are never retried.
 The CLI forces ChatGPT login with no API fallback and uses the configured user
 model. It runs in an empty temporary directory, read-only, with shell, web,
 MCP, plugins, hooks and memories disabled. `agents.enabled=false` and
@@ -125,3 +126,11 @@ The first native batch used the signed-in ChatGPT plan, generated four specs,
 and made no tool calls; its initial envelope rejection consumed the full 330
 seconds. Two strictly valid unseen specs were recovered locally without a new
 model call or trial reservation; the two invalid specs remain refused.
+
+October 16 budget increase: Isaac requested continued work immediately instead
+of waiting for the 22:00 rollover. Caps increased from 24 to 288 candidates,
+7200 to 86400 reserved seconds, and six to 72 Codex batches per window. All
+already consumed candidate IDs, batch markers and seconds are retained. The
+five-minute launchd cadence, single-writer exclusion, per-process deadlines,
+ChatGPT-plan Codex preference, sanitized feedback and every statistical gate
+are unchanged. The increased caps apply to the active and future windows.
