@@ -315,3 +315,8 @@ signed actual-tool sequential reads/writes, no future-card or partial-result
 leakage, immutable retries/restart/resume, actor/subtype/refusal cases, guarded
 operator import and rollback. Actual Jo completing the 90-card batch remains
 separate from fixtures, private export and successful installation.
+
+The marked isolated runtime excludes optional monthly journal-review and live
+scanner settings routers, and skips the live market-watch startup hook before
+importing it. These modules/models are outside the retained replay overlay.
+Normal application routes and market-watch startup remain unchanged.
