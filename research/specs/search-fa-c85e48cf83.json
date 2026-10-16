@@ -1,0 +1,19 @@
+{
+  "family": "failed_breakout",
+  "name": "Continuous setup search",
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 1,
+    "max_minutes": 20
+  },
+  "filters": [
+    {
+      "feature": "vol_ratio",
+      "max": 1.0
+    },
+    {
+      "feature": "spy_trend",
+      "max": 0.5
+    }
+  ]
+}
