@@ -41,6 +41,13 @@ SECONDS_CAP = 7200
 CLAUDE_USD_CAP = 2.0
 CODEX_BATCH_CAP = 6
 IDEA_SECONDS = 330
+# The guardian survives loss of this supervisor. Its alarm kills its entire
+# process group (including the CLI and any descendants), releasing inherited locks.
+MODEL_GUARD = """import os,signal,subprocess,sys
+signal.signal(signal.SIGALRM, lambda *_: os.killpg(os.getpgrp(), signal.SIGKILL))
+signal.alarm(int(sys.argv[1]))
+sys.exit(subprocess.Popen(sys.argv[2:]).wait())
+"""
 STORE = None
 
 
@@ -151,7 +158,9 @@ def codex_command(cli, schema, answer, model=None):
                 'mcp_servers': {}}
     for name, value in settings.items():
         command += ['-c', name + '=' + json.dumps(value)]
-    for feature in ('shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories'):
+    for feature in ('shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories', 'view_image',
+                    'apps', 'browser_use', 'computer_use', 'image_generation', 'code_mode_host',
+                    'workspace_dependencies', 'sleep_tool', 'goals', 'tool_suggest'):
         command += ['--disable', feature]
     command += ['-c', 'features.skip_host_skill_discovery=true']
     if model:
@@ -180,12 +189,14 @@ def codex_ideas(records, night, reserve_seconds, lock_fd=None):
         'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR')}
     cli = shutil.which('codex') or '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
     config = Path(env.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'config.toml'
-    model = tomllib.loads(config.read_text()).get('model') if config.exists() else None
-    receipt = {'origin': 'codex-plan', 'model': model, 'state': 'started', 'feedback_mode': 'catalog-only'}
+    receipt = {'origin': 'codex-plan', 'state': 'started', 'feedback_mode': 'catalog-only'}
     began = time.monotonic()
+    deadline = began + IDEA_SECONDS
     try:
+        model = tomllib.loads(config.read_text()).get('model') if config.exists() else None
+        receipt['model'] = model
         status = subprocess.run([cli, 'login', 'status'], env=env, capture_output=True,
-                                text=True, check=True, timeout=30)
+                                text=True, check=True, timeout=min(30, max(0.01, deadline - time.monotonic() - 15)))
         if 'Logged in using ChatGPT' not in status.stdout + status.stderr:
             raise RuntimeError('Codex must use ChatGPT login; no API fallback')
         prompt = ('Use only this supplied research brief; do not use tools, files, memories or external data. '
@@ -199,22 +210,30 @@ def codex_ideas(records, night, reserve_seconds, lock_fd=None):
                                      'required': ['specs_json'], 'additionalProperties': False}))
         answer = base.with_suffix('.answer.json')
         with tempfile.TemporaryDirectory(prefix='factory-codex-') as empty:
-            process = subprocess.Popen(codex_command(cli, schema, answer, model), stdin=subprocess.PIPE,
+            generation_seconds = min(300, int(deadline - time.monotonic() - 15))
+            if generation_seconds < 1:
+                raise RuntimeError('Codex generation deadline exhausted')
+            command = [sys.executable, '-c', MODEL_GUARD, str(generation_seconds),
+                       *codex_command(cli, schema, answer, model)]
+            process = subprocess.Popen(command, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=empty, env=env,
-                start_new_session=True, preexec_fn=lambda: signal.alarm(300),
+                start_new_session=True,
                 pass_fds=(() if lock_fd is None else (lock_fd,)))
             try:
-                stdout, stderr = process.communicate(prompt, timeout=300)
+                stdout, stderr = process.communicate(prompt, timeout=generation_seconds)
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
                 try:
-                    process.communicate(timeout=15)
+                    process.communicate(timeout=min(5, max(0.01, deadline - time.monotonic())))
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.communicate(timeout=15)
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate(timeout=max(0.01, deadline - time.monotonic()))
                 raise
         base.with_suffix('.events.jsonl').write_text(stdout)
         base.with_suffix('.stderr.txt').write_text(stderr)

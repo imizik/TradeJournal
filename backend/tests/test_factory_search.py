@@ -157,7 +157,7 @@ def test_codex_is_plan_only_without_tools_memory_or_project_context():
     assert 'memories.use_memories=false' in args and 'memories.generate_memories=false' in args
     assert 'project_doc_max_bytes=0' in args and 'web_search="disabled"' in args
     assert 'mcp_servers={}' in args
-    assert {'shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories'} <= {args[i+1] for i,v in enumerate(args) if v=='--disable'}
+    assert {'shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories', 'view_image', 'code_mode_host', 'apps'} <= {args[i+1] for i,v in enumerate(args) if v=='--disable'}
     assert args[args.index('--model')+1] == 'configured-model'
 
 
@@ -248,3 +248,54 @@ def test_codex_budget_refusal_launches_nothing(codex_batch, tmp_path):
 def test_idea_brief_explicit_intraday_includes_recovery():
     text=search.idea_prompt([])
     assert 'exits.max_sessions=1' in text and 'including recovery_swing' in text
+
+
+def test_codex_timeout_including_auth_and_kill_fits_reservation(codex_batch, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    elapsed = [0.0]
+    calls = []
+    monkeypatch.setattr(search.time, 'monotonic', lambda: elapsed[0])
+    def status(*args, **kwargs):
+        elapsed[0] += kwargs['timeout']
+        return SimpleNamespace(stdout='Logged in using ChatGPT', stderr='')
+    monkeypatch.setattr(search.subprocess, 'run', status)
+    class Resistant:
+        pid = 123456
+        def __init__(self, *args, **kwargs):
+            pass
+        def communicate(self, *args, timeout):
+            calls.append(timeout)
+            elapsed[0] += timeout
+            raise search.subprocess.TimeoutExpired('fake', timeout)
+    monkeypatch.setattr(search.subprocess, 'Popen', Resistant)
+    signals = []
+    monkeypatch.setattr(search.os, 'killpg', lambda pid, sig: signals.append(sig))
+    with pytest.raises(search.subprocess.TimeoutExpired):
+        search.codex_ideas([], '2026-10-15', codex_batch.reservations.append)
+    assert calls == [285, 5, 10]
+    assert signals == [search.signal.SIGTERM, search.signal.SIGKILL]
+    assert elapsed[0] <= search.IDEA_SECONDS
+    receipt = json.loads(next(tmp_path.glob('*.receipt.json')).read_text())
+    assert receipt['state'] == 'failed' and receipt['elapsed_seconds'] == 330
+    monkeypatch.setattr(search, 'CODEX_BATCH_CAP', 1)
+    assert search.codex_ideas([], '2026-10-15', lambda _: pytest.fail('spent batch')) == []
+
+
+def test_codex_guardian_kills_descendants_and_releases_lock_after_supervisor_loss(tmp_path):
+    import subprocess
+    import time
+    lock = tmp_path / 'writer.lock'
+    # Fake CLI ignores TERM, spawns a descendant, and would otherwise retain stdout.
+    fake = "import signal,subprocess,sys,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);time.sleep(30)"
+    supervisor = """import fcntl,os,subprocess,sys
+handle=open(sys.argv[1],'a')
+fcntl.flock(handle,fcntl.LOCK_EX)
+subprocess.Popen([sys.executable,'-c',sys.argv[2],'1',sys.executable,'-c',sys.argv[3]],start_new_session=True,pass_fds=(handle.fileno(),))
+os._exit(0)
+"""
+    started = time.monotonic()
+    parent = subprocess.Popen([sys.executable, '-c', supervisor, str(lock), search.MODEL_GUARD, fake], stdout=subprocess.PIPE)
+    parent.communicate(timeout=5)
+    assert time.monotonic() - started < 5  # all descendants closed inherited stdout
+    with lock.open('a') as handle:
+        search.fcntl.flock(handle, search.fcntl.LOCK_EX | search.fcntl.LOCK_NB)
