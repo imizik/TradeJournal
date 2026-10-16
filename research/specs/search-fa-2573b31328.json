@@ -1,0 +1,10 @@
+{
+  "family": "failed_breakout",
+  "name": "Continuous setup search",
+  "filters": [
+    {
+      "feature": "swing_high",
+      "min": 0.0
+    }
+  ]
+}
