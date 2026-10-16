@@ -14,11 +14,16 @@ rather than with a guess.
 The range bands (Charts C2.7) draw a captured straddle as two levels, the price
 at capture plus and minus the move: what the options market charged then for a
 move either way by that expiration, not a forecast of where price will stay.
+
+The touch probability (strike ladder) is a model estimate: under a driftless
+lognormal walk at the straddle's IV, the chance price trades at a level before
+expiry is about twice the chance it finishes beyond it.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from math import erf, log, sqrt
 from typing import Iterable, Mapping
 
 from app.engine.chart_levels import Level
@@ -79,6 +84,14 @@ def straddle(chain: OptionChain, spot: float, root: str | None = None, now: date
     ivs = [leg.iv for leg in (call, put) if leg.iv is not None]
     return {**base, "state": "ready", "move": round(move, 4), "percent": move / spot,
             "iv": sum(ivs) / len(ivs) if ivs else None}
+
+
+def touch_probability(spot: float, level: float, iv: float | None, years: float) -> float | None:
+    """The modelled chance price touches ``level`` before expiry; None without a volatility or time left."""
+    if not iv or iv <= 0 or years <= 0 or spot <= 0 or level <= 0:
+        return None
+    z = abs(log(level / spot)) / (iv * sqrt(years))
+    return min(1.0, 2 * (1 - 0.5 * (1 + erf(z / sqrt(2)))))
 
 
 def _leg(contract: OptionContract) -> dict:
