@@ -1,0 +1,24 @@
+{
+  "family": "vwap_reclaim",
+  "name": "vwap_reclaim",
+  "params": {
+    "sides": "long"
+  },
+  "exits": {
+    "target_r": 1.5,
+    "max_sessions": 1,
+    "max_minutes": 20,
+    "stall_minutes": 10,
+    "stall_r": 0.0
+  },
+  "filters": [
+    {
+      "feature": "open_trend",
+      "min": 0.0
+    },
+    {
+      "feature": "risk",
+      "min": 2.0
+    }
+  ]
+}
