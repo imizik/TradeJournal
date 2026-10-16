@@ -1,0 +1,14 @@
+{
+  "family": "s1_research",
+  "name": "Continuous setup search",
+  "filters": [
+    {
+      "feature": "opening_range_low",
+      "max": 1.0
+    },
+    {
+      "feature": "trend",
+      "max": 0.0
+    }
+  ]
+}
