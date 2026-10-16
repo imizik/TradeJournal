@@ -1,0 +1,24 @@
+{
+  "family": "opening_range_breakout",
+  "name": "opening_range_breakout",
+  "params": {
+    "range_minutes": 15,
+    "sides": "short"
+  },
+  "exits": {
+    "target_r": null,
+    "max_sessions": 1,
+    "max_minutes": 120,
+    "trail_r": 1.0
+  },
+  "filters": [
+    {
+      "feature": "gap",
+      "max": 0.0
+    },
+    {
+      "feature": "prior_week_low",
+      "min": 0.0
+    }
+  ]
+}
