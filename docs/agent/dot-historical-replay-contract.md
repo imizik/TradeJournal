@@ -264,3 +264,54 @@ Operator commands are `backend/scripts/scanner_replay_capture.py` for private
 capture and `backend/scripts/scanner_replay_operator.py` for prepare/report/abandon
 on the marked isolated database. Live scanner/shadow ledgers, SC-0, production
 journal access, VPS activation, options pricing and paid inference are unchanged.
+
+## Factory opportunity pilot — isolated replay connection
+
+Isaac authorized connecting the frozen Mac opportunity pilot on October 15,
+2026. This is **discovery development**, not a scanner tuning pass, exam,
+options-performance claim or production task change. The Mac generates and
+scores the frozen candidate continuations; the isolated server imports them
+without factory execution, provider reads or model calls. Existing S1 scanner
+parameters, production shadow exchange and Jo's production task remain unchanged.
+
+The stdlib-only `backend/scripts/opportunity_replay_export.py` exports the
+unchanged private pilot manifest and committed outcomes to an exclusive owned
+0600 handoff. `scanner_replay_operator.py prepare-opportunities` applies the
+existing marked-SQLite isolation guard **before app/database imports**, then
+validates the source policy, sealed outcomes, exact card/outcome binding,
+causal cutoff candles, chronology, supported families/features, fixed geometry,
+unknown option eligibility, quotas and discovery date bound (through September
+2024). Invalid input rolls back; exact retries preserve the original batch.
+
+The new assignment uses a **fresh actor** and the explicit `opportunity_feed`
+subtype alongside the existing scanner/historical/market grants, with no
+journal or ordinary writer/replay grant. It permits at most 18 fixed factory
+symbols, and the grant must exactly match the frozen manifest's actual symbols
+and complete run set. Ordinary scanner grants retain their 12-symbol S1 bound;
+a legacy grant cannot open an opportunity run and a new subtype cannot repoint
+an old scanner actor. No new OAuth scope or new model-call capability is added.
+
+All five sessions are one sequential practice run, using existing
+`list_practice_runs`, `get_practice_run`, `get_practice_choice` and
+`record_practice_choice` tools. Only the next chronological setup is served;
+an immutable choice is required before the next context. Context and outcome
+commitments, exact retries, resume markers, revocation and actor boundaries
+remain enforced by the existing replay interface. Neither operator abandonment
+nor completion of only one historical session reveals a partial batch.
+
+After all choices commit, the report compares Jo TAKEs with take-all, the fixed
+`day_move >= 0 AND trend >= 0` filter, and seeded count-matched random selections
+per session/spec. R is imported factory underlying execution/cost evidence;
+delayed-entry outcomes and dollar/option returns are not modeled. Dataset
+freeze time is explicitly distinct from unknown provider retrieval time.
+Historical corrections, minute completeness, option liquidity and model memory
+remain unverified. Five correlated discovery sessions cannot establish skill.
+
+Activation must preserve the existing isolated demo's identities, assignments,
+receipts and independent production services. Use the reviewed source bundle,
+a fresh actor-bound assignment, and the existing current connection checks.
+Merging does not activate or rebind the isolated demo. Required proof includes
+signed actual-tool sequential reads/writes, no future-card or partial-result
+leakage, immutable retries/restart/resume, actor/subtype/refusal cases, guarded
+operator import and rollback. Actual Jo completing the 90-card batch remains
+separate from fixtures, private export and successful installation.

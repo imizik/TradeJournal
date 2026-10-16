@@ -412,3 +412,30 @@ assert Path(routes.__file__).resolve().is_relative_to(Path.cwd())
         capture_output=True, text=True, timeout=30)
     assert (result.returncode == 0) is (omitted is None), result.stderr
     assert not (tmp_path / "import-only.db").exists()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_opportunity_operator_new_parent_installs_and_rolls_back(
+    update_fixture, monkeypatch, fail
+):
+    runtime, config, backend, frontend, calls = update_fixture
+    shutil.rmtree(runtime / "backend/scripts")
+    count = []
+
+    def ready():
+        count.append(True)
+        if fail and len(count) == 1:
+            raise RuntimeError("new operator readiness failure")
+
+    monkeypatch.setattr(updater, "ready", ready)
+    target = runtime / "backend/scripts/scanner_replay_operator.py"
+    if fail:
+        with pytest.raises(RuntimeError, match="operator readiness"):
+            updater.update(backend, frontend, "a" * 40)
+        assert not target.exists()
+        assert (
+            runtime / "backend/app/engine/access.py"
+        ).read_text() == "# old source\n"
+    else:
+        updater.update(backend, frontend, "a" * 40)
+        assert target.read_text() == "# new source\n"

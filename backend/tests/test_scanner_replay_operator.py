@@ -279,3 +279,13 @@ def test_report_uses_snapshot_only_and_keeps_option_pnl_separate(trial, tmp_path
     assert "actual option P&L: 125.00" in markdown
     assert "Jo at baseline entry | 0" in markdown
     assert "125.00" not in markdown.split("## Isaac's actual option trades")[0]
+
+
+def test_opportunity_wrong_database_refused_before_reading_handoff(tmp_path, monkeypatch):
+    root = tmp_path / 'not-marked-opportunity'
+    root.mkdir()
+    monkeypatch.setenv('DATABASE_URL','postgresql://example.invalid/forbidden')
+    monkeypatch.setattr(operator,'private_json',lambda *_:pytest.fail('Read before isolated trial validation'))
+    with pytest.raises(RuntimeError,match='non-isolated'):
+        operator.main(['--trial-root',str(root),'prepare-opportunities','--bundle',str(tmp_path/'missing.json'),
+                       '--identifier','opportunity-isolated'])
