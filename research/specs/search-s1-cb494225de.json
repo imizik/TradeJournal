@@ -1,0 +1,13 @@
+{
+  "family": "s1_research",
+  "name": "s1_research",
+  "params": {
+    "setup": "fade"
+  },
+  "filters": [
+    {
+      "feature": "prior_week_high",
+      "min": 0.0
+    }
+  ]
+}
