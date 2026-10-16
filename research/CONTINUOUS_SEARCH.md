@@ -83,3 +83,29 @@ counted IDs and consumed 32 + 63 seconds from the existing time budget. They
 added no factory candidates, changed no gates and made no model calls. The
 v2 pilot has 90 outcome-blind cards awaiting real Jo choices; it is not a
 passed strategy and is not connected to the live scanner or Jo task.
+
+October 16 Codex preference: the search prefers the signed-in ChatGPT Codex
+plan for catalog-only ideas. NO ledger specs, results, notes, candidate IDs,
+real trades, holdout/exam numbers or credentials are sent to Codex. Duplicate
+checking stays local. Any future ledger-feedback mode requires Isaac's explicit
+approval; it is not enabled by this implementation.
+
+Request up to four ideas per batch, with another batch only when no valid
+untried Codex idea remains. At most six batches per 22:00 ET budget window;
+each conservatively reserves 330 seconds before launch. Candidate cap 24 and
+process-time cap 7200 seconds are unchanged. Started batches are never retried.
+The CLI forces ChatGPT login with no API fallback and uses the configured user
+model. It runs in an empty temporary directory, read-only, with shell, web,
+MCP, plugins, hooks, memories and delegation disabled. Keep schema/answer,
+usage/events and generation receipts under the private search directory.
+Existing single-call Claude fallback and random sampling remain available.
+No gate, holdout, Bonferroni count, scanner setting or production task changes.
+
+Unattended-night acceptance October 16: 20 candidates completed in the October
+15 22:00–October 16 06:00 ET window, four after midnight. None passed the screen.
+The accepted ntfy receipt at 09:52 ET is a 20-candidate snapshot; the next result
+at 10:56 ET raised the active-window count to 21. The Mac slept on battery,
+so wall-clock gaps do not represent uninterrupted awake execution. It was on
+AC at audit. Existing restart-receipt.json proves unchanged distinct trial
+count after the actual supervisor restart; the complete ledger has no duplicate
+reservations, and every stored prior-candidate K matches all distinct earlier IDs.

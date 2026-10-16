@@ -147,3 +147,104 @@ def test_next_claude_brief_contains_failures_and_excludes_exam_evidence():
     assert '-0.088874' in brief and '-0.795647' in brief
     assert 'PRIVATE_EXAM_NUMBER' not in brief and 'failed_exam' not in brief
     assert 'Learn from the recorded failed screen checks' in brief
+
+
+def test_codex_is_plan_only_without_tools_memory_or_project_context():
+    args = search.codex_command('codex', '/schema', '/answer', 'configured-model')
+    assert '--ignore-user-config' in args and '--ephemeral' in args
+    assert args[args.index('--sandbox')+1] == 'read-only'
+    assert 'forced_login_method="chatgpt"' in args and 'model_provider="openai"' in args
+    assert 'memories.use_memories=false' in args and 'memories.generate_memories=false' in args
+    assert 'project_doc_max_bytes=0' in args and 'web_search="disabled"' in args
+    assert 'mcp_servers={}' in args
+    assert {'shell_tool', 'plugins', 'hooks', 'multi_agent', 'memories'} <= {args[i+1] for i,v in enumerate(args) if v=='--disable'}
+    assert args[args.index('--model')+1] == 'configured-model'
+
+
+@pytest.fixture
+def codex_batch(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(search, 'OUT', tmp_path)
+    monkeypatch.setattr(search.Path, 'home', lambda: tmp_path)
+    monkeypatch.setenv('OPENAI_API_KEY', 'NEVER_SEND_API_KEY')
+    monkeypatch.setenv('CODEX_API_KEY', 'NEVER_SEND_CODEX_KEY')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'NEVER_SEND_CLAUDE_KEY')
+    state = SimpleNamespace(reservations=[], processes=[], status='Logged in using ChatGPT', tools=False,
+                            raw=[{'family':'vwap_reclaim','filters':[{'feature':'trend','min':0}],
+                                  'exits':{'max_sessions':1}}])
+    def status(args, **kwargs):
+        assert state.reservations == [search.IDEA_SECONDS]
+        assert args[-2:]==['login','status']
+        assert not any('API_KEY' in k for k in kwargs['env'])
+        return SimpleNamespace(stdout=state.status, stderr='', returncode=0)
+    monkeypatch.setattr(search.subprocess, 'run', status)
+    class Process:
+        def __init__(self, args, **kwargs):
+            self.args=args
+            self.kwargs=kwargs
+            self.returncode=0
+            state.processes.append(self)
+            assert not list(Path(kwargs['cwd']).iterdir())
+            assert not any('API_KEY' in k for k in kwargs['env'])
+        def communicate(self, prompt, timeout):
+            assert timeout==300 and 'PRIVATE_EXAM' not in prompt
+            Path(self.args[self.args.index('--output-last-message')+1]).write_text(json.dumps({'specs_json':json.dumps(state.raw)}))
+            events=[{'type':'turn.completed','usage':{'input_tokens':100,'output_tokens':50}}]
+            if state.tools:
+                events.append({'type':'item.completed','item':{'type':'command_execution'}})
+            return '\n'.join(json.dumps(e) for e in events), ''
+    monkeypatch.setattr(search.subprocess, 'Popen', Process)
+    return state
+
+
+def test_codex_batch_reserves_before_launch_queues_then_reuses(codex_batch, tmp_path):
+    state=codex_batch
+    rows=[{'id':'old','spec':{'family':'vwap_reclaim'},'notes':'PRIVATE_EXAM',
+           'periods':{'holdout':{'PRIVATE_EXAM':123}}}]
+    ideas=search.codex_ideas(rows,'2026-10-15',state.reservations.append)
+    assert len(ideas)==1 and len(state.processes)==1
+    assert search.codex_ideas(rows,'2026-10-15',lambda _:pytest.fail('queue must not reserve'))==ideas
+    assert len(state.processes)==1
+    receipt=json.loads(next(tmp_path.glob('*.receipt.json')).read_text())
+    assert receipt['state']=='completed' and receipt['accepted']==1
+    assert receipt['feedback_mode']=='catalog-only'
+    assert json.loads(next(tmp_path.glob('*.brief.txt')).read_text().split('\n')[-1])['ledger']==[]
+    assert receipt['usage']==[{'input_tokens':100,'output_tokens':50}]
+    assert next(tmp_path.glob('*.started.json')).exists()
+    assert 'PRIVATE_EXAM' not in next(tmp_path.glob('*.brief.txt')).read_text()
+
+
+def test_codex_api_auth_refused_after_durable_reservation(codex_batch, tmp_path):
+    codex_batch.status='Logged in using an API key'
+    with pytest.raises(RuntimeError,match='no API fallback'):
+        search.codex_ideas([], '2026-10-15',codex_batch.reservations.append)
+    assert not codex_batch.processes
+    assert json.loads(next(tmp_path.glob('*.receipt.json')).read_text())['state']=='failed'
+
+
+def test_codex_tool_event_refused_without_queue(codex_batch, tmp_path):
+    codex_batch.tools=True
+    with pytest.raises(RuntimeError,match='tool use'):
+        search.codex_ideas([], '2026-10-15',codex_batch.reservations.append)
+    assert not (tmp_path/'2026-10-15-codex-ideas.json').exists()
+
+
+def test_codex_spent_batch_never_reopened_and_candidate_id_not_repeated(codex_batch, tmp_path, monkeypatch):
+    monkeypatch.setattr(search,'CODEX_BATCH_CAP',1)
+    ideas=search.codex_ideas([], '2026-10-15',codex_batch.reservations.append)
+    ident=search.rules.spec_id(search.validate(ideas[0]))
+    assert search.codex_ideas([{'id':ident}], '2026-10-15',lambda _:pytest.fail('spent batch cannot retry'))==[]
+    assert len(codex_batch.processes)==1
+
+
+def test_codex_budget_refusal_launches_nothing(codex_batch, tmp_path):
+    def refuse(_):
+        raise RuntimeError('budget exhausted')
+    with pytest.raises(RuntimeError,match='budget exhausted'):
+        search.codex_ideas([], '2026-10-15',refuse)
+    assert not codex_batch.processes and not list(tmp_path.glob('*.started.json'))
+
+
+def test_idea_brief_explicit_intraday_includes_recovery():
+    text=search.idea_prompt([])
+    assert 'exits.max_sessions=1' in text and 'including recovery_swing' in text
