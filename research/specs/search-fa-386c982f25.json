@@ -1,0 +1,15 @@
+{
+  "family": "failed_breakout",
+  "name": "failed_breakout",
+  "params": {
+    "confirm_bars": 2
+  },
+  "timeframe": 5,
+  "filters": [
+    {
+      "feature": "prior_week_high",
+      "min": 0.0,
+      "max": 0.25
+    }
+  ]
+}
