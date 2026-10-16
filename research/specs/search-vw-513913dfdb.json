@@ -1,0 +1,14 @@
+{
+  "family": "vwap_reclaim",
+  "name": "vwap_reclaim",
+  "params": {
+    "chase_atr": 0.5,
+    "confirm_bars": 1
+  },
+  "filters": [
+    {
+      "feature": "risk",
+      "min": 1.0
+    }
+  ]
+}
