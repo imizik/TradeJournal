@@ -370,10 +370,14 @@ complete report written; the CLI does not overwrite it on retry.
 
 The factual audit binds manifest, actor, policy, prompt version, receipt and
 causal packet hashes; rejects future/overlapping candles and mismatched timing;
-and compares only explicitly labeled literals. Supported claims are
+and binds each source card to its deterministic candidate/opportunity UUIDs. It
+compares only explicitly labeled literals. Supported claims are
 `C=[day_move,trend; category]`, entry, stop, risk in dollars, cost in R, rvol,
 vol_ratio, and `V=[Nx]` relative to the preceding five candle volumes. It honors
-quoted rounding precision. Missing evidence, ambiguous claims and unparsed prose
+quoted rounding precision within finite numeric precision bounds. Scalar labels
+require a delimiter/end after the number (or supported USD/dollar unit; cost
+requires R). Free prose after the number, unsupported units and ranges stay
+unverified rather than being interpreted. Missing evidence, ambiguous claims and unparsed prose
 are **unverified**, never passes. `vol_ratio` is daily ATR5/ATR20, not trading
 volume; a suspicious phrase is a review warning, not an automatic error. Take/skip
 contrast pairs share symbol/family/side/context category but differ in time and
@@ -384,7 +388,8 @@ Comparison accepts the existing study scorer's already-revealed export format
 (`revealed_at`, `arms`, each with `assignment` and `rows`). The operator must list
 **every frozen study arm**. It requires distinct runs, complete assigned card
 counts, identical card sets/source/scoring policy and market/outcome facts, and
-consistent saved receipts. It cannot discover an arm omitted from both the input
+consistent saved receipts bound to each source card through deterministic UUIDs.
+It cannot discover an arm omitted from both the input
 and command, independently attest the study registration, or verify outcome
 seals; it is not a replacement for the owning study's reveal gate. Never feed it
 sealed/unfinished study data or use it to select a rubric against a holdout.

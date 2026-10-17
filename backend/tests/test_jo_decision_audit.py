@@ -27,8 +27,9 @@ def snapshot():
         card["candles"].append({"start": (cutoff - timedelta(minutes=(6-i)*5)).isoformat(),
                                 "end": (cutoff - timedelta(minutes=(5-i)*5)).isoformat(),
                                 "open": 100, "high": 101, "low": 99.5, "close": 100, "volume": 100 if i < 5 else 200})
-    evidence = {"opportunity_id": rid + ":card1", "candidate": {"candidate_id": "candidate1"}, "opportunity": card}
-    receipt = {"run_id": rid, "opportunity_id": evidence["opportunity_id"], "candidate_id": "candidate1",
+    candidate_id = str(uuid.uuid5(uuid.UUID(rid), card["id"]))
+    evidence = {"opportunity_id": str(uuid.uuid5(uuid.UUID(rid), candidate_id)), "candidate": {"candidate_id": candidate_id}, "opportunity": card}
+    receipt = {"run_id": rid, "opportunity_id": evidence["opportunity_id"], "candidate_id": candidate_id,
                "decision": "take", "reason": "C=[1.25,-0.25; mixed] entry 100, stop 99; risk 1.00; cost 0.02R; rvol 1.33; vol_ratio 0.8; V=[2.0x]",
                "served_at": "2026-10-17T12:00:00Z", "committed_at": "2026-10-17T12:00:10Z", "wall_seconds": 10,
                "policy_hash": audit.digest(manifest), "prompt_version": "fixture-v1", "context_sha256": audit.digest(evidence)}
@@ -104,7 +105,8 @@ def comparison():
         for i, outcome in enumerate((-1, 2, None)):
             decision = ("take" if i == 0 else "skip") if name == "control" else ("take" if i == 1 else "skip")
             r = copy.deepcopy(snapshot()["runs"][0]["rows"][0]["receipt"])
-            r.update(run_id=rid, opportunity_id=f"{rid}:{i}", decision=decision, prompt_version=name, reason="Saved reason")
+            candidate_id = str(uuid.uuid5(uuid.UUID(rid), f"c{i}"))
+            r.update(run_id=rid, candidate_id=candidate_id, opportunity_id=str(uuid.uuid5(uuid.UUID(rid), candidate_id)), decision=decision, prompt_version=name, reason="Saved reason")
             rows.append({"source_card_id": f"c{i}", "receipt": r, "decision": decision, "reason": r["reason"],
                          "outcome": {"resolved": outcome is not None, "r": outcome}, "candidate": {"ticker": "NVDA", "side": 1},
                          "features": {"day_move": 1, "trend": 1}, "simulated_as_of": f"2024-02-05T1{i}:00:00-05:00",
@@ -260,3 +262,45 @@ def test_real_opportunity_receipt_export(tmp_path):
         assert report["rows"][0]["facts"]["bar_volume_ratio"] is None
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize('text,field', [
+    ('risk 100 cents', 'risk'), ('risk 100 bps', 'risk'), ('risk 1.00 cents', 'risk'),
+    ('risk 1.00 euros', 'risk'), ('risk 1.00-2.00', 'risk'), ('risk 1.00 to 2.00', 'risk'),
+    ('entry 100/101', 'entry'), ('cost 0.02R-0.05R', 'cost_r'), ('risk 1.00, or 2.00', 'risk'),
+    ('V=[2.0x-3.0x]', 'bar_volume_ratio'), ('V=[2.0x to 3.0x]', 'bar_volume_ratio'),
+    ('risk 1.00 and 2.00', 'risk'), ('risk 1.00 dollars to 2.00 dollars', 'risk'),
+])
+def test_unsupported_units_ranges_and_alternatives_stay_unverified(text, field):
+    assert checks(text)[field]['status'] == 'unparsed'
+
+
+def test_valid_and_unsupported_occurrences_cannot_hide_ambiguity():
+    assert checks('risk 1.00; risk 100 cents')['risk']['status'] == 'ambiguous'
+    assert checks('risk 1.00; risk 1.00-2.00')['risk']['status'] == 'ambiguous'
+    assert checks('risk 1.00 USD;')['risk']['status'] == 'match'
+
+
+def test_receipt_cannot_be_joined_to_another_comparison_card():
+    data = comparison()
+    first, second = data['arms'][1]['rows'][:2]
+    for key in ('receipt', 'decision', 'reason'):
+        first[key], second[key] = second[key], first[key]
+    with pytest.raises(ValueError, match='different source card'):
+        audit.compare_revealed(data, ['control', 'structured'])
+
+
+def test_rehashed_packet_cannot_change_source_card_identity():
+    data = snapshot()
+    row = data['runs'][0]['rows'][0]
+    row['evidence']['opportunity']['id'] = 'another-card'
+    row['evidence_sha256'] = audit.digest(row['evidence'])
+    row['receipt']['context_sha256'] = row['evidence_sha256']
+    row['receipt_sha256'] = audit.digest(row['receipt'])
+    with pytest.raises(ValueError, match='different source card'):
+        audit.audit_export(data)
+
+
+@pytest.mark.parametrize('text', ['risk 1e99999999999999999', 'risk 1e-99999999999999999', 'risk 1e309'])
+def test_unsupported_precision_is_unverified_not_a_crash(text):
+    assert checks(text)['risk']['status'] == 'unparsed'

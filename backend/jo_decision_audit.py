@@ -7,7 +7,7 @@ graded. Outcomes enter only through a separately supplied revealed comparison.
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 import hashlib
 import json
 import math
@@ -64,6 +64,14 @@ def rounded_equal(text, expected):
     return abs(quoted - Decimal(str(expected))) <= tolerance + Decimal("1e-12")
 
 
+def supported_literal(text):
+    try:
+        value = Decimal(text)
+        return value.is_finite() and abs(value.as_tuple().exponent) <= 308 and abs(value.adjusted()) <= 308
+    except DecimalException:
+        return False
+
+
 def card_facts(card):
     cutoff = timestamp(card["simulated_as_of"])
     entry, stop = finite(card["entry_reference"], positive=True), finite(card["stop"], positive=True)
@@ -102,21 +110,40 @@ def card_facts(card):
 
 def claims(reason, facts):
     """Parse only explicit labels; never infer a number's meaning from proximity."""
-    quoted = defaultdict(list)
+    quoted, unsupported = defaultdict(list), set()
     for match in re.finditer(r"C=\[\s*" + NUMBER + r"\s*[,/]\s*" + NUMBER + r"\s*;", reason, re.I):
         quoted["day_move"].append(match[1])
         quoted["trend"].append(match[2])
-    # Unit suffixes which change a quantity's meaning are deliberately excluded.
+    # Only a delimited scalar is verified. Free prose, ranges and unsupported
+    # units remain unverified, including when another occurrence looks valid.
     for field, label in (("risk", "risk"), ("cost_r", "cost"), ("rvol", "rvol"),
                          ("vol_ratio", "vol_ratio"), ("entry", "entry(?: reference)?"), ("stop", "stop")):
-        suffix = r"\s*R\b" if field == "cost_r" else r"(?![\w.%]|,\d|\s*(?:ATR\b|R\b|%|percent\b))"
-        pattern = r"\b" + label + r"\s*[:=@]?\s*\$?" + NUMBER + suffix
-        quoted[field].extend(m[1] for m in re.finditer(pattern, reason, re.I))
-    quoted["bar_volume_ratio"].extend(m[1] for m in re.finditer(r"V=\[\s*" + NUMBER + r"\s*[x×](?!\w)", reason, re.I))
+        pattern = r"\b" + label + r"\s*[:=@]?\s*\$?" + NUMBER
+        for match in re.finditer(pattern, reason, re.I):
+            tail = reason[match.end():]
+            unit = (r"\s*R\b" if field == "cost_r" else
+                    r"\s+(?:USD|dollars?)\b" if field in {"entry", "stop", "risk"} else None)
+            unit_match = re.match(unit, tail, re.I) if unit else None
+            if unit_match:
+                tail = tail[unit_match.end():]
+            if (field == "cost_r" and not unit_match or
+                    re.match(r"\s*,?\s*(?:[-–—/+±]|(?:to|or|through|and)\b\s*[-+\d.])", tail, re.I) or
+                    re.match(r",\d", tail) or
+                    not re.match(r"(?:\s*(?:$|[,;\]\)]))|(?:\.(?:\s|$))", tail)):
+                unsupported.add(field)
+            else:
+                quoted[field].append(match[1])
+    for match in re.finditer(r"V=\[\s*" + NUMBER + r"\s*[x×](?!\w)", reason, re.I):
+        tail = reason[match.end():]
+        if re.match(r"\s*(?:[-–—/+±]|(?:to|or|through|and)\b\s*[-+\d.])", tail, re.I):
+            unsupported.add("bar_volume_ratio")
+        else:
+            quoted["bar_volume_ratio"].append(match[1])
     result = []
     for field in ("day_move", "trend", "entry", "stop", "risk", "cost_r", "rvol", "vol_ratio", "bar_volume_ratio"):
         texts, expected = quoted[field], facts[field]
-        state = ("missing_evidence" if expected is None else "unparsed" if not texts
+        state = ("missing_evidence" if expected is None else "unparsed" if not all(supported_literal(t) for t in texts)
+                 else "ambiguous" if texts and field in unsupported else "unparsed" if not texts
                  else "ambiguous" if len(set(texts)) != 1 else "match" if rounded_equal(texts[0], expected) else "mismatch")
         result.append({"field": field, "quoted": texts, "expected": expected, "status": state})
     categories = re.findall(r"C=\[[^;]*;\s*(aligned|mixed|adverse|unknown)\b", reason, re.I)
@@ -155,6 +182,9 @@ def validate_run(run):
             raise ValueError("Receipt/evidence/assignment binding failed")
         card = packet["opportunity"]
         key = card["id"]
+        candidate_id = str(uuid.uuid5(uuid.UUID(run["run_id"]), key))
+        if receipt["candidate_id"] != candidate_id or receipt["opportunity_id"] != str(uuid.uuid5(uuid.UUID(run["run_id"]), candidate_id)):
+            raise ValueError("Saved receipt belongs to a different source card")
         if key in seen:
             raise ValueError("Duplicate saved card")
         seen.add(key)
@@ -260,6 +290,9 @@ def compare_revealed(data, expected_arms, control="control"):
         by_id, receipt_policies, opportunities = {}, set(), set()
         for row in rows:
             receipt, outcome, cid = row["receipt"], row["outcome"], row["source_card_id"]
+            candidate_id = str(uuid.uuid5(uuid.UUID(assignment["run_id"]), cid))
+            if receipt["candidate_id"] != candidate_id or receipt["opportunity_id"] != str(uuid.uuid5(uuid.UUID(assignment["run_id"]), candidate_id)):
+                raise ValueError("Comparison receipt belongs to a different source card")
             if cid in by_id or row["decision"] not in DECISIONS:
                 raise ValueError("Duplicate or uncommitted comparison card")
             if (receipt["decision"] != row["decision"] or receipt["reason"] != row["reason"]
