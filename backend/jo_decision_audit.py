@@ -133,7 +133,14 @@ def claims(reason, facts):
                 unsupported.add(field)
             else:
                 quoted[field].append(match[1])
-    for body in re.findall(r"V=\[([^\]]*)\]", reason, re.I):
+    volume_bodies = re.findall(r"V=\[([^\]]*)\]", reason, re.I)
+    if len(volume_bodies) != len(re.findall(r"V=\[", reason, re.I)):
+        unsupported.add("bar_volume_ratio")
+    context_bodies = re.findall(r"C=\[([^\]]*)\]", reason, re.I)
+    incomplete_context = len(context_bodies) != len(re.findall(r"C=\[", reason, re.I))
+    if incomplete_context:
+        unsupported.update(("day_move", "trend"))
+    for body in volume_bodies:
         # Consume the WHOLE bracket. Only the frozen rubric's known suffixes
         # are accepted; punctuation must not hide an alternative scalar.
         match = re.fullmatch(r"\s*" + NUMBER + r"\s*[x×]\s*(?:preceding[- ]five median)?\s*(?:;\s*rvol\s*" + NUMBER + r")?\s*", body, re.I)
@@ -148,8 +155,8 @@ def claims(reason, facts):
                  else "ambiguous" if texts and field in unsupported else "unparsed" if not texts
                  else "ambiguous" if len(set(texts)) != 1 else "match" if rounded_equal(texts[0], expected) else "mismatch")
         result.append({"field": field, "quoted": texts, "expected": expected, "status": state})
-    categories, category_unsupported = [], False
-    for body in re.findall(r"C=\[([^\]]*)\]", reason, re.I):
+    categories, category_unsupported = [], incomplete_context
+    for body in context_bodies:
         match = re.fullmatch(r"[^;]*;\s*(aligned|mixed|adverse|unknown)\s*(?:;(.*))?", body, re.I)
         if not match or re.match(r"\s*(?:or|and|to|through)\b", match[2] or "", re.I):
             category_unsupported = True

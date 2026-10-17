@@ -324,3 +324,13 @@ def test_supported_volume_and_mixed_alternatives():
 def test_context_alternative_cannot_hide_after_a_delimiter():
     assert checks('C=[1.25,-0.25; mixed; or aligned]')['context']['status'] == 'unparsed'
     assert checks('C=[1.25,-0.25; mixed] C=[1.25,-0.25; mixed or aligned]')['context']['status'] == 'ambiguous'
+
+
+@pytest.mark.parametrize('text,fields', [
+    ('V=[2.0x] V=[3.0x', ['bar_volume_ratio']),
+    ('C=[1.25,-0.25; mixed] C=[1.25,-0.25; adverse', ['context', 'day_move', 'trend']),
+    ('V=[2.0x] V=[broken V=[3.0x]', ['bar_volume_ratio']),
+])
+def test_incomplete_occurrence_cannot_hide_behind_a_complete_claim(text, fields):
+    results = checks(text)
+    assert all(results[field]['status'] == 'ambiguous' for field in fields)
