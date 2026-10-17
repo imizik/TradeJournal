@@ -331,3 +331,70 @@ The marked isolated runtime excludes optional monthly journal-review and live
 scanner settings routers, and skips the live market-watch startup hook before
 importing it. These modules/models are outside the retained replay overlay.
 Normal application routes and market-watch startup remain unchanged.
+
+## Offline Jo decision auditor
+
+`backend/scripts/jo_decision_audit.py` makes saved opportunity decisions reviewable
+without running Jo or changing a study. It uses only the standard library and
+never imports the application database, chooses a card, reveals a seal, calls a
+provider/model, or activates a service. Reports are private standalone HTML with
+optional machine-readable JSON; this is an operator tool, not a new app page.
+
+From the repository root (replace absolute paths and run IDs):
+
+```sh
+PYTHONPATH=backend python backend/scripts/jo_decision_audit.py export \
+  --trial-root /absolute/marked/sample \
+  --run-id 00000000-0000-0000-0000-000000000001 \
+  --output /absolute/private/evidence.json
+PYTHONPATH=backend python backend/scripts/jo_decision_audit.py audit \
+  --input /absolute/private/evidence.json \
+  --output /absolute/private/evidence.html \
+  --json-output /absolute/private/audit.json
+PYTHONPATH=backend python backend/scripts/jo_decision_audit.py compare \
+  --input /absolute/private/already-revealed-comparison.json \
+  --expected-arm control --expected-arm structured --expected-arm context \
+  --output /absolute/private/comparison.html
+```
+
+Export explicitly targets `<trial-root>/data/trial.db`, requires a canonical
+`.sample-installation` root and exclusively seeded sample fills, and opens SQLite
+in read-only/query-only mode within one read transaction. It queries the named
+runs' brief/manifest and saved actor-bound receipts/evidence, never the sealed
+calendar. No environment database default or remote connection is provided.
+Partial runs are allowed for factual checks and labeled as saved-decision
+coverage, not proof that a whole run finished. JSON inputs must be owned regular
+0600 files (20 MiB maximum); report destinations must be fresh. Outputs are 0600.
+When both output paths are requested, a filesystem failure can leave the first
+complete report written; the CLI does not overwrite it on retry.
+
+The factual audit binds manifest, actor, policy, prompt version, receipt and
+causal packet hashes; rejects future/overlapping candles and mismatched timing;
+and compares only explicitly labeled literals. Supported claims are
+`C=[day_move,trend; category]`, entry, stop, risk in dollars, cost in R, rvol,
+vol_ratio, and `V=[Nx]` relative to the preceding five candle volumes. It honors
+quoted rounding precision. Missing evidence, ambiguous claims and unparsed prose
+are **unverified**, never passes. `vol_ratio` is daily ATR5/ATR20, not trading
+volume; a suspicious phrase is a review warning, not an automatic error. Take/skip
+contrast pairs share symbol/family/side/context category but differ in time and
+possibly other conditions; they do not prove inconsistency. Saved reasons are
+recorded rationale, not private reasoning traces.
+
+Comparison accepts the existing study scorer's already-revealed export format
+(`revealed_at`, `arms`, each with `assignment` and `rows`). The operator must list
+**every frozen study arm**. It requires distinct runs, complete assigned card
+counts, identical card sets/source/scoring policy and market/outcome facts, and
+consistent saved receipts. It cannot discover an arm omitted from both the input
+and command, independently attest the study registration, or verify outcome
+seals; it is not a replacement for the owning study's reveal gate. Never feed it
+sealed/unfinished study data or use it to select a rubric against a holdout.
+
+Comparison sums the existing scorer's supplied R values; it does not simulate
+exits or alter scoring. Complete totals remain unknown if a selected outcome is
+unresolved. Paired differences use added minus removed selections, so an
+unresolved changed selection makes the difference unknown; unchanged unresolved
+selections cancel. It includes daily breakdowns, changed-card reasons, take-all
+and the fixed nonnegative day/trend reference. These are descriptive correlated
+underlying-card results, not options returns, executable portfolio results,
+statistical significance, or evidence that a prompt has improved trading skill.
+Original scoring reports and frozen experiments remain owned by their study.
