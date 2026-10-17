@@ -89,7 +89,8 @@ MESSAGE_POLICY = {
     "cautions": ["puts in the first 15 minutes", "chasing extended moves", "late-day holds"],
 }
 POLICY_SHA256 = digest({"detector": DETECTOR, "wakes": WAKE_POLICY, "messages": MESSAGE_POLICY})
-KINDS = ("event", "wake", "wake_attempt", "read_notice", "notice_refusal", "message_decision", "message_attempt",
+KINDS = ("plan", "plan_cancel", "plan_event", "plan_observation", "plan_push_attempt",
+         "event", "wake", "wake_attempt", "read_notice", "notice_refusal", "message_decision", "message_attempt",
          "stock_alert", "stock_mail_attempt", "stock_review_notice", "stock_push_attempt", "stock_status")
 NO_WAKE_EVENTS = ("minute_gap",)  # recorded so a blind spot is visible, never a reason to wake Jo
 TERMINAL = ("accepted", "expired", "unknown")

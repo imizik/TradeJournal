@@ -342,3 +342,100 @@ market-session acceptance. Never relabel historical NBIS bars as live.
 
 Implementation is under review; no new stock watcher, native task branch or
 live phone acceptance is claimed here yet.
+
+## Conditional price-plan follow-through
+
+Selected by Isaac October 17, 2026 after the Jo weekly review. This bounded
+personal-coach capability is separate from S1 selection, its immutable decisions,
+option eligibility, and the independent shadow comparator. It is implemented by
+[the conditional-plan monitor](../../backend/app/engine/conditional_plans.py), with
+actor-bound Check receipts in
+[`conditional_plan_ledger.py`](../../backend/conditional_plan_ledger.py).
+The [Jo instructions and activation checklist](../../deploy/market-watch/jo-conditional-plans.md)
+are prepared instructions, not evidence of an activated responsibility.
+
+### Saved responsibility
+
+Jo saves a numeric trigger, numeric invalidation, long/short direction, one to
+three confirming completed one-minute closes, rationale, and explicit expiry.
+A fresh own pre-trade check or previously served real stock alert anchors the
+source ID, digest, price and cutoff. Only currently selected scanner tickers are
+eligible. Readiness requires the app monitor's heartbeat within 90 seconds and
+verified regular-session hours. Plans expire within four hours and no later
+than that session's actual close, including early closes. No overnight plan or
+unverified calendar fallback is accepted. Up to 24 new plans per actor/session
+are accepted; reaching that bound refuses new saves explicitly and never drops
+an already accepted plan's alerts.
+
+The authenticated grant supplies ownership; the caller cannot supply an actor.
+Pre-trade checks are subject-owned and stock inputs profile-owned; both must
+match the verified identity. New records are append-only. Exact operation-key
+retries recover the same plan/export even after expiry; changed content conflicts.
+Changing a plan means cancelling it and saving a new, explicitly explained plan
+from fresh evidence. No historical receipt or S1 rule is rewritten.
+
+### Conditions and state
+
+- Long: N consecutive completed minute closes strictly above the trigger;
+  invalidation is one close strictly below the invalidation level. Short reverses
+  both comparisons. Equality satisfies neither condition; a nonqualifying close
+  resets the confirmation count. Invalidation is evaluated first.
+- Only full minutes beginning at or after commitment may count. Expiry is
+  exclusive. A forming candle, pre-commitment move, intrabar touch, natural-language
+  pattern or later revised source cannot establish a trigger.
+- `pending_activation` is a saved request, not monitoring proof. The app records
+  `watching` only after accepting fresh source evidence. `triggered` continues
+  monitoring for invalidation until expiry; it does not imply an entry or Go.
+- `invalidated`, `expired`, `cancelled` and `unavailable` stop the plan. Missing
+  minutes, a monitoring gap beyond three minutes, stale/unavailable source or an
+  unknown session produces `unavailable`, never an invented price invalidation.
+  Recovery requires a new plan; a failed plan does not resume silently.
+- Cancellation is durable and acknowledged on the next monitor pass. Removing
+  a ticker cancels its plans. A cancellation cannot recall a send already in
+  flight. Disabling the running monitor cancels its loaded active plans; stopping
+  the process leaves an explicitly stale heartbeat, not claimed active coverage.
+
+### Monitoring and notification
+
+The existing scanner pass checks accepted plans before discretionary stock-alert
+work, reuses its minute cache and shared provider budget, and finishes observing
+plans before phone delivery. No new scanner, email subscription, paid model call,
+options call, paper exchange or broker action is introduced. Missing cached data
+uses the same selected-symbol minute reader already used by stock awareness.
+The explicit app flag requires stock awareness to be enabled.
+
+Transitions and each evaluated bar are immutable records in the existing private
+market-watch wake store. Derived atomic status publications let Jo read her own
+conditions, timeline, last evaluated bar and delivery attempts using
+`conditional_plan_status` or the bounded latest-50 `conditional_plan_list`.
+These tools make no provider calls. The status never labels an unacknowledged
+plan, stale heartbeat, terminal state or elapsed expiry as actively monitored.
+
+Trigger, invalidation, monitoring failure and expiry notifications use the
+existing ntfy transport directly; no additional Dot turn is needed for delivery.
+Each message identifies the saved condition, observation time and plan. A queued
+trigger superseded by invalidation/expiry/failure is suppressed. Three-minute
+freshness, three bounded attempts and existing unknown-outcome handling apply:
+an uncertain send is never blindly repeated. Accepted provider delivery is not
+phone-display proof. No discretionary stock wake quota suppresses a plan event.
+A global file lock prevents overlapping plan workers from duplicating sends.
+
+### Activation and acceptance
+
+Default off: app `CONDITIONAL_PLAN_ENABLED=false`; Check
+`conditional_plan_enabled=false`. Enabling Check tools requires the existing
+explicit market-watch publication/outbox paths; calls reuse `check:read` and
+`market-watch:read`, with `market-watch:submit` additionally required for save
+and cancel. No OAuth grant, identity, native task, production flag or service is
+changed merely by merging this implementation. Deployment must include the three
+new Check runtime modules. An opt-in change requires the normal authorized
+service restart; disabled/rebound grants refuse old calls.
+
+Before live acceptance, verify one actual Jo save against an observed fresh
+source, an app acknowledgement, a natural future trigger or invalidation, matching
+immutable evidence and one owner-confirmed phone notification. Verify cancellation
+and restart without duplicate transitions/accepted pushes. Monitor failure and
+unknown delivery stay visible. Fixture tests do not establish these live gates
+or trading edge. Coordination: the selected-stock wake-cap/coverage owner keeps
+its repair and passive acceptance; the pilot-study owner keeps rubric/factory
+work. This slice adds no changes to those decision rules or experiments.

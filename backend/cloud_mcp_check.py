@@ -56,6 +56,10 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "conditional_plan_create": ({"operation_id", "source_kind", "source_id", "direction", "trigger_price", "invalidation_price", "confirm_bars", "expires_at", "rationale"}, set()),
+    "conditional_plan_status": ({"plan_id"}, set()),
+    "conditional_plan_list": (set(), set()),
+    "conditional_plan_cancel": ({"plan_id"}, set()),
     "stock_alert": ({"alert_id"}, set()),
     "stock_alert_submit": ({"alert_id", "stance", "summary", "invalidation", "notify"}, set()),
     "market_watch_snapshot": (set(), set()),
@@ -83,6 +87,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name.startswith("conditional_plan_"):
+        return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("conditional_plan_create", "conditional_plan_cancel") else [])
     if name in ("market_watch_snapshot", "market_watch_submit", "stock_alert", "stock_alert_submit"):
         return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("market_watch_submit", "stock_alert_submit") else [])
     if name in ("shadow_setup", "shadow_decide"):
@@ -408,7 +414,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         "data and never changes the computation. Before the open use preopen_watchlist; while holding use "
         "position_check; after the close use review_checks. Advice only: nothing places, sizes or arms an "
         "order. Reuse the same operation_id only to recover an uncertain call; it returns the saved answer. "
-        "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id.",
+        "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id. "
+        + ("Conditional price-plan follow-through is enabled: when the owner requests tracking, turn "
+        "a concrete wait into explicit numeric close conditions and expiry with conditional_plan_create. "
+        "Report pending until conditional_plan_status confirms monitoring. Use the saved timeline for "
+        "follow-up and cancel on request; never say you are watching solely because you described a plan. "
+        "This does not alter S1; all pending shadow commits must precede conditional-plan calls."
+        if config.conditional_plan_enabled else ""),
         token_verifier=verifier, auth=AuthSettings(issuer_url=AnyHttpUrl(config.issuer_url),
             resource_server_url=AnyHttpUrl(config.resource_url), required_scopes=[READ_SCOPE]),
         transport_security=TransportSecuritySettings(allowed_hosts=["127.0.0.1:*", "localhost:*", resource.netloc],
@@ -428,6 +440,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
 
     server.audit_call = lambda name: authenticated(name, log=True)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
+    if config.conditional_plan_enabled:
+        from conditional_plan_tools import register as register_plans
+        register_plans(server, config, ledger, authenticated, scopes, clock)
     if config.market_watch_snapshots_dir:
         from stock_watch_common import identifier as stock_identifier, validate_alert
         from stock_watch_ledger import StockWatchLedger, write_review

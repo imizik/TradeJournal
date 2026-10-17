@@ -51,6 +51,7 @@ class CheckConfig(Strict):
     features_pointer: str
     market_watch_snapshots_dir: str | None = None
     market_watch_outbox_dir: str | None = None
+    conditional_plan_enabled: bool = False
     shadow_setups_dir: str | None = None
     shadow_outbox_dir: str | None = None
     # History older than this is still real; it is used with a caveat.
@@ -93,6 +94,8 @@ class CheckConfig(Strict):
             raise ValueError("Ledger, features and keys must be distinct files")
         if self.market_watch_outbox_dir and not self.market_watch_snapshots_dir:
             raise ValueError("A market-watch outbox requires the market-watch snapshots directory")
+        if self.conditional_plan_enabled and not (self.market_watch_snapshots_dir and self.market_watch_outbox_dir):
+            raise ValueError("Conditional plans require the existing market-watch exchange")
         paths = [Path(p) for p in (self.shadow_setups_dir, self.shadow_outbox_dir, self.market_watch_snapshots_dir,
                                    self.market_watch_outbox_dir) if p]
         if any(a == b or a in b.parents or b in a.parents for i, a in enumerate(paths) for b in paths[i+1:]):
@@ -120,7 +123,7 @@ class CheckVerifier(JWKSVerifier):
     def active_config(self):
         current = super().active_config()
         fixed = ("ledger_file", "features_pointer", "provider_feed", "shadow_setups_dir", "shadow_outbox_dir", "market_watch_snapshots_dir",
-                 "market_watch_outbox_dir")
+                 "market_watch_outbox_dir", "conditional_plan_enabled")
         if current is None or any(getattr(current, key) != getattr(self.config, key) for key in fixed):
             return None
         return current
