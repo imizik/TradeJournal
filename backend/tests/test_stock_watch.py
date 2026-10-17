@@ -470,11 +470,10 @@ def test_email_to_scoped_jo_tools_to_phone_fixture_flow(
         assert db.execute("SELECT count(*) FROM shadow_decision").fetchone()[0] == 0
 
 
-def test_selection_guard_budget_cooldown_and_recovery_are_recorded(
+def test_selection_guard_cooldown_and_recovery_are_recorded(
     engine, tmp_path, monkeypatch
 ):
     from app.engine import stock_watch
-    from stock_watch_common import POLICY
 
     selection = {"symbols": ["NBIS"], "revision": 1}
     mail = []
@@ -502,12 +501,149 @@ def test_selection_guard_budget_cooldown_and_recovery_are_recorded(
     assert (
         len(mail) == 1 and w.store.records("stock_status")[-1]["reason"] == "cooldown"
     )
-    monkeypatch.setitem(POLICY, "max_per_session", 1)
-    w.send(SimpleNamespace(engine=engine), NOW.date())
-    assert (
-        len(mail) == 1
-        and w.store.records("stock_status")[-1]["reason"] == "wake_budget"
-    )
+
+
+def test_early_wakes_cannot_exhaust_late_selected_tickers(engine, tmp_path, monkeypatch):
+    from app.engine import stock_watch
+
+    symbols = ["NBIS", "AAPL", "AMD", "MRVL", "MU", "CRDO"]
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings",
+                        lambda _: {"symbols": symbols, "revision": 2})
+    now = NOW
+    sent = []
+    w = watcher(tmp_path, clock=lambda: now, mail=lambda subject, _: sent.append(subject))
+    scanner = SimpleNamespace(engine=engine)
+    # More than four wakes for each early ticker, and fifteen shared wakes.
+    for slot in range(5):
+        now = NOW + timedelta(minutes=31 * slot)
+        for symbol in symbols[:3]:
+            w.capture(alert(now, symbol=symbol, selected_symbols=symbols))
+        w.send(scanner, now.date())
+    assert len(sent) == 15
+    now = NOW.replace(hour=19, minute=55)  # 15:55 ET, after the paper cutoff.
+    for symbol in symbols[3:]:
+        w.capture(alert(now, symbol=symbol, selected_symbols=symbols))
+    w.send(scanner, now.date())
+    assert len(sent) == 18
+    assert all(any(f"STOCK {symbol} " in subject for subject in sent)
+               for symbol in symbols[3:])
+    # The same store after a restart must not resend these accepted inputs.
+    restarted = StockWatcher(w.store, w.directory, w.outbox, clock=lambda: now,
+                             mail=lambda *_: pytest.fail("duplicate wake"))
+    restarted.send(scanner, now.date())
+    assert not any(s["reason"] == "wake_budget" for s in w.store.records("stock_status"))
+
+
+def test_observations_record_actual_selected_checks_gaps_and_close(engine, tmp_path, monkeypatch):
+    from app.engine import stock_watch
+
+    now = NOW.replace(hour=19, minute=58)
+    symbols = ["MRVL", "MU", "CRDO"]
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings",
+                        lambda _: {"symbols": symbols, "revision": 3})
+    scanner = SimpleNamespace(engine=engine, _pass_minutes={}, _daily_atr=lambda *_: 2.0)
+
+    def read(symbol, day):
+        if symbol == "MU":
+            raise OSError("source unavailable")
+        bars = minutes(now)
+        scanner._pass_minutes[symbol] = (bars, now.timestamp() - (300 if symbol == "CRDO" else 0))
+        return bars
+
+    scanner._minutes = read
+    w = watcher(tmp_path, clock=lambda: now)
+    session = SimpleNamespace(open_at=now.replace(hour=13, minute=30).timestamp(),
+                              close_at=now.replace(hour=20, minute=0).timestamp())
+    w.observe(scanner, now.date(), session)
+    w.observe(scanner, now.date(), session)
+    rows = w.store.records("stock_observation")
+    assert {r["symbol"]: r["outcome"] for r in rows} == {
+        "MRVL": "captured", "MU": "source_unavailable", "CRDO": "stale_source"}
+    assert all(r["selection_revision"] == 3 and r["checked_at"] == r["started_at"] for r in rows)
+    now += timedelta(minutes=1)
+    scanner._pass_minutes.clear()
+    w.observe(scanner, now.date(), session)
+    assert len(w.store.records("stock_observation")) == 6
+    now += timedelta(minutes=1)  # At the actual exchange close, no extra pass.
+    scanner._pass_minutes.clear()
+    w.observe(scanner, now.date(), session)
+    assert len(w.store.records("stock_observation")) == 6
+
+
+@pytest.mark.parametrize("minute, expected", [(58, 3), (59, 1)])
+def test_slow_source_records_actual_symbol_minute_and_stops_at_close(
+    engine, tmp_path, monkeypatch, minute, expected
+):
+    from app.engine import stock_watch
+
+    now = NOW.replace(hour=19, minute=minute, second=59)
+    symbols = ["MRVL", "MU", "CRDO"]
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings",
+                        lambda _: {"symbols": symbols, "revision": 9})
+    scanner = SimpleNamespace(engine=engine, _pass_minutes={}, _daily_atr=lambda *_: 2.0)
+
+    def read(symbol, day):
+        nonlocal now
+        if symbol == "MRVL":
+            now += timedelta(seconds=2)
+        bars = minutes(now)
+        scanner._pass_minutes[symbol] = (bars, now.timestamp())
+        return bars
+
+    scanner._minutes = read
+    w = watcher(tmp_path, clock=lambda: now)
+    session = SimpleNamespace(open_at=now.replace(hour=13, minute=30, second=0).timestamp(),
+                              close_at=now.replace(hour=20, minute=0, second=0).timestamp())
+    w.observe(scanner, now.date(), session)
+    rows = w.store.records("stock_observation")
+    assert len(rows) == expected
+    assert rows[0]["checked_at"] != rows[0]["started_at"]
+    if expected == 3:
+        assert rows[1]["slot_minute"] == rows[0]["slot_minute"] + 1
+        assert rows[1]["pass_minute"] == rows[0]["pass_minute"]
+    else:
+        assert rows[0]["outcome"] == "session_closed"
+        assert w.store.records("stock_alert") == []
+
+
+def test_observation_write_failure_preserves_other_checks_and_selection_snapshot(
+    engine, tmp_path, monkeypatch
+):
+    from app.engine import stock_watch
+
+    now = NOW.replace(hour=19, minute=55)
+    selection = {"symbols": ["MRVL", "MU", "CRDO"], "revision": 9}
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings", lambda _: selection)
+    scanner = SimpleNamespace(engine=engine, _pass_minutes={}, _daily_atr=lambda *_: 2.0)
+
+    def read(symbol, day):
+        bars = minutes(now)
+        scanner._pass_minutes[symbol] = (bars, now.timestamp())
+        return bars
+
+    scanner._minutes = read
+    sent = []
+    w = watcher(tmp_path, clock=lambda: now, mail=lambda *args: sent.append(args))
+    append = w.store.append
+
+    def flaky(kind, record, **kwargs):
+        if kind == "stock_observation" and record["symbol"] == "MRVL":
+            raise OSError("observation persistence unavailable")
+        return append(kind, record, **kwargs)
+
+    monkeypatch.setattr(w.store, "append", flaky)
+    session = SimpleNamespace(open_at=now.replace(hour=13, minute=30).timestamp(),
+                              close_at=now.replace(hour=20, minute=0).timestamp())
+    w.observe(scanner, now.date(), session)
+    w.send(scanner, now.date())
+    assert len(sent) == 3
+    rows = w.store.records("stock_observation")
+    assert [r["symbol"] for r in rows] == ["MU", "CRDO"]
+    selection["symbols"][:] = ["MU"]
+    selection["revision"] = 10
+    # A missing MRVL record remains recognizable under the original revision.
+    assert all(r["selected_symbols"] == ["MRVL", "MU", "CRDO"] and
+               r["selection_revision"] == 9 for r in w.store.records("stock_observation"))
 
 
 def test_monitor_runs_after_paper_cutoff_and_uses_only_selected_symbols(

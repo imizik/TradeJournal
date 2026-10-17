@@ -105,6 +105,8 @@ def _parser() -> argparse.ArgumentParser:
     opportunity = actions.add_parser("prepare-opportunities", help="Import an unchanged discovery-only Mac opportunity pilot")
     opportunity.add_argument("--bundle", type=Path, required=True, help="Private 0600 frozen bridge bundle")
     opportunity.add_argument("--identifier", required=True, help="Fresh isolated opportunity identity")
+    opportunity.add_argument("--assessment-file", type=Path, help="Optional owned 0600 frozen assessment rubric, appended to practice boundaries")
+    opportunity.add_argument("--assessment-version", help="Distinct version required with --assessment-file")
     report = actions.add_parser("report", help="Write a sealed run's Markdown report")
     report.add_argument("--run-id", required=True)
     report.add_argument("--output", type=Path, required=True, help="Fresh absolute 0600 Markdown path")
@@ -129,9 +131,14 @@ def main(argv: list[str] | None = None) -> None:
         if args.action == "prepare-opportunities":
             from app.engine import opportunity_replay
             bundle = private_json(args.bundle, MAX_BUNDLE_BYTES)
+            if (args.assessment_file is None) != (args.assessment_version is None):
+                raise ValueError("Assessment file and version are required together")
+            assessment = (private_bytes(args.assessment_file, MAX_PROMPT_BYTES).decode("utf-8")
+                          if args.assessment_file else None)
             with access._LOCK, Session(engine) as db:
                 access._serialized(db)
-                runs = opportunity_replay.prepare(db, bundle, args.identifier)
+                runs = opportunity_replay.prepare(db, bundle, args.identifier,
+                    assessment_text=assessment, assessment_version=args.assessment_version)
                 manifest = scanner_replay.metadata(runs[0])["manifest"]
             grants = {"symbols": manifest["symbols"], "run_ids": [str(r.id) for r in runs],
                       "journal_read": False, "market_decision_write": True,

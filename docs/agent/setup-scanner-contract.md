@@ -291,11 +291,18 @@ scanner enable flag), [stock_watch.py](../../backend/app/engine/stock_watch.py):
   recent window, valid prices, prior ATR and source/bar freshness within 180 s.
   No missing-minute filling, future bars, retrospective backfill or implicit
   paid-feed fallback. It reads the existing shared Tradier minute/daily data.
-- Uses a 30-minute per-symbol email cooldown and bounds stock-only email wakes
-  to four per ticker and fifteen per session. A same-direction subsequent move
+- Uses a 30-minute per-symbol email cooldown through the regular session,
+  without a shared or per-ticker daily quota that can exhaust later coverage.
+  With an unchanged selection this permits at most thirteen stock-only wakes
+  per ticker during a normal 390-minute session. A same-direction subsequent move
   must additionally differ from its sent/reviewed anchor by max(1%, 0.25 ATR).
   Shadow-pending setup guards take priority. Budget/cooldown/guard/source gaps
   are recorded as immutable stock status, not disguised as a Jo assessment.
+- Records each actual selected-symbol check as private immutable
+  `stock_observation` evidence: session minute, selection revision, source/bar
+  timestamps, prior ATR, completion time and outcome. Missing records are coverage
+  gaps, never backfilled or inferred healthy from an enabled flag. Source gaps,
+  cooldowns, insufficient windows and no qualifying setup are distinguishable.
 - Publishes immutable, bounded `stock-alert-v1` files beside the existing public
   market snapshots, and appends stock records to the existing explicitly
   configured MW-2 store. The frozen selection/revision, evidence and hard
@@ -340,8 +347,10 @@ original native task history, isolated ledger, app notice, transport receipt and
 owner's phone confirmation. Distinguish that full-flow diagnostic from a natural
 market-session acceptance. Never relabel historical NBIS bars as live.
 
-Implementation is under review; no new stock watcher, native task branch or
-live phone acceptance is claimed here yet.
+Passive acceptance audits follow the inspection boundary in the
+[stock task runbook](../../deploy/market-watch/jo-stock-task.md#passive-acceptance-audits).
+Code checks, deployed configuration, natural automatic execution and
+owner-observed phone reception remain separate acceptance evidence.
 
 ## Conditional price-plan follow-through
 

@@ -244,7 +244,25 @@ class StockWatcher:
         with Session(scanner.engine) as db:
             selection = scanner_settings.read_settings(db)
         contacts = self.contacts(today.isoformat())
+        pass_started_at = stamp(now)
         for symbol in selection["symbols"]:
+            now = self.clock()
+            if not session.open_at <= now.timestamp() < session.close_at:
+                break
+            observation = {
+                "session_date": today.isoformat(),
+                "symbol": symbol,
+                "selection_revision": selection["revision"],
+                "selected_symbols": list(selection["symbols"]),
+                "pass_minute": minute,
+                "pass_started_at": pass_started_at,
+                "slot_minute": int(now.timestamp()) // 60,
+                "started_at": stamp(now),
+                "source_observed_at": None,
+                "bar_end": None,
+                "daily_atr14": None,
+                "outcome": "source_unavailable",
+            }
             try:
                 if symbol in scanner._pass_minutes:
                     minutes = scanner._pass_minutes[symbol][0]
@@ -252,28 +270,43 @@ class StockWatcher:
                     minutes = scanner._minutes(symbol, today)
                 _, observed = scanner._pass_minutes[symbol]
                 atr = scanner._daily_atr(symbol, today)
+                now = self.clock()
+                if now.timestamp() >= session.close_at:
+                    observation["outcome"] = "session_closed"
+                    continue
                 completed = [
                     b
                     for b in minutes
                     if session.open_at <= b["time"]
                     and b["end_time"] <= min(now.timestamp(), observed)
                 ]
+                observation.update(
+                    source_observed_at=observed,
+                    bar_end=completed[-1]["end_time"] if completed else None,
+                    daily_atr14=atr,
+                )
                 if (
                     now.timestamp() - observed > POLICY["freshness_seconds"]
                     or not completed
                     or now.timestamp() - completed[-1]["end_time"]
                     > POLICY["freshness_seconds"]
                 ):
+                    observation["outcome"] = "stale_source"
                     self.status(symbol, "stale_source")
                     continue
                 if atr is None:
+                    observation["outcome"] = "atr_unavailable"
                     self.status(symbol, "atr_unavailable")
                     continue
                 if len(completed) >= 16 and any(
                     b["time"] != completed[-16]["time"] + 60 * i
                     for i, b in enumerate(completed[-16:])
                 ):
+                    observation["outcome"] = "incomplete_recent_window"
                     self.status(symbol, "incomplete_recent_window")
+                    continue
+                if len(completed) < 16:
+                    observation["outcome"] = "insufficient_recent_window"
                     continue
                 alerts = [
                     p
@@ -289,6 +322,7 @@ class StockWatcher:
                 if previous and now - contacts[previous["alert_id"]] < timedelta(
                     minutes=POLICY["cooldown_minutes"]
                 ):
+                    observation["outcome"] = "cooldown"
                     continue
                 found = detect_move(
                     minutes,
@@ -318,9 +352,28 @@ class StockWatcher:
                             ),
                         )
                     )
+                    observation["outcome"] = "captured"
+                else:
+                    observation["outcome"] = "no_setup"
             except Exception:
+                observation["outcome"] = "source_unavailable"
                 self.status(symbol, "source_unavailable")
                 log.exception("Stock awareness could not judge %s", symbol)
+            finally:
+                # Private, immutable evidence of an actual check, never backfilled.
+                try:
+                    self.store.append(
+                        "stock_observation",
+                        seal({**observation, "checked_at": stamp(self.clock())}),
+                        ident="stock-observation:" + digest(
+                            [today.isoformat(), observation["slot_minute"],
+                             symbol, selection["revision"]]
+                        ),
+                    )
+                except Exception:
+                    # A telemetry failure is a visible gap, not a reason to
+                    # abandon the other selected tickers or their deliveries.
+                    log.exception("Stock observation could not be recorded: %s", symbol)
 
     def send(self, scanner, today):
         now = self.clock()
@@ -353,20 +406,8 @@ class StockWatcher:
                 or alert["symbol"] not in selection["symbols"]
             ):
                 continue
-            by_symbol = {
-                a
-                for a in reserved
-                if any(
-                    p["alert_id"] == a and p["symbol"] == alert["symbol"]
-                    for p in alerts
-                )
-            }
-            if alert["alert_id"] not in reserved and (
-                len(reserved) >= POLICY["max_per_session"]
-                or len(by_symbol) >= POLICY["max_per_symbol"]
-            ):
-                self.status(alert["symbol"], "wake_budget", alert_id=alert["alert_id"])
-                continue
+            # The per-symbol cooldown bounds wakes without exhausting another
+            # selected ticker's capacity or ending coverage before the close.
             contacts = self.contacts(today.isoformat())
             recent = [
                 p

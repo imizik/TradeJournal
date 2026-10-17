@@ -113,7 +113,7 @@ def bundle():
 
 
 @pytest.fixture
-def opportunity_link(boundary, signing_key, tmp_path):
+def opportunity_link(boundary, signing_key, tmp_path, request):
     b = boundary
     for flag in (
         "TJ_ACCESS_SAMPLE_DATA",
@@ -132,7 +132,7 @@ def opportunity_link(boundary, signing_key, tmp_path):
     ):
         b.patch.setattr(app.state, flag, True, raising=False)
     with Session(b.engine) as db:
-        runs = op.prepare(db, bundle(), "jo-opportunity-fixture")
+        runs = op.prepare(db, bundle(), "jo-opportunity-fixture", **getattr(request, "param", {}))
         ids = [str(r.id) for r in runs]
     grants = {
         "symbols": ["NVDA"],
@@ -291,6 +291,10 @@ def test_invalid_unbounded_or_lookahead_handoffs_refused(mutate):
         op.validate(value)
 
 
+@pytest.mark.parametrize("opportunity_link", [{}, {
+    "assessment_text": "Assess frozen context, then trigger and invalidation; cite numeric evidence.",
+    "assessment_version": "jo-structured-fixture-v1",
+}], indirect=True)
 def test_actual_mcp_tools_use_same_next_card_and_immutable_receipt(opportunity_link):
     import httpx
     from cloud_mcp_d1 import create_server
@@ -306,7 +310,10 @@ def test_actual_mcp_tools_use_same_next_card_and_immutable_receipt(opportunity_l
             h.token,
         )["result"]
         assert not response.get("isError"), response
-        card = response["structuredContent"]["run"]["next_setup"]
+        initial = response["structuredContent"]["run"]
+        card = initial["next_setup"]
+        assert initial["prompt_text"].startswith(op.PROMPT)
+        assert initial["scoring_policy"] == op.POLICY
         args = {
             "opportunity_id": card["opportunity_id"],
             "decision": "skip",
@@ -328,6 +335,8 @@ def test_actual_mcp_tools_use_same_next_card_and_immutable_receipt(opportunity_l
         assert (
             retry["structuredContent"]["choice"] == saved["structuredContent"]["choice"]
         )
+        assert saved["structuredContent"]["choice"]["prompt_version"] == initial["prompt_version"]
+        assert saved["structuredContent"]["choice"]["policy_hash"] == initial["policy_hash"]
     # New adapter/verifier instance, same frozen batch and receipt after restart.
     server = create_server(h.config, backend_transport=httpx.ASGITransport(app=app))
     with TestClient(server.streamable_http_app()) as client:
@@ -347,6 +356,44 @@ def test_actual_mcp_tools_use_same_next_card_and_immutable_receipt(opportunity_l
             and run["next_setup"]["opportunity_id"] != card["opportunity_id"]
         )
         assert run["report"] is None
+        assert run["prompt_text"] == initial["prompt_text"]
+        assert run["policy_hash"] == initial["policy_hash"]
+
+
+def test_assessment_freezes_identity_without_changing_default_or_scoring(opportunity_link):
+    h = opportunity_link
+    with Session(h.b.engine) as db:
+        old_identity = op.digest({"actor": "jo-opportunity-fixture", "input": op.digest(bundle()),
+                                  "policy": op.POLICY, "prompt": op.PROMPT})
+        assert h.ids == [str(uuid.uuid5(uuid.NAMESPACE_URL, replay.PREFIX + old_identity))]
+        kwargs = {"assessment_text": "Cite context and an exact invalidation level.",
+                  "assessment_version": "jo-rubric-fixture-v1"}
+        run = op.prepare(db, bundle(), "jo-custom-fixture", **kwargs)[0]
+        manifest = replay.metadata(run)["manifest"]
+        assert manifest["prompt_text"].startswith(op.PROMPT)
+        assert manifest["prompt_text"].endswith(kwargs["assessment_text"])
+        assert manifest["prompt_version"] == kwargs["assessment_version"]
+        assert manifest["scoring_policy"] == op.POLICY
+        assert replay.accepting_policy(run)
+        before = len(db.exec(select(DecisionContext)).all())
+        assert op.prepare(db, bundle(), "jo-custom-fixture", **kwargs)[0].id == run.id
+        for changed in ({**kwargs, "assessment_text": "Different rubric"},
+                        {**kwargs, "assessment_version": "jo-rubric-fixture-v2"}):
+            with pytest.raises(ValueError, match="Actor cannot be repointed"):
+                op.prepare(db, bundle(), "jo-custom-fixture", **changed)
+        assert len(db.exec(select(DecisionContext)).all()) == before
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"assessment_text": "Only text"}, {"assessment_version": "only-version"},
+    {"assessment_text": " ", "assessment_version": "empty"},
+    {"assessment_text": "x" * 16001, "assessment_version": "long"},
+    {"assessment_text": "Rubric", "assessment_version": op.VERSION},
+    {"assessment_text": "Rubric", "assessment_version": "invalid version"},
+])
+def test_invalid_assessment_refused_before_database_work(kwargs):
+    with pytest.raises(ValueError, match="assessment"):
+        op.prepare(None, bundle(), "jo-invalid-fixture", **kwargs)
 
 
 def test_opportunity_abandonment_never_reveals_partial_batch(opportunity_link):
