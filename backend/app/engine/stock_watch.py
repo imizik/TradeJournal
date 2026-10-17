@@ -244,12 +244,19 @@ class StockWatcher:
         with Session(scanner.engine) as db:
             selection = scanner_settings.read_settings(db)
         contacts = self.contacts(today.isoformat())
+        pass_started_at = stamp(now)
         for symbol in selection["symbols"]:
+            now = self.clock()
+            if not session.open_at <= now.timestamp() < session.close_at:
+                break
             observation = {
                 "session_date": today.isoformat(),
                 "symbol": symbol,
                 "selection_revision": selection["revision"],
-                "slot_minute": minute,
+                "selected_symbols": list(selection["symbols"]),
+                "pass_minute": minute,
+                "pass_started_at": pass_started_at,
+                "slot_minute": int(now.timestamp()) // 60,
                 "started_at": stamp(now),
                 "source_observed_at": None,
                 "bar_end": None,
@@ -263,6 +270,10 @@ class StockWatcher:
                     minutes = scanner._minutes(symbol, today)
                 _, observed = scanner._pass_minutes[symbol]
                 atr = scanner._daily_atr(symbol, today)
+                now = self.clock()
+                if now.timestamp() >= session.close_at:
+                    observation["outcome"] = "session_closed"
+                    continue
                 completed = [
                     b
                     for b in minutes
@@ -350,13 +361,19 @@ class StockWatcher:
                 log.exception("Stock awareness could not judge %s", symbol)
             finally:
                 # Private, immutable evidence of an actual check, never backfilled.
-                self.store.append(
-                    "stock_observation",
-                    seal({**observation, "checked_at": stamp(self.clock())}),
-                    ident="stock-observation:" + digest(
-                        [today.isoformat(), minute, symbol, selection["revision"]]
-                    ),
-                )
+                try:
+                    self.store.append(
+                        "stock_observation",
+                        seal({**observation, "checked_at": stamp(self.clock())}),
+                        ident="stock-observation:" + digest(
+                            [today.isoformat(), observation["slot_minute"],
+                             symbol, selection["revision"]]
+                        ),
+                    )
+                except Exception:
+                    # A telemetry failure is a visible gap, not a reason to
+                    # abandon the other selected tickers or their deliveries.
+                    log.exception("Stock observation could not be recorded: %s", symbol)
 
     def send(self, scanner, today):
         now = self.clock()
