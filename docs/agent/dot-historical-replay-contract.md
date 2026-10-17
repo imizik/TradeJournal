@@ -377,7 +377,9 @@ vol_ratio, and `V=[Nx]` relative to the preceding five candle volumes. It honors
 quoted rounding precision within finite numeric precision bounds. Scalar labels
 require a delimiter/end after the number (or supported USD/dollar unit; cost
 requires R). Free prose after the number, unsupported units and ranges stay
-unverified rather than being interpreted. Missing evidence, ambiguous claims and unparsed prose
+unverified rather than being interpreted. Volume brackets must be complete and
+contain only the scalar, optional `preceding-five median`, and optional `; rvol N`
+suffix; unknown bracket syntax remains unverified. Missing evidence, ambiguous claims and unparsed prose
 are **unverified**, never passes. `vol_ratio` is daily ATR5/ATR20, not trading
 volume; a suspicious phrase is a review warning, not an automatic error. Take/skip
 contrast pairs share symbol/family/side/context category but differ in time and

@@ -304,3 +304,23 @@ def test_rehashed_packet_cannot_change_source_card_identity():
 @pytest.mark.parametrize('text', ['risk 1e99999999999999999', 'risk 1e-99999999999999999', 'risk 1e309'])
 def test_unsupported_precision_is_unverified_not_a_crash(text):
     assert checks(text)['risk']['status'] == 'unparsed'
+
+
+@pytest.mark.parametrize('text', [
+    'V=[2.0x, or 3.0x]', 'V=[2.0x; or 3.0x]', 'V=[2.0x preceding-five median or 3.0x]',
+    'V=[2.0x; rvol 1.33; or 3.0x]', 'V=[2.0x times a different reference]', 'V=[2.0x',
+])
+def test_volume_requires_a_complete_unambiguous_bracket(text):
+    assert checks(text)['bar_volume_ratio']['status'] == 'unparsed'
+
+
+def test_supported_volume_and_mixed_alternatives():
+    assert checks('V=[2.0x preceding-five median; rvol 1.33]')['bar_volume_ratio']['status'] == 'match'
+    assert checks('V=[2.0x] V=[2.0x; or 3.0x]')['bar_volume_ratio']['status'] == 'ambiguous'
+    assert checks('risk 1.00; or 2.00')['risk']['status'] == 'unparsed'
+    assert checks('C=[1.25,-0.25; mixed or aligned]')['context']['status'] == 'unparsed'
+
+
+def test_context_alternative_cannot_hide_after_a_delimiter():
+    assert checks('C=[1.25,-0.25; mixed; or aligned]')['context']['status'] == 'unparsed'
+    assert checks('C=[1.25,-0.25; mixed] C=[1.25,-0.25; mixed or aligned]')['context']['status'] == 'ambiguous'

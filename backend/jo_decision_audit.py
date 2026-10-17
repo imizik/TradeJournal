@@ -127,15 +127,17 @@ def claims(reason, facts):
             if unit_match:
                 tail = tail[unit_match.end():]
             if (field == "cost_r" and not unit_match or
-                    re.match(r"\s*,?\s*(?:[-–—/+±]|(?:to|or|through|and)\b\s*[-+\d.])", tail, re.I) or
+                    re.match(r"\s*[,;:]?\s*(?:[-–—/+±]|(?:to|or|through|and)\b\s*[-+\d.])", tail, re.I) or
                     re.match(r",\d", tail) or
                     not re.match(r"(?:\s*(?:$|[,;\]\)]))|(?:\.(?:\s|$))", tail)):
                 unsupported.add(field)
             else:
                 quoted[field].append(match[1])
-    for match in re.finditer(r"V=\[\s*" + NUMBER + r"\s*[x×](?!\w)", reason, re.I):
-        tail = reason[match.end():]
-        if re.match(r"\s*(?:[-–—/+±]|(?:to|or|through|and)\b\s*[-+\d.])", tail, re.I):
+    for body in re.findall(r"V=\[([^\]]*)\]", reason, re.I):
+        # Consume the WHOLE bracket. Only the frozen rubric's known suffixes
+        # are accepted; punctuation must not hide an alternative scalar.
+        match = re.fullmatch(r"\s*" + NUMBER + r"\s*[x×]\s*(?:preceding[- ]five median)?\s*(?:;\s*rvol\s*" + NUMBER + r")?\s*", body, re.I)
+        if not match:
             unsupported.add("bar_volume_ratio")
         else:
             quoted["bar_volume_ratio"].append(match[1])
@@ -146,9 +148,14 @@ def claims(reason, facts):
                  else "ambiguous" if texts and field in unsupported else "unparsed" if not texts
                  else "ambiguous" if len(set(texts)) != 1 else "match" if rounded_equal(texts[0], expected) else "mismatch")
         result.append({"field": field, "quoted": texts, "expected": expected, "status": state})
-    categories = re.findall(r"C=\[[^;]*;\s*(aligned|mixed|adverse|unknown)\b", reason, re.I)
-    categories = [x.lower() for x in categories]
-    state = ("missing_evidence" if facts["context"] == "unknown" else "unparsed" if not categories else "ambiguous" if len(set(categories)) != 1
+    categories, category_unsupported = [], False
+    for body in re.findall(r"C=\[([^\]]*)\]", reason, re.I):
+        match = re.fullmatch(r"[^;]*;\s*(aligned|mixed|adverse|unknown)\s*(?:;(.*))?", body, re.I)
+        if not match or re.match(r"\s*(?:or|and|to|through)\b", match[2] or "", re.I):
+            category_unsupported = True
+        else:
+            categories.append(match[1].lower())
+    state = ("missing_evidence" if facts["context"] == "unknown" else "unparsed" if not categories else "ambiguous" if category_unsupported or len(set(categories)) != 1
              else "match" if categories[0] == facts["context"] else "mismatch")
     result.append({"field": "context", "quoted": categories, "expected": facts["context"], "status": state})
     return result
