@@ -90,7 +90,7 @@ MESSAGE_POLICY = {
 }
 POLICY_SHA256 = digest({"detector": DETECTOR, "wakes": WAKE_POLICY, "messages": MESSAGE_POLICY})
 KINDS = ("event", "wake", "wake_attempt", "read_notice", "notice_refusal", "message_decision", "message_attempt",
-         "stock_alert", "stock_mail_attempt", "stock_review_notice", "stock_push_attempt", "stock_status")
+         "stock_alert", "stock_mail_attempt", "stock_review_notice", "stock_push_attempt", "stock_status", "stock_observation")
 NO_WAKE_EVENTS = ("minute_gap",)  # recorded so a blind spot is visible, never a reason to wake Jo
 TERMINAL = ("accepted", "expired", "unknown")
 APPLICATION_ID = 0x4D574431  # MWD1: the isolated MW-2 wake/delivery file.

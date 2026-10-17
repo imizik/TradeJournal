@@ -52,3 +52,28 @@ The existing market-context addendum remains after the original eligible
 shadow/co-pilot sequence. Stock-only mail does not invoke SPY forecast slots
 or consume their discretionary budget. Do not create other tasks, send mail,
 change grants, select an option, place/manage orders, or modify paper rules.
+
+## Passive acceptance audits
+
+Never send audit or receipt-retrieval messages into Jo's execution conversation,
+including messages labelled read-only or sent after a particular review commits.
+An unseen new email can overlap that inspection; a prohibition on further calls
+can interrupt an already-started optional market continuation. Audits must not
+change the task or tell Jo to stop, resume, retry or process work.
+
+Use read-only host health, the CURRENT saved selection/revision, private
+`stock_observation` records, immutable Check inputs/reviews/tool calls, normal
+SMTP/Gmail evidence, sealed app notices and transport receipts. Inspect original
+native history only through an available read-only UI/export. If unavailable,
+record the missing evidence instead of asking Jo to reconstruct it. A typed wake,
+synthetic test, provider receipt or enabled flag cannot establish natural execution,
+phone display or continuous coverage.
+
+Reconcile observation minutes against the actual exchange session and selection
+changes, including early closes. Match each alert/hash and hard expiry to its one
+actor-bound saved review; trace useful notifications through the normal app to
+one transport outcome. Ask the owner once about an identifiable useful real phone
+notification; keep unchanged/no-view outcomes quiet. A started optional market input
+without a saved read is incomplete, never resumed after expiry to erase a gap.
+Monitor through close, finish reconciliation after outstanding expiries, then stop
+only the temporary audit. Standing Jo/scanner/market schedules stay unchanged.
