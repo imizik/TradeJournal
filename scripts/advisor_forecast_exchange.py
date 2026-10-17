@@ -73,4 +73,4 @@ class ForecastExchange:
             saved = self.clock()
             result = core.receipt(packet, forecast, first_read["at"], saved, self.spec)
             core.exclusive_json(path, result)
-            return result
+            return core.read_json(path)

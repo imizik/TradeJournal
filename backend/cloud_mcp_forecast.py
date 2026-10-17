@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 import sys
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -151,21 +151,21 @@ def create_server(config_path, *, clock=None):
         return ToolAnnotations(readOnlyHint=not write, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
     @server.tool(annotations=hints(), structured_output=True, meta={"openai/profile": True, "securitySchemes": [{"type": "oauth2", "scopes": scopes("get_profile")}]})
-    async def get_profile() -> dict:
+    async def get_profile() -> dict[str, Any]:
         return await dispatch("get_profile")
 
     @server.tool(annotations=hints(), structured_output=True, meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("get_forecast_snapshot")}]})
-    async def get_forecast_snapshot(ticker: str) -> dict:
+    async def get_forecast_snapshot(ticker: str) -> dict[str, Any]:
         """Read today's immutable snapshot only. Never fetch fresh quotes or outcomes."""
         return await dispatch("get_forecast_snapshot", ticker=ticker)
 
     @server.tool(annotations=hints(True), structured_output=True, meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("save_forecast")}]})
-    async def save_forecast(ticker: str, snapshot_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], forecast: dict) -> dict:
+    async def save_forecast(ticker: str, snapshot_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], forecast: dict) -> dict[str, Any]:
         """Save once; server timestamps. Exact retries return original receipt; changed answers conflict."""
         return await dispatch("save_forecast", ticker=ticker, snapshot_hash=snapshot_hash, forecast=forecast)
 
     @server.tool(annotations=hints(), structured_output=True, meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("get_forecast_receipt")}]})
-    async def get_forecast_receipt(ticker: str, snapshot_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]) -> dict:
+    async def get_forecast_receipt(ticker: str, snapshot_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]) -> dict[str, Any]:
         """Recover only the submitted forecast receipt; no outcome or grading fields."""
         return {"receipt": await dispatch("get_forecast_receipt", ticker=ticker, snapshot_hash=snapshot_hash)}
 
