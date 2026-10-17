@@ -26,7 +26,7 @@ def service(action):
     outcome = action == "outcomes"
     user = "tj-forecast-outcomes" if outcome else "tj-forecast-collector"
     state = OUTCOMES if outcome else STATE
-    supplementary = "" if outcome else "SupplementaryGroups=tj-forecast-exchange\n"
+    group = user if outcome else "tj-forecast-exchange"
     hidden = STATE if outcome else OUTCOMES
     return f"""[Unit]
 Description=Non-model advisor study {action}; owner activation required
@@ -37,8 +37,8 @@ ConditionPathExists={CONFIG}/approval.json
 [Service]
 Type=oneshot
 User={user}
-Group={user}
-{supplementary}WorkingDirectory={RUNTIME}
+Group={group}
+WorkingDirectory={RUNTIME}
 Environment=PYTHONNOUSERSITE=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=-{CONFIG}/data.env
@@ -141,7 +141,8 @@ def install(source):
     for path, user, mode in ((STATE, users[0], 0o750), (RECEIPTS, users[1], 0o750), (OUTCOMES, users[2], 0o700)):
         path.mkdir(mode=mode)
         identity = pwd.getpwnam(user)
-        os.chown(path, identity.pw_uid, identity.pw_gid)
+        group = pwd.getpwnam(users[1]).pw_gid if path == STATE else identity.pw_gid
+        os.chown(path, identity.pw_uid, group)
     for action in ACTIONS:
         for kind, content in (("service", service(action)), ("timer", timer(action))):
             path = unit_dir / f"tj-forecast-{action}.{kind}"

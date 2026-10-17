@@ -126,6 +126,23 @@ def test_interim_score_missing_outcome_and_duplicate_refused(spec, study):
     assert core.score(days, rows, spec, now)["verdict"] == "invalid"
 
 
+@pytest.mark.parametrize("status", ["external_access_detected", "unverified", None])
+def test_missing_entire_session_preserves_access_audit(spec, study, status):
+    days, rows, now = study
+    for row in rows:
+        if row["session"] == days[0]:
+            row.pop("receipt")
+            if status is None:
+                row.pop("audit")
+            else:
+                row["audit"]["web_status"] = status
+    report = core.score(days, rows, spec, now)
+    assert report["verdict"] == "invalid"
+    assert "web/tool isolation unverified or violated:" + days[0] in report["faults"]
+    assert report["missing_sessions"] == days[:1]
+    assert report["access_audits"][days[0]]["web_status"] == (status or "unverified")
+
+
 @pytest.mark.parametrize("change", ["future", "missing", "duplicate", "nan", "bad_ohlc"])
 def test_snapshot_refuses_bad_or_later_bars(spec, change):
     day = "2098-02-01"
@@ -208,4 +225,7 @@ def test_deployment_is_disabled_and_additive():
         assert "InaccessiblePaths=-/opt/tradejournal -/etc/tradejournal -/var/lib/tradejournal" in unit
         assert "Persistent=false" in timer
         assert "forecast.env" not in unit
+        expected_group = "tj-forecast-outcomes" if action == "outcomes" else "tj-forecast-exchange"
+        assert f"Group={expected_group}\n" in unit
+        assert f"ReadWritePaths={module.OUTCOMES if action == 'outcomes' else module.STATE}\n" in unit
     assert "10:00:00" in module.timer("snapshot") and "10:05:00" in module.timer("snapshot")

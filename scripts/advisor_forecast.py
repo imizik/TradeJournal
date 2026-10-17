@@ -280,12 +280,12 @@ def score(sessions, records, spec, now):
         cases.append(c)
     audits = {}
     for d in sessions:
-        evidence = [c.get("audit") for c in cases if c["session"] == d and c["status"] in ("answered", "abstain", "late")]
+        evidence = [c.get("audit") for c in cases if c["session"] == d]
         audit = evidence[0] if evidence else None
         if any(e != audit for e in evidence):
             raise ValueError("inconsistent session audit")
         audits[d] = audit or {"web_status": "unverified", "model_name": None}
-        if evidence and (not audit or audit.get("web_status") != "verified_no_external_access"
+        if (not audit or audit.get("web_status") != "verified_no_external_access"
                          or audit.get("evidence_type") not in ("complete_platform_trace", "verified_task_tool_isolation")
                          or not isinstance(audit.get("evidence_sha256"), str) or len(audit["evidence_sha256"]) != 64):
             faults.append("web/tool isolation unverified or violated:" + d)
