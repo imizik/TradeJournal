@@ -1,0 +1,14 @@
+{
+  "files": {
+    "backend/cloud_mcp_advisor_common.py": "fe809cd67a1665f113c29770ce6c85ff35876281a4ce31ac531e192fc1de2aa2",
+    "backend/cloud_mcp_d0.py": "69ca2c1f51ef22f218463be433b69fb05f34fc6435fd4077c07c6faecd913a14",
+    "backend/cloud_mcp_forecast.py": "7ba06f732fd30a4b365f325000110e26750f3a46797b27fcd990f5e2feb4e7ec",
+    "deploy/advisor_forecast_prepare.py": "76f4b90262aba78ca330cb9a6097747426ffdb9efdc1b5dd0c4c828b89516bad",
+    "research/advisor-forecast/prompt.txt": "82dbbea93d3a5e58079f4eee505db001803284fcad58a32c96e3924d85c700d9",
+    "research/advisor-forecast/spec.json": "55afd000415c1cc0c838fda6ed2e2c9ceedf61765afa44da38348d07c11663a7",
+    "scripts/advisor_forecast.py": "71abd5a76490c8764cc508452fecd0b888753edd151ccdccd003fa140d747160",
+    "scripts/advisor_forecast_exchange.py": "1423ef494827ae9a832f04740811f92b36e0084f51b5866f428beba295f9ab1a",
+    "scripts/advisor_forecast_runtime.py": "ca492fbd9086b2755bb4939aead2bfaee28409ad1e192ccc019f66552ed6b984"
+  },
+  "protocol": "advisor-forecast-v1-preparation"
+}
