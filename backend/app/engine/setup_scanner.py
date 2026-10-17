@@ -181,6 +181,13 @@ class SetupScanner:
                 if session is not None:
                     self.scan(today, session, stock_only=True)
         finally:
+            # Accepted plans get checked before discretionary stock-alert work;
+            # both paths reuse this pass's selected-symbol minute cache.
+            try:
+                from app.engine.conditional_plans import run_for_scanner
+                run_for_scanner(self)
+            except Exception:
+                log.exception("Conditional-plan monitoring pass failed")
             # Stock awareness must survive an option-chain failure, lack of a
             # qualifying contract, and the paper scanner's 15:00 cutoff.
             try:

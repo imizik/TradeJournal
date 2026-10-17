@@ -16,6 +16,19 @@ import importlib
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def restore_main_after_reload():
+    # Reload builds a new FastAPI instance. Other modules retain the original
+    # imported app, so restore the namespace as well as monkeypatched env vars.
+    # Otherwise the sample-app factory sees a different app depending on order.
+    from app import main
+
+    original = vars(main).copy()
+    yield
+    vars(main).clear()
+    vars(main).update(original)
+
+
 def _origins(monkeypatch, configured: str | None) -> list[str]:
     if configured is None:
         monkeypatch.delenv("FRONTEND_PUBLIC_URL", raising=False)
