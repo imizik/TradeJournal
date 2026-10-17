@@ -5,8 +5,9 @@ the advisor to the shadow trader. Build step 4 of the
 [shadow trader design](shadow-trader-design.md#build-order-after-dots-steps-35),
 narrowed to the smallest version that produces a comparable record.
 Reworked October 13 with Isaac's go-ahead to use the recommended choices.
-**SH-1 through SH-5 are merged; the VPS file exchange is activated. Actual Jo
-tool access and the first qualifying live session remain unverified.** The execution
+**The Shadow S1 pipeline is accepted on October 16, 2026 live-session
+evidence, with owner closeout on October 17. Natural TAKE execution remains
+unproven live, covered by fixtures, and is not an acceptance blocker.** The execution
 plan, work split and model guidance are in the [shadow build plan](shadow-build-plan.md).
 
 ## Owner decisions (October 13, 2026)
@@ -157,6 +158,46 @@ S2 extends this display with [Isaac trade links and disagreements](shadow-build-
   the commit.
 - Restarting either service leaves one decision and at most one shadow entry
   and exit per setup.
+
+### Pipeline acceptance — October 16 evidence, owner closeout October 17
+
+The owner accepts S1 as a separately formed decision pipeline for comparison
+with Isaac, not as a profit engine. On October 16, all eight published setups
+received one on-time Jo SKIP each: seven receipts had `clean_order=true`, and
+one retained the conservative false flag. The October 17 read-only audit
+matched those eight unique check-ledger receipts to the eight published
+scanner candidates. October 15's four no-response dispositions remain in the
+record; acceptance does not erase that earlier gap.
+
+Saved October 15 focused verification passed 114 tests with no failures or
+errors. It covers missing scope/wrong actor, forged or non-today setup refusal,
+late decisions, same-day history exclusion, call-order flags, immutable retry
+and restart recovery, and the simulated TAKE entry/exit path. Source-side live
+history-cutoff evidence is retained; the original returned-history-card
+comparison remains unproven and is not held open as a pipeline blocker by this
+owner closeout. Fixture proof is not relabelled as live execution proof.
+
+The natural TAKE lifecycle remains **unproven live** because the scanner has
+not produced a setup Jo judged takeable. Do not force a TAKE, replay an expired
+setup, change decision thresholds or restart services to manufacture evidence.
+This missing natural opportunity does **not** block accepted pipeline status.
+A later natural TAKE is observed under the existing rules, not a new experiment.
+
+Private evidence: bounded-closeout-20261017/closeout.json,
+shadow-closeout-live-20261017.json, and s1-closeout-quotes-20261017.json in the
+October 15 scanner-search task artifacts; saved `jo-shadow-audit/focused-tests.xml`.
+No private receipts or journal data are committed here.
+
+At **50 resolved rules-only S1 paper trades** (distinct candidate IDs with an
+exit, with unresolved entries reported separately), give the owner per-family
+underlying and option results as a **keep/turn-off** decision. Preserve scanner
+version, the factual-prompt-change boundary, same-day versus later expiry,
+quote timestamps, commissions, observed spread and 2x-spread stress. Report
+unavailable underlying entry/exit prices or R as missing rather than inventing
+fills or using later bars. This is descriptive forward evidence, not permission
+to tune parameters or automatically turn a family off. Keep the factory paused.
+Instrument changes are deferred; only if a family later demonstrates underlying
+edge should a separately authorized comparison start with stock.
 
 ### Activation evidence — October 13, 2026
 
