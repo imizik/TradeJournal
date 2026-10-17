@@ -22,14 +22,16 @@ def linked(tmp_path, signing_key, spec, monkeypatch):
     core.exclusive_json(tmp_path / "snapshots" / p["session"] / "MU.json", p)
     core.exclusive_json(tmp_path / "snapshots" / p["session"] / "manifest.json", {t: core.digest(p) for t in spec["tickers"]})
     spec_file = tmp_path / "spec.json"
-    spec_file.write_text(json.dumps(spec))
+    base_spec = core.read_json(core.SPEC_DIR / "spec.json")
+    spec_file.write_text(json.dumps(base_spec))
     keys = tmp_path / "keys.json"
     keys.write_text(json.dumps({"issuer_url": ISSUER, "jwks_url": JWKS_URL, "fetched_at": int(time.time()) - 1,
                                "expires_at": int(time.time()) + 600, **_jwks(signing_key.public_key())}))
     config = {"enabled": True, "forecast_only": True, "issuer_url": ISSUER, "resource_url": RESOURCE,
               "jwks_url": JWKS_URL, "jwks_file": str(keys), "client_id": "forecast-client",
               "profiles": [{"subject": "jo-forecast", "id": "forecast-synthetic-study".replace("forecast-", "forecast_"), "enabled": True}],
-              "spec_file": str(spec_file), "expected_spec_hash": core.digest(spec),
+              "spec_file": str(spec_file), "expected_spec_hash": core.digest(base_spec),
+              "authorized_sessions": [p["session"], "2098-02-02"],
               "snapshots": str(tmp_path / "snapshots"), "receipts": str(tmp_path / "receipts")}
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(config))
@@ -82,5 +84,16 @@ def test_write_scope_and_binding_revocation(linked):
     denied = rpc(client, token(scope="forecast:profile forecast:read"), "save_forecast", args).json()["result"]
     assert denied["isError"]
     config["enabled"] = False
+    path.write_text(json.dumps(config))
+    assert rpc(client, token(), "get_forecast_snapshot", {"ticker": "MU"}).status_code == 401
+
+
+def test_only_two_bound_development_dates_and_no_live_rebinding(linked):
+    client, token, p, clock, path, config = linked
+    clock[0] = core.at("2098-02-03", "10:00:06")
+    denied = rpc(client, token(), "get_forecast_snapshot", {"ticker": "MU"}).json()["result"]
+    assert denied["isError"]
+    clock[0] = core.at(p["session"], "10:00:06")
+    config["authorized_sessions"] = [p["session"], "2098-02-03"]
     path.write_text(json.dumps(config))
     assert rpc(client, token(), "get_forecast_snapshot", {"ticker": "MU"}).status_code == 401
