@@ -46,6 +46,7 @@ class ForecastConfig(Strict):
     snapshots: str
     receipts: str
     expected_spec_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    authorized_sessions: list[str] = Field(min_length=2, max_length=2)
 
     @field_validator("issuer_url", "resource_url", "jwks_url")
     @classmethod
@@ -64,6 +65,9 @@ class ForecastConfig(Strict):
 
     @model_validator(mode="after")
     def boundary(self):
+        from datetime import date
+        if self.authorized_sessions != sorted(set(self.authorized_sessions)) or any(date.fromisoformat(d).isoformat() != d for d in self.authorized_sessions):
+            raise ValueError("two exact development sessions required")
         if urlsplit(self.resource_url).path != "/forecast/mcp":
             raise ValueError("separate forecast audience required")
         if urlsplit(self.issuer_url).netloc != urlsplit(self.jwks_url).netloc:
@@ -87,7 +91,7 @@ class Verifier(JWKSVerifier):
 
     def active_config(self):
         current = super().active_config()
-        immutable = ("spec_file", "snapshots", "receipts", "expected_spec_hash")
+        immutable = ("spec_file", "snapshots", "receipts", "expected_spec_hash", "authorized_sessions")
         if current is None or any(getattr(current, k) != getattr(self.config, k) for k in immutable):
             return None
         try:
@@ -128,7 +132,7 @@ def create_server(config_path, *, clock=None):
     spec = core.read_json(config.spec_file)
     if core.digest(spec) != config.expected_spec_hash:
         raise ValueError("spec binding mismatch")
-    exchange = ForecastExchange(config.snapshots, config.receipts, spec, enabled=True, clock=clock)
+    exchange = ForecastExchange(config.snapshots, config.receipts, core.with_timing(spec, 0), enabled=True, clock=clock)
     host = urlsplit(config.resource_url).netloc
     server = ForecastMCP("tradejournal-isolated-forecast", json_response=True, stateless_http=True,
         streamable_http_path="/forecast/mcp", instructions=(core.SPEC_DIR / "prompt.txt").read_text(),
@@ -143,6 +147,8 @@ def create_server(config_path, *, clock=None):
         if name == "get_profile":
             return {"id": checked.claims["profile_id"], "name": "Isolated Jo forecast study", "model_pinned": False}
         try:
+            if core.stamp(exchange.clock()).date().isoformat() not in config.authorized_sessions:
+                raise ValueError("outside two authorized development sessions")
             return getattr(exchange, name)(**args)
         except (ValueError, OSError, KeyError, TypeError):
             raise ToolError("Forecast unavailable, late, malformed or conflicting. Recover the receipt; never bypass through another connector.") from None

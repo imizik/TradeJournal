@@ -14,9 +14,11 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 ## Current delivery board
 
 **October 17 bounded addition:** [Advisor forecast preparation](advisor-forecast-preparation.md)
-is owner-selected for a synthetic dry run and disabled non-model infrastructure.
-Hosted Jo stays subscription-only; no real forecast/task activation is authorized
-before dry-run confirmation. Production Jo and Shadow are unchanged.
+has passed its synthetic dry run. The owner authorized a new isolated connection
+and two development sessions after connection verification. Hosted Jo stays
+subscription-only; evaluation remains inactive. Web access is unrestricted,
+bounded by the server save deadline, with deadline-time price baselines.
+Production Jo and Shadow are unchanged.
 
 Checkpoint: October 17, 2026: owner accepts the Shadow S1 pipeline on October 16 live-session evidence. Other rows retain their individually stated evidence dates.
 This board is the one place that answers "what is built, switched on, seen

@@ -118,7 +118,7 @@ def history_stats(day, history, prior_sessions, spec):
         raise ValueError("exact prior 20 ordered sessions required")
     if set(history) != set(prior_sessions):
         raise ValueError("missing history; do not skip to older sessions")
-    changes, downs, ups = [], [], []
+    changes, downs, ups, deadline_downs, deadline_ups = [], [], [], [], []
     start, end = timing(spec)
     for d in prior_sessions:
         bars = window(d, history[d], 570, end - 570)
@@ -127,12 +127,17 @@ def history_stats(day, history, prior_sessions, spec):
         changes.append(abs(path[-1]["c"] / path[0]["o"] - 1))
         downs.append(min(0, min(b["l"] for b in path) / ref - 1))
         ups.append(max(0, max(b["h"] for b in path) / ref - 1))
+        deadline_ref = bars[start - 569]["c"]  # last bar completed at start + 2 minutes
+        deadline_downs.append(min(0, min(b["l"] for b in path) / deadline_ref - 1))
+        deadline_ups.append(max(0, max(b["h"] for b in path) / deadline_ref - 1))
     threshold = statistics.median(changes) * spec["sideways_multiplier"]
     low = quantile(downs, 1 - spec["range_quantile"])
     high = quantile(ups, spec["range_quantile"])
     if threshold <= 0 or high <= low:
         raise ValueError("degenerate historical scale")
     return {"sideways_threshold": threshold, "baseline_low_return": low, "baseline_high_return": high,
+            "deadline_low_return": quantile(deadline_downs, 1 - spec["range_quantile"]),
+            "deadline_high_return": quantile(deadline_ups, spec["range_quantile"]),
             "history_hash": digest(history), "prior_sessions": prior_sessions}
 
 
@@ -170,6 +175,25 @@ def validate_prediction(prediction, packet):
     return "answered"
 
 
+def deadline_baseline(packet, current, captured_at, spec):
+    """Independent deadline-time comparator; never supplied by Jo or taken from outcomes."""
+    day = packet["session"]
+    cutoff = at(day, spec["snapshot"]["submission_deadline"])
+    captured = stamp(captured_at)
+    if not cutoff <= captured <= cutoff + timedelta(seconds=30):
+        raise ValueError("baseline capture window exceeded")
+    start, _ = timing(spec)
+    bars = window(day, current, 570, start + 2 - 570)
+    ref = bars[-1]["c"]
+    return {"session": day, "ticker": packet["ticker"], "spec_hash": digest(spec),
+            "snapshot_hash": digest(packet), "captured_at": captured.isoformat(),
+            "information_cutoff": cutoff.isoformat(), "bars": bars, "reference_price": ref,
+            "baseline_low": ref * (1 + packet["deadline_low_return"]),
+            "baseline_high": ref * (1 + packet["deadline_high_return"]),
+            "baseline_directions": {"sideways": "sideways", "up": "up", "down": "down",
+                "opening_continuation": classify(ref / bars[0]["o"] - 1, packet["sideways_threshold"])}}
+
+
 def receipt(packet, prediction, started_at, saved_at, spec):
     started_at, saved_at = stamp(started_at), stamp(saved_at)
     if not stamp(packet["captured_at"]) <= started_at <= saved_at:
@@ -196,26 +220,27 @@ def outcome(day, ticker, bars, captured_at, spec):
 
 def metrics(cases, spec):
     counts = Counter(c["status"] for c in cases)
-    answered = [c for c in cases if c["status"] == "answered" and c.get("outcome")]
-    available = [c for c in cases if c.get("outcome") and c.get("snapshot")]
+    answered = [c for c in cases if c["status"] == "answered" and c.get("outcome") and c.get("baseline")]
+    available = [c for c in cases if c.get("outcome") and c.get("snapshot") and c.get("baseline")]
     labels, confusion = {}, Counter()
     for c in available:
         o, p = c["outcome"], c["snapshot"]
         labels[(c["session"], c["ticker"])] = classify(o["terminal"] / o["start"] - 1, p["sideways_threshold"])
     def accuracy(name, selected):
-        return sum(c["snapshot"]["baseline_directions"][name] == labels[(c["session"], c["ticker"])] for c in selected) / len(selected) if selected else None
+        return sum(c["baseline"]["baseline_directions"][name] == labels[(c["session"], c["ticker"])] for c in selected) / len(selected) if selected else None
     widths, baseline_widths, covered, baseline_covered, terminal_errors, low_errors, high_errors = [], [], [], [], [], [], []
     correct = 0
     for c in answered:
         f, p, o = c["receipt"]["prediction"], c["snapshot"], c["outcome"]
+        b = c["baseline"]
         actual = labels[(c["session"], c["ticker"])]
         correct += f["direction"] == actual
         confusion[(actual, f["direction"])] += 1
         ref = p["reference_price"]
         widths.append((f["high"] - f["low"]) / ref)
-        baseline_widths.append((p["baseline_high"] - p["baseline_low"]) / ref)
+        baseline_widths.append((b["baseline_high"] - b["baseline_low"]) / ref)
         covered.append(f["low"] <= o["low"] and f["high"] >= o["high"])
-        baseline_covered.append(p["baseline_low"] <= o["low"] and p["baseline_high"] >= o["high"])
+        baseline_covered.append(b["baseline_low"] <= o["low"] and b["baseline_high"] >= o["high"])
         terminal_errors.append(abs(f["terminal_price"] - o["terminal"]) / ref)
         low_errors.append(abs(f["low"] - o["low"]) / ref)
         high_errors.append(abs(f["high"] - o["high"]) / ref)
@@ -277,6 +302,12 @@ def score(sessions, records, spec, now):
                 raise ValueError("outcome provenance mismatch")
         else:
             faults.append(f"missing outcome:{day}:{ticker}")
+        b = c.get("baseline")
+        if b and p:
+            if deadline_baseline(p, b["bars"], b["captured_at"], spec) != b:
+                raise ValueError("deadline baseline integrity mismatch")
+        elif p:
+            faults.append(f"missing deadline baseline:{day}:{ticker}")
         cases.append(c)
     audits = {}
     for d in sessions:
@@ -284,11 +315,10 @@ def score(sessions, records, spec, now):
         audit = evidence[0] if evidence else None
         if any(e != audit for e in evidence):
             raise ValueError("inconsistent session audit")
-        audits[d] = audit or {"web_status": "unverified", "model_name": None}
-        if (not audit or audit.get("web_status") != "verified_no_external_access"
-                         or audit.get("evidence_type") not in ("complete_platform_trace", "verified_task_tool_isolation")
-                         or not isinstance(audit.get("evidence_sha256"), str) or len(audit["evidence_sha256"]) != 64):
-            faults.append("web/tool isolation unverified or violated:" + d)
+        # Only operator-imported platform metadata is evidence; discard Jo's claims.
+        platform = audit and audit.get("model_source") == "platform" and audit.get("evidence_type") == "platform_record" and isinstance(audit.get("evidence_sha256"), str) and len(audit["evidence_sha256"]) == 64
+        audits[d] = {"model_name": audit.get("model_name") if platform else None,
+                     "model_source": "platform" if platform else "unavailable"}
     missing_days = sorted({c["session"] for c in cases if c["status"] not in ("answered", "abstain")})
     if len(missing_days) > spec["gates"]["maximum_missing_sessions"]:
         faults.append("more than three missing evaluation sessions; no extension/restart")
@@ -298,11 +328,14 @@ def score(sessions, records, spec, now):
               and overall["direction_advantage"] >= g["direction_advantage"] - 1e-12
               and overall["range_advantage"] >= g["range_advantage"] - 1e-12
               and overall["mean_width_fraction"] <= overall["baseline_mean_width_fraction"] + 1e-12)
+    model_names = sorted({a["model_name"] for a in audits.values() if a.get("model_name") and a.get("model_source") == "platform"})
     return {"protocol": spec["protocol"], "spec_hash": digest(spec), "verdict": "invalid" if faults else "replication_only" if passed else "stop_directional_development",
             "faults": faults, "missing_sessions": missing_days, "overall": overall,
             "by_session": {d: metrics([c for c in cases if c["session"] == d], spec) for d in sessions},
-            "access_audits": audits, "model_pinned": False,
-            "observed_model_names": sorted({a["model_name"] for a in audits.values() if a.get("model_name") and a.get("model_source") == "platform"}),
+            "model_metadata": audits, "model_pinned": False,
+            "web_access": "web access not restricted; bounded by deadline",
+            "information_limitation": "Deadline baselines use completed price bars up to the save deadline. They do not receive Jo's news, web, memory or concurrent-task information. This does not equalize information sets or establish a leakage-controlled forecast.",
+            "observed_model_names": model_names, "observed_model_change": len(model_names) > 1,
             "interpretation": "Hosted Jo under frozen task protocol; model unpinned, unknown metadata remains unknown. Correlated exploratory sample, not trading returns or validated skill."}
 
 
@@ -329,6 +362,7 @@ def dry_run(output, spec):
             r = receipt(p, prediction, at(day, "10:00:06"), at(day, "10:00:07"), spec)
             o = outcome(day, ticker, fixture_bars(day, 600, 60), at(day, "11:05:05"), spec)
             records.append({"session": day, "ticker": ticker, "snapshot": p, "receipt": r, "outcome": o,
+                            "baseline": deadline_baseline(p, fixture_bars(day, count=32), at(day, "10:02:05"), spec),
                             "audit": {"web_status": "verified_no_external_access", "evidence_type": "complete_platform_trace", "evidence_sha256": digest({"synthetic_fixture": True}), "model_name": None, "model_source": "unavailable", "synthetic_fixture": True}})
     report = score(sessions, records, spec, at(sessions[-1], "11:06:00"))
     assert report["overall"]["direction_accuracy"] == 1
