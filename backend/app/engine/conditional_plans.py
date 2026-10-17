@@ -4,6 +4,7 @@ No extra model runs, email tasks, options calls, broker actions or paper fills.
 The immutable wake store is authoritative; public status is a derived projection.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 import fcntl
 import logging
@@ -29,6 +30,8 @@ from stock_watch_common import ET, stamp
 
 log = logging.getLogger(__name__)
 DELIVERY = {"max_attempts": 3, "retry_seconds": 60}
+DELIVERY_WORKERS = 6
+DELIVERY_PASS_SECONDS = 20
 
 
 def enabled():
@@ -88,6 +91,7 @@ class PlanMonitor:
         self.store, self.directory, self.outbox = store, Path(directory), Path(outbox)
         self.clock, self.push = clock, push
         self.runner = MarketWatchRunner(store, directory, clock=clock, push=push)
+        self._checked_at = {}
 
     def events(self, plan):
         return [
@@ -190,6 +194,7 @@ class PlanMonitor:
                 )
                 return
             bars = checked_bars(rows, observed, now)
+            self._checked_at[plan["plan_id"]] = stamp(now)
             observations = [
                 o
                 for o in self.store.records("plan_observation", plan["session_date"])
@@ -394,11 +399,36 @@ class PlanMonitor:
                     "last_bar_end": observations[-1]["bar"]["end_time"]
                     if observations
                     else None,
-                    "checked_at": now,
+                    # Projection/transport time is not observation evidence.
+                    "checked_at": self._checked_at.get(
+                        plan["plan_id"],
+                        observations[-1]["created_at"]
+                        if observations
+                        else plan["created_at"],
+                    ),
                     "created_at": now,
                 }
             ),
         )
+
+    def deliver_plans(self, plans, active):
+        # A burst must not spend every later event's freshness window on earlier
+        # network waits. Each plan has only one worker, under the process lock;
+        # store operations open their own SQLite connection. After a bounded
+        # batch budget, leave unattempted events durable for the next pass.
+        def deliver_one(plan):
+            try:
+                self.deliver(plan, active)
+                self.project(plan, active)
+            except Exception:
+                log.exception("Conditional plan delivery failed: %s", plan["plan_id"])
+
+        started = self.clock()
+        with ThreadPoolExecutor(max_workers=DELIVERY_WORKERS) as pool:
+            for offset in range(0, len(plans), DELIVERY_WORKERS):
+                if (self.clock() - started).total_seconds() >= DELIVERY_PASS_SECONDS:
+                    break
+                list(pool.map(deliver_one, plans[offset : offset + DELIVERY_WORKERS]))
 
     def run(self, scanner, active=True):
         # The existing delivery helper is serialized across process restarts/overlap.
@@ -451,12 +481,7 @@ class PlanMonitor:
                         "Conditional plan observation failed: %s", plan["plan_id"]
                     )
             # Finish observations before potentially slow phone delivery.
-            for plan in plans:
-                try:
-                    self.deliver(plan, active)
-                    self.project(plan, active)
-                except Exception:
-                    log.exception("Conditional plan pass failed: %s", plan["plan_id"])
+            self.deliver_plans(plans, active)
 
 
 def run_for_scanner(scanner):

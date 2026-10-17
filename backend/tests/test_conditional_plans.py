@@ -553,3 +553,70 @@ def test_new_plan_limit_is_explicit_and_does_not_stop_accepted_plan(setup):
     p = s.plans.list(ACTOR)[0]
     s.now += timedelta(minutes=1)
     assert observe(s, monitor(s), p, [bar(NOW, 106)])["state"] == "triggered"
+
+
+def test_delivery_projection_does_not_refresh_observation(setup):
+    s = setup
+    p = create(s, confirm_bars=1)
+    m = monitor(s)
+    s.now += timedelta(minutes=1)
+    observe(s, m, p, [bar(NOW, 106)])
+    checked_at = status(s.public, p, s.now)["checked_at"]
+    s.now += timedelta(seconds=190)
+    m.project(p, True)
+    r = status(s.public, p, s.now)
+    assert r["checked_at"] == checked_at
+    assert not r["monitoring"]
+
+
+def test_twenty_four_slow_pushes_remain_fresh_across_bounded_passes(setup):
+    from threading import Barrier
+
+    s = setup
+    plans = [create(s, operation_id=f"burst-{i}", confirm_bars=1) for i in range(24)]
+    s.now += timedelta(minutes=1)
+    observed_at = s.now
+    # Six concurrent requests each take ten seconds, represented by a shared
+    # clock advanced once per completed wave, without sleeping in the test.
+    def finish_wave():
+        s.now += timedelta(seconds=10)
+
+    wave = Barrier(6, action=finish_wave, timeout=10)
+    sent = []
+
+    def slow_push(title, body):
+        wave.wait()
+        sent.append(title)
+        return "fixture-push"
+
+    m = PlanMonitor(s.store, s.public, s.outbox, clock=lambda: s.now, push=slow_push)
+    scanner = SimpleNamespace(_pass_minutes={"NBIS": ([bar(NOW, 106)], s.now.timestamp())})
+    session = SimpleNamespace(open_at=0, close_at=s.now.timestamp() + 3600)
+    for p in plans:
+        m.observe(p, scanner, ["NBIS"], session, True)
+        m.project(p, True)
+    m.deliver_plans(plans, True)
+    assert len(sent) == 12
+    assert s.now - observed_at == timedelta(seconds=20)
+    assert all(status(s.public, p, s.now)["checked_at"] == stamp(observed_at) for p in plans)
+    s.now += timedelta(seconds=30)
+    m.deliver_plans(plans, True)
+    assert len(sent) == 24
+    attempts = s.store.records("plan_push_attempt")
+    assert len([a for a in attempts if a["result"] == "accepted"]) == 24
+    assert not any(a["result"] in ("expired", "unknown", "failed") for a in attempts)
+    # Completed requests do not resend, and a restart cannot manufacture a
+    # fresh observation when it republishes the persisted timeline.
+    m.deliver_plans(plans, True)
+    assert len(sent) == 24
+    s.now += timedelta(seconds=100)
+    restarted = monitor(s)
+    restarted.project(plans[0], True)
+    assert not status(s.public, plans[0], s.now)["monitoring"]
+
+
+def test_projection_without_observation_is_not_monitoring(setup):
+    s = setup
+    p = create(s)
+    monitor(s).project(p, True)
+    assert not status(s.public, p, s.now)["monitoring"]

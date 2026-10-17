@@ -212,7 +212,7 @@ def status(directory, plan, now):
         )
         result["monitoring"] = (
             value["enabled"]
-            and value["state"] not in TERMINAL
+            and value["state"] in ("watching", "triggered")
             and 0
             <= (now - parse_time(value["checked_at"])).total_seconds()
             <= HEARTBEAT_SECONDS

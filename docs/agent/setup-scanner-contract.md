@@ -419,6 +419,12 @@ freshness, three bounded attempts and existing unknown-outcome handling apply:
 an uncertain send is never blindly repeated. Accepted provider delivery is not
 phone-display proof. No discretionary stock wake quota suppresses a plan event.
 A global file lock prevents overlapping plan workers from duplicating sends.
+Delivery uses at most six concurrent plan workers and stops starting batches
+after twenty seconds per pass; an in-flight batch finishes under the existing
+transport timeout. Remaining events stay durable for the next scanner pass.
+Delivery projections preserve the actual observation timestamp and cannot renew
+monitoring proof. The 24-plan burst regression covers ten-second concurrent
+requests across two passes without dropping fresh queued triggers.
 
 ### Activation and acceptance
 
