@@ -32,7 +32,8 @@ slice; the detailed contracts continue to own implementation and acceptance.
    **Bounded exception October 17, 2026:** Isaac selected
    [prospective advisor forecast preparation](agent/advisor-forecast-preparation.md):
    subscription-only hosted Jo, non-model infrastructure and synthetic dry run.
-   No live forecasts before dry-run confirmation; Shadow and production remain
+   Dry run approved; exactly two development sessions await the new isolated
+   connection. Evaluation remains inactive. Shadow and production remain
    unchanged. This does not reopen unrelated advisor features.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),

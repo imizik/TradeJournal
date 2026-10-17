@@ -16,6 +16,7 @@ import advisor_forecast as core
 CONFIG = Path("/etc/tj-forecast")
 STATE = Path("/var/lib/tj-forecast")
 OUTCOMES = Path("/var/lib/tj-forecast-outcomes")
+BASELINES = Path("/var/lib/tj-forecast-baselines")
 RECEIPTS = Path("/var/lib/tj-forecast-receipts")
 DATA_URL = "https://data.alpaca.markets/v2/stocks/bars"
 
@@ -89,8 +90,10 @@ def approval(spec):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         raise ValueError("root-owned approval required")
-    if core.read_json(path) != {"spec_hash": core.digest(spec), "owner_confirmed_dry_run": True, "non_model_collection_authorized": True}:
+    value = core.read_json(path)
+    if value.get("phase") not in ("development", "evaluation") or value != {"spec_hash": core.digest(spec), "owner_confirmed_dry_run": True, "non_model_collection_authorized": True, "phase": value.get("phase")}:
         raise ValueError("owner confirmation absent")
+    return value["phase"]
 
 
 def registration(spec):
@@ -176,26 +179,49 @@ def outcomes_job(day, reg, spec):
         core.exclusive_json(OUTCOMES / day / f"{ticker}.json", core.outcome(day, ticker, bars[ticker], captured, spec))
 
 
+def baseline_job(day, reg, spec):
+    from datetime import timedelta
+    cutoff = core.at(day, spec["snapshot"]["submission_deadline"])
+    if not cutoff <= core.stamp(now()) <= cutoff + timedelta(seconds=30):
+        raise ValueError("baseline collection late")
+    core.exclusive_json(BASELINES / day / "attempt.json", {"at": now().isoformat()})
+    last_bar = (cutoff - timedelta(minutes=1)).time().isoformat()
+    current = fetch_bars(day, "09:30:00", last_bar, spec)
+    captured = now()
+    hashes = {}
+    for ticker in spec["tickers"]:
+        path = STATE / "snapshots" / day / f"{ticker}.json"
+        if path.exists():
+            baseline = core.deadline_baseline(core.read_json(path), current[ticker], captured, spec)
+            core.exclusive_json(BASELINES / day / f"{ticker}.json", baseline)
+            hashes[ticker] = core.digest(baseline)
+    core.exclusive_json(BASELINES / day / "manifest.json", hashes)
+
+
 def job(action, spec):
-    approval(spec)
+    phase = approval(spec)
     reg = registration(spec)
     day = core.stamp(now()).date().isoformat()
     if day not in reg["sessions"]:
         return {"status": "outside_registered_sessions"}
+    if phase == "development" and day not in reg["sessions"][:2]:
+        return {"status": "evaluation_not_authorized"}
     effective = effective_spec(day, reg, spec)
-    if action == "snapshot":
+    if action in ("snapshot", "baseline"):
         minute = core.stamp(now()).hour * 60 + core.stamp(now()).minute
         expected, _ = core.timing(effective)
-        if minute in (600, 605) and minute != expected:
+        shift = 2 if action == "baseline" else 0
+        if minute in (600 + shift, 605 + shift) and minute != expected + shift:
             return {"status": "other_preregistered_snapshot_slot"}
     if action != "outcomes":
         operational_guard(day, reg, spec)
-    {"history": history_job, "snapshot": snapshot_job, "outcomes": outcomes_job}[action](day, reg, effective)
+    {"history": history_job, "snapshot": snapshot_job, "baseline": baseline_job, "outcomes": outcomes_job}[action](day, reg, effective)
     return {"status": "non_model_job_complete", "action": action, "session": day}
 
 
 def final_score(spec):
-    approval(spec)
+    if approval(spec) != "evaluation":
+        raise ValueError("evaluation not authorized")
     reg = registration(spec)
     days = reg["sessions"][2:]
     if core.stamp(now()) < core.at(days[-1], "11:06:00"):
@@ -212,10 +238,12 @@ def final_score(spec):
             raise ValueError("synthetic audit in real run")
         for ticker in spec["tickers"]:
             item = {"session": day, "ticker": ticker, "audit": audit}
-            for kind, root in (("snapshot", STATE / "snapshots"), ("receipt", RECEIPTS), ("outcome", OUTCOMES)):
+            for kind, root in (("snapshot", STATE / "snapshots"), ("receipt", RECEIPTS), ("baseline", BASELINES), ("outcome", OUTCOMES)):
                 path = root / day / f"{ticker}.json"
                 if path.exists():
                     item[kind] = core.read_json(path)
+                    if kind == "baseline" and core.read_json(BASELINES / day / "manifest.json").get(ticker) != core.digest(item[kind]):
+                        raise ValueError("baseline manifest mismatch")
             records.append(item)
     result = core.score(days, records, effective, now())
     core.exclusive_json(report_path, result)
@@ -224,7 +252,7 @@ def final_score(spec):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["history", "snapshot", "outcomes", "score", "verify"])
+    parser.add_argument("action", choices=["history", "snapshot", "baseline", "outcomes", "score", "verify"])
     args = parser.parse_args()
     spec = core.read_json(core.SPEC_DIR / "spec.json")
     try:

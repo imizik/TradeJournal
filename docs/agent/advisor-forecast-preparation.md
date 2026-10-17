@@ -1,10 +1,16 @@
-# Prospective advisor forecast: preparation only
+# Prospective advisor forecast: development activation pending
 
-Owner selection: October 17, 2026. This reopens one bounded advisor research
-preparation task. It does not change production Jo, Shadow, the scanner,
-pre-trade checks or factory status. No inference API, CLI runtime, account login,
-real forecast, new active schedule or connector grant is authorized by this
-preparation. Only an additive **disabled** non-model VPS installation is selected.
+Owner selection: October 17, 2026. The owner approved the synthetic dry run,
+a new separate forecast-study connection with no production grants, and exactly
+two live development sessions after connection verification. Subscription only;
+no inference API or CLI fallback. Production Jo, Shadow, scanner, pre-trade
+checks and factory remain unchanged. Evaluation activation is not authorized.
+
+The owner replaced the task-scoped web/tool restriction on October 17 before
+any real forecast. The v2 protocol uses deadline-time price baselines and reports
+unrestricted browsing as a limitation. No v1 forecast or score was used to make
+this revision. The existing VPS v1 installation remains disabled until a reviewed
+upgrade and connection activation; local v2 source is not proof of deployment.
 
 ## Frozen research rules
 
@@ -28,13 +34,17 @@ is not evidence that hosted Jo can run this protocol reliably.
 - Sideways includes ±25% of median absolute historical return over the matching
   window in the prior twenty eligible sessions. Missing minutes/history refuse
   the snapshot rather than interpolate or substitute an older session.
-- Direction baselines: always sideways, always up, always down, and the visible
-  opening move. Compare their accuracy on exactly the answered subset, and also
+- Direction baselines: always sideways, always up, always down, and the
+  opening move through the last minute completed by the submission deadline.
+  Compare their accuracy on exactly the answered subset, and also
   report all cases with available inputs/outcomes. Report confusion and per-class
   recall, not just aggregate accuracy.
-- Historical range: nearest-rank Q20 downside and Q80 upside relative to each
-  historical pre-cutoff reference. Jo's per-case width cannot exceed that
-  baseline's width. Score whole-window low/high containment, width as a fraction
+- Historical range: nearest-rank Q20 downside and Q80 upside of the entire
+  forecast window relative to each historical deadline-minute close. Recenter
+  on today's last minute completed by the submission deadline (10:01 close at
+  the 10:02 deadline). The original snapshot-time historical width remains
+  Jo's per-case cap; do not replace it with the later comparator width.
+  Score whole-window low/high containment, width as a fraction
   of reference price, and terminal/low/high absolute errors in those same units.
 - Answer at least 60%; beat the best baseline by 10 percentage points in
   direction and the historical range by 10 points in containment, with no
@@ -43,7 +53,8 @@ is not evidence that hosted Jo can run this protocol reliably.
 - Missing, invalid and late forecasts are not abstentions. Any affected ticker
   makes that session missing for the session-limit rule. More than three missing
   evaluation sessions invalidates the run: no extension or automatic restart.
-  Missing outcomes invalidate the final judgment. All 140 cases remain in the
+  Missing outcomes or a missing deadline baseline for an existing snapshot
+  invalidate the final judgment. All 140 cases remain in the
   participation denominator. No interim scoring or outcome inspection.
 
 ## Development timing choice
@@ -67,21 +78,29 @@ API client or key exists in the non-model runtime. The model is **not pinned**.
 Record platform model metadata when available; otherwise say unavailable.
 Record observed changes. Jo naming her own model is not platform evidence.
 
-Prepare the task to permit only this study's read/save/recovery tools. Disable
-web/browsing/other data tools at task scope if a supported control exists. Do
-not change Jo-wide permissions, production tasks or plugin grants to pretend
-the study is isolated. Official [Dots controls](https://learn.chatgpt.com/codex/dots/controls)
-describe custom rules as instructions, not guaranteed enforcement; no per-task
-technical web-disable control has been verified in this preparation.
+Report exactly: **web access not restricted; bounded by deadline**. The server
+classifies any save after 10:02 (10:07 under the predeclared shift) as late,
+never answered or abstained. Jo cannot supply/backdate the save timestamp.
+An exact retry returns the original immutable receipt, including its status.
+No web-disable or tool-trace gate remains. Do not use Jo's claims as evidence
+of browsing absence, tool use or model identity; metadata is operator-imported
+from the platform when available, and unavailable otherwise.
 
-Each session needs either complete platform tool-trace evidence or verified
-task-scoped tool isolation, kept as an owner-controlled audit with its evidence
-digest. Record `verified_no_external_access`, `external_access_detected`, or
-`unverified`. Server logs see only this server; Jo self-report cannot establish
-absence of browsing. Any detected or unverified external access prevents a
-leakage-controlled pass; retain every case instead of removing contaminated
-ones. Shared memory and information encountered in concurrent Jo work remain
-limitations. Post-cutoff access is not confined to the web.
+The deadline bounds save time, not information equality. Baselines receive
+completed price bars through that deadline; they do not receive Jo's news,
+web, memory or concurrent-task information. A pass is not a leakage-controlled
+forecast or an executable signal at 10:00. The fixed directional baselines
+remain fixed. Opening continuation and historical range use the independently
+captured deadline price data, not Jo's reported inputs or later outcome data.
+
+Capture deadline baselines once, starting at 10:02 and finishing by 10:02:30,
+using only start-labelled bars 09:30–10:01. Under the shift, use 10:07–10:07:30
+and bars 09:30–10:06. Hash and store immutable files separately, unavailable
+through forecast tools. Historical whole-window extrema use the corresponding
+historical deadline close; the target window, threshold and original forecast
+width cap stay unchanged. Event-time filtering cannot guarantee an exact
+historical as-of revision; report that limitation. A missing comparator is an
+integrity failure, never replaced with the earlier baseline or an outcome.
 
 ## What is built and what remains
 
@@ -91,16 +110,17 @@ database imports. Forecast tools use a **separate OAuth audience and scopes**
 offline public-key verification, no data-provider credentials and no result
 reveal. This adapter is prepared and fixture-tested; it is **not bound to an
 existing connector or exposed on the VPS**. Existing practice credentials do
-not silently receive new tools. Actual connection/identity and task-level
-isolation must be reviewed before activation; no production connection is
+not silently receive new tools. Actual connection/identity and deadline
+enforcement must be reviewed before activation; no production connection is
 repointed by this build.
 
 The separate [installer](../../deploy/advisor_forecast_prepare.py) copies a
-hashed bundle to `/opt/tj-forecast/v1`, creates dedicated non-login accounts and
-isolated state, and installs three **disabled/inactive** timers: history at
-09:45, snapshot at the two predeclared slots (only the selected one runs), and
-outcome capture at 11:05. Timezone is America/New_York; missed boot-time runs
-are not replayed. Outcome storage is unavailable to the forecast-serving user.
+hashed v2 bundle to `/opt/tj-forecast/v2`, creates dedicated non-login accounts and
+isolated state, and installs four **disabled/inactive** timers: history at
+09:45, snapshot at the two predeclared slots (only the selected one runs),
+deadline baseline at 10:02/10:07, and outcome capture at 11:05. Timezone is
+America/New_York; missed boot-time runs are not replayed. Outcome and
+deadline-baseline storage are unavailable to the forecast-serving user.
 CPU is capped at 20%, memory at 128 MiB per job. The adapter source is staged
 but no MCP service/socket, public route, issuer grant or Jo schedule is installed.
 
@@ -109,10 +129,16 @@ unsynchronized clock, low disk/memory and source digest mismatch. It never
 touches the app release, DB, production units, credentials or scanner settings.
 The only credential file is an empty private market-data placeholder. There is
 no approval file, calendar registration or evaluation timing selection yet.
+This fresh installer deliberately refuses the existing v1 installation.
+A reviewed side-by-side upgrade and separate MCP installation remain necessary;
+never remove v1 evidence or bypass its collision checks to run this installer.
 
-Before activation, confirm the dry run, verify the real scoped connector and
-tool-access evidence, record actual Dots task settings, provision existing SIP
-credentials, and register the exact future calendar from Alpaca. No inference
+Before activation, verify the real scoped connector and server deadline, record
+actual Dots task settings, provision existing SIP credentials, and register the
+exact future calendar from Alpaca. Development-only approval blocks evaluation
+collection, and the MCP binding permits only the two named development dates.
+The base spec is bound by hash; the adapter derives the same zero-offset
+effective spec as the collector. Later evaluation requires separate activation. No inference
 API purchase or CLI installation is part of that handoff. The disabled setup
 does not establish live feed entitlement, OAuth acceptance, scheduler timing,
 model provenance or forecast accuracy.
@@ -127,7 +153,7 @@ this installation has no DB connection or migrations.
 
 Use `backend/tests/test_advisor_forecast.py` and
 `backend/tests/test_cloud_mcp_forecast.py` for hand-calculated scoring, shifted
-windows, malformed/future bars, missing/late accounting, web-evidence refusal,
+windows, malformed/future bars, missing/late accounting, deadline-baseline integrity,
 immutable timestamps/retries and OAuth audience/identity/scope refusal.
 Run `scripts/advisor_forecast.py dry-run --output <fresh-private-directory>`
 for an invented-data report. It runs zero provider/model calls. A synthetic
