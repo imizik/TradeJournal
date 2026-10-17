@@ -470,11 +470,10 @@ def test_email_to_scoped_jo_tools_to_phone_fixture_flow(
         assert db.execute("SELECT count(*) FROM shadow_decision").fetchone()[0] == 0
 
 
-def test_selection_guard_budget_cooldown_and_recovery_are_recorded(
+def test_selection_guard_cooldown_and_recovery_are_recorded(
     engine, tmp_path, monkeypatch
 ):
     from app.engine import stock_watch
-    from stock_watch_common import POLICY
 
     selection = {"symbols": ["NBIS"], "revision": 1}
     mail = []
@@ -502,12 +501,73 @@ def test_selection_guard_budget_cooldown_and_recovery_are_recorded(
     assert (
         len(mail) == 1 and w.store.records("stock_status")[-1]["reason"] == "cooldown"
     )
-    monkeypatch.setitem(POLICY, "max_per_session", 1)
-    w.send(SimpleNamespace(engine=engine), NOW.date())
-    assert (
-        len(mail) == 1
-        and w.store.records("stock_status")[-1]["reason"] == "wake_budget"
-    )
+
+
+def test_early_wakes_cannot_exhaust_late_selected_tickers(engine, tmp_path, monkeypatch):
+    from app.engine import stock_watch
+
+    symbols = ["NBIS", "AAPL", "AMD", "MRVL", "MU", "CRDO"]
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings",
+                        lambda _: {"symbols": symbols, "revision": 2})
+    now = NOW
+    sent = []
+    w = watcher(tmp_path, clock=lambda: now, mail=lambda subject, _: sent.append(subject))
+    scanner = SimpleNamespace(engine=engine)
+    # More than four wakes for each early ticker, and fifteen shared wakes.
+    for slot in range(5):
+        now = NOW + timedelta(minutes=31 * slot)
+        for symbol in symbols[:3]:
+            w.capture(alert(now, symbol=symbol, selected_symbols=symbols))
+        w.send(scanner, now.date())
+    assert len(sent) == 15
+    now = NOW.replace(hour=19, minute=55)  # 15:55 ET, after the paper cutoff.
+    for symbol in symbols[3:]:
+        w.capture(alert(now, symbol=symbol, selected_symbols=symbols))
+    w.send(scanner, now.date())
+    assert len(sent) == 18
+    assert all(any(f"STOCK {symbol} " in subject for subject in sent)
+               for symbol in symbols[3:])
+    # The same store after a restart must not resend these accepted inputs.
+    restarted = StockWatcher(w.store, w.directory, w.outbox, clock=lambda: now,
+                             mail=lambda *_: pytest.fail("duplicate wake"))
+    restarted.send(scanner, now.date())
+    assert not any(s["reason"] == "wake_budget" for s in w.store.records("stock_status"))
+
+
+def test_observations_record_actual_selected_checks_gaps_and_close(engine, tmp_path, monkeypatch):
+    from app.engine import stock_watch
+
+    now = NOW.replace(hour=19, minute=58)
+    symbols = ["MRVL", "MU", "CRDO"]
+    monkeypatch.setattr(stock_watch.scanner_settings, "read_settings",
+                        lambda _: {"symbols": symbols, "revision": 3})
+    scanner = SimpleNamespace(engine=engine, _pass_minutes={}, _daily_atr=lambda *_: 2.0)
+
+    def read(symbol, day):
+        if symbol == "MU":
+            raise OSError("source unavailable")
+        bars = minutes(now)
+        scanner._pass_minutes[symbol] = (bars, now.timestamp() - (300 if symbol == "CRDO" else 0))
+        return bars
+
+    scanner._minutes = read
+    w = watcher(tmp_path, clock=lambda: now)
+    session = SimpleNamespace(open_at=now.replace(hour=13, minute=30).timestamp(),
+                              close_at=now.replace(hour=20, minute=0).timestamp())
+    w.observe(scanner, now.date(), session)
+    w.observe(scanner, now.date(), session)
+    rows = w.store.records("stock_observation")
+    assert {r["symbol"]: r["outcome"] for r in rows} == {
+        "MRVL": "captured", "MU": "source_unavailable", "CRDO": "stale_source"}
+    assert all(r["selection_revision"] == 3 and r["checked_at"] == r["started_at"] for r in rows)
+    now += timedelta(minutes=1)
+    scanner._pass_minutes.clear()
+    w.observe(scanner, now.date(), session)
+    assert len(w.store.records("stock_observation")) == 6
+    now += timedelta(minutes=1)  # At the actual exchange close, no extra pass.
+    scanner._pass_minutes.clear()
+    w.observe(scanner, now.date(), session)
+    assert len(w.store.records("stock_observation")) == 6
 
 
 def test_monitor_runs_after_paper_cutoff_and_uses_only_selected_symbols(

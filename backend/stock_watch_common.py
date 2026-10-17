@@ -14,15 +14,13 @@ from market_watch_common import parse_time, verify
 FORMAT = "stock-alert-v1"
 REVIEW_FORMAT = "stock-review-v1"
 POLICY = {
-    "version": "stock-watch-v1",
+    "version": "stock-watch-v2",
     "window_minutes": 15,
     "move_fraction": 0.01,
     "move_atr": 0.35,
     "reversal_fraction": 0.03,
     "reversal_atr": 0.5,
     "cooldown_minutes": 30,
-    "max_per_symbol": 4,
-    "max_per_session": 15,
     "freshness_seconds": 180,
     "expiry_minutes": 10,
 }
