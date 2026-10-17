@@ -283,6 +283,17 @@ causal cutoff candles, chronology, supported families/features, fixed geometry,
 unknown option eligibility, quotas and discovery date bound (through September
 2024). Invalid input rolls back; exact retries preserve the original batch.
 
+For an explicitly authorized prompt comparison, `prepare-opportunities` also
+accepts paired `--assessment-file` and `--assessment-version` arguments. The
+owned 0600 UTF-8 rubric (at most 16,000 characters) is appended to the unchanged
+practice-boundary prompt. Its distinct version and exact text are committed to
+the new run identity and manifest before any choice. Omitting both preserves
+existing default identities and prompts. A changed rubric/version requires a
+fresh actor; existing assignments cannot be repointed. Receipts retain the
+frozen prompt version and policy hash. This changes no score, execution rule,
+grant, sequential-reveal gate or production prompt; importing and activating
+each comparison assignment remain separate authorized operator actions.
+
 The new assignment uses a **fresh actor** and the explicit `opportunity_feed`
 subtype alongside the existing scanner/historical/market grants, with no
 journal or ordinary writer/replay grant. It permits at most 18 fixed factory
