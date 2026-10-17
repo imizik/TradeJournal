@@ -13,6 +13,11 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
+**October 17 bounded addition:** [Advisor forecast preparation](advisor-forecast-preparation.md)
+is owner-selected for a synthetic dry run and disabled non-model infrastructure.
+Hosted Jo stays subscription-only; no real forecast/task activation is authorized
+before dry-run confirmation. Production Jo and Shadow are unchanged.
+
 Checkpoint: October 16, 2026, through #331; selected-stock awareness merged (#327) with its flag off by default, and market watch and Jo's historical replay gained rows. Other rows retain their individually stated evidence dates.
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Move

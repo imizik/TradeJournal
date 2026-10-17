@@ -29,6 +29,11 @@ slice; the detailed contracts continue to own implementation and acceptance.
    **Update October 12, 2026:** Isaac declared the advisor done and moved the
    priority to the shadow trader ([shadow S1](agent/shadow-s1-contract.md));
    coach-in-workspace waits behind it.
+   **Bounded exception October 17, 2026:** Isaac selected
+   [prospective advisor forecast preparation](agent/advisor-forecast-preparation.md):
+   subscription-only hosted Jo, non-model infrastructure and synthetic dry run.
+   No live forecasts before dry-run confirmation; Shadow and production remain
+   unchanged. This does not reopen unrelated advisor features.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
    now merged), close its remaining activation/operational gates, and observe one
