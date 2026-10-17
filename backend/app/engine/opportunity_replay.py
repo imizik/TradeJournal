@@ -359,26 +359,43 @@ def validate(bundle):
     return source, private
 
 
-def prepare(db, bundle, identifier):
+def prepare(db, bundle, identifier, *, assessment_text=None, assessment_version=None):
     from sqlmodel import select
     from app.engine import access, scanner_replay as replay
     from app.models import AccessPrincipal, DecisionContext, JobRun, PracticeRun
 
     source, private = validate(bundle)
+    prompt, prompt_version = PROMPT, VERSION
+    custom_assessment = assessment_text is not None or assessment_version is not None
+    if custom_assessment:
+        if (
+            not isinstance(assessment_text, str)
+            or not 1 <= len(assessment_text.strip()) <= 16000
+            or len(assessment_text) > 16000
+            or not isinstance(assessment_version, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", assessment_version)
+            or assessment_version == VERSION
+        ):
+            raise ValueError("A bounded assessment and distinct version are required together")
+        prompt += "\n\nFrozen assessment rubric (within the practice boundaries above):\n" + assessment_text
+        prompt_version = assessment_version
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == "owner":
         raise ValueError("Fresh isolated actor required")
     if stamp(source["frozen_at"]).astimezone(timezone.utc) > access.now().replace(
         tzinfo=timezone.utc
     ):
         raise ValueError("Future freeze receipt")
-    identity = digest(
-        {
-            "actor": identifier,
-            "input": digest(bundle),
-            "policy": POLICY,
-            "prompt": PROMPT,
-        }
-    )
+    identity_input = {
+        "actor": identifier,
+        "input": digest(bundle),
+        "policy": POLICY,
+        "prompt": prompt,
+    }
+    # Preserve every original default-run identity; custom rubrics bind both
+    # their exact text and version before any card can be served.
+    if custom_assessment:
+        identity_input["assessment_version"] = prompt_version
+    identity = digest(identity_input)
     day = source["sessions"][0]
     run_id = uuid.uuid5(uuid.NAMESPACE_URL, replay.PREFIX + identity)
     manifest = {
@@ -390,8 +407,8 @@ def prepare(db, bundle, identifier):
         "phases": {day: "practice"},
         "seed": source["seed"],
         "exam_count": 0,
-        "prompt_text": PROMPT,
-        "prompt_version": VERSION,
+        "prompt_text": prompt,
+        "prompt_version": prompt_version,
         "scoring_policy": POLICY,
         "input_sha256": digest(bundle),
         "source_manifest_sha256": digest(source),
