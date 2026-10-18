@@ -2,8 +2,10 @@
   "files": {
     "backend/cloud_mcp_advisor_common.py": "fe809cd67a1665f113c29770ce6c85ff35876281a4ce31ac531e192fc1de2aa2",
     "backend/cloud_mcp_d0.py": "69ca2c1f51ef22f218463be433b69fb05f34fc6435fd4077c07c6faecd913a14",
+    "backend/cloud_mcp_d0_refresh.py": "d42ee78527b59f1546985eb6a134d6dde3fbe2039ac3a853601c6c42b7c7df7e",
     "backend/cloud_mcp_forecast.py": "36c9695716ba6922e57f1c6fdbd7acda990f28ce2bb9679822691af8edc5273e",
-    "deploy/advisor_forecast_prepare.py": "5024977a1ddaaf99f0544ddac90345224980b70f738d76ba038adad13713c2bd",
+    "deploy/advisor_forecast_prepare.py": "749b44095f178bac281266e034ecac19f3493dbc4acca2a5580da84c765cfb4e",
+    "deploy/advisor_forecast_upgrade.py": "68e53b0ad83de17c8de3b8321791a7052418c735d31b21e87b480babdcbbf2f9",
     "research/advisor-forecast/prompt.txt": "60875c4f8b77e44d948bb1fe3dce7479102c73e4a73b019a0d3403eeccf1c19c",
     "research/advisor-forecast/spec.json": "8c7095939679434883385a002c05d731dfe5771a700c2fc901635e3ca9764864",
     "scripts/advisor_forecast.py": "134c4b6a5bf80bd56bc37b0fff58e01efcb1c703787fd729a58e52468ac55617",

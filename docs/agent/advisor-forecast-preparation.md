@@ -130,8 +130,35 @@ touches the app release, DB, production units, credentials or scanner settings.
 The only credential file is an empty private market-data placeholder. There is
 no approval file, calendar registration or evaluation timing selection yet.
 This fresh installer deliberately refuses the existing v1 installation.
-A reviewed side-by-side upgrade and separate MCP installation remain necessary;
-never remove v1 evidence or bypass its collision checks to run this installer.
+The separate [upgrade](../../deploy/advisor_forecast_upgrade.py) recognizes only
+the exact disabled v1 manifest and six unit hashes. It preserves v1 sources,
+receipts and original units, copies v2 beside it, and installs the deadline
+collector plus disabled MCP socket/service and public-key refresh timer. It
+refuses existing activation records, unexpected paths, units or identities.
+Never remove v1 evidence or bypass its collision checks to run the fresh installer.
+
+The upgrade uses a separate venv from an explicitly fingerprinted offline
+wheelhouse in an existing reviewed Ubuntu release. It installs only MCP/JWT/HTTP
+dependencies, not the application package or inference SDKs. The serving unit
+has no IP network, credentials or production mounts: it can read only its code,
+binding, public keys and frozen snapshots, and write only its receipt directory.
+An independent non-login identity publishes public verification keys every fifteen
+minutes; expired keys deny access. Both units remain inactive after installation.
+No proxy, credential, approval, registration, binding or hosted task is created
+by the upgrade. On unit-validation failure it restores only the old study units;
+partial new files are retained for inspection, never automatically adopted.
+
+Activation still requires fresh installed-identity read/write/network refusal
+proof, frozen source hashes, current public keys, and a binding restricted to the
+separate client/subject and exact two development dates. Install only the rendered
+forecast hostname stanza, validate the complete Caddy configuration, and reload
+using its existing supported mechanism while preserving all other routes. Compare
+production unit hashes and long-running PIDs before/after; distinguish independent
+production deployments from study changes. Verify public metadata, unauthenticated
+401, unknown-route 404, and real subscription connector profile access before
+enabling the four development collection timers. No evaluation approval or timing
+selection is written at this stage. Keep the task schedule and platform settings
+in the private activation record, separate from Jo's self-reported metadata.
 
 Before activation, verify the real scoped connector and server deadline, record
 actual Dots task settings, provision existing SIP credentials, and register the

@@ -19,7 +19,8 @@ BASELINES = Path("/var/lib/tj-forecast-baselines")
 RECEIPTS = Path("/var/lib/tj-forecast-receipts")
 FILES = ("scripts/advisor_forecast.py", "scripts/advisor_forecast_runtime.py", "scripts/advisor_forecast_exchange.py",
          "research/advisor-forecast/spec.json", "research/advisor-forecast/prompt.txt", "deploy/advisor_forecast_prepare.py",
-         "backend/cloud_mcp_forecast.py", "backend/cloud_mcp_d0.py", "backend/cloud_mcp_advisor_common.py")
+         "backend/cloud_mcp_forecast.py", "backend/cloud_mcp_d0.py", "backend/cloud_mcp_advisor_common.py",
+         "backend/cloud_mcp_d0_refresh.py", "deploy/advisor_forecast_upgrade.py")
 ACTIONS = ("history", "snapshot", "baseline", "outcomes")
 
 
@@ -96,7 +97,7 @@ def check_source(source):
     return manifest
 
 
-def install(source):
+def host_guard():
     current = datetime.now(ZoneInfo("America/New_York"))
     if os.geteuid() != 0 or socket.gethostname() != "vps-c6302cfc":
         raise ValueError("explicit host/root required")
@@ -109,6 +110,10 @@ def install(source):
         raise ValueError("512 MiB memory reserve required")
     if subprocess.check_output(["timedatectl", "show", "-p", "NTPSynchronized", "--value"], text=True).strip() != "yes":
         raise ValueError("synchronized clock required")
+
+
+def install(source):
+    host_guard()
     check_source(source)
     if any(p.exists() or p.is_symlink() for p in (RUNTIME.parent, CONFIG, STATE, OUTCOMES, RECEIPTS, BASELINES)):
         raise ValueError("existing study paths; refuse overwrite")
