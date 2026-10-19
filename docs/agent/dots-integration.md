@@ -245,8 +245,8 @@ positions, actual saved watchlist/levels, latest ten captures within 30 days,
 up to thirty active memory revisions, and a prior saved brief summary matching
 the current account scope and Check profile among the latest thirty records. Account
 names/IDs, fill source keys, images/audio/transcripts and Webull accounts are
-excluded. Counts/text and UTF-8 byte totals are bounded and omissions/truncation are disclosed. No quote/news or
-option-risk fetch is performed; journal freshness remains unverified. Prior
+excluded. Counts/text and UTF-8 byte totals are bounded and omissions/truncation are disclosed. The morning publisher adds bounded stock-trade observations and headlines through
+the existing Alpaca adapters; option-risk data and journal freshness remain unverified. Prior
 briefs, memories, captures and saved levels are interpretations, not market facts.
 
 `jo_morning_context()` retrieves only today's published pointer through the same
@@ -308,6 +308,41 @@ After this change is merged and released, refresh the existing Check v4 tool
 metadata so Jo receives the revised writing instructions. This source change does
 not update the live task, regenerate historical briefs, fetch fresh market context
 or establish that an actual Jo-generated brief meets the new writing targets.
+
+### Fresh market context — implementation, not yet activated
+
+The morning publisher makes at most two existing-provider reads when creating a
+new packet: one Alpaca stock snapshot request and one fast news request. Both use
+the existing short-timeout/no-retry adapters. Only symbol names leave the app;
+account identifiers, quantities, costs and memories are never sent to providers.
+The scope is at most 20 unique stock symbols, approved holdings first and then
+the saved watchlist. Unsupported/omitted symbols are disclosed. No replacement
+watchlist, new service, credentials, paid inference or alternate provider is added.
+
+Each accepted last trade retains its provider observation time separately from
+actual retrieval time, feed name and stock-only/unadjusted basis. Observations
+after actual retrieval, invalid prices and missing timestamps are omitted.
+Trades older than ten minutes are labelled stale, including prior-session trades
+returned by a newly fetched snapshot. IEX is not consolidated coverage. No return,
+P&L, split-adjusted daily change, option quote or executable bid/ask is inferred.
+
+Headlines are at most eight relevant, deduplicated HTTPS articles from the prior
+36 hours, retaining publication time and source URL. Future/undated/out-of-window
+articles are excluded; article claims are not independent verification. Empty or
+failed results never mean no catalysts. Earnings and macro-calendar completeness
+remain gaps. Price and news failures degrade independently and do not prevent a
+saved-context briefing. No network call occurs on page reads or when republishing
+an existing packet after a restart; the saved packet and expiry remain immutable.
+
+Deploying this slice with the existing enabled morning configuration automatically
+adds these reads to the next new packet; there is no extra activation flag.
+Before deploying it, replace the live task's old “No live quote/news
+fetch is included” sentence with: “Use only the returned frozen market evidence,
+when present. Report source times/feed and stale or missing observations. A recent
+retrieval is not a current price, and missing headlines do not mean no catalysts.”
+Keep account scope, schedule, authentication and Shadow instructions unchanged.
+Verify actual provider coverage and a natural Jo brief after release; fixture
+coverage alone does not establish useful premarket prices or news availability.
 
 ### October 19 activation evidence
 
