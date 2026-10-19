@@ -15,6 +15,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from urllib.parse import urlsplit
 
 import advisor_forecast_prepare as prep
@@ -26,6 +27,7 @@ UNITS = Path("/etc/systemd/system")
 KEY_USER = "tj-forecast-keys"
 EXCHANGE_USER = "tj-forecast-exchange"
 OLD_MANIFEST_SHA = "9a703484a46e0a82fcac113cda3b5136ff840bd5feb43f438f153fb503395a02"
+V2_MANIFEST_SHA = "59b5fde483dc68efedbedef5992211edf31c0ca2cb94530aece5300f889a486a"
 OLD_UNITS = {
     "tj-forecast-history.timer": "ce23992157192d1a4f1bb02949c3e3e62d65958e9115fc00a25a4f850b0111fb",
     "tj-forecast-history.service": "9b7ed5bed9d67340531c3de6d6a8a59b025e2d57548cf1edfeee473121806732",
@@ -312,10 +314,114 @@ def install(source, wheels, expected_wheel_hash):
         "credentials": "unchanged", "model_calls": 0}))
 
 
+def replace_bytes(path, body, mode):
+    owner = path.stat()
+    fd, temp = tempfile.mkstemp(prefix=".revision-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            os.fchmod(handle.fileno(), mode)
+            os.fchown(handle.fileno(), owner.st_uid, owner.st_gid)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def revise_provider(source):
+    """Revise only the exact unstarted v2 study; preserve all old evidence/config."""
+    prep.host_guard()
+    prep.check_source(source)
+    runtime = prep.RUNTIME
+    owned(runtime, directory=True)
+    manifest_path = runtime / "research/advisor-forecast/manifest.json"
+    owned(manifest_path)
+    if sha(manifest_path) != V2_MANIFEST_SHA:
+        raise ValueError("unrecognized installed v2 manifest")
+    old = json.loads(manifest_path.read_text())
+    if set(old["files"]) != set(prep.FILES):
+        raise ValueError("installed inventory mismatch")
+    for name, expected in old["files"].items():
+        path = runtime / name
+        owned(path)
+        if ".." in Path(name).parts or not path.is_relative_to(runtime) or sha(path) != expected:
+            raise ValueError("installed bundle changed")
+    for action in prep.ACTIONS:
+        inactive(f"tj-forecast-{action}.timer", disabled=True)
+        inactive(f"tj-forecast-{action}.service")
+        for kind, render in (("service", prep.service), ("timer", prep.timer)):
+            unit = UNITS / f"tj-forecast-{action}.{kind}"
+            owned(unit)
+            if unit.read_text() != render(action):
+                raise ValueError("collector unit changed")
+    for name, content in mcp_units().items():
+        owned(UNITS / name)
+        if (UNITS / name).read_text() != content:
+            raise ValueError("MCP unit changed")
+    for name in ("approval.json", "registration.json", "evaluation-timing.json"):
+        absent(prep.CONFIG / name)
+    for root in (prep.STATE / "history", prep.STATE / "snapshots", prep.BASELINES, prep.OUTCOMES, prep.RECEIPTS):
+        # Existing invented 2098 fixtures are retained. No real session may exist.
+        if root.exists() and any(p.name.startswith("20") and not p.name.startswith("2098-") for p in root.iterdir()):
+            raise ValueError("real study evidence already exists")
+    binding_path = MCP_CONFIG / "config.json"
+    owned(binding_path)
+    binding_body = binding_path.read_bytes()
+    binding = json.loads(binding_body)
+    old_spec = json.loads((runtime / "research/advisor-forecast/spec.json").read_text())
+    new_spec = json.loads((source / "research/advisor-forecast/spec.json").read_text())
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if (binding["expected_spec_hash"] != digest(old_spec)
+            or binding["spec_file"] != str(runtime / "research/advisor-forecast/spec.json")
+            or new_spec["protocol"] != "advisor-forecast-v3-tradier"):
+        raise ValueError("unexpected study binding or new protocol")
+    active = []
+    for unit in ("tj-forecast-mcp.socket", "tj-forecast-keys.timer"):
+        state = subprocess.check_output(["systemctl", "is-active", unit], text=True).strip()
+        if state != "active":
+            raise ValueError("expected active isolated connection")
+        active.append(unit)
+    backup = runtime / "before-tradier"
+    absent(backup)
+    backup.mkdir(mode=0o700)
+    names = (*prep.FILES, "research/advisor-forecast/manifest.json")
+    for name in names:
+        target = backup / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(runtime / name, target)
+    (backup / "binding.json").write_bytes(binding_body)
+    binding_mode = stat.S_IMODE(binding_path.stat().st_mode)
+    subprocess.run(["systemctl", "stop", *active, "tj-forecast-mcp.service", "tj-forecast-keys.service"], check=True)
+    try:
+        for name in names:
+            replace_bytes(runtime / name, (source / name).read_bytes(), 0o644)
+        prep.check_source(runtime)
+        binding["expected_spec_hash"] = digest(new_spec)
+        replace_bytes(binding_path, (json.dumps(binding, indent=2) + "\n").encode(), binding_mode)
+    except Exception:
+        for name in names:
+            replace_bytes(runtime / name, (backup / name).read_bytes(), 0o644)
+        replace_bytes(binding_path, binding_body, binding_mode)
+        subprocess.run(["systemctl", "start", *active], check=True)
+        raise
+    subprocess.run(["systemctl", "start", *active], check=True)
+    print(json.dumps({"revised": str(runtime), "old_bundle": str(backup),
+                      "data_timers": "disabled", "credentials": "unchanged", "activation": False}))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--wheels", type=Path, required=True)
-    parser.add_argument("--wheelhouse-sha256", required=True)
+    parser.add_argument("--wheels", type=Path)
+    parser.add_argument("--wheelhouse-sha256")
+    parser.add_argument("--revise-v2-provider", action="store_true")
     args = parser.parse_args()
-    install(args.source.resolve(), args.wheels, args.wheelhouse_sha256)
+    if args.revise_v2_provider:
+        revise_provider(args.source.resolve())
+    elif args.wheels and args.wheelhouse_sha256:
+        install(args.source.resolve(), args.wheels, args.wheelhouse_sha256)
+    else:
+        parser.error("fresh upgrade requires --wheels and --wheelhouse-sha256")

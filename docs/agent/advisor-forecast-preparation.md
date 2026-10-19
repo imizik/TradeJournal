@@ -9,8 +9,10 @@ checks and factory remain unchanged. Evaluation activation is not authorized.
 The owner replaced the task-scoped web/tool restriction on October 17 before
 any real forecast. The v2 protocol uses deadline-time price baselines and reports
 unrestricted browsing as a limitation. No v1 forecast or score was used to make
-this revision. The existing VPS v1 installation remains disabled until a reviewed
-upgrade and connection activation; local v2 source is not proof of deployment.
+this revision. The isolated v2 connection was installed and its real subscription get_profile
+verified. Collection remains disabled. Before any live forecast, the owner selected
+existing Tradier access on October 18; v3 changes only the data adapter and its
+provenance. No purchase, new brokerage login or inference API is involved.
 
 ## Frozen research rules
 
@@ -23,7 +25,8 @@ is not evidence that hosted Jo can run this protocol reliably.
   cases and 140 evaluation cases across two then twenty consecutive sessions.
   Earnings days and sessions closing at or after 11:00 ET are included. The
   indices overlap the stocks; 140 cases are not 140 independent observations.
-- Alpaca SIP raw one-minute bars, no fallback. Bars are start-labelled: the
+- Tradier production consolidated one-minute OHLCV from `/v1/markets/timesales`,
+  `interval=1min`, `session_filter=open`, no fallback or client adjustment. Bars are start-labelled: the
   09:58 bar is the last one completed by 09:59. Snapshot collection starts at
   10:00, must finish by 10:00:30, and hashes the stored packet. No later bar can
   enter it. Historical inputs are fetched before 09:55 and saved with provenance.
@@ -108,8 +111,8 @@ The standalone collector/scorer and forecast exchange have no application
 database imports. Forecast tools use a **separate OAuth audience and scopes**
 (`/forecast/mcp`, `forecast:profile/read/write`), immutable subject/spec binding,
 offline public-key verification, no data-provider credentials and no result
-reveal. This adapter is prepared and fixture-tested; it is **not bound to an
-existing connector or exposed on the VPS**. Existing practice credentials do
+reveal. The separate adapter is installed on the VPS and its actual scoped
+subscription connector profile has been verified. Existing practice credentials do
 not silently receive new tools. Actual connection/identity and deadline
 enforcement must be reviewed before activation; no production connection is
 repointed by this build.
@@ -121,8 +124,8 @@ isolated state, and installs four **disabled/inactive** timers: history at
 deadline baseline at 10:02/10:07, and outcome capture at 11:05. Timezone is
 America/New_York; missed boot-time runs are not replayed. Outcome and
 deadline-baseline storage are unavailable to the forecast-serving user.
-CPU is capped at 20%, memory at 128 MiB per job. The adapter source is staged
-but no MCP service/socket, public route, issuer grant or Jo schedule is installed.
+CPU is capped at 20%, memory at 128 MiB per job. The separate MCP socket, public route and public-key timer are installed.
+Production grants remain excluded. Hosted Jo scheduling is a separate activation gate.
 
 Installation refuses the wrong host, market hours, existing paths/accounts,
 unsynchronized clock, low disk/memory and source digest mismatch. It never
@@ -143,7 +146,8 @@ dependencies, not the application package or inference SDKs. The serving unit
 has no IP network, credentials or production mounts: it can read only its code,
 binding, public keys and frozen snapshots, and write only its receipt directory.
 An independent non-login identity publishes public verification keys every fifteen
-minutes; expired keys deny access. Both units remain inactive after installation.
+minutes; expired keys deny access. The installer leaves both units inactive; the approved connection activation
+subsequently enabled only the socket and public-key timer.
 No proxy, credential, approval, registration, binding or hosted task is created
 by the upgrade. On unit-validation failure it restores only the old study units;
 partial new files are retained for inspection, never automatically adopted.
@@ -161,7 +165,7 @@ selection is written at this stage. Keep the task schedule and platform settings
 in the private activation record, separate from Jo's self-reported metadata.
 
 Before activation, verify the real scoped connector and server deadline, record
-actual Dots task settings, provision existing SIP credentials, and register the
+actual Dots task settings, provision only the existing Tradier token into the private study credential file, and register the
 exact future calendar from Alpaca. Development-only approval blocks evaluation
 collection, and the MCP binding permits only the two named development dates.
 The base spec is bound by hash; the adapter derives the same zero-offset
@@ -175,6 +179,39 @@ Rollback affects only `tj-forecast-*` units and `/opt/tj-forecast`,
 preserve all evidence, then remove only the introduced unit files if uninstalling.
 Do not remove production services or data. No DB rollback is needed because
 this installation has no DB connection or migrations.
+
+## Tradier revision before the first development session
+
+All historical scale/range inputs, 10:00 snapshots, 10:02 deadline baselines and
+11:05 outcome captures use the same Tradier production endpoint. Alpaca supplies
+only the already-defined market calendar. Tradier `time` labels are interpreted
+in America/New_York, including DST; explicit offsets are converted. Returned
+OHLCV is used as reported, without a claim of historical revision or adjustment
+control. No alternative provider or filled-in minute is accepted.
+
+A read-only access check found every required minute in all seven tickers across
+the prior twenty sessions (September 21–October 16): 140 complete windows. This
+is history coverage, not evidence of publication latency at 10:00 or 10:02.
+The two development sessions must establish operational timing; no forecast
+performance is inspected. Tradier and hosted Jo latency may still block the study.
+
+History uses seven date-range requests, filters to the exact registered prior
+sessions and 09:30–10:59 window, and fails on any missing minute. Each current
+capture uses seven requests with at most four in flight and a ten-second socket
+timeout. That is 28 requests per session, sharing the existing account budget;
+429, transport errors and malformed responses fail without retries. The unchanged
+30-second capture deadline is enforced after all responses arrive. The serving
+process cannot access the token, and no orders/account endpoint is called.
+
+`advisor_forecast_upgrade.py --revise-v2-provider` recognizes only the exact
+reviewed unstarted v2 bundle and unit contents, refuses collection activation or
+real study evidence, and preserves old source and binding in `before-tradier`.
+It briefly stops only the isolated MCP/key units, atomically replaces checked
+bundle files and the spec hash in the same binding, and restores the connection.
+Failure during replacement restores the old bundle/binding. Data timers remain
+disabled; credential provisioning, future-date registration and hosted task
+creation are separate activation steps. All performance/missing-data gates stay
+unchanged. No evaluation approval is created.
 
 ## Verification
 

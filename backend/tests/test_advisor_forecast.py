@@ -283,8 +283,8 @@ def test_model_credentials_and_missing_approval_block_network(monkeypatch, spec)
     network.assert_not_called()
 
 
-def test_provider_is_fixed_sip_bounded_and_no_inference_endpoint():
-    assert runtime.DATA_URL == "https://data.alpaca.markets/v2/stocks/bars"
+def test_provider_is_fixed_tradier_bounded_and_no_inference_endpoint():
+    assert runtime.DATA_URL == "https://api.tradier.com/v1/markets/timesales"
     source = Path(runtime.__file__).read_text()
     assert "api.anthropic.com" not in source and "api.openai.com" not in source
     assert "subprocess" not in source

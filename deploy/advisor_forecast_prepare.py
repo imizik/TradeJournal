@@ -143,7 +143,7 @@ def install(source):
     CONFIG.mkdir(mode=0o755)
     fd = os.open(CONFIG / "data.env", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as handle:
-        handle.write("# Existing authorized market-data credentials only; provision after review.\nALPACA_API_KEY=\nALPACA_API_SECRET=\n")
+        handle.write("# Existing authorized market-data credentials only; provision after review.\nTRADIER_API_KEY=\n")
     for path, user, mode in ((STATE, users[0], 0o750), (RECEIPTS, users[1], 0o750), (OUTCOMES, users[2], 0o700)):
         path.mkdir(mode=mode)
         identity = pwd.getpwnam(user)

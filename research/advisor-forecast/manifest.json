@@ -4,13 +4,13 @@
     "backend/cloud_mcp_d0.py": "69ca2c1f51ef22f218463be433b69fb05f34fc6435fd4077c07c6faecd913a14",
     "backend/cloud_mcp_d0_refresh.py": "d42ee78527b59f1546985eb6a134d6dde3fbe2039ac3a853601c6c42b7c7df7e",
     "backend/cloud_mcp_forecast.py": "36c9695716ba6922e57f1c6fdbd7acda990f28ce2bb9679822691af8edc5273e",
-    "deploy/advisor_forecast_prepare.py": "749b44095f178bac281266e034ecac19f3493dbc4acca2a5580da84c765cfb4e",
-    "deploy/advisor_forecast_upgrade.py": "68e53b0ad83de17c8de3b8321791a7052418c735d31b21e87b480babdcbbf2f9",
-    "research/advisor-forecast/prompt.txt": "60875c4f8b77e44d948bb1fe3dce7479102c73e4a73b019a0d3403eeccf1c19c",
-    "research/advisor-forecast/spec.json": "8c7095939679434883385a002c05d731dfe5771a700c2fc901635e3ca9764864",
+    "deploy/advisor_forecast_prepare.py": "2400bc267f05c4985c9d0f68e23eef48a39720377ede0d63fe5cf39945569ebf",
+    "deploy/advisor_forecast_upgrade.py": "6e9f62ab45c2082421d161ba2d9ed568c4e2372b049b1f2b7b95b1de913c99c3",
+    "research/advisor-forecast/prompt.txt": "71db21b0238d8d94ed11c37115cb2e08cb0fe36e0bf5ca5e0afadaaf560055f9",
+    "research/advisor-forecast/spec.json": "a805e187dbb44e1ab968cdcb3470a0d1702d841e355b1048dec348bc4e3ee8be",
     "scripts/advisor_forecast.py": "134c4b6a5bf80bd56bc37b0fff58e01efcb1c703787fd729a58e52468ac55617",
     "scripts/advisor_forecast_exchange.py": "1423ef494827ae9a832f04740811f92b36e0084f51b5866f428beba295f9ab1a",
-    "scripts/advisor_forecast_runtime.py": "2569401bb65eeee89424d9c84b18fa455adb78d1dc60a0597305b38c928403ee"
+    "scripts/advisor_forecast_runtime.py": "b8acdf1187c646ce5a74d7e97d7d724f35b7402fafaa194dcf80e1dd8825491d"
   },
-  "protocol": "advisor-forecast-v2-deadline-baselines"
+  "protocol": "advisor-forecast-v3-tradier"
 }

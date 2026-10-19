@@ -1,6 +1,7 @@
 """Upgrade refusal and sandbox contracts; all fixtures are local and invented."""
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -79,3 +80,60 @@ def test_proxy_exposes_only_forecast_paths_on_explicit_public_bind():
                          ("https://study.example:443/forecast/mcp", "8.8.8.8")):
         with pytest.raises(ValueError):
             upgrade.proxy_stanza(url, address)
+
+
+def test_provider_revision_rolls_back_bundle_and_binding_on_write_failure(tmp_path, monkeypatch):
+    runtime, source, config, units = [tmp_path / n for n in ("runtime", "source", "config", "units")]
+    names = ("research/advisor-forecast/spec.json", "script.py")
+    for root in (runtime, source):
+        (root / "research/advisor-forecast").mkdir(parents=True)
+    config.mkdir()
+    units.mkdir()
+    old_spec, new_spec = {"protocol": "old"}, {"protocol": "advisor-forecast-v3-tradier"}
+    for root, spec in ((runtime, old_spec), (source, new_spec)):
+        (root / names[0]).write_text(json.dumps(spec))
+        (root / names[1]).write_text(root.name)
+    manifest = {"files": {n: upgrade.sha(runtime / n) for n in names}}
+    manifest_name = "research/advisor-forecast/manifest.json"
+    (runtime / manifest_name).write_text(json.dumps(manifest))
+    (source / manifest_name).write_text('{"new": true}')
+    old_hash = hashlib.sha256(json.dumps(old_spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    binding = {"expected_spec_hash": old_hash, "spec_file": str(runtime / names[0]), "client_id": "unchanged"}
+    (config / "config.json").write_text(json.dumps(binding))
+    before = {n: (runtime / n).read_bytes() for n in (*names, manifest_name)}
+    monkeypatch.setattr(prep, "RUNTIME", runtime)
+    monkeypatch.setattr(prep, "FILES", names)
+    monkeypatch.setattr(prep, "CONFIG", tmp_path / "approval")
+    for name in ("STATE", "BASELINES", "OUTCOMES", "RECEIPTS"):
+        monkeypatch.setattr(prep, name, tmp_path / name)
+    monkeypatch.setattr(upgrade, "UNITS", units)
+    monkeypatch.setattr(upgrade, "MCP_CONFIG", config)
+    monkeypatch.setattr(upgrade, "V2_MANIFEST_SHA", upgrade.sha(runtime / manifest_name))
+    monkeypatch.setattr(prep, "host_guard", lambda: None)
+    monkeypatch.setattr(prep, "check_source", lambda _: None)
+    monkeypatch.setattr(upgrade, "owned", lambda *a, **k: None)
+    monkeypatch.setattr(upgrade, "inactive", lambda *a, **k: None)
+    for action in prep.ACTIONS:
+        for kind, render in (("service", prep.service), ("timer", prep.timer)):
+            (units / f"tj-forecast-{action}.{kind}").write_text(render(action))
+    for name, body in upgrade.mcp_units().items():
+        (units / name).write_text(body)
+    run = Mock()
+    monkeypatch.setattr(upgrade.subprocess, "run", run)
+    monkeypatch.setattr(upgrade.subprocess, "check_output", lambda *a, **k: "active\n")
+    actual_replace = upgrade.replace_bytes
+    failed = False
+    def replacement(path, body, mode):
+        nonlocal failed
+        if path == config / "config.json" and not failed:
+            failed = True
+            raise OSError("invented disk error")
+        actual_replace(path, body, mode)
+    monkeypatch.setattr(upgrade, "replace_bytes", replacement)
+    with pytest.raises(OSError, match="disk error"):
+        upgrade.revise_provider(source)
+    assert {n: (runtime / n).read_bytes() for n in before} == before
+    assert json.loads((config / "config.json").read_text()) == binding
+    assert all((runtime / "before-tradier" / n).exists() for n in before)
+    assert run.call_args.args[0] == ["systemctl", "start", "tj-forecast-mcp.socket", "tj-forecast-keys.timer"]
+    assert not any("tradejournal-" in str(call) for call in run.call_args_list)

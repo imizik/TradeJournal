@@ -1,6 +1,6 @@
 {
-  "protocol": "advisor-forecast-v2-deadline-baselines",
-  "status": "DEVELOPMENT_AUTHORIZED_PENDING_CONNECTION",
+  "protocol": "advisor-forecast-v3-tradier",
+  "status": "DEVELOPMENT_AUTHORIZED_PENDING_ACTIVATION",
   "created": "2026-10-17",
   "tickers": [
     "MU",
@@ -13,12 +13,16 @@
   ],
   "timezone": "America/New_York",
   "provider": {
-    "name": "Alpaca",
-    "feed": "sip",
-    "timeframe": "1Min",
-    "adjustment": "raw",
-    "asof": "-",
-    "fallback": false
+    "name": "Tradier",
+    "endpoint": "https://api.tradier.com/v1/markets/timesales",
+    "feed": "production consolidated all-exchange equities",
+    "timeframe": "1min",
+    "session_filter": "open",
+    "adjustment": "provider-reported OHLCV; no client adjustment or cross-provider substitution",
+    "timestamp": "start-labelled time interpreted in America/New_York; explicit offsets converted to that zone",
+    "fallback": false,
+    "request_budget": "7 history range requests plus 7 per snapshot/baseline/outcome; 28 calls per session; at most 4 concurrent, 10s socket timeout, no retries; existing account rate budget shared with production",
+    "history_capture": "One full date-range request per ticker; retain only exact prior-20-session 09:30\u201310:59 windows. Any missing minute fails closed."
   },
   "snapshot": {
     "start": "09:30:00",
@@ -62,7 +66,7 @@
     "maximum_missing_sessions": 3
   },
   "missing_policy": "Any evaluation session with at least one missing, late, invalid or data-missing forecast counts once. More than 3 invalidates and stops this version. No automatic extension/restart; any restart needs a new prospective protocol and owner authorization. All 140 cases remain in participation denominator.",
-  "outcome_policy": "One scheduled capture at 11:05 with bounded transport pagination, no outcome-selection retries. Missing outcomes invalidate final judgment; never silently drop them or interpolate missing bars.",
+  "outcome_policy": "One scheduled capture at 11:05 with bounded seven-ticker transport, no outcome-selection retries. Missing outcomes invalidate final judgment; never silently drop them or interpolate missing bars.",
   "development_policy": "Two plumbing sessions only, no predictive scoring. If either session has a platform-evidenced task start after 10:00:30, choose the preregistered +5 minute schedule before evaluation, without looking at outcomes. Otherwise retain 10:00/10:02. Missing start evidence or missing development delivery blocks evaluation for owner review. No extra development forecasts or automatic CLI fallback. Record the choice once before the first evaluation session.",
   "timing_policy": {
     "allowed_offsets_minutes": [
@@ -99,15 +103,14 @@
   },
   "runtime": {
     "host": "vps-c6302cfc",
-    "mode": "disabled_pending_connection",
+    "mode": "disabled_pending_review_and_schedule",
     "model_calls_authorized": false,
-    "adapter": "VPS non-model collection/scoring and isolated forecast exchange; hosted subscription-only Jo development activation requires verified connection",
+    "adapter": "VPS non-model Tradier collection/scoring and verified isolated forecast exchange; hosted subscription-only Jo activation limited to two development dates",
     "fallback": "Codex subscription CLI only with separate owner approval; not installed or invoked by this preparation"
   },
   "unresolved": [
-    "Bind a new forecast-only OAuth identity/connection without production grants",
-    "Verify existing SIP entitlement without purchase",
-    "Freeze actual task settings and exact future calendar; activate only two development sessions"
+    "Freeze actual hosted Jo task settings and exact future calendar; activate only two development sessions",
+    "Verify live Tradier publication and hosted scheduling latency in development; history coverage is not live-timing proof"
   ],
   "boundaries": [
     "No production services, database, production Jo task, Shadow exchange or pre-trade changes",
@@ -120,7 +123,15 @@
     "capture_seconds": 30,
     "last_bar": "minute starting one minute before submission_deadline",
     "missing_policy": "Missing or invalid deadline baseline for any existing snapshot invalidates judgment; no substitution with earlier baseline or later outcomes",
-    "source": "Independent Alpaca SIP capture with exact completed-minute grid; hashed create-only files; no Jo claims",
+    "source": "Independent Tradier production consolidated minute-bar capture with exact completed-minute grid; hashed create-only files; no Jo claims",
     "availability": "Event-time cutoff, capture within 30 seconds after deadline; not a guarantee of historical as-of revisions or equal news access"
+  },
+  "provider_change": {
+    "authorized": "2026-10-18",
+    "from": "Alpaca live SIP",
+    "to": "Existing Tradier production data access",
+    "reason": "Alpaca existing key lacks recent SIP entitlement. Existing Tradier key returned all 140 prior-session/ticker windows with every required minute. No live forecast or study score informed the change.",
+    "cost": "No purchases, new account or inference API; existing market-data access only",
+    "limits": "Shared provider quota; exact missing-data refusals unchanged. Sunday read-only coverage does not prove live minute publication within the capture windows."
   }
 }
