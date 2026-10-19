@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; Jo OAuth handoff pending | No | Existing Jo/auth reused; shared-context limitation accepted; actual Jo save and first natural morning tracked below |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Actual Jo read → submit → saved receipt → owner UI, Oct 19 manual test | Natural morning/usefulness pending | Existing Jo/auth reused; shared-context limitation accepted; first natural morning still unobserved |
 
 ### Functionality sequence
 
@@ -316,12 +316,30 @@ A manual activation packet was collected and published at **13:33:18 ET on
 October 19** with its actual time and a four-hour expiry. It explicitly identifies
 itself as a late activation test. This marks the personal-context activation
 boundary for subsequent Shadow reviews; independence remains unverified.
-The live owner UI showed the actual packet and explicit missing-brief state.
-Actual Jo attempted the new context read, but ChatGPT reported an expired
-connection after automated reconnect attempts; owner reconnect/consent is the
-current handoff. No Jo-generated briefing has been claimed saved. Natural scheduled delivery,
-cancellation and owner usefulness remain separate acceptance items; this manual
-packet must not be counted as a successful scheduled morning.
+The live owner UI first showed the actual packet and explicit missing-brief state.
+Repeated reconnects initially used a different Auth0 user. Read-only comparison
+of Auth0's successful login subject with the unchanged Check binding identified
+the mismatch; the owner then signed into the existing approved account. No grant
+or identity was broadened to accommodate the wrong user.
+
+Actual Jo read the packet, submitted its own three-priority cited briefing at
+**13:44:52 ET**, and recovered the importer's **saved receipt at 13:45:04 ET**.
+The private API and owner UI matched that receipt's briefing and packet IDs,
+showed one saved version, the explicit late/manual-test label, nineteen evidence
+items, and no accepted personal memories. The output distinguished saved costs
+and chart annotations from current quotes and disclosed missing live research.
+No usefulness rating was entered. This is actual Jo end-to-end proof, not an
+independent research-quality judgment or natural scheduled delivery.
+
+The existing Jo task was paused, its paused state observed, and resumed with
+weekdays 09:00 ET unchanged. Disabling the local morning configuration stopped
+processing across a complete polling interval while the saved briefing stayed
+readable. The enabled configuration was restored and the API restarted; the
+same packet and briefing IDs remained, with one version and a healthy importer.
+This verifies the off/resume path; previously exported copies retain their expiry.
+
+Natural scheduled delivery and owner usefulness remain separate acceptance
+items; this manual packet must not count as a successful scheduled morning.
 
 Every factual claim needs traceable evidence and source times; interpretation,
 uncertainty and missing/stale data remain visible. "What changed" compares frozen
