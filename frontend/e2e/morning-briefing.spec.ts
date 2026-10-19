@@ -2,16 +2,21 @@ import { expect, test } from "@playwright/test";
 
 const day = "2026-10-19";
 async function seed(page: import("@playwright/test").Page) {
+  const memoryResponse = await page.request.post("/api/backend/jo/memories", { data: {
+    operation_id: `memory-${crypto.randomUUID()}`, kind: "thesis", symbol: "MU", original_text: "I want confirmation before adding to MU.",
+    interpretation: "Wait for a confirmed move before adding shares.", source: "owner_statement", status: "active", owner_confirmed: true } });
+  expect(memoryResponse.ok()).toBeTruthy();
+  const memory = await memoryResponse.json();
   const packetResponse = await page.request.post("/api/backend/jo/packets", { data: {
-    operation_id: `morning-${crypto.randomUUID()}`, day, as_of: `${day}T12:45:00Z`, scope: "Invented approved-account context and saved Charts watchlist",
+    operation_id: `morning-${crypto.randomUUID()}`, day, as_of: memory.received_at, scope: "Invented approved-account context and saved Charts watchlist",
     evidence: [{ id: "watchlist", kind: "fact", text: "Saved Charts watchlist: MU, SPY", source: "Charts saved workspace", observed_at: `${day}T12:00:00Z`, retrieved_at: `${day}T12:45:00Z` },
-      { id: "thesis", kind: "belief", text: "I want confirmation before adding to MU.", source: "Explicit owner memory", observed_at: `${day}T12:00:00Z`, retrieved_at: `${day}T12:45:00Z` },
+      { id: "thesis", kind: "belief", text: "I want confirmation before adding to MU.", source: "Explicit owner memory; not a market fact", observed_at: memory.received_at, retrieved_at: memory.received_at },
       { id: "position-1", kind: "fact", text: JSON.stringify({ instrument: "option", symbol: "MU", strike: 120, expiration: "2026-10-23", open_quantity: 2, cost_unit: "USD per contract" }), source: "Saved journal fills; FIFO remaining lots", retrieved_at: `${day}T12:45:00Z` },
       { id: "position-2", kind: "fact", text: JSON.stringify({ instrument: "stock", symbol: "MU", open_quantity: 10, cost_unit: "USD per share" }), source: "Saved journal fills; FIFO remaining lots", retrieved_at: `${day}T12:45:00Z` },
       { id: "market-MU", kind: "fact", text: "MU: last reported trade $118.40; recent at collection (age 6 seconds).", source: "Alpaca IEX latest trade; not a consolidated executable quote", observed_at: `${day}T12:44:54Z`, retrieved_at: `${day}T12:45:00Z` },
       { id: "headline-1", kind: "fact", text: "MU — Invented fixture headline about memory pricing", source: "Alpaca / Benzinga headline; article claims are not independently verified", observed_at: `${day}T11:30:00Z`, retrieved_at: `${day}T12:45:00Z` },
       { id: "schedule", kind: "fact", text: JSON.stringify({ deadline: `${day}T13:15:00Z` }), source: "Morning publication schedule", retrieved_at: `${day}T12:45:00Z` }],
-    gaps: ["No live quote or verified earnings date; check current conditions."], memory_revision_ids: [],
+    gaps: ["No live quote or verified earnings date; check current conditions."], memory_revision_ids: [memory.id],
   } });
   expect(packetResponse.ok()).toBeTruthy();
   const packet = await packetResponse.json();
@@ -27,13 +32,13 @@ async function seed(page: import("@playwright/test").Page) {
   expect(response.ok()).toBeTruthy();
   const brief = await response.json();
   expect((await (await page.request.post("/api/backend/jo/briefings", { data: body })).json()).id).toBe(brief.id);
-  return { packet, brief, body };
+  return { packet, brief, body, memory };
 }
 
 test("saved morning brief reopens, cites evidence, links Charts and persists feedback on phone", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const { brief, packet } = await seed(page);
+  const { brief, packet, memory } = await seed(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/morning?day=${day}&id=${brief.id}`);
   await expect(page.getByText("You asked to wait for confirmation before adding.", { exact: true })).toBeInViewport();
@@ -60,6 +65,23 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
   await expect(page.getByText("I want confirmation before adding to MU.", { exact: true })).toBeVisible();
   await expect(page.getByText("Explicit owner memory · Belief / interpretation")).toBeVisible();
   await expect(page.locator("#evidence-thesis code")).toHaveText("thesis");
+  // The priority names the exact saved revision it relied on; a later correction does not rewrite it.
+  const correction = await page.request.post("/api/backend/jo/memories", { data: { operation_id: `memory-fix-${crypto.randomUUID()}`, memory_id: memory.memory_id, base_revision: 1,
+    kind: "thesis", symbol: "MU", original_text: "Corrected later: I would add MU on any dip.", source: "owner_statement", status: "active", owner_confirmed: true } });
+  expect(correction.ok()).toBeTruthy();
+  await page.reload();
+  const mu = page.getByRole("article").filter({ hasText: "MU remains on your saved watchlist." });
+  await expect(mu.getByText("Your saved view")).toBeVisible();
+  await expect(mu).toContainText("Thesis · MU · revision 1");
+  await expect(panel).not.toContainText("Corrected later");
+  await mu.screenshot({ path: test.info().outputPath("morning-saved-view-desktop.png") });
+  await mu.getByRole("link", { name: "“I want confirmation before adding to MU.”" }).click();
+  const saved = page.locator(`[id="memory-${memory.id}"]`);
+  await expect(saved).toBeVisible();
+  await expect(saved).toContainText("Interpretation: Wait for a confirmed move before adding shares.");
+  await expect(saved.locator("code").first()).toHaveText(memory.id);
+  await expect(page.locator("#evidence-thesis")).toContainText("memory revision 1");
+  await expect(page.getByRole("article").filter({ hasText: "Confirm the journal import" }).getByText("Your saved view")).toHaveCount(0);
   await page.getByRole("button", { name: "Ask Jo about MU" }).click();
   await page.getByLabel("Your question for Jo (optional)").fill("Should I wait for the open?");
   const reference = page.getByLabel("Jo context reference");
@@ -68,6 +90,7 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
   await expect(reference).toHaveValue(/Priority 1: MU — MU remains on your saved watchlist\./);
   await expect(reference).toHaveValue(/Evidence IDs: watchlist, thesis, position-1/);
   await expect(reference).toHaveValue(/My question: Should I wait for the open\?/);
+  await expect(reference).toHaveValue(new RegExp(`Saved memory revisions used: ${memory.id}`));
   await page.getByRole("button", { name: "Copy for Jo" }).click();
   await expect(panel.getByRole("status").filter({ hasText: "Copied" })).toBeVisible();
   await page.evaluate(() => {
@@ -80,8 +103,8 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
   await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
-  const saved = await (await page.request.get(`/api/backend/jo/morning?day=${day}&briefing_id=${brief.id}`)).json();
-  expect(saved.feedback.first_opened_at).toBeTruthy();
+  const reopened = await (await page.request.get(`/api/backend/jo/morning?day=${day}&briefing_id=${brief.id}`)).json();
+  expect(reopened.feedback.first_opened_at).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: test.info().outputPath("morning-brief-phone.png") });
   const missed = page.getByRole("button", { name: "Missed something", exact: true });
@@ -160,6 +183,10 @@ test("delivery states stay explicit: stale, late, missing, waiting, closed, reda
   await expect(panel).toContainText("Evidence is at least four hours old; verify current conditions.");
   await expect(panel).toContainText("Automatic delivery status is unavailable.");
   await page.screenshot({ path: test.info().outputPath("morning-late-stale-phone.png") });
+  view = { ...base, packet: { ...base.packet, memories: [] } };
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(panel).toContainText("No saved beliefs or preferences were in this packet");
+  await expect(panel.getByText("Your saved view")).toHaveCount(0);
   for (const [state, text] of [["missing", "No briefing was saved by the deadline. Yesterday’s brief is not shown as today’s."],
     ["waiting", "Jo’s briefing has not arrived yet."], ["closed", "closed exchange session"], ["redacted", "This briefing or its evidence was removed."]] as const) {
     view = { ...base, state, late: false, stale: false, briefing: state === "missing" || state === "waiting" || state === "closed" ? null : base.briefing };
