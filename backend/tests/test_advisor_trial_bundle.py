@@ -441,11 +441,11 @@ def alembic(*args):
         env={"PATH": os.environ["PATH"], "PYTHON_DOTENV_DISABLED": "1", "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url})
 
 
-def behind_ledger(prepared, tmp_path, monkeypatch):
+def behind_ledger(prepared, tmp_path, monkeypatch, revision="-1"):
     """An install whose ledger predates the newest migration, like the #251 ledger."""
     bundle, calls = host(tmp_path, monkeypatch, prepared)
     control.install(bundle, stage.digest(bundle / "manifest.json"))
-    alembic("downgrade", "-1")
+    alembic("downgrade", revision)
     live_values()
     monkeypatch.setattr(control, "run_alembic", alembic)
     return bundle, calls
@@ -503,7 +503,8 @@ def test_failed_or_destructive_migration_restores_ledger_bytes(prepared, tmp_pat
 
 def test_partial_earlier_migration_is_refused_not_recorded(prepared, tmp_path, monkeypatch):
     """A killed run can leave the new table without its index; a rerun must not accept that."""
-    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch)
+    # This interrupted-migration fixture specifically predates market_context_item.
+    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch, revision="a7c3e9f1b2d4")
     newer, approved = newer_bundle(bundle)
     control.upgrade(newer, approved)
     ledger = control.STATE / "fixture.db"
