@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; Jo OAuth handoff pending | No | Existing Jo/auth reused; shared-context limitation accepted; actual Jo save and first natural morning tracked below |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; instructed afternoon Jo save receipt-confirmed Oct 19 15:31 ET | No | Existing Jo/auth reused; shared-context limitation accepted; first natural scheduled morning and ten-morning owner ratings tracked below |
 
 ### Functionality sequence
 
@@ -287,13 +287,31 @@ production permissions and natural delivery require separate step-5 evidence bel
 
 ### Briefing readability
 
-The morning page leads with a short focus, ranked priorities, personal relevance
-and a visible **Before acting** check. Late/stale/error status and the saved-context
-warning remain visible. Date/version controls, supporting reasoning, citations,
-coverage details and delivery diagnostics are expandable. Summaries longer than
-360 characters are preserved verbatim under **Read Jo’s full summary**; old saved
-records are not rewritten or rounded by the UI. No supported priorities is an
-explicit state, not a reason to manufacture an extra item.
+The morning page opens with a compact header: the briefing date, an honest
+status (Ready, Late, Missing, Waiting, …), saved/context/due times, date/version
+controls and the saved scope. Late arrival, evidence at least four hours old and
+unknown delivery status are separate visible warnings. **Today’s focus** follows
+directly; summaries longer than 360 characters are clamped, with the verbatim
+text one tap away under **Read Jo’s full summary**. Old saved records are not
+rewritten or rounded by the UI.
+
+Each ranked priority shows the review task, **Why you**, **Before acting**,
+**What changed** and **Counterpoint** in the reading flow, with Open chart and
+**Ask Jo about …** beside it. Citations read as saved source labels with observed
+times (for example "Alpaca IEX latest trade · observed 8:44 AM ET"), grouped by
+source; exact evidence IDs stay in the evidence list. Ask Jo builds a copyable
+reference with the briefing and packet IDs, the selected priority and its
+evidence IDs, plus an optional question. It copies text only (with a fallback
+for non-secure pages and an honest failure message); it does not open Jo, start
+a task or guarantee an expired packet is still readable. Feedback sits after the
+priorities; coverage gaps, evidence and briefing IDs stay in details below it.
+Charts links still carry only the symbol. No supported priorities is an explicit
+state, not a reason to manufacture an extra item.
+
+Not yet built for this roadmap: showing which saved thesis/preference revision a
+priority relied on, owner save/correct/retire and inferred-proposal review in the
+app (private owner `/jo/memories` routes exist; no screen uses them), and returning from Charts with the brief/symbol/evidence still
+selected. Usefulness still rests on the ten scheduled mornings and owner ratings.
 
 The `jo_briefing_submit` tool description carries the writing guidance for future
 briefs: a 1–2 sentence summary (45 words maximum), at most three useful priorities,

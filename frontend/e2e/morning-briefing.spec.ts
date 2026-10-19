@@ -6,6 +6,10 @@ async function seed(page: import("@playwright/test").Page) {
     operation_id: `morning-${crypto.randomUUID()}`, day, as_of: `${day}T12:45:00Z`, scope: "Invented approved-account context and saved Charts watchlist",
     evidence: [{ id: "watchlist", kind: "fact", text: "Saved Charts watchlist: MU, SPY", source: "Charts saved workspace", observed_at: `${day}T12:00:00Z`, retrieved_at: `${day}T12:45:00Z` },
       { id: "thesis", kind: "belief", text: "I want confirmation before adding to MU.", source: "Explicit owner memory", observed_at: `${day}T12:00:00Z`, retrieved_at: `${day}T12:45:00Z` },
+      { id: "position-1", kind: "fact", text: JSON.stringify({ instrument: "option", symbol: "MU", strike: 120, expiration: "2026-10-23", open_quantity: 2, cost_unit: "USD per contract" }), source: "Saved journal fills; FIFO remaining lots", retrieved_at: `${day}T12:45:00Z` },
+      { id: "position-2", kind: "fact", text: JSON.stringify({ instrument: "stock", symbol: "MU", open_quantity: 10, cost_unit: "USD per share" }), source: "Saved journal fills; FIFO remaining lots", retrieved_at: `${day}T12:45:00Z` },
+      { id: "market-MU", kind: "fact", text: "MU: last reported trade $118.40; recent at collection (age 6 seconds).", source: "Alpaca IEX latest trade; not a consolidated executable quote", observed_at: `${day}T12:44:54Z`, retrieved_at: `${day}T12:45:00Z` },
+      { id: "headline-1", kind: "fact", text: "MU — Invented fixture headline about memory pricing", source: "Alpaca / Benzinga headline; article claims are not independently verified", observed_at: `${day}T11:30:00Z`, retrieved_at: `${day}T12:45:00Z` },
       { id: "schedule", kind: "fact", text: JSON.stringify({ deadline: `${day}T13:15:00Z` }), source: "Morning publication schedule", retrieved_at: `${day}T12:45:00Z` }],
     gaps: ["No live quote or verified earnings date; check current conditions."], memory_revision_ids: [],
   } });
@@ -15,7 +19,9 @@ async function seed(page: import("@playwright/test").Page) {
     summary: "Keep MU on watch. Your saved preference is to wait for confirmation; this packet does not establish a new entry.",
     summary_evidence_ids: ["watchlist", "thesis"], items: [{ symbol: "MU", what_matters: "MU remains on your saved watchlist.",
       why_personal: "You asked to wait for confirmation before adding.", what_changed: "No prior brief was supplied, so change is unverified.",
-      contrary_evidence: "This is a preference, not proof that price will rise.", watch_out: "Confirm the current price and earnings date. Waiting is a valid choice.", evidence_ids: ["watchlist", "thesis"] }],
+      contrary_evidence: "This is a preference, not proof that price will rise.", watch_out: "Confirm the current price and earnings date. Waiting is a valid choice.", evidence_ids: ["watchlist", "thesis", "position-1", "position-2", "market-MU", "headline-1"] },
+      { symbol: null, what_matters: "Confirm the journal import finished before relying on the two MU option contracts shown as open.", why_personal: "Your saved fills are the only position record in this packet.",
+        what_changed: "First brief for this account scope; no earlier comparison.", contrary_evidence: "Saved fills can lag the broker.", watch_out: "Check the Fills page for this morning's import before acting.", evidence_ids: ["position-1", "position-2"] }],
     limitations: ["Invented browser fixture; no trading action is implied."] };
   const response = await page.request.post("/api/backend/jo/briefings", { data: body });
   expect(response.ok()).toBeTruthy();
@@ -27,7 +33,17 @@ async function seed(page: import("@playwright/test").Page) {
 test("saved morning brief reopens, cites evidence, links Charts and persists feedback on phone", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const { brief } = await seed(page);
+  const { brief, packet } = await seed(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/morning?day=${day}&id=${brief.id}`);
+  await expect(page.getByText("You asked to wait for confirmation before adding.", { exact: true })).toBeInViewport();
+  // The first priority's reason sits above the phone tab bar without opening anything.
+  expect(await page.evaluate(() => {
+    const why = [...document.querySelectorAll("dd")].find((d) => d.textContent === "You asked to wait for confirmation before adding.");
+    const bar = [...document.querySelectorAll("nav")].find((n) => getComputedStyle(n).position === "fixed" && n.getBoundingClientRect().bottom >= window.innerHeight - 1);
+    return !!why && why.getBoundingClientRect().bottom <= (bar ? bar.getBoundingClientRect().top : window.innerHeight);
+  })).toBeTruthy();
+  await page.screenshot({ path: test.info().outputPath("morning-brief-phone-first-screen.png") });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/morning?day=${day}&id=${brief.id}`);
   const panel = page.getByTestId("morning-briefing");
@@ -36,13 +52,30 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
   await expect(page.getByRole("link", { name: "Open MU chart" })).toHaveAttribute("href", "/charts?symbol=MU");
   await page.screenshot({ path: test.info().outputPath("morning-brief-desktop.png") });
   await expect(page.getByText("Confirm the current price and earnings date. Waiting is a valid choice.", { exact: true })).toBeVisible();
-  await expect(page.getByText("This is a preference, not proof that price will rise.", { exact: true })).not.toBeVisible();
-  await page.getByText("Reasoning and sources", { exact: true }).click();
-  await panel.getByRole("link", { name: "thesis", exact: true }).first().click();
+  await expect(page.getByText("This is a preference, not proof that price will rise.", { exact: true })).toBeVisible();
+  await expect(panel).toContainText("Saved journal fills ×2");
+  await expect(panel).toContainText("Alpaca IEX latest trade · observed 8:44 AM ET");
+  await expect(page.getByRole("link", { name: "Open null chart" })).toHaveCount(0);
+  await panel.getByRole("link", { name: "Explicit owner memory", exact: true }).first().click();
   await expect(page.getByText("I want confirmation before adding to MU.", { exact: true })).toBeVisible();
-  await expect(page.getByText("thesis · Belief / interpretation")).toBeVisible();
-  await page.getByText("Continue with Jo", { exact: true }).click();
-  await expect(page.getByLabel("Jo context reference")).toHaveValue(new RegExp(brief.id));
+  await expect(page.getByText("Explicit owner memory · Belief / interpretation")).toBeVisible();
+  await expect(page.locator("#evidence-thesis code")).toHaveText("thesis");
+  await page.getByRole("button", { name: "Ask Jo about MU" }).click();
+  await page.getByLabel("Your question for Jo (optional)").fill("Should I wait for the open?");
+  const reference = page.getByLabel("Jo context reference");
+  await expect(reference).toHaveValue(new RegExp(`Briefing ID: ${brief.id}`));
+  await expect(reference).toHaveValue(new RegExp(`Packet ID: ${packet.id}`));
+  await expect(reference).toHaveValue(/Priority 1: MU — MU remains on your saved watchlist\./);
+  await expect(reference).toHaveValue(/Evidence IDs: watchlist, thesis, position-1/);
+  await expect(reference).toHaveValue(/My question: Should I wait for the open\?/);
+  await page.getByRole("button", { name: "Copy for Jo" }).click();
+  await expect(panel.getByRole("status").filter({ hasText: "Copied" })).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } });
+    document.execCommand = () => false;
+  });
+  await page.getByRole("button", { name: "Copy for Jo" }).click();
+  await expect(panel.getByRole("status").filter({ hasText: "Couldn’t copy" })).toBeVisible();
   await page.getByRole("button", { name: "Useful", exact: true }).click();
   await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.reload();
@@ -69,7 +102,7 @@ test("briefing date never falls back, versions stay explicit and load/feedback f
   await page.goto(`/morning?day=${day}&id=${correction.id}`);
   await expect(page.getByTestId("morning-briefing")).toContainText("Corrected morning view");
   await expect(page.getByText("No supported priority in this briefing.", { exact: false })).toBeVisible();
-  await page.getByText("Date and saved versions", { exact: true }).click();
+  await page.getByText("Dates & versions", { exact: true }).click();
   await page.getByLabel("Saved version").selectOption(brief.id);
   await expect(page.getByTestId("morning-briefing")).toContainText("Keep MU on watch.");
   await page.route("**/jo/briefings/*/feedback", (route) => route.fulfill({ status: 503, json: { detail: "Fixture unavailable" } }));
@@ -97,15 +130,43 @@ test("verbose saved briefs retain exact text behind details while risks stay vis
   const brief = await response.json();
   await page.goto(`/morning?day=${day}&id=${brief.id}`);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByText(longSummary.trim(), { exact: true })).not.toBeVisible();
+  const summaryToggle = page.getByRole("button", { name: "Read Jo’s full summary" });
+  await expect(summaryToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("brief-summary")).toHaveClass(/line-clamp-4/);
   await expect(page.getByText(diagnostic, { exact: true })).not.toBeVisible();
   await expect(page.getByText("Confirm the current price and earnings date. Waiting is a valid choice.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Frozen briefing, not a live price feed/)).toBeVisible();
-  await page.getByText("Read Jo’s full summary", { exact: true }).click();
+  await summaryToggle.click();
+  await expect(page.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("brief-summary")).not.toHaveClass(/line-clamp-4/);
   await expect(page.getByText(longSummary.trim(), { exact: true })).toBeVisible();
-  await page.getByText("Read Jo’s full summary", { exact: true }).click();
-  await page.getByText("Limited coverage · Sources, gaps and delivery details", { exact: true }).click();
+  await page.getByText(/^Limited coverage · \d+ gaps disclosed$/).click();
   await expect(page.getByText(diagnostic, { exact: true })).toBeVisible();
   await expect(page.getByText("No live quote or verified earnings date; check current conditions.", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("delivery states stay explicit: stale, late, missing, waiting, closed, redacted and unknown automation", async ({ page }) => {
+  const { brief } = await seed(page);
+  const base = await (await page.request.get(`/api/backend/jo/morning?day=${day}&briefing_id=${brief.id}`)).json();
+  let view = base;
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: view }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  view = { ...base, late: true, stale: true, automation: { ...base.automation, unavailable: true } };
+  await page.goto(`/morning?day=${day}&id=${brief.id}`);
+  const panel = page.getByTestId("morning-briefing");
+  await expect(panel).toContainText("Late");
+  await expect(panel).toContainText("Arrived after the deadline.");
+  await expect(panel).toContainText("Evidence is at least four hours old; verify current conditions.");
+  await expect(panel).toContainText("Automatic delivery status is unavailable.");
+  await page.screenshot({ path: test.info().outputPath("morning-late-stale-phone.png") });
+  for (const [state, text] of [["missing", "No briefing was saved by the deadline. Yesterday’s brief is not shown as today’s."],
+    ["waiting", "Jo’s briefing has not arrived yet."], ["closed", "closed exchange session"], ["redacted", "This briefing or its evidence was removed."]] as const) {
+    view = { ...base, state, late: false, stale: false, briefing: state === "missing" || state === "waiting" || state === "closed" ? null : base.briefing };
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(panel).toContainText(text);
+    await expect(panel).not.toContainText("Keep MU on watch");
+    await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveCount(0);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });

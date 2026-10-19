@@ -53,6 +53,7 @@ import { DepthHeatmap, heatBookKind, wallLines } from "@/lib/depthHeatmap";
 import type { DepthProfile } from "@/lib/depthHeatmap";
 import { useRecordedDepth } from "@/components/level2/useRecordedDepth";
 import type { RecordedDepth } from "@/components/level2/useRecordedDepth";
+import { copyText } from "@/lib/clipboard";
 
 const INDICATORS = Object.entries(INDICATOR_NAMES) as [keyof Indicators, string][];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -80,20 +81,6 @@ const GROUP_NAMES: [keyof HiddenGroups, string][] = [["levels", "My levels"], ["
 function visible<T extends { hidden?: boolean }>(rows: T[], groupHidden: boolean, none: T[]): T[] {
   if (groupHidden) return none;
   return rows.some((row) => row.hidden) ? rows.filter((row) => !row.hidden) : rows;
-}
-/** Copy text from a click: the clipboard API where the page is a secure context, otherwise the older copy command. */
-async function copyText(text: string): Promise<boolean> {
-  try { if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; } } catch { /* fall back below */ }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.cssText = "position:fixed;top:0;left:0;opacity:0";
-  document.body.appendChild(area);
-  area.select();
-  let copied = false;
-  try { copied = document.execCommand("copy"); } catch { copied = false; }
-  area.remove();
-  return copied;
 }
 /** "moving Breakout" or "adding trend line", with the symbol when it is not the one on screen: what Undo or Redo would do. */
 const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol || !edit.symbol ? "" : ` (${edit.symbol})`}`;
