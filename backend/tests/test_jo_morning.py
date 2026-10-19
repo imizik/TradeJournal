@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 import pytest
@@ -176,3 +176,47 @@ def test_feedback_migration_roundtrip_preserves_briefing_tables(tmp_path):
     _alembic(path, "upgrade", "head")
     assert "morning_briefing_feedback" in inspect(db).get_table_names()
     db.dispose()
+
+
+def test_prior_brief_requires_same_accounts_and_check_profile(morning):
+    from app.engine.jo_morning import operation
+    from jo_briefing_common import PacketSave
+    h, db, config = morning
+    actor = read_config(h.config_path).profiles[0].id
+    prior_day = NOW.date() - timedelta(days=1)
+    with Session(db) as session:
+        old = store.save_packet(session, PacketSave(operation_id=operation(config, actor, prior_day),
+            day=prior_day, as_of=NOW-timedelta(days=1), scope="original approved scope", evidence=[], gaps=["Fixture"]))
+        store.save_briefing(session, BriefingSave(operation_id="prior", packet_id=old["id"], author="Jo",
+            prompt_version="test", summary="Prior private position", summary_evidence_ids=[], items=[], limitations=["Fixture"]))
+        now = datetime.now(timezone.utc)
+        assert any(e.id == "prior-brief" for e in collect(session, config, actor, now).evidence)
+        changed_actor = "check_" + str(uuid4())
+        assert all(e.id != "prior-brief" for e in collect(session, config, changed_actor, now).evidence)
+        other = session.exec(select(Account).where(Account.id != config.account_ids[0])).one()
+        config.account_ids = [other.id]
+        result = collect(session, config, actor, now)
+        assert all(e.id != "prior-brief" for e in result.evidence)
+        assert any("No matching account-scope/profile" in gap for gap in result.gaps)
+
+
+def test_large_unicode_memories_fit_packet_and_published_context(morning):
+    from jo_briefing_common import MemorySave
+    from jo_briefing_owner import publish
+    h, db, config = morning
+    check = read_config(h.config_path)
+    with Session(db) as session:
+        for n in range(30):
+            store.save_memory(session, MemorySave(operation_id=f"large-{n}", kind="preference", original_text="界"*4000,
+                interpretation="界"*4000, source_reference="界"*4000, source="owner_statement", status="active", owner_confirmed=True))
+        now = datetime.now(timezone.utc)
+        body = collect(session, config, check.profiles[0].id, now)
+        assert len(body.memory_revision_ids) < 30
+        assert len([e for e in body.evidence if e.id.startswith("memory-")]) == len(body.memory_revision_ids)
+        assert any("byte limit" in gap for gap in body.gaps)
+        assert len(exchange.canonical(body.model_dump(mode="json")).encode()) < 128 * 1024
+        saved = store.save_packet(session, body)
+        publish(session, check, UUID(saved["id"]), now)
+        context = exchange.context(check.market_watch_snapshots_dir, check.profiles[0].id, saved["id"], now)
+        assert len(exchange.canonical(context).encode()) < exchange.LIMIT
+        assert len(context["packet"]["memories"]) == len(body.memory_revision_ids)

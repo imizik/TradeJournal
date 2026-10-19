@@ -242,9 +242,10 @@ outside that window while enabled. One deterministic packet per scope/day surviv
 restarts and retries without refreshing its cutoff or four-hour expiry. The
 collector exports only allowlisted saved fields: approved-account remaining FIFO
 positions, actual saved watchlist/levels, latest ten captures within 30 days,
-latest thirty active memory revisions, and the prior saved brief summary. Account
+up to thirty active memory revisions, and a prior saved brief summary matching
+the current account scope and Check profile among the latest thirty records. Account
 names/IDs, fill source keys, images/audio/transcripts and Webull accounts are
-excluded. Counts/text are bounded and truncation is disclosed. No quote/news or
+excluded. Counts/text and UTF-8 byte totals are bounded and omissions/truncation are disclosed. No quote/news or
 option-risk fetch is performed; journal freshness remains unverified. Prior
 briefs, memories, captures and saved levels are interpretations, not market facts.
 

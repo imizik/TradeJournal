@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.engine import jo_briefing as store
 from app.engine.chart_journal import open_lots
-from app.models import Account, ChartSettingsRecord, Fill, Trade, TradeFill, TradeCapture, MorningBriefingPacket, MorningBriefingRecord
+from app.models import FILL_LIGHT, Account, ChartSettingsRecord, Fill, Trade, TradeFill, TradeCapture, MorningBriefingPacket, MorningBriefingRecord
 from cloud_mcp_check_common import read_config
 from jo_briefing_common import PacketSave, Strict
 import jo_briefing_exchange as exchange
@@ -71,15 +71,26 @@ def collect(session, config, actor, now):
     evidence, gaps = [], ["Journal import freshness is not verified by this packet; positions reflect saved fills.",
         "No live quotes, news or option risk metrics were fetched. Saved levels may need split/basis review."]
 
+    evidence_bytes = 0
+
     def add(key, kind, text, source, observed=None):
+        nonlocal evidence_bytes
         if len(evidence) >= 80:
             if "Evidence limited to 80 items." not in gaps:
                 gaps.append("Evidence limited to 80 items.")
             return
         if len(text) > 4000:
             gaps.append(f"{key}: text truncated to 4000 characters.")
+        # Leave ample room for JSON keys, timestamps, references and gap text.
+        size = len(exchange.canonical(text[:4000]).encode()) + len(source.encode()) + 512
+        if evidence_bytes + size > 96 * 1024:
+            if "Evidence omitted to fit the packet byte limit." not in gaps:
+                gaps.append("Evidence omitted to fit the packet byte limit.")
+            return False
+        evidence_bytes += size
         evidence.append(dict(id=key, kind=kind, text=text[:4000], source=source,
             observed_at=observed, retrieved_at=now))
+        return True
 
     add("schedule", "fact", exchange.canonical({"deadline": at(day, config.deadline).isoformat()}), "Morning publication schedule")
     trades = session.exec(select(Trade).where(Trade.account_id.in_(config.account_ids), Trade.status == "open",
@@ -88,7 +99,7 @@ def collect(session, config, actor, now):
     if len(trades) > 20:
         gaps.append("Open positions limited to the 20 most recently opened trades.")
     for index, trade in enumerate(trades[:20]):
-        fills = session.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(
+        fills = session.exec(select(Fill).options(*FILL_LIGHT).join(TradeFill, TradeFill.fill_id == Fill.id).where(
             TradeFill.trade_id == trade.id, Fill.account_id == trade.account_id, Fill.executed_at <= now.astimezone(ET).replace(tzinfo=None))).all()
         lots = open_lots([dict(id=f.id, side=f.side, contracts=f.contracts, price=f.price, executed_at=f.executed_at) for f in fills])
         if not fills or lots["open"] <= 0:
@@ -134,22 +145,31 @@ def collect(session, config, actor, now):
     if len(captures) > 10:
         gaps.append("Captures limited to the latest 10 in 30 days; images/audio/transcripts are excluded.")
     memories = store.memories(session, "active", None, 31)
+    selected_memories, memory_bytes = [], 0
     for i, memory in enumerate(memories[:30]):
-        add(f"memory-{i + 1}", "belief", memory["body"]["original_text"], "Explicit owner memory; not a market fact",
-            datetime.fromisoformat(memory["received_at"]))
+        size = len(exchange.canonical(memory).encode())
+        if memory_bytes + size > 256 * 1024:
+            if "Memory revisions omitted to fit the published context byte limit." not in gaps:
+                gaps.append("Memory revisions omitted to fit the published context byte limit.")
+            continue
+        if add(f"memory-{i + 1}", "belief", memory["body"]["original_text"], "Explicit owner memory; not a market fact",
+               datetime.fromisoformat(memory["received_at"])):
+            selected_memories.append(memory["id"])
+            memory_bytes += size
     if len(memories) > 30:
         gaps.append("Active memories limited to the latest 30; packet retains exact revision IDs.")
-    previous = session.exec(select(MorningBriefingRecord).join(MorningBriefingPacket).where(
+    candidates = session.exec(select(MorningBriefingRecord, MorningBriefingPacket).join(MorningBriefingPacket).where(
         MorningBriefingPacket.day < day, MorningBriefingRecord.redacted_at.is_(None), MorningBriefingPacket.redacted_at.is_(None))
-        .order_by(MorningBriefingPacket.day.desc(), MorningBriefingRecord.created_at.desc()).limit(1)).first()
+        .order_by(MorningBriefingPacket.day.desc(), MorningBriefingRecord.created_at.desc()).limit(30)).all()
+    previous = next((brief for brief, packet in candidates if packet.operation_id == operation(config, actor, packet.day)), None)
     if previous:
-        add("prior-brief", "belief", json.loads(previous.body_json)["summary"], "Prior saved briefing; compare dates, not current facts",
+        add("prior-brief", "belief", json.loads(previous.body_json)["summary"], "Prior saved briefing in matching account scope/profile; not current facts",
             previous.created_at.replace(tzinfo=timezone.utc))
     else:
-        gaps.append("No prior saved briefing available for comparison.")
+        gaps.append("No matching account-scope/profile briefing among the latest 30 prior records.")
     return PacketSave(operation_id=operation(config, actor, day), day=day, as_of=now,
         scope=f"{len(accounts)} explicitly approved accounts; saved journal, Charts workspace and personal memories. Deadline {at(day, config.deadline).isoformat()}",
-        evidence=evidence, gaps=gaps[:30], memory_revision_ids=[m["id"] for m in memories[:30]])
+        evidence=evidence, gaps=gaps[:30], memory_revision_ids=selected_memories)
 
 
 class MorningRunner:
