@@ -65,6 +65,21 @@ def register(server, config, authenticated, scopes, clock):
         readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def jo_briefing_submit(briefing: BriefingSave) -> dict[str, Any]:
         """Submit a cited briefing against the published packet, at most three priority items.
+        Write for a quick morning scan: summary is 1–2 plain sentences, at most 45 words.
+        Rank by personal relevance and time sensitivity. A watchlist inventory is not a priority
+        without a specific reason to review it. Zero, one or two items is better than filler.
+        If no comparison is available, say so once; do not repeat missing-history prose per item.
+        Each what_matters leads with a concrete review task and the supporting fact (max 45 words).
+        why_personal is one short sentence. watch_out states the next check or reason to wait
+        (max 30 words); include any material counterpoint/risk here, as it is always visible.
+        what_changed and contrary_evidence are supporting detail, each at most 30 words.
+        Put shared missing-data caveats once in limitations; retain item-specific risks in watch_out.
+        Put technical diagnostics, operation IDs, exact timestamps and test mechanics in limitations,
+        never summary or item prose. State manual-test status briefly in limitations when applicable.
+        Use evidence_ids fields for citations, not raw [position-1] markers in prose.
+        Round displayed costs to cents and fractional shares to at most two decimals, marking
+        rounded quantities approximate; preserve exact strike/level precision and evidence values.
+        Do not manufacture changes, contrary evidence, market context or a third priority.
         author must be Jo; model_id is optional self-report, not attestation. Cite frozen evidence
         IDs; beliefs/estimates are not verified facts. Missing evidence requires limitations.
         New corrections use a NEW operation_id and supersedes_id. Exact retries recover an

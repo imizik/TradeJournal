@@ -285,6 +285,30 @@ unknown-calendar states, late imports, redaction, version/date selection, feedba
 persistence/errors and desktop/390px phone interactions. Actual Jo scheduling,
 production permissions and natural delivery require separate step-5 evidence below.
 
+### Briefing readability
+
+The morning page leads with a short focus, ranked priorities, personal relevance
+and a visible **Before acting** check. Late/stale/error status and the saved-context
+warning remain visible. Date/version controls, supporting reasoning, citations,
+coverage details and delivery diagnostics are expandable. Summaries longer than
+360 characters are preserved verbatim under **Read Jo’s full summary**; old saved
+records are not rewritten or rounded by the UI. No supported priorities is an
+explicit state, not a reason to manufacture an extra item.
+
+The `jo_briefing_submit` tool description carries the writing guidance for future
+briefs: a 1–2 sentence summary (45 words maximum), at most three useful priorities,
+short task-led `what_matters`, one sentence of personal relevance and a concrete
+`watch_out` check. Material counterpoints/risks must appear in that always-visible
+check too. Shared caveats appear once in limitations; diagnostics stay out of the
+main prose. Citation IDs belong in the citation fields. Display costs to cents
+and fractional quantities approximately, retaining exact evidence and strike/level
+precision. These are generation instructions, not new validation limits.
+
+After this change is merged and released, refresh the existing Check v4 tool
+metadata so Jo receives the revised writing instructions. This source change does
+not update the live task, regenerate historical briefs, fetch fresh market context
+or establish that an actual Jo-generated brief meets the new writing targets.
+
 ### October 19 activation evidence
 
 The owner approved Roth IRA only, 08:45 ET publication and a 09:15 ET deadline,
