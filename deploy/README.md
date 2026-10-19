@@ -479,6 +479,8 @@ clears. It never repeats an alert.
 | *Job* failed | the newest finished run of a job type failed; listeners are excluded, and Gmail jobs wait 10 min and stay quiet while the Gmail alert is active | — |
 | Nightly backup, Offsite backup, Scheduled Sync Everything, Options snapshot or Relative volume history failed | its systemd service is `failed` | — |
 | *Schedule* is switched off | the backup, offsite, Sync Everything, Gmail-check, options-snapshot or relative-volume-history timer is not active | 15 min |
+| Server disk is *N*% full | the disk holding `/`, PostgreSQL or the backups is at least 80% used (as `df` reports) | 30 min |
+| Server disk is *N*% full (critical) | that disk is at least 90% used; the 80% warning keeps its state meanwhile | — |
 
 Failures that finished before the first check are history and never alerted.
 A reboot clears systemd's failed state; only a later successful run counts as
@@ -571,9 +573,11 @@ start; use a forward fix or an explicitly planned database restore. Shared
 runtime state and configuration do not roll back with code. Retain known-good
 artifacts off the VPS. Do not delete the shared job-lock directory or files.
 
-Each release is about 1 GB on the disk PostgreSQL shares, and nothing but
+Each release is about 1.7 GB on the disk PostgreSQL shares, and nothing but
 `prune` removes one. Automatic deployment prunes after every successful
-switch; `prune` never removes the current or previous release, and an older
+switch; after a manual install and activation, run
+`sudo /usr/local/sbin/tradejournal-deploy prune --keep 2` yourself. `prune`
+never removes the current or previous release, and an older
 build can be reinstalled from its GitHub release or Actions artifact. A
 controller command that finds another one holding the deployment lock exits
 with status 75 instead of waiting.
