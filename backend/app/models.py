@@ -234,6 +234,15 @@ class MorningBriefingRecord(SQLModel, table=True):
     redacted_at: Optional[datetime] = None
 
 
+class MorningBriefingFeedback(SQLModel, table=True):
+    """Owner feedback and first-open evidence; never edits generated briefing text."""
+    __tablename__ = "morning_briefing_feedback"
+    briefing_id: uuid.UUID = Field(foreign_key="morning_briefing_record.id", primary_key=True)
+    first_opened_at: Optional[datetime] = None
+    rating: Optional[str] = None
+    updated_at: datetime = Field(default_factory=utc_now_naive)
+
+
 class DailyReviewRecord(SQLModel, table=True):
     __tablename__ = "dailyreview"
 
