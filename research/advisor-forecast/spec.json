@@ -1,10 +1,29 @@
 {
-  "protocol": "advisor-forecast-v1-preparation",
-  "status": "PREPARATION_ONLY",
+  "protocol": "advisor-forecast-v3-tradier",
+  "status": "DEVELOPMENT_AUTHORIZED_PENDING_ACTIVATION",
   "created": "2026-10-17",
-  "tickers": ["MU", "NBIS", "NVDA", "AAPL", "QQQ", "SPY", "JPM"],
+  "tickers": [
+    "MU",
+    "NBIS",
+    "NVDA",
+    "AAPL",
+    "QQQ",
+    "SPY",
+    "JPM"
+  ],
   "timezone": "America/New_York",
-  "provider": {"name": "Alpaca", "feed": "sip", "timeframe": "1Min", "adjustment": "raw", "asof": "-", "fallback": false},
+  "provider": {
+    "name": "Tradier",
+    "endpoint": "https://api.tradier.com/v1/markets/timesales",
+    "feed": "production consolidated all-exchange equities",
+    "timeframe": "1min",
+    "session_filter": "open",
+    "adjustment": "provider-reported OHLCV; no client adjustment or cross-provider substitution",
+    "timestamp": "start-labelled time interpreted in America/New_York; explicit offsets converted to that zone",
+    "fallback": false,
+    "request_budget": "7 history range requests plus 7 per snapshot/baseline/outcome; 28 calls per session; at most 4 concurrent, 10s socket timeout, no retries; existing account rate budget shared with production",
+    "history_capture": "One full date-range request per ticker; retain only exact prior-20-session 09:30\u201310:59 windows. Any missing minute fails closed."
+  },
   "snapshot": {
     "start": "09:30:00",
     "completed_by": "09:59:00",
@@ -18,27 +37,101 @@
     "terminal_price": "close of 10:59 start-labelled minute bar",
     "path": "high/low of all 60 start-labelled bars 10:00 through 10:59",
     "availability": "captured-at plus event-time cutoff; not a claim of historical as-of revisions",
-    "latency_caveat": "Up to 120 seconds of the scored hour can elapse before submission. No post-cutoff input is supplied. This is not an executable 10:00 signal."
+    "latency_caveat": "Up to 120 seconds of the scored hour can elapse before submission. Jo may browse before saving. This is not an executable 10:00 signal or an equal-information comparison."
   },
   "history_sessions": 20,
   "sideways_multiplier": 0.25,
   "range_quantile": 0.8,
   "range_quantile_method": "nearest rank: sorted[ceil(0.8*n)-1]",
-  "range_baseline": "reference price times (1 + Q20 of historical downside, 1 + Q80 of historical upside); downside/upside relative to that day's 09:58 close",
+  "range_baseline": "At the submission deadline, use the last completed minute close times (1 + Q20 historical downside, 1 + Q80 historical upside). Historical full-window extrema are relative to each historical deadline-minute close. No partial-window shortening. Snapshot-time historical width remains the per-case forecast cap.",
   "range_width_cap_multiplier": 1.0,
-  "direction_baselines": ["sideways", "up", "down", "opening_continuation"],
-  "opening_continuation": "classify current 09:58 close / 09:30 open - 1 using the same frozen sideways threshold",
-  "sample": {"development_sessions": 2, "evaluation_sessions": 20, "earnings": "include", "half_days": "include if open at 09:30 and close at or after 11:00", "calendar": "Alpaca market calendar, exact 22 sessions registered before first development forecast"},
-  "gates": {"answer_fraction": 0.6, "direction_advantage": 0.1, "range_advantage": 0.1, "maximum_missing_sessions": 3},
+  "direction_baselines": [
+    "sideways",
+    "up",
+    "down",
+    "opening_continuation"
+  ],
+  "opening_continuation": "classify last completed minute close at submission deadline / 09:30 open - 1 using the original frozen sideways threshold",
+  "sample": {
+    "development_sessions": 2,
+    "evaluation_sessions": 20,
+    "earnings": "include",
+    "half_days": "include if open at 09:30 and close at or after 11:00",
+    "calendar": "Alpaca market calendar, exact 22 sessions registered before first development forecast"
+  },
+  "gates": {
+    "answer_fraction": 0.6,
+    "direction_advantage": 0.1,
+    "range_advantage": 0.1,
+    "maximum_missing_sessions": 3
+  },
   "missing_policy": "Any evaluation session with at least one missing, late, invalid or data-missing forecast counts once. More than 3 invalidates and stops this version. No automatic extension/restart; any restart needs a new prospective protocol and owner authorization. All 140 cases remain in participation denominator.",
-  "outcome_policy": "One scheduled capture at 11:05 with bounded transport pagination, no outcome-selection retries. Missing outcomes invalidate final judgment; never silently drop them or interpolate missing bars.",
+  "outcome_policy": "One scheduled capture at 11:05 with bounded seven-ticker transport, no outcome-selection retries. Missing outcomes invalidate final judgment; never silently drop them or interpolate missing bars.",
   "development_policy": "Two plumbing sessions only, no predictive scoring. If either session has a platform-evidenced task start after 10:00:30, choose the preregistered +5 minute schedule before evaluation, without looking at outcomes. Otherwise retain 10:00/10:02. Missing start evidence or missing development delivery blocks evaluation for owner review. No extra development forecasts or automatic CLI fallback. Record the choice once before the first evaluation session.",
-  "timing_policy": {"allowed_offsets_minutes": [0, 5], "deadline_offset_minutes": 2, "forecast_end_fixed": "11:00:00", "shifted": "10:05 snapshot using bars completed by 10:04; 10:07 deadline; 11:00 endpoint. Evaluation horizon is then 55 minutes. Sideways/history/range baselines use that same 10:05-to-11:00 window. Two minutes of outcome may elapse before submission in either schedule.", "evaluation_choice": "immutable before first evaluation session; no shifts during evaluation"},
+  "timing_policy": {
+    "allowed_offsets_minutes": [
+      0,
+      5
+    ],
+    "deadline_offset_minutes": 2,
+    "forecast_end_fixed": "11:00:00",
+    "shifted": "10:05 snapshot using bars completed by 10:04; 10:07 deadline; 11:00 endpoint. Evaluation horizon is then 55 minutes. Sideways/history/range baselines use that same 10:05-to-11:00 window. Two minutes of outcome may elapse before submission in either schedule.",
+    "evaluation_choice": "immutable before first evaluation session; no shifts during evaluation"
+  },
   "evaluation_policy": "No interim outcome scoring or per-case outcome inspection. Operational status only. Score once after all 20 registered sessions. No tuning, selective reruns or historical substitutions.",
   "decision": "Both forecast gates plus participation and integrity must pass to earn consideration of independent replication; otherwise stop directional development under this version. Never automatic promotion or activation.",
-  "model": {"provider": "Hosted Jo / Dots on ChatGPT subscription", "version": null, "pinned": false, "settings": "Freeze actual task settings at activation; unavailable controls recorded unavailable", "allowed_tools": ["get_forecast_snapshot", "save_forecast", "get_forecast_receipt"], "metadata": "Record platform-reported model identity when available; never trust model self-identification. Flag observed changes; undetectable changes remain a limitation.", "context": "Same Jo may retain memory or concurrent-task context. Snapshot-only instruction is not proof of isolation.", "claim": "Evaluation of hosted Jo under a frozen task protocol, with unpinned model and documented context limits"},
-  "web_policy": {"instruction": "No web, browser, quotes, news, other connectors, computer access, delegation or post-cutoff lookups during the study task; use only this study's frozen snapshot and save/receipt tools", "enforcement": "Disable web and other data tools at task scope if supported. Do not change Jo-wide permissions or production tasks. A prompt rule alone is not technical enforcement.", "evidence": "Operator imports complete platform tool trace or verified task-scoped tool isolation evidence. Jo self-report and our server access log alone cannot prove absence of external access.", "statuses": ["verified_no_external_access", "external_access_detected", "unverified"], "gate": "Any detected external access or unverified access invalidates a leakage-controlled pass. Preserve all cases; never silently remove contaminated cases. No fallback without owner approval."},
-  "runtime": {"host": "vps-c6302cfc", "mode": "disabled", "model_calls_authorized": false, "adapter": "VPS non-model collection/scoring and isolated forecast exchange only; hosted Jo not activated", "fallback": "Codex subscription CLI only with separate owner approval; not installed or invoked by this preparation"},
-  "unresolved": ["Owner confirmation of synthetic dry run before real Jo task activation", "Verify task-scoped web controls or complete tool-trace access before claiming isolation", "Bind reviewed forecast tools to a separate authorized practice identity without modifying production Jo or Shadow", "Verify existing SIP entitlement without purchase before activation"],
-  "boundaries": ["No production services, database, production Jo task, Shadow exchange or pre-trade checks", "No factory access or activation", "No model calls in preparation", "No forecast before owner confirms dry run"]
+  "model": {
+    "provider": "Hosted Jo / Dots on ChatGPT subscription",
+    "version": null,
+    "pinned": false,
+    "settings": "Freeze actual task settings at activation; unavailable controls recorded unavailable",
+    "allowed_tools": [
+      "get_forecast_snapshot",
+      "save_forecast",
+      "get_forecast_receipt",
+      "unrestricted web access"
+    ],
+    "metadata": "Record platform-reported model identity when available; never trust model self-identification. Flag observed changes; undetectable changes remain a limitation.",
+    "context": "Jo may use web, memory and concurrent-task context before the server deadline. Baselines have deadline price bars but no equivalent news input.",
+    "claim": "Evaluation of hosted Jo under a frozen task protocol, with unpinned model and documented context limits"
+  },
+  "web_policy": {
+    "report": "web access not restricted; bounded by deadline",
+    "enforcement": "Server timestamps classify saves after the deadline as late, never answered or abstained. Immutable retries preserve original time. No task-scoped web restriction or trace gate.",
+    "evidence": "Do not accept Jo self-report as evidence of tools used, browsing absence or model identity.",
+    "limitation": "Deadline bounds save time, not information equality. News, memory and concurrent-task context are not reproduced in simple price baselines; a pass is not evidence of a leakage-controlled forecast."
+  },
+  "runtime": {
+    "host": "vps-c6302cfc",
+    "mode": "disabled_pending_review_and_schedule",
+    "model_calls_authorized": false,
+    "adapter": "VPS non-model Tradier collection/scoring and verified isolated forecast exchange; hosted subscription-only Jo activation limited to two development dates",
+    "fallback": "Codex subscription CLI only with separate owner approval; not installed or invoked by this preparation"
+  },
+  "unresolved": [
+    "Freeze actual hosted Jo task settings and exact future calendar; activate only two development sessions",
+    "Verify live Tradier publication and hosted scheduling latency in development; history coverage is not live-timing proof"
+  ],
+  "boundaries": [
+    "No production services, database, production Jo task, Shadow exchange or pre-trade changes",
+    "No factory access or activation",
+    "Subscription only; no inference API or CLI fallback",
+    "Exactly two development sessions after connection checks; evaluation requires separate activation after timing evidence"
+  ],
+  "baseline_capture": {
+    "information_cutoff": "submission_deadline",
+    "capture_seconds": 30,
+    "last_bar": "minute starting one minute before submission_deadline",
+    "missing_policy": "Missing or invalid deadline baseline for any existing snapshot invalidates judgment; no substitution with earlier baseline or later outcomes",
+    "source": "Independent Tradier production consolidated minute-bar capture with exact completed-minute grid; hashed create-only files; no Jo claims",
+    "availability": "Event-time cutoff, capture within 30 seconds after deadline; not a guarantee of historical as-of revisions or equal news access"
+  },
+  "provider_change": {
+    "authorized": "2026-10-18",
+    "from": "Alpaca live SIP",
+    "to": "Existing Tradier production data access",
+    "reason": "Alpaca existing key lacks recent SIP entitlement. Existing Tradier key returned all 140 prior-session/ticker windows with every required minute. No live forecast or study score informed the change.",
+    "cost": "No purchases, new account or inference API; existing market-data access only",
+    "limits": "Shared provider quota; exact missing-data refusals unchanged. Sunday read-only coverage does not prove live minute publication within the capture windows."
+  }
 }

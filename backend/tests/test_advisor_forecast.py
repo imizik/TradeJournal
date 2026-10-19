@@ -46,6 +46,7 @@ def record(spec, day, ticker, variant=0):
     return {"session": day, "ticker": ticker, "snapshot": p,
             "receipt": core.receipt(p, f, started, started + timedelta(seconds=1), spec),
             "outcome": core.outcome(day, ticker, bars, core.at(day, "11:05:05"), spec),
+            "baseline": core.deadline_baseline(p, core.fixture_bars(day, count=start + 2 - 570), core.at(day, spec["snapshot"]["submission_deadline"]) + timedelta(seconds=5), spec),
             "audit": {"web_status": "verified_no_external_access", "evidence_type": "complete_platform_trace", "evidence_sha256": "a" * 64,
                       "model_name": None, "model_source": "unavailable", "synthetic_fixture": True}}
 
@@ -108,12 +109,15 @@ def test_missing_session_limit(spec, study, n, invalid):
 
 
 @pytest.mark.parametrize("status,kind", [("unverified", "complete_platform_trace"), ("external_access_detected", "complete_platform_trace"), ("verified_no_external_access", "jo_self_report")])
-def test_web_unknown_or_access_or_self_report_cannot_pass(spec, study, status, kind):
+def test_web_access_is_not_a_gate_and_self_report_is_not_evidence(spec, study, status, kind):
     days, rows, now = study
     for r in rows:
         if r["session"] == days[0]:
             r["audit"]["web_status"], r["audit"]["evidence_type"] = status, kind
-    assert core.score(days, rows, spec, now)["verdict"] == "invalid"
+    report = core.score(days, rows, spec, now)
+    assert report["verdict"] == "replication_only"
+    assert report["web_access"] == "web access not restricted; bounded by deadline"
+    assert report["observed_model_names"] == []
 
 
 def test_interim_score_missing_outcome_and_duplicate_refused(spec, study):
@@ -126,21 +130,75 @@ def test_interim_score_missing_outcome_and_duplicate_refused(spec, study):
     assert core.score(days, rows, spec, now)["verdict"] == "invalid"
 
 
-@pytest.mark.parametrize("status", ["external_access_detected", "unverified", None])
-def test_missing_entire_session_preserves_access_audit(spec, study, status):
+def test_missing_baseline_invalidates_and_self_identification_is_discarded(spec, study):
     days, rows, now = study
+    rows[0].pop("baseline")
     for row in rows:
-        if row["session"] == days[0]:
-            row.pop("receipt")
-            if status is None:
-                row.pop("audit")
-            else:
-                row["audit"]["web_status"] = status
+        row["audit"] = {"model_name": "self-claimed", "model_source": "jo_self_report"}
     report = core.score(days, rows, spec, now)
     assert report["verdict"] == "invalid"
-    assert "web/tool isolation unverified or violated:" + days[0] in report["faults"]
-    assert report["missing_sessions"] == days[:1]
-    assert report["access_audits"][days[0]]["web_status"] == (status or "unverified")
+    assert "missing deadline baseline:" + days[0] + ":MU" in report["faults"]
+    assert report["observed_model_names"] == []
+
+
+def test_deadline_baseline_uses_new_prices_without_changing_target_or_cap(spec):
+    p = packet(spec)
+    bars = core.fixture_bars(p["session"], count=32)
+    bars[-1].update(o=101, c=101, h=103, l=100)
+    b = core.deadline_baseline(p, bars, core.at(p["session"], "10:02:05"), spec)
+    assert b["reference_price"] == 101
+    assert b["baseline_low"] == pytest.approx(99.99)
+    assert b["baseline_high"] == pytest.approx(103.02)
+    assert b["baseline_directions"]["opening_continuation"] == "up"
+    assert p["width_cap_usd"] == 3
+    assert p["timing"]["capture_start"] == "10:00:00"
+    with pytest.raises(ValueError, match="every expected minute"):
+        core.deadline_baseline(p, bars + core.fixture_bars(p["session"], 602, 1), core.at(p["session"], "10:02:05"), spec)
+    with pytest.raises(ValueError, match="capture window"):
+        core.deadline_baseline(p, bars, core.at(p["session"], "10:02:31"), spec)
+
+
+def test_baseline_reconstructed_at_score_and_platform_model_changes_flagged(spec, study):
+    days, rows, now = study
+    for row in rows:
+        row["audit"] = {"model_name": "model-a" if row["session"] == days[0] else "model-b",
+                        "model_source": "platform", "evidence_type": "platform_record", "evidence_sha256": "a" * 64}
+    result = core.score(days, rows, spec, now)
+    assert result["observed_model_change"] is True
+    assert result["observed_model_names"] == ["model-a", "model-b"]
+    rows[0]["baseline"]["baseline_high"] += 1
+    with pytest.raises(ValueError, match="baseline integrity"):
+        core.score(days, rows, spec, now)
+
+
+def test_development_approval_never_collects_evaluation(monkeypatch, spec):
+    monkeypatch.setattr(runtime, "approval", lambda _: "development")
+    monkeypatch.setattr(runtime, "registration", lambda _: {"sessions": ["2098-02-01", "2098-02-02", "2098-02-03"]})
+    monkeypatch.setattr(runtime, "now", lambda: core.at("2098-02-03", "10:00:00"))
+    network = Mock(side_effect=AssertionError("unexpected network"))
+    monkeypatch.setattr(runtime, "fetch_bars", network)
+    assert runtime.job("snapshot", spec)["status"] == "evaluation_not_authorized"
+    network.assert_not_called()
+
+
+def test_baseline_job_freezes_exact_deadline_grid_once(tmp_path, monkeypatch, spec):
+    day = "2098-02-01"
+    state, baselines = tmp_path / "state", tmp_path / "baselines"
+    monkeypatch.setattr(runtime, "STATE", state)
+    monkeypatch.setattr(runtime, "BASELINES", baselines)
+    monkeypatch.setattr(runtime, "now", lambda: core.at(day, "10:02:05"))
+    for ticker in spec["tickers"]:
+        core.exclusive_json(state / "snapshots" / day / f"{ticker}.json", packet(spec, day, ticker))
+    provider = Mock(return_value={t: core.fixture_bars(day, count=32) for t in spec["tickers"]})
+    monkeypatch.setattr(runtime, "fetch_bars", provider)
+    runtime.baseline_job(day, {}, spec)
+    provider.assert_called_once_with(day, "09:30:00", "10:01:00", spec)
+    hashes = core.read_json(baselines / day / "manifest.json")
+    assert set(hashes) == set(spec["tickers"])
+    assert all(hashes[t] == core.digest(core.read_json(baselines / day / f"{t}.json")) for t in spec["tickers"])
+    with pytest.raises(FileExistsError):
+        runtime.baseline_job(day, {}, spec)
+    assert provider.call_count == 1
 
 
 @pytest.mark.parametrize("change", ["future", "missing", "duplicate", "nan", "bad_ohlc"])
@@ -167,6 +225,9 @@ def test_shift_recomputes_55_minute_window(spec):
     assert len(p["bars"]) == 34
     assert p["bars"][-1]["t"].endswith("10:03:00-05:00")
     assert p["timing"]["submission_deadline"] == "10:07:00"
+    b = core.deadline_baseline(p, core.fixture_bars(p["session"], count=37), core.at(p["session"], "10:07:05"), shifted)
+    assert len(b["bars"]) == 37
+    assert b["bars"][-1]["t"].endswith("10:06:00-05:00")
     bars = core.fixture_bars("2098-02-01", 605, 55)
     assert len(core.outcome("2098-02-01", "MU", bars, core.at("2098-02-01", "11:05:01"), shifted)["bars"]) == 55
     with pytest.raises(ValueError):
@@ -194,6 +255,21 @@ def test_exchange_clock_hash_conflicts_and_exact_retry(tmp_path, spec):
         ex.get_forecast_snapshot("MU")
 
 
+@pytest.mark.parametrize("save_time,status", [("10:02:00", "answered"), ("10:02:00.001", "late")])
+def test_exchange_deadline_is_inclusive_and_enforced_by_server(tmp_path, spec, save_time, status):
+    p = packet(spec)
+    core.exclusive_json(tmp_path / "snapshots" / p["session"] / "MU.json", p)
+    core.exclusive_json(tmp_path / "snapshots" / p["session"] / "manifest.json", {t: core.digest(p) for t in spec["tickers"]})
+    clock = Mock(return_value=core.at(p["session"], "10:00:06"))
+    ex = ForecastExchange(tmp_path / "snapshots", tmp_path / "receipts", spec, enabled=True, clock=clock)
+    ex.get_forecast_snapshot("MU")
+    clock.return_value = core.at(p["session"], save_time)
+    saved = ex.save_forecast("MU", core.digest(p), forecast())
+    assert saved["status"] == status
+    clock.return_value = core.at(p["session"], "10:05:00")
+    assert ex.save_forecast("MU", core.digest(p), forecast()) == saved
+
+
 def test_model_credentials_and_missing_approval_block_network(monkeypatch, spec):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-never-sent")
     with pytest.raises(ValueError, match="forbidden"):
@@ -207,8 +283,8 @@ def test_model_credentials_and_missing_approval_block_network(monkeypatch, spec)
     network.assert_not_called()
 
 
-def test_provider_is_fixed_sip_bounded_and_no_inference_endpoint():
-    assert runtime.DATA_URL == "https://data.alpaca.markets/v2/stocks/bars"
+def test_provider_is_fixed_tradier_bounded_and_no_inference_endpoint():
+    assert runtime.DATA_URL == "https://api.tradier.com/v1/markets/timesales"
     source = Path(runtime.__file__).read_text()
     assert "api.anthropic.com" not in source and "api.openai.com" not in source
     assert "subprocess" not in source
@@ -225,7 +301,9 @@ def test_deployment_is_disabled_and_additive():
         assert "InaccessiblePaths=-/opt/tradejournal -/etc/tradejournal -/var/lib/tradejournal" in unit
         assert "Persistent=false" in timer
         assert "forecast.env" not in unit
-        expected_group = "tj-forecast-outcomes" if action == "outcomes" else "tj-forecast-exchange"
+        expected_group = "tj-forecast-outcomes" if action in ("outcomes", "baseline") else "tj-forecast-exchange"
         assert f"Group={expected_group}\n" in unit
-        assert f"ReadWritePaths={module.OUTCOMES if action == 'outcomes' else module.STATE}\n" in unit
+        writable = module.OUTCOMES if action == "outcomes" else module.BASELINES if action == "baseline" else module.STATE
+        assert f"ReadWritePaths={writable}\n" in unit
     assert "10:00:00" in module.timer("snapshot") and "10:05:00" in module.timer("snapshot")
+    assert "10:02:00" in module.timer("baseline") and "10:07:00" in module.timer("baseline")

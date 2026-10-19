@@ -11,22 +11,24 @@ import socket
 import subprocess
 from zoneinfo import ZoneInfo
 
-RUNTIME = Path("/opt/tj-forecast/v1")
+RUNTIME = Path("/opt/tj-forecast/v2")
 CONFIG = Path("/etc/tj-forecast")
 STATE = Path("/var/lib/tj-forecast")
 OUTCOMES = Path("/var/lib/tj-forecast-outcomes")
+BASELINES = Path("/var/lib/tj-forecast-baselines")
 RECEIPTS = Path("/var/lib/tj-forecast-receipts")
 FILES = ("scripts/advisor_forecast.py", "scripts/advisor_forecast_runtime.py", "scripts/advisor_forecast_exchange.py",
          "research/advisor-forecast/spec.json", "research/advisor-forecast/prompt.txt", "deploy/advisor_forecast_prepare.py",
-         "backend/cloud_mcp_forecast.py", "backend/cloud_mcp_d0.py", "backend/cloud_mcp_advisor_common.py")
-ACTIONS = ("history", "snapshot", "outcomes")
+         "backend/cloud_mcp_forecast.py", "backend/cloud_mcp_d0.py", "backend/cloud_mcp_advisor_common.py",
+         "backend/cloud_mcp_d0_refresh.py", "deploy/advisor_forecast_upgrade.py")
+ACTIONS = ("history", "snapshot", "baseline", "outcomes")
 
 
 def service(action):
     outcome = action == "outcomes"
     user = "tj-forecast-outcomes" if outcome else "tj-forecast-collector"
-    state = OUTCOMES if outcome else STATE
-    group = user if outcome else "tj-forecast-exchange"
+    state = OUTCOMES if outcome else BASELINES if action == "baseline" else STATE
+    group = "tj-forecast-outcomes" if outcome or action == "baseline" else "tj-forecast-exchange"
     hidden = STATE if outcome else OUTCOMES
     return f"""[Unit]
 Description=Non-model advisor study {action}; owner activation required
@@ -67,7 +69,7 @@ Restart=no
 
 
 def timer(action):
-    times = {"history": ["09:45:00"], "snapshot": ["10:00:00", "10:05:00"], "outcomes": ["11:05:00"]}[action]
+    times = {"history": ["09:45:00"], "snapshot": ["10:00:00", "10:05:00"], "baseline": ["10:02:00", "10:07:00"], "outcomes": ["11:05:00"]}[action]
     schedule = "\n".join(f"OnCalendar=Mon..Fri *-*-* {t} America/New_York" for t in times)
     return f"""[Unit]
 Description=Disabled non-model advisor study {action}
@@ -95,7 +97,7 @@ def check_source(source):
     return manifest
 
 
-def install(source):
+def host_guard():
     current = datetime.now(ZoneInfo("America/New_York"))
     if os.geteuid() != 0 or socket.gethostname() != "vps-c6302cfc":
         raise ValueError("explicit host/root required")
@@ -108,8 +110,12 @@ def install(source):
         raise ValueError("512 MiB memory reserve required")
     if subprocess.check_output(["timedatectl", "show", "-p", "NTPSynchronized", "--value"], text=True).strip() != "yes":
         raise ValueError("synchronized clock required")
+
+
+def install(source):
+    host_guard()
     check_source(source)
-    if any(p.exists() or p.is_symlink() for p in (RUNTIME.parent, CONFIG, STATE, OUTCOMES, RECEIPTS)):
+    if any(p.exists() or p.is_symlink() for p in (RUNTIME.parent, CONFIG, STATE, OUTCOMES, RECEIPTS, BASELINES)):
         raise ValueError("existing study paths; refuse overwrite")
     unit_dir = Path("/etc/systemd/system")
     for action in ACTIONS:
@@ -137,12 +143,14 @@ def install(source):
     CONFIG.mkdir(mode=0o755)
     fd = os.open(CONFIG / "data.env", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as handle:
-        handle.write("# Existing authorized market-data credentials only; provision after review.\nALPACA_API_KEY=\nALPACA_API_SECRET=\n")
+        handle.write("# Existing authorized market-data credentials only; provision after review.\nTRADIER_API_KEY=\n")
     for path, user, mode in ((STATE, users[0], 0o750), (RECEIPTS, users[1], 0o750), (OUTCOMES, users[2], 0o700)):
         path.mkdir(mode=mode)
         identity = pwd.getpwnam(user)
         group = pwd.getpwnam(users[1]).pw_gid if path == STATE else identity.pw_gid
         os.chown(path, identity.pw_uid, group)
+    BASELINES.mkdir(mode=0o750)
+    os.chown(BASELINES, pwd.getpwnam(users[0]).pw_uid, pwd.getpwnam(users[2]).pw_gid)
     for action in ACTIONS:
         for kind, content in (("service", service(action)), ("timer", timer(action))):
             path = unit_dir / f"tj-forecast-{action}.{kind}"

@@ -1,5 +1,6 @@
 """Non-model collector/scorer. No inference endpoint, CLI, or Jo task dispatch."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -16,8 +17,9 @@ import advisor_forecast as core
 CONFIG = Path("/etc/tj-forecast")
 STATE = Path("/var/lib/tj-forecast")
 OUTCOMES = Path("/var/lib/tj-forecast-outcomes")
+BASELINES = Path("/var/lib/tj-forecast-baselines")
 RECEIPTS = Path("/var/lib/tj-forecast-receipts")
-DATA_URL = "https://data.alpaca.markets/v2/stocks/bars"
+DATA_URL = "https://api.tradier.com/v1/markets/timesales"
 
 
 def now():
@@ -34,41 +36,73 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("redirect refused")
 
 
-def fetch_bars(day, start, end, spec):
+def tradier_bars(ticker, first_day, start, last_day, end):
+    """One bounded, non-retrying production market-data GET; no orders/account API."""
     reject_model_credentials()
-    key, secret = os.environ.get("ALPACA_API_KEY"), os.environ.get("ALPACA_API_SECRET")
-    if not key or not secret:
-        raise ValueError("dedicated existing SIP credentials absent")
-    params = {"symbols": ",".join(spec["tickers"]), "timeframe": "1Min", "feed": "sip", "adjustment": "raw", "asof": "-",
-              "start": core.at(day, start).isoformat(), "end": core.at(day, end).isoformat(), "sort": "asc", "limit": 10000}
-    rows, tokens = {t: [] for t in spec["tickers"]}, set()
+    key = os.environ.get("TRADIER_API_KEY")
+    if not key:
+        raise ValueError("dedicated existing Tradier credential absent")
+    params = {"symbol": ticker, "interval": "1min", "session_filter": "open",
+              "start": f"{first_day} {start[:5]}", "end": f"{last_day} {end[:5]}"}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    for _ in range(4):
-        request = urllib.request.Request(DATA_URL + "?" + urllib.parse.urlencode(params), headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret})
-        try:
-            with opener.open(request, timeout=10) as response:
-                body = response.read(4 * 1024 * 1024 + 1)
-                if len(body) > 4 * 1024 * 1024:
-                    raise ValueError("provider byte budget")
-                result = json.loads(body)
-        except (urllib.error.URLError, OSError, json.JSONDecodeError):
-            raise ValueError("market-data request failed; no fallback or purchase") from None
-        if not isinstance(result.get("bars"), dict) or set(result["bars"]) - set(rows):
-            raise ValueError("unexpected provider symbols")
-        for ticker, values in result["bars"].items():
-            if not isinstance(values, list):
-                raise ValueError("invalid provider bars")
-            rows[ticker].extend(values)
-            if len(rows[ticker]) > 90:
-                raise ValueError("bar budget exceeded")
-        token = result.get("next_page_token")
-        if token is None:
-            return rows
-        if not isinstance(token, str) or len(token) > 2048 or token in tokens:
-            raise ValueError("invalid pagination")
-        tokens.add(token)
-        params["page_token"] = token
-    raise ValueError("pagination budget exceeded")
+    request = urllib.request.Request(DATA_URL + "?" + urllib.parse.urlencode(params),
+                                     headers={"Authorization": "Bearer " + key, "Accept": "application/json"})
+    try:
+        with opener.open(request, timeout=10) as response:
+            body = response.read(8 * 1024 * 1024 + 1)
+            if len(body) > 8 * 1024 * 1024:
+                raise ValueError("provider byte budget")
+            result = json.loads(body)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        raise ValueError("market-data request failed; no retry, fallback or purchase") from None
+    series = result.get("series") if isinstance(result, dict) else None
+    if not isinstance(series, dict) or series.get("symbol", ticker) != ticker:
+        raise ValueError("missing or mismatched Tradier series")
+    values = series.get("data")
+    if isinstance(values, dict):
+        values = [values]
+    if not isinstance(values, list) or not values or len(values) > 10000:
+        raise ValueError("missing or excessive Tradier bars")
+    first, last = core.at(first_day, start), core.at(last_day, end)
+    bars, previous = [], None
+    for row in values:
+        # Tradier time is exchange-local, start-labelled; never use the host TZ.
+        dt = datetime.fromisoformat(row["time"])
+        dt = dt.replace(tzinfo=core.ET) if dt.tzinfo is None else dt.astimezone(core.ET)
+        if dt.second or dt.microsecond or not first <= dt <= last or (previous is not None and dt <= previous):
+            raise ValueError("out-of-range, unordered or duplicate Tradier minute")
+        if row.get("symbol", ticker) != ticker:
+            raise ValueError("mismatched Tradier bar symbol")
+        clean = {k: core.number(row[field], positive=k != "v")
+                 for k, field in (("o", "open"), ("h", "high"), ("l", "low"), ("c", "close"), ("v", "volume"))}
+        if clean["v"] < 0 or not clean["l"] <= min(clean["o"], clean["c"]) <= max(clean["o"], clean["c"]) <= clean["h"]:
+            raise ValueError("invalid Tradier OHLCV")
+        bars.append({"t": dt.isoformat(), **clean})
+        previous = dt
+    return bars
+
+
+def fetch_bars(day, start, end, spec):
+    # Seven calls in two bounded waves fit the unchanged 30-second capture gate.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        values = list(pool.map(lambda t: tradier_bars(t, day, start, day, end), spec["tickers"]))
+    return dict(zip(spec["tickers"], values))
+
+
+def fetch_history(prior, spec):
+    # One range request per ticker, not 140 calls against a shared account budget.
+    # Process one ticker at a time to bound memory for full-session responses.
+    history = {}
+    for ticker in spec["tickers"]:
+        rows = tradier_bars(ticker, prior[0], "09:30:00", prior[-1], "10:59:00")
+        windows = {d: [] for d in prior}
+        for row in rows:
+            dt = core.stamp(row["t"])
+            day = dt.date().isoformat()
+            if day in windows and 570 <= dt.hour * 60 + dt.minute < 660:
+                windows[day].append(row)
+        history[ticker] = {d: core.window(d, windows[d], 570, 90) for d in prior}
+    return history
 
 
 def verify_bundle():
@@ -89,8 +123,10 @@ def approval(spec):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         raise ValueError("root-owned approval required")
-    if core.read_json(path) != {"spec_hash": core.digest(spec), "owner_confirmed_dry_run": True, "non_model_collection_authorized": True}:
+    value = core.read_json(path)
+    if value.get("phase") not in ("development", "evaluation") or value != {"spec_hash": core.digest(spec), "owner_confirmed_dry_run": True, "non_model_collection_authorized": True, "phase": value.get("phase")}:
         raise ValueError("owner confirmation absent")
+    return value["phase"]
 
 
 def registration(spec):
@@ -142,11 +178,7 @@ def history_job(day, reg, spec):
     if not core.at(day, "09:45:00") <= core.stamp(now()) < core.at(day, "09:55:00"):
         raise ValueError("history preparation window exceeded")
     prior = [r["date"] for r in reg["calendar"] if r["date"] < day][-20:]
-    history = {t: {} for t in spec["tickers"]}
-    for d in prior:
-        bars = fetch_bars(d, "09:30:00", "10:59:00", spec)
-        for ticker in spec["tickers"]:
-            history[ticker][d] = core.window(d, bars[ticker], 570, 90)
+    history = fetch_history(prior, spec)
     for ticker in spec["tickers"]:
         core.history_stats(day, history[ticker], prior, spec)
     core.exclusive_json(STATE / "history" / f"{day}.json", {"sessions": prior, "bars": history, "captured_at": now().isoformat(), "spec_hash": core.digest(spec)})
@@ -176,26 +208,49 @@ def outcomes_job(day, reg, spec):
         core.exclusive_json(OUTCOMES / day / f"{ticker}.json", core.outcome(day, ticker, bars[ticker], captured, spec))
 
 
+def baseline_job(day, reg, spec):
+    from datetime import timedelta
+    cutoff = core.at(day, spec["snapshot"]["submission_deadline"])
+    if not cutoff <= core.stamp(now()) <= cutoff + timedelta(seconds=30):
+        raise ValueError("baseline collection late")
+    core.exclusive_json(BASELINES / day / "attempt.json", {"at": now().isoformat()})
+    last_bar = (cutoff - timedelta(minutes=1)).time().isoformat()
+    current = fetch_bars(day, "09:30:00", last_bar, spec)
+    captured = now()
+    hashes = {}
+    for ticker in spec["tickers"]:
+        path = STATE / "snapshots" / day / f"{ticker}.json"
+        if path.exists():
+            baseline = core.deadline_baseline(core.read_json(path), current[ticker], captured, spec)
+            core.exclusive_json(BASELINES / day / f"{ticker}.json", baseline)
+            hashes[ticker] = core.digest(baseline)
+    core.exclusive_json(BASELINES / day / "manifest.json", hashes)
+
+
 def job(action, spec):
-    approval(spec)
+    phase = approval(spec)
     reg = registration(spec)
     day = core.stamp(now()).date().isoformat()
     if day not in reg["sessions"]:
         return {"status": "outside_registered_sessions"}
+    if phase == "development" and day not in reg["sessions"][:2]:
+        return {"status": "evaluation_not_authorized"}
     effective = effective_spec(day, reg, spec)
-    if action == "snapshot":
+    if action in ("snapshot", "baseline"):
         minute = core.stamp(now()).hour * 60 + core.stamp(now()).minute
         expected, _ = core.timing(effective)
-        if minute in (600, 605) and minute != expected:
+        shift = 2 if action == "baseline" else 0
+        if minute in (600 + shift, 605 + shift) and minute != expected + shift:
             return {"status": "other_preregistered_snapshot_slot"}
     if action != "outcomes":
         operational_guard(day, reg, spec)
-    {"history": history_job, "snapshot": snapshot_job, "outcomes": outcomes_job}[action](day, reg, effective)
+    {"history": history_job, "snapshot": snapshot_job, "baseline": baseline_job, "outcomes": outcomes_job}[action](day, reg, effective)
     return {"status": "non_model_job_complete", "action": action, "session": day}
 
 
 def final_score(spec):
-    approval(spec)
+    if approval(spec) != "evaluation":
+        raise ValueError("evaluation not authorized")
     reg = registration(spec)
     days = reg["sessions"][2:]
     if core.stamp(now()) < core.at(days[-1], "11:06:00"):
@@ -212,10 +267,12 @@ def final_score(spec):
             raise ValueError("synthetic audit in real run")
         for ticker in spec["tickers"]:
             item = {"session": day, "ticker": ticker, "audit": audit}
-            for kind, root in (("snapshot", STATE / "snapshots"), ("receipt", RECEIPTS), ("outcome", OUTCOMES)):
+            for kind, root in (("snapshot", STATE / "snapshots"), ("receipt", RECEIPTS), ("baseline", BASELINES), ("outcome", OUTCOMES)):
                 path = root / day / f"{ticker}.json"
                 if path.exists():
                     item[kind] = core.read_json(path)
+                    if kind == "baseline" and core.read_json(BASELINES / day / "manifest.json").get(ticker) != core.digest(item[kind]):
+                        raise ValueError("baseline manifest mismatch")
             records.append(item)
     result = core.score(days, records, effective, now())
     core.exclusive_json(report_path, result)
@@ -224,7 +281,7 @@ def final_score(spec):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["history", "snapshot", "outcomes", "score", "verify"])
+    parser.add_argument("action", choices=["history", "snapshot", "baseline", "outcomes", "score", "verify"])
     args = parser.parse_args()
     spec = core.read_json(core.SPEC_DIR / "spec.json")
     try:
