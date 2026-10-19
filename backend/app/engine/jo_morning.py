@@ -18,10 +18,9 @@ from sqlmodel import Session, select
 from app.engine import jo_briefing as store
 from app.engine.chart_journal import open_lots
 from app.models import FILL_LIGHT, Account, ChartSettingsRecord, Fill, Trade, TradeFill, TradeCapture, MorningBriefingPacket, MorningBriefingRecord
-from cloud_mcp_check_common import read_config
 from jo_briefing_common import PacketSave, Strict
 import jo_briefing_exchange as exchange
-from jo_briefing_owner import binding, publish, import_submission
+from jo_briefing_owner import binding, load_binding, publish, import_submission
 
 ET = ZoneInfo("America/New_York")
 LOG = logging.getLogger(__name__)
@@ -188,7 +187,7 @@ class MorningRunner:
         config = self.config_loader()
         if config is None or not config.enabled:
             return {"status": "disabled"}
-        check = read_config(config.check_config)
+        check = load_binding(config.check_config)
         actor = binding(check)
         imported, errors = 0, 0
         with Session(self.engine) as session:
