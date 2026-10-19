@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Implementation started, Oct 19; first storage slice pending review | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Storage merged (#342), Oct 19; existing-connection tools in implementation | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
 
 ### Functionality sequence
 
@@ -158,7 +158,7 @@ No separate runner, new identity or Auth0 application is selected.
 | 5. Activate and observe | After owner merge and separately approved grants/deployment/task activation, verify actual Jo delivery | Scheduled packet → Jo → saved receipt → app visibility → reopen observed; cancellation verified; distinguish receipt, app availability and any notification delivery |
 | 6. Decide whether to keep | Ten scheduled mornings of delivery and owner feedback | Report every expected morning, lateness/gaps, opens and ratings; owner judges five-minute usefulness and omissions, including no-trade days; keep, simplify or stop before expanding |
 
-**First implementation slice (unmerged):** private owner save/read APIs under
+**First implementation slice (merged PR #342):** private owner save/read APIs under
 `/jo` use `backend/app/engine/jo_briefing.py` and
 `backend/app/routers/jo_briefing.py`. Memory amendments append revisions with
 explicit owner acceptance; stale amendments conflict. Packets reference exact
@@ -170,7 +170,45 @@ record's text (all revisions for a memory), retaining ID/hash tombstones;
 copies in other artifacts, conversations, exports or backups are not erased.
 Packet and briefing text can be redacted separately. No assistant/service grants,
 MCP tools, model calls, publisher, UI or schedule are added in this slice.
-Jo integration and the actual morning experience remain subsequent checkpoints.
+Actual Jo integration and the morning experience remain unactivated/unobserved.
+
+**Second slice — existing-connection tools (unmerged):** `jo_context(packet_id)`,
+`jo_memory_propose(packet_id, memory)`, `jo_briefing_submit(briefing)` and
+`jo_receipt(operation_id)` extend the same Check MCP resource, identity and
+Auth0 application. The default-off `jo_briefing_enabled` configuration requires
+the existing market-watch snapshot/outbox directories; no new service, socket,
+database or login is introduced. It advertises `jo:read` and `jo:submit` only
+when enabled, with `check:read` still required. Existing grants alone do not
+permit personal tools. Config/profile revocation is checked on every call.
+
+The private owner command `backend/jo_briefing_owner.py --config <approved-check-config>`
+provides `publish --packet-id <id> [--lifetime-hours 4]` and
+`import --operation-id <id>`. Publication exposes only that saved packet and
+its exact memory revisions to the configured Check profile, for at most
+24 hours. It does not collect holdings, the watchlist or conversation history.
+The packet ID must be supplied by the owner/task; automatic collection,
+publication, import scheduling, prior-brief context and UI remain next work.
+Run these commands only against separately approved data/bindings; no live
+commands or new grants are included in this implementation.
+
+Jo submissions use the existing outbox, with bounded immutable actor/operation
+keys. `pending_import` means queued, **not app-saved**. The explicit owner import
+validates context/citations again, commits through the existing storage engine,
+and publishes a text-free receipt with saved IDs; `saved` means committed,
+`rejected` means no accepted write for that operation. An exact retry or receipt
+read recovers an uncertain call, including DB-commit/export-failure recovery.
+Jo can only propose new memories; owner acceptance/amendment/retirement/redaction
+remain private. Briefing corrections append and must reference this actor's
+imported record. No notification or monitoring is implied by a save.
+
+Published files are copies: app redaction does not erase an already published
+packet or model context. Future imports refuse changed/redacted context;
+revocation/expiry prevents new tool reads, and export cleanup is an activation
+procedure. Receipts intentionally omit saved text. Authenticated submission
+receipts establish which Check profile submitted content; author/model fields
+remain self-report, and original packet evidence remains owner-supplied.
+Shadow's explicit packet, decision code and workflow are unchanged; shared
+reasoning remains `independence-unverified`.
 
 Every factual claim needs traceable evidence and source times; interpretation,
 uncertainty and missing/stale data remain visible. "What changed" compares frozen
