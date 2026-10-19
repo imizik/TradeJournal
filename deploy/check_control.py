@@ -53,7 +53,7 @@ UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejourna
     "tradejournal-check-keys.service", "tradejournal-check-keys.timer",
     "tradejournal-check-features.service", "tradejournal-check-features.timer",
     "tradejournal-check-owner.socket", "tradejournal-check-owner.service")
-RUNTIME_FILES = ("conditional_plan_common.py", "conditional_plan_ledger.py", "conditional_plan_tools.py", "stock_watch_common.py", "stock_watch_ledger.py", "market_watch_owner.py", "market_watch_common.py", "market_watch_ledger.py", "cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
+RUNTIME_FILES = ("jo_briefing_common.py", "jo_briefing_exchange.py", "jo_briefing_tools.py", "conditional_plan_common.py", "conditional_plan_ledger.py", "conditional_plan_tools.py", "stock_watch_common.py", "stock_watch_ledger.py", "market_watch_owner.py", "market_watch_common.py", "market_watch_ledger.py", "cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
 SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")

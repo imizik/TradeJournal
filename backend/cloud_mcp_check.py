@@ -48,6 +48,7 @@ from cloud_mcp_check_common import (CREDENTIAL_NAMES, NOTE_SCOPE, READ_SCOPE, RE
 from cloud_mcp_check_ledger import FORMAT, SHADOW_LABELS, Conflict, Ledger, NotFound, digest, new_check_id
 from cloud_mcp_d0 import RequestLimits, activated_socket
 import pretrade_features
+from jo_briefing_exchange import READ_SCOPE as JO_READ_SCOPE, SUBMIT_SCOPE as JO_SUBMIT_SCOPE
 
 UNAVAILABLE = "Check permission unavailable; reconnect or contact the owner. No fallback."
 CONTEXT_TIMEOUT = 6.0
@@ -56,6 +57,10 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "jo_context": ({"packet_id"}, set()),
+    "jo_memory_propose": ({"packet_id", "memory"}, set()),
+    "jo_briefing_submit": ({"briefing"}, set()),
+    "jo_receipt": ({"operation_id"}, set()),
     "conditional_plan_create": ({"operation_id", "source_kind", "source_id", "direction", "trigger_price", "invalidation_price", "confirm_bars", "expires_at", "rationale"}, set()),
     "conditional_plan_status": ({"plan_id"}, set()),
     "conditional_plan_list": (set(), set()),
@@ -87,6 +92,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name.startswith("jo_"):
+        return [READ_SCOPE, JO_READ_SCOPE] + ([JO_SUBMIT_SCOPE] if name in ("jo_memory_propose", "jo_briefing_submit") else [])
     if name.startswith("conditional_plan_"):
         return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("conditional_plan_create", "conditional_plan_cancel") else [])
     if name in ("market_watch_snapshot", "market_watch_submit", "stock_alert", "stock_alert_submit"):
@@ -363,7 +370,8 @@ class CheckMCP(FastMCP):
             # offline_access makes the client request it, so Auth0 issues a refresh token and the
             # five-minute access token renews without a reconnect. The tools never require it.
             authorization_servers=[self.settings.auth.issuer_url],
-            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"] + ([MARKET_READ_SCOPE, MARKET_SUBMIT_SCOPE] if getattr(self, "market_watch_enabled", False) else []))
+            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"] + ([MARKET_READ_SCOPE, MARKET_SUBMIT_SCOPE] if getattr(self, "market_watch_enabled", False) else [])
+            + ([JO_READ_SCOPE, JO_SUBMIT_SCOPE] if getattr(self, "jo_briefing_enabled", False) else []))
         paths = {route.path for route in metadata}
         app.routes[:] = [route for route in app.routes if route.path not in paths] + metadata
         return RequestLimits(app)
@@ -439,6 +447,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         return checked
 
     server.audit_call = lambda name: authenticated(name, log=True)
+    server.jo_briefing_enabled = config.jo_briefing_enabled
+    if config.jo_briefing_enabled:
+        from jo_briefing_tools import register as register_jo
+        register_jo(server, config, authenticated, scopes, clock)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
     if config.conditional_plan_enabled:
         from conditional_plan_tools import register as register_plans
