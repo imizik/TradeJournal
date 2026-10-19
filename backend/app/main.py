@@ -24,6 +24,7 @@ from app.routers import practice as practice_router
 from app.routers import advisor_shadow as advisor_shadow_router
 from app.routers import cloud_practice, cloud_choices, research_studio
 from app.routers import access as access_router
+from app.routers import jo_briefing
 from app.access_middleware import AccessMiddleware
 from app.routers.fills import (
     _rebuild_trades,
@@ -336,6 +337,7 @@ app.include_router(
 )
 app.include_router(research_studio.router, prefix="/research-studio", tags=["research studio"])
 app.include_router(research.router, prefix="/research", tags=["research"])
+app.include_router(jo_briefing.router, prefix="/jo", tags=["personal Jo"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
 
 # Inspect the finalized route catalog; permission checks precede all handlers.

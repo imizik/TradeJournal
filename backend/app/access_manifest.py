@@ -1,6 +1,17 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /jo/memories",
+    "GET /jo/memories/{memory_id}",
+    "POST /jo/memories",
+    "POST /jo/memories/{memory_id}/redact",
+    "POST /jo/packets",
+    "GET /jo/packets/{packet_id}",
+    "POST /jo/packets/{packet_id}/redact",
+    "POST /jo/briefings",
+    "GET /jo/briefings",
+    "GET /jo/briefings/{briefing_id}",
+    "POST /jo/briefings/{briefing_id}/redact",
     "GET /research-studio/config",
     "POST /research-studio/command",
     'GET /advisor-shadow/runs/{run_id}',

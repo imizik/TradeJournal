@@ -93,6 +93,12 @@ def test_full_migration_chain_applies_to_postgres(migrated):
     assert expected <= tables, f"missing after migration: {sorted(expected - tables)}"
 
 
+def test_jo_memory_retries_and_revision_races_on_postgres(migrated):
+    from tests.test_jo_briefing import exercise_concurrency
+
+    exercise_concurrency(migrated)
+
+
 def test_concurrent_paper_arms_enforce_symbol_cap_on_postgres(migrated, monkeypatch):
     from tests.test_paper_plans import check_concurrent_symbol_cap
 
