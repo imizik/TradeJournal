@@ -122,13 +122,6 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
       </div>
       <aside className="min-w-0 space-y-4" aria-label="Dashboard actions and status">
         <DataFreshness />
-        <DashboardCard title="Quick Actions">
-          <div className="space-y-1">
-            {[{ href: "/charts", label: "Open Charts" }, { href: tradesHref, label: "View Trades" }, { href: "/daily", label: "Daily Review" }, { href: analyticsHref, label: "Explore Analytics" }].map((action) =>
-              <a key={action.label} href={action.href} className="flex min-h-11 items-center justify-between rounded-md border px-3 text-xs hover:bg-secondary">{action.label}<span aria-hidden>→</span></a>)}
-          </div>
-          {params.account && params.account !== "all" && selectedAccounts.length !== 1 && <p className="mt-2 text-xs text-muted-foreground">Analytics opens all accounts; select the individual account there.</p>}
-        </DashboardCard>
         <DashboardCard title="Daily Practice">
           <p className="text-sm tabular-nums">{decisions.length} recent saved choices</p>
           <p className="mt-1 text-xs text-muted-foreground">Practice records are separate from this journal. TAKEs require explicit paper arming.</p>

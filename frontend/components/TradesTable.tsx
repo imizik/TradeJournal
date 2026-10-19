@@ -9,8 +9,11 @@ import { money } from "@/lib/format";
 /** Rows shown at first and added by each "Show more": a long history stays quick to open and scroll. */
 const PAGE = 50;
 
-/** An expiration as a short calendar date ("Oct 9"), with the year when it is not this year ("Jan 15, 2027"). */
-function fmtExpiry(value: string, thisYear: number) {
+/**
+ * An expiration, or a journal timestamp's New York wall date, as a short
+ * calendar date ("Oct 9"), with the year when it is not this year ("Jan 15, 2027").
+ */
+function fmtDate(value: string, thisYear: number) {
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(year === thisYear ? {} : { year: "numeric" }) });
 }
@@ -18,7 +21,7 @@ function fmtExpiry(value: string, thisYear: number) {
 /** Keep the full option identity visible even when its detail columns are hidden. */
 function contractName(trade: Trade) {
   const expiry = trade.expiration;
-  const date = expiry ? fmtExpiry(expiry, Number(expiry.slice(0, 4))) : null;
+  const date = expiry ? fmtDate(expiry, Number(expiry.slice(0, 4))) : null;
   const year = expiry?.slice(2, 4);
   const side = trade.option_type === "call" ? "C" : trade.option_type === "put" ? "P" : "";
   return `${trade.ticker} ${trade.strike ?? "—"}${side}${date ? ` · ${date} '${year}` : ""}`;
@@ -28,10 +31,9 @@ function contractName(trade: Trade) {
 const bucketName = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
 
 type SortKey =
-  | "ticker" | "account" | "strike" | "option_type" | "expiration"
+  | "ticker" | "account" | "opened_at" | "closed_at"
   | "contracts" | "avg_entry_premium" | "avg_exit_premium"
-  | "realized_pnl" | "pnl_pct" | "hold_duration_mins"
-  | "entry_time_bucket" | "status";
+  | "realized_pnl" | "pnl_pct" | "hold_duration_mins" | "status";
 
 type SortDir = "asc" | "desc";
 
@@ -47,16 +49,14 @@ function getSortVal(trade: Trade, key: SortKey, accountMap: Record<string, Accou
   switch (key) {
     case "ticker": return trade.ticker;
     case "account": return accountMap[trade.account_id]?.name ?? null;
-    case "strike": return trade.strike;
-    case "option_type": return trade.option_type;
-    case "expiration": return trade.expiration;
+    case "opened_at": return trade.opened_at;
+    case "closed_at": return trade.closed_at;
     case "contracts": return trade.contracts;
     case "avg_entry_premium": return trade.avg_entry_premium;
     case "avg_exit_premium": return trade.avg_exit_premium;
     case "realized_pnl": return trade.realized_pnl;
     case "pnl_pct": return trade.pnl_pct;
     case "hold_duration_mins": return trade.hold_duration_mins;
-    case "entry_time_bucket": return trade.entry_time_bucket;
     case "status": return trade.status;
   }
 }
@@ -110,7 +110,7 @@ function Th({
   return (
     <th
       className={cn(
-        "px-2 py-2 text-left font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground/80 sm:px-4",
+        "px-2 py-2 text-left font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground/80 sm:px-3",
         // A phone fits about four columns; the rest return from sm up, and
         // the ticker still opens the trade for everything they hold.
         wide && "hidden sm:table-cell"
@@ -124,7 +124,7 @@ function Th({
 }
 
 function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return <td className={cn("px-2 py-3 sm:px-4", wide && "hidden sm:table-cell")}>{children}</td>;
+  return <td className={cn("px-2 py-3 sm:px-3", wide && "hidden sm:table-cell")}>{children}</td>;
 }
 
 export default function TradesTable({
@@ -169,22 +169,20 @@ export default function TradesTable({
             <Th {...thProps("ticker")}>Ticker</Th>
             <Th {...thProps("realized_pnl")}>P&amp;L</Th>
             {showAccount && <Th {...thProps("account", true)}>Account</Th>}
-            <Th {...thProps("strike", true)}>Strike</Th>
-            <Th {...thProps("option_type", true)}>Type</Th>
-            <Th {...thProps("expiration", true)}>Expiry</Th>
+            <Th {...thProps("opened_at")}>Opened</Th>
+            <Th {...thProps("closed_at", true)}>Closed</Th>
             <Th {...thProps("contracts")}>Quantity</Th>
             <Th {...thProps("avg_entry_premium", true)}>Entry</Th>
             <Th {...thProps("avg_exit_premium", true)}>Exit</Th>
             <Th {...thProps("pnl_pct", true)}>P&amp;L %</Th>
             <Th {...thProps("hold_duration_mins", true)}>Hold</Th>
-            <Th {...thProps("entry_time_bucket", true)}>Entered</Th>
-            <Th {...thProps("status")}>Status</Th>
+            <Th {...thProps("status", true)}>Status</Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={showAccount ? 13 : 12} className="px-4 py-8 text-center text-muted-foreground">
+              <td colSpan={showAccount ? 11 : 10} className="px-4 py-8 text-center text-muted-foreground">
                 No trades found.
               </td>
             </tr>
@@ -211,16 +209,19 @@ export default function TradesTable({
                   </span>
                 </Td>
               )}
-              <Td wide>{t.strike != null ? money(t.strike) : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td wide>{t.option_type ? <span className="uppercase">{t.option_type}</span> : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td wide><span className="whitespace-nowrap">{t.expiration ? fmtExpiry(t.expiration, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
+              <Td>
+                <span className="whitespace-nowrap">{fmtDate(t.opened_at, thisYear)}</span>
+                {t.entry_time_bucket && <span className="hidden text-xs text-muted-foreground sm:block">{bucketName(t.entry_time_bucket)}</span>}
+                {/* Status has no column on a phone; an open trade still says so. */}
+                {t.status === "open" && <span className="mt-1 block sm:hidden"><StatusBadge status={t.status} /></span>}
+              </Td>
+              <Td wide><span className="whitespace-nowrap">{t.closed_at ? fmtDate(t.closed_at, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
               <Td>{t.contracts} <span className="block text-xs text-muted-foreground sm:inline">{t.instrument_type === "stock" ? "shares" : "contracts"}</span></Td>
               <Td wide>{money(t.avg_entry_premium)}</Td>
               <Td wide>{t.avg_exit_premium != null ? money(t.avg_exit_premium) : <span className="text-muted-foreground/40">—</span>}</Td>
               <Td wide><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
               <Td wide><span className="whitespace-nowrap">{t.hold_duration_mins != null ? formatHoldDuration(t.hold_duration_mins) : "—"}</span></Td>
-              <Td wide>{t.entry_time_bucket ? bucketName(t.entry_time_bucket) : "—"}</Td>
-              <Td><StatusBadge status={t.status} /></Td>
+              <Td wide><StatusBadge status={t.status} /></Td>
             </tr>
           ))}
         </tbody>
