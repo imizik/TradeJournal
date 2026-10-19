@@ -17,8 +17,7 @@ Scope is the **navigation surface**: Markdown at the repository root plus
 `docs/agent/`. Those are the documents that tell a reader where to look, so a
 name that does not resolve is a dead end. Plan and contract documents
 elsewhere under `docs/` are excluded on purpose -- naming a file that does not
-exist yet is what a plan is for, and `tradingview-signal-loop-plan.md` names
-several.
+exist yet is what a plan is for.
 
 Within that scope the universe comes from git, not a list here: a document
 added to `docs/agent/` tomorrow is covered without anyone remembering it.

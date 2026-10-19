@@ -1159,8 +1159,7 @@ three observed human-timed sessions remain separate gates; A3 is not fully accep
 
 The [A3 implementation contract](agent/a3-implementation-contract.md) scopes
 the manual-first build, bounded adapter, opt-in scheduling and acceptance
-gates. The [Sol handoff prompt](agent/a3-sol-handoff.md) carries that scope to
-a new chat. Neither document enables a runtime or selects another slice.
+gates. It does not enable a runtime or select another slice.
 
 **User outcome:** one short morning board and one after-work review make the
 loop habitual. On selected opportunities Isaac records one tap before seeing
