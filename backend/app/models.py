@@ -191,6 +191,49 @@ class Trade(SQLModel, table=True):
     trade_tags: list["TradeTag"] = Relationship(back_populates="trade")
 
 
+class JoMemoryRevision(SQLModel, table=True):
+    """Owner-managed memory history, separate from trades and Shadow inputs."""
+
+    __tablename__ = "jo_memory_revision"
+    __table_args__ = (UniqueConstraint("memory_id", "revision", name="uq_jo_memory_revision"),)
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    memory_id: uuid.UUID = Field(index=True)
+    revision: int
+    operation_id: str = Field(unique=True)
+    request_sha256: str
+    status: str
+    symbol: Optional[str] = Field(default=None, index=True)
+    body_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    redacted_at: Optional[datetime] = None
+
+
+class MorningBriefingPacket(SQLModel, table=True):
+    """Frozen, explicitly supplied evidence; collection is a separate operation."""
+
+    __tablename__ = "morning_briefing_packet"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(unique=True)
+    request_sha256: str
+    day: date = Field(index=True)
+    body_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    redacted_at: Optional[datetime] = None
+
+
+class MorningBriefingRecord(SQLModel, table=True):
+    """Immutable saved output bound to its packet, not a daily overwrite."""
+
+    __tablename__ = "morning_briefing_record"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    packet_id: uuid.UUID = Field(foreign_key="morning_briefing_packet.id", index=True)
+    operation_id: str = Field(unique=True)
+    request_sha256: str
+    body_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    redacted_at: Optional[datetime] = None
+
+
 class DailyReviewRecord(SQLModel, table=True):
     __tablename__ = "dailyreview"
 

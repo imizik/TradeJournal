@@ -20,7 +20,7 @@ subscription-only; evaluation remains inactive. Web access is unrestricted,
 bounded by the server save deadline, with deadline-time price baselines.
 Production Jo and Shadow are unchanged.
 
-Checkpoint: October 17, 2026: owner accepts the Shadow S1 pipeline on October 16 live-session evidence. Other rows retain their individually stated evidence dates.
+Checkpoint: October 19, 2026: owner approved starting the morning-briefing implementation below, accepting shared-context Shadow as independence-unverified. Shadow S1 retains its October 17 owner acceptance on October 16 live-session evidence. Other rows retain their individually stated evidence dates; this update is not a production-state audit.
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Move
 the checkpoint whenever a row changes, and verify host state before acting.
@@ -44,6 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Implementation started, Oct 19; first storage slice pending review | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
 
 ### Functionality sequence
 
@@ -80,6 +81,113 @@ linked evidence, exact remaining exit gate and next eligible slice. Carry
 unchanged evidence as the repository workflow permits; do not repeat a completed
 integration trial merely to satisfy a new roadmap label. A conversational success
 claim is not a durable receipt, and recorded past acceptance is not current health.
+
+## Personalized morning briefing and memory
+
+**October 19, 2026 — implementation authorized.** The owner approved starting
+the small release using existing Jo/auth, with Shadow left unchanged and its
+shared-context limitation accepted. Grants, task changes, deployment and
+activation retain their separate approvals. This is not a current VPS audit.
+
+**Outcome:** open TradeJournal to an already-generated, phone-friendly briefing,
+understand what matters in about five minutes, open the relevant chart, and
+continue with Jo using the same saved evidence and personal context.
+
+### Smallest release and non-goals
+
+- Reuse **Trader Jo's existing TradeJournal Check connection, Auth0 setup and
+  services**. Extend bounded tool authorization and receipt/storage patterns;
+  do not create another Auth0 application, login flow or inference worker.
+- Freeze a dated packet of approved holdings, the actual saved Charts watchlist,
+  relevant levels/captures, active personal memories and the prior briefing.
+  Jo retrieves it, researches material developments and submits a cited brief
+  with a stable operation ID. Dashboard reads the saved result without inference.
+- Show what matters, why it matters personally, what changed, contrary evidence
+  and reasons to wait; prioritize at most three items. Reuse Attention for factual
+  warnings, Charts for investigation and captures for owner-confirmed plans.
+  Add a compact context reference, not automatic chart overlays. Reopen by date/ID;
+  offer a copyable Jo context reference until a direct handoff is verified.
+- Store explicit memories in existing relational storage: original wording,
+  separate interpretation, source, symbol/topic, timestamp, revision and status.
+  Inferred memories remain proposals pending owner review. Corrections/retirement
+  preserve history and each briefing's referenced revisions; sensitive material
+  needs an explicit deletion/redaction path. Retrieve by symbol/topic/status and
+  recency, with a few pinned preferences. Bootstrap only owner-selected records
+  or supplied conversation excerpts, not an assumed export of all Jo history.
+- Current positions come from the journal, not remembered holdings. Distinguish
+  preferences and beliefs from facts and statistically supported lessons; retain
+  sample size, period and limitations. Reuse validated position calculations and
+  source times; unsupported basis, exposure or option metrics stay unavailable.
+
+**Non-goals:** a new auth system, VPS Codex worker, paid-model fallback, vector
+database, full Session framework, wholesale conversation ingestion, broad
+discovery scans, continuous AI thesis monitoring, dashboard rewrite, autonomous
+trading or automatic plan monitoring. No changes to Shadow's live workflow or
+experiment, and no new forecasting study. Saving a plan does not activate it.
+
+### Shadow separation decision — accepted limitation
+
+Personal memories/briefings must remain separate from Shadow records and be
+excluded from its explicit frozen input packet. Reuse existing storage and
+packet construction; separate tables or scopes alone do not isolate reasoning.
+Do not automatically copy app memory into Dot-wide memory, but recognize that
+retrieving it still exposes it to the receiving model context.
+
+Personal Jo and Shadow currently share a Dot context. A new chat, prompt to
+ignore memory, or shadow-first call ordering does not prove independence. The
+same authenticated identity with the same permissions cannot enforce different
+access merely because a task calls itself Shadow.
+
+**Owner decision, October 19:** proceed with personal briefing/memory and leave
+Shadow's workflow unchanged. Isolation is not an activation prerequisite.
+Preserve `independence-unverified` and all existing execution guards; richer
+personal context may influence Shadow, and results are not blind comparisons.
+Record the actual personal-memory activation time in the activation evidence so
+later reviews can distinguish before/after periods. Revisit isolation only if
+the owner selects it later; earlier results cannot become independent retroactively.
+No separate runner, new identity or Auth0 application is selected.
+
+### Delivery checkpoints and acceptance
+
+| Step | Work | Acceptance / dependency |
+|---|---|---|
+| 1. Settle scope | Small release and shared-context Shadow accepted; deadline/timezone, exchange-session schedule, accounts/fields and initial memories remain activation choices | Implementation authorized; no live data publication or task creation before those choices and approvals |
+| 2. Save and reopen | Versioned memory, frozen packets and immutable briefing revisions in existing storage; private owner reads | Fixture save → reload → reopen returns identical evidence and revision IDs; correction/retirement and duplicate/conflicting writes behave explicitly |
+| 3. Connect existing Jo | Bounded context, memory and briefing operations over the current connection; reuse receipt/recovery patterns | Ownership/scope refusals, proposed versus accepted memory, payload limits and uncertain-save recovery pass; no broad private API access or paid fallback |
+| 4. Morning experience | Scheduled-task instructions, Dashboard brief, Charts/context links and Useful / Meh / Missed something feedback | Phone/desktop walkthrough covers fresh, partial, stale, late, missing and duplicate results; evidence is accessible and chart settings preserved |
+| 5. Activate and observe | After owner merge and separately approved grants/deployment/task activation, verify actual Jo delivery | Scheduled packet → Jo → saved receipt → app visibility → reopen observed; cancellation verified; distinguish receipt, app availability and any notification delivery |
+| 6. Decide whether to keep | Ten scheduled mornings of delivery and owner feedback | Report every expected morning, lateness/gaps, opens and ratings; owner judges five-minute usefulness and omissions, including no-trade days; keep, simplify or stop before expanding |
+
+**First implementation slice (unmerged):** private owner save/read APIs under
+`/jo` use `backend/app/engine/jo_briefing.py` and
+`backend/app/routers/jo_briefing.py`. Memory amendments append revisions with
+explicit owner acceptance; stale amendments conflict. Packets reference exact
+active memory revisions and contain supplied evidence, not an automatically
+collected portfolio. Briefings cite that packet and corrections append new
+records. Both packet/output provenance and reported author/model remain
+owner-supplied, not proof of an actual Jo call. Redaction removes the selected
+record's text (all revisions for a memory), retaining ID/hash tombstones;
+copies in other artifacts, conversations, exports or backups are not erased.
+Packet and briefing text can be redacted separately. No assistant/service grants,
+MCP tools, model calls, publisher, UI or schedule are added in this slice.
+Jo integration and the actual morning experience remain subsequent checkpoints.
+
+Every factual claim needs traceable evidence and source times; interpretation,
+uncertainty and missing/stale data remain visible. "What changed" compares frozen
+records, not reconstructed recollections. No result by the deadline means an
+explicit unavailable/late state with available factual context, never yesterday's
+brief labelled current. A tool attempt is not a save; a valid citation is not
+proof of correct interpretation. The October 15 reference-limit refusal and its
+task fix motivate schema checks and receipt-based completion, not a claim that
+scheduling is either reliable or broken.
+
+Use small PRs under the existing [review policy](pr-review.md): migrations,
+financial semantics, sensitive-data authorization and activation/deployment are
+tier 2; a cross-surface UI integration is tier 1 unless it changes those boundaries.
+Complete applicable review/CI and UI checks; the owner merges. Fixture proof,
+installed state, natural scheduled execution and usefulness are separate evidence.
+Later evaluation keeps market forecasts, plan adherence and long-term thesis
+changes distinct; clicks/ratings alone establish neither trading edge nor returns.
 
 ## Existing architecture and later scope
 
