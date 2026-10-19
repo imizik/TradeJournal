@@ -1,6 +1,6 @@
 # A3 implementation contract: daily preparation, choices and review
 
-Scoped on 2026-10-08 for a Sol-led implementation. This refines A3 in the
+Scoped on 2026-10-08. This refines A3 in the
 [agentic trading roadmap](../agentic-trading-roadmap.md#a3--run-a-daily-routine-and-compare-independent-choices);
 it does not select another roadmap track or authorize A3 deployment, paid
 model calls, scheduling, or Phase B/C/D work.
@@ -62,7 +62,7 @@ required.
 
 Deliver and verify the daily-run model and manual UI first. Then integrate
 choice isolation, the bounded adapter, and disabled scheduling into the same
-A3 contract. Sol settles ownership, canonical run/retry semantics, cutoff,
+A3 contract. The owner settles ownership, canonical run/retry semantics, cutoff,
 budget enforcement, the restricted runner boundary, and comparison semantics
 before delegating implementation. Do not create an unrelated orchestration
 framework. Choose concrete schema and routes after inspecting owning code;
@@ -113,7 +113,7 @@ this document does not mandate hypothetical tables or endpoints.
   journal fills/FIFO/actual P&L. Preserve frozen planned R and base/3× costs.
   Define a shared underlying-outcome benchmark before either choice; do not
   substitute each actor's different fills or option-versus-stock P&L for it.
-  Missing benchmark coverage remains unavailable. Sol freezes the smallest
+  Missing benchmark coverage remains unavailable. The owner freezes the smallest
   deterministic benchmark contract before implementation.
 - **AC8 — Schedule/deployment readiness.** Test the dedicated job lane,
   calendar-aware 08:50 scheduling, actual receipt/deadline labels, ownership,
@@ -145,8 +145,8 @@ No A3 implementation grants authority to start another roadmap slice.
 
 ## Completion and approvals
 
-Keep one accountable Sol lead; use bounded Luna workers only when useful and
-follow [the repository workflow](codex-workflow.md). Sol owns consequential
+Keep one accountable owner; delegate bounded work only when useful and
+follow [the repository workflow](codex-workflow.md). The owner keeps consequential
 semantics, integration, security and final/live verification. One writer per
 shared subsystem; avoid gratuitous delegation or nested workers.
 

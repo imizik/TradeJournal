@@ -2,7 +2,7 @@
 
 Observed 2026-10-11 at 00:25:56–00:26:04 America/New_York
 (04:25:56–04:26:04 UTC), for Thursday October 8. The API usage-cost
-blocker from the [earlier report](moomoo-timestamp-validation.md) is resolved.
+blocker from the earlier October 10 report is resolved.
 Eight bounded read-only requests succeeded. Current metric sources remain in
 place: interval publication/finality, auction handling and field semantics
 remain unresolved.

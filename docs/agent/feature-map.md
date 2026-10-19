@@ -264,7 +264,6 @@ reason, and ruff lints them without importing them.
 ## Reference documents
 
 - `docs/tradingview-webhook-contract-v1.md` — frozen wire contract
-- `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
 - `docs/pine/README.md` — archived Isaac Market Map research and historical
