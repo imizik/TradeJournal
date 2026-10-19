@@ -309,7 +309,7 @@ metadata so Jo receives the revised writing instructions. This source change doe
 not update the live task, regenerate historical briefs, fetch fresh market context
 or establish that an actual Jo-generated brief meets the new writing targets.
 
-### Fresh market context — implementation, not yet activated
+### Fresh market context — activated October 19
 
 The morning publisher makes at most two existing-provider reads when creating a
 new packet: one Alpaca stock snapshot request and one fast news request. Both use
@@ -343,6 +343,18 @@ retrieval is not a current price, and missing headlines do not mean no catalysts
 Keep account scope, schedule, authentication and Shadow instructions unchanged.
 Verify actual provider coverage and a natural Jo brief after release; fixture
 coverage alone does not establish useful premarket prices or news availability.
+
+Merged #349 is active in release `53879202d0a5-39309047280-1`, after successful
+main CI, package smoke gates, checksum verification and guarded deployment.
+The existing task now uses `jo-morning-v2`, retaining Roth IRA-only scope and
+the weekday 09:00 ET schedule. Authentication, Check runtime and Shadow settings
+were unchanged. A separately keyed manual afternoon packet collected at 15:30 ET
+contained 20 IEX stock observations aged 0–66 seconds and eight headlines.
+Actual Jo submitted a two-priority briefing, receipt-confirmed saved at 15:31 ET;
+the private API and reloaded UI matched its packet, record and evidence citations.
+The earlier briefing and scheduled day pointer were preserved. This establishes
+the instructed fresh-data path, not natural morning delivery or usefulness of
+premarket coverage; those remain unobserved.
 
 ### October 19 activation evidence
 
