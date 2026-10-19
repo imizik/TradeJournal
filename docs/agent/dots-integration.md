@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Storage/tools merged (#342/#343), Oct 19; automatic packet/import and owner UI implemented, unactivated | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; Jo OAuth handoff pending | No | Existing Jo/auth reused; shared-context limitation accepted; actual Jo save and first natural morning tracked below |
 
 ### Functionality sequence
 
@@ -170,7 +170,7 @@ record's text (all revisions for a memory), retaining ID/hash tombstones;
 copies in other artifacts, conversations, exports or backups are not erased.
 Packet and briefing text can be redacted separately. No assistant/service grants,
 MCP tools, model calls, publisher, UI or schedule are added in this slice.
-Actual Jo integration and the morning experience remain unactivated/unobserved.
+This slice alone did not activate Jo; see the October 19 activation evidence below.
 
 **Second slice — existing-connection tools (merged PR #343):** `jo_context(packet_id)`,
 `jo_memory_propose(packet_id, memory)`, `jo_briefing_submit(briefing)` and
@@ -210,7 +210,7 @@ remain self-report, and original packet evidence remains owner-supplied.
 Shadow's explicit packet, decision code and workflow are unchanged; shared
 reasoning remains `independence-unverified`.
 
-### Automatic publication/import and morning UI — implemented, unactivated
+### Automatic publication/import and morning UI
 
 The existing private API lifespan runs `backend/app/engine/jo_morning.py` every
 30 seconds only when `JO_MORNING_CONFIG` names an enabled local JSON configuration.
@@ -227,7 +227,7 @@ absolute existing Check configuration path and explicit account UUIDs:
 }
 ```
 
-These times are proposed defaults in America/New_York, not selected live settings.
+The owner selected these times in America/New_York on October 19, with Roth IRA only.
 Before activation, approve accounts/fields, times, the Check profile/grants and
 file permissions, then set the environment path on the existing API. The API
 must be able to read that configuration and use the existing snapshot/outbox
@@ -257,7 +257,7 @@ files without blocking publication. Disable the configuration to stop both
 publication and import; stop/cancel the Jo task separately. Existing exported
 copies remain subject to their expiry and the explicit cleanup procedure.
 
-**Prepared Jo task instructions (not installed):** On approved exchange mornings
+**Installed Jo task instructions (October 19):** On approved exchange mornings
 after publication, call `jo_morning_context`. If unavailable, report the gap; never
 substitute yesterday's brief or invent positions. Use the returned frozen packet
 and exact memory revisions. Keep beliefs separate from facts, disclose missing
@@ -283,7 +283,45 @@ Fixture acceptance covers once-per-session publication, restart/retry, partial
 fills and account exclusions, actual MCP read/submit/import receipts, off/closed/
 unknown-calendar states, late imports, redaction, version/date selection, feedback
 persistence/errors and desktop/390px phone interactions. Actual Jo scheduling,
-production permissions and natural delivery remain unobserved until step 5.
+production permissions and natural delivery require separate step-5 evidence below.
+
+### October 19 activation evidence
+
+The owner approved Roth IRA only, 08:45 ET publication and a 09:15 ET deadline,
+then explicitly approved an immediate market-hours restart. Merged #344 release
+`3d50d64fdbcd` passed main CI and the Ubuntu deployment package gates. Its archive
+checksums and commit metadata were verified. Installation first stopped for disk
+exhaustion before migration or activation; the old app stayed healthy. With owner
+approval, five obsolete Check runtime copies were removed, retaining the running
+runtime and newest rollback copy. The retry completed after a fresh verified
+backup and the existing guarded migration/activation procedure.
+
+The existing Check runtime and API are enabled; no new service, database, OAuth
+client or connector was created. Only `jo:read` and `jo:submit` were added to the
+existing interactive grant; existing machine-to-machine grants were preserved.
+The Check configuration differs only by personal-Jo enablement. Shadow settings,
+identities and execution rules remain unchanged. Effective service-user checks
+confirmed the exact configuration/exchange grants and denial of private API
+credentials and the Check ledger. Configuration-directory traversal is required
+in addition to read permission on the two exact configuration files; it grants
+neither directory listing nor reads of sibling credentials.
+
+The existing **TJ Premarket Brief** task now runs weekdays at **09:00 ET**, using
+the frozen Roth packet, at most three cited priorities, stable operation IDs and
+receipt checks. Its first scheduled run is October 20. The UI time picker uses
+15-minute increments; 09:00 leaves time after publication and before the deadline.
+No separate email/push or paid inference fallback was enabled.
+
+A manual activation packet was collected and published at **13:33:18 ET on
+October 19** with its actual time and a four-hour expiry. It explicitly identifies
+itself as a late activation test. This marks the personal-context activation
+boundary for subsequent Shadow reviews; independence remains unverified.
+The live owner UI showed the actual packet and explicit missing-brief state.
+Actual Jo attempted the new context read, but ChatGPT reported an expired
+connection after automated reconnect attempts; owner reconnect/consent is the
+current handoff. No Jo-generated briefing has been claimed saved. Natural scheduled delivery,
+cancellation and owner usefulness remain separate acceptance items; this manual
+packet must not be counted as a successful scheduled morning.
 
 Every factual claim needs traceable evidence and source times; interpretation,
 uncertainty and missing/stale data remain visible. "What changed" compares frozen
