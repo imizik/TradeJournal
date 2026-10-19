@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.client import HTTPException
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -32,6 +33,13 @@ STATE_FILE = Path("/var/lib/tradejournal/alerts/state.json")
 API_GRACE = 5 * 60
 GMAIL_GRACE = 10 * 60
 TIMER_GRACE = 15 * 60
+# A deploy briefly holds an extra ~1.7 GB release; only a lasting warning counts.
+DISK_GRACE = 30 * 60
+
+# PostgreSQL, releases, runtimes and backups share these; each disk is checked once.
+DISK_PATHS = ("/", "/var/lib/postgresql", "/var/backups/tradejournal")
+DISK_WARNING = 80
+DISK_CRITICAL = 90
 
 # Listeners are not finite jobs. Gmail's has its own check; Webull is dormant.
 LISTENER_JOBS = {"gmail_listener", "webull_listener"}
@@ -188,6 +196,37 @@ def unit_problems(units: dict[str, dict[str, str]]) -> dict[str, Problem | None]
     return observed
 
 
+def disk_problems(paths=DISK_PATHS) -> dict[str, Problem | None]:
+    """Percent used as df reports it. While critical, the warning keeps its state."""
+    observed: dict[str, Problem | None] = {}
+    seen = set()
+    for path in paths:
+        try:
+            device = os.stat(path).st_dev
+            usage = os.statvfs(path)
+        except OSError:
+            continue
+        if device in seen:
+            continue
+        seen.add(device)
+        used = usage.f_blocks - usage.f_bfree
+        percent = math.ceil(100 * used / (used + usage.f_bavail)) if used + usage.f_bavail else 0
+        free = f"{usage.f_bavail * usage.f_frsize / 1024**3:.1f} GB free on {path}"
+        observed[f"disk:{path}:critical"] = Problem(
+            f"Server disk is {percent}% full",
+            f"Only {free}. Installs, backups and the database can fail soon; ask Claude what to clear.",
+            recovered="Server disk is back under 90%",
+        ) if percent >= DISK_CRITICAL else None
+        if percent < DISK_CRITICAL:
+            observed[f"disk:{path}:warning"] = Problem(
+                f"Server disk is {percent}% full",
+                f"{free}. Each deploy needs about 2 GB (a 1.7 GB release plus its download); ask Claude what to clear.",
+                DISK_GRACE,
+                "Server disk is back under 80%",
+            ) if percent >= DISK_WARNING else None
+    return observed
+
+
 def systemd_units() -> dict[str, dict[str, str]]:
     output = subprocess.run(
         ["systemctl", "show", *SERVICES, *TIMERS, *OPT_IN_TIMERS,
@@ -221,6 +260,7 @@ def observe(watching_since: float) -> dict[str, Problem | None]:
         observed["gmail"] = gmail_problem(gmail)
         observed.update(job_problems(runs, watching_since, gmail_down=observed["gmail"] is not None))
     observed.update(unit_problems(systemd_units()))
+    observed.update(disk_problems())
     return observed
 
 

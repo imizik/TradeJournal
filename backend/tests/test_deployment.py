@@ -593,6 +593,71 @@ def test_undelivered_alert_is_retried_and_reported_to_the_dead_mans_switch(alert
     assert alerts.read_state()["watching_since"] == 100
 
 
+def disk(monkeypatch, alerts, percent_by_path, device_by_path=None):
+    """1000 blocks of 1 MiB; `percent` used as df counts it, no reserved blocks."""
+    devices = device_by_path or {path: 1 for path in percent_by_path}
+
+    def stat(path):
+        if path not in percent_by_path:
+            raise FileNotFoundError(path)
+        return SimpleNamespace(st_dev=devices[path])
+
+    def statvfs(path):
+        used = percent_by_path[path] * 10
+        return SimpleNamespace(f_blocks=1000, f_bfree=1000 - used, f_bavail=1000 - used, f_frsize=1024**2)
+
+    monkeypatch.setattr(alerts.os, "stat", stat)
+    monkeypatch.setattr(alerts.os, "statvfs", statvfs)
+
+
+def test_disk_warning_waits_out_a_deploy_then_fires_once_and_recovers(alerts, monkeypatch):
+    disk(monkeypatch, alerts, {"/": 85})
+    observed = alerts.disk_problems(("/",))
+    assert observed["disk:/:critical"] is None
+    warning = observed["disk:/:warning"]
+    assert warning.title == "Server disk is 85% full" and "0.1 GB free on /" in warning.message
+    notices, state = alerts.evaluate(observed, {}, now=0)
+    assert notices == []
+    notices, state = alerts.evaluate(alerts.disk_problems(("/",)), state, now=alerts.DISK_GRACE)
+    assert [n["title"] for n in notices] == ["Server disk is 85% full"]
+    notices, state = alerts.evaluate(alerts.disk_problems(("/",)), state, now=alerts.DISK_GRACE + 120)
+    assert notices == []
+    disk(monkeypatch, alerts, {"/": 60})
+    notices, state = alerts.evaluate(alerts.disk_problems(("/",)), state, now=alerts.DISK_GRACE + 240)
+    assert [(n["title"], n["recovered"]) for n in notices] == [("Server disk is back under 80%", True)]
+
+
+def test_disk_critical_fires_at_once_without_a_second_warning(alerts, monkeypatch):
+    disk(monkeypatch, alerts, {"/": 85})
+    _, state = alerts.evaluate(alerts.disk_problems(("/",)), {}, now=0)
+    notices, state = alerts.evaluate(alerts.disk_problems(("/",)), state, now=alerts.DISK_GRACE)
+    assert [n["title"] for n in notices] == ["Server disk is 85% full"]
+    disk(monkeypatch, alerts, {"/": 92})
+    observed = alerts.disk_problems(("/",))
+    assert "disk:/:warning" not in observed  # unknown this pass: keeps its alerted state
+    notices, state = alerts.evaluate(observed, state, now=alerts.DISK_GRACE + 120)
+    assert [n["title"] for n in notices] == ["Server disk is 92% full"]
+    assert state["conditions"]["disk:/:warning"]["alerted"] is True
+    disk(monkeypatch, alerts, {"/": 70})
+    notices, _ = alerts.evaluate(alerts.disk_problems(("/",)), state, now=alerts.DISK_GRACE + 240)
+    assert sorted(n["title"] for n in notices) == ["Server disk is back under 80%", "Server disk is back under 90%"]
+
+
+def test_each_disk_is_checked_once_and_missing_paths_are_skipped(alerts, monkeypatch):
+    disk(monkeypatch, alerts, {"/": 50, "/var/lib/postgresql": 50, "/var/backups/tradejournal": 95},
+         {"/": 1, "/var/lib/postgresql": 1, "/var/backups/tradejournal": 2})
+    observed = alerts.disk_problems(("/", "/var/lib/postgresql", "/var/backups/tradejournal", "/missing"))
+    assert sorted(observed) == ["disk:/:critical", "disk:/:warning", "disk:/var/backups/tradejournal:critical"]
+    assert observed["disk:/var/backups/tradejournal:critical"].title == "Server disk is 95% full"
+
+
+def test_disk_is_part_of_every_alert_pass(alerts, monkeypatch):
+    monkeypatch.setattr(alerts, "get", lambda path: (_ for _ in ()).throw(OSError("refused")))
+    monkeypatch.setattr(alerts, "systemd_units", lambda: {})
+    monkeypatch.setattr(alerts, "disk_problems", lambda: {"disk:/:critical": None})
+    assert "disk:/:critical" in alerts.observe(0)
+
+
 def test_notification_is_posted_as_json_to_the_ntfy_server(alerts, monkeypatch):
     requests = []
 
