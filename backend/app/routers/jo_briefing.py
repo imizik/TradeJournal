@@ -1,13 +1,16 @@
 """Private owner API. No assistant grants or MCP exposure in this first slice."""
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import update, func
 from sqlmodel import Session, select
 
 from app.database import get_session
 from app.engine import jo_briefing as store
+from jo_briefing_common import Strict
 from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, utc_now_naive
 
 router = APIRouter()
@@ -112,3 +115,48 @@ def redact_briefing(briefing_id: UUID, session: Session = Depends(get_session)):
         session.commit()
         session.refresh(row)
     return {**store.receipt(row), "notice": "Briefing text is removed; its input packet and external copies remain."}
+
+
+@router.get("/morning")
+def morning(request: Request, day: date, briefing_id: UUID | None = None, session: Session = Depends(get_session)):
+    from app.engine.jo_morning import load_config, morning_view
+    try:
+        config = load_config()
+        configuration_error = False
+    except Exception:
+        config, configuration_error = None, True
+    result = call(morning_view, session, day, datetime.now(timezone.utc), briefing_id, config)
+    runner = getattr(request.app.state, "jo_morning", None)
+    result["automation"] = {"enabled": config is not None, "last_pass": getattr(runner, "last_pass", None),
+                            "unavailable": configuration_error or bool(getattr(runner, "last_error", None))}
+    return result
+
+
+class FeedbackSave(Strict):
+    opened: bool = False
+    rating: Literal["useful", "meh", "missed"] | None = None
+
+
+@router.post("/briefings/{briefing_id}/feedback")
+def feedback(briefing_id: UUID, body: FeedbackSave, session: Session = Depends(get_session)):
+    from app.models import MorningBriefingFeedback
+    if session.get(MorningBriefingRecord, briefing_id) is None:
+        raise HTTPException(404, "Briefing not found")
+    row = session.get(MorningBriefingFeedback, briefing_id)
+    if row is None:
+        session.add(MorningBriefingFeedback(briefing_id=briefing_id))
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()  # Another request created the same feedback row.
+    now = utc_now_naive()
+    values = {"updated_at": now}
+    if body.opened:
+        values["first_opened_at"] = func.coalesce(MorningBriefingFeedback.first_opened_at, now)
+    if body.rating is not None:
+        values["rating"] = body.rating
+    session.execute(update(MorningBriefingFeedback).where(MorningBriefingFeedback.briefing_id == briefing_id).values(**values))
+    session.commit()
+    row = session.get(MorningBriefingFeedback, briefing_id)
+    session.refresh(row)
+    return {"rating": row.rating, "first_opened_at": store.timestamp(row.first_opened_at) if row.first_opened_at else None}

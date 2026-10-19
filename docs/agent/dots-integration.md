@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Storage merged (#342), Oct 19; existing-connection tools in implementation | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | Storage/tools merged (#342/#343), Oct 19; automatic packet/import and owner UI implemented, unactivated | No | No | No | Existing Jo/auth reused; shared-context limitation accepted; data scope, deadline and separate activation approvals remain |
 
 ### Functionality sequence
 
@@ -172,7 +172,7 @@ Packet and briefing text can be redacted separately. No assistant/service grants
 MCP tools, model calls, publisher, UI or schedule are added in this slice.
 Actual Jo integration and the morning experience remain unactivated/unobserved.
 
-**Second slice — existing-connection tools (unmerged):** `jo_context(packet_id)`,
+**Second slice — existing-connection tools (merged PR #343):** `jo_context(packet_id)`,
 `jo_memory_propose(packet_id, memory)`, `jo_briefing_submit(briefing)` and
 `jo_receipt(operation_id)` extend the same Check MCP resource, identity and
 Auth0 application. The default-off `jo_briefing_enabled` configuration requires
@@ -186,8 +186,8 @@ provides `publish --packet-id <id> [--lifetime-hours 4]` and
 `import --operation-id <id>`. Publication exposes only that saved packet and
 its exact memory revisions to the configured Check profile, for at most
 24 hours. It does not collect holdings, the watchlist or conversation history.
-The packet ID must be supplied by the owner/task; automatic collection,
-publication, import scheduling, prior-brief context and UI remain next work.
+Manual publication requires the packet ID. The third slice below adds automatic
+collection/publication/import and a current-day pointer without new infrastructure.
 Run these commands only against separately approved data/bindings; no live
 commands or new grants are included in this implementation.
 
@@ -209,6 +209,81 @@ receipts establish which Check profile submitted content; author/model fields
 remain self-report, and original packet evidence remains owner-supplied.
 Shadow's explicit packet, decision code and workflow are unchanged; shared
 reasoning remains `independence-unverified`.
+
+### Automatic publication/import and morning UI — implemented, unactivated
+
+The existing private API lifespan runs `backend/app/engine/jo_morning.py` every
+30 seconds only when `JO_MORNING_CONFIG` names an enabled local JSON configuration.
+There is no new service or inference worker. The configuration must supply the
+absolute existing Check configuration path and explicit account UUIDs:
+
+```json
+{
+  "enabled": true,
+  "check_config": "/absolute/path/to/approved-check-config.json",
+  "account_ids": ["approved-account-uuid"],
+  "publish_time": "08:45",
+  "deadline": "09:15"
+}
+```
+
+These times are proposed defaults in America/New_York, not selected live settings.
+Before activation, approve accounts/fields, times, the Check profile/grants and
+file permissions, then set the environment path on the existing API. The API
+must be able to read that configuration and use the existing snapshot/outbox
+directories. Synthetic trial mode refuses this runner. Do not change the bound
+profile, scope or times mid-session: the dated pointer is immutable; a conflicting
+replacement refuses publication rather than silently switching context.
+
+On a confirmed open exchange session, publication starts at the configured time
+and stops at the exchange open. The existing Charts calendar supplies holidays
+and early-open information; unavailable calendars fail closed. Imports continue
+outside that window while enabled. One deterministic packet per scope/day survives
+restarts and retries without refreshing its cutoff or four-hour expiry. The
+collector exports only allowlisted saved fields: approved-account remaining FIFO
+positions, actual saved watchlist/levels, latest ten captures within 30 days,
+up to thirty active memory revisions, and a prior saved brief summary matching
+the current account scope and Check profile among the latest thirty records. Account
+names/IDs, fill source keys, images/audio/transcripts and Webull accounts are
+excluded. Counts/text and UTF-8 byte totals are bounded and omissions/truncation are disclosed. No quote/news or
+option-risk fetch is performed; journal freshness remains unverified. Prior
+briefs, memories, captures and saved levels are interpretations, not market facts.
+
+`jo_morning_context()` retrieves only today's published pointer through the same
+Check connection and `check:read jo:read` authorization. Submissions keep the
+existing `jo:submit` grant, validation, expiry and receipt protocol. The importer
+skips completed receipts, rotates bounded pending batches, and tolerates malformed
+files without blocking publication. Disable the configuration to stop both
+publication and import; stop/cancel the Jo task separately. Existing exported
+copies remain subject to their expiry and the explicit cleanup procedure.
+
+**Prepared Jo task instructions (not installed):** On approved exchange mornings
+after publication, call `jo_morning_context`. If unavailable, report the gap; never
+substitute yesterday's brief or invent positions. Use the returned frozen packet
+and exact memory revisions. Keep beliefs separate from facts, disclose missing
+quotes/news and source times, and do not present research absent from the packet
+as cited evidence. Submit at most three priorities with personal relevance,
+changes, contrary evidence and reasons to wait using `jo_briefing_submit` and a
+stable operation ID. Read `jo_receipt` until saved or rejected; `pending_import`
+is not success, and an uncertain call must reuse the same operation ID. Do not
+trade, activate plans, alter Shadow or promote memory proposals to accepted memory.
+The existing schema accepts packet citations only; external research enrichment
+requires a separately approved packet update and is not added by this slice.
+
+The owner Dashboard card links to `/morning` with date/version reopening, explicit
+late/stale/missing/closed/unavailable states, evidence/source timestamps, Charts
+links, a copyable Jo reference and persisted Useful / Meh / Missed something
+feedback. First full-view opens are recorded best-effort; a failed telemetry write
+does not block reading. Feedback errors are shown and can be retried. The private
+browser proxy permits owner routes and refuses assistant-profile access. Neither
+viewing nor saving feedback triggers inference, notifications or chart changes.
+No result silently falls back to another date. Reads use saved content only.
+
+Fixture acceptance covers once-per-session publication, restart/retry, partial
+fills and account exclusions, actual MCP read/submit/import receipts, off/closed/
+unknown-calendar states, late imports, redaction, version/date selection, feedback
+persistence/errors and desktop/390px phone interactions. Actual Jo scheduling,
+production permissions and natural delivery remain unobserved until step 5.
 
 Every factual claim needs traceable evidence and source times; interpretation,
 uncertainty and missing/stale data remain visible. "What changed" compares frozen

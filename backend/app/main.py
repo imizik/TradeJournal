@@ -233,6 +233,27 @@ async def _maybe_start_market_watch(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+async def _maybe_start_jo_morning(app_: FastAPI):
+    """Optional publication/import only, inside the existing API process."""
+    app_.state.jo_morning = None
+    if not os.environ.get("JO_MORNING_CONFIG") or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.jo_morning import MorningRunner
+    runner = MorningRunner(engine)
+    app_.state.jo_morning = runner
+
+    async def loop():
+        while True:
+            try:
+                await asyncio.to_thread(runner.run_once)
+            except Exception:
+                # Never log record contents or configuration paths.
+                runner.last_error = "Morning briefing pass unavailable"
+                logging.getLogger(__name__).warning("Morning briefing pass unavailable")
+            await asyncio.sleep(30)
+    return asyncio.create_task(loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -256,9 +277,12 @@ async def lifespan(_app: FastAPI):
     _app.state.chart_market_stream = chart_market_stream
     level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
     market_watch = await _maybe_start_market_watch(_app)
+    jo_morning = await _maybe_start_jo_morning(_app)
     try:
         yield
     finally:
+        if jo_morning is not None:
+            jo_morning.cancel()
         if market_watch is not None:
             market_watch.cancel()
         if level_alerts is not None:

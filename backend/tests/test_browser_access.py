@@ -133,6 +133,8 @@ def test_cross_audience_and_missing_configuration(boundary):
     ("POST", "/practice/opportunities/09f6afdc-cc00-4487-ad2e-b50f51c17838/choice"),
     ("POST", "/decisions/468aa876-bcb4-4bef-bf6a-33fd621b86bb/arm"),
     ("PUT", "/charts/settings"), ("GET", "/scanner/settings"), ("PUT", "/scanner/settings"),
+    ("GET", "/jo/morning?day=2026-10-19"),
+    ("POST", "/jo/briefings/468aa876-bcb4-4bef-bf6a-33fd621b86bb/feedback"),
     ("POST", "/access/assistants")])
 def test_read_only_inspector_denied(boundary, method, path):
     assert signin(boundary).status_code == 200

@@ -1,6 +1,8 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /jo/morning",
+    "POST /jo/briefings/{briefing_id}/feedback",
     "GET /jo/memories",
     "GET /jo/memories/{memory_id}",
     "POST /jo/memories",

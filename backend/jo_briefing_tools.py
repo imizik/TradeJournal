@@ -2,6 +2,7 @@
 import asyncio
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -23,6 +24,22 @@ def register(server, config, authenticated, scopes, clock):
         except (ValueError, OSError, KeyError, TypeError):
             raise ToolError("Personal Jo operation unavailable or refused. Read jo_receipt after an uncertain submit; "
                             "retry identical content only. No fallback or claim of an app save.") from None
+
+    @server.tool(meta=meta("jo_morning_context"), annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    async def jo_morning_context() -> dict[str, Any]:
+        """Read today's automatically published personal packet, using New York's date.
+        If unavailable, report no packet; never substitute yesterday or invent a briefing.
+        Research/interpret only the frozen evidence and disclose gaps. Submit with a stable
+        operation ID, then recover jo_receipt; pending_import is not an app save.
+        No scheduling, notifications or Shadow isolation is implied by this tool."""
+        def read(actor):
+            now = clock()
+            day = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+            pointer = exchange.read(snapshots, f"jo-morning-{actor}-{day}.json")
+            if pointer.get("profile_id") != actor or pointer.get("day") != day:
+                raise ValueError("Morning packet identity mismatch")
+            return exchange.context(snapshots, actor, UUID(pointer["packet_id"]), now)
+        return await invoke("jo_morning_context", read)
 
     @server.tool(meta=meta("jo_context"), annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def jo_context(packet_id: UUID) -> dict[str, Any]:

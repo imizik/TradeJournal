@@ -10,6 +10,7 @@ import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import DataFreshness from "./DataFreshness";
+import MorningBriefing from "./MorningBriefing";
 import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
@@ -67,6 +68,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
             className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</a>)}
         </div>)}
     </div>
+    <MorningBriefing initialDay={today} compact />
     <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
       <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
       <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />

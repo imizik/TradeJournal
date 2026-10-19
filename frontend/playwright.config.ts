@@ -102,6 +102,7 @@ export default defineConfig({
         FRONTEND_PUBLIC_URL: `http://127.0.0.1:${FRONTEND_PORT}`,
         // Background workers would make runs nondeterministic and reach for
         // credentials that are deliberately absent here.
+        JO_MORNING_CONFIG: "",
         GMAIL_WATCH_AUTOSTART: "false",
         WEBULL_LISTENER_AUTOSTART: "false",
         // Chart access tests must stay deterministic even with a local .env.

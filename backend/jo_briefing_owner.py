@@ -22,6 +22,13 @@ def binding(config):
     return config.profiles[0].id
 
 
+def load_binding(path):
+    """Owner-side adapter for the current validated Check exchange binding."""
+    config = read_config(path)
+    binding(config)
+    return config
+
+
 def publish(session, config, packet_id, now, *, lifetime_hours=4):
     actor = binding(config)
     if not 0 < lifetime_hours <= 24:

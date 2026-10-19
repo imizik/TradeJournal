@@ -58,6 +58,7 @@ CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
     "jo_context": ({"packet_id"}, set()),
+    "jo_morning_context": (set(), set()),
     "jo_memory_propose": ({"packet_id", "memory"}, set()),
     "jo_briefing_submit": ({"briefing"}, set()),
     "jo_receipt": ({"operation_id"}, set()),
