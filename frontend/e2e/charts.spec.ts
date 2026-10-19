@@ -1368,9 +1368,11 @@ test("full-screen mode covers the navigation in the same shell, closes the dock,
   await page.getByRole("button", { name: "Watchlist", exact: true }).click();
   await expect(page.getByRole("region", { name: "Watchlist" })).toBeVisible();
   // The divider above the smaller charts at its lowest: the main chart takes the height they give up (C7.4).
+  // Measured against full screen's own height, so the gain does not depend on the Gmail strip the normal view may show.
+  const beforeDivider = (await main.boundingBox())!.height;
   await rowDivider(page).focus();
   await page.keyboard.press("End");
-  await expect.poll(async () => (await main.boundingBox())!.height).toBeGreaterThan(normal.height + 60);
+  await expect.poll(async () => (await main.boundingBox())!.height).toBeGreaterThan(beforeDivider + 30);
   const smaller = (await page.getByTestId("canvas-Panel 3").boundingBox())!.height;
   await page.getByRole("button", { name: "Maximize 15m chart" }).click();
   await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.height).toBeGreaterThan(600);

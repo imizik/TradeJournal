@@ -160,9 +160,10 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
             </Link>
         );
         return <li key={href}>
-          {href === "/fills" && (rail
-            ? <div role="separator" aria-label="Research & labs" className="my-2 border-t" />
-            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">Research &amp; labs</h2>)}
+          {/* Everyday pages first; research and experiments under their own heading. */}
+          {href === "/strategy-lab" && (rail
+            ? <div role="separator" aria-label="Labs" className="my-2 border-t" />
+            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">Labs</h2>)}
           {rail ? <NavHint label={label}>{link}</NavHint> : link}
         </li>;
       })}

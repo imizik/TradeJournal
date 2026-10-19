@@ -13,8 +13,8 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 ## The screens
 
 The private sidebar and phone More menu (`components/Nav.tsx`) put Dashboard,
-Charts, Daily Review, Trades and Analytics first, followed by **Research & labs**
-(Fills, Signals, Scanner, Advisor review, Strategy Lab, Research Studio, Level 2 lab
+Charts, Daily Review, Trades, Analytics, Fills, Signals, Scanner and Advisor
+review first, followed by **Labs** (Strategy Lab, Research Studio, Level 2 lab
 and AI Buildout). Assistant access remains available when enabled. A **Sync**
 button opens a drawer on any page.
 

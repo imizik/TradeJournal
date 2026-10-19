@@ -283,14 +283,6 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <StatCard label="Winners / Losers" value={`${winners} / ${losers}`} />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Opened & Closed" value={String(sameDayTrades.length)} />
-        <StatCard label="Opened Only" value={String(openedOnlyTrades.length)} />
-        <StatCard label="Closed From Prior" value={String(closedOnlyTrades.length)} />
-      </div>
-
-      <PracticeRoutine day={selectedDay} />
-
       <DailyAiPanel
         tradeCount={selectedTrades.length}
         day={selectedDay ?? null}
@@ -536,6 +528,9 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
           </section>
         </>
       )}
+
+      {/* Practice is separate from the journal day, so it follows the day's own review and trades. */}
+      <PracticeRoutine day={selectedDay} />
     </div>
   );
 }
