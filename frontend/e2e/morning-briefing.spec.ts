@@ -35,6 +35,9 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
   await expect(panel).toContainText("Arrived after the deadline");
   await expect(page.getByRole("link", { name: "Open MU chart" })).toHaveAttribute("href", "/charts?symbol=MU");
   await page.screenshot({ path: test.info().outputPath("morning-brief-desktop.png") });
+  await expect(page.getByText("Confirm the current price and earnings date. Waiting is a valid choice.", { exact: true })).toBeVisible();
+  await expect(page.getByText("This is a preference, not proof that price will rise.", { exact: true })).not.toBeVisible();
+  await page.getByText("Reasoning and sources", { exact: true }).click();
   await panel.getByRole("link", { name: "thesis", exact: true }).first().click();
   await expect(page.getByText("I want confirmation before adding to MU.", { exact: true })).toBeVisible();
   await expect(page.getByText("thesis · Belief / interpretation")).toBeVisible();
@@ -62,9 +65,11 @@ test("saved morning brief reopens, cites evidence, links Charts and persists fee
 test("briefing date never falls back, versions stay explicit and load/feedback failures are honest", async ({ page }) => {
   const { brief, body } = await seed(page);
   const correction = await (await page.request.post("/api/backend/jo/briefings", { data: { ...body,
-    operation_id: `correct-${crypto.randomUUID()}`, summary: "Corrected morning view", supersedes_id: brief.id } })).json();
+    operation_id: `correct-${crypto.randomUUID()}`, summary: "Corrected morning view", items: [], supersedes_id: brief.id } })).json();
   await page.goto(`/morning?day=${day}&id=${correction.id}`);
   await expect(page.getByTestId("morning-briefing")).toContainText("Corrected morning view");
+  await expect(page.getByText("No supported priority in this briefing.", { exact: false })).toBeVisible();
+  await page.getByText("Date and saved versions", { exact: true }).click();
   await page.getByLabel("Saved version").selectOption(brief.id);
   await expect(page.getByTestId("morning-briefing")).toContainText("Keep MU on watch.");
   await page.route("**/jo/briefings/*/feedback", (route) => route.fulfill({ status: 503, json: { detail: "Fixture unavailable" } }));
@@ -79,4 +84,28 @@ test("briefing date never falls back, versions stay explicit and load/feedback f
   await expect(page.getByTestId("morning-briefing").getByRole("alert")).toContainText("The briefing could not load");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: test.info().outputPath("morning-error-phone.png") });
+});
+
+
+test("verbose saved briefs retain exact text behind details while risks stay visible", async ({ page }) => {
+  const { body } = await seed(page);
+  const longSummary = "Manual activation test; exact source timestamps and receipt checks. ".repeat(12);
+  const diagnostic = "operation_id morning-fixture; independence-unverified; no live research used.";
+  const response = await page.request.post("/api/backend/jo/briefings", { data: { ...body,
+    operation_id: `legacy-${crypto.randomUUID()}`, summary: longSummary, limitations: [diagnostic] } });
+  expect(response.ok()).toBeTruthy();
+  const brief = await response.json();
+  await page.goto(`/morning?day=${day}&id=${brief.id}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByText(longSummary.trim(), { exact: true })).not.toBeVisible();
+  await expect(page.getByText(diagnostic, { exact: true })).not.toBeVisible();
+  await expect(page.getByText("Confirm the current price and earnings date. Waiting is a valid choice.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Based on saved context, not verified live holdings or prices/)).toBeVisible();
+  await page.getByText("Read Jo’s full summary", { exact: true }).click();
+  await expect(page.getByText(longSummary.trim(), { exact: true })).toBeVisible();
+  await page.getByText("Read Jo’s full summary", { exact: true }).click();
+  await page.getByText("Limited coverage · Sources, gaps and delivery details", { exact: true }).click();
+  await expect(page.getByText(diagnostic, { exact: true })).toBeVisible();
+  await expect(page.getByText("No live quote or verified earnings date; check current conditions.", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
