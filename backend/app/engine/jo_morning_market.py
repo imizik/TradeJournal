@@ -22,8 +22,8 @@ def stamp(value):
 def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, clock=None):
     """Two bounded existing-provider reads, each independently allowed to fail.
 
-    Only symbol names leave the app. Observations after the collection cutoff
-    are excluded; retrieval time remains the actual completion time.
+    Only symbol names leave the app. Trade observations after actual retrieval are excluded. News stays within
+    the requested cutoff window; retrieval time is the actual completion time.
     """
     clock = clock or (lambda: datetime.now(UTC))
     selected = list(dict.fromkeys(s for s in symbols if isinstance(s, str) and re.fullmatch(r"[A-Z]{1,6}(\.[A-Z])?", s)))
@@ -57,11 +57,11 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
         trade = snap.get("latestTrade") if isinstance(snap, dict) else None
         observed = stamp(trade.get("t")) if isinstance(trade, dict) else None
         price = trade.get("p") if isinstance(trade, dict) else None
-        if (observed is None or observed > cutoff or type(price) not in (int, float)
+        if (observed is None or observed > retrieved or type(price) not in (int, float)
                 or not math.isfinite(price) or price <= 0):
             missing.append(symbol)
             continue
-        age = (cutoff - observed).total_seconds()
+        age = (retrieved - observed).total_seconds()
         freshness = "recent" if age <= 600 else "stale"
         if freshness == "stale":
             stale.append(symbol)
@@ -70,7 +70,7 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
             text=f"{symbol}: last reported trade ${price}; {freshness} at collection (age {int(age)} seconds). "
                  "Unadjusted trade price, not a bid/ask or option mark. No split-adjusted change or return is inferred."))
     if missing:
-        gaps.append("No valid price at or before cutoff for: " + ", ".join(missing) + ".")
+        gaps.append("No valid price at or before retrieval for: " + ", ".join(missing) + ".")
     if stale:
         gaps.append("Last trade older than 10 minutes; not current premarket evidence: " + ", ".join(stale) + ".")
     gaps.append(f"Price coverage is Alpaca {feed.upper()}, not the full consolidated market; a recent retrieval does not make an old trade current.")

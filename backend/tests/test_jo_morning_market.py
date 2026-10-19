@@ -29,7 +29,7 @@ def test_observation_and_retrieval_are_distinct_and_only_scoped_data_is_returned
 def test_old_trade_is_stale_even_with_new_retrieval_and_future_invalid_prices_are_omitted():
     symbols = ["OLD", "FUTURE", "BAD", "NAN", "BOOL"]
     rows, gaps = collect(symbols, {"OLD": {"latestTrade": {"p": 3, "t": (NOW-timedelta(days=3)).isoformat()}},
-        "FUTURE": {"latestTrade": {"p": 4, "t": (NOW+timedelta(seconds=1)).isoformat()}},
+        "FUTURE": {"latestTrade": {"p": 4, "t": (NOW+timedelta(seconds=3)).isoformat()}},
         "BAD": {"latestTrade": {"p": -1, "t": NOW.isoformat()}},
         "NAN": {"latestTrade": {"p": float("nan"), "t": NOW.isoformat()}},
         "BOOL": {"latestTrade": {"p": True, "t": NOW.isoformat()}}})
@@ -69,3 +69,9 @@ def test_scope_is_deduplicated_bounded_and_no_news_does_not_imply_no_catalysts()
     assert any("unsupported" in gap for gap in gaps)
     assert any("limited to 20" in gap for gap in gaps)
     assert any("do not infer" in gap for gap in gaps)
+
+
+def test_trade_observed_during_request_is_kept_before_actual_retrieval():
+    rows, _ = collect(snapshots={"MU": {"latestTrade": {"p": 123, "t": (NOW+timedelta(seconds=1)).isoformat()}}})
+    assert rows[0]["observed_at"] == NOW+timedelta(seconds=1)
+    assert rows[0]["retrieved_at"] == NOW+timedelta(seconds=2)

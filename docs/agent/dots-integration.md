@@ -321,7 +321,7 @@ watchlist, new service, credentials, paid inference or alternate provider is add
 
 Each accepted last trade retains its provider observation time separately from
 actual retrieval time, feed name and stock-only/unadjusted basis. Observations
-after collection starts, invalid prices and missing timestamps are omitted.
+after actual retrieval, invalid prices and missing timestamps are omitted.
 Trades older than ten minutes are labelled stale, including prior-session trades
 returned by a newly fetched snapshot. IEX is not consolidated coverage. No return,
 P&L, split-adjusted daily change, option quote or executable bid/ask is inferred.
@@ -334,7 +334,9 @@ remain gaps. Price and news failures degrade independently and do not prevent a
 saved-context briefing. No network call occurs on page reads or when republishing
 an existing packet after a restart; the saved packet and expiry remain immutable.
 
-Before activating this slice, replace the live task's old “No live quote/news
+Deploying this slice with the existing enabled morning configuration automatically
+adds these reads to the next new packet; there is no extra activation flag.
+Before deploying it, replace the live task's old “No live quote/news
 fetch is included” sentence with: “Use only the returned frozen market evidence,
 when present. Report source times/feed and stale or missing observations. A recent
 retrieval is not a current price, and missing headlines do not mean no catalysts.”
