@@ -89,7 +89,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
           {body.summary && (body.summary.length > 360
             ? <details className="rounded-md border p-3"><summary className="min-h-11 cursor-pointer text-sm font-medium">Read Jo’s full summary</summary><p className="whitespace-pre-wrap text-sm leading-relaxed">{body.summary}</p>{!compact && citations(body.summary_evidence_ids)}</details>
             : <div className="space-y-2"><h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today’s focus</h3><p className="whitespace-pre-wrap text-sm leading-relaxed">{body.summary}</p></div>)}
-          <p className="text-xs text-muted-foreground">Based on saved context, not verified live holdings or prices.{data.packet?.body.as_of && ` Context saved ${time(data.packet.body.as_of)}.`}</p>
+          <p className="text-xs text-muted-foreground">Frozen briefing, not a live price feed. Journal holdings are not broker-verified.{data.packet?.body.as_of && ` Context saved ${time(data.packet.body.as_of)}.`}</p>
           {!compact && !body.items?.length && <p className="text-sm">No supported priority in this briefing. Review the coverage details before drawing conclusions.</p>}
           {compact && <p className="text-xs text-muted-foreground">{body.items?.length ?? 0} priorities{gaps.length ? " · Evidence gaps disclosed in the brief" : ""} · Personal advice. Uses the account scope saved with this briefing.</p>}
           {!compact && body.items?.map((item, index) => <article key={index} className="space-y-3 rounded-lg border p-4">

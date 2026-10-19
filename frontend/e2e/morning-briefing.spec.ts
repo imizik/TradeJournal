@@ -100,7 +100,7 @@ test("verbose saved briefs retain exact text behind details while risks stay vis
   await expect(page.getByText(longSummary.trim(), { exact: true })).not.toBeVisible();
   await expect(page.getByText(diagnostic, { exact: true })).not.toBeVisible();
   await expect(page.getByText("Confirm the current price and earnings date. Waiting is a valid choice.", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Based on saved context, not verified live holdings or prices/)).toBeVisible();
+  await expect(page.getByText(/Frozen briefing, not a live price feed/)).toBeVisible();
   await page.getByText("Read Jo’s full summary", { exact: true }).click();
   await expect(page.getByText(longSummary.trim(), { exact: true })).toBeVisible();
   await page.getByText("Read Jo’s full summary", { exact: true }).click();

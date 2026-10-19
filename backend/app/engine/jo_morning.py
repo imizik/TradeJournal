@@ -1,7 +1,7 @@
 """Opt-in morning publication/import inside the existing API process; no inference.
 
-Read approved local records only. Existing Check OAuth and file permissions
-remain the boundary. No provider research, notifications or Shadow mutation.
+Read approved local records and bounded existing-provider market evidence.
+Existing Check OAuth/file boundaries remain. No inference or Shadow mutation.
 """
 from datetime import datetime, timedelta, timezone
 import json
@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from app.engine import jo_briefing as store
 from app.engine.chart_journal import open_lots
+from app.engine.jo_morning_market import collect_market
 from app.models import FILL_LIGHT, Account, ChartSettingsRecord, Fill, Trade, TradeFill, TradeCapture, MorningBriefingPacket, MorningBriefingRecord
 from jo_briefing_common import PacketSave, Strict
 import jo_briefing_exchange as exchange
@@ -62,17 +63,19 @@ def operation(config, actor, day):
         "scope": sorted(str(i) for i in config.account_ids), "publish": config.publish_time, "deadline": config.deadline})
 
 
-def collect(session, config, actor, now):
+def collect(session, config, actor, now, market_reader=None):
     day = now.astimezone(ET).date()
     accounts = session.exec(select(Account).where(Account.id.in_(config.account_ids))).all()
     if len(accounts) != len(config.account_ids) or any((a.broker or "").lower() == "webull" for a in accounts):
         raise ValueError("Approved account scope missing or excluded")
     evidence, gaps = [], ["Journal import freshness is not verified by this packet; positions reflect saved fills.",
-        "No live quotes, news or option risk metrics were fetched. Saved levels may need split/basis review."]
+        "No option risk metrics or verified live broker holdings. Saved levels may need split/basis review."]
 
     evidence_bytes = 0
+    symbols = []
+    packet_time = now
 
-    def add(key, kind, text, source, observed=None):
+    def add(key, kind, text, source, observed=None, retrieved=None):
         nonlocal evidence_bytes
         if len(evidence) >= 80:
             if "Evidence limited to 80 items." not in gaps:
@@ -88,7 +91,7 @@ def collect(session, config, actor, now):
             return False
         evidence_bytes += size
         evidence.append(dict(id=key, kind=kind, text=text[:4000], source=source,
-            observed_at=observed, retrieved_at=now))
+            observed_at=observed, retrieved_at=retrieved or now))
         return True
 
     add("schedule", "fact", exchange.canonical({"deadline": at(day, config.deadline).isoformat()}), "Morning publication schedule")
@@ -110,6 +113,7 @@ def collect(session, config, actor, now):
             "remaining_average_cost": lots["avg_cost"], "cost_unit": "USD per contract" if trade.instrument_type == "option" else "USD per share", "option_type": trade.option_type,
             "strike": float(trade.strike) if trade.strike is not None else None,
             "expiration": trade.expiration.isoformat() if trade.expiration else None}
+        symbols.append(trade.ticker)
         add(f"position-{index + 1}", "fact", exchange.canonical(detail), "Saved journal fills; FIFO remaining lots")
     if not trades:
         add("positions", "fact", "No open journal trades in the approved account scope.", "Saved journal query")
@@ -123,6 +127,7 @@ def collect(session, config, actor, now):
             settings.updated_at.replace(tzinfo=timezone.utc))
         if len(watched) > 30:
             gaps.append("Watchlist limited to 30 saved symbols.")
+        symbols.extend(watched[:30])
         levels = data.get("levels", {})
         for i, symbol in enumerate(watched[:10]):
             rows = levels.get(symbol, []) if isinstance(levels, dict) else []
@@ -135,6 +140,14 @@ def collect(session, config, actor, now):
             gaps.append("Saved levels limited to the first 10 watchlist symbols and 10 levels each.")
     except (ValueError, TypeError, AttributeError):
         gaps.append("Saved Charts watchlist/levels unavailable; no default tickers substituted.")
+    if market_reader is not None:
+        market_evidence, market_gaps = market_reader(symbols, now)
+        gaps.extend(market_gaps)
+        for row in market_evidence:
+            if add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"]):
+                packet_time = max(packet_time, row["retrieved_at"])
+    else:
+        gaps.append("No price or headline source was requested for this packet.")
     captures = session.exec(select(TradeCapture).where(TradeCapture.account_id.in_(config.account_ids),
         TradeCapture.received_at >= (now - timedelta(days=30)).replace(tzinfo=None), TradeCapture.received_at <= now.replace(tzinfo=None))
         .order_by(TradeCapture.received_at.desc(), TradeCapture.id).limit(11)).all()
@@ -166,14 +179,15 @@ def collect(session, config, actor, now):
             previous.created_at.replace(tzinfo=timezone.utc))
     else:
         gaps.append("No matching account-scope/profile briefing among the latest 30 prior records.")
-    return PacketSave(operation_id=operation(config, actor, day), day=day, as_of=now,
+    return PacketSave(operation_id=operation(config, actor, day), day=day, as_of=packet_time,
         scope=f"{len(accounts)} explicitly approved accounts; saved journal, Charts workspace and personal memories. Deadline {at(day, config.deadline).isoformat()}",
         evidence=evidence, gaps=gaps[:30], memory_revision_ids=selected_memories)
 
 
 class MorningRunner:
-    def __init__(self, engine, config_loader=load_config, calendar=None):
+    def __init__(self, engine, config_loader=load_config, calendar=None, market_reader=collect_market):
         self.engine, self.config_loader = engine, config_loader
+        self.market_reader = market_reader
         if calendar is None:
             from app.engine.chart_calendar import chart_calendar
             calendar = chart_calendar.hours
@@ -222,7 +236,7 @@ class MorningRunner:
                 key = operation(config, actor, day)
                 row = session.exec(select(MorningBriefingPacket).where(MorningBriefingPacket.operation_id == key)).first()
                 if row is None:
-                    saved = store.save_packet(session, collect(session, config, actor, now))
+                    saved = store.save_packet(session, collect(session, config, actor, now, self.market_reader))
                     row = session.get(MorningBriefingPacket, UUID(saved["id"]))
                 # Use the frozen cutoff for repeat publication, never extend expiry on restart.
                 published = datetime.fromisoformat(json.loads(row.body_json)["as_of"])

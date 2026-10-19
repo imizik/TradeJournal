@@ -21,7 +21,10 @@ NOW = datetime(2026, 10, 19, 12, 45, tzinfo=timezone.utc)  # 08:45 ET
 
 
 @pytest.fixture
-def morning(harness, tmp_path):  # noqa: F811
+def morning(harness, tmp_path, monkeypatch):  # noqa: F811
+    from app.engine import alpaca
+    monkeypatch.setattr(alpaca, "ALPACA_API_KEY", "")
+    monkeypatch.setattr(alpaca, "ALPACA_API_SECRET", "")
     snapshots, outbox = tmp_path / "snapshots", tmp_path / "outbox"
     snapshots.mkdir()
     outbox.mkdir()
@@ -58,13 +61,20 @@ def test_automatic_once_per_session_restart_tool_import_and_disabled(morning):
     check = read_config(h.config_path)
     def hours(day):
         return {"status": "open", "open": 570, "close": 960}
-    runner = MorningRunner(db, lambda: config, hours)
+    reads = []
+    def market(symbols, cutoff):
+        reads.append((symbols, cutoff))
+        return [dict(id="market-SPY", kind="fact", text="SPY: invented recent trade $100", source="Fixture",
+            observed_at=NOW-timedelta(seconds=10), retrieved_at=NOW+timedelta(seconds=2))], ["Fixture market coverage"]
+    runner = MorningRunner(db, lambda: config, hours, market)
     assert runner.run_once(NOW - timedelta(minutes=1))["status"] == "outside_publication_window"
     assert runner.run_once(NOW)["status"] == "published"
     first_files = {p.name: p.read_bytes() for p in Path(check.market_watch_snapshots_dir).iterdir()}
-    restarted = MorningRunner(db, lambda: config, hours)
+    restarted = MorningRunner(db, lambda: config, hours, market)
     assert restarted.run_once(NOW + timedelta(minutes=10))["status"] == "published"
     assert first_files == {p.name: p.read_bytes() for p in Path(check.market_watch_snapshots_dir).iterdir()}
+    assert len(reads) == 1 and reads[0][0] == ["SPY", "SPY", "MU"]
+    assert "SECRET" not in str(reads)
     with Session(db) as session:
         packets = session.exec(select(MorningBriefingPacket)).all()
         assert len(packets) == 1
@@ -73,6 +83,8 @@ def test_automatic_once_per_session_restart_tool_import_and_disabled(morning):
         for secret in ("SECRET", "5511", "8822", "secret-email", "Private name", str(config.account_ids[0])):
             assert secret not in encoded
         evidence = {e["id"]: e for e in saved["body"]["evidence"]}
+        assert evidence["market-SPY"]["observed_at"] != evidence["market-SPY"]["retrieved_at"]
+        assert datetime.fromisoformat(saved["body"]["as_of"]) == NOW+timedelta(seconds=2)
         position = json.loads(evidence["position-1"]["text"])
         assert position["remaining_quantity"] == 5 and position["remaining_average_cost"] == 110
         assert "SPY, MU" in evidence["watchlist"]["text"]
