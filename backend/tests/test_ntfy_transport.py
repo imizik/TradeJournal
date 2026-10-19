@@ -81,8 +81,13 @@ def test_fixed_ipv4_publishes_once_and_preserves_payload(sender, status, alerts,
     assert len(requests) == 1
     path, authorization, payload = requests[0]
     assert (path, authorization) == ("/", "Bearer fixture-token")
-    assert {key: payload[key] for key in ("topic", "title", "message", "click")} == {
-        "topic": "fixture-topic", "title": "Test → phone", "message": "Test only", "click": "https://fixture.invalid"}
+    assert {key: payload[key] for key in ("topic", "title", "message")} == {
+        "topic": "fixture-topic", "title": "Test → phone", "message": "Test only"}
+    if sender == "api":
+        assert "click" not in payload
+        assert payload["actions"] == [{"action": "view", "label": "Open app", "url": "https://fixture.invalid"}]
+    else:
+        assert payload["click"] == "https://fixture.invalid"
 
 
 @pytest.mark.parametrize("sender", ["api", "health"])

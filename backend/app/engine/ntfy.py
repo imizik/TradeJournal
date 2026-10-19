@@ -24,7 +24,8 @@ def configured() -> bool:
 
 def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...] = ("bell",), path: str = "") -> str | None:
     """Send one notification; raises ``NtfyError`` when ntfy did not accept it.
-    ``path`` is appended to ``ALERT_APP_URL`` for the notification's tap target.
+    Tapping the notification opens it in ntfy, where the full text shows; ``path``
+    is appended to ``ALERT_APP_URL`` for an "Open app" button on the notification.
     Returns ntfy's message ID when its reply carries one: proof ntfy accepted it, not that a phone showed it."""
     url = os.environ.get("NTFY_URL", "").strip()
     if not url:
@@ -32,7 +33,7 @@ def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...
     target = urlsplit(url)
     body: dict = {"topic": target.path.strip("/"), "title": title, "message": message, "priority": priority, "tags": list(tags)}
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        body["click"] = app_url.rstrip("/") + path
+        body["actions"] = [{"action": "view", "label": "Open app", "url": app_url.rstrip("/") + path}]
     headers = {"Content-Type": "application/json"}
     if token := os.environ.get("NTFY_TOKEN", "").strip():
         headers["Authorization"] = f"Bearer {token}"
