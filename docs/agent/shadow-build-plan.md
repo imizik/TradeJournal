@@ -50,8 +50,8 @@ New v2 files additionally carry `candles`, `candles_as_of`, and an explicit
 contains `source`, `feed`, `last_bar_time`, `1m` (last 60) and `5m` (session).
 Rows are completed and frozen with the candidate. Existing v1 files/decision
 hashes remain supported. Rolling `scanner-candles-v1` files beside setups carry
-up to 120 one-minute bars and the session five-minute bars; SH-3 provisions the
-same API-owner/check-reader setgid permissions, and SH-4 publishes each pass.
+up to 120 one-minute bars and the session five-minute bars; `enable-shadow-exchange` provisions the
+same API-owner/check-reader setgid permissions, and the scanner publishes each pass.
 
 **Decision file** `/var/lib/tradejournal-check/shadow-outbox/decision-<candidate_id>.json`,
 written by the check service with an atomic rename:
@@ -116,7 +116,8 @@ one of the ten full acceptance sessions; counting starts October 14.
 
 ## SH-6 — activation and first live session (lead with Isaac)
 
-Isaac-only steps are marked ⚑.
+Done; kept as the record of the activation and as the procedure for later
+check-service upgrades and rollback. Isaac-only steps are marked ⚑.
 
 1. ⚑ Auth0: add `shadow:decide` to the check API's permissions and to the
    check client's grant.

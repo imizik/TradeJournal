@@ -44,9 +44,11 @@ permissions and acceptance.
 
 ## Built slices: reference for code and services that still exist
 
-These slices are accepted, closed by the owner or dormant. Their code, and in
-several cases an installed service, remain, so the contract is still the
-authority on that code's permissions and isolation. They are not next work.
+These slices are accepted, closed by the owner, dormant, or waiting only on a
+separately stated gate (R4 human usefulness, the prospective MU collection,
+A3's timed sessions). Their code, and in several cases an installed service,
+remain, so the contract is still the authority on that code's permissions and
+isolation. They are not new Dots work; each contract states its own open gate.
 
 | Document | Read it when |
 |---|---|

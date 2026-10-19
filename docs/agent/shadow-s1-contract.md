@@ -7,8 +7,8 @@ narrowed to the smallest version that produces a comparable record.
 Reworked October 13 with Isaac's go-ahead to use the recommended choices.
 **The Shadow S1 pipeline is accepted on October 16, 2026 live-session
 evidence, with owner closeout on October 17. Natural TAKE execution remains
-unproven live, covered by fixtures, and is not an acceptance blocker.** The execution
-plan, work split and model guidance are in the [shadow build plan](shadow-build-plan.md).
+unproven live, covered by fixtures, and is not an acceptance blocker.** The frozen file
+formats, upgrade/rollback sequence and remaining packages are in the [shadow build plan](shadow-build-plan.md).
 
 ## Owner decisions (October 13, 2026)
 
