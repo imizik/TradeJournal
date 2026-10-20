@@ -18,6 +18,7 @@ from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
 from app.routers import level_alerts as level_alerts_router
 from app.routers import captures as captures_router
+from app.routers import check_links as check_links_router
 from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
@@ -343,6 +344,7 @@ if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     from app.routers import scanner as scanner_router
     app.include_router(scanner_router.router, prefix="/scanner", tags=["scanner"])
 app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
+app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     # The isolated replay overlay has no journal monthly-review module/models.

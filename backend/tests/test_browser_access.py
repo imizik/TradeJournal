@@ -134,6 +134,8 @@ def test_cross_audience_and_missing_configuration(boundary):
     ("POST", "/decisions/468aa876-bcb4-4bef-bf6a-33fd621b86bb/arm"),
     ("PUT", "/charts/settings"), ("GET", "/scanner/settings"), ("PUT", "/scanner/settings"),
     ("GET", "/jo/morning?day=2026-10-19"),
+    ("GET", "/jo/check-links/for-trade/468aa876-bcb4-4bef-bf6a-33fd621b86bb"),
+    ("POST", "/jo/check-links/chk_0f8c2a8e-1d6b-4c3a-9e1f-2b7a5c4d3e21/link"),
     ("POST", "/jo/briefings/468aa876-bcb4-4bef-bf6a-33fd621b86bb/feedback"),
     ("POST", "/access/assistants")])
 def test_read_only_inspector_denied(boundary, method, path):

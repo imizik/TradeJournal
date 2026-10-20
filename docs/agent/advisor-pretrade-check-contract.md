@@ -407,6 +407,63 @@ No extra candle reads may be inserted before that shadow commit. Scanner
 rules, universe and task schedule are unchanged. Natural SH-6 acceptance
 remains governed by the [S1 contract](shadow-s1-contract.md#acceptance).
 
+## Saved advice links to later journal activity — October 20, 2026
+
+Dots reliability step 5. The October 19–20 audit found Jo's NBIS advice
+("conditional plan, not a Go") was never tied to the NBIS Oct 23 $180 call
+lifecycle the journal recorded afterwards. The private journal now shows, in
+each saved check on `/advisor-review` (section "Journal afterwards") and on
+each trade page ("Saved advice"):
+
+- **Linked by you:** explicit owner links in the new additive `check_link`
+  table ([check_links.py](../../backend/app/engine/check_links.py)), in the
+  `CaptureLink` style: anchored on a fill's source identity (account plus
+  `raw_email_id`), either a whole trade (its first entry) or one fill, resolved
+  to the current trade on every read. Unlink stamps `unlinked_at`; the row and
+  its history stay. The check in the Check ledger is never copied or edited.
+- **Later activity — review needed:** trades in the approved scope (Webull
+  excluded, as for Jo's history), same underlying, entered after the check
+  (an entry in the check's own minute is flagged "order unclear") within five
+  calendar days, matching every contract field the check named. A possible
+  match is never labelled followed or overrode, never marks advice outdated,
+  and is never linked automatically. A position opened before the check is not
+  listed even if it was managed afterwards.
+- P&L shown is the engine's `trade.realized_pnl`; nothing is recomputed.
+- A check without a ticker or time (redacted or incomplete) shows no matches;
+  a check the reader can't return shows no journal section.
+
+The journal page supplies the check's facts from the saved check it displays;
+the journal backend never reads the Check ledger. Out of scope: automatic
+reassessment, any new Jo or assistant access (`position_check` unchanged),
+followed-versus-overrode grading of links, notifications and assumed links.
+
+**Activation (owner decision; nothing is switched on by the merge).** Until
+then both surfaces say "Saved advice isn't connected to the journal yet".
+
+1. Grant: the private journal frontend becomes a **second read-only peer of
+   the check owner reader**. Set `journal_peer_uid` in
+   `/etc/tradejournal-check/owner/config.json` to that frontend's UID, and give
+   it connect access to `/run/tradejournal-check-owner/owner.sock` (today
+   group `tj-advisor-web-owner`, mode 0660; for example a dedicated socket
+   group holding both frontends, via a reviewed socket drop-in, never adding
+   the journal user to the advisor frontend's group). Restart the owner reader
+   (it refuses config drift while running).
+2. In the private journal frontend's environment set
+   `TJ_CHECK_OWNER_ENABLED=true`, `TJ_CHECK_OWNER_SOCKET=/run/tradejournal-check-owner/owner.sock`
+   and `TJ_CHECK_OWNER_SOCKET_UID=0`, then restart it. Only the
+   `private_legacy` profile reads without an app session; assistant profiles
+   stay refused.
+3. The `check_link` migration ships with the normal app deploy (backup first);
+   it only creates the table.
+4. Verify: `/advisor-review` lists checks in the journal, one real check shows
+   its later activity, a link and unlink round-trip, and the trade page shows
+   the link.
+
+Turning it off: unset `TJ_CHECK_OWNER_ENABLED` (or remove `journal_peer_uid`
+and the socket access, then restart the reader). That restores today's state:
+the journal shows "isn't connected", the trial owner page is unchanged, and
+saved links stay in `check_link` untouched.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his
