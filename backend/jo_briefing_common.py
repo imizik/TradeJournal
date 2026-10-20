@@ -5,7 +5,10 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-Text = Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")]
+# Cover the whole string: connector schema validators may full-match patterns.
+# [\s\S] also preserves multiline text without requiring regex flags.
+NONBLANK = r"^[\s\S]*\S[\s\S]*$"
+Text = Annotated[str, Field(min_length=1, max_length=4000, pattern=NONBLANK)]
 Operation = Annotated[str, Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")]
 Symbol = Annotated[str, Field(pattern=r"^[A-Z]{1,6}(\.[A-Z])?$")]
 
@@ -91,8 +94,8 @@ class BriefingItem(Strict):
 class BriefingSave(Strict):
     operation_id: Operation
     packet_id: UUID
-    author: Annotated[str, Field(min_length=1, max_length=120, pattern=r"\S")]
-    prompt_version: Annotated[str, Field(min_length=1, max_length=120, pattern=r"\S")]
+    author: Annotated[str, Field(min_length=1, max_length=120, pattern=NONBLANK)]
+    prompt_version: Annotated[str, Field(min_length=1, max_length=120, pattern=NONBLANK)]
     model_id: Annotated[str, Field(min_length=1, max_length=120)] | None = None
     summary: Text
     summary_evidence_ids: list[str] = Field(max_length=10)
