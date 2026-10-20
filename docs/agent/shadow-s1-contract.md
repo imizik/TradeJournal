@@ -102,14 +102,13 @@ one-minute bars and session-to-date completed five-minute bars. Rows have Unix
 UTC start/end timestamps; `last_bar_time` is the last completed bar's end in ISO
 UTC. Source is `tradier_timesales_1min`, feed `full_market`. The tool uses a file
 only when its latest one-minute bar is at most 120 seconds old (never future).
-Otherwise it makes one bounded regular-session request through the existing
-Provider directly to Alpaca's data API, explicitly labelled `feed=iex`. There
-is no hosted Alpaca MCP dependency, pagination loop, retry, or new credential.
-Every response carries source, feed, last-bar time and age; unavailable data
-has null time/age and `candles_unavailable`. The response deadline for file and
-provider work is four seconds, below the 15-second proxy response-header budget;
-the provider keeps its existing three-second timeout and short cache. Up to four
-reads may remain in flight; a timed-out worker retains its slot until completion.
+Missing, stale, malformed or wrong-feed files return `status=insufficient_data`
+with `candles_unavailable`; there is no provider fallback or IEX request.
+Completed rows must have valid finite OHLCV and ordered timestamps, and the
+requested interval must itself be fresh. Every response carries source, feed,
+last-bar time and age; unavailable data has null time/age. The response deadline
+for file work is four seconds, below the 15-second proxy response-header budget.
+Up to four reads may remain in flight; a timed-out worker retains its slot until completion.
 The hosted ChatGPT caller's budget is not configurable here.
 
 Packet candles are persisted with the candidate before handoff, so a restart

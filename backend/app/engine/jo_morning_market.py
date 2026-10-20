@@ -4,7 +4,7 @@ import math
 import re
 from urllib.parse import urlsplit
 
-from app.engine import alpaca, news
+from app.engine import news, tradier
 
 UTC = timezone.utc
 MAX_SYMBOLS = 20
@@ -36,11 +36,15 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
     rows = []
     if not selected:
         return rows, ["No eligible saved symbols for market context."]
-    if snapshots_reader is None and not (alpaca.ALPACA_API_KEY and alpaca.ALPACA_API_SECRET):
-        return rows, ["Market context unavailable: existing Alpaca credentials are not configured."]
-    feed = alpaca.ALPACA_DATA_FEED
-    snapshots_reader = snapshots_reader or (lambda tickers: alpaca._alpaca_get_fast(
-        "/v2/stocks/snapshots", {"symbols": ",".join(tickers), "feed": feed}))
+    if snapshots_reader is None:
+        def snapshots_reader(tickers):
+            if tradier.TRADIER_BASE_URL != "https://api.tradier.com":
+                raise ValueError("Live Tradier data required")
+            quotes = tradier.get_quotes_once(tickers)
+            return {symbol: {"latestTrade": {"p": quote.last,
+                "t": datetime.fromtimestamp(quote.trade_date / 1000, UTC).isoformat()
+                     if quote.trade_date else None}}
+                for symbol, quote in quotes.items()}
     news_reader = news_reader or (lambda tickers, start, end: news.fetch_news(
         symbols=tickers, start=start, end=end, limit=MAX_HEADLINES, fast=True))
     try:
@@ -66,14 +70,14 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
         if freshness == "stale":
             stale.append(symbol)
         rows.append(dict(id=f"market-{symbol}", kind="fact", observed_at=observed, retrieved_at=retrieved,
-            source=f"Alpaca {feed.upper()} latest trade; not a consolidated executable quote",
+            source="Tradier full-market latest trade; not an executable quote",
             text=f"{symbol}: last reported trade ${price}; {freshness} at collection (age {int(age)} seconds). "
                  "Unadjusted trade price, not a bid/ask or option mark. No split-adjusted change or return is inferred."))
     if missing:
         gaps.append("No valid price at or before retrieval for: " + ", ".join(missing) + ".")
     if stale:
         gaps.append("Last trade older than 10 minutes; not current premarket evidence: " + ", ".join(stale) + ".")
-    gaps.append(f"Price coverage is Alpaca {feed.upper()}, not the full consolidated market; a recent retrieval does not make an old trade current.")
+    gaps.append("Prices use Tradier full-market data only; a recent retrieval does not make an old trade current. No IEX fallback.")
     start = cutoff - timedelta(hours=36)
     try:
         articles = news_reader(selected, start, cutoff)

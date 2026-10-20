@@ -52,7 +52,7 @@ from jo_briefing_exchange import READ_SCOPE as JO_READ_SCOPE, SUBMIT_SCOPE as JO
 
 UNAVAILABLE = "Check permission unavailable; reconnect or contact the owner. No fallback."
 CONTEXT_TIMEOUT = 6.0
-CANDLES_TIMEOUT = 4.0  # Entire file/provider work, below the proxy response-header budget.
+CANDLES_TIMEOUT = 4.0  # Entire file read, below the proxy response-header budget.
 MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
@@ -130,6 +130,8 @@ class Provider:
         self.calls = 0
 
     def get(self, path, params):
+        if path.startswith("/v2/stocks/") and params.get("feed") != "sip":
+            raise ProviderError("insufficient_data: full-market stock data required; no IEX fallback")
         key = (path, tuple(sorted((name, str(value)) for name, value in params.items())))
         stamp = time.monotonic()
         with self.lock:
@@ -253,15 +255,13 @@ def read_shadow_setup(directory, candidate_id, now):
     return body
 
 
-def candle_unavailable(reason, *, source="alpaca_data_api", feed="iex"):
-    return {"candles_unavailable": reason, "source": source, "feed": feed,
+def candle_unavailable(reason, *, source="tradier_timesales_1min", feed="full_market"):
+    return {"status": "insufficient_data", "candles_unavailable": reason, "source": source, "feed": feed,
         "last_bar_time": None, "age_seconds": None}
 
 
 def candle_read(setups_dir, provider, symbol, interval, count, now):
-    """One bounded file read, then at most one direct provider request. No pagination/retries."""
-    from zoneinfo import ZoneInfo
-    seconds = 60 if interval == "1m" else 300
+    """Read existing full-market scanner candles only; never substitute another feed."""
     stamp = now.timestamp()
     if setups_dir:
         try:
@@ -282,49 +282,27 @@ def candle_read(setups_dir, provider, symbol, interval, count, now):
                     and packet["1m"][-1]["end_time"] == last.timestamp()):
                 rows = packet[interval]
                 end_key = "end_time" if interval == "1m" else "end"
+                start_key = "time" if interval == "1m" else "start"
+                duration = 60 if interval == "1m" else 300
                 if rows and all(row[end_key] <= stamp for row in rows):
                     selected = rows[-count:]
+                    for i, row in enumerate(selected):
+                        values = [row[k] for k in (start_key, end_key, "open", "high", "low", "close", "volume")]
+                        if (any(type(v) not in (int, float) or not math.isfinite(v) for v in values)
+                                or row[end_key] - row[start_key] != duration
+                                or row["low"] <= 0 or row["volume"] < 0
+                                or not row["low"] <= min(row["open"], row["close"]) <= max(row["open"], row["close"]) <= row["high"]
+                                or (i and row[start_key] < selected[i - 1][end_key])):
+                            raise ValueError("invalid completed candle")
+                    if not 0 <= stamp - selected[-1][end_key] <= duration + 120:
+                        raise ValueError("requested interval is stale")
                     selected_last = datetime.fromtimestamp(selected[-1][end_key], timezone.utc)
                     return {"candles": selected, "source": packet["source"], "feed": packet["feed"],
                         "symbol": symbol, "interval": interval, "last_bar_time": selected_last.isoformat(),
                         "age_seconds": round(stamp - selected_last.timestamp(), 3)}
-        except (OSError, ValueError, TypeError, KeyError, IndexError):
-            pass  # Missing/stale/invalid scanner data falls back to the isolated provider.
-    # RTH only; server supplies an explicit completed-bar cutoff and bounded window.
-    local = now.astimezone(ZoneInfo("America/New_York"))
-    opening = local.replace(hour=9, minute=30, second=0, microsecond=0)
-    close = local.replace(hour=16, minute=0, second=0, microsecond=0)
-    end = min(now, close).replace(second=0, microsecond=0)
-    if interval == "5m":
-        end -= timedelta(minutes=end.minute % 5)
-    start = max(opening, end - timedelta(seconds=seconds * count))
-    if end <= start:
-        return candle_unavailable("no completed regular-session bars")
-    try:
-        body = provider.get("/v2/stocks/bars", {"symbols": symbol, "timeframe": "1Min" if interval == "1m" else "5Min",
-            "start": start.isoformat(), "end": (end - timedelta(microseconds=1)).isoformat(),
-            "feed": "iex", "sort": "desc", "limit": count, "adjustment": "raw"})
-        rows = []
-        for row in body.get("bars", {}).get(symbol, []):
-            at = datetime.fromisoformat(row["t"].replace("Z", "+00:00"))
-            if at.tzinfo is None:
-                raise ValueError("bar time has no timezone")
-            if start <= at and at + timedelta(seconds=seconds) <= end:
-                rows.append({"time" if interval == "1m" else "start": at.timestamp(),
-                    "end_time" if interval == "1m" else "end": at.timestamp() + seconds,
-                    **{k: row[v] for k, v in (("open", "o"), ("high", "h"), ("low", "l"), ("close", "c"), ("volume", "v"))}})
-        rows.sort(key=lambda row: row["time" if interval == "1m" else "start"])
-        rows = rows[-count:]
-        if not rows:
-            return candle_unavailable("provider returned no completed bars")
-        last = datetime.fromtimestamp(rows[-1]["end_time" if interval == "1m" else "end"], timezone.utc)
-        return {"candles": rows, "source": "alpaca_data_api", "feed": "iex", "symbol": symbol,
-            "interval": interval, "last_bar_time": last.isoformat(),
-            "age_seconds": round(stamp - last.timestamp(), 3), "truncated": bool(body.get("next_page_token"))}
-    except ProviderError as exc:
-        return candle_unavailable(str(exc))
-    except Exception as exc:
-        return candle_unavailable(f"provider response invalid ({type(exc).__name__})")
+        except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError):
+            pass
+    return candle_unavailable("fresh completed Tradier candles unavailable; no IEX fallback")
 
 
 def write_shadow_decision(directory, decision):
@@ -510,7 +488,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             except (ValueError, OSError, KeyError, TypeError, sqlite3.Error):
                 raise ToolError('Stock review/export refused; retry identical content only to recover') from None
 
-        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded, write_read_notice
+        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded, FullMarketRequired, write_read_notice
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
 
@@ -526,7 +504,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 if snapshot is None:
                     context = await asyncio.to_thread(market_ledger.context, checked.claims["profile_id"], clock)
                     return {"status": "unavailable", "reason": "no_current_session_snapshot", "context": context}
-                return await asyncio.to_thread(market_ledger.serve, checked.claims["profile_id"], snapshot, clock)
+                # MW-1 is a frozen IEX protocol, not interchangeable with Tradier candles.
+                # Keep historical receipts intact; do not issue new IEX evidence to Jo.
+                return {"status": "insufficient_data", "reason": "full_market_snapshot_unavailable",
+                    "detail": "MW-1 uses IEX; full-market evidence is required. No input receipt issued."}
             except (ValueError, OSError, sqlite3.Error):
                 raise ToolError("Market snapshot unavailable; no input receipt issued") from None
 
@@ -545,7 +526,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 forecasts=forecasts, message_intent=message_intent, prompt_version=prompt_version,
                 previous_read_id=previous_read_id, correction_of_read_id=correction_of_read_id, model_id=model_id)
             try:
-                receipt = await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock)
+                receipt = await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock, full_market_only=True)
+            except FullMarketRequired:
+                return {"status": "insufficient_data", "reason": "full_market_snapshot_unavailable",
+                    "detail": "Cannot submit a new read against IEX evidence."}
             except MessageBudgetExceeded:
                 raise ToolError("Daily message-intent budget exhausted; resubmit the read with message_intent=none") from None
             except (ValueError, Conflict, NotFound, sqlite3.Error):
@@ -561,6 +545,11 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
 
 
     def live_context(idea, receipt):
+        # The legacy analysis needs snapshots and daily/minute history. Rolling Tradier
+        # candles cannot supply that whole packet. Do not read an IEX disk cache either.
+        if config.provider_feed != "sip":
+            reason = "insufficient_data: full-market analysis unavailable; IEX is disabled"
+            return clock_only_analysis(receipt, [reason]), [reason]
         # Swing ideas use the same packet; their verdict reads its completed daily bars.
         try:
             analysis = build_scalp_analysis(idea["ticker"], direction=idea["side"], instrument=idea["instrument"],
@@ -621,12 +610,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     async def candles(symbol: Annotated[str, Field(pattern=r"^[A-Za-z]{1,6}(\.[A-Za-z])?$")],
             interval: Literal["1m", "5m"], bars: Annotated[int, Field(ge=1, le=120)] = 60) -> dict[str, Any]:
         """Fresh candles for manual questions AFTER shadow_decide. Before committing, use shadow_setup's
-        frozen candles only: calling this tool before commit makes clean_order false. Never forward-fills.
+        frozen candles only: calling this tool before commit makes clean_order false. Tradier full-market
+        candles only; missing/stale data returns insufficient_data. Never forward-fills or falls back to IEX.
         """
         await authenticated("candles")
         now = clock()
         def read():
-            # Timed-out synchronous reads keep their slot until the provider actually finishes.
+            # Timed-out synchronous reads keep their slot until the file read actually finishes.
             if not candle_slots.acquire(blocking=False):
                 return candle_unavailable("candle reader busy")
             try:
@@ -831,7 +821,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 day = datetime.fromisoformat(record["received_at"]).astimezone(ET).date()
                 wanted.setdefault(day, set()).add(record["idea"]["ticker"].upper())
         bars, deadline = {}, time.monotonic() + SETTLE_BUDGET
-        if wanted:
+        if wanted and config.provider_feed == "sip":
             if slots.locked():
                 raise ToolError("Check service busy; retry shortly")
             async with slots:  # Same provider bound as the other live calls.

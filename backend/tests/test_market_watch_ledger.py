@@ -118,17 +118,15 @@ def test_tools_disabled_by_default_and_scoped_audited_without_provider_calls(har
         assert rpc(client, 'market_watch_snapshot', {}, harness.token(subject='other', scope=scope)).status_code == 401
         inp = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']
         assert call(client, 'market_watch_snapshot', {'path': '/etc/passwd'}, harness.token(scope=scope))['isError']
-        req = request(inp['input_id'])
+        assert inp['status'] == 'insufficient_data'
+        assert 'input_id' not in inp and 'snapshot' not in inp
+        req = request('old-iex-input')
         assert call(client, 'market_watch_submit', req, harness.token(scope='check:read market-watch:read'))['isError']
-        receipt = call(client, 'market_watch_submit', req, harness.token(scope=scope))['structuredContent']
-        assert receipt['read_id']
-        context = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']['context']
-        assert context['latest_read']['read_id'] == receipt['read_id']
-        assert context['discretionary_intents_remaining'] == 2
+        refused = call(client, 'market_watch_submit', req, harness.token(scope=scope))['structuredContent']
+        assert refused['status'] == 'insufficient_data'
         (directory / 'latest.json').unlink()
         missing = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']
         assert missing['status'] == 'unavailable'
-        assert missing['context']['latest_read']['read_id'] == receipt['read_id']
     assert len(harness.requests) == before
     config = json.loads(harness.config_path.read_text())
     with sqlite3.connect(config['ledger_file']) as db:
@@ -274,3 +272,15 @@ def test_daily_intent_budget_atomic_recovery_and_corrections(ledger):
         ledger.submit(ACTOR, request(inp['input_id'], operation_id='fake-correction',
             previous_read_id=corrected['read_id'], message_intent='correction',
             correction_of_read_id=fourth['read_id']), lambda: NOW)
+
+
+def test_live_full_market_policy_refuses_old_input_but_recovers_committed_retry(ledger):
+    from market_watch_ledger import FullMarketRequired
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    req = request(inp['input_id'])
+    with pytest.raises(FullMarketRequired):
+        ledger.submit(ACTOR, req, lambda: NOW, full_market_only=True)
+    # Historical fixture models a receipt committed before the policy changed.
+    saved = ledger.submit(ACTOR, req, lambda: NOW)
+    recovered = ledger.submit(ACTOR, req, lambda: NOW, full_market_only=True)
+    assert recovered['read_id'] == saved['read_id']

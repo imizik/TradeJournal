@@ -75,3 +75,24 @@ def test_trade_observed_during_request_is_kept_before_actual_retrieval():
     rows, _ = collect(snapshots={"MU": {"latestTrade": {"p": 123, "t": (NOW+timedelta(seconds=1)).isoformat()}}})
     assert rows[0]["observed_at"] == NOW+timedelta(seconds=1)
     assert rows[0]["retrieved_at"] == NOW+timedelta(seconds=2)
+
+
+def test_default_prices_use_existing_tradier_quotes_once_and_keep_news_independent(monkeypatch):
+    from app.engine import jo_morning_market as market, tradier
+    calls = []
+    def quotes(symbols):
+        calls.append(symbols)
+        return {"MU": tradier.TradierQuote(symbol="MU", last=123,
+            trade_date=int((NOW-timedelta(seconds=30)).timestamp()*1000))}
+    monkeypatch.setattr(tradier, "TRADIER_BASE_URL", "https://api.tradier.com")
+    monkeypatch.setattr(tradier, "get_quotes_once", quotes)
+    rows, gaps = market.collect_market(["MU"], NOW, news_reader=lambda *_: [article()], clock=lambda: NOW)
+    assert calls == [["MU"]]
+    assert rows[0]["source"] == "Tradier full-market latest trade; not an executable quote"
+    assert rows[0]["observed_at"] == NOW-timedelta(seconds=30)
+    assert rows[1]["id"] == "headline-1"
+    monkeypatch.setattr(tradier, "TRADIER_BASE_URL", "https://sandbox.tradier.com")
+    rows, gaps = market.collect_market(["MU"], NOW, news_reader=lambda *_: [article()], clock=lambda: NOW)
+    assert calls == [["MU"]]  # Sandbox must not be advertised as live full-market evidence.
+    assert [row["id"] for row in rows] == ["headline-1"]
+    assert any("Price source unavailable" in gap for gap in gaps)

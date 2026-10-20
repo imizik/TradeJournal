@@ -423,8 +423,9 @@ domain. This is separate from the ten-morning usefulness decision in step 6.
 ### Fresh market context — activated October 19
 
 The morning publisher makes at most two existing-provider reads when creating a
-new packet: one Alpaca stock snapshot request and one fast news request. Both use
-the existing short-timeout/no-retry adapters. Only symbol names leave the app;
+new packet: one Tradier full-market quote request and one fast Alpaca news request. Both use
+the existing bounded, single-attempt adapters. Tradier must use its production
+endpoint; missing credentials, errors or missing observations do not fall back to IEX. Only symbol names leave the app;
 account identifiers, quantities, costs and memories are never sent to providers.
 The scope is at most 20 unique stock symbols, approved holdings first and then
 the saved watchlist. Unsupported/omitted symbols are disclosed. No replacement
@@ -434,7 +435,7 @@ Each accepted last trade retains its provider observation time separately from
 actual retrieval time, feed name and stock-only/unadjusted basis. Observations
 after actual retrieval, invalid prices and missing timestamps are omitted.
 Trades older than ten minutes are labelled stale, including prior-session trades
-returned by a newly fetched snapshot. IEX is not consolidated coverage. No return,
+returned by newly fetched quotes. Full-market coverage does not make a stale trade current. No return,
 P&L, split-adjusted daily change, option quote or executable bid/ask is inferred.
 
 Headlines are at most eight relevant, deduplicated HTTPS articles from the prior

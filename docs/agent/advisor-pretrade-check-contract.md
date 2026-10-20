@@ -331,21 +331,25 @@ the same request reuses its ID. Do not backfill old conversations as decisions
 made before the outcome. Measure actual check/verdict completeness on future
 sessions; acknowledging instructions is not evidence of adherence.
 
-For manual chart analysis through Jo's separate Alpaca connector:
+### Full-market requirement — October 20 code change
 
-- Set explicit timezone-aware start/end, feed, timeframe, sort and limit.
-  Read one symbol at a time, at most 60 recent one-minute bars with descending
-  sort, then interpret them chronologically. Use the already authorized IEX
-  route and disclose that it is not consolidated full-market data; do not
-  silently switch feeds or change credentials/subscriptions.
-- Record actual first/last timestamps, gaps and whether the requested interval
-  was covered. A fresh quote does not make old candles fresh. Exclude bars
-  whose start plus timeframe exceeds the analysis cutoff; an inclusive end
-  can return the still-forming bar. A limit-sized response is not proof that
-  a larger interval is complete.
-- After a transport timeout, make at most one shorter-window retry. Stop on
-  authentication or rate-limit errors. If candle evidence is still missing,
-  report that limitation rather than infer structure from isolated prices.
+Jo's live checks must not use IEX. The existing Tradier scanner/stock-alert
+packets and manual `candles` tool remain the full-market candle source. Missing
+or stale candles return insufficient data; do not bypass that result using Jo's
+separate Alpaca connector. No new provider or entitlement is activated.
+
+The legacy scalp/swing packet needs snapshots plus daily and intraday history;
+rolling scanner candles alone cannot satisfy it. With `provider_feed=iex`, new
+pre-trade, position and preopen analysis therefore has no live price and reports
+missing full-market evidence before touching provider or disk cache. A separately
+configured SIP feed remains supported; this change does not enable it. New
+post-check price measurements likewise skip IEX. Saved checks, immutable retries,
+results and historical own-trade evidence retain their original provenance.
+
+The isolated provider also refuses stock requests without explicit `feed=sip`.
+This is scoped to Jo's Check process; unrelated journal/research adapters are
+unchanged. Deployment and updating external Jo task instructions are not proven
+by the PR or local fixture tests.
 
 Read-only diagnosis on October 13: an explicit IEX NVDA one-minute request
 from 10:00 through 10:13 Eastern returned 14 bars including the 10:13 bar;
