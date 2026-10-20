@@ -855,15 +855,18 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
                 raise ToolError("Check service busy; retry shortly")
             async with slots:  # Same provider bound as the other live calls.
                 for day, tickers in sorted(wanted.items(), reverse=True):  # Newest first within the budget.
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 1:
-                        break
-                    try:
-                        fetched = await asyncio.wait_for(asyncio.to_thread(tradier_source.fetch_minute_bars_live if tradier_source else fetch_minute_bars_live, sorted(tickers), day),
-                            min(CONTEXT_TIMEOUT, remaining))
-                    except Exception:
-                        continue  # Unread days stay "unavailable" and are retried next time.
-                    bars.update({(day, ticker): fetched.get(ticker) or [] for ticker in tickers})
+                    ordered = sorted(tickers)
+                    for offset in range(0, len(ordered), 8):
+                        batch = ordered[offset:offset + 8]
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 1:
+                            break
+                        try:
+                            fetched = await asyncio.wait_for(asyncio.to_thread(tradier_source.fetch_minute_bars_live if tradier_source else fetch_minute_bars_live, batch, day),
+                                min(CONTEXT_TIMEOUT, remaining))
+                        except Exception:
+                            continue  # Unread batches stay unavailable and are retried next time.
+                        bars.update({(day, ticker): fetched.get(ticker) or [] for ticker in batch})
         settled = []
         for record, model in saved:
             if record["check_id"] in done:

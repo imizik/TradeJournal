@@ -55,6 +55,8 @@ def test_pretrade_works_on_tradier_without_iex_or_old_volume_cache(harness, monk
         result = call(client, 'pre_trade_check', IDEA, harness.token())['structuredContent']
     assert result['live']['price'] is not None
     assert result['verdict'] != 'insufficient_data'
+    assert any('Tradier full_market' in note for note in result['caveats'])
+    assert any('dividend adjustment' in note for note in result['caveats'])
     assert not attempts
     assert all('/stocks/' not in r.url.path for r in harness.requests)
 
@@ -250,3 +252,48 @@ def test_tradier_daily_provenance_cannot_be_iex():
     packet['snapshot_id'] = 'mws_' + digest(packet)[:32]
     with pytest.raises(ValueError, match='Tradier source manifest'):
         validate_snapshot(seal(packet))
+
+
+def test_cached_partial_minute_never_becomes_completed_without_refresh(monkeypatch):
+    import tradier_stock_data as module
+    stamp = [RECEIPT.replace(second=59)]
+    elapsed = [10.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: elapsed[0])
+    reads = []
+    start = stamp[0].replace(second=0)
+    def handler(request):
+        reads.append(request)
+        return httpx.Response(200, json={'series': {'data': [{'timestamp': start.timestamp(),
+            'open': 1, 'high': 2, 'low': 1, 'close': 2, 'volume': 10}]}})
+    provider = TradierStockData('invented', transport=httpx.MockTransport(handler), clock=lambda: stamp[0])
+    assert provider.minutes('SPY', stamp[0].date()) == []
+    stamp[0] += timedelta(seconds=2)
+    assert provider.minutes('SPY', stamp[0].date()) == [] and len(reads) == 1
+    elapsed[0] += 11
+    assert provider.minutes('SPY', stamp[0].date()) and len(reads) == 2
+
+
+def test_review_batches_more_than_eight_pending_tickers(harness):
+    import copy
+    from cloud_mcp_check_ledger import Ledger
+    from tests.test_cloud_mcp_check import SUBJECT
+    with TestClient(harness.server(tradier_source=source()).streamable_http_app()) as client:
+        saved = call(client, 'pre_trade_check', IDEA, harness.token())['structuredContent']
+    config = json.loads(harness.config_path.read_text())
+    ledger = Ledger(config['ledger_file'])
+    original = ledger.get(SUBJECT, saved['check_id'])
+    symbols = ['AAPL', 'AMD', 'GOOG', 'IBM', 'META', 'MSFT', 'NVDA', 'TSLA']
+    for index, symbol in enumerate(symbols):
+        record = copy.deepcopy(original)
+        record.update(check_id=f'chk_fixture_{index}', operation_id=f'batch-{index}', request_sha256=str(index))
+        record['idea']['ticker'] = symbol
+        ledger.insert(record)
+    reads = []
+    def handler(request):
+        reads.append(request.url.params['symbol'])
+        return httpx.Response(200, json={'series': {'data': []}})
+    harness.configure(provider_feed='iex')
+    with TestClient(harness.server(tradier_source=source(handler)).streamable_http_app()) as client:
+        result = call(client, 'review_checks', {}, harness.token())['structuredContent']
+    assert len(result['checks']) == 9
+    assert set(reads) == set(symbols + ['SPY'])

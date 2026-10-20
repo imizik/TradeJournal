@@ -39,7 +39,7 @@ class TradierStockData:
         self.cooldown = 0.0
         self.errors = OrderedDict()
 
-    def get(self, path, params, ttl):
+    def get(self, path, params, ttl, *, with_time=False):
         if path not in {'/v1/markets/timesales', '/v1/markets/history', '/v1/markets/quotes'}:
             raise TradierDataError('unsupported_market_endpoint')
         key = (path, tuple(sorted(params.items())))
@@ -59,7 +59,7 @@ class TradierStockData:
                 cached = self.cache.get(key)
                 if cached and now - cached[0] < ttl:
                     self.cache.move_to_end(key)
-                    return copy.deepcopy(cached[1])
+                    return (copy.deepcopy(cached[1]), cached[2]) if with_time else copy.deepcopy(cached[1])
                 failed = self.errors.get(key)
                 if failed and now - failed[0] < 5:
                     raise TradierDataError(failed[1])
@@ -70,6 +70,7 @@ class TradierStockData:
                 if len(self.calls) >= 30:
                     raise TradierDataError('local_request_budget')
                 self.calls.append(now)
+            requested_at = self.clock().astimezone(UTC)
             try:
                 with self.client.stream('GET', path, params=params) as response:
                     if response.status_code == 429:
@@ -98,11 +99,11 @@ class TradierStockData:
                     raise
                 raise TradierDataError('provider_invalid_response') from None
             with self.lock:
-                self.cache[key] = (time.monotonic(), payload)
+                self.cache[key] = (time.monotonic(), payload, requested_at)
                 while len(self.cache) > 96:
                     self.cache.popitem(last=False)
                 self.errors.pop(key, None)
-            return copy.deepcopy(payload)
+            return (copy.deepcopy(payload), requested_at) if with_time else copy.deepcopy(payload)
         except TradierDataError as exc:
             with self.lock:
                 # Preserve the original failure deadline: polling cannot extend it.
@@ -139,8 +140,9 @@ class TradierStockData:
         cutoff = self.clock().astimezone(UTC)
         if day > cutoff.astimezone(ET).date():
             raise TradierDataError('future_session')
-        payload = self.get('/v1/markets/timesales', {'symbol': symbol, 'interval': '1min',
-            'start': f'{day} 04:00', 'end': f'{day} 20:00', 'session_filter': 'all'}, 10)
+        payload, requested_at = self.get('/v1/markets/timesales', {'symbol': symbol, 'interval': '1min',
+            'start': f'{day} 04:00', 'end': f'{day} 20:00', 'session_filter': 'all'}, 10, with_time=True)
+        cutoff = min(cutoff, requested_at)  # Cached partial minutes must never mature into completed bars.
         rows = _rows(payload.get('series'), 'data')
         result = []
         for row in rows:

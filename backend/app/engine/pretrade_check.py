@@ -361,7 +361,7 @@ def _caveats(analysis: dict, history: dict) -> list[str]:
     if (data.get("staleness") or {}).get("is_stale"):
         caveats.append("live quotes/bars are stale")
     caveats.extend(f"missing: {item}" for item in (assessment.get("missing") or []))
-    caveats.extend(note for note in (assessment.get("data_source_notes") or []) if "iex" in note.lower())
+    caveats.extend(note for note in (assessment.get("data_source_notes") or []) if any(term in note.lower() for term in ("iex", "tradier", "dividend adjustment")))
     if not history["cohorts"][0].get("enough"):
         caveats.append("similar-setup history is too thin to show rates")
     return caveats
