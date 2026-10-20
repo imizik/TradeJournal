@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getPlans, type PlanDelivery, type PlansView, type PlanState, type PlanView } from "@/lib/conditionalPlans";
 
 const zone = "America/New_York";
@@ -8,12 +8,16 @@ const minute = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString(
 const ago = (from: string, to: string) => { const s = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000)); return s < 120 ? `${s} s ago` : `${Math.round(s / 60)} min ago`; };
 const button = "inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm hover:bg-secondary disabled:opacity-50";
 const ACTIVE: PlanState[] = ["pending_activation", "watching", "triggered"];
+/** Still open in the records but past expiry: the monitor never closed it (e.g. it was off). */
+const overdue = (p: PlanView & { checked?: string }) => ACTIVE.includes(p.state) && !!p.checked && Date.parse(p.expires_at) <= Date.parse(p.checked);
+const current = (p: PlanView & { checked?: string }) => ACTIVE.includes(p.state) && !overdue(p);
 const warn = "border-amber-500/40 bg-amber-500/10 text-amber-200";
 const good = "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
 const muted = "border-border bg-secondary/40 text-muted-foreground";
 
 /** Short badge; never says watching unless a fresh heartbeat acknowledges it. */
 function badge(p: PlanView): [string, string] {
+  if (overdue(p)) return ["Past expiry · not monitored", muted];
   switch (p.state) {
     case "pending_activation": return ["Saved · not monitored yet", warn];
     case "watching": return p.monitoring ? ["Watching", good] : ["Not monitored · monitor not reporting", warn];
@@ -101,7 +105,7 @@ function Plan({ p }: { p: PlanView }) {
     {p.cancel_requested && p.state !== "cancelled" && <p className="text-sm text-muted-foreground">Cancellation requested; waiting for the monitor to confirm it.</p>}
     <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[9rem_1fr]">
       <dt className="text-muted-foreground">Monitoring</dt>
-      <dd data-testid="plan-monitoring">{p.monitoring ? `Active · heartbeat ${clock(p.heartbeat_at!)}` : ACTIVE.includes(p.state) ? `Not active${p.heartbeat_at ? ` · last heartbeat ${clock(p.heartbeat_at)}` : ""}` : "Stopped"}</dd>
+      <dd data-testid="plan-monitoring">{p.monitoring ? `Active · heartbeat ${clock(p.heartbeat_at!)}` : current(p) ? `Not active${p.heartbeat_at ? ` · last heartbeat ${clock(p.heartbeat_at)}` : ""}` : "Stopped"}</dd>
       <dt className="text-muted-foreground">Last evaluated bar</dt>
       <dd>{p.last_bar ? `${minute(p.last_bar.time)}–${minute(p.last_bar.end_time)} close ${p.last_bar.close} · ${p.last_bar.consecutive} of ${p.confirm_bars} confirming · checked ${clock(p.last_evaluated_at!)}` : "None yet"}</dd>
       <dt className="text-muted-foreground">Phone alerts</dt>
@@ -124,16 +128,28 @@ export default function PlanWatches() {
   const [data, setData] = useState<PlansView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const receivedAt = useRef(0);
+  const [aged, setAged] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    getPlans(controller.signal).then((v) => { setData(v); setError(null); })
+    getPlans(controller.signal).then((v) => { setData(v); receivedAt.current = Date.now(); setAged(false); setError(null); })
       .catch((reason) => { if (!controller.signal.aborted) setError((reason as Error).message); });
     // Heartbeats age in seconds; reload often enough that "active" never outlives one.
     const timer = setInterval(() => setRefresh((r) => r + 1), 30_000);
     return () => { controller.abort(); clearInterval(timer); };
   }, [refresh]);
-  const active = data?.plans.filter((p) => ACTIVE.includes(p.state)) ?? [];
-  const ended = data?.plans.filter((p) => !ACTIVE.includes(p.state)) ?? [];
+  useEffect(() => {
+    // Phones throttle background timers: reload on return, and re-check age every few seconds.
+    const back = () => { if (document.visibilityState === "visible") setRefresh((r) => r + 1); };
+    const age = setInterval(() => setAged(Date.now() - receivedAt.current > 90_000), 5_000);
+    document.addEventListener("visibilitychange", back);
+    return () => { document.removeEventListener("visibilitychange", back); clearInterval(age); };
+  }, []);
+  // A failed reload or a screen older than one heartbeat window cannot vouch for monitoring.
+  const outdated = !!error || aged;
+  const plans = (data?.plans ?? []).map((p) => ({ ...p, checked: data!.checked_at, monitoring: p.monitoring && !outdated }));
+  const active = plans.filter(current);
+  const ended = plans.filter((p) => !current(p));
   return <div className="min-w-0 space-y-6 break-words" data-testid="plan-watches">
     <header className="space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -145,7 +161,10 @@ export default function PlanWatches() {
     {error && <p role="alert" className="text-sm text-amber-300">{error}{data && " Showing the previously loaded status; it may be out of date."}</p>}
     {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading price watches…</p>}
     {data && <>
-      <Banner v={data} />
+      {outdated ? <section aria-label="Monitor status" data-testid="plan-monitor" className={`space-y-1 rounded-lg border p-4 ${warn}`}>
+        <p className="font-medium">Monitoring status unknown</p>
+        <p className="text-sm">This screen could not refresh, so it cannot confirm anything is being watched. Pull to reload or tap Refresh.</p>
+      </section> : <Banner v={data} />}
       <p className="text-sm text-muted-foreground">Alerts go to your phone as an ntfy push.{data.delivery.configured ? " ntfy accepting a push does not prove your phone showed it." : " ntfy is not configured on this server, so no phone alert can be sent."} When Jo can&apos;t accept a watch it is told why and should tell you; refused requests are not saved here.</p>
       <section aria-label="Active watches" className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current ({active.length})</h2>

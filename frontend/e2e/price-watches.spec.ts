@@ -100,3 +100,21 @@ test("ended states, unknown delivery and unavailable are explicit", async ({ pag
   for (const state of ["unavailable", "invalidated", "expired", "cancelled"]) await expect(card(state).getByTestId("plan-monitoring")).toHaveText("Stopped");
   await fitsPhone(page, "ended");
 });
+
+test("a failed reload stops vouching for monitoring", async ({ page }) => {
+  let fail = false;
+  await page.route("**/conditional-plans", (route) => fail ? route.fulfill({ status: 503, json: { detail: "down" } }) : route.fulfill({ json: view([plan("watching")]) }));
+  await page.goto("/morning/watches");
+  await expect(page.getByTestId("plan-badge")).toHaveText("Watching");
+  fail = true;
+  await page.getByTestId("plan-watches").getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByTestId("plan-monitor")).toContainText("Monitoring status unknown");
+  await expect(page.getByTestId("plan-badge")).toHaveText("Not monitored · monitor not reporting");
+  await expect(page.getByTestId("plan-monitoring")).toContainText("Not active");
+});
+
+test("a plan past expiry that the monitor never closed is not current", async ({ page }) => {
+  await open(page, view([plan("watching", { monitoring: false, expires_at: t(-1) })]));
+  await expect(page.getByText("No current watches. Nothing is being monitored for you.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Ended watches" }).getByTestId("plan-badge")).toHaveText("Past expiry · not monitored");
+});
