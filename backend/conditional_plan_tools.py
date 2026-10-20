@@ -74,15 +74,29 @@ def register(server, config, ledger, authenticated, scopes, clock):
                 clock,
                 check_actor=checked.subject,
             )
+        except Conflict as exc:
+            raise ToolError(str(exc)) from None
+        except (ValueError, NotFound) as exc:
+            # Our own refusal reasons; nothing was saved.
+            raise ToolError(
+                f"REFUSED, nothing saved: {exc}. Tell the owner you cannot watch "
+                "this and why; do not promise monitoring."
+            ) from None
+        except errors:
+            raise ToolError(
+                "REFUSED or uncertain: the plan ledger could not be read. Do not promise "
+                "monitoring. Retry identical content only to recover."
+            ) from None
+        try:
             await asyncio.to_thread(export, config.market_watch_outbox_dir, plan)
             return await asyncio.to_thread(
                 status, config.market_watch_snapshots_dir, plan, clock()
             )
-        except Conflict as exc:
-            raise ToolError(str(exc)) from None
         except errors:
             raise ToolError(
-                "Conditional plan refused or export uncertain. Require a fresh own source, selected ticker, healthy enabled monitor and valid session/levels. Retry identical content only to recover."
+                f"Plan {plan['plan_id']} is saved but its hand-off to the app monitor is "
+                "uncertain. It is NOT being watched yet. Retry identical content (same "
+                "operation_id) to recover; do not create a replacement."
             ) from None
 
     @server.tool(

@@ -2,6 +2,7 @@
 
 DOMAIN_ROUTES = frozenset({
     "GET /jo/morning",
+    "GET /jo/conditional-plans",
     "POST /jo/briefings/{briefing_id}/feedback",
     "GET /jo/memories",
     "GET /jo/memories/{memory_id}",

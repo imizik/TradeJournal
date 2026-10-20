@@ -98,7 +98,10 @@ class PlanLedger:
         from stock_watch_common import identifier
 
         identifier(source_id, "sta")
-        r = validate_alert(read_json(Path(directory) / f"stock-{source_id}.json"))
+        try:
+            r = validate_alert(read_json(Path(directory) / f"stock-{source_id}.json"))
+        except FileNotFoundError:
+            raise ValueError("Stock alert not found") from None
         if r["alert_id"] != source_id or r["kind"] == "diagnostic":
             raise ValueError("Require a real matching stock alert")
         db = self.ledger._connect()
@@ -142,7 +145,12 @@ class PlanLedger:
                     )
                 return validate_plan(json.loads(old[1]))
             now = clock()
-            ready = readiness(directory, now)
+            try:
+                ready = readiness(directory, now)
+            except FileNotFoundError:
+                raise ValueError(
+                    "Conditional-plan monitor has never reported; it is off or not running"
+                ) from None
             symbol, source = self.source(
                 actor,
                 request["source_kind"],
@@ -153,7 +161,8 @@ class PlanLedger:
             )
             if symbol not in ready["symbols"]:
                 raise ValueError(
-                    "Plan symbol must be in the owner's selected scanner tickers"
+                    f"{symbol} is not one of the owner's selected scanner tickers"
+                    f" ({', '.join(ready['symbols']) or 'none selected'})"
                 )
             if (
                 db.execute(
