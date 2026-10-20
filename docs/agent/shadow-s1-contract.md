@@ -102,12 +102,14 @@ one-minute bars and session-to-date completed five-minute bars. Rows have Unix
 UTC start/end timestamps; `last_bar_time` is the last completed bar's end in ISO
 UTC. Source is `tradier_timesales_1min`, feed `full_market`. The tool uses a file
 only when its latest one-minute bar is at most 120 seconds old (never future).
-Missing, stale, malformed or wrong-feed files return `status=insufficient_data`
-with `candles_unavailable`; there is no provider fallback or IEX request.
+Missing, stale, malformed or wrong-feed files trigger a bounded direct Tradier
+refresh using the isolated market-data credential. Only completed contiguous
+1m/5m bars are returned. Provider failure or stale results return
+`status=insufficient_data` with `candles_unavailable`; IEX is never requested.
 Completed rows must have valid finite OHLCV and ordered timestamps, and the
 requested interval must itself be fresh. Every response carries source, feed,
 last-bar time and age; unavailable data has null time/age. The response deadline
-for file work is four seconds, below the 15-second proxy response-header budget.
+for file/refresh work is four seconds, below the 15-second proxy response-header budget.
 Up to four reads may remain in flight; a timed-out worker retains its slot until completion.
 The hosted ChatGPT caller's budget is not configurable here.
 

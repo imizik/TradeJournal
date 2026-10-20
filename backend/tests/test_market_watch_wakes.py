@@ -10,7 +10,7 @@ from app.engine import market_watch_wakes as mw
 from app.engine.market_watch_snapshot import build_snapshot, publish_snapshot
 from app.engine.market_watch_evaluation import MarketWatchOutcomeStore
 from cloud_mcp_check_ledger import Ledger
-from market_watch_common import digest, seal
+from market_watch_common import PROTOCOL, digest, seal
 from market_watch_ledger import MarketWatchLedger, read_notice, write_read_notice
 from tests.test_market_watch_ledger import ACTOR, request
 from tests.test_cloud_mcp_check import harness as harness, signing_key as signing_key, call
@@ -40,7 +40,7 @@ def snapshot_at(now, closes=None, calendar_events=(), highs=None, drop=()):
     bars = {"SPY": spy, "QQQ": _rows([c * 4 for c in closes])} if closes else {"SPY": [], "QQQ": []}
     stamp = now.isoformat().replace("+00:00", "Z")
     events = list(calendar_events)
-    return build_snapshot(now, bars_reader=lambda *_: bars, daily_reader=lambda *_: {},
+    return build_snapshot(now, protocol=PROTOCOL, bars_reader=lambda *_: bars, daily_reader=lambda *_: {},
         vix_reader=lambda: {"observed_at": now - timedelta(minutes=5), "value": 17.0, "change_pct": 1.0},
         calendar_reader=lambda day, at: {"status": "fresh", "reason": None, "source": "official_calendar", "observed_at": stamp,
             "retrieved_at": stamp, "age_seconds": 0, "coverage_start": "2026-01-01", "coverage_end": "2027-01-01",

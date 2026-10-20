@@ -110,9 +110,10 @@ def build_scalp_analysis(
     expiration: Optional[str] = None,
     strike: Optional[float] = None,
     style: Optional[str] = None,
+    stock_source=None,
 ) -> dict:
     """Gather live data and score a potential scalp. Read-only; never trades."""
-    if not alpaca_configured():
+    if stock_source is None and not alpaca_configured():
         raise RuntimeError("Alpaca keys not configured — set ALPACA_API_KEY / ALPACA_API_SECRET")
 
     symbol = symbol.strip().upper()
@@ -134,7 +135,7 @@ def build_scalp_analysis(
     else:
         instrument = "stock"
 
-    packet = _gather_packet(symbol, wants_option, option_type, exp_date, strike)
+    packet = _gather_packet(symbol, wants_option, option_type, exp_date, strike, stock_source=stock_source)
     assessment = score_scalp(packet, direction=direction, instrument=instrument, style=style)
     return {
         "request": {
@@ -161,6 +162,7 @@ def _gather_packet(
     option_type: Optional[str],
     expiration: Optional[date],
     strike: Optional[float],
+    stock_source=None,
 ) -> dict:
     now_et = datetime.now(ET)
     session_date = now_et.date()
@@ -175,6 +177,13 @@ def _gather_packet(
         "live minute bars fetched fresh; never written to the persistent enrichment cache",
     ]
 
+    if stock_source is not None:
+        notes = ["stocks: Tradier full_market; quotes and completed minute candles",
+                 "daily history is provider-reported; dividend adjustment is not guaranteed",
+                 "bounded live reads; no IEX fallback or persistent enrichment-cache writes"]
+    snapshot_reader = stock_source.fetch_snapshots if stock_source else fetch_snapshots
+    daily_reader = stock_source.fetch_daily_bars if stock_source else fetch_daily_bars
+    minute_reader = stock_source.fetch_minute_bars_live if stock_source else fetch_minute_bars_live
     tickers = [symbol] + [t for t in MARKET_TICKERS if t != symbol]
     # The four provider reads are independent: issue them together so the
     # packet costs one round trip instead of four (pre-trade check budget).
@@ -182,17 +191,24 @@ def _gather_packet(
         def submit(fn, *args, **kwargs):
             return pool.submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
-        snapshots_job = submit(fetch_snapshots, tickers)
-        daily_job = submit(fetch_daily_bars, tickers, session_date - timedelta(days=400), session_date)
-        minute_job = submit(fetch_minute_bars_live, tickers, session_date)
+        snapshots_job = submit(snapshot_reader, tickers)
+        daily_job = submit(daily_reader, tickers, session_date - timedelta(days=400), session_date)
+        minute_job = submit(minute_reader, tickers, session_date)
         news_job = submit(fetch_news, symbols=[symbol], start=now_et - timedelta(hours=24), limit=10)
-        snapshots, daily, minute = snapshots_job.result(), daily_job.result(), minute_job.result()
+        gathered = []
+        for label, job in (("quotes", snapshots_job), ("daily history", daily_job), ("minute candles", minute_job)):
+            try:
+                gathered.append(job.result())
+            except Exception as exc:
+                gathered.append({})
+                missing.append(f"{label}: unavailable ({type(exc).__name__})")
+        snapshots, daily, minute = gathered
 
     snap = snapshots.get(symbol)
     sym_daily = daily.get(symbol, [])
     sym_minute = minute.get(symbol, [])
     if not snap:
-        missing.append(f"{symbol}: no Alpaca snapshot (bad/unsupported symbol?)")
+        missing.append(f"{symbol}: no stock snapshot (unavailable/unsupported symbol)")
     if not sym_daily:
         missing.append(f"{symbol}: no daily bars — daily trend/RSI/ATR unavailable")
     if not sym_minute:
@@ -200,7 +216,7 @@ def _gather_packet(
 
     metrics = _symbol_metrics(symbol, snap, sym_daily, session_date)
     snapshot_block = _snapshot_block(metrics, snap, session_date)
-    intraday_block = _intraday_block(symbol, sym_minute, sym_daily, now_et, session_date, missing, notes)
+    intraday_block = _intraday_block(symbol, sym_minute, sym_daily, now_et, session_date, missing, notes, use_cached_rvol=stock_source is None)
     daily_block = _daily_block(sym_daily, latest_completed)
     if sym_daily and not daily_block:
         missing.append(f"{symbol}: not enough daily history to compute indicators")
@@ -291,6 +307,7 @@ def _intraday_block(
     session_date: date,
     missing: list[str],
     notes: list[str],
+    use_cached_rvol: bool = True,
 ) -> dict:
     if not bars:
         return {}
@@ -324,7 +341,7 @@ def _intraday_block(
     elif len(rth) > 0:
         notes.append("intraday EMAs limited — fewer than 20 RTH minute bars so far")
 
-    rvol, rvol_method = _live_rvol(symbol, raw, daily_bars, session_date, ref_dt)
+    rvol, rvol_method = _live_rvol(symbol, raw, daily_bars, session_date, ref_dt, use_cache=use_cached_rvol)
     if rvol is None:
         missing.append(f"{symbol}: RVOL unavailable (no cached minute history and no ADV baseline)")
 
@@ -391,6 +408,7 @@ def _live_rvol(
     daily_bars: list[dict],
     session_date: date,
     ref_dt: datetime,
+    use_cache: bool = True,
 ) -> tuple[Optional[float], Optional[str]]:
     """
     Time-adjusted RVOL vs the same minute-of-day over up to 20 cached sessions,
@@ -400,7 +418,7 @@ def _live_rvol(
     """
     today_cum = raw_intraday.get("cumulative_volume_at_entry")
     mins_since_open = ref_dt.hour * 60 + ref_dt.minute - (9 * 60 + 30)
-    if today_cum and mins_since_open > 0 and daily_bars:
+    if use_cache and today_cum and mins_since_open > 0 and daily_bars:
         prev_dates = sorted(
             {d for b in daily_bars if (d := _daily_bar_date(b)) is not None and d < session_date},
             reverse=True,

@@ -98,9 +98,9 @@ def harness(signing_key, tmp_path, monkeypatch):
         config_path = path
         pointer = features_dir / "current.json"
 
-        def server(self, *, fail=False, now=RECEIPT):
+        def server(self, *, fail=False, now=RECEIPT, tradier_source=None):
             provider = service.Provider("test-key-id", "test-secret", timeout=3, transport=recorded(self.requests, fail=fail))
-            return service.create_server(path, provider=provider, cache_dir=cache, clock=lambda: now)
+            return service.create_server(path, provider=provider, cache_dir=cache, clock=lambda: now, tradier_source=tradier_source)
 
         def token(self, **changes):
             return _token(signing_key, **{"audience": RESOURCE, "subject": SUBJECT, "client_id": CLIENT,
@@ -230,7 +230,7 @@ def test_provider_failure_is_insufficient_data_without_invented_prices(harness):
     with TestClient(harness.server(fail=True).streamable_http_app()) as client:
         result = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
     assert result["verdict"] == "insufficient_data" and result["live"]["price"] is None
-    assert "missing: live market data unavailable (ProviderError)" in result["caveats"]
+    assert "missing: quotes: unavailable (ProviderError)" in result["caveats"]
     assert "data.alpaca.markets" not in json.dumps(result) and "/v2/" not in json.dumps(result)
 
 

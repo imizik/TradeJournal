@@ -136,12 +136,12 @@ Step 2 was built October 11, 2026 and activated with step 3 on October 12 (below
   `history.available=false` plus a caveat; older than 36 h → used with a caveat.
 - Install: [check_control.py](../../deploy/check_control.py) `stage`/`install`
   (exact manifest approval, `--dns`, `--host-ip`), `check`, `stop`, `remove`,
-  and `upgrade` (all units stopped; replaces only the runtime code, keeps the
-  previous one, refuses a bundle with changed units or feature view);
+  and `upgrade` (all units stopped; replaces runtime and individually hash-approved units,
+  keeps backups; SQL additions require their own approval);
   units in [cloud-mcp-check](../../deploy/cloud-mcp-check/); UID-only policy in
   [check_network.py](../../deploy/check_network.py). Install writes no
   credential and starts, enables and loads nothing. Activation (step 4) adds
-  `alpaca-key-id`, `alpaca-secret-key` and `features-database-url` under
+  `alpaca-key-id`, `alpaca-secret-key`, `tradier-api-key` and `features-database-url` under
   `/etc/tradejournal-check/` (root 0600), creates role `tj_check_features`
   and applies `feature-view.sql`, runs the key unit before the service, and
   publishes the Caddy route.
@@ -333,18 +333,34 @@ sessions; acknowledging instructions is not evidence of adherence.
 
 ### Full-market requirement — October 20 code change
 
-Jo's live checks must not use IEX. The existing Tradier scanner/stock-alert
-packets and manual `candles` tool remain the full-market candle source. Missing
-or stale candles return insufficient data; do not bypass that result using Jo's
-separate Alpaca connector. No new provider or entitlement is activated.
+Jo's live checks use Tradier full-market quotes, completed daily history and
+completed intraday candles through the bounded `tradier_stock_data.py` reader.
+Pre-trade, position and preopen analysis share this source; RVOL uses Tradier
+history and never the old Alpaca minute cache. Post-check price measurements
+also use Tradier. Daily OHLC is provider-reported, without a guarantee of dividend
+adjustment. Saved checks and immutable retries retain their original evidence.
 
-The legacy scalp/swing packet needs snapshots plus daily and intraday history;
-rolling scanner candles alone cannot satisfy it. With `provider_feed=iex`, new
-pre-trade, position and preopen analysis therefore has no live price and reports
-missing full-market evidence before touching provider or disk cache. A separately
-configured SIP feed remains supported; this change does not enable it. New
-post-check price measurements likewise skip IEX. Saved checks, immutable retries,
-results and historical own-trade evidence retain their original provenance.
+The manual candle tool first reads fresh scanner files, then directly refreshes
+Tradier if those files are absent, invalid or stale. Same-key requests coalesce;
+short caches, a 30-request/minute per-process budget, five-second error backoff
+and a 60-second 429 cooldown bound provider load. Independent symbol failures do
+not discard healthy symbols. Provider failure or genuinely stale data still
+returns explicit missing evidence; neither IEX nor delayed SIP is a live backup.
+This code change does not establish live acceptance or activate a service.
+
+Rollout requires a separately authorized isolated Check upgrade as well as the
+app release. Provision `/etc/tradejournal-check/tradier-api-key` as root-owned
+0600 from the existing production Tradier credential using a private transfer
+that never prints the token or places it in command arguments. Do not grant the
+Check UID access to `backend.env`. Stage the reviewed bundle, stop all Check
+units, and pass its exact manifest hash plus `--approve-unit <sha256>` for each
+changed service unit to `check_control.py upgrade`. The main unit receives the
+key through `LoadCredential`; key-refresh and feature units cannot read it.
+A failed upgrade restores the previous runtime and unit files; nothing starts
+automatically. Verify credentials, restart only with rollout authorization, and
+check actual pre-trade/candle responses and the next scheduled Market Watch
+publication. Keep old runtime/unit backups for rollback. The existing publisher
+already receives the production Tradier key; it now publishes `mw-tradier-v2`.
 
 The isolated provider also refuses stock requests without explicit `feed=sip`.
 This is scoped to Jo's Check process; unrelated journal/research adapters are

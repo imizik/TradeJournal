@@ -12,6 +12,7 @@ ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-
 Environment=PYTHON_DOTENV_DISABLED=1
 LoadCredential=alpaca-key-id:/etc/tradejournal-check/alpaca-key-id
 LoadCredential=alpaca-secret-key:/etc/tradejournal-check/alpaca-secret-key
+LoadCredential=tradier-api-key:/etc/tradejournal-check/tradier-api-key
 CacheDirectory=tradejournal-check
 CacheDirectoryMode=0700
 Restart=on-failure

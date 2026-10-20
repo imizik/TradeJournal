@@ -226,7 +226,7 @@ def test_candles_fresh_stale_failure_and_scope(harness, exchange):
         file.write_text(json.dumps({**packet, 'last_bar_time': (RECEIPT - timedelta(seconds=121)).isoformat()}))
         stale = call(client, 'candles', args, harness.token())['structuredContent']
         assert stale['status'] == 'insufficient_data' and stale['feed'] == 'full_market'
-        assert 'no IEX fallback' in stale['candles_unavailable']
+        assert 'tradier_refresh_not_configured' in stale['candles_unavailable']
         assert not harness.requests
         assert call(client, 'candles', {**args, 'bars': 121}, harness.token())['isError']
         assert call(client, 'candles', {**args, 'symbol': '../secret'}, harness.token())['isError']

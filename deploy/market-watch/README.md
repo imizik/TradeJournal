@@ -30,13 +30,14 @@ independently. An error after the publisher is entered also leaves the attempt
 as `started`: publication may already be visible even if a later fsync or
 receipt write failed, so `--retry-failed` cannot recollect or duplicate it.
 
-The publisher uses the existing MW-1 build_snapshot and publish_snapshot
+The publisher uses the versioned build_snapshot and publish_snapshot
 functions. Its collection child receives only DATABASE_URL, ALPACA_API_KEY,
 ALPACA_API_SECRET, TRADIER_API_KEY, optional TRADIER_BASE_URL, and
 ALPACA_DATA_FEED from a systemd credential copy of
 /etc/tradejournal/backend.env. Dotenv parsing disables interpolation to avoid
-cross-key secret expansion; the child explicitly sets ALPACA_DATA_FEED=iex for
-this invocation only. PGOPTIONS makes Postgres transactions read-only, and
+cross-key secret expansion; the child sets ALPACA_DATA_FEED=sip as a defensive
+stock-feed guard. Prices/history come from Tradier in `mw-tradier-v2`, with no
+Alpaca stock fallback. The existing production Tradier key is required. PGOPTIONS makes Postgres transactions read-only, and
 the child confirms SHOW transaction_read_only before collection. It does not
 receive migration credentials or model keys. Its only writable paths are the public snapshot directory and the
 private market-watch state directory, which holds receipts and the existing

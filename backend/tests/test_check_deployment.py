@@ -423,3 +423,47 @@ def test_candle_exchange_legacy_receipt_permissions_and_acl(shadow_host):
     with pytest.raises(ValueError, match='Unknown shadow exchange ACL'):
         control.shadow_exchange(True)
     assert not any(c[0] in ('chown', 'setfacl') for c in calls)
+
+
+@pytest.mark.parametrize('fail_build', [False, True, 'reload'])
+def test_reviewed_unit_upgrade_is_explicit_and_rolls_back(staged, host, monkeypatch, fail_build):
+    approved = control.digest(staged / 'manifest.json')
+    record = control.install(staged, approved, dns_servers=['1.1.1.1'], host_ips=['203.0.113.5'])
+    monkeypatch.setattr(control.pwd, 'getpwnam', lambda name: SimpleNamespace(
+        pw_uid=record['uids'][next(r for r, a in control.ACCOUNTS.items() if a == name)], pw_gid=990,
+        pw_shell='/usr/sbin/nologin'))
+    unit = 'tradejournal-check.service'
+    installed_unit = control.UNIT_DIR / unit
+    old_bytes = installed_unit.read_bytes().replace(b'LoadCredential=tradier-api-key:/etc/tradejournal-check/tradier-api-key\n', b'')
+    installed_unit.write_bytes(old_bytes)
+    record['units'][unit] = control.digest(installed_unit)
+    record['manifest_sha256'] = '1' * 64
+    for name in control.ADDITIVE_SQL:
+        (control.CONFIG / name).write_bytes((staged / 'config' / name).read_bytes())
+        record['settings'][name] = control.digest(control.CONFIG / name)
+    control.RECORD.write_text(json.dumps(record))
+    control.RECORD.chmod(0o600)
+    with pytest.raises(ValueError, match='approve-unit'):
+        control.upgrade(staged, approved)
+    assert installed_unit.read_bytes() == old_bytes
+    if fail_build:
+        if fail_build == 'reload':
+            original = old.run
+            failed = []
+            def fail_reload(*args, **kwargs):
+                if args == ('systemctl', 'daemon-reload') and not failed:
+                    failed.append(True)
+                    assert installed_unit.read_bytes() != old_bytes
+                    raise ValueError('fixture build failure')
+                return original(*args, **kwargs)
+            monkeypatch.setattr(old, 'run', fail_reload)
+        else:
+            monkeypatch.setattr(control, 'build_runtime', lambda *args: (_ for _ in ()).throw(ValueError('fixture build failure')))
+        with pytest.raises(ValueError, match='fixture build failure'):
+            control.upgrade(staged, approved, unit_approvals=(control.digest(staged / 'units' / unit),))
+        assert installed_unit.read_bytes() == old_bytes
+        assert json.loads(control.RECORD.read_text())['units'][unit] == control.digest(installed_unit)
+    else:
+        updated = control.upgrade(staged, approved, unit_approvals=(control.digest(staged / 'units' / unit),))
+        assert installed_unit.read_bytes() == (staged / 'units' / unit).read_bytes()
+        assert updated['units'][unit] == control.digest(installed_unit)

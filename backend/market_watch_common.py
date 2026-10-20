@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+import copy
 import hashlib
 import json
 import math
@@ -87,6 +88,25 @@ PROTOCOL["content_sha256"] = digest(PROTOCOL)
 PROTOCOL_SHA256 = PROTOCOL["content_sha256"]
 
 
+# Keep the original sealed IEX protocol reproducible. New live inputs name a
+# distinct source/price basis instead of relabelling historical evidence.
+TRADIER_PROTOCOL = copy.deepcopy(PROTOCOL)
+TRADIER_PROTOCOL.update(protocol_id="mw-tradier-v2", effective_from="2026-10-20",
+    created_at="2026-10-20T00:00:00.000000Z", feature_version="mw-snapshot-tradier-v2",
+    price_basis="Tradier provider-reported OHLC; dividend adjustment not guaranteed",
+    source_policy={**PROTOCOL["source_policy"], "prices": "tradier_full_market"})
+TRADIER_PROTOCOL.pop("content_sha256")
+TRADIER_PROTOCOL["content_sha256"] = digest(TRADIER_PROTOCOL)
+PROTOCOLS = {p["protocol_id"]: p for p in (PROTOCOL, TRADIER_PROTOCOL)}
+
+
+def snapshot_protocol(record):
+    protocol = PROTOCOLS.get(record.get("protocol_id"))
+    if protocol is None or record.get("protocol_sha256") != protocol["content_sha256"]:
+        raise ValueError("snapshot protocol hash is invalid")
+    return protocol
+
+
 def session_bounds(day: date):
     from app.engine.chart_calendar import chart_calendar
     from zoneinfo import ZoneInfo
@@ -158,16 +178,16 @@ def verified_omission_starts(proofs, *, opened, cutoff, finished):
 
 def validate_snapshot(record: dict) -> None:
     verify(record)
+    protocol = snapshot_protocol(record)
+    tradier = protocol is TRADIER_PROTOCOL
     allowed_top = {"schema_version", "created_at", "content_sha256", "snapshot_id", "protocol_id", "protocol_sha256",
                    "session_date", "collection_started_at", "collection_finished_at", "session_open_at", "session_close_at",
                    "market_phase", "indices", "volatility", "calendar", "headlines", "gaps", "input_manifest"}
     if set(record) != allowed_top:
         raise ValueError("snapshot contains fields outside the public market schema")
     required = {"snapshot_id", "protocol_id", "session_date", "collection_started_at", "collection_finished_at", "session_open_at", "session_close_at", "market_phase", "indices", "volatility", "calendar", "headlines", "gaps", "input_manifest"}
-    if not required <= record.keys() or record["protocol_id"] != PROTOCOL["protocol_id"]:
+    if not required <= record.keys():
         raise ValueError("snapshot protocol or fields are invalid")
-    if record.get("protocol_sha256") != PROTOCOL_SHA256:
-        raise ValueError("snapshot protocol hash is invalid")
     if not isinstance(record.get("snapshot_id"), str):
         raise ValueError("snapshot id is invalid")
     if record.get("snapshot_id") != "mws_" + digest({k: v for k, v in record.items() if k not in {"snapshot_id", "content_sha256"}})[:32]:
@@ -194,7 +214,7 @@ def validate_snapshot(record: dict) -> None:
                         "return_vs_prior_close", "distance_to_vwap", "bars_5m"}
         if set(group) != index_fields:
             raise ValueError("index contains fields outside the public market schema")
-        if group.get("symbol") != symbol or group.get("source") != "Alpaca IEX":
+        if group.get("symbol") != symbol or group.get("source") != ("Tradier full_market" if tradier else "Alpaca IEX"):
             raise ValueError("index source or symbol is invalid")
         if group.get("status") not in {"fresh", "stale", "missing", "not_ready", "not_supported"}:
             raise ValueError("index status is invalid")
@@ -233,6 +253,9 @@ def validate_snapshot(record: dict) -> None:
         entries = [item for item in manifest if item.get("group") == f"indices.{symbol}.bars_1m"]
         if len(entries) != 1 or entries[0].get("payload_sha256") != group["source_sha256"]:
             raise ValueError("minute bar manifest hash is invalid")
+        if tradier and (entries[0].get("provider") != "Tradier" or entries[0].get("feed") != "full_market"
+                or entries[0].get("adjustment") != "provider_reported" or entries[0].get("omitted_minutes")):
+            raise ValueError("Tradier source manifest is invalid")
         bars = entries[0].get("bars")
         if not isinstance(bars, list) or digest(bars) != group["source_sha256"]:
             raise ValueError("minute bar manifest payload is invalid")
@@ -361,6 +384,9 @@ def validate_snapshot(record: dict) -> None:
     }
     if any(item.get("group") not in expected_manifest_groups | {"indices.SPY.prior_daily_bar", "indices.QQQ.prior_daily_bar"} for item in manifest):
         raise ValueError("snapshot manifest contains an unsupported source")
+    if tradier and any((item.get("provider"), item.get("feed"), item.get("adjustment")) != ("Tradier", "full_market", "provider_reported")
+            for item in manifest if item.get("group", "").startswith("indices.")):
+        raise ValueError("Tradier source manifest is invalid")
     if len({item.get("group") for item in manifest}) != len(manifest):
         raise ValueError("snapshot manifest has duplicate source groups")
     if len(record["headlines"].get("items", [])) > 10:

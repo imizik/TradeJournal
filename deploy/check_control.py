@@ -8,7 +8,7 @@ granted; no provider or database credential is written (activation is a
 separate approval). `check` reports state, `stop` stops every check unit and
 `remove` retires the units while preserving the ledger, keys and features.
 `upgrade` (all units stopped, exact manifest approval) replaces only the
-runtime code and keeps the previous one.
+runtime code and explicitly hash-approved units, preserving backups.
 Never called by normal deployment. See docs/agent/advisor-pretrade-check-contract.md.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejourna
     "tradejournal-check-keys.service", "tradejournal-check-keys.timer",
     "tradejournal-check-features.service", "tradejournal-check-features.timer",
     "tradejournal-check-owner.socket", "tradejournal-check-owner.service")
-RUNTIME_FILES = ("jo_briefing_common.py", "jo_briefing_exchange.py", "jo_briefing_tools.py", "conditional_plan_common.py", "conditional_plan_ledger.py", "conditional_plan_tools.py", "stock_watch_common.py", "stock_watch_ledger.py", "market_watch_owner.py", "market_watch_common.py", "market_watch_ledger.py", "cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
+RUNTIME_FILES = ("tradier_stock_data.py", "jo_briefing_common.py", "jo_briefing_exchange.py", "jo_briefing_tools.py", "conditional_plan_common.py", "conditional_plan_ledger.py", "conditional_plan_tools.py", "stock_watch_common.py", "stock_watch_ledger.py", "market_watch_owner.py", "market_watch_common.py", "market_watch_ledger.py", "cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
 SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
@@ -317,15 +317,16 @@ def add_context_views(bundle, sql_approval):
     return installed()
 
 
-def upgrade(bundle, approved, sql_approvals=()):
-    """Replace only the stopped runtime code. Config, credentials, ledger, keys,
-    features, identities, policy and units stay byte-identical; nothing starts.
+def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
+    """Replace stopped runtime and individually hash-approved units. Config,
+    credentials, ledger, keys, features, identities and policy stay unchanged; nothing starts.
 
     The replaced runtime is kept under ROOT/previous-runtime/. After a hard kill
     mid-swap (SIGKILL, power loss) every action refuses on inventory drift; move
     the partial ROOT/backend aside and move previous-runtime/<newest>/backend
-    back to ROOT/backend. A bundle whose
-    units or pinned feature view differ is refused: those need their own review.
+    back to ROOT/backend, restore saved previous-runtime/<newest>/units files
+    into UNIT_DIR and run daemon-reload before inventory verification. Changed
+    units require --approve-unit per hash; pinned SQL changes retain their own approval.
     """
     record = installed()
     old.approval(exact(bundle) / "manifest.json", approved)
@@ -336,8 +337,9 @@ def upgrade(bundle, approved, sql_approvals=()):
             raise ValueError("Require root-owned immutable reviewed bundle/ancestors")
     if approved == record["manifest_sha256"]:
         raise ValueError("Bundle is already the installed runtime")
-    if {u: digest(bundle / "units" / u) for u in UNITS} != record["units"]:
-        raise ValueError("Bundle changes check units; review that replacement separately")
+    changed_units = [u for u in UNITS if digest(bundle / "units" / u) != record["units"][u]]
+    if any(digest(bundle / "units" / u) not in unit_approvals for u in changed_units):
+        raise ValueError("Bundle changes check units; approve each reviewed SHA-256 with --approve-unit")
     additions = []
     for name in PINNED_SETTINGS:
         if name not in record["settings"] and name in ADDITIVE_SQL:
@@ -355,6 +357,9 @@ def upgrade(bundle, approved, sql_approvals=()):
         apply_additive(name, (bundle / "config" / name).read_bytes())
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
     previous.mkdir(parents=True, mode=0o700)
+    (previous / "units").mkdir()
+    for unit in changed_units:
+        shutil.copyfile(UNIT_DIR / unit, previous / "units" / unit)
     (ROOT / "backend").rename(previous / "backend")
     scratch = ROOT / "upgrade-unrecorded.json"  # normalize_new_runtime refuses an existing record path.
 
@@ -363,10 +368,17 @@ def upgrade(bundle, approved, sql_approvals=()):
     handlers = {s: signal.signal(s, interrupted) for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)}
     try:
         build_runtime(bundle, scratch)
+        for unit in changed_units:
+            replacement = UNIT_DIR / (unit + ".new")
+            replacement.write_bytes((bundle / "units" / unit).read_bytes())
+            replacement.chmod(0o644)
+            replacement.replace(UNIT_DIR / unit)
+        if changed_units:
+            old.run("systemctl", "daemon-reload")
         settings = dict(record["settings"])
         for name in additions:
             settings[name] = digest(CONFIG / name)  # Written only by apply_additive, byte-equal to the bundle.
-        updated = {**record, "manifest_sha256": approved, "settings": settings, "source_commit": manifest["source_commit"],
+        updated = {**record, "units": {u: digest(UNIT_DIR / u) for u in UNITS}, "manifest_sha256": approved, "settings": settings, "source_commit": manifest["source_commit"],
             "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",)),
             "previous_runtimes": [*record.get("previous_runtimes", []), {"path": str(previous),
                 "manifest_sha256": record["manifest_sha256"], "source_commit": record["source_commit"]}]}
@@ -379,6 +391,11 @@ def upgrade(bundle, approved, sql_approvals=()):
         if (ROOT / "backend").exists():
             (ROOT / "backend").rename(previous / "failed-backend")
         (previous / "backend").rename(ROOT / "backend")
+        for unit in changed_units:
+            shutil.copyfile(previous / "units" / unit, UNIT_DIR / unit)
+            (UNIT_DIR / unit).chmod(0o644)
+        if changed_units:
+            old.run("systemctl", "daemon-reload")
         raise
     finally:
         for number, handler in handlers.items():
@@ -403,7 +420,7 @@ def check():
         keys["expires_in_seconds"] = int(snapshot["expires_at"] - time.time())
     except (OSError, ValueError, KeyError, TypeError):
         keys["expires_in_seconds"] = None
-    credentials = {name: (CONFIG / name).exists() for name in ("alpaca-key-id", "alpaca-secret-key", "features-database-url")}
+    credentials = {name: (CONFIG / name).exists() for name in ("alpaca-key-id", "alpaca-secret-key", "tradier-api-key", "features-database-url")}
     policy_loaded = old.run("nft", "list", "table", "inet", "tj_check", check=False).returncode == 0
     if active["tradejournal-check.service"] and not policy_loaded:
         raise RuntimeError("Check service is running without its UID network policy; stop it")
@@ -544,6 +561,7 @@ def main():
     parser.add_argument("--wheels", type=Path, help="Already verified release wheels; no downloading")
     parser.add_argument("--approve-install")
     parser.add_argument("--approve-upgrade")
+    parser.add_argument("--approve-unit", action="append", default=[], help="SHA-256 of each reviewed replacement unit; requires all check services stopped")
     parser.add_argument("--approve-sql", action="append", default=[], help="SHA-256 of a reviewed additive SQL file")
     parser.add_argument("--dns", action="append", default=[], help="Resolver IP literal the check UIDs may query")
     parser.add_argument("--host-ip", action="append", default=[], help="This host's own IPs, denied to the check UIDs")
@@ -561,7 +579,7 @@ def main():
     elif args.action == "upgrade":
         if not args.bundle:
             parser.error("upgrade requires a reviewed --bundle")
-        record = upgrade(args.bundle, args.approve_upgrade, tuple(args.approve_sql))
+        record = upgrade(args.bundle, args.approve_upgrade, tuple(args.approve_sql), tuple(args.approve_unit))
         print(json.dumps({"upgraded": True, "started": False, "source_commit": record["source_commit"]}))
     elif args.action == "add-context-views":
         if not args.bundle or len(args.approve_sql) != 1:

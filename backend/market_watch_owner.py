@@ -16,6 +16,7 @@ def main(argv=None):
     export = commands.add_parser('export', help='Read one actor’s market-watch records; write canonical JSON to stdout')
     export.add_argument('--ledger', required=True)
     export.add_argument('--actor', required=True)
+    export.add_argument('--protocol', choices=['mw-v1', 'mw-tradier-v2'], help='default: latest served protocol; cohorts remain separate')
     report = commands.add_parser('report', help='MW-2 wakes → reads → messages → outcomes per session, as JSON')
     report.add_argument('--store', required=True, help='absolute MW-2 wake/delivery store')
     report.add_argument('--outcomes', help='absolute MW-1 outcome store with imported exports')
@@ -38,7 +39,7 @@ def main(argv=None):
     else:
         from market_watch_common import canonical
         from market_watch_ledger import MarketWatchLedger
-        print(canonical(MarketWatchLedger.export(args.ledger, args.actor)).decode())
+        print(canonical(MarketWatchLedger.export(args.ledger, args.actor, args.protocol)).decode())
 
 
 if __name__ == '__main__':

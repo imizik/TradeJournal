@@ -300,9 +300,7 @@ def _runtime_env(credential: Path) -> dict[str, str]:
         raise ScheduleRefused("required_market_data_credentials_missing")
     return {"PATH": "/usr/bin:/bin", "PYTHON_DOTENV_DISABLED": "1",
             "PGOPTIONS": "-c default_transaction_read_only=on", **allowed,
-            # The existing snapshot builder enforces the active feed setting.
-            # Override only this child invocation to its explicitly requested IEX policy.
-            "ALPACA_DATA_FEED": "iex"}
+            "ALPACA_DATA_FEED": "sip"}
 
 
 _CHILD_COLLECTOR = r'''

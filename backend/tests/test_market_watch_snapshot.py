@@ -49,7 +49,7 @@ def fixture_snapshot(**options):
     trades_reader = options.pop("trades_reader", None)
     bars, daily = _sources(**options)
     return build_snapshot(
-        now, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily, trades_reader=trades_reader,
+        now, protocol=PROTOCOL, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily, trades_reader=trades_reader,
         vix_reader=lambda: vix,
         calendar_reader=lambda day, at: (_ for _ in ()).throw(OSError("fixture outage")) if fail_calendar else {"status": "fresh", "reason": None, "source": "official_calendar",
             "observed_at": at.isoformat().replace("+00:00", "Z"), "retrieved_at": at.isoformat().replace("+00:00", "Z"),
@@ -95,7 +95,7 @@ def test_snapshot_has_exact_universe_completed_bars_and_reproducible_manifest():
 def test_default_calendar_retains_bundled_cpi_without_claiming_freshness():
     bars, daily = _sources()
     packet = build_snapshot(
-        NOW, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
+        NOW, protocol=PROTOCOL, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
         vix_reader=lambda: None,
         bounds_reader=lambda _: (OPEN, datetime(2026, 10, 14, 20, 0, tzinfo=UTC)),
     )
