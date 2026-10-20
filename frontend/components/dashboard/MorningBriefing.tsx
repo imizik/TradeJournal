@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
-import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefMemory, type MorningView } from "@/lib/joMorning";
+import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 
 const zone = "America/New_York";
@@ -30,6 +30,41 @@ const messages = {
   redacted: "This briefing or its evidence was removed. Earlier versions are available only when explicitly selected.",
 };
 const statusLabels = { ready: "Ready", closed: "Market closed", waiting: "Waiting for Jo", missing: "Missing", unavailable: "Not saved", redacted: "Removed" };
+
+const minutes = (seconds: number) => seconds < 90 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
+const outcomeText = { sent: "sent", failed: "couldn’t be sent; retrying", unknown: "outcome unknown, may have reached your phone; not resent" };
+
+/** What is known about the scheduled brief's delivery, and what TradeJournal cannot see. */
+function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery; pending: MorningView["automation"]["pending"]; day: string }) {
+  if (delivery.fulfilment === "not_expected") return null;
+  const due = delivery.deadline ? clock(delivery.deadline, day) : "the deadline";
+  const headline = {
+    on_time: <>On time. In the journal at {delivery.available_at && clock(delivery.available_at, day)}, due {due}.</>,
+    late: <>Late. In the journal at {delivery.available_at && clock(delivery.available_at, day)}, {minutes(delivery.late_by_seconds ?? 0)} after the {due} deadline. The miss stays recorded.</>,
+    missing: <>Missing. Nothing reached the journal by {due}.{delivery.publication === "missing" && " The packet for Jo was never published, so Jo had nothing to read."}</>,
+    pending: <>Due {due}.{delivery.publication === "missing" && " The packet for Jo hasn’t been published yet."}</>,
+    unknown: <>Status unknown: the market calendar or the Jo connection is unavailable, so the app can’t tell which packet was scheduled.</>,
+  }[delivery.fulfilment];
+  const watchdog = delivery.notifications.watchdog;
+  const warn = delivery.fulfilment === "late" || delivery.fulfilment === "missing";
+  return <section aria-label="Scheduled delivery" data-testid="brief-delivery" className="text-xs text-muted-foreground">
+    <details className="rounded-md border px-3">
+      <summary className="min-h-11 cursor-pointer py-2.5"><span className={warn ? "text-amber-300" : "text-foreground"}><span className="font-medium">Scheduled brief:</span> {headline}</span></summary>
+      <div className="space-y-1 pb-2.5">
+        {delivery.available_at && <p>{delivery.submitted_at
+          ? <>Check received it at {clock(delivery.submitted_at, day)}; importing took {minutes(delivery.import_lag_seconds ?? 0)}.</>
+          : "Check’s receipt time wasn’t recorded for this brief."} Who started the run (the scheduled task or a manual request) isn’t visible to TradeJournal.</p>}
+        {!!delivery.other_briefings && <p>{delivery.other_briefings} other {delivery.other_briefings === 1 ? "brief was" : "briefs were"} saved for this date from a separate packet (a manual or recovery request); {delivery.other_briefings === 1 ? "it doesn’t" : "they don’t"} count as the scheduled delivery.</p>}
+        <p>Phone watchdog: {!watchdog || watchdog.state === "unknown" ? "status unavailable."
+          : watchdog.state === "off" ? "off, so no phone alert is sent for this brief."
+          : watchdog.notices.length ? watchdog.notices.map((n, i) => <span key={i}>{i ? " " : ""}“{n.title}” at {clock(n.at, day)}: {outcomeText[n.outcome]}.</span>)
+          : "on; nothing sent for this date."}</p>
+        <p>ChatGPT’s own notifications aren’t visible to TradeJournal.</p>
+      </div>
+    </details>
+    {!!pending?.count && <p className="mt-1 text-amber-300">A submission from Jo is waiting to be imported{pending.oldest_submitted_at ? ` (received ${clock(pending.oldest_submitted_at, day)})` : ""}.</p>}
+  </section>;
+}
 
 function joReference(briefId: string, packetId: string | undefined, day: string, question: string, item: BriefItem | null, index: number, memoryIds: string[] = []) {
   const lines = ["TradeJournal morning briefing — continue from this saved context.", `Briefing ID: ${briefId}`, `Packet ID: ${packetId ?? "unavailable"}`, `Briefing date: ${day} ET`];
@@ -153,6 +188,8 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       </select></label>}
     </div>
   </details>;
+  // The delivery block already reports a late scheduled brief; repeat it only for other saved briefs.
+  const lateNote = !!data?.late && (compact || data.delivery?.briefing_id !== brief?.id || data.delivery?.fulfilment === "not_expected");
   const status = <>
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
       {data && <><span className={`rounded px-1.5 py-0.5 font-medium ${data.state === "ready" && !data.late && !data.stale ? "bg-secondary text-foreground" : "bg-amber-500/15 text-amber-300"}`}>{data.state === "ready" && data.late ? "Late" : statusLabels[data.state]}</span>
@@ -164,7 +201,8 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {!compact && dateControls}
     </div>
     {data?.automation.unavailable && <p role="status" className="text-sm text-amber-300">Automatic delivery status is unavailable. Saved content below may be incomplete.</p>}
-    {(data?.late || data?.stale) && <p role="status" className="text-sm text-amber-300">{data.late ? "Arrived after the deadline. " : ""}{data.stale ? "Evidence is at least four hours old; verify current conditions." : ""}</p>}
+    {!compact && data?.delivery && <DeliveryStatus delivery={data.delivery} pending={data.automation.pending} day={day} />}
+    {(lateNote || data?.stale) && <p role="status" className="text-sm text-amber-300">{lateNote ? "Arrived after the deadline. " : ""}{data?.stale ? "Evidence is at least four hours old; verify current conditions." : ""}</p>}
     {body && <p className="text-xs text-muted-foreground">{!compact && packet?.body.scope ? `Scope: ${packet.body.scope.split(";")[0].trim()} · ` : ""}Frozen briefing, not a live price feed. Journal holdings are not broker-verified.</p>}
   </>;
   const longSummary = (body?.summary?.length ?? 0) > 360;

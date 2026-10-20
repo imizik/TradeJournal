@@ -43,7 +43,8 @@ def receipt(row):
         result.update(day=row.day.isoformat(), provenance="owner_supplied")
     if isinstance(row, MorningBriefingRecord):
         result.update(packet_id=str(row.packet_id), provenance="owner_supplied",
-                      labels=["personal_advice", "independence-unverified"])
+                      labels=["personal_advice", "independence-unverified"],
+                      submitted_at=timestamp(row.submitted_at) if row.submitted_at else None)
     if hasattr(row, "redacted_at"):
         result["redacted_at"] = timestamp(row.redacted_at) if row.redacted_at else None
     return result
@@ -164,7 +165,8 @@ def get_packet(session, packet_id):
     return result
 
 
-def save_briefing(session, body: BriefingSave):
+def save_briefing(session, body: BriefingSave, submitted_at=None):
+    """submitted_at: when Check received an imported submission (naive UTC); None when unknown."""
     sha = fingerprint(body)
     existing = replay(session, MorningBriefingRecord, body.operation_id, sha)
     if existing is not None:
@@ -183,4 +185,4 @@ def save_briefing(session, body: BriefingSave):
         if previous is None or session.get(MorningBriefingPacket, previous.packet_id).day.isoformat() != packet["day"]:
             raise ValueError("A correction must reference a briefing for the same day")
     return persist(session, MorningBriefingRecord(operation_id=body.operation_id, request_sha256=sha,
-        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json"))))
+        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json")), submitted_at=submitted_at))

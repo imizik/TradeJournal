@@ -119,16 +119,26 @@ def redact_briefing(briefing_id: UUID, session: Session = Depends(get_session)):
 
 @router.get("/morning")
 def morning(request: Request, day: date, briefing_id: UUID | None = None, session: Session = Depends(get_session)):
-    from app.engine.jo_morning import load_config, morning_view
+    from app.engine.jo_morning import load_config, morning_view, watchdog_status
+    from jo_briefing_owner import binding, load_binding
     try:
         config = load_config()
         configuration_error = False
     except Exception:
         config, configuration_error = None, True
-    result = call(morning_view, session, day, datetime.now(timezone.utc), briefing_id, config)
+    actor = None
+    if config is not None:
+        try:
+            actor = binding(load_binding(config.check_config))
+        except Exception:
+            configuration_error = True  # delivery stays "unknown" rather than guessing the packet
+    result = call(morning_view, session, day, datetime.now(timezone.utc), briefing_id, config, None, actor)
     runner = getattr(request.app.state, "jo_morning", None)
     result["automation"] = {"enabled": config is not None, "last_pass": getattr(runner, "last_pass", None),
-                            "unavailable": configuration_error or bool(getattr(runner, "last_error", None))}
+                            "unavailable": configuration_error or bool(getattr(runner, "last_error", None)),
+                            "last_status": getattr(runner, "last_status", None),
+                            "pending": getattr(runner, "pending", None)}
+    result["delivery"]["notifications"]["watchdog"] = watchdog_status(day)
     return result
 
 

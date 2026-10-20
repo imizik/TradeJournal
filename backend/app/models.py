@@ -231,6 +231,9 @@ class MorningBriefingRecord(SQLModel, table=True):
     request_sha256: str
     body_json: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=utc_now_naive)
+    # When Check received Jo's submission; created_at is when the journal had it.
+    # Unknown (None) for owner saves and for records imported before this column.
+    submitted_at: Optional[datetime] = None
     redacted_at: Optional[datetime] = None
 
 

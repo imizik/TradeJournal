@@ -20,7 +20,7 @@ subscription-only; evaluation remains inactive. Web access is unrestricted,
 bounded by the server save deadline, with deadline-time price baselines.
 Production Jo and Shadow are unchanged.
 
-Checkpoint: October 19, 2026: owner approved starting the morning-briefing implementation below, accepting shared-context Shadow as independence-unverified. Shadow S1 retains its October 17 owner acceptance on October 16 live-session evidence. Other rows retain their individually stated evidence dates; this update is not a production-state audit.
+Checkpoint: October 20, 2026: a read-only VPS check found `STOCK_WATCH_ENABLED=true` and `MARKET_WATCH_ENABLED=true` in `backend.env` (whether every running service has loaded them was not separately verified), conditional plans unset (off) in both the app and Check configurations, the morning runner enabled with publish 08:45 / deadline 09:15, the phone-alert timer running every two minutes, and no dead-man's-switch URL configured. Earlier checkpoint, October 19, 2026: owner approved starting the morning-briefing implementation below, accepting shared-context Shadow as independence-unverified. Shadow S1 retains its October 17 owner acceptance on October 16 live-session evidence. Other rows retain their individually stated evidence dates; this update is not a production-state audit.
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Move
 the checkpoint whenever a row changes, and verify host state before acting.
@@ -34,8 +34,8 @@ slice's stated exit criteria were met. None implies trading edge.
 | Invented-data advisor: connected trial, repeatable questions, owner status ([assignment](advisor-assignment-contract.md), [upkeep](advisor-connection-upkeep-contract.md)) | Yes | v2 trial upgraded Oct 12 per the operator record (owner page lists checks); not recorded in the repo's evidence | Connected trial Oct 11 | **Closed by the owner Oct 12**, not against every contract gate | Repeatable-question and key-upkeep acceptance with actual Jo were not recorded; owner-deferred revoke/recover check remains. Invented data only |
 | Pre-trade check, real data ([contract](advisor-pretrade-check-contract.md#next-steps)) | Yes | Oct 12 | First checks Oct 12; sign-in survived a 60-minute gap Oct 13 | Per step in its next-steps table | Grading (followed vs overrode) needs weeks of saved checks; swing outcome linking and sector moves open |
 | Setup scanner S1 ([contract](setup-scanner-contract.md#daily-health-acceptance-notes)) | Yes | Oct 12 (`SETUP_SCANNER_ENABLED`) | Oct 13 baseline session | No — ten full sessions from Oct 14 | Restart and pricing gates per the contract; no tuning before 50 paper trades |
-| Selected-stock awareness ([contract](setup-scanner-contract.md#selected-stock-awareness-separate-from-option-eligibility)) | Yes (#327) | Not recorded; `STOCK_WATCH_ENABLED` defaults off | Detector replay/fixtures only | No | Native email → actual Jo → saved stock review → phone; stock advice remains separate from trade eligibility |
-| Market watch MW-1 and scheduled reads ([design](market-watch-design.md#mw-1-implementation-and-activation-boundary)) | MW-1 (#312, #313); four scheduled reads (#315); MW-2 event wakes and push (#316), off by default | MW-1 and the 09:50/11:00/12:30/14:00 reads with the snapshot publisher, Oct 14; MW-2 wakes, outboxes and push unconfigured | Instructed Jo tool proof Oct 14. First scheduled read Oct 15 refused (13 references over the limit of 10); task workflow fixed in #323 | No | An on-time scheduled read with a saved receipt; eligible intraday scoring; MW-2 needs Isaac's separate approval |
+| Selected-stock awareness ([contract](setup-scanner-contract.md#selected-stock-awareness-separate-from-option-eligibility)) | Yes (#327) | `STOCK_WATCH_ENABLED=true` in the VPS `backend.env` (read-only check Oct 20; activation date not recorded) | Detector replay/fixtures only | No | Native email → actual Jo → saved stock review → phone; stock advice remains separate from trade eligibility |
+| Market watch MW-1 and scheduled reads ([design](market-watch-design.md#mw-1-implementation-and-activation-boundary)) | MW-1 (#312, #313); four scheduled reads (#315); MW-2 event wakes and push (#316), off by default | MW-1 and the 09:50/11:00/12:30/14:00 reads with the snapshot publisher, Oct 14. `MARKET_WATCH_ENABLED=true` with store and outbox paths set in `backend.env` (read-only check Oct 20); MW-2 live wake/push behavior not verified | Instructed Jo tool proof Oct 14. First scheduled read Oct 15 refused (13 references over the limit of 10); task workflow fixed in #323 | No | An on-time scheduled read with a saved receipt; eligible intraday scoring; MW-2 needs Isaac's separate approval |
 | Jo historical replay ([contract](dot-historical-replay-contract.md)) | Yes, isolated demo (#305, #308, #329, #331) | No; merging does not activate or rebind the isolated demo | Generation-only replays (135 sessions, no Jo choices) | No | Actual Jo completing the five-session batch and its scorecard; exam count is zero |
 | Shadow Isaac S1 ([contract](shadow-s1-contract.md#acceptance)) | SH-1 through SH-6 pipeline | VPS file exchange and Jo task, Oct 13 | Oct 16 full session: **8 published setups, 8 on-time SKIPs**, 7 clean-order receipts and 1 conservatively false; refusal/restart/lifecycle fixtures passed | **Pipeline accepted on Oct 16 evidence; owner closeout Oct 17** | Natural TAKE lifecycle unproven live because no setup has qualified for Jo to take; covered by fixtures and not an acceptance blocker. No selection edge claimed. At 50 resolved S1 paper trades, report per-family underlying and option results for an owner keep/turn-off decision; no tuning |
 | Shadow S2: Isaac's trades in the scorecard ([plan](shadow-build-plan.md#s2--built-isaac-in-the-scorecard)) | Yes, display-only (#304) | Pending: merged after the last recorded deploy (`23b7c6c`) | No | No | Comparisons say "not enough evidence" under 30 decisions |
@@ -44,7 +44,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Implementation selected Oct 17; review pending | No; app and Check opt-in default off | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; instructed afternoon Jo save receipt-confirmed Oct 19 15:31 ET | No | Existing Jo/auth reused; shared-context limitation accepted; first natural scheduled morning and ten-morning owner ratings tracked below |
+| Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged | Roth-only publisher/importer and existing Jo task, Oct 19 | Packet/UI observed; instructed afternoon Jo save receipt-confirmed Oct 19 15:31 ET; first natural scheduled run Oct 20 failed connector validation, manual recovery saved 09:26:56 (late) | No | Existing Jo/auth reused; shared-context limitation accepted; delivery honesty and the opt-in morning watchdog are [described below](#delivery-honesty-and-the-morning-watchdog); five consecutive on-time-or-alerted mornings and the ten-morning owner ratings tracked below |
 
 ### Functionality sequence
 
@@ -360,6 +360,59 @@ This proves the recovered connector save, not natural scheduled delivery or usef
 current market coverage. The frozen stale-price, missing-option-mark and
 independence-unverified limitations remain; no schedule, grants or Shadow workflow
 were changed.
+
+### Delivery honesty and the morning watchdog
+
+`GET /jo/morning` adds a `delivery` block for the day's **scheduled obligation**.
+Only a record citing the day's own scheduled packet (its exact `morning-` operation
+key for the configured scope, times and Check profile) fulfils it. Briefs on other
+same-day packets (manual or recovery requests) are counted as `other_briefings`;
+they are never the scheduled delivery. Fulfilment is judged on **journal
+availability**, the record's `created_at` (when the importer committed it): a brief
+Check received at 09:14 but imported at 09:40 missed a 09:15 deadline. `late`
+keeps `late_by_seconds`, so a later recovery never erases the miss. The nullable
+`submitted_at` column records when Check received an imported submission; the gap
+is `import_lag_seconds`. It is unknown (null) for owner saves and for every record
+imported before this change. The deadline is the one frozen in the scheduled packet.
+Past days are judged with today's configuration, so a day before automation was on
+can read as "not published". Who started a run (the scheduled task or a manual
+chat request) is not visible to TradeJournal: `origin` is always `unknown`.
+
+`automation` also reports the runner's `last_status` and `pending` (this profile's
+submissions still lacking a receipt, the oldest Check receipt time, and unreadable
+outbox files). `delivery.notifications.chatgpt` is always `not_observable`;
+`watchdog` reports what the phone watchdog recorded for that date.
+
+The watchdog is the existing `deploy/alerts.py` timer (a separate process from the
+API), opt-in with `JO_MORNING_ALERTS=true` in `alerts.env`; it is off until set.
+It reads `/jo/morning` each pass and alerts once per condition:
+brief missing at the deadline (no grace; a late save sends one "arrived late"
+recovery), packet not published five minutes after publication time (replacing the
+missing-brief alert, since the packet explains it), runner pass older than three
+minutes (five-minute grace, like the API alert), a submission waiting more than two
+minutes for import, an unreadable outbox file, and an unavailable market calendar
+on a weekday (15-minute grace). Pending, unreadable and calendar facts count only
+while the runner is fresh. When the API is down, the existing "isn't responding"
+alert covers it and morning conditions keep their state. Day conditions end
+silently at the next New York date; notices are kept for seven days in
+`/var/lib/tradejournal/alerts/state.json`, which the API reads to show them. A
+morning send that times out after the request may have left is recorded `unknown`
+and **not resent**; a send that clearly failed is retried on the next pass. ntfy
+accepting a message does not prove the phone displayed it.
+
+Failure domains this can and cannot see: a stopped runner, stalled import,
+unreadable file, unpublished packet, unavailable calendar and a brief absent at the
+deadline are visible. A hosted task that never ran, ran late or failed ChatGPT-side
+schema validation (October 20) is visible only as absence at the deadline. A stopped
+alerts timer is visible only to the dead-man's switch (`HEALTHCHECK_PING_URL`),
+which is not configured as of October 20.
+
+Initial operational acceptance, after separately approved deployment and
+activation: five consecutive exchange mornings, reported as two numbers. Watchdog
+correctness (target 5/5): each morning classified correctly, every miss alerted
+within its grace, and at least one push confirmed on the owner's phone. Delivery
+(reported as x/5): on time by journal availability, each miss explained by failure
+domain. This is separate from the ten-morning usefulness decision in step 6.
 
 ### Fresh market context — activated October 19
 

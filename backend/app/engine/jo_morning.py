@@ -25,6 +25,8 @@ from jo_briefing_owner import binding, load_binding, publish, import_submission
 
 ET = ZoneInfo("America/New_York")
 LOG = logging.getLogger(__name__)
+# Written by deploy/alerts.py (same service user); read only to show what the watchdog sent.
+ALERTS_STATE = Path("/var/lib/tradejournal/alerts/state.json")
 
 
 class MorningConfig(Strict):
@@ -194,6 +196,9 @@ class MorningRunner:
         self.calendar = calendar
         self.last_pass = None
         self.last_error = None
+        self.last_status = None
+        # Submissions still waiting for a receipt after this pass, for the watchdog.
+        self.pending = {"count": 0, "oldest_submitted_at": None, "unreadable": 0}
         self.scan_cursor = ""
 
     def run_once(self, now=None):
@@ -226,6 +231,7 @@ class MorningRunner:
                 except Exception:
                     session.rollback()
                     errors += 1
+            self.pending = self.waiting(check, actor, pending)
             day = now.astimezone(ET).date()
             hours = self.calendar(day)
             if not hours or hours.get("status") != "open":
@@ -245,10 +251,95 @@ class MorningRunner:
                     {"packet_id": str(row.id), "profile_id": actor, "day": day.isoformat()})
                 state = "published"
         self.last_pass, self.last_error = now.isoformat(), "Some submissions could not be imported" if errors else None
+        self.last_status = state
         return {"status": state, "imported": imported, "errors": errors}
 
+    @staticmethod
+    def waiting(check, actor, candidates):
+        """This profile's submissions with no receipt yet; unreadable files are counted, not guessed."""
+        count, oldest, unreadable = 0, None, 0
+        for path in candidates:
+            key = path.name.removeprefix("jo-request-").removesuffix(".json")
+            if (Path(check.market_watch_snapshots_dir) / f"jo-receipt-{key}.json").exists():
+                continue
+            try:
+                request = exchange.Submission.model_validate(exchange.read(check.market_watch_outbox_dir, path.name))
+            except Exception:
+                unreadable += 1
+                continue
+            if request.profile_id != actor:
+                continue
+            count += 1
+            oldest = request.received_at if oldest is None else min(oldest, request.received_at)
+        return {"count": count, "oldest_submitted_at": oldest.isoformat() if oldest else None, "unreadable": unreadable}
 
-def morning_view(session, day, now, briefing_id=None, config=None, calendar=None):
+
+def _frozen_deadline(packet_row):
+    """The deadline frozen in a scheduled packet's own schedule evidence, if readable."""
+    try:
+        for item in json.loads(packet_row.body_json)["evidence"]:
+            if item["id"] == "schedule":
+                value = datetime.fromisoformat(json.loads(item["text"])["deadline"])
+                return value if value.tzinfo is not None else None
+    except (ValueError, TypeError, KeyError):
+        pass
+    return None
+
+
+def delivery(session, day, now, config, actor, hours):
+    """Did the scheduled obligation for this day reach the journal in time?
+
+    Fulfilment is judged on journal availability (``created_at``): a brief Check received
+    at 09:14 but imported at 09:40 still missed a 09:15 deadline. Only a record citing the
+    day's own scheduled packet fulfils it; manual or recovery packets for the same day are
+    counted separately. Who started the run (the scheduled task or a manual chat) is not
+    visible to the app, so origin stays unknown. Past days are judged with today's
+    configuration, so a day before automation was on can read as "not published".
+    """
+    calendar = "unavailable" if not hours else hours.get("status") or "unavailable"
+    result = {"calendar": calendar, "publication": "unknown", "fulfilment": "unknown", "deadline": None,
+        "publish_at": None, "packet_id": None, "published_at": None, "briefing_id": None, "available_at": None,
+        "submitted_at": None, "import_lag_seconds": None, "late_by_seconds": None, "origin": "unknown",
+        "other_briefings": 0, "notifications": {"chatgpt": "not_observable", "watchdog": None}}
+    if config is None:
+        result.update(publication="not_expected", fulfilment="not_expected")
+        return result
+    if calendar == "closed":
+        result.update(publication="not_expected", fulfilment="not_expected")
+        return result
+    if calendar != "open" or actor is None:
+        return result
+    publish_at, deadline = at(day, config.publish_time), at(day, config.deadline)
+    key = operation(config, actor, day)
+    packet = session.exec(select(MorningBriefingPacket).where(MorningBriefingPacket.operation_id == key)).first()
+    if packet is not None:
+        deadline = _frozen_deadline(packet) or deadline
+    result.update(deadline=deadline.isoformat(), publish_at=publish_at.isoformat())
+    records = session.exec(select(MorningBriefingRecord).join(MorningBriefingPacket).where(MorningBriefingPacket.day == day)
+        .order_by(MorningBriefingRecord.created_at, MorningBriefingRecord.id)).all()
+    mine = [r for r in records if packet is not None and r.packet_id == packet.id]
+    result["other_briefings"] = len(records) - len(mine)
+    if packet is None:
+        result["publication"] = "pending" if now < publish_at else "missing"
+        result["fulfilment"] = "pending" if now < deadline else "missing"
+        return result
+    result.update(publication="published", packet_id=str(packet.id), published_at=store.timestamp(packet.created_at))
+    if not mine:
+        result["fulfilment"] = "pending" if now < deadline else "missing"
+        return result
+    # The first saved record is the delivery; later ones are corrections or retries.
+    first = mine[0]
+    available = first.created_at.replace(tzinfo=timezone.utc)
+    result.update(briefing_id=str(first.id), available_at=available.isoformat(),
+        fulfilment="on_time" if available <= deadline else "late",
+        late_by_seconds=max(0, int((available - deadline).total_seconds())))
+    if first.submitted_at:
+        submitted = first.submitted_at.replace(tzinfo=timezone.utc)
+        result.update(submitted_at=submitted.isoformat(), import_lag_seconds=max(0, int((available - submitted).total_seconds())))
+    return result
+
+
+def morning_view(session, day, now, briefing_id=None, config=None, calendar=None, actor=None):
     """Saved content only. Dates never fall back to a prior morning's output."""
     records = session.exec(select(MorningBriefingRecord).join(MorningBriefingPacket)
         .where(MorningBriefingPacket.day == day).order_by(MorningBriefingRecord.created_at.desc(), MorningBriefingRecord.id.desc()).limit(100)).all()
@@ -289,8 +380,26 @@ def morning_view(session, day, now, briefing_id=None, config=None, calendar=None
     from app.models import MorningBriefingFeedback
     feedback = session.get(MorningBriefingFeedback, row.id) if row else None
     return {"day": day.isoformat(), "state": state, "late": late, "stale": stale,
+        "delivery": delivery(session, day, now, config, actor, hours),
         "archived": day != now.astimezone(ET).date(), "deadline": deadline.isoformat() if deadline else None,
         "checked_at": now.isoformat(), "packet": packet, "briefing": store.receipt(row) if row else None,
         "versions": [{"id": str(r.id), "received_at": store.timestamp(r.created_at), "redacted": bool(r.redacted_at)} for r in records],
         "feedback": {"rating": feedback.rating if feedback else None,
             "first_opened_at": store.timestamp(feedback.first_opened_at) if feedback and feedback.first_opened_at else None}}
+
+
+def watchdog_status(day, path=None):
+    """The phone watchdog's morning record for one day, or unknown when it cannot be read.
+
+    Only the watchdog's own ntfy attempts are known here; any notification ChatGPT sends
+    about a Jo task is outside TradeJournal and is never reported as delivered or missing.
+    """
+    try:
+        state = json.loads((path or ALERTS_STATE).read_text()).get("jo_morning")
+    except (OSError, ValueError, AttributeError):
+        return {"state": "unknown", "checked_at": None, "notices": []}
+    if not isinstance(state, dict):
+        return {"state": "unknown", "checked_at": None, "notices": []}
+    notices = state.get("notices", {}).get(day.isoformat(), [])
+    return {"state": "on" if state.get("enabled") else "off", "checked_at": state.get("checked_at"),
+        "notices": notices if isinstance(notices, list) else []}

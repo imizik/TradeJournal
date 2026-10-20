@@ -87,7 +87,11 @@ def import_submission(session, config, operation_id, now):
                 prior = exchange.read(snapshots, f"jo-receipt-{prior_key}.json") if len(prior_key) == 64 and all(c in '0123456789abcdef' for c in prior_key) else {}
                 if prior.get("profile_id") != actor or prior.get("record_id") != str(previous.id):
                     raise ValueError("Correction ownership mismatch")
-            saved = (store.save_memory if request.kind == "memory" else store.save_briefing)(session, body)
+            if request.kind == "memory":
+                saved = store.save_memory(session, body)
+            else:
+                # Check's authenticated receipt time; created_at stays the journal-availability time.
+                saved = store.save_briefing(session, body, request.received_at.astimezone(timezone.utc).replace(tzinfo=None))
         ack.update(status="saved", record_id=saved["id"], saved_at=saved["received_at"],
                    memory_id=saved.get("memory_id"), memory_status=saved.get("status"))
     except (ValueError, LookupError):

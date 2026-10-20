@@ -198,6 +198,54 @@ test("delivery states stay explicit: stale, late, missing, waiting, closed, reda
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
+test("scheduled delivery: availability time, kept miss, unknown origin and watchdog vs ChatGPT notifications", async ({ page }) => {
+  const { brief } = await seed(page);
+  const base = await (await page.request.get(`/api/backend/jo/morning?day=${day}&briefing_id=${brief.id}`)).json();
+  const delivery = { calendar: "open", publication: "published", fulfilment: "late", deadline: `${day}T13:15:00+00:00`, publish_at: `${day}T12:45:00+00:00`,
+    packet_id: base.packet.id, published_at: `${day}T12:45:18+00:00`, briefing_id: brief.id, available_at: `${day}T13:26:56+00:00`,
+    submitted_at: `${day}T13:26:40+00:00`, import_lag_seconds: 16, late_by_seconds: 716, origin: "unknown", other_briefings: 1,
+    notifications: { chatgpt: "not_observable", watchdog: { state: "on", checked_at: `${day}T13:27:00+00:00`, notices: [
+      { kind: "brief", title: "Jo's morning brief is missing", recovered: false, outcome: "sent", at: `${day}T13:15:10+00:00` },
+      { kind: "brief", title: "Jo's morning brief arrived late", recovered: true, outcome: "unknown", at: `${day}T13:27:00+00:00` }] } } };
+  let view = { ...base, delivery };
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: view }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/morning?day=${day}&id=${brief.id}`);
+  const status = page.getByTestId("brief-delivery");
+  await expect(status).toContainText("Late. In the journal at 9:26 AM ET, 12 min after the 9:15 AM ET deadline. The miss stays recorded.");
+  await expect(status).toContainText("Check received it at 9:26 AM ET; importing took 16 s.");
+  await expect(status).toContainText("Who started the run (the scheduled task or a manual request) isn’t visible to TradeJournal.");
+  await expect(status).toContainText("1 other brief was saved for this date from a separate packet");
+  await expect(status).toContainText("“Jo's morning brief is missing” at 9:15 AM ET: sent.");
+  await expect(status).toContainText("“Jo's morning brief arrived late” at 9:27 AM ET: outcome unknown, may have reached your phone; not resent.");
+  await expect(page.getByText("Arrived after the deadline.")).toHaveCount(0);
+  await status.locator("summary").click();
+  await expect(status).toContainText("ChatGPT’s own notifications aren’t visible to TradeJournal.");
+  await page.screenshot({ path: test.info().outputPath("morning-delivery-late-phone.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  const states = [
+    [{ ...delivery, fulfilment: "missing", publication: "missing", available_at: null, submitted_at: null, other_briefings: 0,
+      notifications: { chatgpt: "not_observable", watchdog: { state: "off", checked_at: null, notices: [] } } },
+      ["Missing. Nothing reached the journal by 9:15 AM ET. The packet for Jo was never published", "Phone watchdog: off"]],
+    [{ ...delivery, fulfilment: "on_time", available_at: `${day}T13:10:00+00:00`, submitted_at: null, other_briefings: 0,
+      notifications: { chatgpt: "not_observable", watchdog: { state: "on", checked_at: null, notices: [] } } },
+      ["On time. In the journal at 9:10 AM ET, due 9:15 AM ET.", "Check’s receipt time wasn’t recorded for this brief.", "on; nothing sent for this date."]],
+    [{ ...delivery, fulfilment: "unknown", available_at: null, notifications: { chatgpt: "not_observable", watchdog: null } },
+      ["Status unknown", "Phone watchdog: status unavailable."]],
+  ] as const;
+  for (const [next, texts] of states) {
+    view = { ...base, delivery: next };
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    for (const text of texts) await expect(status).toContainText(text);
+  }
+  view = { ...base, delivery: { ...delivery, fulfilment: "pending", available_at: null }, automation: { ...base.automation, pending: { count: 1, oldest_submitted_at: `${day}T13:05:00+00:00`, unreadable: 0 } } };
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(status).toContainText("A submission from Jo is waiting to be imported (received 9:05 AM ET).");
+  view = { ...base, delivery: { ...delivery, fulfilment: "not_expected" } };
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(status).toHaveCount(0);
+});
+
 test("memory review: accept, decline, correct, retire and add beliefs with honest conflicts and retries", async ({ page }) => {
   const tag = crypto.randomUUID().slice(0, 8);
   const propose = async (text: string) => {
