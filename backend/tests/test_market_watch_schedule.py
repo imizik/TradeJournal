@@ -300,9 +300,9 @@ def test_child_environment_is_narrow_and_postgres_read_only(tmp_path):
     child_env = _runtime_env(source)
     assert child_env["PGOPTIONS"] == "-c default_transaction_read_only=on"
     assert "OPENAI_API_KEY" not in child_env and "MIGRATION_DATABASE_URL" not in child_env
-    assert child_env["ALPACA_DATA_FEED"] == "iex"
+    assert child_env["ALPACA_DATA_FEED"] == "sip"
     source.write_text(source.read_text().replace("ALPACA_DATA_FEED=iex", "ALPACA_DATA_FEED=sip"))
-    assert _runtime_env(source)["ALPACA_DATA_FEED"] == "iex"
+    assert _runtime_env(source)["ALPACA_DATA_FEED"] == "sip"
 
     unit = (ROOT / "deploy/market-watch/tradejournal-market-watch-publisher.service").read_text()
     timer = (ROOT / "deploy/market-watch/tradejournal-market-watch-publisher.timer").read_text()

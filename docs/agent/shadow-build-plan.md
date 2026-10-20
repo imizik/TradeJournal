@@ -86,8 +86,8 @@ restated in the S1 contract:
   unchanged by the shadow trade, which uses the same enter/watch/exit code
   under a `shadow_` event-key prefix. A shadow TAKE's entry uses a quote updated
   at or after the backend stored the decision.
-- `check_control.py upgrade` refuses a bundle that changes check units; the
-  shadow exchange keeps the check units unchanged. Ledger `received_at` strings
+- `check_control.py upgrade` requires an explicit `--approve-unit` hash for
+  each changed unit; the original shadow exchange kept check units unchanged. Ledger `received_at` strings
   are ISO UTC: compare datetimes, not strings.
 
 ## SC-0 — daily scanner health check (ops)

@@ -14,7 +14,7 @@ import sqlite3
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
-from market_watch_common import PROTOCOL, canonical, digest, verify, validate_snapshot
+from market_watch_common import PROTOCOLS, canonical, digest, verify, validate_snapshot
 
 
 HORIZONS = ("30m", "60m", "close")
@@ -70,18 +70,18 @@ def _manifest(bars: list[dict]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _source_manifest(source: dict | None, bars: list[dict]) -> dict:
+def _source_manifest(source: dict | None, bars: list[dict], protocol_id="mw-v1") -> dict:
     source = source or {}
     retrieved = source.get("retrieved_at")
     if retrieved is not None:
         _time(retrieved)
     latest_bar_end = max((b["end"] for b in bars), default=None)
     time_verified = retrieved is not None and (latest_bar_end is None or _time(retrieved) >= latest_bar_end)
+    expected = (("Tradier", "full_market", "provider_reported", PROTOCOLS[protocol_id]["price_basis"])
+                if protocol_id == "mw-tradier-v2" else ("Alpaca", "iex", "split", PRICE_BASIS))
     return {"provider": source.get("provider"), "feed": source.get("feed"),
             "adjustment": source.get("adjustment"), "price_basis": source.get("price_basis"),
-            "retrieved_at": retrieved, "source_claim_matches_protocol": time_verified and source.get("provider") == "Alpaca" and
-            source.get("feed") == "iex" and source.get("adjustment") == "split" and
-            source.get("price_basis") == PRICE_BASIS,
+            "retrieved_at": retrieved, "source_claim_matches_protocol": time_verified and tuple(source.get(k) for k in ("provider", "feed", "adjustment", "price_basis")) == expected,
             "bars_sha256": _manifest(bars)}
 
 
@@ -109,7 +109,7 @@ def evaluate_forecast(read: dict, forecast: dict, bars: Iterable[dict], *,
         raise MarketWatchEvaluationError("forecast probability must be null or in [0,1]")
     if comparator_probability is not None and (not _finite(comparator_probability) or not 0 <= comparator_probability <= 1):
         raise MarketWatchEvaluationError("comparator probability must be null or in [0,1]")
-    source = _source_manifest(bar_source, parsed)
+    source = _source_manifest(bar_source, parsed, read["protocol_id"])
     if source["retrieved_at"] is not None and _time(source["retrieved_at"]) > now:
         source["source_claim_matches_protocol"] = False
     if session_open_at is None or session_close_at is None:
@@ -230,12 +230,12 @@ def session_diagnostic(*, session_date: str, read_rows: list[dict], today_bars: 
         parsed_day = sorted((_bar(x) for x in day.get("bars", [])), key=lambda b: b["start"])
         normalized_prior.append({"session_date": day.get("session_date"), "session_open_at": day.get("session_open_at"),
             "session_close_at": day.get("session_close_at"), "previous_close": day.get("previous_close"),
-            "bar_source": _source_manifest(day.get("bar_source"), parsed_day),
+            "bar_source": _source_manifest(day.get("bar_source"), parsed_day, protocol_id),
             "bars": [{"start": b["start"].isoformat(), "open": b["open"], "high": b["high"],
                       "low": b["low"], "close": b["close"], "volume": b["volume"]} for b in parsed_day]})
     today_manifest = [{"start": b["start"].isoformat(), "open": b["open"], "high": b["high"],
                        "low": b["low"], "close": b["close"], "volume": b["volume"]} for b in today]
-    today_source = _source_manifest(bar_source, today)
+    today_source = _source_manifest(bar_source, today, protocol_id)
     session_manifest = {"today_source": today_source, "today": today_manifest,
                         "prior_sessions": normalized_prior, "calendar_roster": roster}
     if session_open_at is None or session_close_at is None:
@@ -302,7 +302,7 @@ def session_diagnostic(*, session_date: str, read_rows: list[dict], today_bars: 
                 not _finite(day.get("previous_close"))):
                 reason = "prior_session_history_missing"
                 break
-            prior_source = _source_manifest(day.get("bar_source"), rows)
+            prior_source = _source_manifest(day.get("bar_source"), rows, protocol_id)
             normalized_prior[len(prior) - len(days) + day_idx]["bar_source"] = prior_source
             if (not prior_source["source_claim_matches_protocol"] or
                 (prior_source["retrieved_at"] is not None and _time(prior_source["retrieved_at"]) > evaluated_time)):
@@ -420,7 +420,7 @@ class MarketWatchOutcomeStore:
             verify(export)
         except Exception as exc:
             raise MarketWatchEvaluationError("export envelope hash is invalid") from exc
-        if export["protocol_id"] != PROTOCOL.get("protocol_id", "mw-v1"):
+        if export["protocol_id"] not in PROTOCOLS:
             raise MarketWatchEvaluationError("export protocol mismatch")
         actor = export["actor"]
         if not isinstance(actor, str) or not actor:
@@ -634,6 +634,8 @@ class MarketWatchOutcomeStore:
         existing_sessions = {(o["session_date"], o["evaluation_revision"]): o for o in self.session_outcomes()}
         for session_date, day_reads in session_rows.items():
             if (session_date, 1) in existing_sessions:
+                if existing_sessions[(session_date, 1)]["protocol_id"] != export["protocol_id"]:
+                    raise MarketWatchEvaluationError("Session already evaluated under a different protocol; explicit revision required")
                 session_outcomes.append(existing_sessions[(session_date, 1)])
                 continue
             snap = inputs[day_reads[-1]["input_id"]]["snapshot_json"]

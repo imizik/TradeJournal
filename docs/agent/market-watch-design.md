@@ -13,14 +13,24 @@ selecting any slice below goes through the
 
 ## Full-market requirement — October 20 code change
 
-The live Jo Check tools no longer issue MW-1 input receipts or accept new reads
-against its IEX snapshots. They report `insufficient_data` with reason
-`full_market_snapshot_unavailable`. Existing committed retries remain recoverable.
-MW-1's frozen IEX protocol, historical ledger and offline evaluation are preserved;
-this change does not relabel its evidence as consolidated or migrate its publisher.
-Tradier stock-watch and Shadow evidence remain available. Full-market SPY/QQQ
-Market Watch requires a separately validated snapshot protocol before live reads
-can resume. This code change has not itself activated or deployed anything.
+The default publisher now builds `mw-tradier-v2` from Tradier full-market
+SPY/QQQ minute candles and daily history. Jo Check serves and accepts this
+protocol, restoring live reads without IEX. VWAP, opening range and completed
+five-minute bars retain strict coverage requirements; unavailable or stale
+sources remain explicit gaps. Daily prices are provider-reported, with no
+promise of dividend adjustment. Stock-watch ATR history uses Tradier too.
+
+The frozen `mw-v1` IEX protocol and historical records remain reproducible.
+New reads start a separate per-protocol parent chain; the daily notification
+budget still spans both protocols. Owner exports default to the latest served
+protocol, with `--protocol mw-v1` available for historical exports. Evaluation
+keeps source bases separate and requires a new session revision when changing
+protocols. The older implementation/acceptance notes below describe MW-1 unless
+explicitly marked otherwise. Existing committed retries remain recoverable.
+
+These changes have fixture proof only, not deployment or live acceptance.
+The app publisher release and isolated Check credential/unit upgrade must both
+complete; see the [Check rollout](advisor-pretrade-check-contract.md#full-market-requirement--october-20-code-change).
 
 ## What Isaac wants
 

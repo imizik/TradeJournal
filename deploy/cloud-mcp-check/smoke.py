@@ -154,7 +154,7 @@ def exercise(archive, scratch):
     config.update({"enabled": True, "issuer_url": ISSUER, "resource_url": RESOURCE, "jwks_url": JWKS_URL,
         "client_id": CLIENT, "profiles": [{"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True}]})
     owned(control.CONFIG / "config.json", json.dumps(config).encode(), "root:tj-check")
-    for name in ("alpaca-key-id", "alpaca-secret-key"):
+    for name in ("alpaca-key-id", "alpaca-secret-key", "tradier-api-key"):
         owned(control.CONFIG / name, b"invented-not-a-provider-key\n", "root:root", 0o600)
     # Package smoke already created the private API user. Provision the optional
     # exchange before the sandbox starts; the new empty SQLite file is valid.

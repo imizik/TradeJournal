@@ -329,7 +329,7 @@ NOTICE_FIELDS = {"schema_version", "created_at", "content_sha256", "notice_versi
 def validate_notice(notice: dict, snapshots_dir: str | Path, now: datetime) -> dict:
     """Verify one outbox notice against its seal and the snapshot this app published."""
     verify(notice)
-    if set(notice) != NOTICE_FIELDS or notice["notice_version"] != "mw-read-notice-v1" or notice["protocol_id"] != "mw-v1":
+    if set(notice) != NOTICE_FIELDS or notice["notice_version"] != "mw-read-notice-v1" or notice["protocol_id"] not in {"mw-v1", "mw-tradier-v2"}:
         raise ValueError("read notice fields are invalid")
     if not re.fullmatch(r"mwr_[0-9a-f-]{36}", notice["read_id"]) or not re.fullmatch(r"check_[0-9a-f-]{36}", notice["actor"]):
         raise ValueError("read notice identity is invalid")
@@ -455,11 +455,8 @@ def _default_setup_window(now: datetime) -> bool:
 
 
 def _default_daily(day: date) -> list[dict]:
-    from app.engine import alpaca
-    result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
-        "symbols": "SPY", "timeframe": "1Day", "start": (day - timedelta(days=40)).isoformat(),
-        "end": day.isoformat(), "adjustment": "split", "feed": "iex", "limit": 10000})
-    return result.get("bars", {}).get("SPY", [])
+    from app.engine.market_watch_snapshot import tradier_source
+    return tradier_source().fetch_daily_bars(["SPY"], day - timedelta(days=40), day).get("SPY", [])
 
 
 class MarketWatchRunner:

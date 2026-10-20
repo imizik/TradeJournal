@@ -13,11 +13,26 @@ from pathlib import Path
 import tempfile
 from typing import Callable
 import fcntl
-from market_watch_common import PROTOCOL, PROTOCOL_SHA256, digest, parse_time, previous_session_date, seal, session_bounds, validate_snapshot, verify
+from market_watch_common import PROTOCOL, TRADIER_PROTOCOL, snapshot_protocol, digest, parse_time, previous_session_date, seal, session_bounds, validate_snapshot, verify
 from market_watch_common import MAX_VERIFIED_OMISSIONS, MAX_OMISSION_TRADES, VERIFIED_OMISSION_REASON, verified_omission_starts
 
 ET_NAME = "America/New_York"
 
+
+
+_stock_source = None
+
+
+def tradier_source():
+    """One process-local cache/budget reused by market snapshot and daily reads."""
+    global _stock_source
+    if _stock_source is None:
+        from app.engine import tradier
+        from tradier_stock_data import TradierStockData
+        if not tradier.tradier_configured() or tradier.TRADIER_BASE_URL != "https://api.tradier.com":
+            raise ValueError("production Tradier market data is not configured")
+        _stock_source = TradierStockData(tradier.TRADIER_API_KEY)
+    return _stock_source
 
 def _time(value: datetime) -> str:
     if value.tzinfo is None:
@@ -135,9 +150,12 @@ def _index(symbol: str, rows: list[dict], raw_rows: list[dict], prior_close: dic
 def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None = None, trades_reader: Callable | None = None,
                    daily_reader: Callable | None = None, vix_reader: Callable | None = None,
                    calendar_reader: Callable | None = None, news_reader: Callable | None = None,
-                   bounds_reader: Callable | None = None) -> dict:
+                   bounds_reader: Callable | None = None, protocol: dict = TRADIER_PROTOCOL, stock_source=None) -> dict:
     """Build a sealed bounded packet. Every source can fail independently."""
     from zoneinfo import ZoneInfo
+    if protocol not in (PROTOCOL, TRADIER_PROTOCOL):
+        raise ValueError("unsupported market protocol")
+    tradier = protocol == TRADIER_PROTOCOL
     fixed_clock = now is not None
     now = now or datetime.now(UTC)
     if now.tzinfo is None:
@@ -170,35 +188,46 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
     if bounds is None:
         gaps.append({"group": "session_calendar", "reason": "exchange_calendar_unavailable_or_closed"})
     cutoff = min(now.replace(second=0, microsecond=0), closed) if closed else now.replace(second=0, microsecond=0)
-    if bars_reader is None:
-        from app.engine import alpaca
-        if alpaca.ALPACA_DATA_FEED != "iex":
-            raise RuntimeError("MW-1 snapshots require the configured Alpaca feed to be IEX")
-        def bars_reader(symbols, d):
-            # The ordinary full-day cache waits until extended hours close.
-            # Read the bounded live portion through the same Alpaca adapter,
-            # without writing a partial day into that immutable cache.
-            result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
-                "symbols": ",".join(symbols), "timeframe": "1Min",
-                "start": opened.isoformat(), "end": cutoff.isoformat(),
-                "adjustment": "split", "feed": "iex", "limit": 10000,
-            })
-            return result.get("bars", {})
-        if trades_reader is None:
-            def trades_reader(symbol, start, end):
-                return alpaca._alpaca_get_fast(f"/v2/stocks/{symbol}/trades", {
-                    "start": _time(start), "end": _time(end), "feed": "iex", "limit": MAX_OMISSION_TRADES,
+    if tradier:
+        if stock_source is None and (bars_reader is None or daily_reader is None):
+            stock_source = tradier_source()
+        if bars_reader is None:
+            bars_reader = stock_source.fetch_minute_bars_live
+        if daily_reader is None:
+            def daily_reader(symbols, d):
+                return stock_source.fetch_daily_bars(symbols, d - timedelta(days=14), d)
+        # IEX no-print proofs cannot establish full-market minute coverage.
+        trades_reader = None
+    else:
+        if bars_reader is None:
+            from app.engine import alpaca
+            if alpaca.ALPACA_DATA_FEED != "iex":
+                raise RuntimeError("MW-1 snapshots require the configured Alpaca feed to be IEX")
+            def bars_reader(symbols, d):
+                # The ordinary full-day cache waits until extended hours close.
+                # Read the bounded live portion through the same Alpaca adapter,
+                # without writing a partial day into that immutable cache.
+                result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
+                    "symbols": ",".join(symbols), "timeframe": "1Min",
+                    "start": opened.isoformat(), "end": cutoff.isoformat(),
+                    "adjustment": "split", "feed": "iex", "limit": 10000,
                 })
-    if daily_reader is None:
-        from app.engine import alpaca
-        def daily_reader(symbols, d):
-            start_day = d - timedelta(days=14)
-            result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
-                "symbols": ",".join(symbols), "timeframe": "1Day",
-                "start": start_day.isoformat(), "end": d.isoformat(),
-                "adjustment": "split", "feed": "iex", "limit": 10000,
-            })
-            return result.get("bars", {})
+                return result.get("bars", {})
+            if trades_reader is None:
+                def trades_reader(symbol, start, end):
+                    return alpaca._alpaca_get_fast(f"/v2/stocks/{symbol}/trades", {
+                        "start": _time(start), "end": _time(end), "feed": "iex", "limit": MAX_OMISSION_TRADES,
+                    })
+        if daily_reader is None:
+            from app.engine import alpaca
+            def daily_reader(symbols, d):
+                start_day = d - timedelta(days=14)
+                result = alpaca._alpaca_get_fast("/v2/stocks/bars", {
+                    "symbols": ",".join(symbols), "timeframe": "1Day",
+                    "start": start_day.isoformat(), "end": d.isoformat(),
+                    "adjustment": "split", "feed": "iex", "limit": 10000,
+                })
+                return result.get("bars", {})
     if vix_reader is None:
         def vix_reader():
             from sqlmodel import Session, select
@@ -403,27 +432,30 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
         headlines["age_seconds"] = max(0.0, (finished - parse_time(headlines["retrieved_at"])).total_seconds())
         if headlines["age_seconds"] > PROTOCOL["freshness_limits"]["news_retrieval_seconds"]:
             headlines["status"] = "stale"
+    if tradier:
+        for group in indices.values():
+            group["source"] = "Tradier full_market"
     manifest = []
     for symbol, group in indices.items():
         source_rows = published_rows[symbol]
         session_bars = _session_bars(source_rows, opened, cutoff) if opened else []
-        manifest.append({"group": f"indices.{symbol}.bars_1m", "provider": "Alpaca", "feed": "iex",
-                         "adjustment": "split", "window_start": _time(opened) if opened else None, "window_end": _time(cutoff),
+        manifest.append({"group": f"indices.{symbol}.bars_1m", "provider": "Tradier" if tradier else "Alpaca", "feed": "full_market" if tradier else "iex",
+                         "adjustment": "provider_reported" if tradier else "split", "window_start": _time(opened) if opened else None, "window_end": _time(cutoff),
                          "retrieved_at": group["retrieved_at"], "payload_sha256": group["source_sha256"],
                          "bars": session_bars})
         if omitted_by_symbol[symbol]:
             manifest[-1]["omitted_minutes"] = omitted_by_symbol[symbol]
         previous = prior_manifest_rows.get(symbol)
         if previous:
-            manifest.append({"group": f"indices.{symbol}.prior_daily_bar", "provider": "Alpaca", "feed": "iex",
-                             "adjustment": "split", "window_start": (day - timedelta(days=14)).isoformat(),
+            manifest.append({"group": f"indices.{symbol}.prior_daily_bar", "provider": "Tradier" if tradier else "Alpaca", "feed": "full_market" if tradier else "iex",
+                             "adjustment": "provider_reported" if tradier else "split", "window_start": (day - timedelta(days=14)).isoformat(),
                              "window_end": day.isoformat(), "retrieved_at": _time(daily_retrieved),
                              "payload_sha256": digest([previous]), "bars": [previous]})
     for group_name, source in (("volatility", volatility), ("calendar", calendar), ("headlines", headlines)):
         manifest.append({"group": group_name, "provider": source.get("source"),
                          "retrieved_at": source.get("retrieved_at"),
                          "payload_sha256": source.get("source_sha256")})
-    packet = {"schema_version": 1, "protocol_id": "mw-v1", "protocol_sha256": PROTOCOL_SHA256, "session_date": day.isoformat(),
+    packet = {"schema_version": 1, "protocol_id": protocol["protocol_id"], "protocol_sha256": protocol["content_sha256"], "session_date": day.isoformat(),
               "collection_started_at": _time(collection_started), "collection_finished_at": _time(finished),
               "created_at": _time(finished),
               "session_open_at": _time(opened) if opened else None, "session_close_at": _time(closed) if closed else None, "market_phase": phase,
@@ -438,6 +470,7 @@ def build_snapshot(now: datetime | None = None, *, bars_reader: Callable | None 
 def publish_snapshot(directory: str | Path, snapshot: dict) -> Path:
     """Publish a frozen protocol and immutable packet; advance latest monotonically."""
     validate_snapshot(snapshot)
+    protocol = snapshot_protocol(snapshot)
     root = Path(directory)
     if root.is_symlink():
         raise ValueError("snapshot publication directory may not be a symlink")
@@ -448,10 +481,10 @@ def publish_snapshot(directory: str | Path, snapshot: dict) -> Path:
     data = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
     protocol_dir = root / "protocols"
     protocol_dir.mkdir(exist_ok=True)
-    protocol_path = protocol_dir / f"{PROTOCOL_SHA256}.json"
+    protocol_path = protocol_dir / f"{protocol['content_sha256']}.json"
     if protocol_path.is_symlink():
         raise ValueError("protocol publication path may not be a symlink")
-    protocol_bytes = json.dumps(PROTOCOL, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    protocol_bytes = json.dumps(protocol, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
     lock_path = root / ".publish.lock"
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o640)
     try:
@@ -541,8 +574,9 @@ def read_latest_snapshot(directory: str | Path, now: datetime) -> dict | None:
         snapshot = json.loads(_read_bounded(root / f"{sha}.json", 2 * 1024 * 1024))
         if (root / f"{sha}.json").is_symlink():
             return None
-        protocol_path = root / "protocols" / f"{PROTOCOL_SHA256}.json"
-        if protocol_path.is_symlink() or json.loads(_read_bounded(protocol_path, 64 * 1024)) != PROTOCOL:
+        protocol = snapshot_protocol(snapshot)
+        protocol_path = root / "protocols" / f"{protocol['content_sha256']}.json"
+        if protocol_path.is_symlink() or json.loads(_read_bounded(protocol_path, 64 * 1024)) != protocol:
             return None
         verify(snapshot)
         validate_snapshot(snapshot)

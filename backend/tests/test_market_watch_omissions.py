@@ -115,7 +115,7 @@ def test_many_unknown_holes_do_not_start_unbounded_trade_queries():
     bars, daily = _sources()
     bars["SPY"] = [b for b in bars["SPY"] if not 15 <= (parse_time(b["t"]) - OPEN).total_seconds() / 60 <= 24]
     calls = []
-    packet = build_snapshot(NOW, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
+    packet = build_snapshot(NOW, protocol=__import__("market_watch_common").PROTOCOL, bars_reader=lambda *_: bars, daily_reader=lambda *_: daily,
                             trades_reader=lambda *args: calls.append(args) or odd_lots(*args),
                             bounds_reader=lambda _: (OPEN, OPEN + timedelta(hours=6, minutes=30)),
                             vix_reader=lambda: None, calendar_reader=lambda *_: fixture_snapshot()["calendar"],

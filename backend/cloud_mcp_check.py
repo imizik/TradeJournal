@@ -51,7 +51,7 @@ import pretrade_features
 from jo_briefing_exchange import READ_SCOPE as JO_READ_SCOPE, SUBMIT_SCOPE as JO_SUBMIT_SCOPE
 
 UNAVAILABLE = "Check permission unavailable; reconnect or contact the owner. No fallback."
-CONTEXT_TIMEOUT = 6.0
+CONTEXT_TIMEOUT = 10.0
 CANDLES_TIMEOUT = 4.0  # Entire file read, below the proxy response-header budget.
 MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
@@ -171,13 +171,13 @@ def bind_provider(provider, *, feed, cache_dir):
     news._alpaca_get = news._alpaca_get_fast = provider.get
 
 
-def read_credentials(directory):
+def read_credentials(directory, names=CREDENTIAL_NAMES):
     """Read the provider key pair from systemd's read-only credential directory."""
     directory = Path(directory)
     if not directory.is_absolute():
         raise ValueError("Credential directory must be absolute")
     values = []
-    for name in CREDENTIAL_NAMES:
+    for name in names:
         descriptor = os.open(directory / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             info = os.fstat(descriptor)
@@ -260,7 +260,7 @@ def candle_unavailable(reason, *, source="tradier_timesales_1min", feed="full_ma
         "last_bar_time": None, "age_seconds": None}
 
 
-def candle_read(setups_dir, provider, symbol, interval, count, now):
+def candle_read(setups_dir, provider, symbol, interval, count, now, tradier_source=None):
     """Read existing full-market scanner candles only; never substitute another feed."""
     stamp = now.timestamp()
     if setups_dir:
@@ -302,7 +302,36 @@ def candle_read(setups_dir, provider, symbol, interval, count, now):
                         "age_seconds": round(stamp - selected_last.timestamp(), 3)}
         except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError):
             pass
-    return candle_unavailable("fresh completed Tradier candles unavailable; no IEX fallback")
+    if tradier_source is not None:
+        from tradier_stock_data import ET, TradierDataError
+        try:
+            minutes = tradier_source.minutes(symbol, now.astimezone(ET).date())
+            rows = []
+            duration = 60 if interval == "1m" else 300
+            groups = {}
+            for bar in minutes:
+                start = datetime.fromisoformat(bar["t"]).timestamp()
+                if start + 60 > stamp:
+                    continue
+                groups.setdefault(int(start // duration) * duration, []).append((start, bar))
+            for start, group in sorted(groups.items()):
+                if len(group) != duration // 60 or [v[0] for v in group] != [start + i * 60 for i in range(duration // 60)]:
+                    continue
+                bars = [v[1] for v in group]
+                rows.append({"time" if interval == "1m" else "start": start,
+                    "end_time" if interval == "1m" else "end": start + duration,
+                    "open": bars[0]["o"], "high": max(b["h"] for b in bars),
+                    "low": min(b["l"] for b in bars), "close": bars[-1]["c"], "volume": sum(b["v"] for b in bars)})
+            end_key = "end_time" if interval == "1m" else "end"
+            if not rows or not 0 <= stamp - rows[-1][end_key] <= duration + 120:
+                return candle_unavailable("tradier_no_fresh_completed_bars")
+            return {"candles": rows[-count:], "source": "tradier_timesales_1min", "feed": "full_market",
+                "delivery": "direct_refresh", "symbol": symbol, "interval": interval,
+                "last_bar_time": datetime.fromtimestamp(rows[-1][end_key], timezone.utc).isoformat(),
+                "age_seconds": stamp - rows[-1][end_key]}
+        except TradierDataError as exc:
+            return candle_unavailable(str(exc))
+    return candle_unavailable("tradier_refresh_not_configured; scanner candles missing or stale")
 
 
 def write_shadow_decision(directory, decision):
@@ -373,7 +402,7 @@ class CheckMCP(FastMCP):
         return await super().call_tool(name, arguments)
 
 
-def create_server(config_path, *, provider, cache_dir, clock=None):
+def create_server(config_path, *, provider, cache_dir, clock=None, tradier_source=None):
     reject_credentials()
     verifier = CheckVerifier(config_path)
     config = verifier.config
@@ -511,10 +540,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 if snapshot is None:
                     context = await asyncio.to_thread(market_ledger.context, checked.claims["profile_id"], clock)
                     return {"status": "unavailable", "reason": "no_current_session_snapshot", "context": context}
-                # MW-1 is a frozen IEX protocol, not interchangeable with Tradier candles.
-                # Keep historical receipts intact; do not issue new IEX evidence to Jo.
-                return {"status": "insufficient_data", "reason": "full_market_snapshot_unavailable",
-                    "detail": "MW-1 uses IEX; full-market evidence is required. No input receipt issued."}
+                if snapshot["protocol_id"] != "mw-tradier-v2":
+                    return {"status": "insufficient_data", "reason": "full_market_snapshot_unavailable",
+                        "detail": "Publisher has not supplied a Tradier full-market snapshot."}
+                return await asyncio.to_thread(market_ledger.serve, checked.claims["profile_id"], snapshot, clock)
             except (ValueError, OSError, sqlite3.Error):
                 raise ToolError("Market snapshot unavailable; no input receipt issued") from None
 
@@ -554,13 +583,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     def live_context(idea, receipt):
         # The legacy analysis needs snapshots and daily/minute history. Rolling Tradier
         # candles cannot supply that whole packet. Do not read an IEX disk cache either.
-        if config.provider_feed != "sip":
+        if tradier_source is None and config.provider_feed != "sip":
             reason = "insufficient_data: full-market analysis unavailable; IEX is disabled"
             return clock_only_analysis(receipt, [reason]), [reason]
         # Swing ideas use the same packet; their verdict reads its completed daily bars.
         try:
             analysis = build_scalp_analysis(idea["ticker"], direction=idea["side"], instrument=idea["instrument"],
-                option_type=idea["option_type"], expiration=idea["expiration"], strike=idea["strike"])
+                option_type=idea["option_type"], expiration=idea["expiration"], strike=idea["strike"], stock_source=tradier_source)
             return analysis, []
         except Exception as exc:
             # Provider/network errors can echo request details; keep the type only.
@@ -627,7 +656,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             if not candle_slots.acquire(blocking=False):
                 return candle_unavailable("candle reader busy")
             try:
-                return candle_read(config.shadow_setups_dir, provider, symbol.upper(), interval, bars, now)
+                return candle_read(config.shadow_setups_dir, provider, symbol.upper(), interval, bars, now, tradier_source)
             finally:
                 candle_slots.release()
         try:
@@ -832,20 +861,23 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 day = datetime.fromisoformat(record["received_at"]).astimezone(ET).date()
                 wanted.setdefault(day, set()).add(record["idea"]["ticker"].upper())
         bars, deadline = {}, time.monotonic() + SETTLE_BUDGET
-        if wanted and config.provider_feed == "sip":
+        if wanted and (tradier_source is not None or config.provider_feed == "sip"):
             if slots.locked():
                 raise ToolError("Check service busy; retry shortly")
             async with slots:  # Same provider bound as the other live calls.
                 for day, tickers in sorted(wanted.items(), reverse=True):  # Newest first within the budget.
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 1:
-                        break
-                    try:
-                        fetched = await asyncio.wait_for(asyncio.to_thread(fetch_minute_bars_live, sorted(tickers), day),
-                            min(CONTEXT_TIMEOUT, remaining))
-                    except Exception:
-                        continue  # Unread days stay "unavailable" and are retried next time.
-                    bars.update({(day, ticker): fetched.get(ticker) or [] for ticker in tickers})
+                    ordered = sorted(tickers)
+                    for offset in range(0, len(ordered), 8):
+                        batch = ordered[offset:offset + 8]
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 1:
+                            break
+                        try:
+                            fetched = await asyncio.wait_for(asyncio.to_thread(tradier_source.fetch_minute_bars_live if tradier_source else fetch_minute_bars_live, batch, day),
+                                min(CONTEXT_TIMEOUT, remaining))
+                        except Exception:
+                            continue  # Unread batches stay unavailable and are retried next time.
+                        bars.update({(day, ticker): fetched.get(ticker) or [] for ticker in batch})
         settled = []
         for record, model in saved:
             if record["check_id"] in done:
@@ -1030,7 +1062,11 @@ def main():
         fd = activated_socket(config)
         key_id, secret_key = read_credentials(os.environ["CREDENTIALS_DIRECTORY"])
         provider = Provider(key_id, secret_key, timeout=config.provider_timeout_seconds)
-        app = create_server(args.config, provider=provider, cache_dir=os.environ["CACHE_DIRECTORY"]).streamable_http_app()
+        from tradier_stock_data import TradierStockData
+        token, = read_credentials(os.environ["CREDENTIALS_DIRECTORY"], ("tradier-api-key",))
+        source = TradierStockData(token, timeout=config.provider_timeout_seconds)
+        app = create_server(args.config, provider=provider, cache_dir=os.environ["CACHE_DIRECTORY"],
+            tradier_source=source).streamable_http_app()
     except (OSError, ValueError, KeyError):
         parser.error("Check configuration, keys, credential or socket is missing, invalid or disabled")
     uvicorn.run(app, fd=fd, access_log=False, proxy_headers=False, ws="none", loop="asyncio",

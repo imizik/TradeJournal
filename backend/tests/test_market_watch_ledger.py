@@ -122,8 +122,7 @@ def test_tools_disabled_by_default_and_scoped_audited_without_provider_calls(har
         assert 'input_id' not in inp and 'snapshot' not in inp
         req = request('old-iex-input')
         assert call(client, 'market_watch_submit', req, harness.token(scope='check:read market-watch:read'))['isError']
-        refused = call(client, 'market_watch_submit', req, harness.token(scope=scope))['structuredContent']
-        assert refused['status'] == 'insufficient_data'
+        assert call(client, 'market_watch_submit', req, harness.token(scope=scope))['isError']
         (directory / 'latest.json').unlink()
         missing = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']
         assert missing['status'] == 'unavailable'

@@ -156,7 +156,7 @@ def comparator(snapshot, read, now):
             signal = 'up'
         else:
             signal = 'neutral'
-    return seal({'comparator_id': identifier('mwc'), 'read_id': read['read_id'], 'protocol_id': 'mw-v1',
+    return seal({'comparator_id': identifier('mwc'), 'read_id': read['read_id'], 'protocol_id': snapshot['protocol_id'],
                  'snapshot_sha256': snapshot['content_sha256'], 'computed_at': now.isoformat(),
                  'created_at': now.isoformat(), 'version': 'price-check-v1', 'signal': signal,
                  'inputs': values, 'reasons': reasons,
@@ -194,13 +194,18 @@ class MarketWatchLedger:
             verify(record)
         return result
 
-    def _context(self, db, actor, session_date):
+    def _context(self, db, actor, session_date, protocol_id=None):
         reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == session_date]
         by_id = {r['read_id']: r for r in reads}
         intents = [m for m in self.rows(db, TABLES[3], actor)
                    if m['kind'] == 'intent' and m['read_id'] in by_id]
         used = sum(not m['is_correction'] for m in intents)
-        latest_intent = intents[-1] if intents else None
+        if protocol_id is None:
+            inputs = self.rows(db, TABLES[0], actor)
+            protocol_id = inputs[-1]['snapshot_json']['protocol_id'] if inputs else None
+        reads = [r for r in reads if r['protocol_id'] == protocol_id]
+        current_intents = [m for m in intents if by_id[m['read_id']]['protocol_id'] == protocol_id]
+        latest_intent = current_intents[-1] if current_intents else None
         return {'session_date': session_date, 'latest_read': reads[-1] if reads else None,
                 'latest_message_intent': ({'message_id': latest_intent['message_id'],
                     'is_correction': latest_intent['is_correction'],
@@ -230,7 +235,7 @@ class MarketWatchLedger:
                            'snapshot_sha256': snapshot['content_sha256'], 'snapshot_json': snapshot,
                            'served_at': now.isoformat(), 'created_at': now.isoformat()})
             self.insert(db, TABLES[0], record, 'input_id')
-            context = self._context(db, actor, snapshot['session_date'])
+            context = self._context(db, actor, snapshot['session_date'], snapshot['protocol_id'])
         return {'input_id': record['input_id'], 'served_at': record['served_at'], 'snapshot_id': snapshot['snapshot_id'],
                 'snapshot_sha256': snapshot['content_sha256'], 'snapshot': snapshot, 'quality_flags': flags,
                 'context': context}
@@ -250,10 +255,6 @@ class MarketWatchLedger:
                 read = json.loads(prior[1])
                 verify(read)
                 return self.receipt(db, read, True)
-            if full_market_only:
-                # This ledger's immutable MW-1 protocol is IEX. Historical/offline
-                # evaluation stays reproducible; already committed retries still recover.
-                raise FullMarketRequired("MW-1 does not supply full-market evidence")
             now = clock()  # Only after lock; retries deliberately precede age/session checks.
             inputs = self.rows(db, TABLES[0], actor)
             inp = next((i for i in inputs if i['input_id'] == request.get('input_id')), None)
@@ -261,10 +262,12 @@ class MarketWatchLedger:
                 raise NotFound('Input unavailable for actor')
             snapshot = inp['snapshot_json']
             validate_snapshot(snapshot)
+            if full_market_only and snapshot['protocol_id'] != 'mw-tradier-v2':
+                raise FullMarketRequired('Full-market snapshot required')
             validate_request(request, snapshot)
             if snapshot['session_date'] != now.astimezone(ZoneInfo('America/New_York')).date().isoformat():
                 raise ValueError('Input is not current session')
-            reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == snapshot['session_date']]
+            reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == snapshot['session_date'] and r['protocol_id'] == snapshot['protocol_id']]
             if request.get('previous_read_id') != (reads[-1]['read_id'] if reads else None):
                 raise Conflict('Latest parent required')
             correction = request.get('correction_of_read_id')
@@ -278,7 +281,7 @@ class MarketWatchLedger:
             read_id = identifier('mwr')
             read = seal({**request, 'read_id': read_id, 'actor': actor, 'request_sha256': request_hash,
                          'received_at': now.isoformat(), 'created_at': now.isoformat(),
-                         'session_date': snapshot['session_date'], 'protocol_id': 'mw-v1',
+                         'session_date': snapshot['session_date'], 'protocol_id': snapshot['protocol_id'],
                          'snapshot_id': snapshot['snapshot_id'], 'snapshot_sha256': snapshot['content_sha256'],
                          'previous_read_id': request.get('previous_read_id'),
                          'model_id': request.get('model_id'), 'correction_of_read_id': correction,
@@ -361,7 +364,7 @@ class MarketWatchLedger:
             return result
 
     @staticmethod
-    def export(path, actor):
+    def export(path, actor, protocol_id=None):
         """Read-only owner invocation. No schema creation or private table reads."""
         from pathlib import Path
         actor_valid(actor)
@@ -372,9 +375,20 @@ class MarketWatchLedger:
             db.execute('PRAGMA query_only=ON')
             db.execute('BEGIN')
             collections = {key: MarketWatchLedger.rows(db, table, actor) for key, table in zip(('inputs', 'reads', 'comparators', 'messages'), TABLES)}
+        # A source migration must not pool calibration cohorts. Default to the
+        # most recently served protocol; the owner can explicitly export v1.
+        protocols = {"mw-v1", "mw-tradier-v2"}
+        protocol_id = protocol_id or (collections['inputs'][-1]['snapshot_json']['protocol_id'] if collections['inputs'] else 'mw-v1')
+        if protocol_id not in protocols:
+            raise ValueError('Unknown export protocol')
+        collections['inputs'] = [i for i in collections['inputs'] if i['snapshot_json']['protocol_id'] == protocol_id]
+        collections['reads'] = [r for r in collections['reads'] if r['protocol_id'] == protocol_id]
+        read_ids = {r['read_id'] for r in collections['reads']}
+        collections['comparators'] = [r for r in collections['comparators'] if r['read_id'] in read_ids]
+        collections['messages'] = [r for r in collections['messages'] if r['read_id'] in read_ids]
         # Deterministic envelope makes repeated exports byte-identical.
         stamp = max((r['created_at'] for rows in collections.values() for r in rows), default='1970-01-01T00:00:00+00:00')
-        return seal({'export_id': 'mwx_' + digest(collections), 'actor': actor, 'protocol_id': 'mw-v1', 'created_at': stamp, **collections})
+        return seal({'export_id': 'mwx_' + digest(collections), 'actor': actor, 'protocol_id': protocol_id, 'created_at': stamp, **collections})
 
 
 NOTICE_VERSION = 'mw-read-notice-v1'
