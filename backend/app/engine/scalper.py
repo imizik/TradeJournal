@@ -204,6 +204,15 @@ def _gather_packet(
                 missing.append(f"{label}: unavailable ({type(exc).__name__})")
         snapshots, daily, minute = gathered
 
+    for ticker, bars in daily.items():
+        rejected = getattr(bars, "rejected_dates", [])
+        if rejected:
+            notes.append(
+                f"Tradier {ticker}: rejected daily rows on {', '.join(rejected)}; "
+                f"using only {len(bars)} valid daily bars after {rejected[-1]} "
+                "so indicators do not bridge a known gap; longer lookbacks may be unavailable"
+            )
+
     snap = snapshots.get(symbol)
     sym_daily = daily.get(symbol, [])
     sym_minute = minute.get(symbol, [])

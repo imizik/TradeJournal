@@ -297,3 +297,72 @@ def test_review_batches_more_than_eight_pending_tickers(harness):
         result = call(client, 'review_checks', {}, harness.token())['structuredContent']
     assert len(result['checks']) == 9
     assert set(reads) == set(symbols + ['SPY'])
+
+
+def test_daily_bad_rows_preserve_safe_suffix_and_other_symbols():
+    from datetime import date
+    from app.engine.scalper import _daily_block
+    from app.engine.market_watch_wakes import prior_atr14
+    end = date(2026, 10, 20)
+    days = [end - timedelta(days=i) for i in range(400, 0, -1)]
+    rows = [{'date': d.isoformat(), 'open': 750, 'high': 760, 'low': 740,
+             'close': 750 + d.day % 7, 'volume': 1000000} for d in days if d.weekday() < 5]
+    bad = [
+        {'date': '2025-12-18', 'open': 677.6, 'high': 680.74, 'low': 674.9,
+         'close': 674.476632, 'volume': 108650128},
+        {'date': '2026-06-17', 'open': 751.29, 'high': 752.15, 'low': 739.22,
+         'close': 739.056484, 'volume': 85945227},
+    ]
+    def handler(request):
+        replacements = {r['date']: r for r in bad} if request.url.params['symbol'] == 'SPY' else {}
+        return httpx.Response(200, json={'history': {'day': [replacements.get(r['date'], r) for r in reversed(rows)]}})
+    provider = source(handler)
+    result = provider.fetch_daily_bars(['SPY', 'QQQ'], days[0], end)
+    spy = result['SPY']
+    assert spy.rejected_dates == ['2025-12-18', '2026-06-17']
+    assert spy and all(b['t'][:10] > '2026-06-17' for b in spy)
+    assert len(result['QQQ']) == len(rows) and not result['QQQ'].rejected_dates
+    daily = _daily_block(spy, end - timedelta(days=1))
+    assert daily['atr_14'] is not None and daily['rsi_14'] is not None
+    assert daily['sma_50'] is not None and daily['sma_200'] is None
+    assert prior_atr14(spy, end) is not None
+    assert provider.fetch_daily_bars(['SPY'], days[0], end)['SPY'] == spy
+
+
+@pytest.mark.parametrize('fault', ['ohlc', 'volume', 'missing', 'duplicate', 'date'])
+def test_daily_recent_fault_never_bridges_gap(fault):
+    from datetime import date
+    from app.engine.market_watch_wakes import prior_atr14
+    rows = [{'date': f'2026-10-{i:02}', 'open': 10, 'high': 12, 'low': 9,
+             'close': 11, 'volume': 100} for i in range(1, 20)]
+    if fault == 'ohlc':
+        rows[-2]['close'] = 8
+    elif fault == 'volume':
+        rows[-2]['volume'] = -1
+    elif fault == 'missing':
+        del rows[-2]['open']
+    elif fault == 'duplicate':
+        rows.append(dict(rows[-2]))
+    else:
+        rows[-2]['date'] = 'unknown'
+    provider = source(lambda _: httpx.Response(200, json={'history': {'day': rows}}))
+    bars = provider.fetch_daily_bars(['SPY'], date(2026, 10, 1), date(2026, 10, 20))['SPY']
+    assert len(bars) == (0 if fault == 'date' else 1)
+    assert prior_atr14(bars, date(2026, 10, 20)) is None
+
+
+def test_pretrade_daily_quarantine_caveat_and_rvol_survive(harness):
+    def handler(request):
+        response = tradier_fixture(request)
+        if request.url.path.endswith('/history') and request.url.params['symbol'] == 'SPY':
+            payload = response.json()
+            rows = payload['history']['day']
+            rows[1]['close'] = rows[1]['low'] - 1
+            return httpx.Response(200, json=payload)
+        return response
+    with TestClient(harness.server(tradier_source=source(handler)).streamable_http_app()) as client:
+        result = call(client, 'pre_trade_check', IDEA, harness.token())['structuredContent']
+    assert any('Tradier SPY: rejected daily rows' in note for note in result['caveats'])
+    assert result['live']['rvol'] is not None
+    assert result['verdict'] != 'insufficient_data'
+    assert all('/stocks/' not in r.url.path for r in harness.requests)

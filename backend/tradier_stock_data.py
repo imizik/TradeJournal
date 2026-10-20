@@ -24,6 +24,14 @@ class TradierDataError(ValueError):
     pass
 
 
+class DailyBars(list):
+    """Usable suffix plus request-local quality evidence (never shared state)."""
+
+    def __init__(self, bars, rejected_dates):
+        super().__init__(bars)
+        self.rejected_dates = sorted(rejected_dates)
+
+
 class TradierStockData:
     source = 'Tradier full_market'
 
@@ -160,8 +168,28 @@ class TradierStockData:
         def read(symbol):
             payload = self.get('/v1/markets/history', {'symbol': symbol, 'interval': 'daily',
                 'start': start.isoformat(), 'end': end.isoformat()}, 3600)
-            return _ordered([_bar(row, datetime.fromisoformat(row['date']).replace(tzinfo=ET))
-                for row in _rows(payload.get('history'), 'day') if start.isoformat() <= row['date'] < end.isoformat()])
+            valid, rejected, seen = {}, set(), set()
+            for row in _rows(payload.get('history'), 'day'):
+                # An unplaceable row cannot establish a safe suffix.
+                if not isinstance(row, dict):
+                    raise TradierDataError('invalid_daily_date')
+                label = row.get('date')
+                if not isinstance(label, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', label):
+                    raise TradierDataError('invalid_daily_date')
+                at = datetime.fromisoformat(label).replace(tzinfo=ET)
+                if not start <= at.date() < end:
+                    continue
+                if label in seen:
+                    rejected.add(label)
+                    continue
+                seen.add(label)
+                try:
+                    valid[label] = _bar(row, at)
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    rejected.add(label)
+            # Never compress a known missing session into an indicator window.
+            boundary = max(rejected, default='')
+            return DailyBars([valid[d] for d in sorted(valid) if d > boundary], rejected)
         return self._batch(symbols, read)
 
     def fetch_snapshots(self, symbols):

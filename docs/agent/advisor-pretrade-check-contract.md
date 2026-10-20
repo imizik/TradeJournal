@@ -355,6 +355,13 @@ Pre-trade, position and preopen analysis share this source; RVOL uses Tradier
 history and never the old Alpaca minute cache. Post-check price measurements
 also use Tradier. Daily OHLC is provider-reported, without a guarantee of dividend
 adjustment. Saved checks and immutable retries retain their original evidence.
+Invalid OHLCV or duplicate dated daily rows are quarantined. Daily consumers use
+only the valid suffix after the latest rejected date, preserving recent history
+without bridging a known gap in indicators or RVOL. Pre-trade caveats name the
+rejected dates and usable count; rolling lookbacks remain unavailable when too
+short. Exponential indicators retain their existing initialization semantics.
+Unparseable dates still fail the symbol's daily batch closed because the gap
+cannot be placed. This does not relax minute validation or add an IEX fallback.
 
 The manual candle tool first reads fresh scanner files, then directly refreshes
 Tradier if those files are absent, invalid or stale. Same-key requests coalesce;
