@@ -308,10 +308,19 @@ priorities; coverage gaps, evidence and briefing IDs stay in details below it.
 Charts links still carry only the symbol. No supported priorities is an explicit
 state, not a reason to manufacture an extra item.
 
-Not yet built for this roadmap: showing which saved thesis/preference revision a
-priority relied on, owner save/correct/retire and inferred-proposal review in the
-app (private owner `/jo/memories` routes exist; no screen uses them), and returning from Charts with the brief/symbol/evidence still
-selected. Usefulness still rests on the ten scheduled mornings and owner ratings.
+A priority that cites a saved memory shows it under **Your saved view** with its
+kind, symbol, revision number and save time, linked to **Your saved memories in
+this packet**: the exact revisions the packet referenced, with interpretation,
+source and revision/memory IDs. A citation is paired with a revision only when its
+saved wording and save time match exactly one referenced revision; otherwise it
+stays a plain source label. Later corrections or retirements do not change an old
+brief. A packet with no memories says so under the focus. Ask Jo includes the
+selected priority's memory revision IDs.
+
+Not yet built for this roadmap: owner save/correct/retire and inferred-proposal
+review in the app (private owner `/jo/memories` routes exist; no screen uses
+them), and returning from Charts with the brief/symbol/evidence still selected.
+Usefulness still rests on the ten scheduled mornings and owner ratings.
 
 The `jo_briefing_submit` tool description carries the writing guidance for future
 briefs: a 1–2 sentence summary (45 words maximum), at most three useful priorities,

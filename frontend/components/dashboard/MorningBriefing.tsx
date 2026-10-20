@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
-import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type MorningView } from "@/lib/joMorning";
+import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefMemory, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 
 const zone = "America/New_York";
@@ -17,6 +17,7 @@ function clock(value: string, day: string) {
 const longDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric", year: "numeric" });
 /** The saved source's leading clause ("Alpaca IEX latest trade"); its caveats stay in the evidence details. */
 const sourceLabel = (e: BriefEvidence) => e.source.split(";")[0].trim() || e.id;
+const memoryKind = (m: BriefMemory) => ({ statement: "Statement", thesis: "Thesis", preference: "Preference", lesson: "Lesson" })[m.body.kind ?? "statement"] ?? "Memory";
 const kindLabel = (kind: BriefEvidence["kind"]) => kind === "belief" ? "Belief / interpretation" : kind === "estimate" ? "Estimate" : "Recorded fact";
 
 const button = "inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm hover:bg-secondary disabled:opacity-50";
@@ -30,11 +31,12 @@ const messages = {
 };
 const statusLabels = { ready: "Ready", closed: "Market closed", waiting: "Waiting for Jo", missing: "Missing", unavailable: "Not saved", redacted: "Removed" };
 
-function joReference(briefId: string, packetId: string | undefined, day: string, question: string, item: BriefItem | null, index: number) {
+function joReference(briefId: string, packetId: string | undefined, day: string, question: string, item: BriefItem | null, index: number, memoryIds: string[] = []) {
   const lines = ["TradeJournal morning briefing — continue from this saved context.", `Briefing ID: ${briefId}`, `Packet ID: ${packetId ?? "unavailable"}`, `Briefing date: ${day} ET`];
   if (item) {
     lines.push(`Priority ${index + 1}: ${item.symbol ?? "Portfolio review"} — ${item.what_matters}`);
     if (item.evidence_ids.length) lines.push(`Evidence IDs: ${item.evidence_ids.join(", ")}`);
+    if (memoryIds.length) lines.push(`Saved memory revisions used: ${memoryIds.join(", ")}`);
   }
   lines.push(`My question: ${question.trim() || "(add your question here)"}`);
   lines.push("Use jo_context with this packet ID only while its publication remains valid, and say so if it has expired. Treat memories as beliefs and disclose evidence gaps.");
@@ -81,10 +83,22 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   const packet = data?.packet;
   const gaps = [...new Set([...(packet?.body.gaps ?? []), ...(body?.limitations ?? [])])];
   const evidence = new Map((packet?.body.evidence ?? []).map((e) => [e.id, e]));
-  const openEvidence = () => {
-    const element = document.getElementById("brief-evidence");
+  const openDetails = (key: string) => () => {
+    const element = document.getElementById(key);
     if (element instanceof HTMLDetailsElement) element.open = true;
   };
+  const openEvidence = openDetails("brief-evidence");
+  const memories = packet && !packet.redacted_at ? packet.memories ?? [] : [];
+  /** The exact revision a cited memory record was copied from: same saved wording and save time, and only when that pairing is unique. */
+  const memoryFor = (e?: BriefEvidence) => {
+    if (!e || e.kind !== "belief" || !e.observed_at) return null;
+    const observed = Date.parse(e.observed_at);
+    const matches = memories.filter((m) => !m.redacted_at && m.body.original_text === e.text && Date.parse(m.received_at) === observed);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const usedMemories = (item: BriefItem) => [...new Map(item.evidence_ids.map((key) => memoryFor(evidence.get(key)))
+    .filter((m): m is BriefMemory => !!m).map((m) => [m.id, m])).values()];
+  const memoryMeta = (m: BriefMemory) => `${memoryKind(m)}${m.symbol ? ` · ${m.symbol}` : ""} · revision ${m.revision} · saved ${time(m.received_at)}`;
   /** Cited evidence grouped by saved source, linked to the exact record in the evidence list. */
   const sources = (ids: string[] = []) => {
     if (!ids.length) return null;
@@ -116,7 +130,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   }
   const joPanel = (item: BriefItem | null, index: number) => {
     if (!brief) return null;
-    const reference = joReference(brief.id, packet?.id, day, question, item, index);
+    const reference = joReference(brief.id, packet?.id, day, question, item, index, item ? usedMemories(item).map((m) => m.id) : []);
     return <div className="space-y-2 rounded-md bg-muted/40 p-3">
       <label className="block text-xs text-muted-foreground">Your question for Jo (optional)
         <input value={question} onChange={(e) => { setQuestion(e.target.value); setCopy(null); }} placeholder={item?.symbol ? `What should I check on ${item.symbol} first?` : "What should I look at first?"} className="mt-1 block min-h-11 w-full rounded-md border bg-background px-3 text-sm text-foreground" />
@@ -159,6 +173,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     <p data-testid="brief-summary" className={`whitespace-pre-wrap leading-relaxed ${compact ? "text-sm" : "text-base"} ${longSummary && !fullSummary ? "line-clamp-4" : ""}`}>{body.summary}</p>
     {longSummary && <button type="button" aria-expanded={fullSummary} className={textButton} onClick={() => setFullSummary((v) => !v)}>{fullSummary ? "Show less" : "Read Jo’s full summary"}</button>}
     {!compact && sources(body.summary_evidence_ids)}
+    {!compact && packet && !packet.redacted_at && !memories.length && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence.</p>}
   </section>;
 
   if (compact) return <DashboardCard title="Morning briefing" action={<a href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</a>}>
@@ -200,6 +215,13 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
             .filter(([, value]) => value?.trim()).map(([label, value, tone]) => <div key={label} className="sm:grid sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-3">
               <dt className={`text-xs font-medium sm:pt-0.5 ${tone || "text-muted-foreground"}`}>{label}</dt><dd className="whitespace-pre-wrap leading-relaxed">{value}</dd>
             </div>)}
+          {(() => {
+            const used = usedMemories(item);
+            return used.length > 0 && <div className="sm:grid sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-3">
+              <dt className="text-xs font-medium text-muted-foreground sm:pt-0.5">Your saved view</dt>
+              <dd className="space-y-1">{used.map((m) => <p key={m.id}><a href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="hover:underline">“{m.body.original_text}”</a><span className="block text-xs text-muted-foreground">{memoryMeta(m)}</span></p>)}</dd>
+            </div>;
+          })()}
         </dl>
         {sources(item.evidence_ids)}
         {asking === index && joPanel(item, index)}
@@ -220,7 +242,19 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         <ol className="space-y-4 pb-3">{packet.body.evidence?.map((e) => <li id={`evidence-${e.id}`} key={e.id} className="scroll-mt-20 border-t pt-3 text-sm">
           <p className="font-medium">{sourceLabel(e)} · {kindLabel(e.kind)}</p>
           <p className="mt-1 whitespace-pre-wrap">{e.text}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{e.source} · {e.observed_at ? `Observed ${time(e.observed_at)}` : "Observation time unavailable"} · Retrieved {time(e.retrieved_at)} · ID <code>{e.id}</code></p>
+          <p className="mt-2 text-xs text-muted-foreground">{e.source} · {e.observed_at ? `Observed ${time(e.observed_at)}` : "Observation time unavailable"} · Retrieved {time(e.retrieved_at)} · ID <code>{e.id}</code>{(() => { const m = memoryFor(e); return m && <> · <a href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="underline underline-offset-2">memory revision {m.revision}</a></>; })()}</p>
+        </li>)}</ol>
+      </details>}
+      {!!memories.length && <details id="brief-memories" className="rounded-md border px-3">
+        <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Your saved memories in this packet ({memories.length})</summary>
+        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief.</p>
+        <ol className="space-y-4 pb-3">{memories.map((m) => <li id={`memory-${m.id}`} key={m.id} className="scroll-mt-20 border-t pt-3 text-sm">
+          {m.redacted_at ? <p className="text-muted-foreground">Removed memory · revision {m.revision}</p> : <>
+            <p className="font-medium">{memoryMeta(m)}</p>
+            <p className="mt-1 whitespace-pre-wrap">“{m.body.original_text}”</p>
+            {m.body.interpretation && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">Interpretation: {m.body.interpretation}</p>}
+          </>}
+          <p className="mt-2 text-xs text-muted-foreground">{m.body.source ? `Source ${m.body.source.replace(/_/g, " ")} · ` : ""}Revision ID <code>{m.id}</code> · Memory ID <code>{m.memory_id}</code></p>
         </li>)}</ol>
       </details>}
       {brief && <details className="rounded-md border px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm">Briefing details</summary><div className="space-y-2 pb-3 text-xs text-muted-foreground">
