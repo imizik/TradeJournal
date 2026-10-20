@@ -800,6 +800,22 @@ reads never reach Shadow Isaac.
   operation ID names another workflow is never credited to a slot by time.
   Reads with neither are `unprompted`. MW-2 cannot see a scheduled run
   that saved nothing; that stays in Jo's native task history and #315's receipts.
+- **Scheduled-read reliability (owner screen).** `GET /jo/market-reads`
+  (owner-only; `/morning/market-reads`, linked from Morning) shows the last ten
+  weekdays back to the first recorded evidence. For each 09:50, 11:00, 12:30
+  and 14:00 slot it joins the prep slot's latest #315 publisher receipt
+  (status, attempts, error code; `started` alone is an unknown outcome) with
+  the read `session_report` links to it, and reports the Check receipt time and
+  its delay from the slot in seconds. No lateness tolerance is applied. The
+  exchange calendar marks slots on closed days or after an early close as not
+  expected; an unavailable calendar, store or receipt directory reads as
+  unknown, never as missing. The route has no outcome store, so it links by the
+  time window only: a read more than 30 minutes after its slot (or after the
+  next wake) is listed as not credited to a slot, and the slot shows no read
+  seen. `reliability_report(..., outcome_store=...)` links exactly by operation
+  ID when an export is imported. A receipt time is not when Jo started, and a
+  slot with no read has no cause the app can see. Tests:
+  `backend/tests/test_market_watch_reliability.py`.
 
 Fixture tests: `backend/tests/test_market_watch_wakes.py`. They are not live
 proof of mail, push, Jo's triggers or the 20-session acceptance.
