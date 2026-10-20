@@ -225,15 +225,15 @@ def test_candles_fresh_stale_failure_and_scope(harness, exchange):
         assert not harness.requests
         file.write_text(json.dumps({**packet, 'last_bar_time': (RECEIPT - timedelta(seconds=121)).isoformat()}))
         stale = call(client, 'candles', args, harness.token())['structuredContent']
-        assert stale['source'] == 'alpaca_data_api' and stale['feed'] == 'iex'
-        assert len(harness.requests) == 1
-        query = harness.requests[0].url.params
-        assert query['feed'] == 'iex' and query['limit'] == '60' and query['end']
+        assert stale['status'] == 'insufficient_data' and stale['feed'] == 'full_market'
+        assert 'no IEX fallback' in stale['candles_unavailable']
+        assert not harness.requests
         assert call(client, 'candles', {**args, 'bars': 121}, harness.token())['isError']
         assert call(client, 'candles', {**args, 'symbol': '../secret'}, harness.token())['isError']
     with TestClient(harness.server(fail=True).streamable_http_app()) as client:
         unavailable = call(client, 'candles', args, harness.token())['structuredContent']
-        assert unavailable['candles_unavailable'] == 'provider HTTP 503'
+        assert unavailable['status'] == 'insufficient_data'
+        assert not harness.requests
         assert unavailable['last_bar_time'] is None and unavailable['age_seconds'] is None
 
 
@@ -245,7 +245,7 @@ def test_candles_hard_deadline(harness, monkeypatch):
     def slow(*args):
         release.wait(5)
         return {}
-    monkeypatch.setattr(service.Provider, 'get', slow)
+    monkeypatch.setattr(service, 'candle_read', slow)
     monkeypatch.setattr(service, 'CANDLES_TIMEOUT', .05)
     with TestClient(harness.server().streamable_http_app()) as client:
         started = time.monotonic()
@@ -258,21 +258,42 @@ def test_candles_hard_deadline(harness, monkeypatch):
         assert elapsed < .5
 
 
-@pytest.mark.parametrize('interval,seconds', [('1m', 60), ('5m', 300)])
-def test_direct_candles_excludes_incomplete_bars_and_has_bounded_window(interval, seconds):
+@pytest.mark.parametrize('interval', ['1m', '5m'])
+def test_missing_candles_never_fall_back_to_provider(interval):
     import cloud_mcp_check as service
     from types import SimpleNamespace
-    requests = []
-    def get(path, params):
-        requests.append((path, params))
-        end = RECEIPT
-        return {'bars': {'MU': [
-            {'t': (end - timedelta(seconds=seconds)).isoformat(), 'o': 1, 'h': 2, 'l': 1, 'c': 2, 'v': 10},
-            {'t': end.isoformat(), 'o': 2, 'h': 3, 'l': 2, 'c': 3, 'v': 10}]}, 'next_page_token': 'unused'}
+    def get(*args):
+        pytest.fail("Missing scanner candles must not call another provider")
     result = service.candle_read(None, SimpleNamespace(get=get), 'MU', interval, 120, RECEIPT)
-    assert len(result['candles']) == 1 and result['age_seconds'] == 0
-    assert result['last_bar_time'] == RECEIPT.isoformat() and result['truncated']
-    assert len(requests) == 1
-    params = requests[0][1]
-    assert params['timeframe'] == ('1Min' if interval == '1m' else '5Min')
-    assert params['feed'] == 'iex' and params['limit'] == 120
+    assert result['status'] == 'insufficient_data'
+    assert result['last_bar_time'] is None
+
+
+@pytest.mark.parametrize('mutation', ['wrong_feed', 'future', 'malformed', 'incomplete', 'stale_5m'])
+def test_invalid_full_market_candles_are_insufficient_without_network(tmp_path, mutation):
+    import cloud_mcp_check as service
+    from types import SimpleNamespace
+    folder = tmp_path / 'candles'
+    folder.mkdir()
+    row = {'time': RECEIPT.timestamp()-60, 'end_time': RECEIPT.timestamp(),
+        'open': 1, 'high': 2, 'low': 1, 'close': 2, 'volume': 10}
+    packet = {'format': 'scanner-candles-v1', 'symbol': 'MU', 'source': 'tradier_timesales_1min',
+        'feed': 'full_market', 'last_bar_time': RECEIPT.isoformat(), '1m': [row], '5m': []}
+    interval = '1m'
+    if mutation == 'wrong_feed':
+        packet['feed'] = 'iex'
+    elif mutation == 'future':
+        packet['last_bar_time'] = (RECEIPT+timedelta(seconds=60)).isoformat()
+    elif mutation == 'malformed':
+        row['close'] = float('nan')
+    elif mutation == 'incomplete':
+        row['end_time'] += 60
+    elif mutation == 'stale_5m':
+        interval = '5m'
+        packet['5m'] = [{**{k: row[k] for k in ('open', 'high', 'low', 'close', 'volume')},
+            'start': RECEIPT.timestamp()-900, 'end': RECEIPT.timestamp()-600}]
+    (folder / 'MU.json').write_text(json.dumps(packet))
+    def forbidden(*args):
+        pytest.fail('No provider fallback permitted')
+    result = service.candle_read(tmp_path / 'setups', SimpleNamespace(get=forbidden), 'MU', interval, 60, RECEIPT)
+    assert result['status'] == 'insufficient_data'

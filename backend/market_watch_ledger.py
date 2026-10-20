@@ -24,6 +24,10 @@ TABLES = ('market_watch_input', 'market_watch_read', 'market_watch_comparator', 
 DAILY_DISCRETIONARY_INTENTS = 3
 
 
+class FullMarketRequired(ValueError):
+    """A live Jo request cannot create a new read under the frozen IEX protocol."""
+
+
 class MessageBudgetExceeded(ValueError):
     """The actor already reserved its discretionary messages for this session."""
 
@@ -231,7 +235,7 @@ class MarketWatchLedger:
                 'snapshot_sha256': snapshot['content_sha256'], 'snapshot': snapshot, 'quality_flags': flags,
                 'context': context}
 
-    def submit(self, actor, request, clock):
+    def submit(self, actor, request, clock, *, full_market_only=False):
         actor_valid(actor)
         request_hash = digest(request)
         if len(canonical(request)) > 16384:
@@ -246,6 +250,10 @@ class MarketWatchLedger:
                 read = json.loads(prior[1])
                 verify(read)
                 return self.receipt(db, read, True)
+            if full_market_only:
+                # This ledger's immutable MW-1 protocol is IEX. Historical/offline
+                # evaluation stays reproducible; already committed retries still recover.
+                raise FullMarketRequired("MW-1 does not supply full-market evidence")
             now = clock()  # Only after lock; retries deliberately precede age/session checks.
             inputs = self.rows(db, TABLES[0], actor)
             inp = next((i for i in inputs if i['input_id'] == request.get('input_id')), None)
