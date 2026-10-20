@@ -50,14 +50,14 @@ export async function saveMemory(body: MemorySave): Promise<BriefMemory> {
   try {
     response = await fetch(apiUrl("/jo/memories"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } catch {
-    throw new Error("Couldn’t reach the app, so it’s unknown whether this saved. Retry sends the same request and cannot save it twice.");
+    throw new Error("Couldn’t reach the app, so it’s unknown whether this saved. The list has been reloaded; check it before saving again. An unchanged retry cannot save twice.");
   }
   if (response.ok) return response.json();
   const detail = await response.json().then((body) => typeof body?.detail === "string" ? body.detail : "", () => "");
   const message = response.status === 409 && detail.startsWith("Operation ID") ? "This retry did not match the earlier attempt. The list has been reloaded; check whether the first version saved."
     : response.status === 409 ? "This memory changed since the page loaded. The list has been reloaded; check it and try again."
     : response.status === 422 ? "The app refused this memory as invalid. Check the wording and symbol."
-    : response.status >= 500 ? "The app had an error, so it’s unknown whether this saved. Retry sends the same request and cannot save it twice."
+    : response.status >= 500 ? "The app had an error, so it’s unknown whether this saved. The list has been reloaded; check it before saving again. An unchanged retry cannot save twice."
     : `Not saved (error ${response.status}).`;
   throw new MemorySaveError(message, response.status);
 }
