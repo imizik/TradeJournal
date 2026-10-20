@@ -24,9 +24,9 @@ def view(setup, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(route, "_now", lambda: s.now)
     app = FastAPI()
-    app.include_router(route.router, prefix="/conditional-plans")
+    app.include_router(route.router, prefix="/jo/conditional-plans")
     client = TestClient(app)
-    return lambda: client.get("/conditional-plans").json()
+    return lambda: client.get("/jo/conditional-plans").json()
 
 
 def only(v):
@@ -38,8 +38,8 @@ def test_unconfigured_feature_reads_off(monkeypatch):
     for name in ("MARKET_WATCH_STORE", "CONDITIONAL_PLAN_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     app = FastAPI()
-    app.include_router(route.router, prefix="/conditional-plans")
-    v = TestClient(app).get("/conditional-plans").json()
+    app.include_router(route.router, prefix="/jo/conditional-plans")
+    v = TestClient(app).get("/jo/conditional-plans").json()
     assert v["enabled"] is False and v["configured"] is False and v["plans"] == []
     assert v["readiness"] == {"heartbeat": "missing"}
 

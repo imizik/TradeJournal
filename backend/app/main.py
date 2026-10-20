@@ -363,7 +363,7 @@ app.include_router(
 app.include_router(research_studio.router, prefix="/research-studio", tags=["research studio"])
 app.include_router(research.router, prefix="/research", tags=["research"])
 app.include_router(jo_briefing.router, prefix="/jo", tags=["personal Jo"])
-app.include_router(conditional_plans_router.router, prefix="/conditional-plans", tags=["personal Jo"])
+app.include_router(conditional_plans_router.router, prefix="/jo/conditional-plans", tags=["personal Jo"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
 
 # Inspect the finalized route catalog; permission checks precede all handlers.

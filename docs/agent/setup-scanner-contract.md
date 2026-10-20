@@ -435,6 +435,24 @@ Delivery projections preserve the actual observation timestamp and cannot renew
 monitoring proof. The 24-plan burst regression covers ten-second concurrent
 requests across two passes without dropping fresh queued triggers.
 
+### Owner view and refusals
+
+The owner-only, read-only `GET /jo/conditional-plans` route (Morning → Jo's price
+watches, `/morning/watches`) lists the latest 50 plans from the wake store plus
+exports still waiting in the Check outbox, with saved conditions, source anchor,
+state and reason, last evaluated bar, push attempts (sent means ntfy accepted it;
+unknown is never resent) and the monitor heartbeat, eligible tickers and session.
+It claims active monitoring only from the derived status's fresh heartbeat with
+the app flag on; a stale heartbeat, a failed or ended plan, or a switched-off
+feature never reads as watching. It adds no store and no assistant or service grant.
+
+A refused `conditional_plan_create` saves nothing and returns the specific reason
+(monitor off, never reported or stale; no open session; ticker not selected,
+with the selected list; stale or missing source; levels or expiry; the 24-plan
+cap) so Jo can say what it cannot watch and why. Refusals are not recorded:
+the Check ledger keeps only the time and tool name of each call, so the owner
+sees refusals in Jo's reply, not on the watches screen.
+
 ### Activation and acceptance
 
 Default off: app `CONDITIONAL_PLAN_ENABLED=false`; Check

@@ -274,6 +274,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     </div>{feedbackError && <p role="alert" className="mt-2 text-sm text-amber-300">{feedbackError}</p>}</section>}
     {data && <div className="space-y-2">
       <a href="/morning/memories" className={textButton}>Saved memories and Jo’s proposals →</a>
+      <a href="/morning/watches" className={textButton}>Jo’s price watches →</a>
       {!!gaps.length && <details className="rounded-md border border-amber-500/30 px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Limited coverage · {gaps.length} {gaps.length === 1 ? "gap" : "gaps"} disclosed</summary><p className="mb-3 text-xs text-muted-foreground">This brief has missing or unverified evidence. Check these details before relying on it.</p><ul className="list-disc space-y-2 pb-3 pl-4 text-sm text-muted-foreground">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></details>}
       {packet && !packet.redacted_at && <details id="brief-evidence" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Evidence and personal context ({packet.body.evidence?.length ?? 0})</summary>
