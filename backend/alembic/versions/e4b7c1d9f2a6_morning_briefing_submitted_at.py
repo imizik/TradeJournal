@@ -13,12 +13,13 @@ depends_on = None
 
 
 def upgrade():
-    # Nullable with no backfill: earlier imports kept no submission time in the database.
-    columns = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("morning_briefing_record")}
-    if "submitted_at" not in columns:
-        op.add_column("morning_briefing_record", sa.Column("submitted_at", sa.DateTime(), nullable=True))
+    # A new table, not a column: saved records stay unchanged and the migration stays additive.
+    # No backfill: earlier imports kept no submission time in the database.
+    if "morning_briefing_submission" not in sa.inspect(op.get_bind()).get_table_names():
+        op.create_table("morning_briefing_submission",
+            sa.Column("briefing_id", sa.Uuid(), sa.ForeignKey("morning_briefing_record.id"), primary_key=True),
+            sa.Column("submitted_at", sa.DateTime(), nullable=False))
 
 
 def downgrade():
-    with op.batch_alter_table("morning_briefing_record") as batch:
-        batch.drop_column("submitted_at")
+    op.drop_table("morning_briefing_submission")

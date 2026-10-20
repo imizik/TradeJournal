@@ -483,14 +483,15 @@ clears. It never repeats an alert.
 | Server disk is *N*% full (critical) | that disk is at least 90% used; the 80% warning keeps its state meanwhile | — |
 | Jo's morning brief is missing / arrived late | opt-in (`JO_MORNING_ALERTS=true`): no brief on the scheduled packet was in the journal by the deadline; one recovery when it arrives | — |
 | Jo's morning packet wasn't published | opt-in: no scheduled packet after publication time on an open session | 5 min |
-| Morning brief automation stopped | opt-in: the API's morning runner hasn't completed a pass for three minutes | 5 min |
-| Jo's brief is waiting to be imported / A Jo submission can't be read | opt-in: a submission has no receipt after two minutes, or an outbox file is unreadable | — |
+| Morning brief automation stopped / can't load its settings | opt-in: the API's morning runner hasn't completed a pass for three minutes, or its configuration fails to load | 5 min |
+| A Jo submission is waiting to be imported / can't be read | opt-in: a submission has no receipt after two minutes, or an outbox file can never import | — |
 | Market calendar unavailable for the morning brief | opt-in: the runner can't confirm a weekday session, so it publishes nothing | 15 min |
+| Morning brief status unreadable | opt-in: `GET /jo/morning` fails while the rest of the API answers | 10 min |
 
 The morning rows read `GET /jo/morning`; see [delivery honesty and the morning
 watchdog](../docs/agent/dots-integration.md#delivery-honesty-and-the-morning-watchdog).
-A morning send whose outcome is unknown (a timeout after the request may have
-left) is recorded and not resent.
+A morning send whose outcome is unknown (a timeout while waiting for ntfy's
+reply) is recorded and not resent; a connect timeout is a failure and is retried.
 
 Failures that finished before the first check are history and never alerted.
 A reboot clears systemd's failed state; only a later successful run counts as

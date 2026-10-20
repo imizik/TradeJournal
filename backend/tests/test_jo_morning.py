@@ -310,7 +310,9 @@ def test_delivery_on_time_closed_unknown_and_owner_saves_have_no_submission_time
         assert morning_view(session, NOW.date(), NOW, config=None, calendar=open_day, actor=actor)["delivery"]["fulfilment"] == "not_expected"
         owner = store.save_briefing(session, BriefingSave(operation_id="owner", packet_id=packet_id, author="Jo", prompt_version="test",
             summary="Owner save", summary_evidence_ids=["watchlist"], items=[], limitations=[]))
-        assert owner["submitted_at"] is None
+        from app.models import MorningBriefingSubmission
+        assert session.get(MorningBriefingSubmission, UUID(owner["id"])) is None
+        assert session.get(MorningBriefingSubmission, UUID(on_time["briefing_id"])) is not None
 
 
 def test_runner_reports_waiting_and_unreadable_submissions_for_its_own_profile(morning):
@@ -327,6 +329,12 @@ def test_runner_reports_waiting_and_unreadable_submissions_for_its_own_profile(m
     waiting = MorningRunner.waiting(check, check.profiles[0].id, candidates)
     assert waiting == {"count": 1, "oldest_submitted_at": (NOW + timedelta(minutes=1)).isoformat(), "unreadable": 1}
     assert MorningRunner.waiting(check, "check_" + str(uuid4()), candidates)["count"] == 0
+    # A file named for another operation can never import; it is not a waiting brief.
+    real = next(p for p in candidates if "1" * 64 not in p.name)
+    renamed = outbox / ("jo-request-" + "2" * 64 + ".json")
+    renamed.write_bytes(real.read_bytes())
+    assert MorningRunner.waiting(check, check.profiles[0].id, [real, renamed])["unreadable"] == 1
+    renamed.unlink()
     runner.run_once(NOW + timedelta(minutes=2))
     assert runner.pending == {"count": 0, "oldest_submitted_at": None, "unreadable": 1}
     assert runner.last_status == "published"
@@ -362,10 +370,13 @@ def test_submitted_at_migration_roundtrip_keeps_records(tmp_path):
     path = tmp_path / "submitted-at.sqlite"
     _alembic(path, "upgrade", "head")
     db = create_engine(f"sqlite:///{path}")
-    columns = lambda: {c["name"] for c in inspect(db).get_columns("morning_briefing_record")}  # noqa: E731
-    assert "submitted_at" in columns()
+    tables = lambda: set(inspect(db).get_table_names())  # noqa: E731
+    record_sql = lambda: [c["name"] for c in inspect(db).get_columns("morning_briefing_record")]  # noqa: E731
+    assert "morning_briefing_submission" in tables()
+    before = record_sql()
     _alembic(path, "downgrade", "d0f6b2c4e8a3")
-    assert "submitted_at" not in columns() and "morning_briefing_feedback" in inspect(db).get_table_names()
+    assert "morning_briefing_submission" not in tables() and "morning_briefing_feedback" in tables()
+    assert record_sql() == before  # Additive: the record table itself never changes.
     _alembic(path, "upgrade", "head")
-    assert "submitted_at" in columns()
+    assert "morning_briefing_submission" in tables()
     db.dispose()

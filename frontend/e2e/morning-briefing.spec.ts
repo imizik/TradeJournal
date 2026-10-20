@@ -238,9 +238,14 @@ test("scheduled delivery: availability time, kept miss, unknown origin and watch
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     for (const text of texts) await expect(status).toContainText(text);
   }
-  view = { ...base, delivery: { ...delivery, fulfilment: "pending", available_at: null }, automation: { ...base.automation, pending: { count: 1, oldest_submitted_at: `${day}T13:05:00+00:00`, unreadable: 0 } } };
+  const waiting = { ...base.automation, pending: { count: 1, oldest_submitted_at: `${day}T13:05:00+00:00`, unreadable: 0 } };
+  view = { ...base, archived: false, delivery: { ...delivery, fulfilment: "pending", available_at: null }, automation: waiting };
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(status).toContainText("A submission from Jo is waiting to be imported (received 9:05 AM ET).");
+  // The runner's backlog is current state; an archived date never shows it.
+  view = { ...view, archived: true };
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(status).not.toContainText("waiting to be imported");
   view = { ...base, delivery: { ...delivery, fulfilment: "not_expected" } };
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(status).toHaveCount(0);

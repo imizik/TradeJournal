@@ -57,7 +57,7 @@ function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery;
         {!!delivery.other_briefings && <p>{delivery.other_briefings} other {delivery.other_briefings === 1 ? "brief was" : "briefs were"} saved for this date from a separate packet (a manual or recovery request); {delivery.other_briefings === 1 ? "it doesn’t" : "they don’t"} count as the scheduled delivery.</p>}
         <p>Phone watchdog: {!watchdog || watchdog.state === "unknown" ? "status unavailable."
           : watchdog.state === "off" ? "off, so no phone alert is sent for this brief."
-          : watchdog.notices.length ? watchdog.notices.map((n, i) => <span key={i}>{i ? " " : ""}“{n.title}” at {clock(n.at, day)}: {outcomeText[n.outcome]}.</span>)
+          : watchdog.notices.length ? watchdog.notices.map((n, i) => <span key={i}>{i ? " " : ""}“{n.title}” at {clock(n.at, day)}: {outcomeText[n.outcome]}{(n.attempts ?? 1) > 1 ? ` after ${n.attempts} attempts` : ""}.</span>)
           : "on; nothing sent for this date."}</p>
         <p>ChatGPT’s own notifications aren’t visible to TradeJournal.</p>
       </div>
@@ -201,7 +201,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {!compact && dateControls}
     </div>
     {data?.automation.unavailable && <p role="status" className="text-sm text-amber-300">Automatic delivery status is unavailable. Saved content below may be incomplete.</p>}
-    {!compact && data?.delivery && <DeliveryStatus delivery={data.delivery} pending={data.automation.pending} day={day} />}
+    {!compact && data?.delivery && <DeliveryStatus delivery={data.delivery} pending={data.archived ? null : data.automation.pending} day={day} />}
     {(lateNote || data?.stale) && <p role="status" className="text-sm text-amber-300">{lateNote ? "Arrived after the deadline. " : ""}{data?.stale ? "Evidence is at least four hours old; verify current conditions." : ""}</p>}
     {body && <p className="text-xs text-muted-foreground">{!compact && packet?.body.scope ? `Scope: ${packet.body.scope.split(";")[0].trim()} · ` : ""}Frozen briefing, not a live price feed. Journal holdings are not broker-verified.</p>}
   </>;

@@ -8,7 +8,7 @@ from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, utc_now_naive
+from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, MorningBriefingSubmission, utc_now_naive
 
 from jo_briefing_common import (  # noqa: F401 — retained owner API imports
     BriefingSave, MemoryRedact, MemorySave, PacketSave,
@@ -43,8 +43,7 @@ def receipt(row):
         result.update(day=row.day.isoformat(), provenance="owner_supplied")
     if isinstance(row, MorningBriefingRecord):
         result.update(packet_id=str(row.packet_id), provenance="owner_supplied",
-                      labels=["personal_advice", "independence-unverified"],
-                      submitted_at=timestamp(row.submitted_at) if row.submitted_at else None)
+                      labels=["personal_advice", "independence-unverified"])
     if hasattr(row, "redacted_at"):
         result["redacted_at"] = timestamp(row.redacted_at) if row.redacted_at else None
     return result
@@ -184,5 +183,9 @@ def save_briefing(session, body: BriefingSave, submitted_at=None):
         previous = session.get(MorningBriefingRecord, body.supersedes_id)
         if previous is None or session.get(MorningBriefingPacket, previous.packet_id).day.isoformat() != packet["day"]:
             raise ValueError("A correction must reference a briefing for the same day")
-    return persist(session, MorningBriefingRecord(operation_id=body.operation_id, request_sha256=sha,
-        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json")), submitted_at=submitted_at))
+    row = MorningBriefingRecord(operation_id=body.operation_id, request_sha256=sha,
+        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json")))
+    if submitted_at is not None:
+        # Committed with the record, so a saved import never lacks its receipt time.
+        session.add(MorningBriefingSubmission(briefing_id=row.id, submitted_at=submitted_at))
+    return persist(session, row)

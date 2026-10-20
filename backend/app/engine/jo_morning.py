@@ -255,10 +255,14 @@ class MorningRunner:
         return {"status": state, "imported": imported, "errors": errors}
 
     @staticmethod
-    def waiting(check, actor, candidates):
-        """This profile's submissions with no receipt yet; unreadable files are counted, not guessed."""
+    def waiting(check, actor, candidates, limit=200):
+        """This profile's importable submissions with no receipt yet (briefings or memories).
+
+        Files that can never import (unreadable, or named for another operation) are counted
+        as unreadable; other profiles' files are ignored. At most ``limit`` files are read.
+        """
         count, oldest, unreadable = 0, None, 0
-        for path in candidates:
+        for path in sorted(candidates, key=lambda p: p.name)[:limit]:
             key = path.name.removeprefix("jo-request-").removesuffix(".json")
             if (Path(check.market_watch_snapshots_dir) / f"jo-receipt-{key}.json").exists():
                 continue
@@ -268,6 +272,9 @@ class MorningRunner:
                 unreadable += 1
                 continue
             if request.profile_id != actor:
+                continue
+            if exchange.operation_key(actor, request.operation_id) not in path.name:
+                unreadable += 1
                 continue
             count += 1
             oldest = request.received_at if oldest is None else min(oldest, request.received_at)
@@ -333,8 +340,10 @@ def delivery(session, day, now, config, actor, hours):
     result.update(briefing_id=str(first.id), available_at=available.isoformat(),
         fulfilment="on_time" if available <= deadline else "late",
         late_by_seconds=max(0, int((available - deadline).total_seconds())))
-    if first.submitted_at:
-        submitted = first.submitted_at.replace(tzinfo=timezone.utc)
+    from app.models import MorningBriefingSubmission
+    receipt = session.get(MorningBriefingSubmission, first.id)
+    if receipt is not None:
+        submitted = receipt.submitted_at.replace(tzinfo=timezone.utc)
         result.update(submitted_at=submitted.isoformat(), import_lag_seconds=max(0, int((available - submitted).total_seconds())))
     return result
 

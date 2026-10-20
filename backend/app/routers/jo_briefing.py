@@ -136,6 +136,7 @@ def morning(request: Request, day: date, briefing_id: UUID | None = None, sessio
     runner = getattr(request.app.state, "jo_morning", None)
     result["automation"] = {"enabled": config is not None, "last_pass": getattr(runner, "last_pass", None),
                             "unavailable": configuration_error or bool(getattr(runner, "last_error", None)),
+                            "configuration_error": configuration_error,
                             "last_status": getattr(runner, "last_status", None),
                             "pending": getattr(runner, "pending", None)}
     result["delivery"]["notifications"]["watchdog"] = watchdog_status(day)

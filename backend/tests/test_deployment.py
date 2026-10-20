@@ -1009,9 +1009,10 @@ MORNING_DEADLINE = datetime(2026, 10, 20, 13, 15, tzinfo=timezone.utc).timestamp
 
 
 def morning_view(publication="published", fulfilment="pending", last_pass=MORNING_DEADLINE, pending=None,
-                 status="published", day="2026-10-20", enabled=True):
+                 status="published", day="2026-10-20", enabled=True, configuration_error=False):
     iso = lambda value: datetime.fromtimestamp(value, timezone.utc).isoformat() if value else None  # noqa: E731
-    return {"day": day, "automation": {"enabled": enabled, "last_pass": iso(last_pass), "last_status": status,
+    return {"day": day, "automation": {"enabled": enabled, "configuration_error": configuration_error,
+            "last_pass": iso(last_pass), "last_status": status,
             "pending": pending or {"count": 0, "oldest_submitted_at": None, "unreadable": 0}},
             "delivery": {"publication": publication, "fulfilment": fulfilment, "deadline": "2026-10-20T13:15:00+00:00",
                          "publish_at": "2026-10-20T12:45:00+00:00"}}
@@ -1029,7 +1030,9 @@ def test_morning_conditions_name_one_cause_and_leave_unknowns_alone(alerts):
         assert alerts.morning_problems(morning_view(fulfilment=done), now)[brief] is None
     unknown = alerts.morning_problems(morning_view(publication="unknown", fulfilment="unknown"), now)
     assert brief not in unknown and publication not in unknown
-    assert all(value is None for value in alerts.morning_problems(morning_view(fulfilment="missing", enabled=False), now).values())
+    assert alerts.morning_problems(morning_view(fulfilment="missing", enabled=False), now) == {}
+    broken = alerts.morning_problems(morning_view(fulfilment="not_expected", enabled=False, configuration_error=True), now)
+    assert list(broken) == ["jo_morning:runner"] and broken["jo_morning:runner"].grace == alerts.API_GRACE
 
 
 def test_a_stopped_runner_hides_its_stale_pending_and_calendar_facts(alerts):
@@ -1046,7 +1049,7 @@ def test_a_stopped_runner_hides_its_stale_pending_and_calendar_facts(alerts):
     recent = {"count": 1, "oldest_submitted_at": "2026-10-20T13:14:30+00:00", "unreadable": 0}
     assert alerts.morning_problems(morning_view(pending=recent), MORNING_DEADLINE + 60)["jo_morning:import"] is None
     saturday = alerts.morning_problems(morning_view(day="2026-10-24", status="calendar_unavailable"), MORNING_DEADLINE + 60)
-    assert saturday["jo_morning:calendar"] is None
+    assert "jo_morning:calendar" not in saturday
 
 
 def morning_pass(alerts, monkeypatch, view, sends, fail=None):
@@ -1090,7 +1093,8 @@ def test_yesterdays_unrecovered_miss_ends_silently_and_old_notices_age_out(alert
 
 def test_uncertain_morning_send_is_recorded_and_never_resent(alerts, monkeypatch):
     sends, config = [], {"JO_MORNING_ALERTS": "true"}
-    morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends, fail=alerts.URLError(TimeoutError("timed out")))
+    # A bare TimeoutError is urlopen waiting for ntfy's reply: the request may have arrived.
+    morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends, fail=TimeoutError("timed out"))
     assert alerts.check(config, now=MORNING_DEADLINE + 10)
     morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends)
     alerts.check(config, now=MORNING_DEADLINE + 130)
@@ -1100,14 +1104,19 @@ def test_uncertain_morning_send_is_recorded_and_never_resent(alerts, monkeypatch
 
 def test_failed_morning_send_is_retried_and_reported(alerts, monkeypatch):
     sends, config = [], {"JO_MORNING_ALERTS": "true"}
-    morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends, fail=alerts.URLError(ConnectionRefusedError("refused")))
-    assert alerts.check(config, now=MORNING_DEADLINE + 10) is False
+    # urlopen wraps a connect timeout in URLError: nothing reached ntfy, so it is retried.
+    for failure in (alerts.URLError(ConnectionRefusedError("refused")), alerts.URLError(TimeoutError("timed out"))):
+        morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends, fail=failure)
+        assert alerts.check(config, now=MORNING_DEADLINE + 10) is False
+        assert alerts.check(config, now=MORNING_DEADLINE + 130) is False
     morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends)
-    assert alerts.check(config, now=MORNING_DEADLINE + 130)
+    assert alerts.check(config, now=MORNING_DEADLINE + 250)
     assert sends == ["Jo's morning brief is missing"]
-    assert [n["outcome"] for n in alerts.read_state()["jo_morning"]["notices"]["2026-10-20"]] == ["failed", "sent"]
+    log = alerts.read_state()["jo_morning"]["notices"]["2026-10-20"]
+    assert [(n["outcome"], n["attempts"]) for n in log] == [("sent", 5)]  # retries collapse into one line
     assert alerts.uncertain(alerts.URLError("ntfy could not be reached (ReadTimeout)"))
     assert not alerts.uncertain(alerts.URLError("ntfy could not be reached (ConnectTimeout)"))
+    assert not alerts.uncertain(alerts.HTTPError("https://ntfy.sh/", 503, "unavailable", {}, None))
 
 
 def test_morning_watchdog_is_opt_in_and_skips_an_unreachable_api(alerts, monkeypatch):
@@ -1123,3 +1132,33 @@ def test_morning_watchdog_is_opt_in_and_skips_an_unreachable_api(alerts, monkeyp
     monkeypatch.setattr(alerts, "get", lambda path: (_ for _ in ()).throw(OSError("refused")))
     alerts.check({"JO_MORNING_ALERTS": "true"}, now=MORNING_DEADLINE + 30)
     assert alerts.read_state()["jo_morning"]["error"] == "Morning status unreadable (OSError)"
+    alerts.check({"JO_MORNING_ALERTS": "true"}, now=MORNING_DEADLINE + 30 + alerts.MORNING_STATUS_GRACE)
+    assert sends == ["Morning brief status unreadable"]
+
+
+def test_disabled_automation_ends_quietly_but_broken_settings_alert(alerts, monkeypatch):
+    sends, config = [], {"JO_MORNING_ALERTS": "true"}
+    morning_pass(alerts, monkeypatch, morning_view(fulfilment="missing"), sends)
+    alerts.check(config, now=MORNING_DEADLINE + 10)
+    morning_pass(alerts, monkeypatch, morning_view(fulfilment="not_expected", enabled=False, configuration_error=True), sends)
+    alerts.check(config, now=MORNING_DEADLINE + 130)
+    alerts.check(config, now=MORNING_DEADLINE + 130 + alerts.API_GRACE)
+    assert sends == ["Jo's morning brief is missing", "Morning brief automation can't load its settings"]
+    assert "jo_morning:2026-10-20:brief" in alerts.read_state()["conditions"]  # still missing, not "arrived"
+    morning_pass(alerts, monkeypatch, morning_view(fulfilment="not_expected", enabled=False), sends)
+    alerts.check(config, now=MORNING_DEADLINE + 900)
+    assert len(sends) == 2 and not [k for k in alerts.read_state()["conditions"] if k.startswith("jo_morning:")]
+
+
+def test_weekend_keeps_an_unresolved_calendar_condition(alerts, monkeypatch):
+    sends, config = [], {"JO_MORNING_ALERTS": "true"}
+    friday = datetime(2026, 10, 23, 22, 0, tzinfo=timezone.utc).timestamp()
+    morning_pass(alerts, monkeypatch, morning_view(day="2026-10-23", last_pass=friday, status="calendar_unavailable"), sends)
+    alerts.check(config, now=friday)
+    later = friday + alerts.MORNING_CALENDAR_GRACE
+    morning_pass(alerts, monkeypatch, morning_view(day="2026-10-23", last_pass=later, status="calendar_unavailable"), sends)
+    alerts.check(config, now=later)
+    saturday = datetime(2026, 10, 24, 4, 30, tzinfo=timezone.utc).timestamp()
+    morning_pass(alerts, monkeypatch, morning_view(day="2026-10-24", last_pass=saturday, status="calendar_unavailable", fulfilment="not_expected"), sends)
+    alerts.check(config, now=saturday)
+    assert sends == ["Market calendar unavailable for the morning brief"]

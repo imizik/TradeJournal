@@ -370,10 +370,11 @@ same-day packets (manual or recovery requests) are counted as `other_briefings`;
 they are never the scheduled delivery. Fulfilment is judged on **journal
 availability**, the record's `created_at` (when the importer committed it): a brief
 Check received at 09:14 but imported at 09:40 missed a 09:15 deadline. `late`
-keeps `late_by_seconds`, so a later recovery never erases the miss. The nullable
-`submitted_at` column records when Check received an imported submission; the gap
-is `import_lag_seconds`. It is unknown (null) for owner saves and for every record
-imported before this change. The deadline is the one frozen in the scheduled packet.
+keeps `late_by_seconds`, so a later recovery never erases the miss. A separate
+`morning_briefing_submission` table (committed with the record, which stays
+unchanged) records when Check received an imported submission as `submitted_at`;
+the gap is `import_lag_seconds`. It is unknown (null) for owner saves and for every
+record imported before this change. The deadline is the one frozen in the scheduled packet.
 Past days are judged with today's configuration, so a day before automation was on
 can read as "not published". Who started a run (the scheduled task or a manual
 chat request) is not visible to TradeJournal: `origin` is always `unknown`.
@@ -389,16 +390,21 @@ It reads `/jo/morning` each pass and alerts once per condition:
 brief missing at the deadline (no grace; a late save sends one "arrived late"
 recovery), packet not published five minutes after publication time (replacing the
 missing-brief alert, since the packet explains it), runner pass older than three
-minutes (five-minute grace, like the API alert), a submission waiting more than two
-minutes for import, an unreadable outbox file, and an unavailable market calendar
-on a weekday (15-minute grace). Pending, unreadable and calendar facts count only
-while the runner is fresh. When the API is down, the existing "isn't responding"
-alert covers it and morning conditions keep their state. Day conditions end
-silently at the next New York date; notices are kept for seven days in
-`/var/lib/tradejournal/alerts/state.json`, which the API reads to show them. A
-morning send that times out after the request may have left is recorded `unknown`
-and **not resent**; a send that clearly failed is retried on the next pass. ntfy
-accepting a message does not prove the phone displayed it.
+minutes or morning settings that fail to load (five-minute grace, like the API
+alert), a submission waiting more than two minutes for import, an outbox file that
+can never import, an unavailable market calendar on a weekday (15-minute grace;
+weekends leave it unchanged), and `/jo/morning` itself unreadable while the rest of
+the API answers (10-minute grace). Pending, unreadable and calendar facts count
+only while the runner is fresh. When the API is down, the existing "isn't
+responding" alert covers it and morning conditions keep their state. Settings that
+fail to load leave the brief and packet conditions unknown, never "resolved";
+deliberately disabling the morning automation or the watchdog ends them silently.
+Day conditions end silently at the next New York date; notices are kept for seven
+days in `/var/lib/tradejournal/alerts/state.json`, which the API reads to show
+them, with retries of one failed notice collapsed into a single line. A morning
+send that times out while waiting for ntfy's reply is recorded `unknown` and **not
+resent**; a send that clearly failed, including a connect timeout, is retried on
+the next pass. ntfy accepting a message does not prove the phone displayed it.
 
 Failure domains this can and cannot see: a stopped runner, stalled import,
 unreadable file, unpublished packet, unavailable calendar and a brief absent at the
