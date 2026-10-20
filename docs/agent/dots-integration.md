@@ -361,6 +361,12 @@ current market coverage. The frozen stale-price, missing-option-mark and
 independence-unverified limitations remain; no schedule, grants or Shadow workflow
 were changed.
 
+`backend/tests/test_check_tool_schemas.py` now covers every tool the Check
+connector can register (Jo briefing, pre-trade, review, position, market-watch,
+stock-alert, Shadow and conditional-plan tools): realistic arguments are validated
+against each exported input schema with formats checked and patterns full-matched,
+and a newly registered tool fails CI until it has sample arguments there.
+
 ### Delivery honesty and the morning watchdog
 
 `GET /jo/morning` adds a `delivery` block for the day's **scheduled obligation**.
