@@ -127,7 +127,7 @@ def test_cross_audience_and_missing_configuration(boundary):
 
 # Fixed ids, not uuid4(): parametrized ids must be identical in every pytest-xdist
 # worker, or collection fails before any test runs.
-@pytest.mark.parametrize("method,path", [("GET", "/fills"), ("GET", "/accounts"), ("GET", "/charts/settings"),
+@pytest.mark.parametrize("method,path", [("GET", "/fills"), ("GET", "/accounts"), ("GET", "/charts/settings"), ("GET", "/conditional-plans"),
     ("GET", "/charts/symbol/SPY/you"), ("GET", "/gmail/health"), ("GET", "/access/assistants"),
     ("POST", "/sync/pipeline/run"), ("POST", "/decisions"), ("POST", "/practice/prepare"),
     ("POST", "/practice/opportunities/09f6afdc-cc00-4487-ad2e-b50f51c17838/choice"),
