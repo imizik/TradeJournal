@@ -727,7 +727,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         Same operation_id + same idea returns the original saved check (never recomputed); a different idea under
         that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
         your own verdict with attach_model_verdict (see next_step in the result).
-        Run this for any actionable entry, wait or pass advice so it is saved; chat-only advice is unrecorded.
+        Run this for actionable entry, wait or pass advice on a specific idea so it is saved; chat-only advice is unrecorded.
         Saying you will watch or recheck later needs a saved conditional plan when that tool is offered;
         otherwise say you can't monitor it. ChatGPT tasks are invisible to TradeJournal.
         """

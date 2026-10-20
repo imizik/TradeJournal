@@ -3,7 +3,8 @@
 On October 20 the ChatGPT connector full-matched an exported nonblank `\\S`
 pattern and refused a scheduled brief before it reached Check (#354). These
 payloads are validated against the tools/list schemas the way a strict client
-would: JSON Schema 2020-12 with formats checked and patterns full-matched.
+would: JSON Schema 2020-12, patterns full-matched, formats checked where the
+installed checker supports them (uuid is the only format exported today).
 Generated tokens and disposable directories only.
 """
 import re
