@@ -812,7 +812,8 @@ reads never reach Shadow Isaac.
   unknown, never as missing. The route has no outcome store, so it links by the
   time window only: a read more than 30 minutes after its slot (or after the
   next wake) is listed as not credited to a slot, and the slot shows no read
-  seen. `reliability_report(..., outcome_store=...)` links exactly by operation
+  seen. Equally, a manual or setup-context read inside the window is
+  credited to the slot, since the route cannot see its operation ID. `reliability_report(..., outcome_store=...)` links exactly by operation
   ID when an export is imported. A receipt time is not when Jo started, and a
   slot with no read has no cause the app can see. Tests:
   `backend/tests/test_market_watch_reliability.py`.

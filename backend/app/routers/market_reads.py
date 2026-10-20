@@ -64,8 +64,14 @@ def market_reads():
                 pass
     except OSError:
         log.exception("Publisher receipts unreadable")
-    if store is not None:
-        evidence |= {date.fromisoformat(r["session_date"]) for r in store.records("read_notice")}
-    view = reliability_report(store, receipts, _days(now.astimezone(ET).date(), min(evidence, default=None)),
-                              hours=_hours, now=now)
+    try:
+        if store is not None:
+            evidence |= {date.fromisoformat(r["session_date"]) for r in store.records("read_notice")}
+        days = _days(now.astimezone(ET).date(), min(evidence, default=None))
+        view = reliability_report(store, receipts, days, hours=_hours, now=now)
+    except Exception:
+        # A corrupt or locked store makes reads unknown; it never fails the page.
+        log.exception("Market-watch store unreadable")
+        days = _days(now.astimezone(ET).date(), min(evidence, default=None))
+        view = reliability_report(None, receipts, days, hours=_hours, now=now)
     return {**view, "market_watch_enabled": enabled()}

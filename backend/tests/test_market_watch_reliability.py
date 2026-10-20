@@ -1,6 +1,7 @@
 """Scheduled market-read reliability: packets, reads seen and measured delays, with no tolerance."""
 from datetime import UTC, date, datetime, timedelta
 import json
+import sqlite3
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -158,6 +159,7 @@ def test_holiday_early_close_unknown_calendar_and_upcoming(env, tmp_path):
 
     unknown = slots(report(runner, receipts, hours=lambda day: None))
     assert unknown["09:50"]["expected"] is None and unknown["09:50"]["not_expected_reason"] == "exchange_calendar_unavailable"
+    assert unknown["09:50"]["status"] == "unknown"  # never "no read seen" when the day may have been closed
 
     def broken(day):
         raise RuntimeError("tradier down")
@@ -165,6 +167,14 @@ def test_holiday_early_close_unknown_calendar_and_upcoming(env, tmp_path):
 
     midday = slots(report(runner, receipts, now=et(12, 0)))
     assert midday["09:50"]["status"] == "no_read_seen" and midday["12:30"]["status"] == "upcoming"
+    assert midday["12:30"]["packet"]["status"] == "not_due" and midday["11:00"]["packet"]["status"] == "no_receipt"
+
+
+def test_read_near_a_slot_after_an_early_close_is_not_credited_as_expected(env, tmp_path):
+    runner, *_ = env
+    stray, _ = Jo(runner, tmp_path).read(et(14, 5), "manual")
+    s = slots(report(runner, tmp_path / "receipts", hours=lambda day: {"status": "open", "open": 570, "close": 780}))
+    assert s["14:00"]["status"] == "not_expected" and s["14:00"]["read_id"] == stray["read_id"]
 
 
 def test_missing_evidence_is_unknown_not_missing(tmp_path):
@@ -193,6 +203,15 @@ def test_route_lists_weekdays_back_to_the_first_evidence(client):
     assert [s["session_date"] for s in view["sessions"]] == ["2026-10-16", "2026-10-15", "2026-10-14"]
     assert view["reads_available"] and view["receipts_available"]
     assert {s["status"] for s in view["sessions"][0]["slots"]} == {"no_read_seen"}
+
+
+def test_corrupt_store_makes_reads_unknown_not_a_failure(client, monkeypatch):
+    def broken(*args, **kwargs):
+        raise sqlite3.DatabaseError("file is not a database")
+    monkeypatch.setattr(mw.MarketWatchWakeStore, "records", broken)
+    view = client.get("/jo/market-reads").json()
+    assert view["reads_available"] is False and view["receipts_available"] is True
+    assert {s["status"] for s in view["sessions"][0]["slots"]} == {"unknown"}
 
 
 def test_route_days_skip_weekends_and_cap():

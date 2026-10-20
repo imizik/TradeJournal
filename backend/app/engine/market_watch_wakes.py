@@ -916,8 +916,11 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
             read_id, link = (by_slot.get(slot) or {}).get("read_id"), (by_slot.get(slot) or {}).get("attribution")
             read = reads.get(read_id) if read_id else None
             received = read["received_at"] if read else None
-            status = ("read_seen" if read_id else "unknown" if store is None else "upcoming" if at > now
-                      else "not_expected" if expected is False else "no_read_seen")
+            # A read near a slot that was not expected stays visible but never makes the slot "read".
+            status = ("not_expected" if expected is False else "unknown" if store is None else "read_seen" if read_id
+                      else "upcoming" if at > now else "unknown" if expected is None else "no_read_seen")
+            if packet["status"] == "no_receipt" and at - timedelta(minutes=schedule.READ_MINUTES) > now:
+                packet["status"] = "not_due"
             slot_rows.append({"slot": slot, "scheduled_at": _iso(at), "expected": expected, "not_expected_reason": reason,
                               "operation_id": f"{WAKE_POLICY['jo_scheduled_operation_prefix']}:{session}:{slot}",
                               "packet": packet, "status": status, "read_id": read_id, "attribution": link,
@@ -940,5 +943,6 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
                        "no lateness tolerance is applied; delays are numbers only",
                        f"without an exported operation ID a read is linked by time: the first unclaimed read within {WAKE_POLICY['read_attribution_minutes']} minutes "
                        "of the slot and before the next wake; a later read is listed as not credited and the slot shows no read seen",
+                       "without an export, any read in the window is linked by time, so a manual or setup-context read there can stand in for a missed scheduled read",
                        "a slot with no read seen has no visible cause: Jo's hosted run history is outside the app",
                        "a publisher receipt proves the packet attempt, not that Jo was woken"]}

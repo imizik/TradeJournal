@@ -27,6 +27,7 @@ function packet(p: MarketReadPacket) {
     skipped_exchange_closed: "skipped: market closed",
     skipped_outside_regular_session: "skipped: outside the regular session",
     no_receipt: "no publisher receipt",
+    not_due: "not due yet",
     unreadable: "receipt unreadable",
     unknown: "receipts unavailable on this server",
   };
@@ -51,15 +52,14 @@ function Slot({ s, close, window }: { s: MarketReadSlot; close: number | null; w
       <span className="font-medium">{s.slot} ET</span>
       <span data-testid="slot-badge" className={`rounded-full border px-2 py-0.5 text-xs ${tone}`}>{label}</span>
     </div>
-    {s.status === "read_seen" && s.received_at && <p className="text-sm" data-testid="slot-delay">
+    {s.received_at && <p className="text-sm" data-testid="slot-delay">
       Received {clock(s.received_at)} · <strong>{delay(s.receipt_delay_seconds!)}</strong></p>}
-    {s.status === "read_seen" && <p className="text-xs text-muted-foreground">
+    {s.read_id && <p className="text-xs text-muted-foreground">
       {s.attribution === "operation_id" ? "Linked by its scheduled operation ID." : `Linked by time: the first read within ${window} min of the slot.`}
       {s.read_used_slot_packet === true ? " Used this slot's packet." : s.read_used_slot_packet === false ? " Used a different packet." : ""}</p>}
     {s.status === "no_read_seen" && <p className="text-sm text-muted-foreground">No read was linked to this slot. The cause is not visible to the app.</p>}
     {s.status === "not_expected" && <p className="text-sm text-muted-foreground">{s.not_expected_reason === "after_close" ? `After the ${close !== null ? minuteOfDay(close) : ""} close.` : "Market closed."}</p>}
-    {s.status === "unknown" && <p className="text-sm text-muted-foreground">Read records are not available on this server.</p>}
-    {s.expected === null && <p className="text-xs text-amber-200">Exchange hours unknown for this day.</p>}
+    {s.status === "unknown" && <p className="text-sm text-muted-foreground">{s.expected === null ? "Exchange hours are unknown for this day, so whether this read was due is unknown." : "Read records are not available on this server."}</p>}
     <p className="text-xs text-muted-foreground" data-testid="slot-packet">{packet(s.packet)}</p>
   </li>;
 }
@@ -118,7 +118,7 @@ export default function MarketReads() {
         <ul className="list-disc space-y-1 pb-3 pl-4 text-sm text-muted-foreground">
           <li>The time shown is when the Check service saved the read, not when Jo started.</li>
           <li>A slot with no read has no visible cause here; Jo&apos;s hosted run history is outside the app.</li>
-          <li>Without an operation ID, a read links to a slot only within {data.attribution_window_minutes} minutes and before the next wake. A later read is listed under other reads, and the slot shows no read seen.</li>
+          <li>This screen links reads by time: the first read within {data.attribution_window_minutes} minutes of a slot and before the next wake. A manual or setup read in that window counts for the slot; a later read is listed under other reads, and the slot shows no read seen.</li>
           <li>A packet receipt proves the app prepared it, not that Jo was woken.</li>
         </ul>
       </details>
