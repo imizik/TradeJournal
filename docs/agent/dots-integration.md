@@ -336,6 +336,22 @@ metadata so Jo receives the revised writing instructions. This source change doe
 not update the live task, regenerate historical briefs, fetch fresh market context
 or establish that an actual Jo-generated brief meets the new writing targets.
 
+**October 20 validation recovery:** the scheduled submission failed before reaching
+Check because the connector full-matched the exported nonblank `\S` pattern,
+rejecting ordinary strings including author `Jo`. Whole-string nonblank patterns
+retain blank rejection and length bounds. A regression against exported MCP
+schemas reproduces the failure; focused submission/import/recovery tests pass.
+The owner-authorized one-file Check runtime repair preserves the original runtime
+commit with explicit hotfix provenance, verifies the full installation inventory,
+retains rollback copies and restarts only Check. Refreshing Check v4 tools then
+allowed a manually recovered two-priority briefing against the original October 20
+packet. Its receipt confirmed an app save at **09:26:56 ET**; the owner UI showed
+APLD before NBIS and the correct packet/briefing IDs. The **09:15 target was missed**.
+This proves the recovered connector save, not natural scheduled delivery or useful
+current market coverage. The frozen stale-price, missing-option-mark and
+independence-unverified limitations remain; no schedule, grants or Shadow workflow
+were changed.
+
 ### Fresh market context — activated October 19
 
 The morning publisher makes at most two existing-provider reads when creating a

@@ -1,6 +1,7 @@
 """Generated tokens and disposable files/SQLite only; no real data publication."""
 from datetime import timedelta
 import json
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -11,12 +12,52 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.engine import jo_briefing as store
 from app.models import JoMemoryRevision, MorningBriefingRecord
 from cloud_mcp_check_common import read_config
-from jo_briefing_common import MemorySave, PacketSave, BriefingSave
+from jo_briefing_common import MemorySave, PacketSave, BriefingSave, Text
 import jo_briefing_exchange as exchange
 import jo_briefing_owner as owner
 from tests.test_cloud_mcp_check import harness, signing_key, call, rpc, RECEIPT  # noqa: F401
 
 SCOPES = "check:read jo:read jo:submit"
+
+
+@pytest.mark.parametrize("text", ["", " ", "\t\r\n", "\u00a0"])
+def test_nonblank_validation_still_refuses_blank_text(text):
+    from pydantic import TypeAdapter, ValidationError
+    with pytest.raises(ValidationError):
+        TypeAdapter(Text).validate_python(text)
+    for field in ("author", "prompt_version", "summary"):
+        with pytest.raises(ValidationError):
+            BriefingSave.model_validate({**brief({"id": str(uuid4())}), field: text})
+
+
+def test_exported_nonblank_patterns_accept_whole_strings(personal):
+    """Connector validators may full-match JSON Schema patterns instead of searching."""
+    h, _, _, _, _ = personal
+    with TestClient(h.server().streamable_http_app()) as client:
+        tools = rpc(client, "", {}, h.token(scope=SCOPES), "tools/list").json()["result"]["tools"]
+    patterns = []
+
+    def collect(schema):
+        if isinstance(schema, dict):
+            if schema.get("type") == "string" and schema.get("maxLength") in (120, 4000) and "pattern" in schema:
+                # Operation IDs have a separate restricted alphabet, not free text.
+                if schema["pattern"] != r"^[A-Za-z0-9_.:-]+$":
+                    patterns.append(schema["pattern"])
+            for value in schema.values():
+                collect(value)
+        elif isinstance(schema, list):
+            for value in schema:
+                collect(value)
+
+    for tool in tools:
+        if tool["name"] in ("jo_briefing_submit", "jo_memory_propose"):
+            collect(tool["inputSchema"])
+    assert len(patterns) >= 3
+    for pattern in patterns:
+        for text in ("Jo", "jo-morning-v2", "Review APLD’s calls.", " first\nsecond \n", "\nJo\n"):
+            assert re.fullmatch(pattern, text), (pattern, text)
+        for text in ("", " ", "\t\r\n", "\u00a0"):
+            assert not re.search(pattern, text), (pattern, text)
 
 
 @pytest.fixture
