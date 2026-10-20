@@ -10,10 +10,22 @@ export type MemoryStatus = "proposed" | "active" | "retired";
 export type MemorySave = { operation_id: string; memory_id?: string; base_revision?: number; kind: MemoryKind; symbol: string | null; original_text: string;
   interpretation: string | null; source: MemorySource; source_reference?: string | null; status: MemoryStatus; owner_confirmed: boolean };
 export type BriefItem = { symbol: string | null; what_matters: string; why_personal: string; what_changed: string; contrary_evidence: string; watch_out: string; evidence_ids: string[] };
+export type WatchdogNotice = { kind: string; title: string; recovered: boolean; outcome: "sent" | "failed" | "unknown"; at: string; attempts?: number };
+/** The scheduled obligation for a date: judged on when the brief reached the journal. Origin is never observed. */
+export type MorningDelivery = {
+  calendar: string; publication: "published" | "missing" | "pending" | "not_expected" | "unknown";
+  fulfilment: "on_time" | "late" | "missing" | "pending" | "not_expected" | "unknown";
+  deadline: string | null; publish_at: string | null; packet_id: string | null; published_at: string | null;
+  briefing_id: string | null; available_at: string | null; submitted_at: string | null;
+  import_lag_seconds: number | null; late_by_seconds: number | null; origin: "unknown"; other_briefings: number;
+  notifications: { chatgpt: "not_observable"; watchdog: { state: "on" | "off" | "unknown"; checked_at: string | null; notices: WatchdogNotice[] } | null };
+};
 export type MorningView = {
   day: string; state: "ready" | "waiting" | "missing" | "unavailable" | "redacted" | "closed";
   late: boolean; stale: boolean; archived: boolean; deadline: string | null; checked_at: string;
-  automation: { enabled: boolean; last_pass: string | null; unavailable: boolean };
+  automation: { enabled: boolean; last_pass: string | null; unavailable: boolean; configuration_error?: boolean; last_status?: string | null;
+    pending?: { count: number; oldest_submitted_at: string | null; unreadable: number } | null };
+  delivery?: MorningDelivery;
   packet: { id: string; redacted_at: string | null; memories?: BriefMemory[]; body: { as_of?: string; scope?: string; gaps?: string[]; evidence?: BriefEvidence[]; memory_revision_ids?: string[] } } | null;
   briefing: { id: string; received_at: string; redacted_at: string | null; body: { summary?: string; summary_evidence_ids?: string[]; items?: BriefItem[]; limitations?: string[]; supersedes_id?: string | null } } | null;
   versions: { id: string; received_at: string; redacted: boolean }[];

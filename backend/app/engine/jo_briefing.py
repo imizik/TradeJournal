@@ -8,7 +8,7 @@ from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, utc_now_naive
+from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, MorningBriefingSubmission, utc_now_naive
 
 from jo_briefing_common import (  # noqa: F401 — retained owner API imports
     BriefingSave, MemoryRedact, MemorySave, PacketSave,
@@ -164,7 +164,8 @@ def get_packet(session, packet_id):
     return result
 
 
-def save_briefing(session, body: BriefingSave):
+def save_briefing(session, body: BriefingSave, submitted_at=None):
+    """submitted_at: when Check received an imported submission (naive UTC); None when unknown."""
     sha = fingerprint(body)
     existing = replay(session, MorningBriefingRecord, body.operation_id, sha)
     if existing is not None:
@@ -182,5 +183,9 @@ def save_briefing(session, body: BriefingSave):
         previous = session.get(MorningBriefingRecord, body.supersedes_id)
         if previous is None or session.get(MorningBriefingPacket, previous.packet_id).day.isoformat() != packet["day"]:
             raise ValueError("A correction must reference a briefing for the same day")
-    return persist(session, MorningBriefingRecord(operation_id=body.operation_id, request_sha256=sha,
-        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json"))))
+    row = MorningBriefingRecord(operation_id=body.operation_id, request_sha256=sha,
+        packet_id=body.packet_id, body_json=canonical(body.model_dump(mode="json")))
+    if submitted_at is not None:
+        # Committed with the record, so a saved import never lacks its receipt time.
+        session.add(MorningBriefingSubmission(briefing_id=row.id, submitted_at=submitted_at))
+    return persist(session, row)

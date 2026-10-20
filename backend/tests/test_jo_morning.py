@@ -232,3 +232,151 @@ def test_large_unicode_memories_fit_packet_and_published_context(morning):
         context = exchange.context(check.market_watch_snapshots_dir, check.profiles[0].id, saved["id"], now)
         assert len(exchange.canonical(context).encode()) < exchange.LIMIT
         assert len(context["packet"]["memories"]) == len(body.memory_revision_ids)
+
+
+def _imported_at(db, at):
+    """Records take the importer's wall-clock time; pin it to the simulated import moment."""
+    with Session(db) as session:
+        for row in session.exec(select(MorningBriefingRecord)).all():
+            row.created_at = at.replace(tzinfo=None)
+            session.add(row)
+        session.commit()
+
+
+def _submit(check, packet_id, operation_id, at, summary="Saved watchlist only"):
+    body = BriefingSave(operation_id=operation_id, packet_id=packet_id, author="Jo", prompt_version="test",
+        summary=summary, summary_evidence_ids=["watchlist"], items=[], limitations=["Fixture"])
+    exchange.submit(check.market_watch_snapshots_dir, check.market_watch_outbox_dir, check.profiles[0].id,
+        packet_id, "briefing", body.model_dump(mode="json"), at)
+
+
+def test_delivery_is_judged_on_journal_availability_and_keeps_the_miss(morning):
+    """Submitted 09:05 but imported 09:16: late, with the receipt time and import lag kept."""
+    h, db, config = morning
+    check = read_config(h.config_path)
+    actor = check.profiles[0].id
+    open_day = lambda day: {"status": "open", "open": 570, "close": 960}  # noqa: E731
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    with Session(db) as session:
+        before = morning_view(session, NOW.date(), NOW - timedelta(minutes=5), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert before["publication"] == "pending" and before["fulfilment"] == "pending" and before["origin"] == "unknown"
+        unpublished = morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert unpublished["publication"] == "missing" and unpublished["fulfilment"] == "missing"
+    assert runner.run_once(NOW)["status"] == "published"
+    with Session(db) as session:
+        packet_id = session.exec(select(MorningBriefingPacket)).one().id
+    _submit(check, packet_id, "scheduled", NOW + timedelta(minutes=20))
+    with Session(db) as session:
+        waiting = morning_view(session, NOW.date(), NOW + timedelta(minutes=29), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert waiting["publication"] == "published" and waiting["fulfilment"] == "pending"
+        missed = morning_view(session, NOW.date(), NOW + timedelta(minutes=30), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert missed["fulfilment"] == "missing" and missed["deadline"] == "2026-10-19T13:15:00+00:00"
+    assert runner.run_once(NOW + timedelta(minutes=31))["imported"] == 1
+    _imported_at(db, NOW + timedelta(minutes=31))
+    with Session(db) as session:
+        late = morning_view(session, NOW.date(), NOW + timedelta(hours=1), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert late["fulfilment"] == "late" and late["late_by_seconds"] == 60
+        assert late["submitted_at"] == (NOW + timedelta(minutes=20)).isoformat()
+        assert late["import_lag_seconds"] == 11 * 60
+        # A same-day manual packet's brief never counts as the scheduled delivery.
+        from jo_briefing_common import PacketSave
+        manual = store.save_packet(session, PacketSave(operation_id="manual-afternoon", day=NOW.date(), as_of=NOW + timedelta(hours=6),
+            scope="manual", evidence=[{"id": "x", "kind": "fact", "text": "x", "source": "Fixture", "retrieved_at": (NOW + timedelta(hours=6)).isoformat()}], gaps=[]))
+        store.save_briefing(session, BriefingSave(operation_id="manual-brief", packet_id=manual["id"], author="Jo", prompt_version="test",
+            summary="Manual", summary_evidence_ids=["x"], items=[], limitations=[]))
+        view = morning_view(session, NOW.date(), NOW + timedelta(hours=7), config=config, calendar=open_day, actor=actor)
+        assert view["briefing"]["operation_id"] == "manual-brief" and view["delivery"]["briefing_id"] == late["briefing_id"]
+        assert view["delivery"]["fulfilment"] == "late" and view["delivery"]["other_briefings"] == 1
+
+
+def test_delivery_on_time_closed_unknown_and_owner_saves_have_no_submission_time(morning):
+    h, db, config = morning
+    check = read_config(h.config_path)
+    actor = check.profiles[0].id
+    open_day = lambda day: {"status": "open", "open": 570, "close": 960}  # noqa: E731
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    runner.run_once(NOW)
+    with Session(db) as session:
+        packet_id = session.exec(select(MorningBriefingPacket)).one().id
+    _submit(check, packet_id, "early", NOW + timedelta(minutes=10))
+    runner.run_once(NOW + timedelta(minutes=11))
+    _imported_at(db, NOW + timedelta(minutes=11))
+    with Session(db) as session:
+        on_time = morning_view(session, NOW.date(), NOW + timedelta(hours=1), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert on_time["fulfilment"] == "on_time" and on_time["late_by_seconds"] == 0
+        for calendar, expected in [(lambda d: {"status": "closed"}, "not_expected"), (lambda d: None, "unknown")]:
+            assert morning_view(session, NOW.date(), NOW, config=config, calendar=calendar, actor=actor)["delivery"]["fulfilment"] == expected
+        assert morning_view(session, NOW.date(), NOW, config=config, calendar=open_day, actor=None)["delivery"]["fulfilment"] == "unknown"
+        assert morning_view(session, NOW.date(), NOW, config=None, calendar=open_day, actor=actor)["delivery"]["fulfilment"] == "not_expected"
+        owner = store.save_briefing(session, BriefingSave(operation_id="owner", packet_id=packet_id, author="Jo", prompt_version="test",
+            summary="Owner save", summary_evidence_ids=["watchlist"], items=[], limitations=[]))
+        from app.models import MorningBriefingSubmission
+        assert session.get(MorningBriefingSubmission, UUID(owner["id"])) is None
+        assert session.get(MorningBriefingSubmission, UUID(on_time["briefing_id"])) is not None
+
+
+def test_runner_reports_waiting_and_unreadable_submissions_for_its_own_profile(morning):
+    h, db, config = morning
+    check = read_config(h.config_path)
+    runner = MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570}, lambda s, c: ([], []))
+    runner.run_once(NOW)
+    with Session(db) as session:
+        packet_id = session.exec(select(MorningBriefingPacket)).one().id
+    _submit(check, packet_id, "queued", NOW + timedelta(minutes=1))
+    outbox = Path(check.market_watch_outbox_dir)
+    (outbox / ("jo-request-" + "1" * 64 + ".json")).write_text("not json")
+    candidates = sorted(outbox.glob("jo-request-*.json"))
+    waiting = MorningRunner.waiting(check, check.profiles[0].id, candidates)
+    assert waiting == {"count": 1, "oldest_submitted_at": (NOW + timedelta(minutes=1)).isoformat(), "unreadable": 1}
+    assert MorningRunner.waiting(check, "check_" + str(uuid4()), candidates)["count"] == 0
+    # A file named for another operation can never import; it is not a waiting brief.
+    real = next(p for p in candidates if "1" * 64 not in p.name)
+    renamed = outbox / ("jo-request-" + "2" * 64 + ".json")
+    renamed.write_bytes(real.read_bytes())
+    assert MorningRunner.waiting(check, check.profiles[0].id, [real, renamed])["unreadable"] == 1
+    renamed.unlink()
+    runner.run_once(NOW + timedelta(minutes=2))
+    assert runner.pending == {"count": 0, "oldest_submitted_at": None, "unreadable": 1}
+    assert runner.last_status == "published"
+
+
+def test_watchdog_status_is_unknown_without_its_record(tmp_path):
+    from app.engine.jo_morning import watchdog_status
+    day = NOW.date()
+    path = tmp_path / "state.json"
+    assert watchdog_status(day, path)["state"] == "unknown"
+    path.write_text("not json")
+    assert watchdog_status(day, path)["state"] == "unknown"
+    notice = {"kind": "brief", "title": "Jo's morning brief is missing", "recovered": False, "outcome": "unknown", "at": NOW.isoformat()}
+    path.write_text(json.dumps({"jo_morning": {"enabled": True, "checked_at": NOW.isoformat(), "notices": {day.isoformat(): [notice]}}}))
+    assert watchdog_status(day, path) == {"state": "on", "checked_at": NOW.isoformat(), "notices": [notice]}
+    assert watchdog_status(day + timedelta(days=1), path)["notices"] == []
+    path.write_text(json.dumps({"jo_morning": {"enabled": False}}))
+    assert watchdog_status(day, path)["state"] == "off"
+
+
+def test_morning_route_reports_delivery_and_never_claims_chatgpt_delivery(client, monkeypatch, tmp_path):  # noqa: F811
+    from app.engine import jo_morning
+    monkeypatch.setattr(jo_morning, "ALERTS_STATE", tmp_path / "absent.json")
+    view = client.get("/jo/morning?day=2026-10-01").json()
+    assert view["delivery"]["fulfilment"] == "not_expected" and view["delivery"]["origin"] == "unknown"
+    assert view["delivery"]["notifications"] == {"chatgpt": "not_observable", "watchdog": {"state": "unknown", "checked_at": None, "notices": []}}
+    assert set(view["automation"]) >= {"enabled", "last_pass", "unavailable", "last_status", "pending"}
+
+
+def test_submitted_at_migration_roundtrip_keeps_records(tmp_path):
+    from sqlalchemy import inspect
+    from tests.test_schema_migrations import _alembic
+    path = tmp_path / "submitted-at.sqlite"
+    _alembic(path, "upgrade", "head")
+    db = create_engine(f"sqlite:///{path}")
+    tables = lambda: set(inspect(db).get_table_names())  # noqa: E731
+    record_sql = lambda: [c["name"] for c in inspect(db).get_columns("morning_briefing_record")]  # noqa: E731
+    assert "morning_briefing_submission" in tables()
+    before = record_sql()
+    _alembic(path, "downgrade", "d0f6b2c4e8a3")
+    assert "morning_briefing_submission" not in tables() and "morning_briefing_feedback" in tables()
+    assert record_sql() == before  # Additive: the record table itself never changes.
+    _alembic(path, "upgrade", "head")
+    assert "morning_briefing_submission" in tables()
+    db.dispose()

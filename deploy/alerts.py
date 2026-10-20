@@ -10,7 +10,7 @@ notices when this server goes quiet altogether.
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.client import HTTPException
 import json
 import math
@@ -21,6 +21,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -92,6 +93,19 @@ OPT_IN_TIMERS = {
 }
 
 
+# Jo's morning brief, opt-in with JO_MORNING_ALERTS=true. Judged from the API's own
+# GET /jo/morning delivery state; this check schedules, publishes and imports nothing.
+ET = ZoneInfo("America/New_York")
+MORNING_RUNNER_STALE = 3 * 60  # the runner passes every 30 s; six missed passes
+MORNING_IMPORT_STALL = 2 * 60  # a submission with no receipt after four import passes
+# The first pass after publication time takes up to 30 s plus two short provider reads;
+# five minutes also covers a deploy restart, like API_GRACE.
+MORNING_PUBLICATION_GRACE = 5 * 60
+MORNING_CALENDAR_GRACE = TIMER_GRACE  # the calendar retries on its own; a lasting gap counts
+MORNING_STATUS_GRACE = 10 * 60  # /jo/morning unreadable while the rest of the API answers
+MORNING_KEEP_DAYS = 7  # long enough to review a five-session acceptance run
+
+
 @dataclass
 class Problem:
     title: str
@@ -110,7 +124,7 @@ def load_config() -> dict[str, str]:
                 config[key.strip()] = value.strip().strip("'\"")
     except OSError:
         pass
-    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL"}})
+    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL", "JO_MORNING_ALERTS"}})
     return config
 
 
@@ -264,6 +278,113 @@ def observe(watching_since: float) -> dict[str, Problem | None]:
     return observed
 
 
+def et_clock(value: str | None) -> str:
+    moment = datetime.fromisoformat(value) if value else None
+    return moment.astimezone(ET).strftime("%-I:%M %p ET") if moment else "the deadline"
+
+
+def morning_problems(view: dict, now: float) -> dict[str, Problem | None]:
+    """Morning-brief conditions from one /jo/morning read; a key left out is unknown this pass."""
+    day = view["day"]
+    automation, delivery = view.get("automation") or {}, view.get("delivery") or {}
+    brief, publication = f"jo_morning:{day}:brief", f"jo_morning:{day}:publication"
+    if not automation.get("enabled"):
+        # Settings that fail to load stop the runner; that is a problem, not "turned off".
+        # The brief and its packet stay unknown rather than being reported resolved.
+        return {"jo_morning:runner": Problem(
+            "Morning brief automation can't load its settings",
+            "The app can't read the morning brief configuration, so it isn't publishing or importing.",
+            API_GRACE, "Morning brief automation is running again",
+        )} if automation.get("configuration_error") else {}
+    observed: dict[str, Problem | None] = {}
+    last = timestamp(automation.get("last_pass"))
+    if last is None or now - last > MORNING_RUNNER_STALE:
+        observed["jo_morning:runner"] = Problem(
+            "Morning brief automation stopped",
+            "The app hasn't published or imported Jo's morning brief for a few minutes, so a brief Jo sends may not reach TradeJournal.",
+            API_GRACE, "Morning brief automation is running again",
+        )
+    else:
+        # Pending and calendar facts come from the runner's last pass; only a fresh pass counts.
+        observed["jo_morning:runner"] = None
+        pending = automation.get("pending") or {}
+        oldest = timestamp(pending.get("oldest_submitted_at"))
+        observed["jo_morning:import"] = Problem(
+            "A Jo submission is waiting to be imported",
+            f"Check received it at {et_clock(pending.get('oldest_submitted_at'))}, but it isn't in the journal yet.",
+            recovered="Jo's waiting submission was imported",
+        ) if oldest is not None and now - oldest > MORNING_IMPORT_STALL else None
+        observed["jo_morning:unreadable"] = Problem(
+            "A Jo submission can't be read",
+            "A file in the morning outbox is unreadable, so it can't be imported. Ask Claude to look at it.",
+            recovered="No unreadable Jo submissions remain",
+        ) if (pending.get("unreadable") or 0) > 0 else None
+        # Weekends say nothing about the calendar either way, so the condition keeps its state.
+        if date.fromisoformat(day).weekday() < 5:
+            observed["jo_morning:calendar"] = Problem(
+                "Market calendar unavailable for the morning brief",
+                "The app can't confirm today's session, so it won't publish Jo's packet. Nothing is published on a guess.",
+                MORNING_CALENDAR_GRACE, "The market calendar is available again",
+            ) if automation.get("last_status") == "calendar_unavailable" else None
+    state, fulfilment = delivery.get("publication"), delivery.get("fulfilment")
+    if state == "missing":
+        observed[publication] = Problem(
+            "Jo's morning packet wasn't published",
+            f"No packet for {day} by {et_clock(delivery.get('publish_at'))}. Jo can only report the gap.",
+            MORNING_PUBLICATION_GRACE, "Jo's morning packet was published",
+        )
+    elif state in ("published", "pending", "not_expected"):
+        observed[publication] = None
+    if fulfilment == "missing":
+        # A missing packet already explains the missing brief; one message, not two.
+        observed[brief] = None if state == "missing" else Problem(
+            "Jo's morning brief is missing",
+            f"No brief for {day} was in TradeJournal by {et_clock(delivery.get('deadline'))}. A later save will still show as late.",
+            recovered="Jo's morning brief arrived late",
+        )
+    elif fulfilment in ("on_time", "late", "pending", "not_expected"):
+        observed[brief] = None
+    return observed
+
+
+def observe_morning(now: float) -> tuple[dict[str, Problem | None], str | None, bool]:
+    """Read today's morning state: (conditions, read error, automation deliberately off).
+
+    A failed read leaves the other morning conditions unknown and is a condition itself.
+    """
+    day = datetime.fromtimestamp(now, ET).date().isoformat()
+    unreadable = Problem(
+        "Morning brief status unreadable",
+        "The app answers, but its morning brief status doesn't, so the watchdog can't tell whether Jo's brief arrived.",
+        MORNING_STATUS_GRACE, "Morning brief status is readable again",
+    )
+    try:
+        view = get(f"/jo/morning?day={day}")
+        automation = view.get("automation") or {}
+        off = not automation.get("enabled") and not automation.get("configuration_error")
+        return {**morning_problems(view, now), "jo_morning:status": None}, None, off
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, HTTPException) as exc:
+        return {"jo_morning:status": unreadable}, f"Morning status unreadable ({type(exc).__name__})", False
+
+
+def notice_day(key: str, today: str) -> str:
+    parts = key.split(":")
+    return parts[1] if len(parts) == 3 else today
+
+
+def uncertain(exc: BaseException) -> bool:
+    """A timeout once the request may have reached ntfy: delivery is unknown, not failed.
+
+    urlopen wraps connect/send errors (nothing reached ntfy) in URLError, and raises a bare
+    TimeoutError while waiting for the reply. The IPv4 path names the httpx timeout instead.
+    """
+    if isinstance(exc, HTTPError):
+        return False
+    if isinstance(exc, URLError):
+        return any(name in str(exc.reason) for name in ("ReadTimeout", "WriteTimeout"))
+    return isinstance(exc, TimeoutError)
+
+
 def evaluate(observed: dict[str, Problem | None], state: dict, now: float) -> tuple[list[dict], dict]:
     """Return the notifications this pass owes and the state that follows them.
 
@@ -362,21 +483,53 @@ def check(config: dict[str, str], now: float | None = None) -> bool:
     state = read_state()
     # Failures that finished before the first pass are history, not news.
     state.setdefault("watching_since", now)
-    notices, following = evaluate(observe(state["watching_since"]), state, now)
+    observed = observe(state["watching_since"])
+    today = datetime.fromtimestamp(now, ET).date().isoformat()
+    morning_on = config.get("JO_MORNING_ALERTS", "").strip().lower() == "true"
+    morning = dict(state.get("jo_morning") or {}, enabled=morning_on)
+    found, off = {}, False
+    if morning_on and observed.get("api", False) is None:
+        found, error, off = observe_morning(now)
+        morning.update(error=error, **({} if error else {"checked_at": datetime.fromtimestamp(now, timezone.utc).isoformat()}))
+    # Yesterday's brief conditions end with their day, and switching the watchdog or the
+    # morning automation off ends them all: silently, neither "resolved" nor repeated.
+    state["conditions"] = {key: value for key, value in state.get("conditions", {}).items()
+        if not key.startswith("jo_morning:") or (morning_on and not off and notice_day(key, today) == today)}
+    observed.update(found)
+    notices, following = evaluate(observed, state, now)
+    log = {day: entries for day, entries in (morning.get("notices") or {}).items()
+        if (date.fromisoformat(today) - date.fromisoformat(day)).days < MORNING_KEEP_DAYS}
     delivered = True
     for notice in notices:
+        is_morning = notice["keys"][0].startswith("jo_morning:")
         try:
             publish(config, notice["title"], notice["message"], recovered=notice["recovered"])
             print(f"Sent: {notice['title']}")
+            outcome = "sent"
         except OSError as exc:
-            delivered = False
             print(f"Could not send '{notice['title']}': {first_line(str(exc), 120)}")
-            # Leave the condition as it was so the next pass tries again.
-            for key in notice["keys"]:
-                if notice["recovered"]:
-                    following["conditions"][key] = state["conditions"][key]
-                else:
-                    following["conditions"][key]["alerted"] = False
+            outcome = "unknown" if is_morning and uncertain(exc) else "failed"
+            if outcome == "failed":
+                delivered = False
+                # Leave the condition as it was so the next pass tries again.
+                for key in notice["keys"]:
+                    if notice["recovered"]:
+                        following["conditions"][key] = state["conditions"][key]
+                    else:
+                        following["conditions"][key]["alerted"] = False
+            # An unknown morning send may have reached the phone; it is recorded, never resent.
+        if is_morning:
+            key = notice["keys"][0]
+            entries = log.setdefault(notice_day(key, today), [])
+            entry = {"kind": key.split(":")[-1], "title": notice["title"], "recovered": notice["recovered"],
+                "outcome": outcome, "at": datetime.fromtimestamp(now, timezone.utc).isoformat(), "attempts": 1}
+            last = entries[-1] if entries else None
+            if last and last["outcome"] == "failed" and (last["kind"], last["recovered"]) == (entry["kind"], entry["recovered"]):
+                # A retry replaces its failed attempt instead of adding a line per pass.
+                entries[-1] = dict(entry, attempts=last.get("attempts", 1) + 1)
+            else:
+                entries.append(entry)
+    following["jo_morning"] = dict(morning, notices=log)
     following["checked_at"] = now
     write_state(following)
     ping(config, delivered)

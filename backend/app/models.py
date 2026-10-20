@@ -234,6 +234,17 @@ class MorningBriefingRecord(SQLModel, table=True):
     redacted_at: Optional[datetime] = None
 
 
+class MorningBriefingSubmission(SQLModel, table=True):
+    """When Check received an imported briefing; the record's created_at is when the journal had it.
+
+    A separate table keeps saved records immutable. No row means unknown: owner saves and
+    records imported before this table existed.
+    """
+    __tablename__ = "morning_briefing_submission"
+    briefing_id: uuid.UUID = Field(foreign_key="morning_briefing_record.id", primary_key=True)
+    submitted_at: datetime
+
+
 class MorningBriefingFeedback(SQLModel, table=True):
     """Owner feedback and first-open evidence; never edits generated briefing text."""
     __tablename__ = "morning_briefing_feedback"
