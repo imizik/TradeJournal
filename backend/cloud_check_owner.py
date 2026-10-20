@@ -58,8 +58,6 @@ def exact_path(value):
 class OwnerConfig(Strict):
     enabled: bool = False
     peer_uid: int = Field(ge=1)
-    # The private journal frontend as a second read-only peer (Dots step 5). Absent: only peer_uid is admitted.
-    journal_peer_uid: int | None = Field(default=None, ge=1)
     socket_path: str
     ledger_path: str
 
@@ -212,7 +210,7 @@ def create_app(config_path):
         headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
         try:
             config = current()
-            if request.scope.get("check_owner_peer_uid") not in {config.peer_uid, config.journal_peer_uid} - {None}:
+            if request.scope.get("check_owner_peer_uid") != config.peer_uid:
                 return JSONResponse({"detail": "Owner peer required"}, 403, headers=headers)
             if (sum(len(k) + len(v) for k, v in request.scope["headers"]) > 16384
                     or request.headers.get("content-length", "0") != "0"

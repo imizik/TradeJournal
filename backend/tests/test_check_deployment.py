@@ -1,6 +1,7 @@
 """Offline proof for the disabled pre-trade check installer, units and policy."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -48,6 +49,20 @@ def test_owner_reader_unit_is_private_readonly_and_networkless():
     socket = unit("tradejournal-check-owner.socket")
     assert "ListenStream=/run/tradejournal-check-owner/owner.sock" in socket and "SocketUser=root" in socket
     assert f"SocketGroup={control.OWNER_WEB}\n" in socket and "SocketMode=0660" in socket and "[Install]" not in socket
+
+
+def test_journal_reader_is_the_owner_reader_on_its_own_socket_config_and_group():
+    owner, journal = unit("tradejournal-check-owner.service"), unit("tradejournal-check-journal.service")
+    renamed = (owner.replace("tradejournal-check-owner.socket", "tradejournal-check-journal.socket")
+        .replace("/etc/tradejournal-check/owner", "/etc/tradejournal-check/journal")
+        .replace("/run/tradejournal-check-owner", "/run/tradejournal-check-journal"))
+    # Same sandbox line for line; only the description, socket, config and run directory differ.
+    assert journal.splitlines()[2:] == renamed.splitlines()[2:]
+    assert "--config /etc/tradejournal-check/journal/config.json" in journal and "PrivateNetwork=true" in journal
+    socket = unit("tradejournal-check-journal.socket")
+    assert "ListenStream=/run/tradejournal-check-journal/owner.sock" in socket and "SocketUser=root" in socket
+    assert f"SocketGroup={control.API_USER}\n" in socket and "SocketMode=0660" in socket and "[Install]" not in socket
+    assert control.OWNER_WEB not in socket
 
 
 def test_publisher_and_key_units_are_finite_and_separate():
@@ -117,7 +132,7 @@ def test_stage_is_private_disabled_and_complete(staged):
 @pytest.fixture
 def host(tmp_path, monkeypatch):
     """A fake Ubuntu host: paths under tmp_path, recorded commands, no systemd."""
-    for name in ("ROOT", "CONFIG", "STATE", "KEYS", "FEATURES", "RUN", "OWNER_RUN"):
+    for name in ("ROOT", "CONFIG", "STATE", "KEYS", "FEATURES", "RUN", "OWNER_RUN", "JOURNAL_RUN"):
         monkeypatch.setattr(control, name, tmp_path / ("host-" + name.lower()))
     monkeypatch.setattr(control, "RECORD", control.ROOT / "installation.json")
     unit_dir = tmp_path / "systemd"
@@ -144,7 +159,7 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(control.platform, "machine", lambda: "x86_64")
     ids = iter(range(1001, 1004))
     monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(
-        pw_uid=2001 if name == control.OWNER_WEB else next(ids)))
+        pw_uid=2001 if name == control.OWNER_WEB else 3001 if name == control.API_USER else next(ids)))
     monkeypatch.setattr(control.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=990))
     original_stat = Path.stat
     monkeypatch.setattr(Path, "stat", lambda path, *a, **k: os.stat_result(
@@ -171,6 +186,9 @@ def test_install_writes_disabled_units_and_no_credentials(staged, host, monkeypa
     assert json.loads((config_dir / "config.json").read_text())["enabled"] is False
     owner = json.loads((config_dir / "owner/config.json").read_text())
     assert owner == {"enabled": False, "peer_uid": 2001, "socket_path": str(control.OWNER_RUN / "owner.sock"),
+        "ledger_path": "/var/lib/tradejournal-check/ledger.db"}
+    journal = json.loads((config_dir / "journal/config.json").read_text())
+    assert journal == {"enabled": False, "peer_uid": 3001, "socket_path": str(control.JOURNAL_RUN / "owner.sock"),
         "ledger_path": "/var/lib/tradejournal-check/ledger.db"}
     assert (control.ROOT / "backend/data/alpaca_cache").is_dir()
     assert not list((control.ROOT / "backend").glob("**/.env"))
@@ -467,3 +485,61 @@ def test_reviewed_unit_upgrade_is_explicit_and_rolls_back(staged, host, monkeypa
         updated = control.upgrade(staged, approved, unit_approvals=(control.digest(staged / 'units' / unit),))
         assert installed_unit.read_bytes() == (staged / 'units' / unit).read_bytes()
         assert updated['units'][unit] == control.digest(installed_unit)
+
+
+JOURNAL_UNITS = ("tradejournal-check-journal.socket", "tradejournal-check-journal.service")
+
+
+def older_install(staged, host, monkeypatch):
+    """The live host's shape: installed before the journal reader existed."""
+    approved = control.digest(staged / "manifest.json")
+    record = control.install(staged, approved, dns_servers=["1.1.1.1"], host_ips=["203.0.113.5"])
+    uids = {**{a: record["uids"][r] for r, a in control.ACCOUNTS.items()}, control.API_USER: 3001}
+    monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=uids[name], pw_gid=990,
+        pw_shell="/usr/sbin/nologin"))
+    for name in JOURNAL_UNITS:
+        (control.UNIT_DIR / name).unlink()
+    shutil.rmtree(control.CONFIG / "journal")
+    record = json.loads(control.RECORD.read_text())
+    record["units"] = {u: d for u, d in record["units"].items() if u not in JOURNAL_UNITS}
+    record["manifest_sha256"] = "1" * 64
+    for name in control.ADDITIVE_SQL:  # Views already applied on the live host.
+        (control.CONFIG / name).write_bytes((staged / "config" / name).read_bytes())
+        record["settings"][name] = control.digest(control.CONFIG / name)
+    control.RECORD.write_text(json.dumps(record))
+    control.RECORD.chmod(0o600)
+    return approved
+
+
+def test_older_install_stops_without_the_journal_units(staged, host, monkeypatch):
+    older_install(staged, host, monkeypatch)
+    calls = host
+    calls.clear()
+    control.stop()
+    stopped = [name for c in calls if c[:2] == ["systemctl", "stop"] for name in c[2:]]
+    assert "tradejournal-check-owner.socket" in stopped and not set(JOURNAL_UNITS) & set(stopped)
+
+
+@pytest.mark.parametrize("fail_build", [False, True])
+def test_upgrade_adds_the_journal_reader_only_with_unit_approval_and_disabled(staged, host, monkeypatch, fail_build):
+    approved = older_install(staged, host, monkeypatch)
+    owner_before = (control.CONFIG / "owner/config.json").read_bytes()
+    with pytest.raises(ValueError, match="approve-unit"):
+        control.upgrade(staged, approved)
+    approvals = tuple(control.digest(staged / "units" / u) for u in JOURNAL_UNITS)
+    with pytest.raises(ValueError, match="approve-unit"):
+        control.upgrade(staged, approved, unit_approvals=approvals[:1])
+    assert not (control.CONFIG / "journal").exists() and not any((control.UNIT_DIR / u).exists() for u in JOURNAL_UNITS)
+    if fail_build:
+        monkeypatch.setattr(control, "build_runtime", lambda *args: (_ for _ in ()).throw(ValueError("fixture build failure")))
+        with pytest.raises(ValueError, match="fixture build failure"):
+            control.upgrade(staged, approved, unit_approvals=approvals)
+        assert not (control.CONFIG / "journal").exists() and not any((control.UNIT_DIR / u).exists() for u in JOURNAL_UNITS)
+        assert set(json.loads(control.RECORD.read_text())["units"]).isdisjoint(JOURNAL_UNITS)
+        return
+    updated = control.upgrade(staged, approved, unit_approvals=approvals)
+    assert set(JOURNAL_UNITS) <= set(updated["units"]) and all((control.UNIT_DIR / u).exists() for u in JOURNAL_UNITS)
+    journal = json.loads((control.CONFIG / "journal/config.json").read_text())
+    assert journal["enabled"] is False and journal["peer_uid"] == 3001
+    assert (control.CONFIG / "owner/config.json").read_bytes() == owner_before  # The trial's grant is untouched.
+    assert not any(c[0] == "systemctl" and c[1] in ("start", "enable", "restart") for c in host)

@@ -443,41 +443,44 @@ then both surfaces say "Saved advice isn't connected to the journal yet". The
 production private frontend runs the `private_legacy` profile (no
 `/etc/tradejournal/access-owner.env`, read-only check October 20, 2026).
 
-1. **Upgrade the Check runtime first.** `cloud_check_owner.py` ships in the
-   isolated Check runtime, not the app release, and the installed reader
-   refuses unknown config keys. Stage the reviewed bundle, stop all Check
-   units and run `check_control.py upgrade` with its exact manifest hash, as
-   for the Tradier rollout above. Adding `journal_peer_uid` before this would
-   stop the reader and the trial's `/advisor-review` list.
-2. **The grant:** the private journal frontend becomes a **second read-only
-   peer of the check owner reader**. Set `journal_peer_uid` in
-   `/etc/tradejournal-check/owner/config.json` to the frontend's UID. That
-   frontend runs as `tradejournal`, the account the private API, workers and
-   sync jobs also use, so peer admission by UID admits all of them; it stays
-   GET-only over owner data. Give socket access without touching the advisor
-   frontend's group: for example a dedicated socket group set by a reviewed
-   drop-in on `tradejournal-check-owner.socket`, granted to the journal
-   frontend through `SupplementaryGroups=` on `tradejournal-frontend.service`
-   only. Restart the reader (it refuses config drift while running).
+The journal gets **its own reader instance and socket**:
+`tradejournal-check-journal.socket` (`/run/tradejournal-check-journal/owner.sock`,
+root, group `tradejournal`, mode 0660) and `tradejournal-check-journal.service`,
+the owner reader's exact sandbox as `tj-check` with its own bound config
+`/etc/tradejournal-check/journal/config.json`. The trial's owner socket, group
+and config are untouched, and neither frontend account joins the other's group
+(the Check and trial controllers both refuse that as drift).
+
+1. **Check runtime upgrade.** Stage the reviewed bundle, run
+   `check_control.py stop`, then `check_control.py upgrade` with the exact
+   manifest hash and `--approve-unit <sha256>` for each of the two new units.
+   The upgrade adds the units and a **disabled** journal config (`peer_uid` =
+   the `tradejournal` account); nothing starts or is enabled. A failure
+   removes both and restores the previous runtime. Start the existing Check
+   units again as usual.
+2. **The grant:** set `"enabled": true` in
+   `/etc/tradejournal-check/journal/config.json` (keep root:tj-check 0640) and
+   start `tradejournal-check-journal.socket`. This makes the private journal a
+   read-only reader of saved checks. The `tradejournal` account is shared by the
+   private API, workers and sync jobs, so all of them can read through this
+   socket; it stays GET-only over owner data.
 3. In a drop-in for `tradejournal-frontend.service` (not `access-owner.env`,
    which would switch the profile to `owner` and hide the journal section) set
    `TJ_CHECK_OWNER_ENABLED=true`, `TJ_CHECK_OWNER_JOURNAL=true`,
-   `TJ_CHECK_OWNER_SOCKET=/run/tradejournal-check-owner/owner.sock` and
+   `TJ_CHECK_OWNER_SOCKET=/run/tradejournal-check-journal/owner.sock` and
    `TJ_CHECK_OWNER_SOCKET_UID=0`, then restart the frontend. Without
    `TJ_CHECK_OWNER_JOURNAL` a `private_legacy` frontend never reads checks;
    assistant profiles stay refused.
-4. The `check_link` migration ships with the normal app deploy (backup first);
-   it only creates the table.
+4. The `check_link` table is already created by the app deploy's migration.
 5. Verify: `/advisor-review` lists checks in the journal, one real check shows
    its later activity, a link and unlink round-trip, and the trade page shows
    the link.
 
-Turning it off: remove the frontend drop-in and restart the frontend. The
-journal then shows "isn't connected" again. Removing `journal_peer_uid` and the
-socket grant (then restarting the reader) withdraws the grant itself; with only
-that done and the drop-in still present, the journal shows "unavailable"
-instead. Either way the trial owner page is unchanged and saved links stay in
-`check_link`, untouched.
+Turning it off: remove the frontend drop-in and restart the frontend (the
+journal shows "isn't connected" again), then stop
+`tradejournal-check-journal.socket` and its service and set the journal config
+back to `"enabled": false` to withdraw the grant. The trial owner page is
+unchanged throughout, and saved links stay in `check_link`.
 
 ## Acceptance
 

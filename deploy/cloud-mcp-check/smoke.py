@@ -51,7 +51,7 @@ def guard():
             or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1"):
         raise ValueError("Check native smoke only runs as root on explicitly disposable CI")
     for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
-            control.OWNER_RUN, control.SHADOW, DROPIN,
+            control.OWNER_RUN, control.JOURNAL_RUN, control.SHADOW, DROPIN,
             *[control.UNIT_DIR / u for u in control.UNITS]):
         if path.exists() or path.is_symlink():
             raise ValueError("Refuse a pre-existing check native-smoke resource: " + str(path))
@@ -85,10 +85,10 @@ def egress(account, port):
     return result.returncode == 0
 
 
-def owner_get(path, account):
-    """GET over the owner socket as a real UID; the kernel supplies the peer."""
+def owner_get(path, account, run_dir=None):
+    """GET over the owner (or journal) socket as a real UID; the kernel supplies the peer."""
     script = ("import socket,sys\ns=socket.socket(socket.AF_UNIX);s.settimeout(10)\n"
-        f"s.connect({str(control.OWNER_RUN / 'owner.sock')!r})\n"
+        f"s.connect({str((run_dir or control.OWNER_RUN) / 'owner.sock')!r})\n"
         f"s.sendall(b'GET {path} HTTP/1.1\\r\\nHost: owner\\r\\nConnection: close\\r\\n\\r\\n')\n"
         "b=b''\nwhile (c:=s.recv(65536)): b+=c\nsys.stdout.write(b.decode())")
     result = run("systemd-run", f"--unit={PROBE_UNITS[2]}", "--wait", "--pipe", "--collect", "--property=Type=oneshot",
@@ -272,6 +272,16 @@ def exercise(archive, scratch):
     assert int(reader_uid) == record["uids"]["service"], "owner reader is not running as the check UID"
     print("PASS: owner reader lists and reopens the saved check for the owner frontend UID only")
 
+    journal = json.loads((control.CONFIG / "journal/config.json").read_text())
+    assert journal["enabled"] is False and journal["peer_uid"] == int(run("id", "-u", control.API_USER).stdout)
+    owned(control.CONFIG / "journal/config.json", json.dumps({**journal, "enabled": True}).encode(), "root:tj-check")
+    run("systemctl", "start", "tradejournal-check-journal.socket")
+    status, body = owner_get("/owner/checks", control.API_USER, control.JOURNAL_RUN)
+    assert status == 200 and [c["check_id"] for c in json.loads(body)["checks"]] == [first["check_id"]], (status, body)
+    assert owner_get("/owner/checks", control.OWNER_WEB, control.JOURNAL_RUN)[0] is None, "trial UID reached the journal socket"
+    assert owner_get("/owner/checks", control.API_USER)[0] is None, "journal UID reached the trial's owner socket"
+    print("PASS: journal reader serves the journal UID on its own socket; neither frontend reaches the other's")
+
     control.stop()
     shutil.rmtree(DROPIN)
     assert not control.shadow_exchange(False)["enabled"]
@@ -286,7 +296,8 @@ def exercise(archive, scratch):
 
 def cleanup():
     run("systemctl", "stop", "tradejournal-check.socket", "tradejournal-check.service", "tradejournal-check-owner.socket",
-        "tradejournal-check-owner.service", *PROBE_UNITS, check=False)
+        "tradejournal-check-owner.service", "tradejournal-check-journal.socket", "tradejournal-check-journal.service",
+        *PROBE_UNITS, check=False)
     run("systemctl", "stop", "tradejournal-check-network.service", check=False)
     run("nft", "delete", "table", "inet", "tj_check", check=False)
     for name in control.UNITS:
@@ -294,7 +305,7 @@ def cleanup():
     shutil.rmtree(DROPIN, ignore_errors=True)
     run("systemctl", "daemon-reload", check=False)
     for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
-            control.OWNER_RUN, control.SHADOW, Path("/var/cache/tradejournal-check")):
+            control.OWNER_RUN, control.JOURNAL_RUN, control.SHADOW, Path("/var/cache/tradejournal-check")):
         shutil.rmtree(path, ignore_errors=True)
     for account in control.ACCOUNTS.values():
         run("userdel", account, check=False)

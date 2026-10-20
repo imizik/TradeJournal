@@ -1,0 +1,40 @@
+[Unit]
+Description=Read-only private journal view of the pre-trade check ledger; no network
+Requires=tradejournal-check-journal.socket
+After=tradejournal-check-journal.socket
+
+[Service]
+Type=exec
+User=tj-check
+Group=tj-check
+WorkingDirectory=/opt/tradejournal-check/backend
+ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/cloud_check_owner.py --config /etc/tradejournal-check/journal/config.json
+Environment=PYTHON_DOTENV_DISABLED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro
+BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/journal /run/tradejournal-check-journal
+# SQLite needs the ledger directory writable for its WAL index files while the
+# check service writes; the reader opens the file mode=ro with query_only.
+BindPaths=/var/lib/tradejournal-check
+ReadWritePaths=/var/lib/tradejournal-check
+InaccessiblePaths=-/srv -/mnt -/media
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+LockPersonality=true
+TasksMax=32
+MemoryMax=256M
+CPUQuota=50%
+TimeoutStopSec=10
+KillMode=control-group
+
+# No provider or database credential, environment file, restart policy or install section.
