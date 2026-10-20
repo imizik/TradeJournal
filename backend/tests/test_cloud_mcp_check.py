@@ -84,7 +84,7 @@ def harness(signing_key, tmp_path, monkeypatch):
         "expires_at": int(time.time()) + 600, **_jwks(signing_key.public_key())}))
     features_dir = tmp_path / "features"
     features_dir.mkdir()
-    config = {"enabled": True, "check_only": True, "issuer_url": ISSUER, "resource_url": RESOURCE,
+    config = {"enabled": True, "check_only": True, "provider_feed": "sip", "issuer_url": ISSUER, "resource_url": RESOURCE,
         "jwks_url": JWKS_URL, "jwks_file": str(keys), "client_id": CLIENT,
         "profiles": [{"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True}],
         "ledger_file": str(tmp_path / "ledger.db"), "features_pointer": str(features_dir / "current.json")}
@@ -546,3 +546,43 @@ def test_checks_positions_and_preopen_carry_earnings_and_vix(harness):
     assert "VIX 27.4: elevated volatility" in swing["caveats"] and swing["market"]["vix"]["value"] == 27.4
     assert pre["vix"]["value"] == 27.4 and pre["watchlist"][0]["market"]["earnings"]["date"] == "2026-10-12"
     assert pre["watchlist"][1]["market"]["earnings"] is None  # A fund: no earnings, not "missing".
+
+
+def test_iex_configuration_fails_closed_before_analysis_or_cache(harness, monkeypatch):
+    harness.configure(provider_feed="iex")
+    attempted = []
+    def forbidden(*args, **kwargs):
+        attempted.append(True)
+        raise AssertionError("IEX analysis must not be invoked")
+    monkeypatch.setattr(scalper, "build_scalp_analysis", forbidden)
+    with TestClient(harness.server().streamable_http_app()) as client:
+        result = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+    assert result["verdict"] == "insufficient_data"
+    assert result["live"]["price"] is None
+    assert not attempted and not harness.requests
+
+
+def test_provider_refuses_iex_or_unspecified_stock_feed_before_network():
+    requests = []
+    provider = service.Provider("test-key-id", "test-secret", timeout=3, transport=recorded(requests))
+    for params in ({"feed": "iex"}, {}):
+        with pytest.raises(service.ProviderError, match="full-market"):
+            provider.get("/v2/stocks/snapshots", params)
+    assert not requests
+
+
+def test_review_does_not_measure_old_checks_using_iex(harness, monkeypatch):
+    with TestClient(harness.server().streamable_http_app()) as client:
+        check = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+    harness.configure(provider_feed="iex")
+    from app.engine import alpaca
+    attempted = []
+    def forbidden(*args, **kwargs):
+        attempted.append(True)
+        raise AssertionError("Must not read IEX bars or cached history")
+    monkeypatch.setattr(alpaca, "fetch_minute_bars_live", forbidden)
+    before = len(harness.requests)
+    with TestClient(harness.server().streamable_http_app()) as client:
+        review = call(client, "review_checks", {}, harness.token())["structuredContent"]
+    assert review["checks"][0]["check_id"] == check["check_id"]
+    assert not attempted and len(harness.requests) == before

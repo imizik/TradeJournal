@@ -293,7 +293,7 @@ under the normal outside-market-hours procedure and check health.
 Verify in the actual service mount namespaces: API can write rolling files,
 tj-check can read but cannot write them, files are 0640 with group tj-check,
 and API still cannot read the check ledger. Verify fresh scanner provenance,
-stale-file fallback to direct IEX, unavailable responses, and tool call logging
+stale-file insufficient-data responses (IEX fallback removed October 20), and tool call logging
 using approved non-decision checks. Do not manufacture live shadow decisions.
 
 **Owner handoff:** Refresh tools in ChatGPT and confirm `candles` is listed.

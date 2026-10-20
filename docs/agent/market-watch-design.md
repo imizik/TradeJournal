@@ -11,6 +11,17 @@ rules, records and gates. Codex owns the shadow and check-service backend;
 selecting any slice below goes through the
 [Dots delivery board](dots-integration.md#current-delivery-board).
 
+## Full-market requirement — October 20 code change
+
+The live Jo Check tools no longer issue MW-1 input receipts or accept new reads
+against its IEX snapshots. They report `insufficient_data` with reason
+`full_market_snapshot_unavailable`. Existing committed retries remain recoverable.
+MW-1's frozen IEX protocol, historical ledger and offline evaluation are preserved;
+this change does not relabel its evidence as consolidated or migrate its publisher.
+Tradier stock-watch and Shadow evidence remain available. Full-market SPY/QQQ
+Market Watch requires a separately validated snapshot protocol before live reads
+can resume. This code change has not itself activated or deployed anything.
+
 ## What Isaac wants
 
 Jo should pay attention to the market on its own, form a view of the day from
