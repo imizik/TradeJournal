@@ -857,3 +857,92 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                   "without an imported export the session close is unknown, so slots after an early close show no_read_seen",
                        "independence-unverified: reads are advice to Isaac and never feed Shadow Isaac or S1",
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}
+
+
+def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: str | Path | None, days: list[date], *,
+                       hours, now: datetime, outcome_store=None) -> dict:
+    """Jo's expected scheduled reads per session: publisher packet, read seen, measured receipt delay.
+
+    Built only from existing records: #315's publisher receipts, the read links of
+    ``session_report`` and the exchange calendar (``hours(day)`` → the
+    calendar row or None). No lateness tolerance is applied; a delay is a
+    number. ``store=None`` or a missing receipt directory means that evidence is
+    unknown, never that nothing happened.
+    """
+    import market_watch_schedule as schedule
+
+    receipts = Path(receipt_directory) if receipt_directory else None
+    receipts_available = bool(receipts and receipts.is_dir())
+    linked = session_report(store, outcome_store)["sessions"] if store is not None else {}
+    exported = [r for e in (outcome_store.imported_exports() if outcome_store is not None else []) for r in e["reads"]]
+    sessions = []
+    for day in days:
+        session = day.isoformat()
+        try:
+            row = hours(day)
+        except Exception:
+            log.exception("Exchange calendar unavailable for %s", session)
+            row = None
+        known = isinstance(row, dict) and row.get("status") in ("open", "closed")
+        report = linked.get(session, {})
+        reads = {r["read_id"]: r for r in exported if r["session_date"] == session}
+        reads.update({n["read_id"]: n for n in (store.records("read_notice", session) if store is not None else [])})
+        by_slot = {r["slot"]: r for r in report.get("scheduled_reads", [])}
+        slot_rows = []
+        for slot in WAKE_POLICY["jo_scheduled_local_times"]:
+            at = _at_local(day, slot)
+            if not known:
+                expected, reason = None, "exchange_calendar_unavailable"
+            elif row["status"] == "closed":
+                expected, reason = False, "exchange_closed"
+            elif _local_minutes(slot) >= row["close"]:
+                expected, reason = False, "after_close"
+            else:
+                expected, reason = True, None
+            prep = f"{(_local_minutes(slot) - schedule.READ_MINUTES) // 60:02d}-{(_local_minutes(slot) - schedule.READ_MINUTES) % 60:02d}"
+            packet = {"slot": prep, "status": "unknown" if not receipts_available else "no_receipt", "attempts": 0,
+                      "recorded_at": None, "snapshot_id": None, "error_code": None, "quality_flags": []}
+            if receipts_available:
+                try:
+                    history = schedule._attempt_records(receipts / session / prep)
+                except (OSError, ValueError):
+                    log.exception("Publisher receipts unreadable for %s %s", session, prep)
+                    history, packet["status"] = [], "unreadable"
+                if history:
+                    latest = history[-1]
+                    packet.update({"status": latest.get("status"), "attempts": max(r.get("attempt", 0) for r in history),
+                                   "recorded_at": latest.get("recorded_at"), "snapshot_id": latest.get("snapshot_id"),
+                                   "error_code": latest.get("error_code"), "quality_flags": latest.get("quality_flags", [])})
+            read_id, link = (by_slot.get(slot) or {}).get("read_id"), (by_slot.get(slot) or {}).get("attribution")
+            read = reads.get(read_id) if read_id else None
+            received = read["received_at"] if read else None
+            # A read near a slot that was not expected stays visible but never makes the slot "read".
+            status = ("not_expected" if expected is False else "unknown" if store is None else "read_seen" if read_id
+                      else "upcoming" if at > now else "unknown" if expected is None else "no_read_seen")
+            if packet["status"] == "no_receipt" and at - timedelta(minutes=schedule.READ_MINUTES) > now:
+                packet["status"] = "not_due"
+            slot_rows.append({"slot": slot, "scheduled_at": _iso(at), "expected": expected, "not_expected_reason": reason,
+                              "operation_id": f"{WAKE_POLICY['jo_scheduled_operation_prefix']}:{session}:{slot}",
+                              "packet": packet, "status": status, "read_id": read_id, "attribution": link,
+                              "received_at": received,
+                              "receipt_delay_seconds": round((parse_time(received) - at).total_seconds()) if received else None,
+                              "read_used_slot_packet": (read.get("snapshot_id") == packet["snapshot_id"]
+                                                        if read and packet["snapshot_id"] else None)})
+        credited = {r["read_id"] for r in slot_rows if r["read_id"]}
+        wake_reads = {w["read_id"]: w["wake_id"] for w in report.get("wakes", []) if w["read_id"]}
+        others = sorted(({"read_id": rid, "received_at": r["received_at"], "event_wake_id": wake_reads.get(rid)}
+                         for rid, r in reads.items() if rid not in credited), key=lambda r: r["received_at"])
+        sessions.append({"session_date": session,
+                         "hours": ({"status": row["status"], "open": row.get("open"), "close": row.get("close")} if known else None),
+                         "slots": slot_rows, "reads_not_credited_to_a_slot": others,
+                         "summary": {k: sum(r["status"] == k for r in slot_rows)
+                                     for k in ("read_seen", "no_read_seen", "upcoming", "not_expected", "unknown")}})
+    return {"checked_at": _iso(now), "reads_available": store is not None, "receipts_available": receipts_available,
+            "attribution_window_minutes": WAKE_POLICY["read_attribution_minutes"], "sessions": sessions,
+            "limits": ["received_at is when the Check service committed the read, not when Jo started; the delay is measured from the slot time",
+                       "no lateness tolerance is applied; delays are numbers only",
+                       f"without an exported operation ID a read is linked by time: the first unclaimed read within {WAKE_POLICY['read_attribution_minutes']} minutes "
+                       "of the slot and before the next wake; a later read is listed as not credited and the slot shows no read seen",
+                       "without an export, any read in the window is linked by time, so a manual or setup-context read there can stand in for a missed scheduled read",
+                       "a slot with no read seen has no visible cause: Jo's hosted run history is outside the app",
+                       "a publisher receipt proves the packet attempt, not that Jo was woken"]}
