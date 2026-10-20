@@ -3,7 +3,12 @@ import { apiUrl } from "./api";
 export type BriefEvidence = { id: string; kind: "fact" | "belief" | "estimate"; text: string; source: string; observed_at: string | null; retrieved_at: string };
 /** An exact saved memory revision a packet referenced; later corrections do not replace it. */
 export type BriefMemory = { id: string; memory_id: string; revision: number; status: string; symbol: string | null; received_at: string; redacted_at: string | null;
-  body: { kind?: "statement" | "thesis" | "preference" | "lesson"; original_text?: string; interpretation?: string | null; source?: string } };
+  body: { kind?: MemoryKind; original_text?: string; interpretation?: string | null; source?: MemorySource; source_reference?: string | null } };
+export type MemoryKind = "statement" | "thesis" | "preference" | "lesson";
+export type MemorySource = "owner_statement" | "owner_import" | "jo_proposal";
+export type MemoryStatus = "proposed" | "active" | "retired";
+export type MemorySave = { operation_id: string; memory_id?: string; base_revision?: number; kind: MemoryKind; symbol: string | null; original_text: string;
+  interpretation: string | null; source: MemorySource; source_reference?: string | null; status: MemoryStatus; owner_confirmed: boolean };
 export type BriefItem = { symbol: string | null; what_matters: string; why_personal: string; what_changed: string; contrary_evidence: string; watch_out: string; evidence_ids: string[] };
 export type MorningView = {
   day: string; state: "ready" | "waiting" | "missing" | "unavailable" | "redacted" | "closed";
@@ -28,4 +33,31 @@ export async function saveBriefFeedback(id: string, body: { opened?: boolean; ra
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error("Feedback was not saved. Please retry.");
   return response.json();
+}
+
+/** Latest revision of each memory with this status. */
+export async function listMemories(status: MemoryStatus | "retired", signal?: AbortSignal): Promise<{ items: BriefMemory[]; limit: number }> {
+  const response = await fetch(apiUrl(`/jo/memories?status=${status}&limit=100`), { cache: "no-store", signal });
+  if (!response.ok) throw new Error("Saved memories could not load. Nothing was changed.");
+  return response.json();
+}
+
+export class MemorySaveError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+
+/** Appends one owner-confirmed revision. A 409 means the memory changed since it was loaded. */
+export async function saveMemory(body: MemorySave): Promise<BriefMemory> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/jo/memories"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    throw new Error("Couldn’t reach the app, so it’s unknown whether this saved. The list has been reloaded; check it before saving again. An unchanged retry cannot save twice.");
+  }
+  if (response.ok) return response.json();
+  const detail = await response.json().then((body) => typeof body?.detail === "string" ? body.detail : "", () => "");
+  const message = response.status === 409 && detail.startsWith("Operation ID") ? "This retry did not match the earlier attempt. The list has been reloaded; check whether the first version saved."
+    : response.status === 409 ? "This memory changed since the page loaded. The list has been reloaded; check it and try again."
+    : response.status === 422 ? "The app refused this memory as invalid. Check the wording and symbol."
+    : response.status >= 500 ? "The app had an error, so it’s unknown whether this saved. The list has been reloaded; check it before saving again. An unchanged retry cannot save twice."
+    : `Not saved (error ${response.status}).`;
+  throw new MemorySaveError(message, response.status);
 }

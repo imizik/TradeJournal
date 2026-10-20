@@ -317,9 +317,18 @@ stays a plain source label. Later corrections or retirements do not change an ol
 brief. A packet with no memories says so under the focus. Ask Jo includes the
 selected priority's memory revision IDs.
 
-Not yet built for this roadmap: owner save/correct/retire and inferred-proposal
-review in the app (private owner `/jo/memories` routes exist; no screen uses
-them), and returning from Charts with the brief/symbol/evidence still selected.
+**Saved memories** (`/morning/memories`, owner-only, linked from the brief) lists
+Jo's proposals, active and retired memories through the existing owner
+`/jo/memories` routes. The owner can accept a proposal (as-is or edited), decline
+it, correct an active memory, retire one with a confirming click, or add a new
+belief. Every action appends an owner-confirmed revision and keeps the original
+source and reference; nothing in the screen redacts or deletes. An uncertain save
+keeps its operation ID only for an identical retry and reloads the list first;
+a changed request gets a new ID; revision conflicts close the editor on the newer
+version. Active memories reach Jo only through the next morning packet (latest 30).
+
+Not yet built for this roadmap: returning from Charts with the brief/symbol/
+evidence still selected.
 Usefulness still rests on the ten scheduled mornings and owner ratings.
 
 The `jo_briefing_submit` tool description carries the writing guidance for future
