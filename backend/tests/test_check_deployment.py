@@ -543,3 +543,13 @@ def test_upgrade_adds_the_journal_reader_only_with_unit_approval_and_disabled(st
     assert journal["enabled"] is False and journal["peer_uid"] == 3001
     assert (control.CONFIG / "owner/config.json").read_bytes() == owner_before  # The trial's grant is untouched.
     assert not any(c[0] == "systemctl" and c[1] in ("start", "enable", "restart") for c in host)
+
+
+def test_upgrade_refuses_a_leftover_journal_unit_before_anything_moves(staged, host, monkeypatch):
+    approved = older_install(staged, host, monkeypatch)
+    (control.UNIT_DIR / "tradejournal-check-journal.service.d").mkdir()
+    runtime = sorted(p.name for p in (control.ROOT / "backend").iterdir())
+    with pytest.raises(ValueError, match="pre-existing check unit"):
+        control.upgrade(staged, approved, unit_approvals=tuple(control.digest(staged / "units" / u) for u in JOURNAL_UNITS))
+    assert sorted(p.name for p in (control.ROOT / "backend").iterdir()) == runtime
+    assert not (control.CONFIG / "journal").exists() and not (control.ROOT / "previous-runtime").exists()

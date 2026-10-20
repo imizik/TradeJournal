@@ -339,7 +339,8 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
     mid-swap (SIGKILL, power loss) every action refuses on inventory drift; move
     the partial ROOT/backend aside and move previous-runtime/<newest>/backend
     back to ROOT/backend, restore saved previous-runtime/<newest>/units files
-    into UNIT_DIR and run daemon-reload before inventory verification. Changed
+    into UNIT_DIR, delete any unit the old record lacks (and a new
+    CONFIG/journal) and run daemon-reload before inventory verification. Changed
     units require --approve-unit per hash; pinned SQL changes retain their own approval.
     """
     record = installed()
@@ -368,6 +369,13 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
         check=False).stdout.decode().strip() not in {"inactive", "failed"}]
     if running:
         raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
+    # A unit added by this upgrade gets the same collision checks as a fresh install.
+    for unit in [u for u in changed_units if u not in record["units"]]:
+        if (UNIT_DIR / unit).exists() or (UNIT_DIR / unit).is_symlink() or (UNIT_DIR / (unit + ".d")).exists() \
+                or old.run("systemctl", "cat", unit, check=False).returncode == 0:
+            raise ValueError("Refuse a pre-existing check unit: " + unit)
+    if not (CONFIG / "journal").exists() and (CONFIG / "journal").is_symlink():
+        raise ValueError("Refuse a symlinked journal config")
     for name in additions:  # Additive database change first: on refusal nothing else has moved.
         apply_additive(name, (bundle / "config" / name).read_bytes())
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
@@ -392,8 +400,8 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
             replacement.replace(UNIT_DIR / unit)
         if not (CONFIG / "journal").exists():
             # Additive and disabled, as on a fresh install; nothing starts.
+            added_journal = True  # Set first so a partial directory is rolled back too.
             journal_config(json.loads((CONFIG / "owner/config.json").read_text())["ledger_path"])
-            added_journal = True
         if changed_units:
             old.run("systemctl", "daemon-reload")
         settings = dict(record["settings"])
@@ -419,7 +427,7 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
             else:
                 (UNIT_DIR / unit).unlink(missing_ok=True)
         if added_journal:
-            shutil.rmtree(CONFIG / "journal")
+            shutil.rmtree(CONFIG / "journal", ignore_errors=True)
         if changed_units:
             old.run("systemctl", "daemon-reload")
         raise
@@ -457,9 +465,10 @@ def check():
 
 def stop():
     old.root_only()
-    json.loads(exact(RECORD).read_text())  # Fixed names stay stoppable after drift.
-    # Units an older installation never had (the journal reader) are skipped, not failed.
-    units = [u for u in UNITS if (UNIT_DIR / u).exists()]
+    # Fixed names stay stoppable after drift.
+    record = json.loads(exact(RECORD).read_text())
+    # Units an older installation never had (the journal reader) are skipped; recorded ones never are.
+    units = [u for u in UNITS if u in record.get("units", {}) or (UNIT_DIR / u).exists()]
     timers = [u for u in units if u.endswith(".timer")]
     results = [old.run("systemctl", "stop", *group, check=False) for group in (
         timers, [u for u in units if u.endswith(".socket")], [u for u in units if u.endswith(".service")])]
