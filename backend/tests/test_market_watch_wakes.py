@@ -549,7 +549,7 @@ def test_no_wakes_outside_window_or_on_closed_days(env):
     assert sent == [] and runner.store.records("wake") == []
 
 
-def test_check_service_writes_notice_to_outbox_only_when_configured(harness, tmp_path):
+def test_check_service_refuses_new_iex_notice_but_recovers_committed_handoff(harness, tmp_path):
     public, outbox = tmp_path / "market-public", tmp_path / "market-outbox"
     public.mkdir()
     outbox.mkdir()
@@ -558,9 +558,22 @@ def test_check_service_writes_notice_to_outbox_only_when_configured(harness, tmp
     harness.configure(market_watch_snapshots_dir=str(public), market_watch_outbox_dir=str(outbox))
     scope = "check:read market-watch:read market-watch:submit"
     with TestClient(harness.server(now=now).streamable_http_app()) as client:
-        served = call(client, "market_watch_snapshot", {}, harness.token(scope=scope))["structuredContent"]
-        req = request(served["input_id"])
+        unavailable = call(client, "market_watch_snapshot", {}, harness.token(scope=scope))["structuredContent"]
+        assert unavailable["status"] == "insufficient_data" and "input_id" not in unavailable
+        # Seed an old input, then verify the live boundary cannot create a new
+        # IEX read or delivery notice. The offline ledger retains its protocol.
+        config = json.loads(harness.config_path.read_text())
+        actor = config["profiles"][0]["id"]
+        legacy = MarketWatchLedger(Ledger(config["ledger_file"]))
+        served = legacy.serve(actor, snapshot_at(now), lambda: now)
+        req = request(served["input_id"], previous_read_id=None, correction_of_read_id=None, model_id=None)
+        refused = call(client, "market_watch_submit", req, harness.token(scope=scope))["structuredContent"]
+        assert refused["status"] == "insufficient_data" and list(outbox.iterdir()) == []
+        # Model an immutable submission committed before the full-market rule;
+        # its original handoff remains recoverable after a transport failure.
+        legacy.submit(actor, req, lambda: now)
         receipt = call(client, "market_watch_submit", req, harness.token(scope=scope))["structuredContent"]
+        assert receipt["replayed"]
         files = sorted(p.name for p in outbox.iterdir())
         assert files == [f"read-{receipt['read_id']}.json"]
         (outbox / files[0]).unlink()  # a lost handoff is recovered by the identical retry
