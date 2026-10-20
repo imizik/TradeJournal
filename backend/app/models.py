@@ -595,6 +595,31 @@ class CaptureLink(SQLModel, table=True):
     unlinked_at: Optional[datetime] = None  # UTC
 
 
+class CheckLink(SQLModel, table=True):
+    """A saved Jo check (the Check service's ``chk_…`` ID) linked by the owner to
+    the journal activity that followed it, in the CaptureLink style: anchored in
+    a fill's source identity (account plus ``raw_email_id``), resolved to its
+    current trade on every read. ``target`` says whether the owner chose the
+    whole trade (its first entry fill) or one fill. The check itself lives in
+    the Check ledger and is never copied or edited here; a link asserts nothing
+    about whether the advice was followed. Unlinking stamps ``unlinked_at``."""
+
+    __tablename__ = "check_link"
+    __table_args__ = (
+        Index("uq_check_link_active", "check_id", "account_id", "source_key", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    check_id: str = Field(index=True)
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)  # Fill.raw_email_id of the anchor fill
+    target: str  # trade | fill
+    method: str  # possible_match | manual
+    linked_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    unlinked_at: Optional[datetime] = None  # UTC
+
+
 class TradeCaptureNote(SQLModel, table=True):
     """Something added to a capture later, never replacing it: a transcript
     correction or a reflection. Always shown as written after the capture."""

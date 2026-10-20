@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { advisorStamp } from "./AdvisorReceiptView";
+import CheckActivity from "./CheckActivity";
 
 type Verdict = "go" | "wait" | "pass" | "insufficient_data";
 type Summary = { check_id: string; received_at: string; ticker: string; side: string; instrument: string; option_type: string | null;
@@ -122,7 +123,7 @@ function CohortLine({ cohort }: { cohort: Cohort }) {
   </li>;
 }
 
-function CheckDetail({ value }: { value: Detail }) {
+function CheckDetail({ value, journal }: { value: Detail; journal: boolean }) {
   const { answer } = value;
   return <div className="space-y-3 border-t pt-3" data-testid="pretrade-check-detail">
     <div className="flex flex-wrap items-center gap-2"><Pill verdict={answer.verdict} /><span className="font-medium">{idea(value.idea as never)}</span>
@@ -148,6 +149,9 @@ function CheckDetail({ value }: { value: Detail }) {
     {answer.caveats.length > 0 && <section aria-label="Caveats"><h4 className="font-medium">Caveats</h4>
       <ul className="list-disc pl-5 text-muted-foreground">{answer.caveats.map((c, i) => <li key={i} className="break-words">{c}</li>)}</ul></section>}
     {value.result && <AfterCheck result={value.result} />}
+    {journal && <CheckActivity checkId={value.check_id} facts={{ ticker: value.idea.ticker as string | null, received_at: value.received_at,
+      instrument: value.idea.instrument as string | null, option_type: value.idea.option_type as string | null,
+      strike: value.idea.strike, expiration: value.idea.expiration as string | null }} />}
     <section aria-label="Jo's note"><h4 className="font-medium">Jo</h4>
       {value.model_verdict ? <p className="break-words"><Pill verdict={value.model_verdict.verdict} /> {value.model_verdict.summary} <span className="text-muted-foreground">({advisorStamp(value.model_verdict.received_at)})</span></p>
         : <p className="text-muted-foreground">Jo didn&apos;t attach a note.</p>}
@@ -157,7 +161,8 @@ function CheckDetail({ value }: { value: Detail }) {
   </div>;
 }
 
-export default function PretradeChecks() {
+// journal: rendered by the private journal, which adds what the journal recorded afterwards (Dots step 5).
+export default function PretradeChecks({ journal = false }: { journal?: boolean }) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [grades, setGrades] = useState<Grades | null>(null);
   const [error, setError] = useState("");
@@ -206,7 +211,17 @@ export default function PretradeChecks() {
     return () => { active = false; sequence.current += 1; controller.current?.abort(); };
   }, [reload]);
 
-  if (dormant) return null;
+  // ?check=chk_… (from a trade's page) opens that check once the list has loaded.
+  const wanted = useRef<string | null>(null);
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get("check");
+    if (listing && !loading && value && /^chk_[0-9a-f-]{36}$/.test(value) && wanted.current !== value) { wanted.current = value; void toggle(value); }
+  }, [listing, loading, toggle]);
+
+  if (dormant) return journal ? <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="pretrade-checks-dormant">
+    <h2 className="font-semibold">Pre-trade checks</h2>
+    <p className="mt-1">Saved advice isn&apos;t connected to the journal yet, so Jo&apos;s checks and what happened after them can&apos;t be shown here.</p>
+  </section> : null;
   return <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="pretrade-checks" aria-labelledby="pretrade-checks-heading">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 id="pretrade-checks-heading" className="font-semibold">Pre-trade checks</h2>
@@ -216,6 +231,11 @@ export default function PretradeChecks() {
     {loading && <p role="status" className="mt-2">Loading saved checks…</p>}
     {error && <p role="alert" className="mt-2 break-words">{error}</p>}
     {listing && listing.checks.length === 0 && <p className="mt-2">No checks yet. Ask Jo for a pre-trade check during market hours.</p>}
+    {listing && open && !listing.checks.some(c => c.check_id === open) && <div className="border-t pb-3" data-testid="pretrade-check-linked">
+      {!detail && !detailError && <p role="status">Opening the saved check…</p>}
+      {detailError && <p role="alert" className="break-words">{detailError}</p>}
+      {detail && <CheckDetail value={detail} journal={journal} />}
+    </div>}
     {listing && listing.checks.length > 0 && <>
       <ul className="mt-2 divide-y">{listing.checks.map(c => <li key={c.check_id} data-testid="pretrade-check-row">
         <button type="button" onClick={() => void toggle(c.check_id)} aria-expanded={open === c.check_id}
@@ -228,7 +248,7 @@ export default function PretradeChecks() {
         {open === c.check_id && <div className="pb-3">
           {!detail && !detailError && <p role="status">Opening the saved check…</p>}
           {detailError && <p role="alert" className="break-words">{detailError}</p>}
-          {detail && <CheckDetail value={detail} />}
+          {detail && <CheckDetail value={detail} journal={journal} />}
         </div>}
       </li>)}</ul>
       {listing.total > listing.checks.length && <p className="mt-1 text-xs text-muted-foreground">Showing the newest {listing.checks.length} of {listing.total}.</p>}

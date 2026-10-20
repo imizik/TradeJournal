@@ -407,6 +407,78 @@ No extra candle reads may be inserted before that shadow commit. Scanner
 rules, universe and task schedule are unchanged. Natural SH-6 acceptance
 remains governed by the [S1 contract](shadow-s1-contract.md#acceptance).
 
+## Saved advice links to later journal activity — October 20, 2026
+
+Dots reliability step 5. The October 19–20 audit found Jo's NBIS advice
+("conditional plan, not a Go") was never tied to the NBIS Oct 23 $180 call
+lifecycle the journal recorded afterwards. The private journal now shows, in
+each saved check on `/advisor-review` (section "Journal afterwards") and on
+each trade page ("Saved advice"):
+
+- **Linked by you:** explicit owner links in the new additive `check_link`
+  table ([check_links.py](../../backend/app/engine/check_links.py)), in the
+  `CaptureLink` style: anchored on a fill's source identity (account plus
+  `raw_email_id`), either a whole trade (its first entry) or one fill, resolved
+  to the current trade on every read. Unlink stamps `unlinked_at`; the row and
+  its history stay. The check in the Check ledger is never copied or edited.
+- **Later activity — review needed:** trades in the approved scope (Webull
+  excluded, as for Jo's history), same underlying, entered after the check
+  (an entry in the check's own minute, or a time-less entry on its day, is
+  flagged "order unclear") within five New York calendar days, matching every contract field the check named. A possible
+  match is never labelled followed or overrode, never marks advice outdated,
+  and is never linked automatically. A position opened before the check is not
+  listed even if it was managed afterwards.
+- P&L shown is the engine's `trade.realized_pnl`; nothing is recomputed.
+- A check without a ticker or time (redacted or incomplete) shows no matches;
+  a check the reader can't return shows no journal section. A trade page's
+  link opens its check even when it is older than the newest 50 listed.
+
+The journal page supplies the check's facts from the saved check it displays;
+the journal backend never reads the Check ledger. Out of scope: automatic
+reassessment, any new Jo or assistant access (`position_check` unchanged),
+followed-versus-overrode grading of links, notifications and assumed links.
+
+**Activation (owner decision; nothing is switched on by the merge).** Until
+then both surfaces say "Saved advice isn't connected to the journal yet". The
+production private frontend runs the `private_legacy` profile (no
+`/etc/tradejournal/access-owner.env`, read-only check October 20, 2026).
+
+1. **Upgrade the Check runtime first.** `cloud_check_owner.py` ships in the
+   isolated Check runtime, not the app release, and the installed reader
+   refuses unknown config keys. Stage the reviewed bundle, stop all Check
+   units and run `check_control.py upgrade` with its exact manifest hash, as
+   for the Tradier rollout above. Adding `journal_peer_uid` before this would
+   stop the reader and the trial's `/advisor-review` list.
+2. **The grant:** the private journal frontend becomes a **second read-only
+   peer of the check owner reader**. Set `journal_peer_uid` in
+   `/etc/tradejournal-check/owner/config.json` to the frontend's UID. That
+   frontend runs as `tradejournal`, the account the private API, workers and
+   sync jobs also use, so peer admission by UID admits all of them; it stays
+   GET-only over owner data. Give socket access without touching the advisor
+   frontend's group: for example a dedicated socket group set by a reviewed
+   drop-in on `tradejournal-check-owner.socket`, granted to the journal
+   frontend through `SupplementaryGroups=` on `tradejournal-frontend.service`
+   only. Restart the reader (it refuses config drift while running).
+3. In a drop-in for `tradejournal-frontend.service` (not `access-owner.env`,
+   which would switch the profile to `owner` and hide the journal section) set
+   `TJ_CHECK_OWNER_ENABLED=true`, `TJ_CHECK_OWNER_JOURNAL=true`,
+   `TJ_CHECK_OWNER_SOCKET=/run/tradejournal-check-owner/owner.sock` and
+   `TJ_CHECK_OWNER_SOCKET_UID=0`, then restart the frontend. Without
+   `TJ_CHECK_OWNER_JOURNAL` a `private_legacy` frontend never reads checks;
+   assistant profiles stay refused.
+4. The `check_link` migration ships with the normal app deploy (backup first);
+   it only creates the table.
+5. Verify: `/advisor-review` lists checks in the journal, one real check shows
+   its later activity, a link and unlink round-trip, and the trade page shows
+   the link.
+
+Turning it off: remove the frontend drop-in and restart the frontend. The
+journal then shows "isn't connected" again. Removing `journal_peer_uid` and the
+socket grant (then restarting the reader) withdraws the grant itself; with only
+that done and the drop-in still present, the journal shows "unavailable"
+instead. Either way the trial owner page is unchanged and saved links stay in
+`check_link`, untouched.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his

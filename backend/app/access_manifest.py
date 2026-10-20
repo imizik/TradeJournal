@@ -1,6 +1,10 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /jo/check-links/for-trade/{trade_id}",
+    "GET /jo/check-links/{check_id}/activity",
+    "POST /jo/check-links/{check_id}/link",
+    "POST /jo/check-links/{check_id}/links/{link_id}/unlink",
     "GET /jo/morning",
     "GET /jo/conditional-plans",
     "GET /jo/market-reads",

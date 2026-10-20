@@ -10,6 +10,7 @@ import { ChartCandlestick } from "lucide-react";
 import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
 import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
+import TradeAdvice from "@/components/TradeAdvice";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -154,6 +155,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
         <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
       </section>}
+
+      <TradeAdvice tradeId={id} />
 
       <div className="rounded-lg border bg-card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
