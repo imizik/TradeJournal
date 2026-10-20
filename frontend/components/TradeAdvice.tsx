@@ -10,18 +10,19 @@ type Saved = { check_id: string; received_at: string; idea: Record<string, strin
 const LABEL: Record<string, string> = { go: "Go", wait: "Wait", pass: "Pass", insufficient_data: "Not enough data" };
 const DORMANT = "Pre-trade check review is not switched on yet";
 
-async function readCheck(url: string): Promise<{ state: "ok"; body: Saved } | { state: "dormant" | "unavailable" }> {
+async function readCheck(url: string): Promise<{ state: "ok"; body: Saved } | { state: "dormant" | "unavailable" | "forbidden" }> {
   try {
     const response = await fetch(url, { cache: "no-store", redirect: "error" });
     const body = await response.json();
     if (response.status === 503 && body.detail === DORMANT) return { state: "dormant" };
+    if (response.status === 403) return { state: "forbidden" };
     return response.ok ? { state: "ok", body } : { state: "unavailable" };
   } catch { return { state: "unavailable" }; }
 }
 
 export default function TradeAdvice({ tradeId }: { tradeId: string }) {
   const [links, setLinks] = useState<TradeCheckLink[] | null>(null);
-  const [connected, setConnected] = useState<"ok" | "dormant" | "unavailable" | null>(null);
+  const [connected, setConnected] = useState<"ok" | "dormant" | "unavailable" | "forbidden" | null>(null);
   const [checks, setChecks] = useState<Record<string, Saved | null>>({});
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export default function TradeAdvice({ tradeId }: { tradeId: string }) {
     return () => { active = false; };
   }, [tradeId]);
 
-  if (links === null && connected === null) return null;
+  if ((links === null && connected === null) || connected === "forbidden") return null;
   return <section aria-label="Saved advice" data-testid="trade-advice" className="rounded-lg border bg-card p-5 text-sm">
     <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Saved advice</h2>
     {connected === "dormant" && <p>Saved advice isn&apos;t connected to the journal yet{links?.length ? <>; {links.length} saved check{links.length === 1 ? " is" : "s are"} linked and will show once it is</> : null}.</p>}

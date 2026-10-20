@@ -1,7 +1,7 @@
 """Saved-advice links (Dots step 5): explicit owner links and clearly labelled
 possible later activity. A match never claims the advice was followed."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -149,6 +149,21 @@ def test_a_check_naming_no_contract_matches_any_nbis_option_and_a_same_minute_en
     _rebuild_trades(db, "test")
     found = check_links.possible(db, facts(instrument=None, option_type=None, strike=None, expiration=None))
     assert [after for _, after in found] == ["same_minute", "after"]
+
+
+def test_date_only_entries_after_the_check_day_are_after_and_same_day_is_unclear(db):
+    fill(db, "buy_to_open", 1, 500, "2026-10-19T00:00")
+    fill(db, "buy_to_open", 1, 300, "2026-10-20T00:00", option_type="put", strike=170, expiration=OCT23)
+    fill(db, "buy_to_open", 1, 300, "2026-10-18T00:00", option_type="put", strike=160, expiration=OCT23)
+    _rebuild_trades(db, "test")
+    found = check_links.possible(db, facts(instrument=None, option_type=None, strike=None, expiration=None))
+    assert [(trade.opened_at.day, after) for trade, after in found] == [(19, "same_day"), (20, "after")]
+
+
+def test_window_end_is_five_new_york_days_across_daylight_saving(db):
+    # 09:30 EDT on Oct 30 → 09:30 EST on Nov 4 (14:30 UTC), not 08:30.
+    body = check_links.activity(db, facts(received_at="2026-10-30T13:30:00Z"))
+    assert body["window"]["to"] == int(datetime(2026, 11, 4, 14, 30, tzinfo=UTC).timestamp())
 
 
 def test_no_fills_means_no_activity(db):

@@ -6,7 +6,7 @@ export type CheckFacts = { ticker?: string | null; received_at?: string | null; 
 export type ActivityFill = { fill_id: string; role: string; side: string; contracts: number; price: number; executed_at: number | null };
 export type ActivityTrade = { trade_id: string; account: string | null; account_type: string | null; contract: string; status: string;
   contracts: number; opened_at: number | null; closed_at: number | null; realized_pnl: number | null;
-  timing: "after" | "same_minute" | null; fills: ActivityFill[] };
+  timing: "after" | "same_minute" | "same_day" | null; fills: ActivityFill[] };
 export type LinkedActivity = { link_id: string; target: "trade" | "fill"; method: string; linked_at: number;
   trade: ActivityTrade | null; fill_id: string | null; note?: string };
 export type Activity = { check_id: string; window: { from: number; to: number; days: number }; linked: LinkedActivity[];

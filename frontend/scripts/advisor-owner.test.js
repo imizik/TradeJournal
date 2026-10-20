@@ -178,6 +178,10 @@ test('check BFF reads its own socket, fixed paths and exact check IDs only', asy
 
 test('private journal reads saved checks without an app session; advisor review stays owner-only', async () => fixture(async ({ server, socket, calls }) => {
   checkSocket(socket); profile.value = 'private_legacy'; const seen = [];
+  server.on('request', () => seen.push('without-journal-setting'));
+  const unset = await loaded.exports.checkOwnerList(new Request('http://journal/api/check-owner/checks'));
+  assert.equal(unset.status, 503); assert.match(await unset.text(), /not switched on yet/); assert.deepEqual(seen, []);
+  server.removeAllListeners('request'); process.env.TJ_CHECK_OWNER_JOURNAL = 'true';
   server.on('request', (request, response) => { seen.push(request.url); response.setHeader('Content-Type', 'application/json'); response.end(request.url === '/owner/checks' ? checkList : checkDetail); });
   const list = await loaded.exports.checkOwnerList(new Request('http://journal/api/check-owner/checks'));
   assert.equal(list.status, 200); assert.equal(await list.text(), checkList); assert.equal(calls(), 0);

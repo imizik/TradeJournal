@@ -231,6 +231,11 @@ export default function PretradeChecks({ journal = false }: { journal?: boolean 
     {loading && <p role="status" className="mt-2">Loading saved checks…</p>}
     {error && <p role="alert" className="mt-2 break-words">{error}</p>}
     {listing && listing.checks.length === 0 && <p className="mt-2">No checks yet. Ask Jo for a pre-trade check during market hours.</p>}
+    {listing && open && !listing.checks.some(c => c.check_id === open) && <div className="border-t pb-3" data-testid="pretrade-check-linked">
+      {!detail && !detailError && <p role="status">Opening the saved check…</p>}
+      {detailError && <p role="alert" className="break-words">{detailError}</p>}
+      {detail && <CheckDetail value={detail} journal={journal} />}
+    </div>}
     {listing && listing.checks.length > 0 && <>
       <ul className="mt-2 divide-y">{listing.checks.map(c => <li key={c.check_id} data-testid="pretrade-check-row">
         <button type="button" onClick={() => void toggle(c.check_id)} aria-expanded={open === c.check_id}

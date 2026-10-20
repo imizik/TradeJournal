@@ -94,13 +94,14 @@ def _contract_matches(facts: CheckFacts, trade: Trade) -> bool:
 
 
 def _after(facts: CheckFacts, trade: Trade) -> str | None:
-    """after | same_minute when the entry follows the check inside the window, else None."""
+    """after | same_minute | same_day when the entry follows the check inside the window, else None."""
     wall = trade.opened_at
     if wall is None or wall > facts.received_ny + WINDOW:
         return None
     if not reliable(wall):
-        # A date without a time: only the check's own day is close enough to show, and its order is unclear.
-        return "same_minute" if wall.date() == facts.received_ny.date() else None
+        # A date without a time: a later day is after the check; the check's own day leaves the order unclear.
+        day = facts.received_ny.date()
+        return "after" if wall.date() > day else "same_day" if wall.date() == day else None
     when = timing(facts.received_utc, wall)
     return {"pre_entry": "after", "unverified": "same_minute"}.get(when)
 
@@ -177,7 +178,7 @@ def activity(db: Session, facts: CheckFacts) -> dict:
         linked.append(entry)
     return {
         "check_id": facts.check_id,
-        "window": {"from": int(facts.received_at.timestamp()), "to": int((facts.received_at + WINDOW).timestamp()),
+        "window": {"from": int(facts.received_at.timestamp()), "to": int((facts.received_ny + WINDOW).replace(tzinfo=NY).timestamp()),
                    "days": WINDOW.days},
         "linked": linked,
         "possible": [_trade_row(trade, accounts.get(trade.account_id), fills[trade.id], after) for trade, after in candidates],

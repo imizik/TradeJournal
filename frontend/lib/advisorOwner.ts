@@ -82,7 +82,9 @@ async function ownerRead(request: Request, route: string, valid: (value: Record<
   try {
     const config = accessConfig();
     // The private journal (no app sessions; never public) may read saved checks too, once that peer is granted (Dots step 5).
+    // TJ_CHECK_OWNER_JOURNAL is explicit so an owner frontend that lost its profile line never serves checks without a login.
     const journal = prefix === "TJ_CHECK_OWNER" && config.profile === "private_legacy";
+    if (journal && process.env.TJ_CHECK_OWNER_JOURNAL !== "true") return refusal(503, "Pre-trade check review is not switched on yet");
     if (config.profile !== "owner" && !journal) return refusal(config.profile === "assistant" ? 403 : 503, "Authenticated owner entrance required");
     if (request.method !== "GET" || new URL(request.url).search || request.headers.get("content-length") && request.headers.get("content-length") !== "0" || request.headers.has("transfer-encoding")) return refusal(400, "Use the fixed owner GET without selectors or body");
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(DEADLINE)]);

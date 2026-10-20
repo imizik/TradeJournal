@@ -17,6 +17,7 @@ function TradeLines({ trade, action, fillAction, linkedFill }: { trade: Activity
       <Link href={`/trades/${trade.trade_id}`} className="font-medium underline">{trade.contract}</Link>
       <span className="text-muted-foreground">{trade.account ?? "account unknown"} · {trade.status} · P&amp;L {money(trade.realized_pnl)}</span>
       {trade.timing === "same_minute" && <span className="text-xs text-muted-foreground">entered in the check&apos;s own minute; order unclear</span>}
+      {trade.timing === "same_day" && <span className="text-xs text-muted-foreground">entry has no time; same day as the check, order unclear</span>}
       {action && <span className="ml-auto">{action}</span>}
     </div>
     <ul className="space-y-0.5">{trade.fills.map(f => <li key={f.fill_id} className={`flex flex-wrap items-center gap-x-2 ${linkedFill === f.fill_id ? "font-medium" : ""}`}>

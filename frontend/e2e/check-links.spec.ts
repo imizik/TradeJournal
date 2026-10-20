@@ -93,3 +93,17 @@ test("a check the reader can't return shows no journal activity", async ({ page 
   await expect(page.getByTestId("pretrade-checks")).toContainText("Saved pre-trade checks unavailable");
   await expect(page.getByTestId("check-activity")).toHaveCount(0);
 });
+
+test("a linked check older than the list still opens, and a redacted one shows no matches", async ({ page }) => {
+  const trade = await nvda(page);
+  const { detail } = savedCheck(trade);
+  await page.route("**/api/check-owner/checks", route => route.fulfill({ json: { schema_version: "check-owner-list-v1", checks: [], total: 60, limit: 50 } }));
+  await page.route("**/api/check-owner/grades", route => route.fulfill({ status: 503, json: { detail: "unavailable" } }));
+  await page.route(`**/api/check-owner/checks/${CHECK}`, route => route.fulfill({ json: { ...detail, idea: { ...detail.idea, ticker: null } } }));
+  await page.goto(`/advisor-review?check=${CHECK}`);
+  const opened = page.getByTestId("pretrade-check-linked");
+  await expect(opened.getByTestId("pretrade-check-detail")).toBeVisible();
+  await expect(opened.getByTestId("check-activity")).toContainText("This saved check has no ticker or time to match on");
+  await expect(opened.getByTestId("check-possible")).toHaveCount(0);
+  await fitsPhone(page, "redacted");
+});
