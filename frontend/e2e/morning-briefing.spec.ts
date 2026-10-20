@@ -197,3 +197,90 @@ test("delivery states stay explicit: stale, late, missing, waiting, closed, reda
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
+
+test("memory review: accept, decline, correct, retire and add beliefs with honest conflicts and retries", async ({ page }) => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const propose = async (text: string) => {
+    const response = await page.request.post("/api/backend/jo/memories", { data: { operation_id: `proposal-${crypto.randomUUID()}`, kind: "preference", symbol: "MU",
+      original_text: text, interpretation: "Jo’s reading of a chat remark.", source: "jo_proposal", source_reference: "Invented chat excerpt", status: "proposed", owner_confirmed: false } });
+    expect(response.ok()).toBeTruthy();
+    return response.json();
+  };
+  const accepted = await propose(`Accept me ${tag}: I size down before earnings.`);
+  const declined = await propose(`Decline me ${tag}: I never hold overnight.`);
+  const latest = async (memoryId: string) => (await (await page.request.get(`/api/backend/jo/memories/${memoryId}?limit=1`)).json()).items[0];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/morning/memories");
+  const review = page.getByTestId("memory-review");
+  const cardWith = (text: string) => review.getByTestId("memory-card").filter({ hasText: text });
+  await expect(cardWith(`Accept me ${tag}`)).toContainText("Proposed by Jo");
+  await page.screenshot({ path: test.info().outputPath("memory-review-phone.png") });
+
+  await cardWith(`Accept me ${tag}`).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(review.getByRole("status")).toContainText("Accepted");
+  await expect(review.getByRole("region", { name: "Active memories" }).getByTestId("memory-card").filter({ hasText: `Accept me ${tag}` })).toContainText("revision 2");
+  expect(await latest(accepted.memory_id)).toMatchObject({ revision: 2, status: "active", body: { owner_confirmed: true, source: "jo_proposal" } });
+
+  await cardWith(`Decline me ${tag}`).getByRole("button", { name: "Decline", exact: true }).click();
+  expect((await latest(declined.memory_id)).status).toBe("proposed");
+  await cardWith(`Decline me ${tag}`).getByRole("button", { name: "Confirm decline" }).click();
+  await expect(review.getByRole("status")).toContainText("Declined");
+  expect((await latest(declined.memory_id)).status).toBe("retired");
+
+  // Correct: a new revision with the owner's wording; the earlier revision stays in history.
+  const active = review.locator(`[data-memory-id="${accepted.memory_id}"]`);
+  await active.getByRole("button", { name: "Correct" }).click();
+  await active.getByLabel("Your wording").fill(`Corrected ${tag}: I size down a week before earnings.`);
+  await active.getByRole("button", { name: "Save correction" }).click();
+  await expect(cardWith(`Corrected ${tag}`)).toContainText("revision 3");
+  expect((await (await page.request.get(`/api/backend/jo/memories/${accepted.memory_id}`)).json()).items.map((r: { revision: number }) => r.revision)).toEqual([3, 2, 1]);
+
+  // Conflict: another change lands while the correction form is open.
+  await active.getByRole("button", { name: "Correct" }).click();
+  const current = await latest(accepted.memory_id);
+  expect((await page.request.post("/api/backend/jo/memories", { data: { ...current.body, operation_id: `elsewhere-${crypto.randomUUID()}`, base_revision: 3, memory_id: accepted.memory_id,
+    original_text: `Changed elsewhere ${tag}.` } })).ok()).toBeTruthy();
+  await active.getByLabel("Your wording").fill(`Stale edit ${tag}`);
+  await active.getByRole("button", { name: "Save correction" }).click();
+  await expect(review.getByRole("alert")).toContainText("This memory changed since the page loaded");
+  await expect(cardWith(`Changed elsewhere ${tag}`)).toContainText("revision 4");
+  expect((await latest(accepted.memory_id)).revision).toBe(4);
+
+  // Retire needs a confirming second click.
+  await active.getByRole("button", { name: "Retire" }).click();
+  await active.getByRole("button", { name: "Confirm retire" }).click();
+  await expect(review.getByRole("status")).toContainText("Retired");
+  await review.getByText(/^Retired \(\d+\)$/).click();
+  await expect(review.locator("details").getByTestId("memory-card").filter({ hasText: `Changed elsewhere ${tag}` })).toContainText("revision 5");
+
+  // Add: invalid symbol blocks the save; an interrupted save retries with the same operation ID and saves once.
+  await review.getByRole("button", { name: "Add a belief" }).click();
+  await review.getByLabel("Your wording").fill(`New belief ${tag}: I like MU above its 50-day.`);
+  await review.getByLabel("Symbol (optional)").fill("not a ticker");
+  await expect(review.getByRole("button", { name: "Save belief" })).toBeDisabled();
+  await expect(review).toContainText("Symbol must be a ticker");
+  await review.getByLabel("Symbol (optional)").fill("MU");
+  const operations: string[] = [];
+  let fail = true;
+  await page.route("**/jo/memories", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    operations.push(JSON.parse(route.request().postData() ?? "{}").operation_id);
+    if (fail) { fail = false; return route.abort("failed"); }
+    return route.continue();
+  });
+  await review.getByRole("button", { name: "Save belief" }).click();
+  await expect(review.getByRole("alert")).toContainText("it’s unknown whether this saved");
+  await review.getByRole("button", { name: "Save belief" }).click();
+  await expect(review.getByRole("status")).toContainText("Saved.");
+  expect(operations).toHaveLength(2);
+  expect(operations[0]).toBe(operations[1]);
+  await expect(cardWith(`New belief ${tag}`)).toContainText("Thesis · MU · revision 1 · Your statement");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: test.info().outputPath("memory-review-desktop.png") });
+
+  await page.route("**/jo/memories?**", (route) => route.fulfill({ status: 503, json: { detail: "Fixture unavailable" } }));
+  await page.reload();
+  await expect(review.getByRole("alert")).toContainText("Saved memories could not load. Nothing was changed.");
+});

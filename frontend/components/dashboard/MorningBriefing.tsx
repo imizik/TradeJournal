@@ -173,7 +173,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     <p data-testid="brief-summary" className={`whitespace-pre-wrap leading-relaxed ${compact ? "text-sm" : "text-base"} ${longSummary && !fullSummary ? "line-clamp-4" : ""}`}>{body.summary}</p>
     {longSummary && <button type="button" aria-expanded={fullSummary} className={textButton} onClick={() => setFullSummary((v) => !v)}>{fullSummary ? "Show less" : "Read Jo’s full summary"}</button>}
     {!compact && sources(body.summary_evidence_ids)}
-    {!compact && packet && !packet.redacted_at && !memories.length && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence.</p>}
+    {!compact && packet && !packet.redacted_at && !memories.length && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
   </section>;
 
   if (compact) return <DashboardCard title="Morning briefing" action={<a href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</a>}>
@@ -235,6 +235,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {([["useful", "Useful"], ["meh", "Meh"], ["missed", "Missed something"]] as const).map(([value, label]) => <button key={value} type="button" disabled={saving} aria-pressed={data?.feedback.rating === value} className={`${button} ${data?.feedback.rating === value ? "bg-secondary" : ""}`} onClick={() => void rate(value)}>{label}</button>)}
     </div>{feedbackError && <p role="alert" className="mt-2 text-sm text-amber-300">{feedbackError}</p>}</section>}
     {data && <div className="space-y-2">
+      <a href="/morning/memories" className={textButton}>Saved memories and Jo’s proposals →</a>
       {!!gaps.length && <details className="rounded-md border border-amber-500/30 px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Limited coverage · {gaps.length} {gaps.length === 1 ? "gap" : "gaps"} disclosed</summary><p className="mb-3 text-xs text-muted-foreground">This brief has missing or unverified evidence. Check these details before relying on it.</p><ul className="list-disc space-y-2 pb-3 pl-4 text-sm text-muted-foreground">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></details>}
       {packet && !packet.redacted_at && <details id="brief-evidence" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Evidence and personal context ({packet.body.evidence?.length ?? 0})</summary>
@@ -247,7 +248,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       </details>}
       {!!memories.length && <details id="brief-memories" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Your saved memories in this packet ({memories.length})</summary>
-        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief.</p>
+        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief. <a href="/morning/memories" className="text-primary hover:underline">Review or correct saved memories →</a></p>
         <ol className="space-y-4 pb-3">{memories.map((m) => <li id={`memory-${m.id}`} key={m.id} className="scroll-mt-20 border-t pt-3 text-sm">
           {m.redacted_at ? <p className="text-muted-foreground">Removed memory · revision {m.revision}</p> : <>
             <p className="font-medium">{memoryMeta(m)}</p>
