@@ -231,7 +231,12 @@ test("memory review: accept, decline, correct, retire and add beliefs with hones
   const active = review.locator(`[data-memory-id="${accepted.memory_id}"]`);
   await active.getByRole("button", { name: "Correct" }).click();
   await active.getByLabel("Your wording").fill(`Corrected ${tag}: I size down a week before earnings.`);
+  // The save commits but its response is lost: the page says the outcome is unknown and shows the landed revision.
+  await page.route("**/jo/memories", async (route) => { await route.fetch(); await route.abort("failed"); }, { times: 1 });
   await active.getByRole("button", { name: "Save correction" }).click();
+  await expect(active.getByRole("alert")).toContainText("it’s unknown whether this saved");
+  await expect(active).toContainText("revision 3");
+  await expect(active.getByRole("button", { name: "Save correction" })).toHaveCount(0);
   await expect(cardWith(`Corrected ${tag}`)).toContainText("revision 3");
   expect((await (await page.request.get(`/api/backend/jo/memories/${accepted.memory_id}`)).json()).items.map((r: { revision: number }) => r.revision)).toEqual([3, 2, 1]);
 
@@ -261,19 +266,33 @@ test("memory review: accept, decline, correct, retire and add beliefs with hones
   await expect(review).toContainText("Symbol must be a ticker");
   await review.getByLabel("Symbol (optional)").fill("MU");
   const operations: string[] = [];
-  let fail = true;
+  const attempts = ["unsent", "lost"];
   await page.route("**/jo/memories", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     operations.push(JSON.parse(route.request().postData() ?? "{}").operation_id);
-    if (fail) { fail = false; return route.abort("failed"); }
+    const attempt = attempts.shift();
+    if (attempt === "unsent") return route.abort("failed");
+    if (attempt === "lost") { await route.fetch(); return route.abort("failed"); }
     return route.continue();
   });
+  // 1: never reached the app. The owner then edits the wording, so the next save is a different request with a new ID.
   await review.getByRole("button", { name: "Save belief" }).click();
   await expect(review.getByRole("alert")).toContainText("it’s unknown whether this saved");
+  await review.getByLabel("Your wording").fill(`New belief ${tag}: I like MU above its 50-day average.`);
+  // 2: saved, but the response was lost. The reloaded list shows it.
+  await review.getByRole("button", { name: "Save belief" }).click();
+  await expect(review.getByRole("alert")).toContainText("it’s unknown whether this saved");
+  await expect(cardWith(`New belief ${tag}`)).toHaveCount(1);
+  // 3: the identical retry replays the saved record instead of adding another.
   await review.getByRole("button", { name: "Save belief" }).click();
   await expect(review.getByRole("status")).toContainText("Saved.");
-  expect(operations).toHaveLength(2);
-  expect(operations[0]).toBe(operations[1]);
+  expect(operations).toHaveLength(3);
+  expect(operations[0]).not.toBe(operations[1]);
+  expect(operations[1]).toBe(operations[2]);
+  await page.unroute("**/jo/memories");
+  const mine = (await (await page.request.get("/api/backend/jo/memories?status=active&limit=100")).json()).items
+    .filter((m: { body: { original_text: string } }) => m.body.original_text.includes(`New belief ${tag}`));
+  expect(mine.map((m: { body: { original_text: string } }) => m.body.original_text)).toEqual([`New belief ${tag}: I like MU above its 50-day average.`]);
   await expect(cardWith(`New belief ${tag}`)).toContainText("Thesis · MU · revision 1 · Your statement");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 1000 });

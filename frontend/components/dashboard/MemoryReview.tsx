@@ -45,11 +45,11 @@ export default function MemoryReview() {
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ key: string; draft: Draft } | null>(null);
+  const [editing, setEditing] = useState<{ key: string; revision: number; draft: Draft } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [adding, setAdding] = useState<Draft | null>(null);
-  // One operation ID per pending action, reused on retry so an uncertain save cannot be applied twice.
-  const operations = useRef<Record<string, string>>({});
+  // An uncertain save keeps its operation ID for an exact retry; any change to the request gets a new ID.
+  const operations = useRef<Record<string, { id: string; request: string }>>({});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -61,7 +61,9 @@ export default function MemoryReview() {
 
   async function submit(key: string, body: Omit<MemorySave, "operation_id">, done: string) {
     if (busy) return;
-    const operation_id = operations.current[key] ??= `owner-memory-${newClientId()}`;
+    const request = JSON.stringify(body);
+    if (operations.current[key]?.request !== request) operations.current[key] = { id: `owner-memory-${newClientId()}`, request };
+    const operation_id = operations.current[key].id;
     setBusy(key); setNotice(null); setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k.split(":")[0] !== key.split(":")[0])));
     try {
       await saveMemory({ ...body, operation_id });
@@ -70,6 +72,8 @@ export default function MemoryReview() {
     } catch (reason) {
       // A definite refusal frees the ID; an unknown outcome keeps it for an exact retry.
       if (reason instanceof MemorySaveError && reason.status < 500) delete operations.current[key];
+      // After an unknown outcome, reload so a save that did land is visible before anything is resent.
+      else setRefresh((r) => r + 1);
       // Show the newer version instead of leaving a stale edit open on top of it.
       if (reason instanceof MemorySaveError && reason.status === 409) { setEditing(null); setConfirming(null); setRefresh((r) => r + 1); }
       setErrors((e) => ({ ...e, [key]: (reason as Error).message }));
@@ -78,11 +82,12 @@ export default function MemoryReview() {
 
   const card = (m: BriefMemory, actions: React.ReactNode) => {
     const editKey = `${m.memory_id}:correct`;
-    const isEditing = editing?.key === editKey;
+    // An editor opened on an older revision closes once a newer one loads (another change, or an uncertain save that landed).
+    const isEditing = editing?.key === editKey && editing.revision === m.revision;
     const keyError = Object.entries(errors).find(([key]) => key.startsWith(`${m.memory_id}:`))?.[1];
     return <li key={m.id} data-testid="memory-card" data-memory-id={m.memory_id} className="space-y-2 rounded-lg border bg-card p-4">
       <p className="text-xs text-muted-foreground">{kindName(m.body.kind)}{m.symbol ? ` · ${m.symbol}` : ""} · revision {m.revision} · {sourceName[m.body.source ?? "owner_statement"]} · saved {time(m.received_at)}</p>
-      {isEditing ? <DraftFields draft={editing.draft} onChange={(draft) => setEditing({ key: editKey, draft })} idPrefix={m.id} /> : <>
+      {isEditing ? <DraftFields draft={editing.draft} onChange={(draft) => setEditing({ key: editKey, revision: m.revision, draft })} idPrefix={m.id} /> : <>
         <p className="whitespace-pre-wrap text-sm leading-relaxed">“{m.body.original_text}”</p>
         {m.body.interpretation && <p className="whitespace-pre-wrap text-sm text-muted-foreground">Interpretation: {m.body.interpretation}</p>}
         {m.body.source_reference && <p className="whitespace-pre-wrap text-xs text-muted-foreground">Reference: {m.body.source_reference}</p>}
@@ -98,7 +103,7 @@ export default function MemoryReview() {
       {keyError && <p role="alert" className="text-sm text-amber-300">{keyError}</p>}
     </li>;
   };
-  const editButton = (m: BriefMemory, label: string) => <button type="button" className={button} disabled={!!busy} onClick={() => { setEditing({ key: `${m.memory_id}:correct`, draft: draftOf(m) }); setConfirming(null); }}>{label}</button>;
+  const editButton = (m: BriefMemory, label: string) => <button type="button" className={button} disabled={!!busy} onClick={() => { setEditing({ key: `${m.memory_id}:correct`, revision: m.revision, draft: draftOf(m) }); setConfirming(null); }}>{label}</button>;
   const retireButton = (m: BriefMemory, label: string, confirmLabel: string, done: string) => confirming === m.memory_id
     ? <><button type="button" className={`${button} border-amber-500/50 text-amber-300`} disabled={!!busy} onClick={() => void submit(`${m.memory_id}:retire`, revisionOf(m, "retired"), done)}>{confirmLabel}</button>
       <button type="button" className={button} disabled={!!busy} onClick={() => setConfirming(null)}>Keep</button></>
