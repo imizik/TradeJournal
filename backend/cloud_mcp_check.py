@@ -424,6 +424,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         "position_check; after the close use review_checks. Advice only: nothing places, sizes or arms an "
         "order. Reuse the same operation_id only to recover an uncertain call; it returns the saved answer. "
         "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id. "
+        "Actionable entry, wait or pass advice on a specific idea is a check: save it with pre_trade_check and "
+        "attach_model_verdict before you answer so it reopens in review_checks; if a save fails, say the advice "
+        "is unrecorded. Promise monitoring only through a mechanism TradeJournal can see"
+        + (": a saved conditional plan that conditional_plan_status reports as monitoring. "
+        if config.conditional_plan_enabled else
+        ". None is active on this connection, so say \"I can't monitor this\" instead of offering checks later. ")
+        + "ChatGPT tasks or reminders you create are invisible to TradeJournal and are not monitoring. "
         + ("Conditional price-plan follow-through is enabled: when the owner requests tracking, turn "
         "a concrete wait into explicit numeric close conditions and expiry with conditional_plan_create. "
         "Report pending until conditional_plan_status confirms monitoring. Use the saved timeline for "
@@ -720,6 +727,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         Same operation_id + same idea returns the original saved check (never recomputed); a different idea under
         that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
         your own verdict with attach_model_verdict (see next_step in the result).
+        Run this for any actionable entry, wait or pass advice so it is saved; chat-only advice is unrecorded.
+        Saying you will watch or recheck later needs a saved conditional plan when that tool is offered;
+        otherwise say you can't monitor it. ChatGPT tasks are invisible to TradeJournal.
         """
         checked = await authenticated("pre_trade_check")
         if any(value is not None and not math.isfinite(value) for value in (entry, stop, strike)):
@@ -758,7 +768,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     async def attach_model_verdict(check_id: Annotated[str, Field(pattern=r"^chk_[0-9a-f-]{36}$")],
             verdict: Literal["go", "wait", "pass", "insufficient_data"],
             summary: Annotated[str, Field(min_length=1, max_length=2000)]) -> dict[str, Any]:
-        """Save your narrated verdict once for a saved check. Identical retries return the original."""
+        """Save your narrated verdict once for a saved check. Identical retries return the original.
+        Include the trigger, invalidation and recheck condition. Unsaved advice cannot be reopened in review_checks."""
         checked = await authenticated("attach_model_verdict")
         try:
             saved = await asyncio.to_thread(ledger.attach, checked.subject, check_id, verdict, summary)

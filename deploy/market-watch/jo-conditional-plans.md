@@ -40,6 +40,10 @@ on the concrete condition you are waiting for:
    an old plan to make it fit the move. A replacement requires fresh evidence,
    a new operation ID and an explicitly explained change.
 
+Until this feature is activated, Check tells Jo no monitoring is available: Jo
+says "I can't monitor this" rather than promising later checks, and a ChatGPT
+task Jo creates is not monitoring, because TradeJournal cannot see it.
+
 Do not add email tasks, model API workers, broker orders, paper entries, changed
 scanner selection, or new account access. Do not put audit messages into the live
 execution conversation to retrieve receipts; use passive owner evidence.

@@ -331,6 +331,22 @@ the same request reuses its ID. Do not backfill old conversations as decisions
 made before the outcome. Measure actual check/verdict completeness on future
 sessions; acknowledging instructions is not evidence of adherence.
 
+**Saved advice and monitoring promises (October 20, 2026).** The October 19–20
+audit found Jo's NBIS "conditional plan, not a Go" kept in chat only, and an
+"hourly checks from 10:15" promise backed by a ChatGPT task the app cannot see.
+The Check server instructions and the `pre_trade_check`/`attach_model_verdict`
+descriptions now say: actionable entry, wait or pass advice on a specific idea
+is saved as a check with its model verdict, so it reopens through
+`review_checks`; a failed save is disclosed as unrecorded advice. A monitoring
+promise must name a mechanism TradeJournal can see: a saved
+[conditional plan](../../deploy/market-watch/jo-conditional-plans.md), and only
+while that feature is enabled in Check. Otherwise Jo says "I can't monitor
+this". Tasks or reminders Jo creates in ChatGPT are invisible to TradeJournal
+and never count as monitoring. These instructions improve compliance; they
+cannot guarantee every chat reply is saved, and only saved checks and plans are
+evidence. They reach Jo after a Check deploy and a refresh of the Check tool
+metadata in ChatGPT.
+
 For manual chart analysis through Jo's separate Alpaca connector:
 
 - Set explicit timezone-aware start/end, feed, timeframe, sort and limit.
