@@ -371,6 +371,11 @@ The owner `/practice` page and Daily Review mount
 `frontend/components/PracticeRoutine.tsx`; assistant Today surfaces are retained: manual
 preparation, frozen contexts, validated immutable choices, explicit reveal,
 A2 arming, outcome/coverage review, feedback and actual attention timers.
+The page leads with the day's task (setups to answer before the cutoff and
+progress); a TAKE is entered by picking saved price facts, which the page turns
+into the same A1 plan the server validates. The morning brief, per-setup
+outcome/feedback and run provenance (policy, hashes, IDs, agent cost) sit in
+collapsed sections.
 `backend/app/routers/practice.py` owns the private owner API;
 `backend/app/engine/practice.py` owns run/revision identity and deterministic
 review/benchmark. `backend/app/engine/practice_agent.py` is the bounded tool-free

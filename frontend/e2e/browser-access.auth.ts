@@ -58,7 +58,7 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await page.goto("/charts?symbol=MU");
   await expect(page.getByRole("link", { name: "Charts", exact: true }).first()).toBeVisible();
   await page.goto("/daily");
-  await expect(page.getByText("Daily practice routine", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("practice-routine").getByRole("heading", { level: 2, name: /^Daily practice/ })).toBeVisible();
   expect(journalRequests).toEqual([]);
   const revoked = await owner.request.post(`/api/access/assistants/${identifier}/revoke`, { headers: { Origin: ownerOrigin, "x-tj-csrf": ownerSession.csrf }, data: {} });
   expect(revoked.status()).toBe(200);
