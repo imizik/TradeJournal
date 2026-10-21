@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.engine import jo_briefing as store
 from app.engine.chart_journal import open_lots
-from app.engine.jo_morning_market import collect_market
+from app.engine.jo_morning_market import collect_backdrop, collect_market
 from app.models import FILL_LIGHT, Account, ChartSettingsRecord, Fill, Trade, TradeFill, TradeCapture, MorningBriefingPacket, MorningBriefingRecord
 from jo_briefing_common import PacketSave, Strict
 import jo_briefing_exchange as exchange
@@ -65,7 +65,7 @@ def operation(config, actor, day):
         "scope": sorted(str(i) for i in config.account_ids), "publish": config.publish_time, "deadline": config.deadline})
 
 
-def collect(session, config, actor, now, market_reader=None):
+def collect(session, config, actor, now, market_reader=None, backdrop_reader=collect_backdrop):
     day = now.astimezone(ET).date()
     accounts = session.exec(select(Account).where(Account.id.in_(config.account_ids))).all()
     if len(accounts) != len(config.account_ids) or any((a.broker or "").lower() == "webull" for a in accounts):
@@ -142,6 +142,16 @@ def collect(session, config, actor, now, market_reader=None):
             gaps.append("Saved levels limited to the first 10 watchlist symbols and 10 levels each.")
     except (ValueError, TypeError, AttributeError):
         gaps.append("Saved Charts watchlist/levels unavailable; no default tickers substituted.")
+    # Saved local backdrop (calendar, VIX, earnings) first, so the evidence cap never drops it.
+    if backdrop_reader is not None:
+        try:
+            backdrop_evidence, backdrop_gaps = backdrop_reader(session, symbols, now)
+        except Exception:
+            LOG.warning("Jo morning backdrop unavailable", exc_info=True)
+            backdrop_evidence, backdrop_gaps = [], ["Macro calendar, VIX and earnings backdrop unavailable."]
+        gaps.extend(backdrop_gaps)
+        for row in backdrop_evidence:
+            add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"])
     if market_reader is not None:
         market_evidence, market_gaps = market_reader(symbols, now)
         gaps.extend(market_gaps)
@@ -187,9 +197,9 @@ def collect(session, config, actor, now, market_reader=None):
 
 
 class MorningRunner:
-    def __init__(self, engine, config_loader=load_config, calendar=None, market_reader=collect_market):
+    def __init__(self, engine, config_loader=load_config, calendar=None, market_reader=collect_market, backdrop_reader=collect_backdrop):
         self.engine, self.config_loader = engine, config_loader
-        self.market_reader = market_reader
+        self.market_reader, self.backdrop_reader = market_reader, backdrop_reader
         if calendar is None:
             from app.engine.chart_calendar import chart_calendar
             calendar = chart_calendar.hours
@@ -242,7 +252,7 @@ class MorningRunner:
                 key = operation(config, actor, day)
                 row = session.exec(select(MorningBriefingPacket).where(MorningBriefingPacket.operation_id == key)).first()
                 if row is None:
-                    saved = store.save_packet(session, collect(session, config, actor, now, self.market_reader))
+                    saved = store.save_packet(session, collect(session, config, actor, now, self.market_reader, self.backdrop_reader))
                     row = session.get(MorningBriefingPacket, UUID(saved["id"]))
                 # Use the frozen cutoff for repeat publication, never extend expiry on restart.
                 published = datetime.fromisoformat(json.loads(row.body_json)["as_of"])

@@ -473,8 +473,9 @@ domain. This is separate from the ten-morning usefulness decision in step 6.
 
 ### Fresh market context — activated October 19
 
-The morning publisher makes at most two existing-provider reads when creating a
-new packet: one Tradier full-market quote request and one fast Alpaca news request. Both use
+The morning publisher originally made at most two existing-provider reads when creating a
+new packet: one Tradier full-market quote request and one fast Alpaca news request
+(extended by the [market backdrop](#market-backdrop--october-21) below). Both use
 the existing bounded, single-attempt adapters. Tradier must use its production
 endpoint; missing credentials, errors or missing observations do not fall back to IEX. Only symbol names leave the app;
 account identifiers, quantities, costs and memories are never sent to providers.
@@ -518,6 +519,34 @@ the private API and reloaded UI matched its packet, record and evidence citation
 The earlier briefing and scheduled day pointer were preserved. This establishes
 the instructed fresh-data path, not natural morning delivery or usefulness of
 premarket coverage; those remain unobserved.
+
+### Market backdrop — October 21
+
+The first scored brief (October 21) had no macro context: every price was the
+prior 16:00 trade and nothing described the market. New packets now add, each
+failing alone into a gap line and never blocking publication:
+
+- **Extended-hours prices.** After the one batched quote read, each priced
+  symbol gets one cached Tradier 1-minute `timesales` read (`session_filter=all`,
+  the request level alerts already make), bounded by a 45-second budget. Today's
+  last minute becomes `market-<SYMBOL>` with its bar time and the change against
+  the quote's prior regular-session last trade (not an official close). With no
+  minute today, the quote's regular-session trade stays, labelled stale. SPY, QQQ
+  and SMH are always priced as backdrop proxies, outside the 20 owner symbols.
+- **`macro-calendar`**: FOMC, CPI and jobs releases from today through the next
+  seven days, from the Daily Review's `macro_events` reader.
+- **`vix`** and **`earnings-<SYMBOL>`**: the pre-trade check's `market_context_item`
+  snapshot (no new provider read), with its read time; earnings within seven days
+  for held, recently traded and watched symbols.
+- **`macro-headline-<n>`**: at most four broad-tape Benzinga headlines from the
+  prior 18 hours whose title names a market-wide theme (Fed, rates, inflation,
+  tariffs, war, oil, dollar and similar), with the ticker headlines' labelling.
+
+Index futures, Treasury yields, the dollar and oil remain unavailable without new
+provider access; the packet says so. The Check tool descriptions ask Jo to open
+with a cited market backdrop (summary up to 60 words), then position items, and to
+compress shared caveats into one or two limitations lines. Deploying this requires
+a Check runtime upgrade for the new tool descriptions and a ChatGPT connector refresh.
 
 ### October 19 activation evidence
 
