@@ -95,19 +95,6 @@ def test_only_the_configured_peer_reads(owner, uid):
     assert read(reader.create_app(owner[1]), uid).status_code == 403
 
 
-def test_journal_peer_reads_only_when_configured(owner):
-    ledger, path, config = owner
-    saved = ledger.insert(record())
-    journal = PEER + 7
-    assert read(reader.create_app(path), journal).status_code == 403  # Absent by default.
-    path.write_text(json.dumps({**config, "journal_peer_uid": journal}))
-    app = reader.create_app(path)
-    assert read(app, journal).status_code == 200 and read(app, PEER).status_code == 200
-    assert read(app, journal, f"{reader.LIST_PATH}/{saved['check_id']}").json()["check_id"] == saved["check_id"]
-    assert read(app, journal, reader.LIST_PATH, "POST").status_code == 404  # Still read-only.
-    assert read(app, PEER + 8).status_code == 403
-
-
 @pytest.mark.parametrize("path,method,headers", [
     (reader.LIST_PATH, "POST", None),
     (reader.LIST_PATH + "?limit=500", "GET", None),

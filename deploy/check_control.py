@@ -42,21 +42,25 @@ KEYS = Path("/var/lib/tradejournal-check-keys")
 FEATURES = Path("/var/lib/tradejournal-check-features")
 RUN = Path("/run/tradejournal-check")
 OWNER_RUN = Path("/run/tradejournal-check-owner")
+JOURNAL_RUN = Path("/run/tradejournal-check-journal")
 RECORD = ROOT / "installation.json"
 UNIT_DIR = old.UNIT_DIR
 GROUP = "tj-check"
 ACCOUNTS = {"service": "tj-check", "keys": "tj-check-keys", "features": "tj-check-features"}
 # The private owner frontend (advisor trial) is the only peer of the owner reader.
 OWNER_WEB = "tj-advisor-web-owner"
+# The private journal frontend reads saved checks through its own socket and
+# reader instance (Dots step 5), so neither frontend joins the other's group.
 TEMPLATES = SOURCE / "deploy/cloud-mcp-check"
 UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejournal-check-network.service",
     "tradejournal-check-keys.service", "tradejournal-check-keys.timer",
     "tradejournal-check-features.service", "tradejournal-check-features.timer",
-    "tradejournal-check-owner.socket", "tradejournal-check-owner.service")
+    "tradejournal-check-owner.socket", "tradejournal-check-owner.service",
+    "tradejournal-check-journal.socket", "tradejournal-check-journal.service")
 RUNTIME_FILES = ("tradier_stock_data.py", "jo_briefing_common.py", "jo_briefing_exchange.py", "jo_briefing_tools.py", "conditional_plan_common.py", "conditional_plan_ledger.py", "conditional_plan_tools.py", "stock_watch_common.py", "stock_watch_ledger.py", "market_watch_owner.py", "market_watch_common.py", "market_watch_ledger.py", "cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
-SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
+SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner", "journal")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
 # client) and enables owner/config.json; the network policy and view SQL stay pinned.
 PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql", "market-view.sql")
@@ -143,7 +147,7 @@ def preflight(bundle, approved, *, dns_servers, host_ips):
     distro = platform.freedesktop_os_release()
     if distro.get("ID") != "ubuntu" or distro.get("VERSION_ID") != "24.04" or platform.machine() != "x86_64":
         raise ValueError("Require artifact-matched Ubuntu 24.04 x86_64 host")
-    for path in (ROOT, CONFIG, STATE, KEYS, FEATURES, RUN, OWNER_RUN, *[UNIT_DIR / u for u in UNITS],
+    for path in (ROOT, CONFIG, STATE, KEYS, FEATURES, RUN, OWNER_RUN, JOURNAL_RUN, *[UNIT_DIR / u for u in UNITS],
             *[UNIT_DIR / (u + ".d") for u in UNITS]):
         exact(path.parent)
         if path.exists() or path.is_symlink():
@@ -210,6 +214,7 @@ def install(bundle, approved, *, dns_servers, host_ips):
         (CONFIG / "owner").mkdir(mode=0o750)
         old.run("chown", f"root:{GROUP}", CONFIG / "owner")
         private_file(CONFIG / "owner/config.json", (json.dumps(owner, indent=2) + "\n").encode(), mode=0o640, group=GROUP)
+        journal_config(config["ledger_file"])
         for path, owner, mode in ((STATE, ACCOUNTS["service"], 0o700), (KEYS, ACCOUNTS["keys"], 0o750),
                 (FEATURES, ACCOUNTS["features"], 0o750)):
             path.mkdir(mode=mode)
@@ -317,6 +322,15 @@ def add_context_views(bundle, sql_approval):
     return installed()
 
 
+def journal_config(ledger_file):
+    """The journal reader's own bound directory with a disabled config; enabling it is the owner's grant."""
+    journal = {"enabled": False, "peer_uid": pwd.getpwnam(API_USER).pw_uid,
+        "socket_path": str(JOURNAL_RUN / "owner.sock"), "ledger_path": ledger_file}
+    (CONFIG / "journal").mkdir(mode=0o750)
+    old.run("chown", f"root:{GROUP}", CONFIG / "journal")
+    private_file(CONFIG / "journal/config.json", (json.dumps(journal, indent=2) + "\n").encode(), mode=0o640, group=GROUP)
+
+
 def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
     """Replace stopped runtime and individually hash-approved units. Config,
     credentials, ledger, keys, features, identities and policy stay unchanged; nothing starts.
@@ -325,7 +339,8 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
     mid-swap (SIGKILL, power loss) every action refuses on inventory drift; move
     the partial ROOT/backend aside and move previous-runtime/<newest>/backend
     back to ROOT/backend, restore saved previous-runtime/<newest>/units files
-    into UNIT_DIR and run daemon-reload before inventory verification. Changed
+    into UNIT_DIR, delete any unit the old record lacks (and a new
+    CONFIG/journal) and run daemon-reload before inventory verification. Changed
     units require --approve-unit per hash; pinned SQL changes retain their own approval.
     """
     record = installed()
@@ -337,7 +352,8 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
             raise ValueError("Require root-owned immutable reviewed bundle/ancestors")
     if approved == record["manifest_sha256"]:
         raise ValueError("Bundle is already the installed runtime")
-    changed_units = [u for u in UNITS if digest(bundle / "units" / u) != record["units"][u]]
+    # A unit the installation never had counts as changed and needs its own approval too.
+    changed_units = [u for u in UNITS if digest(bundle / "units" / u) != record["units"].get(u)]
     if any(digest(bundle / "units" / u) not in unit_approvals for u in changed_units):
         raise ValueError("Bundle changes check units; approve each reviewed SHA-256 with --approve-unit")
     additions = []
@@ -353,14 +369,23 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
         check=False).stdout.decode().strip() not in {"inactive", "failed"}]
     if running:
         raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
+    # A unit added by this upgrade gets the same collision checks as a fresh install.
+    for unit in [u for u in changed_units if u not in record["units"]]:
+        if (UNIT_DIR / unit).exists() or (UNIT_DIR / unit).is_symlink() or (UNIT_DIR / (unit + ".d")).exists() \
+                or old.run("systemctl", "cat", unit, check=False).returncode == 0:
+            raise ValueError("Refuse a pre-existing check unit: " + unit)
+    if not (CONFIG / "journal").exists() and (CONFIG / "journal").is_symlink():
+        raise ValueError("Refuse a symlinked journal config")
     for name in additions:  # Additive database change first: on refusal nothing else has moved.
         apply_additive(name, (bundle / "config" / name).read_bytes())
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
     previous.mkdir(parents=True, mode=0o700)
     (previous / "units").mkdir()
     for unit in changed_units:
-        shutil.copyfile(UNIT_DIR / unit, previous / "units" / unit)
+        if unit in record["units"]:
+            shutil.copyfile(UNIT_DIR / unit, previous / "units" / unit)
     (ROOT / "backend").rename(previous / "backend")
+    added_journal = False
     scratch = ROOT / "upgrade-unrecorded.json"  # normalize_new_runtime refuses an existing record path.
 
     def interrupted(signum, frame):
@@ -373,6 +398,10 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
             replacement.write_bytes((bundle / "units" / unit).read_bytes())
             replacement.chmod(0o644)
             replacement.replace(UNIT_DIR / unit)
+        if not (CONFIG / "journal").exists():
+            # Additive and disabled, as on a fresh install; nothing starts.
+            added_journal = True  # Set first so a partial directory is rolled back too.
+            journal_config(json.loads((CONFIG / "owner/config.json").read_text())["ledger_path"])
         if changed_units:
             old.run("systemctl", "daemon-reload")
         settings = dict(record["settings"])
@@ -392,8 +421,13 @@ def upgrade(bundle, approved, sql_approvals=(), unit_approvals=()):
             (ROOT / "backend").rename(previous / "failed-backend")
         (previous / "backend").rename(ROOT / "backend")
         for unit in changed_units:
-            shutil.copyfile(previous / "units" / unit, UNIT_DIR / unit)
-            (UNIT_DIR / unit).chmod(0o644)
+            if unit in record["units"]:
+                shutil.copyfile(previous / "units" / unit, UNIT_DIR / unit)
+                (UNIT_DIR / unit).chmod(0o644)
+            else:
+                (UNIT_DIR / unit).unlink(missing_ok=True)
+        if added_journal:
+            shutil.rmtree(CONFIG / "journal", ignore_errors=True)
         if changed_units:
             old.run("systemctl", "daemon-reload")
         raise
@@ -431,12 +465,16 @@ def check():
 
 def stop():
     old.root_only()
-    json.loads(exact(RECORD).read_text())  # Fixed names stay stoppable after drift.
-    timers = [u for u in UNITS if u.endswith(".timer")]
+    # Fixed names stay stoppable after drift.
+    record = json.loads(exact(RECORD).read_text())
+    # Units an older installation never had (the journal reader) are skipped; recorded ones never are.
+    units = [u for u in UNITS if u in record.get("units", {}) or (UNIT_DIR / u).exists()]
+    timers = [u for u in units if u.endswith(".timer")]
     results = [old.run("systemctl", "stop", *group, check=False) for group in (
-        timers, [u for u in UNITS if u.endswith(".socket")], [u for u in UNITS if u.endswith(".service")])]
-    if any(old.run("systemctl", "is-active", "--quiet", u, check=False).returncode == 0 for u in UNITS) \
-            or (RUN / "mcp.sock").exists() or (OWNER_RUN / "owner.sock").exists() or any(r.returncode for r in results):
+        timers, [u for u in units if u.endswith(".socket")], [u for u in units if u.endswith(".service")])]
+    if any(old.run("systemctl", "is-active", "--quiet", u, check=False).returncode == 0 for u in units) \
+            or (RUN / "mcp.sock").exists() or (OWNER_RUN / "owner.sock").exists() or (JOURNAL_RUN / "owner.sock").exists() \
+            or any(r.returncode for r in results):
         raise RuntimeError("Check shutdown incomplete; all groups were attempted")
 
 
@@ -445,7 +483,7 @@ def remove():
     record = installed()
     old.run("systemctl", "disable", *[u for u in UNITS if u.endswith(".timer")], check=False)
     stop()
-    for name in UNITS:
+    for name in record["units"]:
         (UNIT_DIR / name).unlink()
     RECORD.rename(ROOT / ("removed-" + str(int(time.time())) + "-installation.json"))
     old.run("systemctl", "daemon-reload")
