@@ -2,6 +2,7 @@ import { api } from "@/lib/serverApi";
 import type { Account, Fill, PositionQuote } from "@/lib/api";
 import type { AppAccess } from "@/lib/accessTypes";
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { requireAccess } from "@/lib/accessServer";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
@@ -38,6 +39,14 @@ export default async function DashboardPage({
   const access = await requireAccess();
   if (access.grants.decision_write || access.grants.market_decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
   if (!access.owner && !access.grants.journal_read) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /><PracticeDecisions records={(await api.decisions()).decisions} /></div>;
+  // Preserve saved phone-alert and run links after moving the owner workspace.
+  const params = await searchParams;
+  if (access.owner && (params.decision || params.practice_run)) {
+    const practiceParams = new URLSearchParams();
+    if (params.decision) practiceParams.set("decision", params.decision);
+    if (params.practice_run) practiceParams.set("practice_run", params.practice_run);
+    redirect(`/practice?${practiceParams}${params.decision ? "#saved-decisions" : ""}`);
+  }
   if (access.owner) return <Suspense fallback={<DashboardLoading />}><DashboardData access={access} searchParams={searchParams} /></Suspense>;
   return <DashboardData access={access} searchParams={searchParams} />;
 }

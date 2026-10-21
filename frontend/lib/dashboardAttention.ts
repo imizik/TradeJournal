@@ -172,7 +172,7 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
     const endsText = new Date(ends).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
     items.push({ id: `wait:${record.id}`, priority: "follow_up", title: `${record.symbol} WAIT still open`,
       detail: `${record.wait_condition ?? "No condition saved."} · ends ${endsText} ET`, when: `Ends ${shortDate(new Date(ends).toLocaleDateString("en-CA", { timeZone: "America/New_York" }))}`,
-      href: `/?decision=${encodeURIComponent(record.id)}#saved-decisions`, sortKey: record.wait_expiry });
+      href: `/practice?decision=${encodeURIComponent(record.id)}#saved-decisions`, sortKey: record.wait_expiry });
   }
 
   items.sort((a, b) => ATTENTION_PRIORITY[a.priority] - ATTENTION_PRIORITY[b.priority]

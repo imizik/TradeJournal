@@ -22,7 +22,7 @@ test("discards freeze responses after the symbol changes", async ({ page }) => {
     await waiting;
     await route.fulfill({ json: frozen("SPY") });
   });
-  await page.goto("/");
+  await page.goto("/practice");
   await page.getByText("Save a human decision").click();
   await page.getByLabel("Symbol").fill("SPY");
   const spyRequest = page.waitForRequest((request) => request.url().includes("/decisions/context/SPY"));
@@ -42,7 +42,7 @@ test("newer freeze request wins when responses arrive out of order", async ({ pa
     if (symbol === "SPY") await spyWaiting;
     await route.fulfill({ json: frozen(symbol) });
   });
-  await page.goto("/");
+  await page.goto("/practice");
   await page.getByText("Save a human decision").click();
   await page.getByLabel("Symbol").fill("SPY");
   const spyRequest = page.waitForRequest((request) => request.url().includes("/decisions/context/SPY"));
@@ -65,7 +65,7 @@ test("retries an uncertain freeze with the same operation ID", async ({ page }) 
     if (attempts === 1) return route.fulfill({ status: 503, json: { detail: "temporary failure" } });
     await route.fulfill({ json: frozen("SPY") });
   });
-  await page.goto("/");
+  await page.goto("/practice");
   await page.getByText("Save a human decision").click();
   await page.getByLabel("Symbol").fill("SPY");
   await page.getByRole("button", { name: "Freeze market context" }).click();
@@ -108,7 +108,7 @@ test("saved WAIT and SKIP details survive a page reload", async ({ page, request
   });
   expect(skipResponse.ok()).toBeTruthy();
 
-  await page.goto("/");
+  await page.goto("/practice");
   await page.reload();
   const waitRecord = page.locator("details").filter({ hasText: waitOpportunityId });
   await waitRecord.locator("summary").click();
@@ -180,7 +180,7 @@ test("arms a TAKE and shows the paper timeline", async ({ page, request }) => {
   const base = { record_id: id, policy_version: "shadow-isaac-p0-v1", outcome: null, outcome_x3: null };
   const armOps = await mockPaper(page, id, { ...base, status: "unarmed", events: [] },
     { ...base, status: "armed", events: [ev("armed", 1, 1791378000, { delivery: "pending" })] });
-  await page.goto("/");
+  await page.goto("/practice");
   const card = page.locator(`#decision-${id}`);
   await card.locator("summary").click();
   await card.getByRole("button", { name: "Arm paper plan" }).click();
@@ -194,7 +194,7 @@ test("arms a TAKE and shows the paper timeline", async ({ page, request }) => {
 test("shows a policy refusal verbatim and reuses no stale operation", async ({ page, request }) => {
   const id = await takeRecord(request);
   await mockPaper(page, id, { record_id: id, status: "unarmed", policy_version: null, events: [], outcome: null, outcome_x3: null });
-  await page.goto("/");
+  await page.goto("/practice");
   const card = page.locator(`#decision-${id}`);
   await card.locator("summary").click();
   await card.getByRole("button", { name: "Arm paper plan" }).click();
