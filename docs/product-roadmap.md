@@ -41,6 +41,10 @@ slice; the detailed contracts continue to own implementation and acceptance.
    option that was up gives its gain back, or is still open on its last day.
    Alerts only, off until he enables `POSITION_ALERTS_ENABLED`. This does not
    reopen other non-Dots work.
+   **Selected October 21, 2026:** Isaac selected [Radar](radar.md), a feed of
+   meaningful intraday market changes outside his watchlist, ahead of other new
+   feature work. In-flight Dots acceptance work continues. Radar sends no alerts
+   and records only after his separate OK.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
    now merged), close its remaining activation/operational gates, and observe one
