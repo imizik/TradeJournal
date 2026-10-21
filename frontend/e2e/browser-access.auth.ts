@@ -90,7 +90,7 @@ test("owner credential UI, CSRF refusal, and access key dismissal", async ({ bro
   expect([400, 404]).toContain(traversal.status());
   const escaped = await page.request.get("/api/backend/%252e%252e/access/me");
   expect([400, 404]).toContain(escaped.status());
-  await page.goto("/");
+  await page.goto("/practice");
   await page.getByText("Save a human decision", { exact: true }).click();
   await page.getByLabel("Symbol", { exact: true }).fill("SPY");
   await page.getByRole("button", { name: "Freeze market context", exact: true }).click();
