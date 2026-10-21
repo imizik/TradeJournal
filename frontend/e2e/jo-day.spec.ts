@@ -52,7 +52,11 @@ function plans(day: string, live: boolean): PlansView {
   const watch: PlanView = { plan_id: "plan_1", actor: "check_1", session_date: day, symbol: "MU", direction: "long", trigger_price: 140, invalidation_price: 137.5,
     confirm_bars: 2, rationale: "Owner asked to track a breakout over 140.", source: { kind: "check", id: "c", sha256: "s", observed_at: iso(day, "10:20"), price: 139.2 },
     expires_at: live ? new Date(Date.now() + 3_600_000).toISOString() : iso(day, "14:20"), created_at: iso(day, "10:21"), accepted_by_monitor: true, cancel_requested: false,
-    state: live ? "watching" : "expired", reason: null, state_at: null, monitoring: true, heartbeat_at: null, last_bar: null, last_evaluated_at: null, events: [], deliveries: [] };
+    state: live ? "triggered" : "expired", reason: null, state_at: null, monitoring: live, heartbeat_at: null, last_bar: null, last_evaluated_at: null,
+    events: [{ state: "triggered", reason: "confirmed_closes", occurred_at: iso(day, "10:54"),
+      bar: { time: 0, end_time: 0, open: 140.6, high: 140.7, low: 140.5, close: 140.6 } },
+      ...(live ? [] : [{ state: "expired" as const, reason: "monitoring_window_ended", occurred_at: iso(day, "14:20"), bar: null }])],
+    deliveries: [{ event_state: "triggered", attempt: 1, result: "accepted", outcome: "sent", error_code: null, transport_receipt_id: null, occurred_at: iso(day, "10:54") }] };
   return { checked_at: new Date().toISOString(), enabled: true, app_flag: true, stock_watch: true, configured: true,
     readiness: { heartbeat: "fresh" }, max_daily_plans: 24, plans_today: 1, limit: 50, delivery: { channel: "ntfy", configured: true }, plans: [watch] };
 }
@@ -70,15 +74,20 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   await stub(page, today, true);
   await page.goto(`/daily/${today}`);
   const jo = page.getByTestId("jo-day");
-  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · 1 price watch · .* · next: 11:00 market read$/);
+  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · MU triggered 10:54 AM · .* · next: 11:00 market read$/);
   await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
-  const first = jo.getByTestId("jo-day-item").filter({ hasText: "Scheduled market read · mixed" });
-  await expect(first).toContainText("Data had gaps");
+  const first = jo.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" });
+  await expect(first).toContainText("On time · data had gaps");
+  await expect(first).toContainText("SPY is holding its opening range"); // first sentence, before opening
   await first.locator("summary").click();
   await expect(first).toContainText("SPY is holding its opening range");
   await expect(first).toContainText("Wrong if:");
-  await expect(jo.getByText("Extra market read · mixed · correction")).toBeVisible();
-  await expect(jo.getByText("MU long watch: 2 closes above 140", { exact: true })).toBeVisible();
+  await expect(jo.getByText("Extra read · mixed · correction")).toBeVisible();
+  // The trigger is its own row with price and alert, and the live watch says what it still checks.
+  const fired = jo.getByTestId("jo-day-item").filter({ hasText: "MU watch triggered · close 140.6" });
+  await expect(fired).toContainText("Phone alert sent");
+  await expect(fired).toContainText("Alert only: no order was placed.");
+  await expect(jo.getByText("MU triggered 10:54 AM: still checking for a close below 137.5")).toBeVisible();
   await expect(jo.getByRole("heading", { name: "Coming up" })).toBeVisible();
   await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Upcoming" })).toHaveCount(3);
   await jo.screenshot({ path: test.info().outputPath("jo-day-today-desktop.png") });
@@ -102,11 +111,13 @@ test("a past day is a record: missing reads are flagged and nothing is shown as 
   await stub(page, past, false);
   await page.goto(`/daily/${past}`);
   const jo = page.getByTestId("jo-day");
-  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · 1 price watch/);
-  await expect(page.getByTestId("jo-day-headline")).toHaveClass(/text-amber-200/);
+  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 3 missing · 1 extra read · MU triggered 10:54 AM/);
+  await expect(page.getByTestId("jo-day-headline")).toHaveAttribute("data-trouble", "true");
   await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Missing" })).toHaveCount(3);
   await expect(jo.getByRole("heading", { name: "Coming up" })).toHaveCount(0);
-  await expect(jo.getByText("expired")).toBeVisible();
+  // The trigger stays in the record after the watch ends.
+  await expect(jo.getByText("MU watch triggered · close 140.6")).toBeVisible();
+  await expect(jo.getByText("MU watch ended at its expiry")).toBeVisible();
 });
 
 test("one failed record is named and the rest still show", async ({ page }) => {

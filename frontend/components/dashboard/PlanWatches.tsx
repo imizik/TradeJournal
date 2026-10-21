@@ -107,7 +107,7 @@ function Plan({ p }: { p: PlanView }) {
       <dt className="text-muted-foreground">Monitoring</dt>
       <dd data-testid="plan-monitoring">{p.monitoring ? `Active · heartbeat ${clock(p.heartbeat_at!)}` : current(p) ? `Not active${p.heartbeat_at ? ` · last heartbeat ${clock(p.heartbeat_at)}` : ""}` : "Stopped"}</dd>
       <dt className="text-muted-foreground">Last evaluated bar</dt>
-      <dd>{p.last_bar ? `${minute(p.last_bar.time)}–${minute(p.last_bar.end_time)} close ${p.last_bar.close} · ${p.last_bar.consecutive} of ${p.confirm_bars} confirming · checked ${clock(p.last_evaluated_at!)}` : "None yet"}</dd>
+      <dd>{p.last_bar ? `${minute(p.last_bar.time)}–${minute(p.last_bar.end_time)} close ${p.last_bar.close} · ${Math.min(p.last_bar.consecutive, p.confirm_bars)} of ${p.confirm_bars} confirming · checked ${clock(p.last_evaluated_at!)}` : "None yet"}</dd>
       <dt className="text-muted-foreground">Phone alerts</dt>
       <dd>{p.deliveries.length ? <ul className="space-y-1">{p.deliveries.map((d, i) => <li key={i}>{d.event_state ? stateName[d.event_state] : "Alert"} alert, attempt {d.attempt}: {outcome[d.outcome]}{d.error_code ? ` (${d.error_code})` : ""} · {clock(d.occurred_at)}</li>)}</ul> : "None sent yet"}</dd>
       <dt className="text-muted-foreground">Based on</dt>

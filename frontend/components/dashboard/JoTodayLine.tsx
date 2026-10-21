@@ -8,7 +8,8 @@ export default function JoTodayLine({ today }: { today: string }) {
   return <a href={`/daily/${today}#jo`} data-testid="jo-today-line"
     className="col-span-2 block rounded-md border px-3 py-2 text-sm hover:bg-secondary sm:col-span-4 xl:col-span-2">
     <span className="text-muted-foreground">Jo: </span>
-    <span className={headline?.trouble ? "text-amber-200" : "text-foreground"}>{headline ? headline.text : "loading…"}</span>
+    {headline ? headline.parts.map((part, i) => <span key={i}>{i ? " · " : ""}<span className={part.tone === "trouble" ? "text-amber-200" : part.tone === "news" ? "text-sky-300" : "text-foreground"}>{part.text}</span></span>)
+      : <span className="text-muted-foreground">loading…</span>}
     <span className="ml-1 text-primary">→</span>
   </a>;
 }

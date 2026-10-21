@@ -18,7 +18,8 @@ const link = "text-sm text-primary hover:underline";
 const ACTIVE: PlanState[] = ["pending_activation", "watching", "triggered"];
 
 type Tone = string;
-type Item = { key: string; at: string | null; label: string; icon: "done" | "warn" | "watch" | "next" | "skip"; badge?: [string, Tone]; detail?: React.ReactNode };
+type Item = { key: string; at: string | null; label: string; sub?: string; icon: "done" | "warn" | "watch" | "next" | "skip"; badge?: [string, Tone]; detail?: React.ReactNode };
+type Part = { text: string; tone?: "trouble" | "news" };
 export type JoDayData = { morning: MorningView | null; reads: MarketReadSession | null; readsOff: boolean; plans: PlansView | null; scanner: ScannerDay | null; failed: string[] };
 
 /** Loads the four existing Jo records for a date; each one can fail on its own without hiding the rest. */
@@ -34,7 +35,7 @@ export function useJoDay(day: string, live: boolean) {
         const value = <T,>(r: PromiseSettledResult<T>) => r.status === "fulfilled" ? r.value : null;
         const readsView = value(reads);
         setData({ morning: value(morning), reads: readsView?.sessions.find((s) => s.session_date === day) ?? null,
-          readsOff: !!readsView && (!readsView.market_watch_enabled || !readsView.reads_available),
+          readsOff: !!readsView && !readsView.reads_available,
           plans: value(plans), scanner: value(scanner),
           failed: [["the morning briefing", morning], ["market reads", reads], ["price watches", plans], ["scanner setups", scanner]]
             .filter(([, r]) => (r as PromiseSettledResult<unknown>).status === "rejected").map(([name]) => name as string) });
@@ -52,34 +53,47 @@ export function useJoDay(day: string, live: boolean) {
 const plansFor = (data: JoDayData, day: string) => (data.plans?.plans ?? []).filter((p) => p.session_date === day);
 const activePlan = (p: PlanView, checked: string) => ACTIVE.includes(p.state) && Date.parse(p.expires_at) > Date.parse(checked);
 
-/** One plain sentence: the briefing, reads in, setups and the next scheduled job. */
-export function joHeadline(data: JoDayData, day: string, live: boolean): { text: string; trouble: boolean } {
-  const parts: string[] = [];
-  let trouble = data.failed.length > 0;
+const etMinutes = (value: string) => { const [h, m] = new Date(value).toLocaleTimeString("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit" }).split(":").map(Number); return h * 60 + m; };
+/** Today, after the session's close by the server's clock: the day is a record, not a live screen. */
+const afterClose = (data: JoDayData, live: boolean) => {
+  const close = data.reads?.hours?.close, now = data.plans?.checked_at ?? data.morning?.checked_at;
+  return live && close != null && !!now && etMinutes(now) >= close;
+};
+const finalEvents = ["triggered", "invalidated", "expired", "cancelled", "unavailable"] as PlanState[];
+
+/** One plain sentence: the briefing, reads in, what went wrong, watch news and the next scheduled job. */
+export function joHeadline(data: JoDayData, day: string, live: boolean): { text: string; trouble: boolean; parts: Part[] } {
+  const parts: Part[] = [];
   const f = data.morning?.delivery?.fulfilment;
-  if (f === "on_time") parts.push("Briefing on time");
-  else if (f === "late") { parts.push("Briefing late"); trouble = true; }
-  else if (f === "missing") { parts.push("Briefing missing"); trouble = true; }
-  else if (f === "pending") parts.push("Briefing not in yet");
-  else if (data.morning?.briefing) parts.push("Briefing saved");
+  if (f === "on_time") parts.push({ text: "Briefing on time" });
+  else if (f === "late") parts.push({ text: "Briefing late", tone: "trouble" });
+  else if (f === "missing") parts.push({ text: "Briefing missing", tone: "trouble" });
+  else if (f === "pending") parts.push({ text: "Briefing not in yet" });
+  else if (data.morning?.briefing) parts.push({ text: "Briefing saved" });
   const slots = data.reads?.slots.filter((s) => s.expected) ?? [];
   if (slots.length) {
     const due = slots.filter((s) => s.delivery !== "pending");
-    const inCount = slots.filter((s) => s.status === "read_seen").length;
-    parts.push(`${inCount} of ${live ? slots.length : due.length} market reads in`);
-    if (slots.some((s) => s.delivery === "missing" || s.delivery === "late")) trouble = true;
+    parts.push({ text: `${slots.filter((s) => s.status === "read_seen").length} of ${live ? slots.length : due.length} market reads in` });
+    const missing = slots.filter((s) => s.delivery === "missing").length, late = slots.filter((s) => s.delivery === "late").length;
+    if (missing) parts.push({ text: `${missing} missing`, tone: "trouble" });
+    if (late) parts.push({ text: `${late} late`, tone: "trouble" });
   }
   const extra = data.reads?.reads_not_credited_to_a_slot.length ?? 0;
-  if (extra) parts.push(`${extra} extra ${extra === 1 ? "read" : "reads"}`);
+  if (extra) parts.push({ text: `${extra} extra ${extra === 1 ? "read" : "reads"}` });
   const watches = plansFor(data, day);
-  if (watches.length) parts.push(`${watches.length} price ${watches.length === 1 ? "watch" : "watches"}`);
+  const fired = watches.flatMap((p) => p.events.filter((e) => e.state === "triggered").map((e) => `${p.symbol} triggered ${time(e.occurred_at)}`));
+  if (fired.length) fired.forEach((text) => parts.push({ text, tone: "news" }));
+  else if (watches.length) parts.push({ text: `${watches.length} price ${watches.length === 1 ? "watch" : "watches"}` });
+  if (watches.some((p) => p.state === "unavailable")) parts.push({ text: "a watch stopped", tone: "trouble" });
   const setups = data.scanner?.candidates.length ?? 0;
-  parts.push(setups ? `${setups} ${setups === 1 ? "setup" : "setups"}` : "no setups");
-  if (live) {
+  parts.push({ text: setups ? `${setups} ${setups === 1 ? "setup" : "setups"}` : "no setups" });
+  if (afterClose(data, live)) parts.push({ text: "market closed" });
+  else if (live) {
     const next = data.reads?.slots.find((s) => s.expected && s.delivery === "pending" && !s.read);
-    parts.push(next ? `next: ${slotTime(next.slot)} market read` : "nothing else scheduled today");
+    parts.push({ text: next ? `next: ${slotTime(next.slot)} market read` : "nothing else scheduled today" });
   }
-  return { text: parts.join(" · "), trouble };
+  if (data.failed.length) parts.push({ text: "some records didn't load", tone: "trouble" });
+  return { text: parts.map((p) => p.text).join(" · "), trouble: parts.some((p) => p.tone === "trouble"), parts };
 }
 
 const viewWord: Record<MarketReadText["view"], string> = { up: "Leaning up", down: "Leaning down", mixed: "Mixed", no_view: "No view" };
@@ -88,18 +102,19 @@ function ReadText({ read }: { read: MarketReadText }) {
   return <div className="space-y-2 text-sm">
     <p><span className="text-muted-foreground">{viewWord[read.view]}{read.is_correction ? " · correction" : ""}: </span>{read.main_text}</p>
     <p><span className="text-muted-foreground">Other case: </span>{read.alternative_text}</p>
-    <p><span className="text-muted-foreground">Wrong if: </span>{read.invalidation_text}</p>
+    <p><span className="text-muted-foreground">Wrong if: </span>{read.invalidation_text.replace(/^wrong if:?\s*/i, "")}</p>
     <p className="text-muted-foreground">What changed: {read.change_summary}</p>
   </div>;
 }
 
-function readBadge(read: MarketReadText | null): string {
-  if (!read) return "Market read";
-  return `Market read · ${viewWord[read.view].toLowerCase()}${read.is_correction ? " · correction" : ""}`;
+/** The read's lean, plus the start of its main text so a row can be scanned without opening it. */
+function readLabel(prefix: string, read: MarketReadText | null) {
+  const label = read ? `${prefix} · ${viewWord[read.view].toLowerCase()}${read.is_correction ? " · correction" : ""}` : prefix;
+  const text = read?.main_text.trim() ?? "";
+  return { label, sub: text ? (text.length > 120 ? `${text.slice(0, 120).replace(/\s+\S*$/, "")}…` : text) : undefined };
 }
 
-const planStates: Record<PlanState, string> = { pending_activation: "saved, not monitored yet", watching: "watching", triggered: "triggered (not entered)",
-  invalidated: "cancelled by its invalidation price", expired: "expired", cancelled: "cancelled", unavailable: "monitoring failed" };
+const minutesAfter = (later: string, earlier: string) => Math.round((Date.parse(later) - Date.parse(earlier)) / 60000);
 
 function shadowBadge(c: ScannerCandidateRow): [string, Tone] {
   if (c.shadow.decision === "take") return ["Jo: TAKE", ok];
@@ -112,6 +127,10 @@ function shadowBadge(c: ScannerCandidateRow): [string, Tone] {
 export function joItems(data: JoDayData, day: string, live: boolean) {
   const done: Item[] = [], watching: Item[] = [], next: Item[] = [];
   const m = data.morning, d = m?.delivery;
+  if (d?.publication === "published" && d.published_at) {
+    done.push({ key: "packet", at: d.published_at, icon: "done", label: "Morning data sent to Jo",
+      badge: !m?.briefing && d.deadline ? [`Briefing due ${time(d.deadline)}`, muted] : undefined });
+  }
   if (m?.briefing && !m.briefing.redacted_at) {
     const symbols = (m.briefing.body.items ?? []).map((i) => i.symbol).filter(Boolean) as string[];
     done.push({ key: "brief", at: d?.available_at ?? m.briefing.received_at, icon: d?.fulfilment === "late" ? "warn" : "done",
@@ -132,20 +151,20 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
   for (const s of data.reads?.slots ?? []) {
     if (s.expected === false) continue;
     if (s.received_at) {
-      done.push({ key: `slot-${s.slot}`, at: s.received_at, icon: s.delivery === "late" ? "warn" : "done", label: `Scheduled ${readBadge(s.read).toLowerCase()}${s.delivery === "late" ? ` (${slotTime(s.slot)} slot)` : ""}`,
-        badge: s.delivery === "late" ? [`Late · ${Math.round((s.late_by_seconds ?? 0) / 60)} min past due`, warn] : s.packet.status === "published_partial" ? ["Data had gaps", warn] : ["On time", ok],
+      done.push({ key: `slot-${s.slot}`, at: s.received_at, icon: s.delivery === "late" ? "warn" : "done", ...readLabel(`${slotTime(s.slot)} read`, s.read),
+        badge: s.delivery === "late" ? [`Late · ${minutesAfter(s.received_at, s.scheduled_at)} min after ${slotTime(s.slot)}`, warn] : s.packet.status === "published_partial" ? ["On time · data had gaps", warn] : ["On time", ok],
         detail: s.read ? <ReadText read={s.read} /> : <p className="text-sm text-muted-foreground">Jo&apos;s words for this read weren&apos;t saved in the app; only its timing is known.</p> });
     } else if (s.delivery === "pending" || s.status === "upcoming") {
-      if (live) next.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "next", label: "Market read", badge: ["Upcoming", muted] });
+      if (live) next.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "next", label: `${slotTime(s.slot)} market read`, badge: ["Upcoming", muted] });
     } else if (s.delivery === "missing") {
-      done.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "warn", label: `${slotTime(s.slot)} market read`, badge: ["Missing", warn],
+      done.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "warn", label: `${slotTime(s.slot)} read`, badge: ["Missing", warn],
         detail: <p className="text-sm text-muted-foreground">No read arrived by the deadline. The cause isn&apos;t visible to the app.</p> });
     } else if (s.delivery === "unknown" && s.expected) {
-      done.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "warn", label: `${slotTime(s.slot)} market read`, badge: ["Unknown", warn] });
+      done.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "warn", label: `${slotTime(s.slot)} read`, badge: ["Unknown", warn] });
     }
   }
   for (const r of data.reads?.reads_not_credited_to_a_slot ?? []) {
-    done.push({ key: r.read_id, at: r.received_at, icon: "done", label: `Extra ${readBadge(r.read).toLowerCase()}${r.event_wake_id ? " · answered a market alert" : ""}`,
+    done.push({ key: r.read_id, at: r.received_at, icon: "done", ...readLabel(`Extra read${r.event_wake_id ? " · answered a market alert" : ""}`, r.read),
       badge: ["Unscheduled", muted], detail: r.read ? <ReadText read={r.read} /> : undefined });
   }
 
@@ -154,25 +173,40 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
     const label = `${p.symbol} ${p.direction} watch: ${p.confirm_bars} closes ${p.direction === "long" ? "above" : "below"} ${p.trigger_price}`;
     const detail = <div className="space-y-1 text-sm"><p>{p.rationale}</p>
       <p className="text-muted-foreground">Cancels on a close {p.direction === "long" ? "below" : "above"} {p.invalidation_price} · ends {time(p.expires_at)} · phone alert only, never an order</p></div>;
-    done.push({ key: p.plan_id, at: p.created_at, icon: "watch", label: `Saved ${label}`, badge: [planStates[p.state], ACTIVE.includes(p.state) ? ok : muted], detail });
-    if (live && activePlan(p, checked)) watching.push({ key: `w-${p.plan_id}`, at: null, icon: "watch", label, badge: [p.monitoring ? `Watching until ${time(p.expires_at)}` : "Monitor not reporting", p.monitoring ? ok : warn], detail });
+    done.push({ key: p.plan_id, at: p.created_at, icon: "watch", label: `Saved ${label}`, badge: ["Saved", muted], detail });
+    // Each outcome is its own row, so a trigger stays in the record after the watch ends.
+    for (const e of p.events.filter((ev) => finalEvents.includes(ev.state))) {
+      const sent = p.deliveries.filter((x) => x.event_state === e.state).at(-1);
+      const price = e.bar ? ` · close ${e.bar.close}` : "";
+      const words: Record<string, string> = { triggered: `${p.symbol} watch triggered${price}`, invalidated: `${p.symbol} watch cancelled: closed ${p.direction === "long" ? "below" : "above"} ${p.invalidation_price}${price}`,
+        expired: `${p.symbol} watch ended at its expiry`, cancelled: `${p.symbol} watch cancelled`, unavailable: `${p.symbol} watch stopped: monitoring failed` };
+      done.push({ key: `${p.plan_id}-${e.state}`, at: e.occurred_at, icon: e.state === "unavailable" ? "warn" : e.state === "triggered" ? "watch" : "skip",
+        label: words[e.state], sub: e.state === "triggered" ? "Alert only: no order was placed." : undefined,
+        badge: sent ? (sent.outcome === "sent" ? ["Phone alert sent", e.state === "triggered" ? ok : muted] : sent.outcome === "failed" ? ["Phone alert failed", warn]
+          : sent.outcome === "unknown" ? ["Phone alert may have sent", warn] : ["No phone alert", muted]) : e.state === "unavailable" ? ["Not watched", warn] : undefined });
+    }
+    if (live && !afterClose(data, live) && activePlan(p, checked)) {
+      const trig = p.events.find((e) => e.state === "triggered");
+      watching.push({ key: `w-${p.plan_id}`, at: null, icon: "watch", label: trig ? `${p.symbol} triggered ${time(trig.occurred_at)}: still checking for a close ${p.direction === "long" ? "below" : "above"} ${p.invalidation_price}` : label,
+        badge: !p.monitoring ? ["Monitor not reporting", warn] : [`Until ${time(p.expires_at)}`, ok], detail });
+    }
   }
 
   for (const c of data.scanner?.candidates ?? []) {
     done.push({ key: c.id, at: c.detected_at, icon: c.shadow.decision === "take" ? "done" : "skip", label: `Setup: ${c.symbol} ${c.setup === "orb" ? "opening-range breakout" : "fade"} ${c.direction}`,
       badge: shadowBadge(c), detail: c.shadow.reason ? <p className="text-sm">{c.shadow.reason}</p> : undefined });
   }
-  if (live && data.scanner?.enabled) {
+  if (live && !afterClose(data, live) && data.scanner?.enabled) {
     const mon = data.scanner.monitoring;
     watching.push({ key: "scanner", at: null, icon: "watch", label: `Setup scanner on ${mon.symbols_selected} stocks${mon.last_judged_bar_end ? ` · last bar ${time(mon.last_judged_bar_end)}` : ""}`,
       badge: mon.state === "fresh" ? ["Running", ok] : mon.state === "stale" || mon.state === "not_running" ? ["Not keeping up", warn] : ["Market closed", muted] });
   }
-  if (live && !plansFor(data, day).some((p) => activePlan(p, checked)) && data.plans?.enabled) {
+  if (live && !afterClose(data, live) && !plansFor(data, day).some((p) => activePlan(p, checked)) && data.plans?.enabled) {
     watching.push({ key: "no-watch", at: null, icon: "skip", label: "No active price watches", badge: [`${data.plans.plans_today ?? 0} of ${data.plans.max_daily_plans} used today`, muted] });
   }
 
   const byTime = (a: Item, b: Item) => Date.parse(a.at ?? "") - Date.parse(b.at ?? "");
-  return { done: done.sort(byTime), watching, next: next.sort(byTime) };
+  return { done: done.sort(byTime), watching, next: next.sort(byTime), closed: afterClose(data, live) };
 }
 
 const icons: Record<Item["icon"], [string, string]> = { done: ["✓", "text-emerald-400"], warn: ["!", "text-amber-300"], watch: ["◉", "text-sky-300"], next: ["○", "text-muted-foreground"], skip: ["–", "text-muted-foreground"] };
@@ -183,7 +217,7 @@ function Row({ item }: { item: Item }) {
     <span className="w-[4.5rem] shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">{item.at ? time(item.at) : "now"}</span>
     <span aria-hidden="true" className={`w-3 shrink-0 text-center ${tone}`}>{glyph}</span>
     <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1">
-      <span className="min-w-0 break-words">{item.label}</span>
+      <span className="min-w-0 break-words">{item.label}{item.sub && <span className="block text-xs text-muted-foreground">{item.sub}</span>}</span>
       {item.badge && <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${item.badge[1]}`}>{item.badge[0]}</span>}
     </span>
   </div>;
@@ -208,7 +242,8 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Jo&apos;s day</h2>
-        {headline ? <p className={`mt-1 text-base ${headline.trouble ? "text-amber-200" : "text-foreground"}`} data-testid="jo-day-headline">{headline.text}</p>
+        {headline ? <p className="mt-1 text-base text-foreground" data-testid="jo-day-headline" data-trouble={headline.trouble}>
+          {headline.parts.map((part, i) => <span key={i}>{i ? " · " : ""}<span className={part.tone === "trouble" ? "text-amber-200" : part.tone === "news" ? "text-sky-300" : undefined}>{part.text}</span></span>)}</p>
           : <p role="status" className="mt-1 text-sm text-muted-foreground">Loading Jo&apos;s records…</p>}
       </div>
       <button type="button" onClick={refresh} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm hover:bg-secondary">Refresh</button>
@@ -217,8 +252,9 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
     {data?.readsOff && <p className="text-xs text-muted-foreground">Market-read records aren&apos;t available on this server, so reads can&apos;t be shown.</p>}
     {items && <>
       <Group title="Done" items={items.done} empty={live ? "Nothing from Jo yet today." : "No Jo activity recorded for this day."} />
-      {live && <Group title="Watching now" items={items.watching} empty="Nothing is being watched right now." />}
-      {live && <Group title="Coming up" items={items.next} empty="Nothing else scheduled today." />}
+      {live && items.closed && <p className="text-sm text-muted-foreground">The market has closed; nothing is being watched and nothing else is scheduled today.</p>}
+      {live && !items.closed && <Group title="Watching now" items={items.watching} empty="Nothing is being watched right now." />}
+      {live && !items.closed && <Group title="Coming up" items={items.next} empty="Nothing else scheduled today." />}
     </>}
     <p className="flex flex-wrap gap-x-4 gap-y-1">
       <a className={link} href={`/morning?day=${day}`}>Briefing →</a>

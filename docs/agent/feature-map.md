@@ -187,6 +187,11 @@ see the [prototype notes](../level2-synthetic-prototype.md) and
   market-shaped candles in `frontend/e2e/fixtures/realisticBars.ts`; to try
   the UI on real candles without touching real records or synced chart
   settings, `bash scripts/ux_sandbox.sh` (port 3098, its own seeded SQLite).
+  `--jo-day` instead runs a scripted Jo day on a fake clock
+  (`backend/scripts/ux_jo_day.py`): briefing, scheduled and extra reads, an MU
+  price watch that triggers, a refused TSLA watch, a missing and a late read,
+  written through the Check ledgers and outboxes and judged by the app's own
+  importers, plan monitor and API; step it with `POST :8098/__sim/next`.
   The `trade-chart-ux` skill (`.claude/skills/trade-chart-ux/SKILL.md`)
   covers UI review and the picture checks before review.
 - **A route with no test:** call it and paste the response.
