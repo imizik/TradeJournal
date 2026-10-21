@@ -1,5 +1,5 @@
 import { requireAccess } from "@/lib/accessServer";
-import DailyAiPanel from "@/components/DailyAiPanel";
+import DayReviewWorkflow from "@/components/DayReviewWorkflow";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
@@ -143,11 +143,12 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
     ...new Set(selectedTrades.filter((trade) => trade.instrument_type === "stock").map((trade) => trade.ticker)),
   ];
 
-  const [tradeFillEntries, optionQuotes, stockQuotes, savedDailyReview] = await Promise.all([
+  const [tradeFillEntries, optionQuotes, stockQuotes, savedDailyReview, dayJournal] = await Promise.all([
     Promise.all(selectedTrades.map(async (trade) => [trade.id, await api.tradeFills(trade.id)] as const)),
     optionPositions.length ? api.positionQuotes(optionPositions) : Promise.resolve([] as PositionQuote[]),
     stockTickers.length ? api.stockQuotes(stockTickers) : Promise.resolve({} as Record<string, number | null>),
     selectedDay ? api.dailyReview(selectedDay) : Promise.resolve(null),
+    selectedDay && access.owner ? api.dayJournal(selectedDay).catch(() => null) : Promise.resolve(null),
   ]);
 
   const fillsByTradeId = Object.fromEntries(tradeFillEntries);
@@ -283,13 +284,16 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <StatCard label="Winners / Losers" value={`${winners} / ${losers}`} />
       </div>
 
-      <DailyAiPanel
+      <DayReviewWorkflow
+        key={`${selectedDay ?? "invalid-day"}:${savedDailyReview?.generated_at ?? "no-review"}`}
         tradeCount={selectedTrades.length}
         day={selectedDay ?? null}
         dayLabel={dayLabel}
         tradeIds={selectedTrades.map((trade) => trade.id)}
         initialReview={savedDailyReview?.review ?? null}
         initialGeneratedAt={savedDailyReview?.generated_at ?? null}
+        initialJournal={dayJournal}
+        canEditJournal={access.owner}
       />
 
       {selectedTrades.length === 0 ? (

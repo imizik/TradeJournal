@@ -19,14 +19,15 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.ai import daily_reviewer, plan_runner
 from app.database import get_session
 from app.jobs import plan_reviews
-from app.models import Account, DailyReviewRecord, Trade
+from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
 from app.routers.daily_review import router
 
 ACCOUNT = UUID(int=1)
 ANSWER = {"summary": "Two trades, +$60.", "day_grade": "B: sized to plan", "key_takeaways": ["SPY 9:31 entry was on plan"],
           "best_trade": {"trade_id": None, "ticker": "SPY", "reason": "waited for the reclaim"},
           "worst_trade": {"trade_id": None, "ticker": "SPY", "reason": "chased"}, "patterns": [],
-          "next_session_rules": ["Max 2 contracts"], "rules_check": [], "vs_baseline": [], "data_gaps": []}
+          "next_session_rules": ["Max 2 contracts"], "rules_check": [], "vs_baseline": [], "data_gaps": [],
+          "expectation_checks": []}
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -86,7 +87,7 @@ def fake_claude(tmp_path, monkeypatch):
     # The day's market context reads providers; tests/test_review_context.py covers it offline.
     from app.ai import review_context
 
-    monkeypatch.setattr(review_context, "build", lambda session, day, trades: {"gaps": ["stubbed in tests"]})
+    monkeypatch.setattr(review_context, "build", lambda session, day, trades, **kwargs: {"gaps": ["stubbed in tests"]})
     # The monthly review has its own tests (tests/test_monthly_review.py); these runs are about the day.
     monkeypatch.setattr(plan_reviews, "plan_month", lambda session, today: None)
     plan_runner._checked.clear()
@@ -195,10 +196,70 @@ def test_the_review_sees_the_last_rules_and_the_traders_normal(fake_claude, engi
     assert (baseline["trading_days"], baseline["trades_per_day"], baseline["median_premium_per_trade"], baseline["win_rate"]) == (2, 1.0, 200.0, 0.5)
     assert (baseline["avg_win"], baseline["avg_loss"], baseline["worst_day_pnl"]) == (50.0, -30.0, -30.0)
     assert [item["id"] for item in context["trades"]] == [str(UUID(int=103))]
-    assert {"rules_check", "vs_baseline", "data_gaps"} <= set(seen["schema"]["required"])
+    assert {"rules_check", "vs_baseline", "data_gaps", "expectation_checks"} <= set(seen["schema"]["required"])
     assert review["generated_by"] == "claude-sonnet-5-5 through claude -p on the Claude plan"
     assert review["prompt_version"] == daily_reviewer.PROMPT_VERSION
     assert json.loads(record.review_json)["usage"]["output_tokens"] == 300
+
+
+@pytest.mark.parametrize("append_during_generation", [False, True])
+def test_review_stales_if_owner_thoughts_change_during_generation(engine, monkeypatch, append_during_generation):
+    from app.ai import daily_review_service
+
+    day = datetime(2026, 9, 3).date()
+    add(engine, trade(1, datetime(2026, 9, 3, 9, 31), datetime(2026, 9, 3, 10, 0)))
+
+    def fake_review(_day, _trades, _fills, session, backend=None):
+        if append_during_generation:
+            session.add(DayJournalEntry(operation_id="during-review", day=day, kind="update", text="New thought"))
+            session.commit()
+        return {**ANSWER, "owner_thoughts_included": False}
+
+    monkeypatch.setattr(daily_reviewer, "review_trading_day", fake_review)
+    with Session(engine) as session:
+        record, review = daily_review_service.generate(session, day)
+        stored = json.loads(record.review_json)
+
+    if append_during_generation:
+        assert review["source_data_stale"] is True
+        assert review["source_data_stale_reason"] == "Owner thoughts changed while this review was being generated."
+        assert review["owner_thoughts_included"] is True
+        assert stored["source_data_stale"] is True and stored["owner_thoughts_included"] is True
+        assert stored["owner_input_count"] == 0
+    else:
+        assert "source_data_stale" not in review
+        assert review["owner_thoughts_included"] is False
+        assert "source_data_stale" not in stored
+
+
+def test_private_prior_day_rules_make_the_next_review_private(fake_claude, engine, monkeypatch):
+    from app.ai import daily_review_service, review_context
+
+    prior_day = datetime(2026, 9, 2).date()
+    review_day = datetime(2026, 9, 3).date()
+    add(engine,
+        DayJournalEntry(operation_id="private-prior", day=prior_day, kind="outlook", text="Private outlook"),
+        review_record(prior_day.isoformat(), owner_thoughts_included=True, owner_input_count=1,
+                      next_session_rules=["SECRET prior-day rule"]),
+        trade(1, datetime(2026, 9, 3, 9, 31), datetime(2026, 9, 3, 10, 0)))
+    monkeypatch.setattr(review_context, "build", lambda *_args, **_kwargs: {"gaps": []})
+    seen = {}
+
+    def ask(_system, message, _schema, **_kwargs):
+        context = json.loads(message.split("\n\n", 1)[1])
+        seen["history"] = context["history"]
+        answer = {**ANSWER, "next_session_rules": context["history"]["prior_reviews"][0]["next_session_rules"]}
+        return type("Answer", (), {"data": answer, "author": "test", "input_tokens": 0,
+            "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
+
+    monkeypatch.setattr(plan_runner, "ask", ask)
+    with Session(engine) as session:
+        record, review = daily_review_service.generate(session, review_day)
+
+    assert seen["history"]["owner_private_inputs"] is True
+    assert review["next_session_rules"] == ["SECRET prior-day rule"]
+    assert review["owner_thoughts_included"] is True
+    assert json.loads(record.review_json)["owner_thoughts_included"] is True
 
 
 def test_the_review_never_falls_back_to_the_api(fake_claude, engine, monkeypatch):

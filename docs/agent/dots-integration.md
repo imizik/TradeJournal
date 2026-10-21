@@ -126,6 +126,40 @@ discovery scans, continuous AI thesis monitoring, dashboard rewrite, autonomous
 trading or automatic plan monitoring. No changes to Shadow's live workflow or
 experiment, and no new forecasting study. Saving a plan does not activate it.
 
+### Owner daily thoughts and review — October 21 implementation
+
+The owner authorized a daily thinking workflow after the isolated UX audit.
+The private owner UI records morning outlooks, later thoughts, ideas (including
+explicitly untraded ones) and end-of-day reflections in `DayJournalEntry`.
+The Morning page and Daily Review share the selected day's timeline; Jo's
+briefing remains separately attributed. Entries need no trade or account and
+retain original text and server receipt time. A later update adds a new entry;
+selecting a historical day does not backdate it. Retry operations are
+idempotent and conflicting payloads are refused.
+
+`GET /day-journal/{day}` and `POST /day-journal/{day}/entries` are owner-only.
+No journal-reader, assistant or MCP role gains access. Ordinary reads do not
+fetch market data or launch inference. Saving a thought marks an existing
+review stale without moving its original generation time. Thoughts and
+unlinked-capture days appear in the review calendar even with no trades.
+
+Explicit daily analysis can review thoughts/captures without trades, retaining
+the existing configured review backend. Owner entries and later capture notes
+retain timestamps and provenance in its input. Review context discloses its
+entry/text limits and retrospective notes. Optional expectation checks refer
+to saved thought IDs and sourced market observations; missing evidence remains
+unresolved. They are separate from trade-plan adherence and do not establish
+trading edge or returns. Symbol links open the selected day's chart for
+inspection. The existing no-trade empty state remains meaningful when there
+are neither trades nor saved thoughts/captures.
+
+The isolated browser test uses the real owner routes, context builder and
+review persistence with labeled synthetic market and inference boundaries.
+It verifies UI integration, not model accuracy, a naturally elapsed trading
+day, natural Jo delivery or production activation. The UX journey lives in
+`.claude/skills/trade-chart-ux/references/day-review-journey.md`; its recurring
+follow-up preserves pass/fail/blocked evidence and revisits findings after fixes.
+
 ### Shadow separation decision — accepted limitation
 
 Personal memories/briefings must remain separate from Shadow records and be

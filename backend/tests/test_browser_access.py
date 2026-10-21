@@ -1,5 +1,5 @@
 """Actual requests prove identity, operation, resource and stream boundaries."""
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 import json
 from types import SimpleNamespace
 import uuid
@@ -351,6 +351,122 @@ def test_assistant_cannot_reach_owner_advisor_shadow_routes(boundary):
     assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/advisor-output", json={}).status_code == 403
     for action in ("advisor-handoff", "advisor-import"):
         assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/{action}", json={}).status_code == 403
+
+
+def test_day_journal_is_owner_only_even_with_existing_journal_read_grant(boundary):
+    boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
+    created = boundary.owner.post("/access/assistants", json={"identifier": "reader",
+        "grants": {"symbols": ["SPY"], "run_ids": [], "journal_read": True}})
+    assert created.status_code == 201
+    assert signin(boundary, identifier="reader", key=created.json()["key"]).status_code == 200
+    assert boundary.public.get("/day-journal/2026-09-30").status_code == 403
+    assert boundary.public.post("/day-journal/2026-09-30/entries", json={"operation_id": "x", "kind": "outlook",
+        "text": "SPY holds", "symbol": "SPY"}).status_code == 403
+    saved = boundary.owner.post("/day-journal/2026-09-30/entries", json={"operation_id": "owner-x", "kind": "outlook",
+        "text": "SPY holds", "symbol": "SPY"})
+    assert saved.status_code == 200, saved.text
+    assert boundary.owner.get("/day-journal/2026-09-30").json()["entries"][0]["actor"] == "owner"
+
+
+def test_journal_read_assistant_cannot_retrieve_owner_thought_reviews_or_calendar_days(boundary):
+    from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
+
+    boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
+    created = boundary.owner.post("/access/assistants", json={"identifier": "reader",
+        "grants": {"symbols": ["SPY"], "run_ids": [], "journal_read": True}})
+    assert created.status_code == 201
+    with Session(boundary.engine) as db:
+        account_id = uuid.UUID(int=700)
+        db.add(Account(id=account_id, name="IRA", type="roth_ira", last4="1700"))
+        db.add(Trade(id=uuid.UUID(int=701), account_id=account_id, ticker="SPY", instrument_type="option",
+                     contracts=1, avg_entry_premium=1, total_premium_paid=100, realized_pnl=25, pnl_pct=25,
+                     opened_at=datetime(2026, 9, 30, 10), closed_at=datetime(2026, 9, 30, 11), status="closed"))
+        db.add(Trade(id=uuid.UUID(int=702), account_id=account_id, ticker="SPY", instrument_type="option",
+                     contracts=1, avg_entry_premium=1, total_premium_paid=100, realized_pnl=10, pnl_pct=10,
+                     opened_at=datetime(2026, 9, 28, 10), closed_at=datetime(2026, 9, 28, 11), status="closed"))
+        db.add(DayJournalEntry(operation_id="private-day", day=date(2026, 9, 29), kind="outlook",
+                               text="SECRET thought only", created_at=datetime(2026, 9, 29, 8), actor="owner"))
+        db.add(DayJournalEntry(operation_id="raced-day", day=date(2026, 9, 28), kind="update",
+                               text="SECRET appended after review snapshot", created_at=datetime(2026, 9, 28, 15), actor="owner"))
+        db.add(DailyReviewRecord(day=date(2026, 9, 30), review_json=json.dumps({
+            "summary": "SECRET narrative from the thought", "expectation_checks": [{"entry_id": "secret-id"}],
+            "owner_thoughts_included": True}), trade_count=1,
+            created_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 1)))
+        db.add(DailyReviewRecord(day=date(2026, 9, 29), review_json=json.dumps({
+            "summary": "SECRET thought-only review", "owner_thoughts_included": True}), trade_count=0,
+            created_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 1)))
+        db.add(DailyReviewRecord(day=date(2026, 9, 28), review_json=json.dumps({
+            "summary": "Old summary", "source_data_stale": False,
+            "owner_data_included": False, "owner_input_count": 0}), trade_count=1,
+            created_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 1)))
+        db.commit()
+
+    assert signin(boundary, identifier="reader", key=created.json()["key"]).status_code == 200
+    calendar = boundary.public.get("/daily-review").json()
+    assert [item["day"] for item in calendar] == ["2026-09-30", "2026-09-28"]
+    assert calendar[0]["trade_count"] == 1 and calendar[0]["closed_pnl"] == 25
+    assert calendar[0]["saved"] is False and calendar[0]["generated_at"] is None
+    assert calendar[1]["closed_pnl"] == 10 and calendar[1]["saved"] is False
+    assert calendar[1]["source_data_stale"] is False
+    assert boundary.public.get("/daily-review/2026-09-30").json() is None
+    assert boundary.public.get("/daily-review/2026-09-29").json() is None
+    assert boundary.public.get("/daily-review/2026-09-28").json() is None
+    assert boundary.owner.get("/daily-review/2026-09-30").json()["review"]["summary"].startswith("SECRET")
+    assert boundary.owner.get("/daily-review/2026-09-29").json()["review"]["summary"].startswith("SECRET")
+    raced = boundary.owner.get("/daily-review/2026-09-28").json()["review"]
+    assert raced["source_data_stale"] is True
+    assert raced["owner_thoughts_included"] is True
+    assert raced["source_data_stale_reason"] == "Owner thoughts changed after this review's input snapshot."
+    owner_calendar = boundary.owner.get("/daily-review").json()
+    assert next(item for item in owner_calendar if item["day"] == "2026-09-28")["source_data_stale"] is True
+
+
+def test_review_inherits_private_provenance_from_prior_day_rules(boundary, monkeypatch):
+    from app.ai import plan_runner, review_context
+    from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
+
+    boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
+    assistant = boundary.owner.post("/access/assistants", json={"identifier": "reader",
+        "grants": {"symbols": ["SPY"], "run_ids": [], "journal_read": True}})
+    assert assistant.status_code == 201
+    account_id, trade_id = uuid.UUID(int=710), uuid.UUID(int=711)
+    day_a, day_b = date(2026, 9, 29), date(2026, 9, 30)
+    with Session(boundary.engine) as db:
+        db.add(Account(id=account_id, name="IRA", type="roth_ira", last4="1710"))
+        db.add(DayJournalEntry(operation_id="private-a", day=day_a, kind="outlook",
+                               text="Private day A thought", created_at=datetime(2026, 9, 29, 8), actor="owner"))
+        db.add(DailyReviewRecord(day=day_a, review_json=json.dumps({
+            "summary": "Private day A", "day_grade": "B", "next_session_rules": ["SECRET carry-forward rule"],
+            "owner_thoughts_included": True, "owner_input_count": 1}), trade_count=0))
+        db.add(Trade(id=trade_id, account_id=account_id, ticker="SPY", instrument_type="option",
+                     contracts=1, avg_entry_premium=1, total_premium_paid=100, realized_pnl=0, pnl_pct=0,
+                     opened_at=datetime(2026, 9, 30, 10), closed_at=datetime(2026, 9, 30, 11), status="closed"))
+        db.commit()
+
+    monkeypatch.setattr(review_context, "build", lambda *_args, **_kwargs: {"gaps": []})
+    seen = {}
+    def ask(_system, message, _schema, **_kwargs):
+        context = json.loads(message.split("\n\n", 1)[1])
+        seen["private_rule"] = context["history"]["prior_reviews"][0]["next_session_rules"][0]
+        return type("Answer", (), {"data": {
+            "summary": seen["private_rule"], "day_grade": "B", "key_takeaways": [],
+            "best_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
+            "worst_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
+            "patterns": [], "next_session_rules": [seen["private_rule"]], "rules_check": [], "vs_baseline": [],
+            "data_gaps": [], "expectation_checks": []}, "author": "test", "input_tokens": 0,
+            "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
+    monkeypatch.setattr(plan_runner, "ask", ask)
+
+    generated = boundary.owner.post("/daily-review", json={"day": day_b.isoformat(), "trade_ids": [str(trade_id)]})
+    assert generated.status_code == 200, generated.text
+    assert seen["private_rule"] == "SECRET carry-forward rule"
+    assert generated.json()["review"]["owner_thoughts_included"] is True
+    assert generated.json()["review"]["summary"] == "SECRET carry-forward rule"
+
+    assert signin(boundary, identifier="reader", key=assistant.json()["key"]).status_code == 200
+    assert boundary.public.get(f"/daily-review/{day_b}").json() is None
+    item = next(row for row in boundary.public.get("/daily-review").json() if row["day"] == day_b.isoformat())
+    assert item["saved"] is False and item["generated_at"] is None and item["source_data_stale"] is False
 
 
 def test_stream_revalidation_does_not_spend_request_budget(boundary):

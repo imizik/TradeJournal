@@ -5,9 +5,10 @@ from pathlib import Path
 from statistics import median
 
 from dotenv import load_dotenv
+from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.models import Account, DailyReviewRecord, DayJournalEntry, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -15,7 +16,7 @@ load_dotenv(BACKEND_DIR.parent / ".env")
 
 
 REVIEW_FIELDS = ("summary", "day_grade", "key_takeaways", "best_trade", "worst_trade", "patterns", "next_session_rules")
-PROMPT_VERSION = 3
+PROMPT_VERSION = 4
 BASELINE_DAYS = 20
 PRIOR_REVIEWS = 3
 
@@ -37,7 +38,8 @@ def review_trading_day(
     context["history"] = _history_context(date.fromisoformat(day), session)
     from app.ai import review_context
 
-    context["day_context"] = review_context.build(session, date.fromisoformat(day), trades)
+    context["day_context"] = review_context.build(session, date.fromisoformat(day), trades, include_owner_thoughts=True)
+    review_context_data = context["day_context"]
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
     chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
     if chosen == "api":
@@ -54,6 +56,31 @@ def review_trading_day(
     missing = [field for field in REVIEW_FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
+    if "expectation_checks" not in review or not isinstance(review["expectation_checks"], list):
+        raise ValueError("AI response missing required field: expectation_checks (use [] when no outlook or idea needs comparison)")
+    valid_thought_ids = {row["id"] for row in context["day_context"].get("owner_timeline", [])}
+    required_thought_ids = {row["id"] for row in context["day_context"].get("owner_timeline", [])
+                            if row.get("kind") in {"outlook", "idea"}}
+    checks = review["expectation_checks"]
+    accepted = [item for item in checks if isinstance(item, dict) and item.get("entry_id") in valid_thought_ids]
+    if len(accepted) != len(checks):
+        review["data_gaps"] = list(review.get("data_gaps") or [])
+        review["data_gaps"].append("An expectation check referenced a thought that was not in this day's saved timeline; that check was omitted")
+    accepted_ids = [item["entry_id"] for item in accepted]
+    if len(accepted_ids) != len(set(accepted_ids)):
+        raise ValueError("AI response contains duplicate expectation checks for a saved thought")
+    missing_checks = required_thought_ids - set(accepted_ids)
+    if missing_checks:
+        raise ValueError("AI response omitted expectation checks for saved outlook/idea entries: " + ", ".join(sorted(missing_checks)))
+    review["expectation_checks"] = accepted
+    for field in ("owner_timeline_truncated_count", "owner_timeline_text_truncated_count"):
+        count = context["day_context"].get(field, 0)
+        if count:
+            review[field] = count
+    review["owner_thoughts_included"] = bool(
+        review_context_data.get("owner_timeline") or review_context_data.get("plans") or
+        context["history"].get("owner_private_inputs")
+    )
     review["prompt_version"] = PROMPT_VERSION
     return review
 
@@ -82,11 +109,18 @@ def _history_context(review_day: date, session: Session) -> dict:
         select(DailyReviewRecord).where(DailyReviewRecord.day < review_day).order_by(DailyReviewRecord.day.desc()).limit(PRIOR_REVIEWS)
     ).all()
     prior_reviews = []
+    owner_private_inputs = False
     for record in prior:
         try:
             saved = json.loads(record.review_json)
         except ValueError:
             continue
+        thought_count = session.exec(select(func.count(DayJournalEntry.id)).where(DayJournalEntry.day == record.day)).one()
+        snapshot_count = saved.get("owner_input_count")
+        owner_private_inputs = owner_private_inputs or bool(
+            saved.get("owner_thoughts_included") or saved.get("expectation_checks") or
+            (int(thought_count or 0) > 0 and (not isinstance(snapshot_count, int) or snapshot_count != int(thought_count or 0)))
+        )
         prior_reviews.append({"day": record.day.isoformat(), "days_before": (review_day - record.day).days,
                               "day_grade": saved.get("day_grade"), "next_session_rules": saved.get("next_session_rules") or []})
 
@@ -118,7 +152,7 @@ def _history_context(review_day: date, session: Session) -> dict:
         "avg_day_pnl": round(sum(by_day.values()) / len(by_day), 2) if by_day else None,
         "worst_day_pnl": round(min(by_day.values()), 2) if by_day else None,
     } if days else None
-    return {"prior_reviews": prior_reviews, "baseline": baseline}
+    return {"prior_reviews": prior_reviews, "baseline": baseline, "owner_private_inputs": owner_private_inputs}
 
 
 def _assemble_daily_context(
@@ -370,7 +404,7 @@ _TRADE_PICK = {
 REVIEW_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps", "market_read", "plan_vs_execution"],
+    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps", "market_read", "plan_vs_execution", "expectation_checks"],
     "properties": {
         "summary": {"type": "string"},
         "day_grade": {"type": "string"},
@@ -389,6 +423,13 @@ REVIEW_SCHEMA = {
             "type": "object", "additionalProperties": False, "required": ["ticker", "planned", "did", "result"],
             "properties": {"ticker": {"type": "string"}, "planned": {"type": "string"}, "did": {"type": "string"},
                            "result": {"enum": ["followed", "deviated", "partly", "no_plan"]}}}},
+        "expectation_checks": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["entry_id", "expected", "observed", "assessment", "evidence"],
+            "properties": {"entry_id": {"type": "string"}, "expected": {"type": "string"},
+                           "observed": {"type": "string"},
+                           "assessment": {"enum": ["supported", "invalidated", "mixed", "unresolved"]},
+                           "evidence": {"type": "string"}}}},
         "data_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     },
 }
@@ -424,6 +465,18 @@ from exit decisions.
 ## Using day_context
 
 day_context holds what was around the trades. Use it to judge decisions in their setting, not to explain P&L away:
+- owner_timeline contains the owner's saved outlook and timestamped thoughts for this day. Compare each concrete expectation
+  return one expectation_checks item for every outlook and idea entry (empty [] when none exist), with the exact
+  thought id, a concise expected and observed statement, assessment supported / invalidated / mixed / unresolved, and evidence
+  naming the thought id plus source and time. Retrospective entries were saved after their stated day; never present their
+  wording as a premarket forecast. A prior-evening timestamp may still be before the next session; use the actual timestamp.
+  Same-day thoughts recorded after 09:30 New York time are intraday updates, not premarket views. Missing or insufficient
+  market evidence means unresolved. Do not invent prices or levels.
+  Keep forecast accuracy separate from adherence: following a valid plan can still lead to a forecast miss, and a correct
+  forecast does not prove that the trader followed their plan.
+  Market bars include source_bar_at (UTC) when available. Cite the thought id and relevant source bar time in evidence;
+  if no source timestamp or value is available, leave the check unresolved. If owner_timeline_truncated_count or
+  owner_timeline_text_truncated_count is present, some journal context was capped; disclose that limitation in data_gaps.
 - plans: what the trader captured before entering (by_trade, with minutes_before_entry) and plans never traded
   (not_traded). This is the most important input when present: compare each plan with what was done (instrument,
   side, strike, size, timing) in plan_vs_execution, one item per traded plan; a traded position with no plan is
