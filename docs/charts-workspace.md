@@ -637,6 +637,10 @@ cd backend
   candles it moved, plus the quote. The countdowns, the status dot and the
   price age read a shared one-second clock themselves, so a second passing
   re-renders those labels and no chart.
+- The crosshair's candle also stays out of React state: a move, or a linked
+  chart following it, re-renders only that chart's candle values row, never
+  the chart. The fill and news marker layer places its marks once per paint or
+  hit test, not on every one of the library's per-update view requests.
 - Each panel creates its chart once. A new symbol, interval, session or RSI
   setting swaps data and panes on the same chart. Until a new symbol's or
   session's candles arrive, every chart keeps its previous frame, dimmed and
