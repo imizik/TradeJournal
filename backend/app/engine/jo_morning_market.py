@@ -67,7 +67,7 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
         snapshots = {}
         gaps.append("Price source unavailable; no substitute price feed was used.")
     retrieved = clock()
-    missing, stale = [], []
+    missing, stale, unverified = [], [], []
     for symbol in priced:
         snap = snapshots.get(symbol)
         trade = snap.get("latestTrade") if isinstance(snap, dict) else None
@@ -86,7 +86,8 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
             reference = snap.get("reference") if isinstance(snap.get("reference"), dict) else {}
             base, base_at = reference.get("p"), stamp(reference.get("t"))
             change = (f"; {(price - base) / base * 100:+.2f}% vs prior regular-session last trade ${base} "
-                      f"({base_at.astimezone(ET):%b %d %H:%M} ET)" if valid_price(base) and base_at and base_at < observed else
+                      f"({base_at.astimezone(ET):%b %d %H:%M} ET)"
+                      if valid_price(base) and base_at and base_at.astimezone(ET).date() < observed.astimezone(ET).date() else
                       "; no prior regular-session trade available for a change")
             text = (f"{label}: extended-hours last ${price} (1-minute bar starting {observed.astimezone(ET):%H:%M} ET){change}; "
                     f"{status}. Thin extended-hours trading; not a bid/ask, official close or option mark.")
@@ -96,11 +97,16 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
                     "Unadjusted trade price, not a bid/ask or option mark. No split-adjusted change or return is inferred.")
             if snap.get("session") == "regular":
                 text += " No extended-hours trade found today."
+            elif snap.get("session") == "unverified":
+                text += " Extended-hours minutes could not be read; premarket activity is unknown."
+                unverified.append(symbol)
             source = "Tradier full-market latest trade; not an executable quote"
         rows.append(dict(id=f"market-{symbol}", kind="fact", observed_at=observed, retrieved_at=retrieved,
             source=source, text=text))
     if missing:
         gaps.append("No valid price at or before retrieval for: " + ", ".join(missing) + ".")
+    if unverified:
+        gaps.append("Extended-hours minutes unavailable (provider error, rate limit or time budget) for: " + ", ".join(unverified) + ".")
     if stale:
         gaps.append("Last trade older than 10 minutes; not current premarket evidence: " + ", ".join(stale) + ".")
     gaps.append("Prices use Tradier full-market data only; a recent retrieval does not make an old trade current. No IEX fallback.")
@@ -172,15 +178,19 @@ def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monoton
         quote = found.get(symbol)
         regular = {"p": quote.last, "t": datetime.fromtimestamp(quote.trade_date / 1000, UTC).isoformat()
                    if quote.trade_date else None} if quote else None
-        snap = {"latestTrade": regular, "session": "regular"} if regular else {}
+        # "regular": minutes were read and today has none; "unverified": they could not be read.
+        session = "unverified"
+        bar = None
         if monotonic() < deadline:
             try:
                 bar = last_minute(read, symbol, today)
+                session = "regular"
             except Exception:
-                bar = None
-            if bar:
-                snap = {"latestTrade": {"p": bar["close"], "t": datetime.fromtimestamp(bar["time"], UTC).isoformat()},
-                        "session": "extended", "reference": regular}
+                pass
+        snap = {"latestTrade": regular, "session": session} if regular else {}
+        if bar:
+            snap = {"latestTrade": {"p": bar["close"], "t": datetime.fromtimestamp(bar["time"], UTC).isoformat()},
+                    "session": "extended", "reference": regular}
         if snap:
             result[symbol] = snap
     return result
@@ -285,15 +295,18 @@ def collect_backdrop(session, symbols, now, *, events_reader=week_events):
     except Exception:
         gaps.append("Saved VIX reading unavailable; volatility backdrop unknown.")
     try:
-        wanted = list(dict.fromkeys(s for s in symbols if isinstance(s, str)))
+        # Same symbol rule as collect_market, so every evidence ID passes Check validation.
+        wanted = list(dict.fromkeys(s for s in symbols if isinstance(s, str) and re.fullmatch(r"[A-Z]{1,6}(\.[A-Z])?", s)))
         upcoming = session.exec(select(MarketContextItem).where(MarketContextItem.kind == "earnings",
             MarketContextItem.symbol.in_(wanted), MarketContextItem.event_date >= day,
             MarketContextItem.event_date <= day + timedelta(days=EARNINGS_DAYS))
             .order_by(MarketContextItem.event_date, MarketContextItem.symbol)).all()
+        seen = set()
         for row in upcoming[:10]:
             fetched = row.fetched_at.replace(tzinfo=UTC)
-            if fetched > now:
+            if fetched > now or row.symbol in seen:
                 continue
+            seen.add(row.symbol)
             days = (row.event_date - day).days
             when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days} days"
             rows.append(dict(id=f"earnings-{row.symbol}", kind="fact", observed_at=fetched, retrieved_at=now,

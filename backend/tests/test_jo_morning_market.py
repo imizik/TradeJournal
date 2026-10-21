@@ -104,7 +104,7 @@ def test_default_prices_use_existing_tradier_quotes_once_and_keep_news_independe
     assert rows[0]["id"] == "market-MU"
     assert rows[0]["source"] == "Tradier full-market latest trade; not an executable quote"
     assert rows[0]["observed_at"] == NOW-timedelta(seconds=30)
-    assert "No extended-hours trade found today" in rows[0]["text"]
+    assert "premarket activity is unknown" in rows[0]["text"]
     assert rows[1]["id"] == "headline-1"
     assert any("SPY, QQQ, SMH" in gap for gap in gaps)  # Backdrop ETFs with no quote are disclosed.
     monkeypatch.setattr(tradier, "TRADIER_BASE_URL", "https://sandbox.tradier.com")
@@ -132,20 +132,22 @@ def test_extended_hours_minutes_give_premarket_change_and_fall_back_per_symbol(m
     snaps = tradier_snapshots(["SPY", "QQQ", "MU"], quotes=quotes, read=read)
     assert reads[0] == ("/v1/markets/timesales", "SPY", "all")
     assert snaps["SPY"]["session"] == "extended" and snaps["SPY"]["latestTrade"]["p"] == 101.5
-    assert snaps["QQQ"]["session"] == snaps["MU"]["session"] == "regular"
+    assert snaps["QQQ"]["session"] == "regular" and snaps["MU"]["session"] == "unverified"
     now = today.astimezone(timezone.utc) + timedelta(minutes=1)
     rows, gaps = collect_market(["MU"], now, snapshots_reader=lambda _: snaps, news_reader=lambda *_: [],
                                 clock=lambda: now)
     text = {r["id"]: r["text"] for r in rows}
     assert "SPY (S&P 500 ETF; market backdrop proxy): extended-hours last $101.5 (1-minute bar starting 08:44 ET)" in text["market-SPY"]
     assert "+1.50% vs prior regular-session last trade $100" in text["market-SPY"] and "recent" in text["market-SPY"]
-    assert "stale" in text["market-QQQ"] and "No extended-hours trade" in text["market-MU"]
+    assert "stale" in text["market-QQQ"] and "No extended-hours trade" in text["market-QQQ"]
+    assert "premarket activity is unknown" in text["market-MU"] and "No extended-hours trade" not in text["market-MU"]
+    assert any("Extended-hours minutes unavailable" in gap and "MU" in gap for gap in gaps)
     assert any("No index futures, Treasury yields" in gap for gap in gaps)
     # A spent time budget stops further minute reads; quotes still answer.
     clock = iter([0, 100, 100, 100])
     reads.clear()
     snaps = tradier_snapshots(["SPY", "QQQ"], quotes=quotes, read=read, monotonic=lambda: next(clock))
-    assert not reads and snaps["SPY"]["session"] == "regular"
+    assert not reads and snaps["SPY"]["session"] == "unverified"
 
 
 def test_market_wide_headlines_are_theme_filtered_bounded_and_fail_alone():
@@ -184,6 +186,8 @@ def backdrop_db(tmp_path):
             MarketContextItem(kind="earnings", symbol="MU", event_date=NOW.date() + timedelta(days=30), status="estimated",
                               fetched_at=naive - timedelta(hours=3), source="Tradier"),
             MarketContextItem(kind="earnings", symbol="SECRET", event_date=NOW.date(), status="confirmed",
+                              fetched_at=naive - timedelta(hours=3), source="Tradier"),
+            MarketContextItem(kind="earnings", symbol="BRK/B", event_date=NOW.date(), status="confirmed",
                               fetched_at=naive - timedelta(hours=3), source="Tradier")])
         session.commit()
     return db
@@ -192,7 +196,7 @@ def backdrop_db(tmp_path):
 def test_backdrop_reads_coming_week_calendar_saved_vix_and_near_earnings(tmp_path):
     db = backdrop_db(tmp_path)
     with Session(db) as session:
-        rows, gaps = collect_backdrop(session, ["TSLA", "MU"], NOW)  # Monday Oct 19 2026, real calendar file
+        rows, gaps = collect_backdrop(session, ["TSLA", "MU", "BRK/B"], NOW)  # Monday Oct 19 2026, real calendar file
     by_id = {r["id"]: r for r in rows}
     assert list(by_id) == ["macro-calendar", "vix", "earnings-TSLA"]
     assert by_id["macro-calendar"]["text"] == "No FOMC, CPI or jobs releases are scheduled Mon Oct 19 through Mon Oct 26."
