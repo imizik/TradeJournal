@@ -54,7 +54,7 @@ def main():
         folder.mkdir(parents=True, exist_ok=False)
     os.environ.update(MARKET_WATCH_STORE=str(base / "wakes.sqlite"), MARKET_WATCH_SNAPSHOTS_DIR=str(public),
                       MARKET_WATCH_OUTBOX_DIR=str(outbox), CONDITIONAL_PLAN_ENABLED="true", STOCK_WATCH_ENABLED="true",
-                      MARKET_WATCH_ENABLED="false", LEVEL_ALERTS_AUTOSTART="false")
+                      MARKET_WATCH_ENABLED="true", LEVEL_ALERTS_AUTOSTART="false")
     profile = "check_" + str(uuid.uuid4())
     (base / "jwks.json").write_text("{}")
     check_path = base / "check.json"
@@ -199,9 +199,11 @@ def main():
             return
         scanner = type("Scanner", (), {"_pass_minutes": {"MU": (mu_minutes(), Clock.now.timestamp())}})()
         session_hours = type("Hours", (), {"open_at": open_at.timestamp(), "close_at": close_at.timestamp()})()
-        monitor.observe(state["plan"], scanner, ("SPY", "QQQ", "MU", "NBIS", "AMD"), session_hours, True)
-        monitor.deliver(state["plan"], True)
-        monitor.project(state["plan"], True)
+        # The monitor imports Jo's exported plan itself (validation, store, cancellations), as in production.
+        for plan in monitor.ingest():
+            monitor.observe(plan, scanner, ("SPY", "QQQ", "MU", "NBIS", "AMD"), session_hours, True)
+            monitor.deliver(plan, True)
+            monitor.project(plan, True)
 
     def publish_packet():
         assert morning.run_once(Clock.now)["status"] == "published"

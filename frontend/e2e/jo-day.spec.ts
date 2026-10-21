@@ -19,25 +19,30 @@ function slot(day: string, name: string, extra: Partial<MarketReadSlot> = {}): M
     read_used_slot_packet: null, deadline: iso(day, name), delivery: "pending", late_by_seconds: null, ...extra };
 }
 
-function reads(day: string, live: boolean): MarketReadsView {
+// The server's clock for each stub (an ET time on the stubbed day), so no test depends on when the suite runs.
+type Mode = { live: boolean; now: string; watchOff?: boolean };
+
+function reads(day: string, { live, now, watchOff }: Mode): MarketReadsView {
   const first = slot(day, "09:50", { status: "read_seen", read_id: "mwr_1", received_at: iso(day, "09:50"), delivery: "on_time",
     packet: { slot: "09-49", status: "published_partial", attempts: 1, recorded_at: null, snapshot_id: "mws_a", error_code: null, quality_flags: ["gap:headlines"] },
     read: text("SPY is holding its opening range; no clean break yet.") });
-  const rest = ["11:00", "12:30", "14:00"].map((name) => live ? slot(day, name)
-    : slot(day, name, { status: "no_read_seen", delivery: "missing" }));
-  return { checked_at: new Date().toISOString(), market_watch_enabled: true, reads_available: true, receipts_available: true,
-    attribution_window_minutes: 30, deadline_minutes: 15, reads_through: new Date().toISOString(), limits: [],
-    importer: { running: true, outbox_configured: true, last_ingest: new Date().toISOString(), current: true },
+  const rest = live ? ["11:00", "12:30", "14:00"].map((name) => slot(day, name)) : [
+    slot(day, "11:00", { status: "no_read_seen", delivery: "missing" }), slot(day, "12:30", { status: "no_read_seen", delivery: "missing" }),
+    slot(day, "14:00", { status: "read_seen", read_id: "mwr_3", received_at: iso(day, "14:22"), delivery: "late", late_by_seconds: 420,
+      read: text("Afternoon chop; MU holding above 140.") })];
+  return { checked_at: iso(day, now), market_watch_enabled: !watchOff, reads_available: true, receipts_available: true,
+    attribution_window_minutes: 30, deadline_minutes: 15, reads_through: iso(day, now), limits: [],
+    importer: { running: true, outbox_configured: true, last_ingest: iso(day, now), current: true },
     sessions: [{ session_date: day, hours: { status: "open", open: 570, close: 960 }, slots: [first, ...rest],
       reads_not_credited_to_a_slot: [{ read_id: "mwr_2", received_at: iso(day, "10:45"), event_wake_id: null,
         read: text("Correction: SPY recovered above VWAP, so the bearish note no longer holds.", { is_correction: true }) }],
-      summary: { read_seen: 1, no_read_seen: live ? 0 : 3, upcoming: live ? 3 : 0, not_expected: 0, unknown: 0 },
-      delivery_summary: { on_time: 1, late: 0, missing: live ? 0 : 3, pending: live ? 3 : 0, not_expected: 0, unknown: 0 },
+      summary: { read_seen: live ? 1 : 2, no_read_seen: live ? 0 : 2, upcoming: live ? 3 : 0, not_expected: 0, unknown: 0 },
+      delivery_summary: { on_time: 1, late: live ? 0 : 1, missing: live ? 0 : 2, pending: live ? 3 : 0, not_expected: 0, unknown: 0 },
       watchdog: { state: "on", checked_at: null, notices: [] } }] };
 }
 
-function morning(day: string): MorningView {
-  return { day, state: "ready", late: false, stale: false, archived: false, deadline: iso(day, "09:15"), checked_at: new Date().toISOString(),
+function morning(day: string, { now }: Mode): MorningView {
+  return { day, state: "ready", late: false, stale: false, archived: false, deadline: iso(day, "09:15"), checked_at: iso(day, now),
     automation: { enabled: true, last_pass: null, unavailable: false },
     delivery: { calendar: "open", publication: "published", fulfilment: "on_time", deadline: iso(day, "09:15"), publish_at: iso(day, "08:45"),
       packet_id: "p1", published_at: iso(day, "08:45"), briefing_id: "b1", available_at: iso(day, "08:56"), submitted_at: iso(day, "08:56"),
@@ -48,33 +53,36 @@ function morning(day: string): MorningView {
         { symbol: "NBIS", what_matters: "Verify price before acting on the compute-shortage headline.", why_personal: "", what_changed: "", contrary_evidence: "", watch_out: "", evidence_ids: [] }] } } };
 }
 
-function plans(day: string, live: boolean): PlansView {
+function plans(day: string, { live, now }: Mode): PlansView {
   const watch: PlanView = { plan_id: "plan_1", actor: "check_1", session_date: day, symbol: "MU", direction: "long", trigger_price: 140, invalidation_price: 137.5,
     confirm_bars: 2, rationale: "Owner asked to track a breakout over 140.", source: { kind: "check", id: "c", sha256: "s", observed_at: iso(day, "10:20"), price: 139.2 },
-    expires_at: live ? new Date(Date.now() + 3_600_000).toISOString() : iso(day, "14:20"), created_at: iso(day, "10:21"), accepted_by_monitor: true, cancel_requested: false,
+    expires_at: iso(day, "14:20"), created_at: iso(day, "10:21"), accepted_by_monitor: true, cancel_requested: false,
     state: live ? "triggered" : "expired", reason: null, state_at: null, monitoring: live, heartbeat_at: null, last_bar: null, last_evaluated_at: null,
     events: [{ state: "triggered", reason: "confirmed_closes", occurred_at: iso(day, "10:54"),
       bar: { time: 0, end_time: 0, open: 140.6, high: 140.7, low: 140.5, close: 140.6 } },
       ...(live ? [] : [{ state: "expired" as const, reason: "monitoring_window_ended", occurred_at: iso(day, "14:20"), bar: null }])],
     deliveries: [{ event_state: "triggered", attempt: 1, result: "accepted", outcome: "sent", error_code: null, transport_receipt_id: null, occurred_at: iso(day, "10:54") }] };
-  return { checked_at: new Date().toISOString(), enabled: true, app_flag: true, stock_watch: true, configured: true,
+  return { checked_at: iso(day, now), enabled: true, app_flag: true, stock_watch: true, configured: true,
     readiness: { heartbeat: "fresh" }, max_daily_plans: 24, plans_today: 1, limit: 50, delivery: { channel: "ntfy", configured: true }, plans: [watch] };
 }
 
-async function stub(page: Page, day: string, live: boolean) {
-  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: morning(day) }));
-  await page.route("**/jo/market-reads?**", (route) => route.fulfill({ json: reads(day, live) }));
-  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: plans(day, live) }));
+async function stub(page: Page, day: string, mode: Mode) {
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: morning(day, mode) }));
+  await page.route("**/jo/market-reads?**", (route) => route.fulfill({ json: reads(day, mode) }));
+  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: plans(day, mode) }));
 }
+const midday = { live: true, now: "11:05" };
 
 test("today's Daily Review shows what Jo did, is watching and will do, with Jo's own read text", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await stub(page, today, true);
+  await stub(page, today, midday);
   await page.goto(`/daily/${today}`);
   const jo = page.getByTestId("jo-day");
   await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · MU triggered 10:54 AM · .* · next: 11:00 market read$/);
+  await expect(page.getByTestId("jo-day-headline")).toHaveAttribute("data-trouble", "false");
+  await expect(jo.getByText("Morning data sent to Jo")).toBeVisible();
   await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
   const first = jo.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" });
   await expect(first).toContainText("On time · data had gaps");
@@ -93,6 +101,7 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   await jo.screenshot({ path: test.info().outputPath("jo-day-today-desktop.png") });
 
   // The jump bar stays reachable and moves to each section.
+  await expect(page.getByRole("navigation", { name: "Sections of this day" }).getByRole("link", { name: "AI analysis" })).toBeVisible();
   await page.getByRole("navigation", { name: "Sections of this day" }).getByRole("link", { name: /^Trades/ }).click();
   await expect(page).toHaveURL(/#trades$/);
   await expect(page.getByRole("navigation", { name: "Sections of this day" })).toBeInViewport();
@@ -105,23 +114,45 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   expect(errors).toEqual([]);
 });
 
-test("a past day is a record: missing reads are flagged and nothing is shown as upcoming", async ({ page }) => {
+test("a past day is a record: problems are named, lateness counts from the slot, nothing is upcoming", async ({ page }) => {
   const past = "2026-10-01";
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await stub(page, past, false);
+  await stub(page, past, { live: false, now: "16:05" });
   await page.goto(`/daily/${past}`);
   const jo = page.getByTestId("jo-day");
-  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 3 missing · 1 extra read · MU triggered 10:54 AM/);
-  await expect(page.getByTestId("jo-day-headline")).toHaveAttribute("data-trouble", "true");
-  await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Missing" })).toHaveCount(3);
+  const headline = page.getByTestId("jo-day-headline");
+  await expect(headline).toHaveText(/^Briefing on time · 2 of 4 market reads in · 2 missing · 1 late · 1 extra read · MU triggered 10:54 AM/);
+  await expect(headline).toHaveAttribute("data-trouble", "true");
+  // Only the problems are coloured, not the whole sentence.
+  await expect(headline.getByText("2 missing", { exact: true })).toHaveClass(/text-amber-200/);
+  await expect(headline.getByText("Briefing on time", { exact: true })).not.toHaveClass(/text-amber-200/);
+  await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Missing" })).toHaveCount(2);
+  await expect(jo.getByTestId("jo-day-item").filter({ hasText: "2:00 read · mixed" })).toContainText("Late · 22 min after 2:00");
   await expect(jo.getByRole("heading", { name: "Coming up" })).toHaveCount(0);
   // The trigger stays in the record after the watch ends.
   await expect(jo.getByText("MU watch triggered · close 140.6")).toBeVisible();
   await expect(jo.getByText("MU watch ended at its expiry")).toBeVisible();
 });
 
+test("after today's close the page is a record: no live lists, and the headline says the market closed", async ({ page }) => {
+  await stub(page, today, { live: false, now: "16:05" });
+  await page.goto(`/daily/${today}`);
+  const jo = page.getByTestId("jo-day");
+  await expect(page.getByTestId("jo-day-headline")).toHaveText(/ · market closed$/);
+  await expect(jo.getByText("The market has closed; nothing is being watched and nothing else is scheduled today.")).toBeVisible();
+  await expect(jo.getByRole("heading", { name: "Watching now" })).toHaveCount(0);
+  await expect(jo.getByRole("heading", { name: "Coming up" })).toHaveCount(0);
+});
+
+test("with market watch off, saved reads still show with a plain note", async ({ page }) => {
+  await stub(page, today, { ...midday, watchOff: true });
+  await page.goto(`/daily/${today}`);
+  await expect(page.getByTestId("jo-day-reads-note")).toHaveText("Market watch is off on this server, so no new reads will arrive; saved reads are shown.");
+  await expect(page.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" })).toBeVisible();
+});
+
 test("one failed record is named and the rest still show", async ({ page }) => {
-  await stub(page, today, true);
+  await stub(page, today, midday);
   await page.route("**/jo/conditional-plans", (route) => route.fulfill({ status: 503, json: { detail: "down" } }));
   await page.goto(`/daily/${today}`);
   await expect(page.getByTestId("jo-day").getByRole("alert")).toHaveText("Couldn't load price watches. What's shown may be incomplete.");
@@ -129,7 +160,7 @@ test("one failed record is named and the rest still show", async ({ page }) => {
 });
 
 test("the dashboard links to today's Jo timeline", async ({ page }) => {
-  await stub(page, today, true);
+  await stub(page, today, midday);
   await page.goto("/");
   const line = page.getByTestId("jo-today-line");
   await expect(line).toContainText("Briefing on time · 1 of 4 market reads in");
