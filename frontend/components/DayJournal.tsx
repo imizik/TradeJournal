@@ -45,6 +45,14 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
     if (!initialData) void load();
   }, [initialData, load]);
 
+  useEffect(() => {
+    // A save whose reply was lost is already in the timeline: retire its pending draft.
+    if (!draft?.attempted || !journal?.entries.some((entry) => entry.operation_id === draft.write.operation_id)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStorageWarning(!storeDraft(day, null)); setDraft(null); setSaveError(null);
+    setSaveMessage("Your earlier save went through. It is in the timeline below.");
+  }, [day, draft, journal]);
+
   const changeDraft = (next: SavedDraft | null) => {
     setStorageWarning(!storeDraft(day, next));
     setDraft(next);

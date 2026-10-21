@@ -877,7 +877,8 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                                  "attempts": sum(a["result"] == "sending" for a in results),
                                  "delivery": final["result"] if final else ("failed_pending" if results else "pending" if d["decision"] == "send" else "not_sent"),
                                  "transport_receipt_id": final.get("transport_receipt_id") if final else None,
-                                 "error_code": final.get("error_code") if final else None})
+                                 "error_code": final.get("error_code") if final else None,
+                                 "decided_at": d["created_at"], "settled_at": final["occurred_at"] if final else None})
         session_reads = [rid for rid, _ in sorted(read_times.items(), key=lambda kv: kv[1])]
         read_outcomes = [o for o in outcomes if o["read_id"] in read_times]
         status_counts: dict[str, int] = {}
@@ -1034,6 +1035,8 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
         sessions.append({"session_date": session,
                          "hours": ({"status": row["status"], "open": row.get("open"), "close": row.get("close")} if known else None),
                          "slots": slot_rows, "reads_not_credited_to_a_slot": others,
+                         # Jo's notify reads pushed to the phone; "accepted" is ntfy taking it, not the phone showing it.
+                         "messages": report.get("messages", []),
                          "summary": {k: sum(r["status"] == k for r in slot_rows)
                                      for k in ("read_seen", "no_read_seen", "upcoming", "not_expected", "unknown")},
                          "delivery_summary": {k: sum(r["delivery"] == k for r in slot_rows)

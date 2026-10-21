@@ -96,6 +96,10 @@ so the external dependency link is supported by the bundler.
   `document.querySelectorAll('[data-testid="canvas-main"] canvas').length`
   until it is non-zero. The app runs as `next dev`; for performance numbers
   compare like with like, and confirm what matters on the production build.
+  In this dev server a sidebar or tab click can sit on "Rendering" forever
+  from some pages (seen from `/morning` and `/trades`; the production build
+  navigates normally). Open the target URL directly or use a production
+  build (`next build` + `next start` with the same env) before calling it a bug.
 - Settings persist in the sandbox file across sessions and agents. To judge
   the shipped defaults, delete `backend/data/ux_sandbox/` before starting
   and compare against `DEFAULT_SETTINGS` in `frontend/lib/charts.ts`.

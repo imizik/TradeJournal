@@ -232,3 +232,58 @@ test("Daily Review retains v4 opportunity setups and urgent positions", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await brief.screenshot({ path: test.info().outputPath("jo-day-opportunity-brief-phone.png") });
 });
+
+test("phone alerts list every recorded push with its time, subject and outcome, and never claims the phone showed it", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const mode = { live: false, now: "16:05" };
+  const view = reads(today, mode);
+  const session = view.sessions[0];
+  session.messages = [
+    { message_id: "mwm_1", read_id: "mwr_1", is_correction: false, decision: "send", reason: null, attempts: 1, delivery: "accepted",
+      decided_at: iso(today, "09:51"), settled_at: iso(today, "09:51") },
+    { message_id: "mwm_2", read_id: "mwr_2", is_correction: true, decision: "send", reason: null, attempts: 2, delivery: "unknown",
+      decided_at: iso(today, "10:45"), settled_at: iso(today, "10:46") },
+    { message_id: "mwm_3", read_id: "mwr_3", is_correction: false, decision: "suppressed_budget", reason: "2 used", attempts: 0, delivery: "not_sent",
+      decided_at: iso(today, "14:22"), settled_at: null }];
+  session.watchdog = { state: "on", checked_at: null, notices: [{ kind: "1100", title: "Jo's 11:00 AM market read is missing", recovered: false, outcome: "failed", at: iso(today, "11:16") }] };
+  const brief = morning(today, mode);
+  brief.delivery!.notifications.watchdog = { state: "on", checked_at: null, notices: [] };
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: brief }));
+  await page.route("**/jo/market-reads?**", (route) => route.fulfill({ json: view }));
+  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: plans(today, mode) }));
+  await page.goto(`/daily/${today}`);
+  const alerts = page.getByTestId("jo-phone-alerts");
+  await expect(alerts.getByRole("heading", { name: "Phone alerts today" })).toBeVisible();
+  await expect(alerts.getByTestId("jo-phone-alert")).toHaveText([
+    /9:51 AM.*Jo's message: 9:50 read · mixed.*Sent to ntfy/,
+    /10:46 AM.*Jo's correction: Extra read \(10:45 AM\) · mixed · correction.*May have sent/,
+    /10:54 AM.*MU price watch triggered.*Sent to ntfy/,
+    /11:16 AM.*Watchdog: Jo's 11:00 AM market read is missing.*Failed to send/,
+    /2:22 PM.*Jo's message: 2:00 read · mixed.*Held back: daily message limit/,
+  ]);
+  await expect(alerts).toContainText("“Sent to ntfy” means the push service accepted it; the app can't see whether your phone showed it.");
+  await expect(alerts).not.toContainText("Couldn't read");
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`/daily/${today}`);
+  await expect(page.getByTestId("jo-phone-alert")).toHaveCount(5);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.getByTestId("jo-phone-alerts").screenshot({ path: test.info().outputPath("jo-phone-alerts-phone.png") });
+  expect(errors).toEqual([]);
+});
+
+test("a phone-alert source that couldn't be read is named, not shown as quiet", async ({ page }) => {
+  await stub(page, today, midday);
+  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ status: 503, json: { detail: "down" } }));
+  await page.goto(`/daily/${today}`);
+  // This stub is an older server: no read-message history and no watchdog record, so those are unknown too.
+  await expect(page.getByTestId("jo-phone-alerts")).toContainText(
+    "Couldn't read the record of price watches, Jo's read messages or the watchdog, so some pushes may be missing here.");
+});
+
+test("the month calendar invents no Jo status when there is no Jo record", async ({ page }) => {
+  await page.goto("/daily");
+  await expect(page.getByTestId("jo-calendar-legend")).toContainText("Jo ? a record is unknown, not fine. No mark: no Jo record.");
+  await expect(page.getByTestId("jo-calendar-mark")).toHaveCount(0);
+});

@@ -3,7 +3,7 @@
 Read approved local records and bounded existing-provider market evidence.
 Existing Check OAuth/file boundaries remain. No inference or Shadow mutation.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -419,6 +419,34 @@ def morning_view(session, day, now, briefing_id=None, config=None, calendar=None
         "versions": [{"id": str(r.id), "received_at": store.timestamp(r.created_at), "redacted": bool(r.redacted_at)} for r in records],
         "feedback": {"rating": feedback.rating if feedback else None,
             "first_opened_at": store.timestamp(feedback.first_opened_at) if feedback and feedback.first_opened_at else None}}
+
+
+def weekdays_in_month(month, today):
+    """Weekdays of ``month`` (YYYY-MM) up to ``today``, newest first, for the calendar's Jo marks."""
+    first = date.fromisoformat(f"{month}-01")
+    days, day = [], first
+    while day.month == first.month and day <= today:
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    return days[::-1]
+
+
+def month_delivery(session, days, now, config, actor, calendar=None):
+    """The briefing obligation for each day, judged as ``delivery`` judges one day; unknown stays unknown.
+
+    Days before the first morning packet ever published are left out (no record), rather than read as missed.
+    """
+    if calendar is None:
+        from app.engine.chart_calendar import chart_calendar
+        calendar = chart_calendar.cached
+    from sqlalchemy import func
+    first = session.exec(select(func.min(MorningBriefingPacket.day))).one()
+    rows = []
+    for day in (d for d in days if first is not None and d >= first):
+        d = delivery(session, day, now, config, actor, calendar(day) if config else None)
+        rows.append({"day": day.isoformat(), **{k: d[k] for k in ("publication", "fulfilment", "deadline", "available_at", "late_by_seconds")}})
+    return rows
 
 
 def watchdog_status(day, path=None, section="jo_morning"):

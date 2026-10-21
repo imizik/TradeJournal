@@ -434,6 +434,10 @@ chat request) is not visible to TradeJournal: `origin` is always `unknown`.
 submissions still lacking a receipt, the oldest Check receipt time, and unreadable
 outbox files). `delivery.notifications.chatgpt` is always `not_observable`;
 `watchdog` reports what the phone watchdog recorded for that date.
+`GET /jo/morning?month=YYYY-MM` (instead of `day`) returns just each weekday's
+`publication`, `fulfilment`, `deadline`, `available_at`, `late_by_seconds` and
+`watchdog_notices` for the Daily Review calendar, skipping days before the first
+morning packet ever published (no record, not a miss).
 
 The watchdog is the existing `deploy/alerts.py` timer (a separate process from the
 API), opt-in with `JO_MORNING_ALERTS=true` in `alerts.env`; it is off until set.

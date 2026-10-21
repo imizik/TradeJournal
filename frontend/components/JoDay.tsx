@@ -233,6 +233,62 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
   return { done: done.sort(byTime), watching, next: next.sort(byTime), closed: afterClose(data, live) };
 }
 
+type Alert = { key: string; at: string | null; about: string; outcome: [string, Tone] };
+const pushOutcome: Record<"sent" | "failed" | "unknown" | "not_sent", [string, Tone]> = {
+  sent: ["Sent to ntfy", ok], failed: ["Failed to send", warn], unknown: ["May have sent", warn], not_sent: ["Not sent", muted] };
+const messageOutcome = (m: NonNullable<MarketReadSession["messages"]>[number]): [string, Tone] =>
+  m.decision === "suppressed_budget" ? ["Held back: daily message limit", muted]
+  : m.decision === "expired_before_send" ? ["Not sent: arrived too late", muted]
+  : m.delivery === "accepted" ? pushOutcome.sent : m.delivery === "unknown" ? pushOutcome.unknown
+  : m.delivery === "expired" ? ["Not sent: retries ran out", warn] : m.delivery === "failed_pending" ? ["Failed, retrying", warn] : ["Sending", muted];
+const eventWord: Partial<Record<PlanState, string>> = { triggered: "triggered", invalidated: "cancelled by its stop level", expired: "ended", cancelled: "cancelled", unavailable: "stopped" };
+
+/** Every phone push the app recorded for the day: price watches, Jo's flagged reads and the watchdog's notices. */
+export function phoneAlerts(data: JoDayData, day: string) {
+  const alerts: Alert[] = [];
+  for (const p of plansFor(data, day)) {
+    for (const d of p.deliveries) {
+      alerts.push({ key: `${p.plan_id}-${d.event_state}-${d.attempt}-${d.occurred_at}`, at: d.occurred_at,
+        about: `${p.symbol} price watch ${d.event_state ? eventWord[d.event_state] ?? d.event_state : "update"}`, outcome: pushOutcome[d.outcome] });
+    }
+  }
+  const reads = data.reads;
+  const readFor = (id: string) => {
+    const slot = reads?.slots.find((s) => s.read_id === id);
+    if (slot) return readLabel(`${slotTime(slot.slot)} read`, slot.read).label;
+    const extra = reads?.reads_not_credited_to_a_slot.find((r) => r.read_id === id);
+    return extra ? readLabel(`Extra read (${time(extra.received_at)})`, extra.read).label : "a market read";
+  };
+  for (const m of reads?.messages ?? []) {
+    alerts.push({ key: m.message_id, at: m.settled_at ?? m.decided_at, about: `Jo's ${m.is_correction ? "correction" : "message"}: ${readFor(m.read_id)}`, outcome: messageOutcome(m) });
+  }
+  const notices = [...(data.morning?.delivery?.notifications.watchdog?.notices ?? []), ...(reads?.watchdog.notices ?? [])];
+  notices.forEach((n, i) => alerts.push({ key: `watchdog-${i}-${n.at}`, at: n.at ?? null, about: `Watchdog: ${n.title}`, outcome: pushOutcome[n.outcome] ?? pushOutcome.unknown }));
+  // Sources whose record couldn't be read: their pushes may exist but aren't shown.
+  const unread = [!data.plans ? "price watches" : null, !reads || !data.reads?.messages ? "Jo's read messages" : null,
+    !data.morning?.delivery?.notifications.watchdog || data.morning.delivery.notifications.watchdog.state === "unknown" || reads?.watchdog.state === "unknown" || !data.morning || !reads ? "the watchdog" : null]
+    .filter(Boolean) as string[];
+  return { alerts: alerts.sort((a, b) => Date.parse(a.at ?? "") - Date.parse(b.at ?? "")), unread };
+}
+
+function PhoneAlerts({ data, day, live }: { data: JoDayData; day: string; live: boolean }) {
+  const { alerts, unread } = phoneAlerts(data, day);
+  return <div data-testid="jo-phone-alerts">
+    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{live ? "Phone alerts today" : "Phone alerts"}</h3>
+    {alerts.length ? <ul className="mt-1">{alerts.map((a) => <li key={a.key} className="border-t first:border-t-0" data-testid="jo-phone-alert">
+      <div className="flex min-w-0 items-start gap-x-3 py-2 text-sm">
+        <span className="w-[4.5rem] shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">{a.at ? time(a.at) : "—"}</span>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <span className="min-w-0 break-words">{a.about}</span>
+          <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${a.outcome[1]}`}>{a.outcome[0]}</span>
+        </span>
+      </div></li>)}</ul>
+      : <p className="mt-1 py-2 text-sm text-muted-foreground">No phone alerts recorded{live ? " today" : " for this day"}.</p>}
+    <p className="text-xs text-muted-foreground">&ldquo;Sent to ntfy&rdquo; means the push service accepted it; the app can&apos;t see whether your phone showed it.
+      ChatGPT&apos;s own notifications aren&apos;t recorded here.{unread.length ? ` Couldn't read the record of ${unread.length > 1 ? `${unread.slice(0, -1).join(", ")} or ${unread.at(-1)}` : unread[0]}, so some pushes may be missing here.` : ""}</p>
+  </div>;
+}
+
 const icons: Record<Item["icon"], [string, string]> = { done: ["✓", "text-emerald-400"], warn: ["!", "text-amber-300"], watch: ["◉", "text-sky-300"], next: ["○", "text-muted-foreground"], skip: ["–", "text-muted-foreground"] };
 
 function Row({ item }: { item: Item }) {
@@ -282,6 +338,7 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
       {live && !items.closed && <Group title="Watching now" items={items.watching} empty="Nothing is being watched right now." />}
       {live && !items.closed && <Group title="Coming up" items={items.next} empty="Nothing else scheduled today." />}
     </>}
+    {data && (live || items?.done.length) ? <PhoneAlerts data={data} day={day} live={live} /> : null}
     <p className="flex flex-wrap gap-x-4 gap-y-1">
       <a className={link} href={`/morning?day=${day}`}>Briefing →</a>
       <a className={link} href="/morning/market-reads">All market reads →</a>

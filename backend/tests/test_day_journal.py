@@ -128,6 +128,7 @@ def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(
     assert len(generated.json()["review"]["expectation_checks"]) == 1
     assert any("not in this day's saved timeline" in gap for gap in generated.json()["review"]["data_gaps"])
     generated_at = generated.json()["generated_at"]
+    assert generated_at.endswith(("Z", "+00:00"))  # zoned, so browsers do not read UTC as local time
     later = client.post(f"/day-journal/{DAY}/entries", json=entry("op-2", kind="update", text="No longer expecting a flat open"))
     assert later.status_code == 200
     saved_review = client.get(f"/daily-review/{DAY}").json()

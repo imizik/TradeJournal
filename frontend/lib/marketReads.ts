@@ -15,9 +15,15 @@ export type MarketReadSlot = { slot: string; scheduled_at: string; expected: boo
   packet: MarketReadPacket; status: SlotStatus; read_id: string | null; attribution: "operation_id" | "time_window" | null;
   received_at: string | null; read: MarketReadText | null; receipt_delay_seconds: number | null; read_used_slot_packet: boolean | null;
   deadline: string | null; delivery: SlotDelivery; late_by_seconds: number | null };
+/** One of Jo's reads flagged for the phone. delivery "accepted" is ntfy taking the push, never the phone showing it. */
+export type MarketReadMessage = { message_id: string; read_id: string; is_correction: boolean;
+  decision: "send" | "suppressed_budget" | "expired_before_send"; reason: string | null; attempts: number;
+  delivery: "accepted" | "expired" | "unknown" | "failed_pending" | "pending" | "not_sent"; decided_at: string; settled_at: string | null };
 export type MarketReadSession = { session_date: string; hours: { status: "open" | "closed"; open: number | null; close: number | null } | null;
   slots: MarketReadSlot[]; reads_not_credited_to_a_slot: { read_id: string; received_at: string; event_wake_id: string | null; read: MarketReadText | null }[];
   summary: Record<SlotStatus, number>; delivery_summary: Record<SlotDelivery, number>;
+  /** Absent from servers older than message history. */
+  messages?: MarketReadMessage[];
   watchdog: { state: "on" | "off" | "unknown"; checked_at: string | null; notices: WatchdogNotice[] } };
 export type MarketReadsView = { checked_at: string; market_watch_enabled: boolean; reads_available: boolean; receipts_available: boolean;
   attribution_window_minutes: number; deadline_minutes: number; reads_through: string; sessions: MarketReadSession[]; limits: string[];

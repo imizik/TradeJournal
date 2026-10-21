@@ -22,6 +22,10 @@ export type MorningDelivery = {
   context_read?: "recorded" | "not_recorded" | "unknown"; context_read_at?: string | null;
   notifications: { chatgpt: "not_observable"; watchdog: { state: "on" | "off" | "unknown"; checked_at: string | null; notices: WatchdogNotice[] } | null };
 };
+/** One weekday of the month calendar's briefing marks (``GET /jo/morning?month=``). */
+export type MorningMonthDay = { day: string; publication: MorningDelivery["publication"]; fulfilment: MorningDelivery["fulfilment"];
+  deadline: string | null; available_at: string | null; late_by_seconds: number | null; watchdog_notices: WatchdogNotice[] };
+export type MorningMonth = { month: string; checked_at: string; configuration_error: boolean; days: MorningMonthDay[] };
 export type MorningView = {
   day: string; state: "ready" | "waiting" | "missing" | "unavailable" | "redacted" | "closed";
   late: boolean; stale: boolean; archived: boolean; deadline: string | null; checked_at: string;

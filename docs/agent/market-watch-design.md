@@ -839,7 +839,11 @@ reads never reach Shadow Isaac.
 - **Scheduled-read reliability (owner screen).** `GET /jo/market-reads`
   (owner-only; `/morning/market-reads`, linked from Morning) shows the last ten
   weekdays back to the first recorded evidence; `?day=YYYY-MM-DD` returns that
-  one weekday for the Daily Review's Jo's day timeline. Each credited slot and
+  one weekday for the Daily Review's Jo's day timeline, and `?month=YYYY-MM`
+  that month's weekdays up to today (never before the first evidence) for the
+  Daily Review calendar's Jo marks. Each session lists `messages`: Jo's reads
+  flagged for the phone, with decision, delivery (`accepted` is ntfy taking the
+  push, not the phone showing it), `decided_at` and `settled_at`. Each credited slot and
   each read not credited to a slot carries `read`: Jo's saved `view`,
   `main_text`, `alternative_text`, `invalidation_text`, `change_summary` and
   `is_correction` (null when only an export without the text is known). For each 09:50, 11:00, 12:30
