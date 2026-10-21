@@ -453,3 +453,30 @@ def test_submitted_at_migration_roundtrip_keeps_records(tmp_path):
     _alembic(path, "upgrade", "head")
     assert "morning_briefing_submission" in tables()
     db.dispose()
+
+
+def test_backdrop_evidence_leads_market_rows_passes_check_citation_rules_and_never_blocks(morning):
+    from app.models import MarketContextItem
+    h, db, config = morning
+    actor = read_config(h.config_path).profiles[0].id
+    with Session(db) as session:
+        session.add(MarketContextItem(kind="vix", symbol="VIX", value=17.5, fetched_at=NOW.replace(tzinfo=None) - timedelta(minutes=3),
+                                      source="Tradier"))
+        session.add(MarketContextItem(kind="earnings", symbol="MU", event_date=NOW.date() + timedelta(days=2), status="confirmed",
+                                      fetched_at=NOW.replace(tzinfo=None) - timedelta(hours=1), source="Tradier"))
+        session.commit()
+        def market(symbols, cutoff):
+            return [dict(id="market-SPY", kind="fact", text="SPY fixture", source="Fixture", observed_at=NOW, retrieved_at=NOW)], []
+        packet = collect(session, config, actor, NOW, market)
+        ids = [e.id for e in packet.evidence]
+        assert ids.index("macro-calendar") < ids.index("vix") < ids.index("earnings-MU") < ids.index("market-SPY")
+        published = {"id": str(uuid4()), "body": packet.model_dump(mode="json")}
+        body = BriefingSave(operation_id="backdrop", packet_id=published["id"], author="Jo", prompt_version="jo-morning-v3",
+            summary="Calm backdrop; MU reports Wednesday.", summary_evidence_ids=["vix", "macro-calendar", "earnings-MU"],
+            items=[], limitations=["No futures, yields, dollar or oil."])
+        exchange.validate_body("briefing", body.model_dump(mode="json"), published)
+        def broken(*_):
+            raise RuntimeError("database gone")
+        packet = collect(session, config, actor, NOW, market, broken)
+        assert "vix" not in [e.id for e in packet.evidence] and "market-SPY" in [e.id for e in packet.evidence]
+        assert "Macro calendar, VIX and earnings backdrop unavailable." in packet.gaps
