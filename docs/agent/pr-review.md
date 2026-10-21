@@ -89,15 +89,19 @@ after the session ends or authorize new paid API automation.
    do not reset the budget. If exhausted, blocked, or interrupted, leave the PR
    unmerged with auto-merge disabled and report the specific remaining work.
    An unavailable check or unresolved finding is not a pass.
-4. Before merging tier 0, inspect the final diff, actionable review findings,
-   and all applicable CI jobs/steps on the exact final head. Check repository
-   auto-merge is enabled and `main` still enforces the required Backend, Frontend,
+4. Before merging tier 0, disable any queued GitHub auto-merge, then inspect the
+   final diff, actionable review findings, and all applicable CI jobs/steps on
+   the exact final head. Check squash merging is enabled and `main` still
+   enforces the required Backend, Frontend,
    Browser, Postgres parity, and Ubuntu package and systemd build checks. Do not
    remove protection, bypass reviews, use `--admin`, or merge with pending proof.
    After those gates pass, use
-   `gh pr merge <number> --auto --squash --match-head-commit <verified-head-sha>`.
+   `gh pr merge <number> --squash --match-head-commit <verified-head-sha>`.
    If the head changes, reassess risk and verify that head before trying again.
-   Confirm the PR actually merged; enabled auto-merge is only queued, not done.
+   Do not use `--auto` or leave a merge queued: a queued GitHub auto-merge can
+   survive later pushes by a writer and is not pinned to the verified head.
+   If merge requirements are still pending, continue monitoring and reverify
+   before the next attempt. Confirm the PR actually merged before reporting done.
 5. Leave tier 1/2 PRs with auto-merge disabled for the user's approval and merge,
    after applicable reviews and verification. A previous PR's approval does not
    approve a new diff. Do not split or relabel high-risk changes to avoid this
