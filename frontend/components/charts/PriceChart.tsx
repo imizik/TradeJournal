@@ -156,7 +156,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
   colors?: Record<ColorKey, string>;
@@ -227,6 +227,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onUnlock?(id: string): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
+  /** The trader moved this chart's view themself (a drag, the wheel, a touch, Latest candles). */
+  onUserMove?(): void;
   onInterval(interval: Interval): void; onFocus?(): void; onMaximize?(): void;
   /** Plan trade (C3.4) in the main chart's own bar, where a phone's toolbar has no room left. */
   onPlan?(): void;
@@ -270,7 +272,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, onUserMove, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
   // The fill chevron under the pointer: its fills, listed (C3.1). A tap, or a click on several, pins the list so a fill can be picked from it.
   const [fillTip, setFillTip] = useState<{ group: FillGroup; x: number; y: number; width: number; pinned: boolean } | null>(null);
   // A news marker's headlines (T3.5), hovered or pinned by a tap; a pinned one opens the News tab from its button.
@@ -307,7 +309,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
   const exhausted = !!history?.exhausted;
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, onUserMove, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, onUserMove, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -646,7 +648,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       (event.target as Element).dispatchEvent(again);
     };
     element.addEventListener("wheel", onWheel, { capture: true, passive: false });
-    const unpin = () => { pinnedLive.current = false; };
+    const unpin = () => { pinnedLive.current = false; actions.current.onUserMove?.(); };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
     chart.subscribeClick((event) => {
       const now = actions.current;
@@ -1083,7 +1085,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
               {STUDIES.map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
                 className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
             </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { actions.current.onUserMove?.(); pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
           {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><Expand size={13} /></button>}
           </span>
