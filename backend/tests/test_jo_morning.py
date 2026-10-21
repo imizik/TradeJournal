@@ -62,7 +62,7 @@ def test_automatic_once_per_session_restart_tool_import_and_disabled(morning):
     def hours(day):
         return {"status": "open", "open": 570, "close": 960}
     reads = []
-    def market(symbols, cutoff):
+    def market(symbols, cutoff, **kwargs):
         reads.append((symbols, cutoff))
         return [dict(id="market-SPY", kind="fact", text="SPY: invented recent trade $100", source="Fixture",
             observed_at=NOW-timedelta(seconds=10), retrieved_at=NOW+timedelta(seconds=2))], ["Fixture market coverage"]
@@ -126,7 +126,7 @@ def test_import_after_publication_window_and_bad_file_does_not_stop_publish(morn
     h, db, config = morning
     check = read_config(h.config_path)
     (Path(check.market_watch_outbox_dir) / ("jo-request-" + "0"*64 + ".json")).write_text("invalid")
-    runner = MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570})
+    runner = MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570}, market_reader=None)
     outcome = runner.run_once(NOW)
     assert outcome["status"] == "published" and outcome["errors"] == 1
     with Session(db) as session:
@@ -256,7 +256,7 @@ def test_delivery_is_judged_on_journal_availability_and_keeps_the_miss(morning):
     check = read_config(h.config_path)
     actor = check.profiles[0].id
     open_day = lambda day: {"status": "open", "open": 570, "close": 960}  # noqa: E731
-    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff, **kwargs: ([], []))
     with Session(db) as session:
         before = morning_view(session, NOW.date(), NOW - timedelta(minutes=5), config=config, calendar=open_day, actor=actor)["delivery"]
         assert before["publication"] == "pending" and before["fulfilment"] == "pending" and before["origin"] == "unknown"
@@ -294,7 +294,7 @@ def test_delivery_on_time_closed_unknown_and_owner_saves_have_no_submission_time
     check = read_config(h.config_path)
     actor = check.profiles[0].id
     open_day = lambda day: {"status": "open", "open": 570, "close": 960}  # noqa: E731
-    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff, **kwargs: ([], []))
     runner.run_once(NOW)
     with Session(db) as session:
         packet_id = session.exec(select(MorningBriefingPacket)).one().id
@@ -331,7 +331,7 @@ def test_first_morning_read_leaves_one_content_free_marker_and_the_view_reports_
 
     assert read_at(NOW - timedelta(minutes=1))["isError"]  # No pointer published yet.
     assert not list(outbox.iterdir())
-    MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], [])).run_once(NOW)
+    MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff, **kwargs: ([], [])).run_once(NOW)
     with Session(db) as session:
         packet_id = str(session.exec(select(MorningBriefingPacket)).one().id)
         view = lambda: morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]  # noqa: E731
@@ -384,14 +384,14 @@ def test_first_morning_read_leaves_one_content_free_marker_and_the_view_reports_
     finally:
         marker.chmod(0o640)
     # The importer's scan never treats the marker as a submission.
-    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff, **kwargs: ([], []))
     assert runner.run_once(NOW + timedelta(minutes=32))["errors"] == 0 and runner.pending["unreadable"] == 0
 
 
 def test_runner_reports_waiting_and_unreadable_submissions_for_its_own_profile(morning):
     h, db, config = morning
     check = read_config(h.config_path)
-    runner = MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570}, lambda s, c: ([], []))
+    runner = MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570}, lambda s, c, **kwargs: ([], []))
     runner.run_once(NOW)
     with Session(db) as session:
         packet_id = session.exec(select(MorningBriefingPacket)).one().id
@@ -465,7 +465,7 @@ def test_backdrop_evidence_leads_market_rows_passes_check_citation_rules_and_nev
         session.add(MarketContextItem(kind="earnings", symbol="MU", event_date=NOW.date() + timedelta(days=2), status="confirmed",
                                       fetched_at=NOW.replace(tzinfo=None) - timedelta(hours=1), source="Tradier"))
         session.commit()
-        def market(symbols, cutoff):
+        def market(symbols, cutoff, **kwargs):
             return [dict(id="market-SPY", kind="fact", text="SPY fixture", source="Fixture", observed_at=NOW, retrieved_at=NOW)], []
         packet = collect(session, config, actor, NOW, market)
         ids = [e.id for e in packet.evidence]
@@ -480,3 +480,25 @@ def test_backdrop_evidence_leads_market_rows_passes_check_citation_rules_and_nev
         packet = collect(session, config, actor, NOW, market, broken)
         assert "vix" not in [e.id for e in packet.evidence] and "market-SPY" in [e.id for e in packet.evidence]
         assert "Macro calendar, VIX and earnings backdrop unavailable." in packet.gaps
+
+
+def test_discovery_excludes_all_saved_symbols_beyond_packet_caps(morning):
+    h, db, config = morning
+    from app.engine.jo_morning import collect
+    watchlist = ["W"+chr(65+i//26)+chr(65+i%26) for i in range(35)]
+    tickers = ["H"+chr(65+i) for i in range(22)]
+    with Session(db) as session:
+        settings = session.get(ChartSettingsRecord, "default")
+        settings.data_json = json.dumps({"watchlist": watchlist})
+        session.add(settings)
+        session.add_all([Trade(account_id=config.account_ids[0], ticker=ticker, instrument_type="stock", contracts=1,
+            avg_entry_premium=10, total_premium_paid=10, opened_at=NOW.replace(tzinfo=None)-timedelta(days=1)) for ticker in tickers])
+        session.commit()
+        captured = []
+        def market(symbols, cutoff, *, excluded_symbols):
+            captured.append((symbols, excluded_symbols))
+            return [], []
+        collect(session, config, read_config(h.config_path).profiles[0].id, NOW, market_reader=market, backdrop_reader=None)
+    _, excluded = captured[0]
+    assert set(watchlist + tickers + ["SPY"]) == excluded
+    assert "SECRET" not in excluded  # No additional account grant.

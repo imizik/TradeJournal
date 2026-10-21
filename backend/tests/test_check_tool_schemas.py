@@ -70,6 +70,11 @@ PAYLOADS = {
             "status": "proposed", "owner_confirmed": False}},
     ],
     "jo_briefing_submit": [
+        {"briefing": {"operation_id": "morning-opportunities", "packet_id": ids(), "author": "Jo",
+            "prompt_version": "jo-morning-v4", "summary": "Market context first.", "summary_evidence_ids": ["market-SPY"],
+            "items": [], "opportunities": [brief_item(symbol="NEW", status="conditional", entry_trigger=PROSE,
+                invalidation="A failed retest.", timeframe="Intraday only.")],
+            "urgent_positions": [brief_item()], "limitations": ["Recheck spread and liquidity."]}},
         {"briefing": {"operation_id": "morning-roth-2026-10-20", "packet_id": ids(), "author": NOTE,
             "prompt_version": "jo-morning-v2", "summary": "Review APLD’s calls.", "summary_evidence_ids": [],
             "items": [], "limitations": ["No comparison is available."]}},

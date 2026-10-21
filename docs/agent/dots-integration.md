@@ -757,3 +757,59 @@ Isaac selected [Jo’s own sample paper replay](dot-sample-replay-contract.md) a
 reporting the original MU/NBIS WAIT save/reload/reopen acceptance. A new scoped
 login may start its own TAKE replay on a separate frozen exercise. This adds no
 live exposure, P0 universe change, active WAIT monitor, model calls or schedule.
+
+### Opportunity-first morning brief — October 21
+
+New generation uses `jo-morning-v4`: market context first, up to three new
+opportunities outside the approved account holdings **and** saved Charts
+watchlist, then at most two short urgent position reviews. Urgent reviews cover
+imminent expiry, material new position events or time-sensitive risk; they do not
+become a portfolio inventory. Historical `items` briefs retain their original
+labels/content. Existing packet/briefing records are not rewritten.
+
+The publisher reads one broad-tape news page (at most 50 stories, past 36 hours)
+independent of saved symbols. Valid HTTPS stories with observation times in that
+window introduce at most six new US ticker candidates, material-catalyst keywords
+first and recency second. All approved open holding tickers and the entire valid
+saved watchlist are excluded, including names beyond the existing display/quote
+caps. `discovery-scope` discloses coverage; `discovery-<SYMBOL>` records the reported
+catalyst and source URL. This is bounded news-led discovery, **not** a whole-market
+mover, liquidity or relative-volume screen. No new provider or model service is
+added. Broad-news failure is disclosed; it never becomes “no opportunities.”
+
+SPY/QQQ/SMH are priced first, then discovery candidates, then the existing bounded
+saved symbols. The same single Tradier quote request and 45-second minute-read
+budget apply. Completed same-day premarket minutes add `setup-<SYMBOL>` range
+high/low, reported volume and returned-minute count (minimum two minutes and
+positive volume). The range retains its own last-minute timestamp; a later stock
+trade cannot refresh it. Missing, sparse or stale minutes require research-only
+ideas. Source observations/retrievals, partial coverage and unadjusted price-basis
+caveats remain visible. The separate saved-symbol news page also samples up to 50
+stories, prioritizes catalyst stories and keeps at most eight, with a two-story
+per-symbol quota, so generic watchlist headlines do not take every slot.
+
+The JSON briefing keeps legacy `items=[]` for new generation, adding bounded
+`opportunities` and `urgent_positions` arrays. Opportunities require an entry
+condition, invalidation, timeframe and `conditional` or `research_only` status.
+Both owner saves and Check submissions validate citations; every opportunity
+must cite its discovery evidence. Conditional setups additionally require cited
+Tradier price **and** range evidence from the packet's ET date, each at most ten
+minutes old at collection. A conditional setup still waits for its stated
+trigger and a fresh spread/liquidity check; it is not an executed or activated
+plan. Jo must not invent numeric levels, relative volume, sizing, targets or
+option selections. Shared gaps belong in limitations; specific risks stay on
+cards. Empty discovery is an explicit state, never filled with owned tickers.
+Empty new arrays are omitted in serialized legacy requests to preserve existing
+idempotency hashes. No migration is needed for the existing JSON bodies.
+
+Release source changes alone do not update the live ChatGPT task or isolated
+Check catalog. After merge/release, refresh Check's tool metadata and change the
+existing morning task's writing instruction to: “Use jo-morning-v4. Read today's
+jo_morning_context only. Lead with market context, then opportunities beyond my
+holdings and watchlist using discovery evidence, with entry condition,
+invalidation, timeframe and honest research-only status when confirmation is
+missing. Keep urgent positions to a short final section. Submit items=[],
+opportunities and urgent_positions; recover jo_receipt until saved or rejected.”
+Retain the current account grant, weekday schedule, expiry, authentication and
+Shadow ordering. Production activation and a natural morning's provider/Jo
+acceptance are separate from fixture checks; neither is claimed by this change.

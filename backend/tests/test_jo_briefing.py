@@ -220,3 +220,30 @@ def test_storage_migration_upgrade_downgrade(tmp_path):
     _alembic(path, "upgrade", "head")
     assert "morning_briefing_record" in inspect(engine).get_table_names()
     engine.dispose()
+
+
+def test_opportunity_format_citations_freshness_and_legacy_hashes(client):
+    from jo_briefing_common import BriefingSave
+    now = datetime(2026, 10, 21, 12, 45, tzinfo=timezone.utc)
+    def evidence(key, observed=now):
+        return dict(id=key, kind="fact", text="Invented broad-market candidate and range", source="Tradier fixture",
+                    observed_at=observed.isoformat(), retrieved_at=now.isoformat())
+    packet = client.post('/jo/packets', json=dict(operation_id="opportunity-packet", day="2026-10-21", as_of=now.isoformat(),
+        scope="Invented", evidence=[evidence("discovery-NEW"), evidence("market-NEW"), evidence("setup-NEW", now-timedelta(hours=1))], gaps=[])).json()
+    item = dict(symbol="NEW", what_matters="A reported contract catalyst", why_personal="A conditional intraday idea",
+        what_changed="New catalyst", contrary_evidence="Unverified liquidity", watch_out="Verify the spread before acting",
+        evidence_ids=["discovery-NEW", "market-NEW", "setup-NEW"], status="conditional", entry_trigger="Wait for a confirmed range break",
+        invalidation="Failure to hold the cited range", timeframe="Intraday; reassess after the open")
+    body = dict(operation_id="opportunity-brief", packet_id=packet['id'], author="Jo", prompt_version="jo-morning-v4",
+        summary="Market context is limited", summary_evidence_ids=["market-NEW"], items=[], opportunities=[item], urgent_positions=[], limitations=["Fixture"])
+    assert client.post('/jo/briefings', json=body).status_code == 422  # stale range cannot be promoted by a fresh stock price
+    body['opportunities'][0]['status'] = 'research_only'
+    saved = client.post('/jo/briefings', json=body)
+    assert saved.status_code == 201, saved.text
+    assert client.post('/jo/briefings', json=body).json()['id'] == saved.json()['id']
+    bad = {**body, 'operation_id': 'bad-citation', 'opportunities': [{**item, 'evidence_ids': ['unknown']}]}
+    assert client.post('/jo/briefings', json=bad).status_code == 422
+    bad = {**body, 'operation_id': 'no-discovery', 'opportunities': [{**item, 'evidence_ids': ['market-NEW']}]}
+    assert client.post('/jo/briefings', json=bad).status_code == 422
+    legacy = {k:v for k,v in body.items() if k not in ('opportunities', 'urgent_positions')}
+    assert BriefingSave.model_validate(legacy).model_dump(mode='json') == legacy | {'model_id': None, 'supersedes_id': None}

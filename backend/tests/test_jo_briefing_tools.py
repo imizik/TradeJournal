@@ -263,3 +263,29 @@ def test_changed_submission_digest_and_context_rejected(personal):
     receipt.write_text(json.dumps(ack))
     with pytest.raises(ValueError, match="mismatch"):
         exchange.status(config.market_watch_snapshots_dir, config.market_watch_outbox_dir, actor, "proposal")
+
+
+def test_opportunity_tool_roundtrip_checks_freshness_and_new_section_citations(personal):
+    h, config, engine, _, _ = personal
+    rows = [dict(id=key, kind="fact", text="Invented candidate and range", source="Tradier fixture",
+                 observed_at=RECEIPT, retrieved_at=RECEIPT) for key in ["discovery-NEW", "market-NEW", "setup-NEW"]]
+    with Session(engine) as session:
+        packet = store.save_packet(session, PacketSave(operation_id="discovery", day=RECEIPT.date(), as_of=RECEIPT,
+            scope="Invented discovery", evidence=rows, gaps=[]))
+        owner.publish(session, config, UUID(packet["id"]), RECEIPT)
+    item = dict(symbol="NEW", status="conditional", what_matters="Reported catalyst", why_personal="An intraday candidate",
+        what_changed="A reported update", contrary_evidence="Unverified liquidity", watch_out="Recheck spread",
+        entry_trigger="Wait for a range break", invalidation="Failed retest", timeframe="Intraday only",
+        evidence_ids=[r["id"] for r in rows])
+    body = {**brief(packet, "opportunity"), "prompt_version": "jo-morning-v4", "summary_evidence_ids": ["market-NEW"], "opportunities": [item]}
+    with TestClient(h.server().streamable_http_app()) as client:
+        token = h.token(scope=SCOPES)
+        assert call(client, "jo_briefing_submit", {"briefing": {**body, "summary_evidence_ids": []}}, token)["isError"]
+        bad = {**item, "evidence_ids": ["unknown"]}
+        assert call(client, "jo_briefing_submit", {"briefing": {**body, "opportunities": [bad]}}, token)["isError"]
+        assert result(client, "jo_briefing_submit", {"briefing": body}, token)["status"] == "pending_import"
+        with Session(engine) as session:
+            receipt = owner.import_submission(session, config, "opportunity", RECEIPT+timedelta(seconds=1))
+            saved = session.get(MorningBriefingRecord, UUID(receipt["record_id"]))
+            assert json.loads(saved.body_json)["opportunities"][0]["entry_trigger"] == item["entry_trigger"]
+        assert result(client, "jo_receipt", {"operation_id": "opportunity"}, token)["app_saved"]

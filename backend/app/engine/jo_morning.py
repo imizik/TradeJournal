@@ -75,6 +75,10 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
 
     evidence_bytes = 0
     symbols = []
+    # Exclude every saved holding/watchlist name from discovery, even outside packet display caps.
+    discovery_excluded = set(session.exec(select(Trade.ticker).where(
+        Trade.account_id.in_(config.account_ids), Trade.status == "open",
+        Trade.opened_at <= now.astimezone(ET).replace(tzinfo=None))).all())
     packet_time = now
 
     def add(key, kind, text, source, observed=None, retrieved=None):
@@ -125,6 +129,7 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
         watched = data.get("watchlist")
         if not isinstance(watched, list) or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,14}", s) for s in watched):
             raise ValueError("No valid saved watchlist")
+        discovery_excluded.update(watched)
         add("watchlist", "fact", "Saved Charts watchlist: " + (", ".join(watched[:30]) or "empty"), "Charts saved workspace",
             settings.updated_at.replace(tzinfo=timezone.utc))
         if len(watched) > 30:
@@ -153,7 +158,7 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
         for row in backdrop_evidence:
             add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"])
     if market_reader is not None:
-        market_evidence, market_gaps = market_reader(symbols, now)
+        market_evidence, market_gaps = market_reader(symbols, now, excluded_symbols=discovery_excluded)
         gaps.extend(market_gaps)
         for row in market_evidence:
             if add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"]):

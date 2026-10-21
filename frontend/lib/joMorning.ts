@@ -10,6 +10,7 @@ export type MemoryStatus = "proposed" | "active" | "retired";
 export type MemorySave = { operation_id: string; memory_id?: string; base_revision?: number; kind: MemoryKind; symbol: string | null; original_text: string;
   interpretation: string | null; source: MemorySource; source_reference?: string | null; status: MemoryStatus; owner_confirmed: boolean };
 export type BriefItem = { symbol: string | null; what_matters: string; why_personal: string; what_changed: string; contrary_evidence: string; watch_out: string; evidence_ids: string[] };
+export type BriefOpportunity = BriefItem & { status: "conditional" | "research_only"; entry_trigger: string; invalidation: string; timeframe: string };
 export type WatchdogNotice = { kind: string; title: string; recovered: boolean; outcome: "sent" | "failed" | "unknown"; at: string; attempts?: number };
 /** The scheduled obligation for a date: judged on when the brief reached the journal. Origin is never observed. */
 export type MorningDelivery = {
@@ -28,7 +29,7 @@ export type MorningView = {
     pending?: { count: number; oldest_submitted_at: string | null; unreadable: number } | null };
   delivery?: MorningDelivery;
   packet: { id: string; redacted_at: string | null; memories?: BriefMemory[]; body: { as_of?: string; scope?: string; gaps?: string[]; evidence?: BriefEvidence[]; memory_revision_ids?: string[] } } | null;
-  briefing: { id: string; received_at: string; redacted_at: string | null; body: { summary?: string; summary_evidence_ids?: string[]; items?: BriefItem[]; limitations?: string[]; supersedes_id?: string | null } } | null;
+  briefing: { id: string; received_at: string; redacted_at: string | null; body: { prompt_version?: string; opportunities?: BriefOpportunity[]; urgent_positions?: BriefItem[]; summary?: string; summary_evidence_ids?: string[]; items?: BriefItem[]; limitations?: string[]; supersedes_id?: string | null } } | null;
   versions: { id: string; received_at: string; redacted: boolean }[];
   feedback: { rating: "useful" | "meh" | "missed" | null; first_opened_at: string | null };
 };
