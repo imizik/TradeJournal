@@ -12,6 +12,8 @@
 #   bash scripts/ux_sandbox.sh --keys-from FILE   # keys from another env file
 #   bash scripts/ux_sandbox.sh --no-keys          # seeded records only, no candles
 #   UX_BACKEND_PYTHON=/path/to/python UX_FRONTEND_NODE_MODULES_DIR=/path/to/node_modules bash scripts/ux_sandbox.sh --no-keys
+#   bash scripts/ux_sandbox.sh --jo-day           # a scripted Jo day on a fake clock (backend/scripts/ux_jo_day.py);
+#                                                 # its own fresh database, no keys; step it with POST :8098/__sim/next
 #
 # Both servers start from an empty environment: only the allow-listed
 # market-data keys from that file and the sandbox's own settings reach them,
@@ -55,10 +57,12 @@ trap cleanup EXIT
 
 KEYS_FROM=""
 USE_KEYS=1
+JO_DAY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keys-from) [[ $# -ge 2 ]] || die "--keys-from needs a file"; KEYS_FROM="$2"; shift 2 ;;
     --no-keys) USE_KEYS=0; shift ;;
+    --jo-day) JO_DAY=1; USE_KEYS=0; shift ;;
     -h|--help) sed -n '3,22p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -123,6 +127,12 @@ for name, value in dotenv_values(sys.argv[1]).items():
   echo "Market-data keys loaded: ${imported[*]:-none}"
 fi
 
+if [[ $JO_DAY -eq 1 ]]; then
+  # Every simulated day starts from nothing, in its own folder beside the ordinary sandbox.
+  SANDBOX="$ROOT/backend/data/ux_sandbox_jo_day"
+  DB_FILE="$SANDBOX/ux_sandbox.db"
+  rm -rf "$SANDBOX"
+fi
 mkdir -p "$SANDBOX/captures"
 DATABASE_URL="sqlite:///$DB_FILE"
 BACKEND_ENV=("${CHILD_ENV[@]}" ${KEY_ENV[@]+"${KEY_ENV[@]}"} DATABASE_URL="$DATABASE_URL"
@@ -139,7 +149,11 @@ FRONTEND_ENV=("${CHILD_ENV[@]}" NEXT_PUBLIC_API_URL=/api/backend PORT="$FRONTEND
 (cd "$ROOT/backend" && env -i "${BACKEND_ENV[@]}" "$PYTHON" scripts/seed_dev_data.py --database-url "$DATABASE_URL") \
   || die "seeding $DB_FILE failed; if you added fills by hand there, delete $SANDBOX to start over"
 
-(cd "$ROOT/backend" && exec env -i "${BACKEND_ENV[@]}" "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT") &
+if [[ $JO_DAY -eq 1 ]]; then
+  (cd "$ROOT/backend" && exec env -i "${BACKEND_ENV[@]}" "$PYTHON" scripts/ux_jo_day.py --port "$BACKEND_PORT" --dir "$SANDBOX/jo_day") &
+else
+  (cd "$ROOT/backend" && exec env -i "${BACKEND_ENV[@]}" "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT") &
+fi
 pids+=("$!")
 (cd "$ROOT/frontend" && exec env -i "${FRONTEND_ENV[@]}" ./node_modules/.bin/next dev --webpack --port "$FRONTEND_PORT" --hostname 127.0.0.1) &
 pids+=("$!")

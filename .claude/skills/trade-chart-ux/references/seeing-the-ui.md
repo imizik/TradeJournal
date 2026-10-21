@@ -109,6 +109,18 @@ so the external dependency link is supported by the bundler.
 - Ctrl+C (or stopping the background task) stops both servers. Delete
   `backend/data/ux_sandbox/` to start over.
 
+### A whole Jo day, step by step
+
+`bash scripts/ux_sandbox.sh --jo-day` (needs `UX_BACKEND_PYTHON` /
+`UX_FRONTEND_NODE_MODULES_DIR` as above in a bare worktree) starts a fresh
+sandbox whose backend runs on a fake clock for today's date. `curl -s -X POST
+127.0.0.1:8098/__sim/next` advances one step (08:30 → 16:05: briefing,
+reads, an MU watch that triggers, a missing and a late read); `GET /__sim` is
+the ground truth to compare the Daily Review's Jo's day against. It only moves
+forward: restart the script to replay. Prices are invented and phone pushes
+are recorded, never sent; the Check sign-in layer and the real Jo are not
+involved.
+
 ## Safety outside the sandbox
 
 The user's own app (`bash startdev.sh`, ports 8080/3000) is connected to real

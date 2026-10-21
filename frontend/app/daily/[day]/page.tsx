@@ -296,7 +296,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
       >
         {[
           ...(access.owner ? [{ href: "#jo", label: "Jo's day" }, { href: "#thoughts", label: "Your thoughts" }] : []),
-          { href: "#ai-review", label: "AI review" },
+          { href: "#ai-review", label: "AI analysis" },
           { href: "#trades", label: `Trades · ${selectedTrades.length}` },
           { href: "#practice", label: "Practice" },
         ].map((section) => (
