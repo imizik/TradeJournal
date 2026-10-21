@@ -96,10 +96,32 @@ def test_owner_thoughts_join_the_day_context_and_their_symbols_get_market_contex
     session.add(DayJournalEntry(operation_id="thought", day=DAY, kind="idea", text="NVDA relative strength holds",
                                 symbol="NVDA", actor="owner", created_at=datetime(2026, 9, 30, 15, 0)))
     session.commit()
-    context = review_context.build(session, DAY, [])
+    context = review_context.build(session, DAY, [], include_owner_thoughts=True)
     assert context["owner_timeline"][0]["text"] == "NVDA relative strength holds"
     assert context["owner_timeline"][0]["retrospective"] is False
     assert "NVDA" in offline["daily_symbols"]
+
+
+def test_per_trade_review_excludes_private_day_thoughts_from_model_context(session, offline, monkeypatch):
+    from app.ai import plan_runner, reviewer
+
+    session.add(DayJournalEntry(operation_id="private-thought", day=DAY, kind="outlook",
+                                text="SECRET private morning plan", created_at=datetime(2026, 9, 30, 12)))
+    session.commit()
+    seen = {}
+    def ask(_system, message, _schema):
+        seen["message"] = message
+        return type("Answer", (), {"data": {"strategy": "ORB", "flags": [], "summary": "Reviewed",
+            "entry_quality": "Clear", "exit_quality": "Clear", "suggestions": [],
+            "market_read": "Mixed", "plan_check": None, "data_gaps": []},
+            "author": "test", "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
+    monkeypatch.setattr(plan_runner, "ask", ask)
+
+    review = reviewer.review_trade(trade(77), [], session=session)
+
+    assert review["summary"] == "Reviewed"
+    assert "SECRET private morning plan" not in seen["message"]
+    assert "owner_timeline" not in json.loads(seen["message"].split("\n\n", 1)[1])["day_context"]
 
 
 def test_owner_timeline_keeps_first_morning_entry_and_latest_entries_when_capped(session, offline):
@@ -113,7 +135,7 @@ def test_owner_timeline_keeps_first_morning_entry_and_latest_entries_when_capped
     ])
     session.commit()
 
-    context = review_context.build(session, DAY, [])
+    context = review_context.build(session, DAY, [], include_owner_thoughts=True)
 
     timeline = context["owner_timeline"]
     assert len(timeline) == 50

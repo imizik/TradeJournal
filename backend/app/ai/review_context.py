@@ -56,7 +56,7 @@ SECTOR_ETF = {"Technology": "XLK", "Communication Services": "XLC", "Consumer Cy
 FUNDS = {"SPY", "QQQ", "IWM", "DIA", "SMH", "SPX", "SPXW", "XSP", "NDX", "VIX", "TLT", "GLD", "SLV", "USO", "SOXL", "TQQQ", "SQQQ"}
 
 
-def build(session: Session, day: date, trades: list[Trade]) -> dict:
+def build(session: Session, day: date, trades: list[Trade], *, include_owner_thoughts: bool = False) -> dict:
     """The extra context for one review day. Never raises: what fails is named in ``gaps``."""
     gaps: list[str] = []
     context: dict = {"gaps": gaps}
@@ -75,15 +75,18 @@ def build(session: Session, day: date, trades: list[Trade]) -> dict:
         return value
 
     context["plans"] = part("plans", lambda: plans(session, day, trades), "No captured trade plans for this day")
-    timeline_data = part("owner timeline", lambda: owner_timeline_for_review(session, day),
-                         "No saved owner thoughts for this day")
-    if timeline_data:
-        context["owner_timeline"], timeline_total = timeline_data
+    if include_owner_thoughts:
+        timeline_data = part("owner timeline", lambda: owner_timeline_for_review(session, day),
+                             "No saved owner thoughts for this day")
+        if timeline_data:
+            context["owner_timeline"], timeline_total = timeline_data
+        else:
+            context["owner_timeline"], timeline_total = [], 0
     else:
-        context["owner_timeline"], timeline_total = [], 0
+        timeline_total = 0
     truncated_count = max(0, timeline_total - OWNER_TIMELINE_LIMIT)
     text_truncated_count = 0
-    for row in context["owner_timeline"]:
+    for row in context.get("owner_timeline", []):
         if len(row["text"]) > OWNER_THOUGHT_TEXT_LIMIT:
             row["text"] = row["text"][:OWNER_THOUGHT_TEXT_LIMIT]
             text_truncated_count += 1

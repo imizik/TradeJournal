@@ -51,20 +51,22 @@ def append(session: Session, *, day: date, operation_id: str, kind: str, text: s
 
     row = DayJournalEntry(operation_id=operation_id, day=day, kind=kind, text=text, symbol=symbol,
                           not_traded=not_traded, created_at=datetime.now(timezone.utc).replace(tzinfo=None), actor="owner")
-    session.add(row)
-    review = session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day == day)).first()
-    if review:
-        try:
-            saved = json.loads(review.review_json)
-        except (TypeError, json.JSONDecodeError):
-            saved = {}
-        if not isinstance(saved, dict):
-            saved = {}
-        saved["source_data_stale"] = True
-        saved["source_data_stale_reason"] = "Owner thoughts changed after this review was generated."
-        review.review_json = json.dumps(saved)
-        session.add(review)
     try:
+        session.add(row)
+        # This SELECT can trigger ORM autoflush, so it belongs inside the
+        # IntegrityError recovery boundary just like commit itself.
+        review = session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day == day)).first()
+        if review:
+            try:
+                saved = json.loads(review.review_json)
+            except (TypeError, json.JSONDecodeError):
+                saved = {}
+            if not isinstance(saved, dict):
+                saved = {}
+            saved["source_data_stale"] = True
+            saved["source_data_stale_reason"] = "Owner thoughts changed after this review was generated."
+            review.review_json = json.dumps(saved)
+            session.add(review)
         session.commit()
     except IntegrityError:
         session.rollback()

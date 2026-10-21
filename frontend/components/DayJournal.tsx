@@ -8,7 +8,7 @@ import { DAY_JOURNAL_KINDS, chartPathLink, dateET, kindLabel, planText, readDraf
 const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const newWrite = (kind: DayJournalEntry["kind"]): DayJournalWrite => ({ operation_id: uid(), kind, text: "", symbol: null, not_traded: false });
 
-export default function DayJournal({ day, review = false, initialData, onEntrySaved }: { day: string; review?: boolean; initialData?: DayJournalData | null; onEntrySaved?: () => void }) {
+export default function DayJournal({ day, review = false, initialData, onEntrySaved, onDataLoaded }: { day: string; review?: boolean; initialData?: DayJournalData | null; onEntrySaved?: (entry: DayJournalEntry) => void; onDataLoaded?: (data: DayJournalData) => void }) {
   const { owner } = useAppAccess();
   const [journal, setJournal] = useState<DayJournalData | null>(initialData ?? null);
   const [loading, setLoading] = useState(!initialData);
@@ -18,23 +18,32 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
-  const [refresh, setRefresh] = useState(0);
   const saveLock = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(null);
-    try { setJournal(await api.dayJournal(day)); }
+    try {
+      const data = await api.dayJournal(day);
+      setJournal(data);
+      onDataLoaded?.(data);
+    }
     catch { setLoadError("Please try again."); }
     finally { setLoading(false); }
-  }, [day]);
+  }, [day, onDataLoaded]);
 
   useEffect(() => {
     // Drafts live in the browser only, so read them after the client hydrates.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(readDraft(day));
     setSaveError(null); setSaveMessage(null);
+    // The parent keys this component by day; draft hydration must not rerun on refresh.
+  }, [day]);
+
+  useEffect(() => {
+    // Fetch initial server data only when it was not supplied by the page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!initialData) void load();
-  }, [day, initialData, load, refresh]);
+  }, [initialData, load]);
 
   const changeDraft = (next: SavedDraft | null) => {
     setStorageWarning(!storeDraft(day, next));
@@ -57,9 +66,13 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
     saveLock.current = true; changeDraft(immutable); setSaving(true); setSaveError(null); setSaveMessage(null);
     try {
       const entry = await api.addDayJournalEntry(day, immutable.write);
-      setJournal((current) => current ? { ...current, entries: [...current.entries.filter((item) => item.id !== entry.id), entry].sort((a, b) => a.created_at.localeCompare(b.created_at)) } : current);
+      setJournal((current) => {
+        const base = current ?? { day, entries: [], trade_plans: {} };
+        return { ...base, entries: [...base.entries.filter((item) => item.id !== entry.id), entry].sort((a, b) => a.created_at.localeCompare(b.created_at)) };
+      });
+      setLoadError(null);
       const cleared = storeDraft(day, null);
-      setDraft(null); setStorageWarning(!cleared); setSaveMessage("Saved to your day journal."); onEntrySaved?.();
+      setDraft(null); setStorageWarning(!cleared); setSaveMessage("Saved to your day journal."); onEntrySaved?.(entry);
     } catch {
       setSaveError("Could not confirm this save. Your draft remains here. Retry the same save; if it already went through, it will not create a duplicate.");
     } finally { saveLock.current = false; setSaving(false); }
@@ -78,7 +91,7 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">Your original notes stay saved and separate from Jo’s briefing. Times show when each note was saved (ET). Symbol links open that day’s chart for path inspection; available historical bars vary.</p></div>
-      <button type="button" aria-label="Refresh saved day journal" onClick={() => setRefresh((value) => value + 1)} className="min-h-11 rounded border px-3 text-sm hover:bg-secondary">Refresh</button>
+      <button type="button" aria-label="Refresh saved day journal" onClick={() => void load()} disabled={loading} className="min-h-11 rounded border px-3 text-sm hover:bg-secondary disabled:opacity-50">Refresh</button>
     </div>
 
     {owner && <div className="mt-4 rounded-md border bg-background/40 p-4">

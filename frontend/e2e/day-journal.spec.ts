@@ -118,3 +118,40 @@ async function addThought(page: Page, kind: "update" | "idea" | "reflection", te
   await journal.getByTestId("day-journal-save").click();
   await expect(journal.getByText(text, { exact: true })).toBeVisible();
 }
+
+test("Daily Review refresh receives another tab's thoughts and invalidates its saved review", async ({ page, request }) => {
+  let day = "";
+  for (let candidate = 1; candidate <= 31; candidate++) {
+    const value = `2001-01-${String(candidate).padStart(2, "0")}`;
+    const existing = await (await request.get(`/api/backend/day-journal/${value}`)).json();
+    if (existing.entries.length === 0) { day = value; break; }
+  }
+  expect(day).not.toBe("");
+  expect((await request.post(`${fixtureApi}/__test/day-journal-review?mode=ready`)).ok()).toBeTruthy();
+  const second = await page.context().newPage();
+  try {
+    await page.goto(`/daily/${day}`);
+    const run = page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ });
+    await expect(run).toBeDisabled();
+    await second.goto(`/morning?day=${day}`);
+    const words = `Remote morning plan ${Date.now()}: wait for SPY above 580.`;
+    await second.getByTestId("day-journal-add-outlook").click();
+    await second.getByLabel("Your words").fill(words);
+    await second.getByTestId("day-journal-save").click();
+    await expect(second.getByTestId("day-journal-entry").filter({ hasText: words })).toBeVisible();
+    await page.getByRole("button", { name: "Refresh saved day journal" }).click();
+    await expect(page.getByTestId("day-journal-entry").filter({ hasText: words })).toBeVisible();
+    await expect(run).toBeEnabled();
+    await run.click();
+    await expect(page.getByRole("region", { name: "Morning expectations against the day" })).toContainText(words);
+    const update = `Remote revision ${Date.now()}: the reclaim failed.`;
+    await addThought(second, "update", update);
+    await page.getByRole("button", { name: "Refresh saved day journal" }).click();
+    await expect(page.getByTestId("day-journal-entry").filter({ hasText: update })).toBeVisible();
+    await expect(page.getByText(/Saved analysis may not include|Saved analysis predates|thoughts.*changed/i).first()).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("day-refresh-cross-tab.png"), fullPage: true });
+  } finally {
+    await second.close();
+    await request.post(`${fixtureApi}/__test/day-journal-review?mode=off`);
+  }
+});

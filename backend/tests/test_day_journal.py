@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
+from app.engine import day_journal
 from app.models import Account, DayJournalEntry, Trade, TradeCapture, TradeCaptureNote
 from app.routers.day_journal import router as day_journal_router
 from app.routers.daily_review import router as daily_review_router
@@ -60,12 +61,46 @@ def test_day_journal_rejects_invalid_day_symbol_and_empty_text(journal):
     assert client.post(f"/day-journal/{DAY}/entries", json=entry(text="  ")).status_code == 422
 
 
+@pytest.mark.parametrize("competing_text, expected", [
+    ("SPY holds 580 into the open", "retry"),
+    ("Different competing payload", "conflict"),
+])
+def test_append_recovers_integrity_error_during_autoflush(journal, monkeypatch, competing_text, expected):
+    _, engine = journal
+    from app.engine.day_journal import EntryConflict
+
+    with Session(engine) as session:
+        original_add = session.add
+        inserted = False
+
+        def add_with_competing_writer(row, *args, **kwargs):
+            nonlocal inserted
+            if isinstance(row, DayJournalEntry) and row.operation_id == "race-op" and not inserted:
+                inserted = True
+                with Session(engine) as competing:
+                    competing.add(DayJournalEntry(operation_id="race-op", day=DAY, kind="outlook",
+                        text=competing_text, actor="owner"))
+                    competing.commit()
+            return original_add(row, *args, **kwargs)
+
+        monkeypatch.setattr(session, "add", add_with_competing_writer)
+        if expected == "conflict":
+            with pytest.raises(EntryConflict, match="different entry"):
+                day_journal.append(session, day=DAY, operation_id="race-op", kind="outlook",
+                                   text="SPY holds 580 into the open")
+        else:
+            result = day_journal.append(session, day=DAY, operation_id="race-op", kind="outlook",
+                                        text="SPY holds 580 into the open")
+            assert result.text == competing_text
+            assert len(session.exec(select(DayJournalEntry)).all()) == 1
+
+
 def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(journal, monkeypatch):
     client, engine = journal
     client.post(f"/day-journal/{DAY}/entries", json=entry())
     seen = {}
 
-    def context(session, day, trades):
+    def context(session, day, trades, **kwargs):
         seen["day_context"] = {"owner_timeline": [{"id": "entry-id", "retrospective": False}]}
         return seen["day_context"]
 
@@ -97,7 +132,7 @@ def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(
     assert later.status_code == 200
     saved_review = client.get(f"/daily-review/{DAY}").json()
     assert saved_review["review"]["source_data_stale"] is True
-    assert saved_review["review"]["source_data_stale_reason"] == "Owner thoughts changed after this review was generated."
+    assert saved_review["review"]["source_data_stale_reason"] == "Owner thoughts changed after this review's input snapshot."
     assert saved_review["generated_at"] == generated_at
     assert client.post("/daily-review", json={"day": "2026-09-29", "trade_ids": []}).status_code == 404
 
@@ -119,7 +154,7 @@ def test_review_generation_fails_if_it_omits_a_saved_outlook_check(journal, monk
     _, engine = journal
     from app.ai import daily_reviewer, plan_runner, review_context
 
-    monkeypatch.setattr(review_context, "build", lambda *_: {"owner_timeline": [{"id": "outlook-1", "kind": "outlook"}]})
+    monkeypatch.setattr(review_context, "build", lambda *_, **__: {"owner_timeline": [{"id": "outlook-1", "kind": "outlook"}]})
     incomplete = {"summary": "A summary", "day_grade": "B: clear plan", "key_takeaways": [],
                   "best_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
                   "worst_trade": {"trade_id": None, "ticker": None, "reason": "No trade"}, "patterns": [],

@@ -87,7 +87,7 @@ def fake_claude(tmp_path, monkeypatch):
     # The day's market context reads providers; tests/test_review_context.py covers it offline.
     from app.ai import review_context
 
-    monkeypatch.setattr(review_context, "build", lambda session, day, trades: {"gaps": ["stubbed in tests"]})
+    monkeypatch.setattr(review_context, "build", lambda session, day, trades, **kwargs: {"gaps": ["stubbed in tests"]})
     # The monthly review has its own tests (tests/test_monthly_review.py); these runs are about the day.
     monkeypatch.setattr(plan_reviews, "plan_month", lambda session, today: None)
     plan_runner._checked.clear()
@@ -230,6 +230,36 @@ def test_review_stales_if_owner_thoughts_change_during_generation(engine, monkey
         assert "source_data_stale" not in review
         assert review["owner_thoughts_included"] is False
         assert "source_data_stale" not in stored
+
+
+def test_private_prior_day_rules_make_the_next_review_private(fake_claude, engine, monkeypatch):
+    from app.ai import daily_review_service, review_context
+
+    prior_day = datetime(2026, 9, 2).date()
+    review_day = datetime(2026, 9, 3).date()
+    add(engine,
+        DayJournalEntry(operation_id="private-prior", day=prior_day, kind="outlook", text="Private outlook"),
+        review_record(prior_day.isoformat(), owner_thoughts_included=True, owner_input_count=1,
+                      next_session_rules=["SECRET prior-day rule"]),
+        trade(1, datetime(2026, 9, 3, 9, 31), datetime(2026, 9, 3, 10, 0)))
+    monkeypatch.setattr(review_context, "build", lambda *_args, **_kwargs: {"gaps": []})
+    seen = {}
+
+    def ask(_system, message, _schema, **_kwargs):
+        context = json.loads(message.split("\n\n", 1)[1])
+        seen["history"] = context["history"]
+        answer = {**ANSWER, "next_session_rules": context["history"]["prior_reviews"][0]["next_session_rules"]}
+        return type("Answer", (), {"data": answer, "author": "test", "input_tokens": 0,
+            "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
+
+    monkeypatch.setattr(plan_runner, "ask", ask)
+    with Session(engine) as session:
+        record, review = daily_review_service.generate(session, review_day)
+
+    assert seen["history"]["owner_private_inputs"] is True
+    assert review["next_session_rules"] == ["SECRET prior-day rule"]
+    assert review["owner_thoughts_included"] is True
+    assert json.loads(record.review_json)["owner_thoughts_included"] is True
 
 
 def test_the_review_never_falls_back_to_the_api(fake_claude, engine, monkeypatch):

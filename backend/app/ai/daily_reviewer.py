@@ -5,9 +5,10 @@ from pathlib import Path
 from statistics import median
 
 from dotenv import load_dotenv
+from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.models import Account, DailyReviewRecord, DayJournalEntry, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -37,7 +38,7 @@ def review_trading_day(
     context["history"] = _history_context(date.fromisoformat(day), session)
     from app.ai import review_context
 
-    context["day_context"] = review_context.build(session, date.fromisoformat(day), trades)
+    context["day_context"] = review_context.build(session, date.fromisoformat(day), trades, include_owner_thoughts=True)
     review_context_data = context["day_context"]
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
     chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
@@ -76,7 +77,10 @@ def review_trading_day(
         count = context["day_context"].get(field, 0)
         if count:
             review[field] = count
-    review["owner_thoughts_included"] = bool(review_context_data.get("owner_timeline") or review_context_data.get("plans"))
+    review["owner_thoughts_included"] = bool(
+        review_context_data.get("owner_timeline") or review_context_data.get("plans") or
+        context["history"].get("owner_private_inputs")
+    )
     review["prompt_version"] = PROMPT_VERSION
     return review
 
@@ -105,11 +109,18 @@ def _history_context(review_day: date, session: Session) -> dict:
         select(DailyReviewRecord).where(DailyReviewRecord.day < review_day).order_by(DailyReviewRecord.day.desc()).limit(PRIOR_REVIEWS)
     ).all()
     prior_reviews = []
+    owner_private_inputs = False
     for record in prior:
         try:
             saved = json.loads(record.review_json)
         except ValueError:
             continue
+        thought_count = session.exec(select(func.count(DayJournalEntry.id)).where(DayJournalEntry.day == record.day)).one()
+        snapshot_count = saved.get("owner_input_count")
+        owner_private_inputs = owner_private_inputs or bool(
+            saved.get("owner_thoughts_included") or saved.get("expectation_checks") or
+            (int(thought_count or 0) > 0 and (not isinstance(snapshot_count, int) or snapshot_count != int(thought_count or 0)))
+        )
         prior_reviews.append({"day": record.day.isoformat(), "days_before": (review_day - record.day).days,
                               "day_grade": saved.get("day_grade"), "next_session_rules": saved.get("next_session_rules") or []})
 
@@ -141,7 +152,7 @@ def _history_context(review_day: date, session: Session) -> dict:
         "avg_day_pnl": round(sum(by_day.values()) / len(by_day), 2) if by_day else None,
         "worst_day_pnl": round(min(by_day.values()), 2) if by_day else None,
     } if days else None
-    return {"prior_reviews": prior_reviews, "baseline": baseline}
+    return {"prior_reviews": prior_reviews, "baseline": baseline, "owner_private_inputs": owner_private_inputs}
 
 
 def _assemble_daily_context(
