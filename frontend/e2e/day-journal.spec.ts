@@ -82,7 +82,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       // A new thought must invalidate the review that was just generated,
       // without losing the new original/reflection or requiring a trade.
       await addThought(page, "reflection", reflection);
-      await expect(page.getByText(/Saved analysis predates|Saved analysis used|thoughts.*changed/i).first()).toBeVisible();
+      await expect(page.getByText("Saved analysis may not include the latest thoughts, plans, fills, or market context. Regenerate it to review the current saved inputs.", { exact: true })).toBeVisible();
       const stored = await (await request.get(`/api/backend/daily-review/${viewport.day}`)).json();
       expect(stored.review.source_data_stale).toBe(true);
       if (viewport.hasTrades) expect(stored.trade_count).toBeGreaterThan(0);
@@ -148,7 +148,7 @@ test("Daily Review refresh receives another tab's thoughts and invalidates its s
     await addThought(second, "update", update);
     await page.getByRole("button", { name: "Refresh saved day journal" }).click();
     await expect(page.getByTestId("day-journal-entry").filter({ hasText: update })).toBeVisible();
-    await expect(page.getByText(/Saved analysis may not include|Saved analysis predates|thoughts.*changed/i).first()).toBeVisible();
+    await expect(page.getByText("Saved analysis may not include the latest thoughts, plans, fills, or market context. Regenerate it to review the current saved inputs.", { exact: true })).toBeVisible();
     await page.screenshot({ path: test.info().outputPath("day-refresh-cross-tab.png"), fullPage: true });
   } finally {
     await second.close();

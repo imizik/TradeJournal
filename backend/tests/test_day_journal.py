@@ -48,7 +48,7 @@ def test_day_journal_appends_and_idempotent_retry_conflicts_only_on_changed_payl
     saved = first.json()
     assert saved["symbol"] == "SPY" and saved["actor"] == "owner" and saved["created_at"].endswith("Z")
     assert client.post(f"/day-journal/{DAY}/entries", json=entry()).json() == saved
-    assert client.post(f"/day-journal/2026-10-01/entries", json=entry()).status_code == 409
+    assert client.post("/day-journal/2026-10-01/entries", json=entry()).status_code == 409
     assert client.post(f"/day-journal/{DAY}/entries", json=entry(text="changed")).status_code == 409
     assert client.post(f"/day-journal/{DAY}/entries", json={**entry(), "created_at": "2026-09-30T12:00:00Z"}).status_code == 422
     assert client.get(f"/day-journal/{DAY}").json()["entries"] == [saved]
