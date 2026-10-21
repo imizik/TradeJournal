@@ -1132,3 +1132,52 @@ def test_rolling_does_not_promote_cached_partial_minute(engine, monkeypatch, tmp
     watch._minutes('SPY', DAY)
     watch.publish_candles(DAY, SimpleNamespace(open_at=OPEN, close_at=CLOSE))
     assert json.loads((rolling / 'SPY.json').read_text())['1m'][-1]['end_time'] == at(9, 51)
+
+
+# ------------------------------------------------------------------ owner page timing and freshness
+
+
+def test_day_route_shows_paper_deadline_session_and_monitoring_freshness(scanner_client, engine, monkeypatch):
+    monkeypatch.setenv("SETUP_SCANNER_ENABLED", "true")
+    monkeypatch.setattr(routes, "chart_calendar", Calendar())
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    scanner_client.app.state.level_alerts = SimpleNamespace(scanner=watch)
+
+    def day_at(now, day=DAY.isoformat()):
+        monkeypatch.setattr(routes, "time", SimpleNamespace(time=lambda: now))
+        return scanner_client.get("/scanner/day", params={"day": day}).json()
+
+    body = day_at(at(9, 51))
+    row = body["candidates"][0]
+    # The setup bar closed at 09:50; the paper entry is the later quote, and its time stop is entry + 60 minutes.
+    assert row["bar_end"].startswith("2026-10-07T13:50:00") and row["events"]["entry"]["at"] == "2026-10-07T13:50:35Z"
+    assert row["paper_deadline"] == {"at": "2026-10-07T14:50:35Z", "kind": "time_stop"}
+    assert body["session"] == "open"
+    assert body["monitoring"] == {"state": "fresh", "checked_at": "2026-10-07T13:51:00Z", "last_judged_bar_end": "2026-10-07T13:50:00Z",
+                                  "symbols_judged": 1, "symbols_selected": 1}
+    # A reloaded page is not fresh monitoring: no bar judged since 09:50 is stale by 10:00.
+    assert day_at(at(10, 0))["monitoring"]["state"] == "stale"
+    assert day_at(at(9, 0))["monitoring"]["state"] == "outside_window"
+    scanner_client.app.state.level_alerts = None
+    assert day_at(at(9, 51))["monitoring"]["state"] == "not_running"
+    monkeypatch.setenv("SETUP_SCANNER_ENABLED", "false")
+    assert day_at(at(9, 51))["monitoring"]["state"] == "off"
+
+    # A weekend reads as closed even without a calendar; an unknown weekday stays unknown.
+    monkeypatch.setattr(routes, "chart_calendar", SimpleNamespace(hours=lambda day: None))
+    assert day_at(at(9, 51), "2026-10-10")["session"] == "closed"
+    assert day_at(at(9, 51), "2026-10-07")["session"] == "unknown"
+
+
+def test_paper_deadline_is_flat_by_close_when_earlier_than_the_time_stop(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = rows(engine)[0][0]
+    session = setup_scanner.regular_session(DAY, Calendar().hours(DAY))
+    late_entry = {"entry": {"at": at(15, 0)}}
+    assert setup_scanner._paper_deadline(candidate, late_entry, session) == {"at": "2026-10-07T19:45:00Z", "kind": "flat"}
+    assert setup_scanner._paper_deadline(candidate, late_entry, None)["kind"] == "time_stop"
+    assert setup_scanner._paper_deadline(candidate, {}, session) is None

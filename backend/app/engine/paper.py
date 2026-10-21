@@ -20,6 +20,7 @@ import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+import httpx
 from sqlalchemy import func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -393,8 +394,10 @@ class PaperWatcher:
     def deliver(self) -> None:
         now = self.clock()
         with Session(self.engine) as db:
+            # A claim this old may have reached ntfy before the pass died, so it is
+            # recorded unknown and never resent: a duplicate push is worse than a missed one.
             db.exec(update(DecisionEvent).where(DecisionEvent.delivery == "sending", DecisionEvent.claimed_at < _utc(now - CLAIM_SECONDS))
-                    .values(delivery="pending"))
+                    .values(delivery="unknown", last_error="The send was interrupted and may have reached the phone, so it was not resent."))
             db.commit()
             due = db.exec(select(DecisionEvent.id).where(DecisionEvent.delivery == "pending")
                           .where((DecisionEvent.next_attempt_at.is_(None)) | (DecisionEvent.next_attempt_at <= _utc(now)))
@@ -420,6 +423,10 @@ class PaperWatcher:
             try:
                 ntfy.publish(title, body, path=f"/?decision={record.id}")
             except ntfy.NtfyError as exc:
+                if not _surely_unsent(exc):
+                    event.delivery, event.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                    db.commit()
+                    return
                 event.delivery = "pending"
                 event.next_attempt_at = _utc(now + BACKOFF[min(event.attempts, len(BACKOFF)) - 1])
                 event.last_error = str(exc)
@@ -427,6 +434,13 @@ class PaperWatcher:
                 return
             event.delivery, event.delivered_at, event.last_error = "sent", _utc(self.clock()), None
             db.commit()
+
+
+def _surely_unsent(exc: ntfy.NtfyError) -> bool:
+    """True when the push certainly never reached ntfy: not configured, refused with a status, or no connection.
+    Any other transport error (a timeout or drop after the request left) leaves the outcome unknown."""
+    cause = exc.__cause__
+    return cause is None or isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout))
 
 
 def message(record: DecisionRecord, event: dict, now: float) -> tuple[str, str]:

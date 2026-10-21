@@ -1,7 +1,9 @@
 # Review by risk
 
 Choose by the actual behavior and blast radius, not file count. Ordinary work
-uses focused checks without mandatory independent review. The user alone merges.
+uses focused checks without mandatory independent review. Both Codex and Claude
+Code automatically repair and merge ordinary PRs; tiers 1/2 require the user's
+approval and merge.
 
 ## Choose the review depth
 
@@ -37,9 +39,10 @@ paid API review or waiting for GitHub comments.
    or local suite plus CI. Cover the affected failure/recovery paths: numerical
    boundaries, authorization refusals, migration rollback, or service lifecycle
    as relevant. Do not require unrelated live environments or proof layers.
-2. Commit a complete candidate. Tier 0 can push/update the PR and hand back with
-   CI explicitly pending. Tiers 1/2 brief the required reviewers with outcome,
-   scope, base/head, checks and relevant constraints; review and CI may overlap.
+2. Commit a complete candidate. Tier 0 pushes/updates the PR and owns it through
+   CI and merge under the completion rules below. Tiers 1/2 brief the required
+   reviewers with outcome, scope, base/head, checks and relevant constraints;
+   review and CI may overlap.
 3. Fix valid findings and rerun affected checks. Recheck substantive changes with
    the general reviewer, and with the focused reviewer when its risk area changed.
    Meaning-preserving prose-only edits need no recheck; changes to instructions,
@@ -64,6 +67,52 @@ Keep one short record: scope/tier, reviewed SHA, checks, findings and next actio
 Report a stalled/unavailable review as incomplete; do not repeatedly poll or
 narrate unchanged waits. No new approval is needed for authorized routine repairs.
 
+## Automatic repair and merge
+
+These rules apply equally to Codex and Claude Code for PRs they own. They govern
+the active agent session; repository instructions do not start a background bot
+after the session ends or authorize new paid API automation.
+
+1. Classify the complete diff by behavior using the table above and record the
+   tier and reason in the PR description. Only tier 0 qualifies for automatic
+   merge. Mixed ordinary/high-risk changes use the higher tier. Resolve uncertain
+   behavior before choosing tier 0; a label or green CI is not a risk assessment.
+2. Run focused checks, push the complete candidate, and monitor CI and review
+   feedback. Diagnose failures and actionable findings, make the smallest valid
+   repair, and push again without asking for routine permission. Reassess the
+   full diff after each repair: financial/account/fill semantics, auth/security,
+   migrations, deployment, destructive or real-data mutation, and CI/review/
+   permission changes require tier 2 even when they fix an ordinary PR's CI.
+   Do not weaken tests or safeguards to obtain a pass.
+3. Allow at most three automatic repair/review rounds per PR, shared across
+   agents and sessions; record rounds in the PR description. Repeated attempts
+   do not reset the budget. If exhausted, blocked, or interrupted, leave the PR
+   unmerged with auto-merge disabled and report the specific remaining work.
+   An unavailable check or unresolved finding is not a pass.
+4. Before merging tier 0, disable any queued GitHub auto-merge, then inspect the
+   final diff, actionable review findings, and all applicable CI jobs/steps on
+   the exact final head. Check squash merging is enabled and `main` still
+   enforces the required Backend, Frontend,
+   Browser, Postgres parity, and Ubuntu package and systemd build checks. Do not
+   remove protection, bypass reviews, use `--admin`, or merge with pending proof.
+   After those gates pass, use
+   `gh pr merge <number> --squash --match-head-commit <verified-head-sha>`.
+   If the head changes, reassess risk and verify that head before trying again.
+   Do not use `--auto` or leave a merge queued: a queued GitHub auto-merge can
+   survive later pushes by a writer and is not pinned to the verified head.
+   If merge requirements are still pending, continue monitoring and reverify
+   before the next attempt. Confirm the PR actually merged before reporting done.
+5. Leave tier 1/2 PRs with auto-merge disabled for the user's approval and merge,
+   after applicable reviews and verification. A previous PR's approval does not
+   approve a new diff. Do not split or relabel high-risk changes to avoid this
+   gate. This includes changes to these rules or their enforcement.
+
+Merging ordinary application changes may release them through the existing
+[automatic deployment](../../deploy/README.md#automatic-deployment) pipeline.
+That normal release path is authorized for tier 0; changes to deployment,
+manual activation, production-data operations and paid services retain their
+separate approval requirements. Preserve release backup and market-hours guards.
+
 ## Reviewer contract
 
 Read this policy and only the relevant code/contracts. Review the supplied
@@ -83,4 +132,5 @@ condition. Do not invent findings or turn a narrow fix into a redesign.
 Briefly record tier, review result when required, checked SHA, validation and
 remaining limitations. For tiers 1/2 retain reviewer profiles, round count and
 any carry or user decision. Tier 0 needs no review receipt. Never claim CI,
-deployment or human acceptance that was not observed; never merge or auto-merge.
+deployment or human acceptance that was not observed. Record the merge result
+for tier 0; leave tiers 1/2 for the user's approval and merge.
