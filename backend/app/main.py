@@ -377,6 +377,8 @@ app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"]
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     from app.routers import scanner as scanner_router
     app.include_router(scanner_router.router, prefix="/scanner", tags=["scanner"])
+    from app.routers import radar as radar_router
+    app.include_router(radar_router.router, prefix="/radar", tags=["radar"])
 app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
 app.include_router(position_alerts_router.router, prefix="/trades", tags=["position alerts"])

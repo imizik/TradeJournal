@@ -20,9 +20,11 @@ involve Jo.
    versioned. They write the event and revision rows whose shape PR 1 defines
    (`RadarEvent`, `RadarEventRevision`; sample in
    `backend/tests/fixtures/radar/sample_event.json`).
-3. **Owner-only API:** feed, event detail, coverage, since-last-visit and
-   feedback.
-4. **`/radar` screen,** built against sample events alongside step 2.
+3. **Owner-only API (built):** `backend/app/routers/radar.py` — feed, event
+   detail, coverage, since-last-visit, visits and feedback. See
+   [Feed API](#feed-api-and-screen).
+4. **`/radar` screen (built),** `frontend/app/radar/page.tsx`, checked against
+   the sample event until step 2 writes real ones.
 5. **News enrichment:** "news nearby" or "cause unknown" on each event.
 
 ## Recorder
@@ -43,6 +45,33 @@ bid, ask, Tradier's trade time and our retrieval time). Quote rows older than
 the newest 60 recorded sessions are pruned; passes and events are kept. When
 the calendar is unavailable during clock hours the pass is recorded as skipped
 rather than guessed.
+
+## Feed API and screen
+
+All four routes are owner-only (assistant sessions are denied) and read-only
+apart from two append-only tables, `visit` and `feedback`, in the same Radar
+file (older files gain them when opened).
+
+- `GET /radar/feed?session=YYYY-MM-DD` returns the session's events with their
+  latest revision status and rating, `since_last_visit` (events first seen
+  after the last recorded visit, or after `?since=` when the page pins it),
+  coverage (passes recorded against regular-session minutes so far, last ok
+  pass, symbols missing from the latest pass, universe version) and a `state`:
+  `off` (not enabled, no absolute `RADAR_STORE`, or the file cannot be opened;
+  never a 500), `no_data`, `recording`, or `stale` (during regular hours, no ok
+  pass for over 3 minutes). The default session is today's New York date when
+  it has data, else the latest session recorded.
+- `GET /radar/events/{event_id}` returns the event exactly as saved and every
+  revision in order. Nothing is recomputed or priced again.
+- `POST /radar/visits` records Isaac opening the screen; the page posts it once
+  per load, after reading the feed.
+- `POST /radar/events/{event_id}/feedback` takes `useful`, `already_knew`,
+  `too_late` or `irrelevant`; the latest rating wins on read.
+
+The screen shows one coverage line, then "New since your last visit" and the
+earlier events as cards that expand into the original evidence, the later
+readings, an Open chart link and the four rating buttons. No detection runs
+here; until step 2 writes events it shows the empty state with coverage.
 
 ## Activation boundary
 

@@ -116,6 +116,9 @@ export default defineConfig({
         CAPTURE_TRANSCRIBER: "off",
         PRACTICE_AGENT_ENABLED: "false",
         PRACTICE_SCHEDULE_ENABLED: "false",
+        // Radar's feed reads this file; the recorder stays idle without a Tradier key.
+        RADAR_ENABLED: "true",
+        RADAR_STORE: path.join(BACKEND, "data", "e2e_radar.sqlite"),
       },
     },
     {

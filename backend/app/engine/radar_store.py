@@ -22,7 +22,8 @@ APPLICATION_ID = 0x52414431  # RAD1: the isolated Radar recorder file; foreign f
 RETENTION_SESSIONS = 60
 UNIVERSE_PATH = Path(__file__).resolve().parent.parent / "data" / "radar_universe.json"
 
-TABLES = {"pass", "quote", "event", "event_revision"}
+TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback"}
+RATINGS = ("useful", "already_knew", "too_late", "irrelevant")
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pass(id INTEGER PRIMARY KEY AUTOINCREMENT, session_date TEXT NOT NULL,
   started_at TEXT NOT NULL, finished_at TEXT NOT NULL, universe_version TEXT NOT NULL,
@@ -39,6 +40,14 @@ CREATE TABLE IF NOT EXISTS event(event_id TEXT PRIMARY KEY, session_date TEXT NO
 CREATE INDEX IF NOT EXISTS event_session ON event(session_date);
 CREATE TABLE IF NOT EXISTS event_revision(event_id TEXT NOT NULL REFERENCES event(event_id), revision INTEGER NOT NULL,
   recorded_at TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(event_id, revision));
+CREATE TABLE IF NOT EXISTS visit(id INTEGER PRIMARY KEY AUTOINCREMENT, visited_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL REFERENCES event(event_id),
+  rating TEXT NOT NULL CHECK(rating IN ('useful','already_knew','too_late','irrelevant')), recorded_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS feedback_event ON feedback(event_id);
+CREATE TRIGGER IF NOT EXISTS visit_no_update BEFORE UPDATE ON visit BEGIN SELECT RAISE(ABORT,'radar visits are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS visit_no_delete BEFORE DELETE ON visit BEGIN SELECT RAISE(ABORT,'radar visits are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS feedback_no_update BEFORE UPDATE ON feedback BEGIN SELECT RAISE(ABORT,'radar feedback is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS feedback_no_delete BEFORE DELETE ON feedback BEGIN SELECT RAISE(ABORT,'radar feedback is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS pass_no_update BEFORE UPDATE ON pass BEGIN SELECT RAISE(ABORT,'radar passes are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS pass_no_delete BEFORE DELETE ON pass BEGIN SELECT RAISE(ABORT,'radar passes are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS quote_no_update BEFORE UPDATE ON quote BEGIN SELECT RAISE(ABORT,'radar quotes are immutable'); END;
@@ -237,6 +246,37 @@ class RadarStore:
         with self._db() as db:
             return [json.loads(row[0]) for row in
                     db.execute("SELECT payload FROM event_revision WHERE event_id=? ORDER BY revision", (event_id,))]
+
+    def event(self, event_id: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT payload FROM event WHERE event_id=?", (event_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def sessions(self) -> list[str]:
+        """Every session date with a pass or an event, newest first."""
+        with self._db() as db:
+            return [row[0] for row in db.execute(
+                "SELECT session_date FROM pass UNION SELECT session_date FROM event ORDER BY 1 DESC")]
+
+    def append_visit(self, visited_at: str) -> None:
+        with self._db() as db:
+            db.execute("INSERT INTO visit(visited_at) VALUES(?)", (visited_at,))
+
+    def last_visit(self) -> str | None:
+        with self._db() as db:
+            row = db.execute("SELECT visited_at FROM visit ORDER BY id DESC LIMIT 1").fetchone()
+        return row[0] if row else None
+
+    def append_feedback(self, event_id: str, rating: str, recorded_at: str) -> None:
+        if rating not in RATINGS:
+            raise ValueError("unknown radar rating")
+        with self._db() as db:
+            db.execute("INSERT INTO feedback(event_id, rating, recorded_at) VALUES(?,?,?)", (event_id, rating, recorded_at))
+
+    def latest_ratings(self) -> dict[str, str]:
+        """The newest rating per event; earlier ratings stay in the table."""
+        with self._db() as db:
+            return {row[0]: row[1] for row in db.execute("SELECT event_id, rating FROM feedback ORDER BY id")}
 
     def prune_quotes(self, keep_sessions: int = RETENTION_SESSIONS) -> int:
         """Delete quote rows older than the newest ``keep_sessions`` recorded sessions; passes and events stay."""
