@@ -464,8 +464,8 @@ A refused `conditional_plan_create` saves no plan and returns the specific reaso
 with the selected list; stale or missing source; levels or expiry; the 24-plan
 cap) so Jo can say what it cannot watch and why. It also writes a refusal
 receipt (`conditional-plan-refusal-v1`) to the new append-only
-`conditional_plan_refusal` Check-ledger table and exports it to the outbox as
-`conditional-plan-refusal-cpr_*.json`: time, ET session date, symbol (null when
+`conditional_plan_refusal` Check-ledger table and exports it to the outbox as a
+`conditional-plan-refusal-` file named by its `cpr_` ID: time, ET session date, symbol (null when
 refused before the source was read), source kind, direction, levels, confirm
 bars and expiry as Jo sent them, the reason (≤300 characters) and a reason code
 (`ticker_not_selected`, `monitor_off`, `no_session`, `daily_cap`, `other`). No
