@@ -15,7 +15,7 @@ from sqlmodel import Session, delete, select
 from app.database import engine
 from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, day_journal, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
 from app.routers import level_alerts as level_alerts_router
 from app.routers import captures as captures_router
 from app.routers import check_links as check_links_router
@@ -350,6 +350,7 @@ app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
 app.include_router(position_alerts_router.router, prefix="/trades", tags=["position alerts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
+app.include_router(day_journal.router, prefix="/day-journal", tags=["day-journal"])
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     # The isolated replay overlay has no journal monthly-review module/models.
     from app.routers import monthly_review

@@ -85,3 +85,7 @@ def option_quotes(requests):
 
 quotes.get_stock_quotes = stock_quotes
 quotes.get_option_quotes = option_quotes
+
+# Loaded only behind the disposable database guard above, never by app.main.
+from e2e.fixtures.day_journal_review import install as install_day_journal_fixture
+install_day_journal_fixture(core_app)

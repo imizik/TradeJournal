@@ -353,6 +353,21 @@ def test_assistant_cannot_reach_owner_advisor_shadow_routes(boundary):
         assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/{action}", json={}).status_code == 403
 
 
+def test_day_journal_is_owner_only_even_with_existing_journal_read_grant(boundary):
+    boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
+    created = boundary.owner.post("/access/assistants", json={"identifier": "reader",
+        "grants": {"symbols": ["SPY"], "run_ids": [], "journal_read": True}})
+    assert created.status_code == 201
+    assert signin(boundary, identifier="reader", key=created.json()["key"]).status_code == 200
+    assert boundary.public.get("/day-journal/2026-09-30").status_code == 403
+    assert boundary.public.post("/day-journal/2026-09-30/entries", json={"operation_id": "x", "kind": "outlook",
+        "text": "SPY holds", "symbol": "SPY"}).status_code == 403
+    saved = boundary.owner.post("/day-journal/2026-09-30/entries", json={"operation_id": "owner-x", "kind": "outlook",
+        "text": "SPY holds", "symbol": "SPY"})
+    assert saved.status_code == 200, saved.text
+    assert boundary.owner.get("/day-journal/2026-09-30").json()["entries"][0]["actor"] == "owner"
+
+
 def test_stream_revalidation_does_not_spend_request_budget(boundary):
     assert signin(boundary).status_code == 200
     from app.models import AccessLoginLimit

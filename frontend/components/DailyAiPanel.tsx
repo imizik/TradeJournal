@@ -13,6 +13,8 @@ export default function DailyAiPanel({
   tradeIds,
   initialReview = null,
   initialGeneratedAt = null,
+  hasDayContext = false,
+  contextRevision = 0,
 }: {
   tradeCount: number;
   day: string | null;
@@ -20,25 +22,30 @@ export default function DailyAiPanel({
   tradeIds: string[];
   initialReview?: DailyReview | null;
   initialGeneratedAt?: string | null;
+  hasDayContext?: boolean;
+  contextRevision?: number;
 }) {
   const { owner } = useAppAccess();
   const [status, setStatus] = useState<Status>(initialReview ? "done" : "idle");
   const [review, setReview] = useState<DailyReview | null>(initialReview);
   const [generatedAt, setGeneratedAt] = useState<string | null>(initialGeneratedAt);
+  const [reviewedContextRevision, setReviewedContextRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   async function handleRunAnalysis() {
-    if (!day || tradeIds.length === 0) return;
+    if (!day || (tradeIds.length === 0 && !hasDayContext)) return;
 
     setStatus("loading");
     setError(null);
+    const requestedContextRevision = contextRevision;
     try {
       const response = await api.reviewDay({ day, trade_ids: tradeIds });
       setReview(response.review);
       setGeneratedAt(response.generated_at);
+      setReviewedContextRevision(requestedContextRevision);
       setStatus("done");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate daily analysis");
+    } catch {
+      setError("The daily review could not be generated. Please retry.");
       setStatus("error");
     }
   }
@@ -51,13 +58,13 @@ export default function DailyAiPanel({
             AI Analysis
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Full-day Claude review, on your Claude plan, across the {tradeCount} trade(s) shown for {dayLabel}.
+            Full-day Claude review, on your Claude plan, for {dayLabel}. Inputs include {tradeCount} journal trade(s){hasDayContext ? " and your saved day thoughts and plans" : ""}.
           </p>
         </div>
         <button
           type="button"
           onClick={handleRunAnalysis}
-          disabled={!owner || !day || tradeIds.length === 0 || status === "loading"}
+          disabled={!owner || !day || (tradeIds.length === 0 && !hasDayContext) || status === "loading"}
           className="rounded bg-foreground px-3 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
         >
           {status === "loading" ? "Generating..." : review ? "Regenerate Analysis" : "Run Daily Analysis"}
@@ -68,20 +75,19 @@ export default function DailyAiPanel({
         {error ? (
           <p className="text-red-400">{error}</p>
         ) : status === "loading" ? (
-          <p>Generating review from trade, fill, and enrichment context. This can take a minute…</p>
+          <p>Generating review from your saved journal context. This can take a minute…</p>
         ) : review ? (
           <div className="space-y-4">
-            {review.source_data_stale && (
+            {(review.source_data_stale || reviewedContextRevision < contextRevision) && (
               <p className="rounded border border-amber-500/50 bg-amber-950/30 p-3 text-amber-200">
-                Saved analysis used older fill times or market context. Regenerate it after enrichment finishes.
+                {review.source_data_stale_reason ?? "Saved analysis may not include the latest thoughts, plans, fills, or market context. Regenerate it to review the current saved inputs."}
               </p>
             )}
             <DailyReviewResult review={review} generatedAt={generatedAt} />
           </div>
         ) : (
           <p>
-            No analysis has been generated yet. The review will use trades, fills, realized P&L, and any enriched
-            fill indicators currently available for this day.
+            No analysis has been generated yet. The review will use saved journal trades and any saved day thoughts or plans available for this date. Actual market path evidence may be unavailable; any gaps should remain explicit.
           </p>
         )}
       </div>
@@ -112,6 +118,7 @@ function DailyReviewResult({ review, generatedAt }: { review: DailyReview; gener
         <p className="text-foreground/80">{review.market_read}</p>
       </div>}
       <PlanVsExecution items={review.plan_vs_execution} />
+      <ExpectationChecks items={review.expectation_checks} />
       <RulesCheck items={review.rules_check} />
       <ReviewList title="Key Takeaways" items={review.key_takeaways} />
       <ReviewList title="Compared With Your Normal" items={review.vs_baseline} />
@@ -130,6 +137,22 @@ function DailyReviewResult({ review, generatedAt }: { review: DailyReview; gener
       {review.generated_by && <p className="text-xs text-muted-foreground">Written by {review.generated_by}.</p>}
     </div>
   );
+}
+
+function ExpectationChecks({ items }: { items?: DailyReview["expectation_checks"] }) {
+  if (!items?.length) return null;
+  const labels = { supported: "Supported", invalidated: "Invalidated", mixed: "Mixed", unresolved: "Unresolved" } as const;
+  const tones = { supported: "border-emerald-500/50 text-emerald-300", invalidated: "border-red-500/50 text-red-300", mixed: "border-amber-500/50 text-amber-200", unresolved: "border-border text-muted-foreground" } as const;
+  return <section aria-label="Morning expectations against the day">
+    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Your Expectations vs the Day</h3>
+    <p className="mb-2 text-xs text-muted-foreground">Review assessments should cite observed evidence. Open the saved note to see its original words; use its symbol chart to inspect the day’s price path.</p>
+    <ul className="space-y-2">{items.map((item) => <li key={item.entry_id} className="rounded border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2"><span className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${tones[item.assessment]}`}>{labels[item.assessment]}</span><a href={`#thought-${encodeURIComponent(item.entry_id)}`} className="text-xs text-primary underline">Open original thought</a></div>
+      <p className="mt-2 text-sm"><span className="font-medium text-foreground">Expected:</span> {item.expected}</p>
+      <p className="mt-1 text-sm"><span className="font-medium text-foreground">Observed:</span> {item.observed}</p>
+      <p className="mt-1 text-sm text-muted-foreground">Evidence: {item.evidence}</p>
+    </li>)}</ul>
+  </section>;
 }
 
 const RESULT = {

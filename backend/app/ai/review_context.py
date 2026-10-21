@@ -30,8 +30,9 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
+from sqlalchemy import func
 
-from app.models import (CaptureLink, ChartSettingsRecord, Fill, LevelAlert, LevelAlertEvent, OptionChainSnapshot, Tag,
+from app.models import (CaptureLink, ChartSettingsRecord, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent, OptionChainSnapshot, Tag,
                         Trade, TradeCapture, TradeCaptureNote, TradeFill, TradeTag)
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ HEADLINES = 5
 EARNINGS_WINDOW = 7
 WALL_BAND = 0.12  # strikes within 12% of the price
 WALL_MAX_AGE_DAYS = 5  # an older snapshot no longer describes the day
+OWNER_TIMELINE_LIMIT = 50
+OWNER_THOUGHT_TEXT_LIMIT = 2_000
 SIDES = {"c": "call", "call": "call", "p": "put", "put": "put"}  # the recorder stores "C" / "P"
 # Semiconductors trade with SMH more than with their Morningstar sector's ETF.
 SEMIS = {"NVDA", "AMD", "AVGO", "MU", "INTC", "QCOM", "TSM", "ARM", "MRVL", "SMCI", "AMAT", "LRCX", "KLAC", "TXN", "ON",
@@ -56,7 +59,6 @@ FUNDS = {"SPY", "QQQ", "IWM", "DIA", "SMH", "SPX", "SPXW", "XSP", "NDX", "VIX", 
 def build(session: Session, day: date, trades: list[Trade]) -> dict:
     """The extra context for one review day. Never raises: what fails is named in ``gaps``."""
     gaps: list[str] = []
-    underlyings = sorted({trade.ticker.upper() for trade in trades})
     context: dict = {"gaps": gaps}
 
     def part(name: str, read: Callable[[], object], gap: str) -> object | None:
@@ -73,6 +75,27 @@ def build(session: Session, day: date, trades: list[Trade]) -> dict:
         return value
 
     context["plans"] = part("plans", lambda: plans(session, day, trades), "No captured trade plans for this day")
+    timeline_data = part("owner timeline", lambda: owner_timeline_for_review(session, day),
+                         "No saved owner thoughts for this day")
+    if timeline_data:
+        context["owner_timeline"], timeline_total = timeline_data
+    else:
+        context["owner_timeline"], timeline_total = [], 0
+    truncated_count = max(0, timeline_total - OWNER_TIMELINE_LIMIT)
+    text_truncated_count = 0
+    for row in context["owner_timeline"]:
+        if len(row["text"]) > OWNER_THOUGHT_TEXT_LIMIT:
+            row["text"] = row["text"][:OWNER_THOUGHT_TEXT_LIMIT]
+            text_truncated_count += 1
+    if truncated_count:
+        context["owner_timeline_truncated_count"] = truncated_count
+        gaps.append(f"Owner thought context includes the latest {OWNER_TIMELINE_LIMIT} of {timeline_total} entries")
+    if text_truncated_count:
+        context["owner_timeline_text_truncated_count"] = text_truncated_count
+        gaps.append(f"Owner thought text was capped at {OWNER_THOUGHT_TEXT_LIMIT} characters in {text_truncated_count} entries")
+    trade_underlyings = {trade.ticker.upper() for trade in trades}
+    thought_underlyings = sorted({row["symbol"] for row in context.get("owner_timeline", []) if row.get("symbol")})[:20]
+    underlyings = sorted(trade_underlyings | set(thought_underlyings))
     context["tags"] = part("tags", lambda: tags(session, trades), "No tags on these trades")
     stocks = [symbol for symbol in underlyings if symbol not in FUNDS]
     facts = part("tradier", lambda: company_facts(stocks, day), "Sector and earnings unavailable (Tradier)") or {} if stocks else {}
@@ -133,7 +156,9 @@ def plans(session: Session, day: date, trades: list[Trade]) -> dict:
     notes: dict = defaultdict(list)
     for note in session.exec(select(TradeCaptureNote).where(TradeCaptureNote.capture_id.in_([c.id for c in captures]))
                              .order_by(TradeCaptureNote.created_at)).all():
-        notes[note.capture_id].append(note.text)
+        created = note.created_at.replace(tzinfo=timezone.utc) if note.created_at.tzinfo is None else note.created_at
+        notes[note.capture_id].append({"text": note.text, "created_at": created.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                       "kind": note.kind})
     opened = {trade.id: trade.opened_at for trade in trades}
     by_trade: dict[str, list] = defaultdict(list)
     untraded = []
@@ -155,6 +180,36 @@ def plans(session: Session, day: date, trades: list[Trade]) -> dict:
         else:
             untraded.append({key: value for key, value in row.items() if value not in (None, False)})
     return {key: value for key, value in {"by_trade": dict(by_trade), "not_traded": untraded}.items() if value}
+
+
+def owner_timeline(session: Session, day: date) -> list[dict]:
+    return _owner_timeline_rows(session, day)
+
+
+def owner_timeline_for_review(session: Session, day: date) -> tuple[list[dict], int] | None:
+    total = session.exec(select(func.count(DayJournalEntry.id)).where(DayJournalEntry.day == day)).one()
+    if not total:
+        return None
+    ids = session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)
+                       .order_by(DayJournalEntry.created_at.desc(), DayJournalEntry.id.desc())
+                       .limit(OWNER_TIMELINE_LIMIT)).all()
+    selected = session.exec(select(DayJournalEntry).where(DayJournalEntry.id.in_(ids))
+                            .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all() if ids else []
+    return [_serialize_owner_entry(row, day) for row in selected], int(total or 0)
+
+
+def _owner_timeline_rows(session: Session, day: date) -> list[dict]:
+    rows = session.exec(select(DayJournalEntry).where(DayJournalEntry.day == day)
+                        .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all()
+    return [_serialize_owner_entry(row, day) for row in rows]
+
+
+def _serialize_owner_entry(row: DayJournalEntry, day: date) -> dict:
+    created = row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at
+    return {"id": str(row.id), "kind": row.kind, "text": row.text, "symbol": row.symbol,
+            "not_traded": row.not_traded,
+            "created_at": created.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "actor": "owner", "retrospective": created.astimezone(ET).date() != day}
 
 
 def tags(session: Session, trades: list[Trade]) -> dict:
@@ -254,6 +309,7 @@ def daily_moves(day: date, symbols: list[str]) -> dict[str, dict]:
         high, low, close, open_, prev = today["h"], today["l"], today["c"], today["o"], before["c"]
         ranges = [(bar["h"] - bar["l"]) / bar["c"] for _, bar in dated[-21:-1] if bar.get("c")]
         out[symbol] = {
+            "source_bar_at": today.get("t"),
             "change_pct": round((close / prev - 1) * 100, 2), "gap_pct": round((open_ / prev - 1) * 100, 2),
             "open_to_close_pct": round((close / open_ - 1) * 100, 2),
             "close_in_range": round((close - low) / (high - low), 2) if high > low else None,
@@ -286,6 +342,7 @@ def intraday_shape(day: date) -> dict:
         first_hour = [bar for when, bar in session if when.time() < time(10, 30)]
         whole = high[1]["h"] - low[1]["l"]
         out[symbol] = {
+            "source_bar_at": session[-1][1].get("t"),
             # 1 is a straight line open to close; near 0 is chop that went nowhere.
             "trend_efficiency": round(abs(closes[-1] - session[0][1]["o"]) / path, 2) if path else None,
             "close_vs_vwap_pct": round((closes[-1] / vwap - 1) * 100, 2) if vwap else None,

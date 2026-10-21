@@ -4,13 +4,17 @@ Review button (``POST /daily-review``) and the nightly plan run
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import uuid
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, or_, select
 
-from app.models import FILL_LIGHT, DailyReviewRecord, Fill, Trade, TradeFill
+from app.models import (FILL_LIGHT, CaptureLink, DailyReviewRecord, DayJournalEntry, Fill, Trade, TradeCapture,
+                        TradeFill)
+
+ET = ZoneInfo("America/New_York")
 
 
 def day_trade_ids(session: Session, day: date) -> list[uuid.UUID]:
@@ -21,6 +25,30 @@ def day_trade_ids(session: Session, day: date) -> list[uuid.UUID]:
         (Trade.closed_at >= start) & (Trade.closed_at < end),
     ))).all()
     return list(rows)
+
+
+def has_day_inputs(session: Session, day: date) -> bool:
+    if session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day).limit(1)).first():
+        return True
+    start, end = datetime.combine(day, time.min, ET).astimezone(timezone.utc).replace(tzinfo=None), datetime.combine(day + timedelta(days=1), time.min, ET).astimezone(timezone.utc).replace(tzinfo=None)
+    return session.exec(select(TradeCapture.id).where(TradeCapture.received_at >= start,
+                                                      TradeCapture.received_at < end).limit(1)).first() is not None
+
+
+def review_days_without_trades(session: Session) -> set[date]:
+    """Days with owner thoughts or captures that are not linked to a trade."""
+    days = set(session.exec(select(DayJournalEntry.day).distinct()).all())
+    captures = session.exec(select(TradeCapture.id, TradeCapture.received_at, TradeCapture.not_taken_at)).all()
+    if captures:
+        ids = [capture_id for capture_id, _, _ in captures]
+        linked = set(session.exec(select(CaptureLink.capture_id).where(CaptureLink.unlinked_at.is_(None),
+                                                                       CaptureLink.capture_id.in_(ids))).all())
+        for capture_id, received_at, not_taken_at in captures:
+            if capture_id in linked and not not_taken_at:
+                continue
+            stamp = received_at.replace(tzinfo=timezone.utc) if received_at.tzinfo is None else received_at
+            days.add(stamp.astimezone(ET).date())
+    return days
 
 
 def load_trades(session: Session, trade_ids: list[uuid.UUID]) -> tuple[list[Trade], dict[str, list[Fill]]]:
@@ -57,11 +85,15 @@ def save_review(session: Session, day: date, review: dict, trade_count: int) -> 
 
 
 def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = None, backend: str | None = None) -> tuple[DailyReviewRecord, dict]:
-    """Review the day (its own trades unless ids are given) and save it. Raises LookupError when there are no trades."""
+    """Review the day (its own trades unless ids are given) and save it."""
     from app.ai.daily_reviewer import review_trading_day
 
-    trades, fills_by_trade_id = load_trades(session, day_trade_ids(session, day) if trade_ids is None else trade_ids)
-    if not trades:
-        raise LookupError(f"No trades on {day.isoformat()}")
+    wanted = day_trade_ids(session, day) if trade_ids is None else trade_ids
+    trades, fills_by_trade_id = load_trades(session, wanted)
+    allowed = set(day_trade_ids(session, day))
+    if len(trades) != len(set(wanted)) or any(trade_id not in allowed for trade_id in wanted):
+        raise LookupError("Selected trades must belong to the review day")
+    if not trades and not has_day_inputs(session, day):
+        raise LookupError(f"No trades or saved thoughts/captures on {day.isoformat()}")
     review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session, backend=backend)
     return save_review(session, day, review, len(trades)), review

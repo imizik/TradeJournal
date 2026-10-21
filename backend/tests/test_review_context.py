@@ -13,7 +13,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.ai import review_context
 from app.engine import options_recorder
-from app.models import (Account, CaptureLink, ChartSettingsRecord, Fill, LevelAlert, LevelAlertEvent, OptionChainSnapshot, Tag,
+from app.models import (Account, CaptureLink, ChartSettingsRecord, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent, OptionChainSnapshot, Tag,
                         Trade, TradeCapture, TradeCaptureNote, TradeFill, TradeTag)
 
 ACCOUNT = UUID(int=1)
@@ -35,10 +35,13 @@ def session():
 def offline(monkeypatch):
     """Providers stubbed: the tests below say what each returns."""
     calls = {}
-    monkeypatch.setattr(review_context, "daily_moves", lambda day, symbols: calls.setdefault("daily", {
+    def daily(day, symbols):
+        calls["daily_symbols"] = symbols
+        return calls.setdefault("daily", {
         "SPY": {"change_pct": -0.5, "gap_pct": 0.1, "open_to_close_pct": -0.6, "close_in_range": 0.2, "range_vs_20d": 1.4, "close": 580.0},
         "NVDA": {"change_pct": 1.5, "gap_pct": 0.5, "open_to_close_pct": 1.0, "close_in_range": 0.9, "range_vs_20d": 1.1, "close": 180.0},
-        "SMH": {"change_pct": 0.5, "gap_pct": 0.2, "open_to_close_pct": 0.3, "close_in_range": 0.6, "range_vs_20d": 1.0, "close": 300.0}}))
+        "SMH": {"change_pct": 0.5, "gap_pct": 0.2, "open_to_close_pct": 0.3, "close_in_range": 0.6, "range_vs_20d": 1.0, "close": 300.0}})
+    monkeypatch.setattr(review_context, "daily_moves", daily)
     monkeypatch.setattr(review_context, "intraday_shape", lambda day: {"SPY": {"trend_efficiency": 0.12, "close_vs_vwap_pct": -0.3}})
     monkeypatch.setattr(review_context, "gauges", lambda day: {"vix": {"close": 21.4, "change": 2.1}, "source": "yfinance (unofficial)"})
     monkeypatch.setattr(review_context, "_headlines", lambda day, symbols, gaps: {"NVDA": ["10:02 Nvidia wins order"]})
@@ -74,7 +77,7 @@ def test_plans_link_to_their_trade_with_minutes_before_entry_and_untraded_plans_
                      # 10:00 New York = 14:00 UTC, five minutes before the 10:05 entry.
                      capture(1, datetime(2026, 9, 30, 14, 0), wording="Calls if 182 holds", quantity=2, strike=185.0),
                      CaptureLink(capture_id=UUID(int=901), account_id=ACCOUNT, source_key="mail-1", method="manual"),
-                     TradeCaptureNote(capture_id=UUID(int=901), kind="note", text="Held too long"),
+                     TradeCaptureNote(capture_id=UUID(int=901), kind="note", text="Held too long", created_at=datetime(2026, 9, 30, 14, 30)),
                      capture(2, datetime(2026, 9, 30, 15, 30), underlying="AMD", wording="AMD puts under 160", not_taken_at=datetime(2026, 9, 30, 18)),
                      # Captured today, linked to a trade on another day: traded, so not "not traded".
                      capture(3, datetime(2026, 9, 30, 21, 0), underlying="MU", wording="MU calls Monday"),
@@ -82,10 +85,21 @@ def test_plans_link_to_their_trade_with_minutes_before_entry_and_untraded_plans_
     session.commit()
     plans = review_context.plans(session, DAY, [traded])
     linked = plans["by_trade"][str(traded.id)][0]
-    assert linked["plan"] == "Calls if 182 holds" and linked["minutes_before_entry"] == 5 and linked["later_notes"] == ["Held too long"]
+    assert linked["plan"] == "Calls if 182 holds" and linked["minutes_before_entry"] == 5
+    assert linked["later_notes"] == [{"text": "Held too long", "created_at": "2026-09-30T14:30:00Z", "kind": "note"}]
     assert linked["captured_at"] == "2026-09-30 10:00"
     assert plans["not_traded"] == [{"captured_at": "2026-09-30 11:30", "underlying": "AMD", "side": "buy_calls", "plan": "AMD puts under 160",
                                     "marked_not_taken": True}]
+
+
+def test_owner_thoughts_join_the_day_context_and_their_symbols_get_market_context(session, offline):
+    session.add(DayJournalEntry(operation_id="thought", day=DAY, kind="idea", text="NVDA relative strength holds",
+                                symbol="NVDA", actor="owner", created_at=datetime(2026, 9, 30, 15, 0)))
+    session.commit()
+    context = review_context.build(session, DAY, [])
+    assert context["owner_timeline"][0]["text"] == "NVDA relative strength holds"
+    assert context["owner_timeline"][0]["retrospective"] is False
+    assert "NVDA" in offline["daily_symbols"]
 
 
 def test_levels_alerts_tags_and_open_interest_walls(session):

@@ -53,17 +53,19 @@ async def list_daily_reviews(session: Session = Depends(get_session)):
 
     records = session.exec(select(DailyReviewRecord)).all()
     records_by_day = {record.day: record for record in records}
+    from app.ai import daily_review_service
+    review_days = set(trade_ids_by_day) | daily_review_service.review_days_without_trades(session) | set(records_by_day)
 
     return [
         {
             "day": review_day.isoformat(),
-            "trade_count": len(trade_ids_by_day[review_day]),
+            "trade_count": len(trade_ids_by_day.get(review_day, set())),
             "closed_pnl": float(round(closed_pnl_by_day[review_day], 2)) if review_day in closed_pnl_by_day else None,
             "saved": review_day in records_by_day,
             "generated_at": records_by_day[review_day].updated_at if review_day in records_by_day else None,
             "source_data_stale": bool(json.loads(records_by_day[review_day].review_json).get("source_data_stale")) if review_day in records_by_day else False,
         }
-        for review_day in sorted(trade_ids_by_day.keys(), reverse=True)
+        for review_day in sorted(review_days, reverse=True)
     ]
 
 
@@ -92,8 +94,6 @@ async def get_daily_review(review_day: date, session: Session = Depends(get_sess
 
 @router.post("", response_model=DailyReviewResponse)
 def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get_session)):
-    if not body.trade_ids:
-        raise HTTPException(status_code=400, detail="At least one trade is required for a daily review")
     review_day = _parse_day(body.day)
 
     from app.ai import daily_review_service, plan_runner
@@ -101,7 +101,9 @@ def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get
     try:
         record, review = daily_review_service.generate(session, review_day, body.trade_ids)
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail="No matching trades found") from exc
+        detail = str(exc)
+        raise HTTPException(status_code=400 if "belong to the review day" in detail else 404,
+                            detail=detail) from exc
     except plan_runner.PlanUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"Daily review is not set up on the Claude plan: {exc}") from exc
     except ModuleNotFoundError as exc:

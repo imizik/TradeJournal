@@ -206,6 +206,7 @@ export type FillWriteInput = {
 
 export type DailyReview = {
   source_data_stale?: boolean;
+  source_data_stale_reason?: string;
   summary: string;
   day_grade: string;
   key_takeaways: string[];
@@ -229,6 +230,45 @@ export type DailyReview = {
   market_read?: string;
   plan_vs_execution?: PlanCheck[];
   generated_by?: string;
+  expectation_checks?: {
+    entry_id: string;
+    expected: string;
+    observed: string;
+    assessment: "supported" | "invalidated" | "mixed" | "unresolved";
+    evidence: string;
+  }[];
+};
+
+export type DayJournalEntry = {
+  id: string;
+  operation_id: string;
+  day: string;
+  kind: "outlook" | "update" | "idea" | "reflection";
+  text: string;
+  symbol: string | null;
+  not_traded: boolean;
+  created_at: string;
+  actor: "owner";
+};
+export type DayTradePlan = {
+  captured_at: string;
+  underlying?: string | null;
+  side?: string | null;
+  setup?: string | null;
+  plan?: string | null;
+  note?: string | null;
+  later_notes?: { text: string; created_at: string; kind?: string | null }[];
+  marked_not_taken?: boolean;
+  [key: string]: unknown;
+};
+export type DayTradePlans = { by_trade?: Record<string, DayTradePlan[]>; not_traded?: DayTradePlan[] };
+export type DayJournal = { day: string; entries: DayJournalEntry[]; trade_plans: DayTradePlans };
+export type DayJournalWrite = {
+  operation_id: string;
+  kind: DayJournalEntry["kind"];
+  text: string;
+  symbol?: string | null;
+  not_traded?: boolean;
 };
 
 export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };
@@ -921,6 +961,8 @@ return {
   dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
   planRunner: () => get<PlanRunnerStatus>("/daily-review/runner"),
   dailyReview: (day: string) => get<DailyReviewResponse | null>(`/daily-review/${day}`),
+  dayJournal: (day: string) => get<DayJournal>(`/day-journal/${day}`),
+  addDayJournalEntry: (day: string, body: DayJournalWrite) => post<DayJournalEntry>(`/day-journal/${day}/entries`, body),
   monthlyReviews: () => get<MonthlyReviewIndexItem[]>("/monthly-review"),
   monthlyReview: (month: string) => get<MonthlyReviewResponse | null>(`/monthly-review/${month}`),
   reviewMonth: (month: string) => post<MonthlyReviewResponse>("/monthly-review", { month }),

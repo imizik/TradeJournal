@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
+import DayJournal from "@/components/DayJournal";
 
 const zone = "America/New_York";
 function time(value: string) {
@@ -241,6 +242,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading saved briefing…</p>}
     {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
     {focus}
+    <DayJournal key={day} day={day} />
     {body && <section aria-label="Priorities" className="space-y-3">
       {!body.items?.length && <p className="text-sm">No supported priority in this briefing. Review the coverage details before drawing conclusions.</p>}
       {body.items?.map((item, index) => <article key={index} className="space-y-3 rounded-lg border bg-card p-4">

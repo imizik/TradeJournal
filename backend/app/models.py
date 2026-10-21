@@ -265,6 +265,22 @@ class DailyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class DayJournalEntry(SQLModel, table=True):
+    """Immutable owner-authored thought saved for a New York calendar day."""
+    __tablename__ = "day_journal_entry"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_day_journal_entry_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(max_length=100)
+    day: date = Field(index=True)
+    kind: str = Field(max_length=16)
+    text: str = Field(sa_column=Column(Text, nullable=False))
+    symbol: Optional[str] = Field(default=None, max_length=16)
+    not_traded: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    actor: str = Field(default="owner", max_length=16)
+
+
 class MonthlyReviewRecord(SQLModel, table=True):
     """One calendar month's review across all its trades (app/ai/monthly_reviewer.py)."""
     __tablename__ = "monthly_review"

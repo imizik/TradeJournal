@@ -54,6 +54,18 @@ def review_trading_day(
     missing = [field for field in REVIEW_FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
+    valid_thought_ids = {row["id"] for row in context["day_context"].get("owner_timeline", [])}
+    checks = review.get("expectation_checks")
+    if isinstance(checks, list):
+        accepted = [item for item in checks if isinstance(item, dict) and item.get("entry_id") in valid_thought_ids]
+        if len(accepted) != len(checks):
+            review["data_gaps"] = list(review.get("data_gaps") or [])
+            review["data_gaps"].append("An expectation check referenced a thought that was not in this day's saved timeline; that check was omitted")
+        review["expectation_checks"] = accepted
+    for field in ("owner_timeline_truncated_count", "owner_timeline_text_truncated_count"):
+        count = context["day_context"].get(field, 0)
+        if count:
+            review[field] = count
     review["prompt_version"] = PROMPT_VERSION
     return review
 
@@ -389,6 +401,13 @@ REVIEW_SCHEMA = {
             "type": "object", "additionalProperties": False, "required": ["ticker", "planned", "did", "result"],
             "properties": {"ticker": {"type": "string"}, "planned": {"type": "string"}, "did": {"type": "string"},
                            "result": {"enum": ["followed", "deviated", "partly", "no_plan"]}}}},
+        "expectation_checks": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["entry_id", "expected", "observed", "assessment", "evidence"],
+            "properties": {"entry_id": {"type": "string"}, "expected": {"type": "string"},
+                           "observed": {"type": "string"},
+                           "assessment": {"enum": ["supported", "invalidated", "mixed", "unresolved"]},
+                           "evidence": {"type": "string"}}}},
         "data_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     },
 }
@@ -424,6 +443,16 @@ from exit decisions.
 ## Using day_context
 
 day_context holds what was around the trades. Use it to judge decisions in their setting, not to explain P&L away:
+- owner_timeline contains the owner's saved outlook and timestamped thoughts for this day. Compare each concrete expectation
+  with observed market/trade evidence only when that evidence is present. If useful, return expectation_checks with the exact
+  thought id, a concise expected and observed statement, assessment supported / invalidated / mixed / unresolved, and evidence
+  naming the thought id plus source and time. Retrospective entries were saved after their stated day; never present their
+  wording as a premarket forecast. Missing or insufficient market evidence means unresolved. Do not invent prices or levels.
+  Keep forecast accuracy separate from adherence: following a valid plan can still lead to a forecast miss, and a correct
+  forecast does not prove that the trader followed their plan.
+  Market bars include source_bar_at (UTC) when available. Cite the thought id and relevant source bar time in evidence;
+  if no source timestamp or value is available, leave the check unresolved. If owner_timeline_truncated_count or
+  owner_timeline_text_truncated_count is present, some journal context was capped; disclose that limitation in data_gaps.
 - plans: what the trader captured before entering (by_trade, with minutes_before_entry) and plans never traded
   (not_traded). This is the most important input when present: compare each plan with what was done (instrument,
   side, strike, size, timing) in plan_vs_execution, one item per traded plan; a traded position with no plan is
