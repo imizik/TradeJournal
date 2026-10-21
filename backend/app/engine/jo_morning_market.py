@@ -1,5 +1,5 @@
 """Bounded public market evidence for the existing morning packet; no inference."""
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import math
 import re
 import time
