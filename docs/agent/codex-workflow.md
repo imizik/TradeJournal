@@ -22,3 +22,7 @@ Use [focused checks](verification.md) for ordinary work. No worker or reviewer i
 mandatory for that path. [Review policy](pr-review.md) owns the requirements for
 broad and consequential changes; optional delegation does not add review gates.
 Report what changed, checks and remaining blockers briefly.
+
+Own ordinary PRs through CI, bounded repairs and automatic squash merge under
+the shared [PR completion rules](pr-review.md#automatic-repair-and-merge).
+Broad and consequential PRs retain the user's approval and merge.
