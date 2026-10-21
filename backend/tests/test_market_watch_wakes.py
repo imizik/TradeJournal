@@ -30,7 +30,7 @@ def _rows(closes):
     return rows
 
 
-def snapshot_at(now, closes=None, calendar_events=(), highs=None, drop=()):
+def snapshot_at(now, closes=None, calendar_events=(), highs=None, drop=(), *, vix_observed_at=None, calendar_status="fresh"):
     minutes = max(0, int((min(now, CLOSE) - OPEN).total_seconds() // 60))
     closes = (closes or [100.0] * 400)[:minutes]
     spy = _rows(closes)
@@ -41,8 +41,9 @@ def snapshot_at(now, closes=None, calendar_events=(), highs=None, drop=()):
     stamp = now.isoformat().replace("+00:00", "Z")
     events = list(calendar_events)
     return build_snapshot(now, protocol=PROTOCOL, bars_reader=lambda *_: bars, daily_reader=lambda *_: {},
-        vix_reader=lambda: {"observed_at": now - timedelta(minutes=5), "value": 17.0, "change_pct": 1.0},
-        calendar_reader=lambda day, at: {"status": "fresh", "reason": None, "source": "official_calendar", "observed_at": stamp,
+        vix_reader=lambda: {"observed_at": vix_observed_at or now - timedelta(minutes=5), "value": 17.0, "change_pct": 1.0},
+        calendar_reader=lambda day, at: {"status": calendar_status, "reason": None, "source": "official_calendar",
+            "observed_at": stamp if calendar_status == "fresh" else None,
             "retrieved_at": stamp, "age_seconds": 0, "coverage_start": "2026-01-01", "coverage_end": "2027-01-01",
             "calendar_version": "fixture", "events": events, "source_sha256": digest({"coverage_start": "2026-01-01",
             "coverage_end": "2027-01-01", "calendar_version": "fixture", "events": events})},
@@ -364,6 +365,156 @@ def _submit_notice(ledger, outbox, snapshot, operation, now, previous=None, **ch
     return receipt
 
 
+# Regression input from the owner's actual wall-of-text correction. Keep the
+# detail verbose: a short test main would not demonstrate the separation.
+LONG_CORRECTION = {
+    "main": {"text": "Correction to the earlier failed-reclaim bearish watch: as of 10:45 EDT, SPY has recovered inside its opening range, with five consecutive minute closes above 769.73 and the last two above current VWAP 770.0098; QQQ 722.48 is also back above VWAP 721.8260. The immediate bearish condition no longer holds. Stand down from that old setup rather than chase puts; this recovery is not automatically a call entry, with SPY 771.23 and QQQ 723.065 still overhead. Tradier full-market completed bars; independence-unverified.",
+             "supporting_refs": ["/indices/SPY", "/indices/QQQ"], "contradicting_refs": []},
+    "invalidation": {"text": "The current recovery weakens if SPY loses 769.73 again and QQQ loses VWAP 721.8260 without reclaiming. Sustained breaks and successful retests above SPY 771.23 and QQQ 723.065 would instead support upside continuation; neither is confirmed at this cutoff.", "evidence_refs": ["/indices/SPY"]},
+    "alternative": {"text": "This could remain a choppy range: SPY previously regained 769.73 then slipped back beneath it before the latest recovery, and QQQ has repeatedly reversed near its opening high. Fresh VWAP losses with failed reclaims and a renewed SPY 769.73 break would justify a new downside assessment, not automatic reuse of the old one.", "supporting_refs": [], "contradicting_refs": []},
+    "change_summary": "Linked correction of the recorded 10:07 bearish conditional note: SPY is back above 769.73 and current VWAP, and QQQ above current VWAP, so the immediate failed-reclaim condition has failed. Not a correction of an unmessaged read or a new Go. Core 10:45 prices are fresh; calendar observation and headline cache are missing. VIX 17.25 was observed at 10:30:31 EDT, not a simultaneous 10:45 quote, despite server fresh status.",
+    "phone_summary": "The 10:07 bearish watch no longer holds: SPY recovered its opening range and both indexes are above VWAP. This does not confirm a call entry.\nWatch downside only if SPY loses 769.73 and QQQ loses VWAP 721.8260 without reclaiming. Upside needs breaks and successful retests above SPY 771.23 and QQQ 723.065. Neither is confirmed.",
+    "view": "mixed",
+    "forecasts": [{"horizon": h, "predicate": "spy_return_lt_zero", "probability": None,
+                   "abstention_reason": "No defensible directional forecast."} for h in ("30m", "60m", "close")],
+}
+
+
+def test_long_correction_summary_preserves_full_read_and_source_limits(env, tmp_path):
+    runner, clock, _, pushed, _ = env
+    clock.now = datetime(2026, 10, 14, 14, 45, tzinfo=UTC)
+    snapshot = snapshot_at(clock.now, calendar_status="missing",
+                           vix_observed_at=datetime(2026, 10, 14, 14, 30, 31, tzinfo=UTC))
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    first = _submit_notice(ledger, runner.outbox_dir, snapshot, "initial", clock.now)
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "correction", clock.now,
+        previous=first["read_id"], message_intent="correction", correction_of_read_id=first["read_id"], **LONG_CORRECTION)
+    notice = ledger.read_notice(ACTOR, receipt["read_id"])
+    assert notice["notice_version"] == "mw-read-notice-v2"
+    assert mw.validate_notice(notice, runner.snapshots_dir, clock.now)
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    title, body = pushed[-1]
+    assert title.startswith("Jo correction: MIXED") and "10:45 EDT saved" in title
+    assert body.startswith(LONG_CORRECTION["phone_summary"])
+    assert "does not confirm a call entry" in body and "723.065" in body
+    assert "Calendar missing" in body and "News missing" in body
+    assert "VIX observed 10:30:31 EDT" in body and "VIX stale" not in body
+    assert "Chance SPY" not in body and "Your cautions" not in body
+    assert receipt["read_id"] not in body and first["message_id"] not in body
+    saved = ledger.export(ledger.ledger.path, ACTOR)["reads"][-1]
+    for key, value in LONG_CORRECTION.items():
+        if key != "forecasts":
+            assert saved[key] == value
+    assert saved["correction_of_read_id"] == first["read_id"]
+    assert [{k: v for k, v in f.items() if k != "forecast_id"} for f in saved["forecasts"]] == LONG_CORRECTION["forecasts"]
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 2
+
+
+@pytest.mark.parametrize("summary", [None, "", " " * 20, "x" * 701, {"wrong": "shape"}, 42, "bad\x00text"])
+def test_unusable_summary_cannot_block_budget_free_correction(env, tmp_path, summary):
+    runner, clock, _, pushed, _ = env
+    snapshot = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    parent, first = None, None
+    for i in range(3):
+        receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, f"initial-{i}", clock.now, previous=parent)
+        first = first or receipt
+        parent = receipt["read_id"]
+        runner.ingest_notices(clock.now)
+        runner.deliver_messages(clock.now)
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "correction", clock.now, previous=parent,
+        message_intent="correction", correction_of_read_id=first["read_id"],
+        **{**LONG_CORRECTION, "phone_summary": summary})
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 4
+    title, body = pushed[-1]
+    assert title.startswith("Jo correction: MIXED") and "Short summary unavailable" in body
+    assert LONG_CORRECTION["main"]["text"] in body
+    assert LONG_CORRECTION["invalidation"]["text"] in body
+    decision = next(d for d in runner.store.records("message_decision") if d["read_id"] == receipt["read_id"])
+    assert decision["budget_free"] and decision["decision"] == "send"
+    assert ledger.read_notice(ACTOR, receipt["read_id"])["phone_summary"] == summary
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 4
+
+
+def test_fallback_bounds_unicode_bytes_without_slicing_conditions(env, tmp_path):
+    runner, clock, _, pushed, _ = env
+    snapshot = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    condition = "Wait for a reclaim; otherwise stand down."
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "long", clock.now,
+        phone_summary="x" * 701, main={"text": "界" * 2000, "supporting_refs": [], "contradicting_refs": []},
+        invalidation={"text": condition, "evidence_refs": []})
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    body = pushed[-1][1]
+    assert len(body.encode("utf-8")) <= mw.MESSAGE_POLICY["max_bytes"]
+    assert condition in body and "Main read too long" in body and "界" not in body
+    notice = ledger.read_notice(ACTOR, receipt["read_id"])
+    extreme = {**notice, "invalidation_text": "界" * 2000}
+    assert len(mw.message_text(extreme, snapshot)[1].encode("utf-8")) <= mw.MESSAGE_POLICY["max_bytes"]
+    assert "too long for this notification" in mw.message_text(extreme, snapshot)[1]
+
+
+def test_legacy_notice_replays_identically_and_snapshot_loss_does_not_block_send(env, tmp_path):
+    runner, clock, _, pushed, _ = env
+    snapshot = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "legacy", clock.now)
+    notice = ledger.read_notice(ACTOR, receipt["read_id"])
+    assert notice["notice_version"] == "mw-read-notice-v1" and "phone_summary" not in notice
+    assert mw.validate_notice(notice, runner.snapshots_dir, clock.now)
+    assert ledger.read_notice(ACTOR, receipt["read_id"]) == notice
+    # A v2 field cannot be smuggled into v1, nor omitted from v2.
+    for bad in ({**notice, "phone_summary": "extra"}, {**notice, "notice_version": "mw-read-notice-v2"}):
+        with pytest.raises(ValueError, match="fields"):
+            mw.validate_notice(seal(bad), runner.snapshots_dir, clock.now)
+    runner.ingest_notices(clock.now)
+    (runner.snapshots_dir / f"{snapshot['content_sha256']}.json").unlink()
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 1 and "source observation times unavailable" in pushed[0][1]
+
+
+def test_summary_boundary_and_submission_staleness_remain_visible(env, tmp_path):
+    runner, clock, _, _, _ = env
+    snapshot = snapshot_at(clock.now)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "boundary", clock.now,
+        phone_summary="界" * 700)
+    notice = ledger.read_notice(ACTOR, receipt["read_id"])
+    notice["quality_flags"] += ["volatility:stale", "SPY.vwap:missing", "snapshot-stale"]
+    _, body = mw.message_text(notice, snapshot)
+    assert body.startswith("界" * 700)
+    assert "VIX stale" in body and "SPY vwap missing" in body and "snapshot stale" in body
+    assert len(body.encode("utf-8")) <= mw.MESSAGE_POLICY["max_bytes"]
+    assert "Short summary unavailable" in mw.message_text({**notice, "phone_summary": "x" * 701}, snapshot)[1]
+
+
+@pytest.mark.parametrize("view", ["up", "down", "mixed", "no_view"])
+def test_forecast_labels_preserve_predicate_and_hide_null_horizons(env, tmp_path, view):
+    runner, clock, _, _, _ = env
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    snapshot = snapshot_at(clock.now)
+    receipt = _submit_notice(ledger, runner.outbox_dir, snapshot, "forecast", clock.now,
+        view=view, phone_summary="Wait for confirmation.", forecasts=[
+            {"horizon": "30m", "predicate": "spy_return_lt_zero", "probability": .8},
+            {"horizon": "60m", "predicate": "spy_return_lt_zero", "probability": 0},
+            {"horizon": "close", "predicate": "spy_return_lt_zero", "probability": None, "abstention_reason": "No view."}])
+    _, body = mw.message_text(ledger.read_notice(ACTOR, receipt["read_id"]), snapshot)
+    assert "negative (post-read anchor): 30m 80% · 60m 0%" in body
+    assert "close —" not in body and "close 0%" not in body and "confidence" not in body
+
+
 def test_messages_budget_corrections_links_and_freshness(env, tmp_path):
     from market_watch_ledger import MessageBudgetExceeded
     runner, clock, _, pushed, _ = env
@@ -390,8 +541,9 @@ def test_messages_budget_corrections_links_and_freshness(env, tmp_path):
     assert [decisions[r["read_id"]]["decision"] for r in receipts] == ["send", "send", "send"]
     assert len(pushed) == 2
     title, body = pushed[0]
-    assert title == "Jo market read: DOWN" and "Weak tape" in body and "Wrong if: Reclaim VWAP" in body
-    assert "30m 0.60" in body and receipts[0]["read_id"] in body and "late-day holds" in body
+    assert title.startswith("Jo market read: DOWN · ") and "saved" in title
+    assert "Weak tape" in body and "What changes this view: Reclaim VWAP" in body
+    assert "30m 60%" in body and receipts[0]["read_id"] not in body and "late-day holds" not in body
     attempts = [a for a in runner.store.records("message_attempt") if a["result"] in ("accepted", "expired")]
     assert {(a["read_id"], a["result"]) for a in attempts} == {(receipts[0]["read_id"], "accepted"), (receipts[1]["read_id"], "accepted"),
                                                                (receipts[2]["read_id"], "expired")}

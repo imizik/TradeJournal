@@ -65,13 +65,26 @@ invent the intended receipt time.
    pointer such as /indices/SPY over enumerating its fields when necessary.
    Keep each text/change_summary/abstention_reason within 2000 characters and
    the complete request within 16 KiB. Do not weaken or invent evidence to fit.
+   Include optional phone_summary as a short string: aim for 500-700 characters,
+   at most 700. Lead with the takeaway, then the reason and the key conditions
+   that change it. For a correction, identify the earlier advice being corrected
+   and whether it still applies. Preserve qualifications such as "this does not
+   confirm a call entry" and any material missing/stale context. Do not call
+   an ordinary directional read an entry trigger. Use short sentences and at
+   most three short paragraphs. Do not repeat the full alternative, generic
+   cautions, internal IDs or empty forecasts in this summary. Keep the full
+   analysis, evidence, alternative and invalidation in their existing fields.
+   If you cannot produce a usable summary, omit it: a valid read/correction
+   still saves and the phone uses the saved read as a longer fallback. Cosmetic
+   summary problems are never a reason to skip a correction. Retries still use
+   the EXACT submitted fields, including phone_summary when supplied.
    Completion requires a successful receipt with read_id and received_at.
    A tool error or attempted call is not a saved read: record its exact error
    in the native task result and mark the run failed, never quiet-success.
 8. Do not send chat for market reads or market notes. TradeJournal pushes each
    newly committed update/correction to Isaac's phone. Still save
    message_intent update/correction exactly as before. A replayed receipt never
-   requests another send. Keep the saved main text concise, with the evidence,
+   requests another send. Keep the saved main text focused, with the evidence,
    invalidation and conditional trade types that fit or should be avoided.
    Treat puts in the first 15 minutes, chasing extended moves and long holds
    as caution flags, not new trading rules. Do not select/price option
@@ -83,3 +96,11 @@ Keep routine no-change reads and operational gaps in the native task result.
 No routine chat ping. No continuous monitoring or event detector. A snapshot or
 Jo wake failure is a coverage gap; never erase it from a later report. Holiday
 and half-day slots outside the exchange session do not make live forecasts.
+
+Rollout: these are repository instructions, not proof a hosted task uses them.
+After the app-side consumer understands v1 and v2 notices and the Check producer
+supports phone_summary, copy these instructions into the native scheduled task.
+Inline them in event/setup tasks that use this workflow. Do not enable new
+schedules or change grants. Until that update, old tasks still use the longer
+fallback. Verify a saved summary and actual phone appearance separately from
+transport acceptance.

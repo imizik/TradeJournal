@@ -69,7 +69,7 @@ TOOL_ARGUMENTS = {
     "stock_alert": ({"alert_id"}, set()),
     "stock_alert_submit": ({"alert_id", "stance", "summary", "invalidation", "notify"}, set()),
     "market_watch_snapshot": (set(), set()),
-    "market_watch_submit": ({"operation_id", "input_id", "view", "main", "alternative", "invalidation", "change_summary", "forecasts", "message_intent", "prompt_version"}, {"previous_read_id", "correction_of_read_id", "model_id"}),
+    "market_watch_submit": ({"operation_id", "input_id", "view", "main", "alternative", "invalidation", "change_summary", "forecasts", "message_intent", "prompt_version"}, {"previous_read_id", "correction_of_read_id", "model_id", "phone_summary"}),
     "candles": ({"symbol", "interval"}, {"bars"}),
     "shadow_setup": ({"candidate_id"}, set()),
     "shadow_decide": ({"candidate_id", "decision", "reason"}, set()),
@@ -552,15 +552,23 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         async def market_watch_submit(operation_id: str, input_id: str, view: str, main: dict, alternative: dict,
                 invalidation: dict, change_summary: str, forecasts: list[dict], message_intent: str,
                 prompt_version: str, previous_read_id: str | None = None,
-                correction_of_read_id: str | None = None, model_id: str | None = None) -> dict[str, Any]:
+                correction_of_read_id: str | None = None, model_id: str | None = None,
+                phone_summary: Any = None) -> dict[str, Any]:
             """Append a market read, forecasts and optional message intent; never sends anything.
             Exact retries recover the receipt; use the latest same-session read as parent.
-            Never insert this call between shadow_setup and shadow_decide."""
+            phone_summary: optional short text (target 500-700 characters) for the phone;
+            include takeaway, reason, key conditions and material limitations. Full reasoning
+            belongs in main/alternative/invalidation. Unusable summaries fall back to those
+            saved fields; they never block a valid read. Never insert this call between
+            shadow_setup and shadow_decide."""
             checked = await authenticated("market_watch_submit")
             request = dict(operation_id=operation_id, input_id=input_id, view=view, main=main,
                 alternative=alternative, invalidation=invalidation, change_summary=change_summary,
                 forecasts=forecasts, message_intent=message_intent, prompt_version=prompt_version,
                 previous_read_id=previous_read_id, correction_of_read_id=correction_of_read_id, model_id=model_id)
+            # Omitting the new field preserves legacy request hashes on retries.
+            if phone_summary is not None:
+                request['phone_summary'] = phone_summary
             try:
                 receipt = await asyncio.to_thread(market_ledger.submit, checked.claims["profile_id"], request, clock, full_market_only=True)
             except FullMarketRequired:

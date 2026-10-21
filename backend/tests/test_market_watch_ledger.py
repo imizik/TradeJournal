@@ -57,6 +57,18 @@ def test_atomic_concurrent_retry_restart_and_next_day_recovery(ledger):
                     db.execute(sql)
 
 
+def test_summary_is_saved_and_part_of_exact_retry_identity(ledger):
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    req = request(inp['input_id'], phone_summary='Wait for a reclaim.')
+    receipt = ledger.submit(ACTOR, req, lambda: NOW)
+    assert ledger.submit(ACTOR, req, lambda: NOW)['replayed']
+    for changed in ({**req, 'phone_summary': 'Changed wording.'},
+                    {k: v for k, v in req.items() if k != 'phone_summary'}):
+        with pytest.raises(Conflict, match='different content'):
+            ledger.submit(ACTOR, changed, lambda: NOW)
+    assert ledger.read_notice(ACTOR, receipt['read_id'])['phone_summary'] == req['phone_summary']
+
+
 def test_parent_forks_cross_actor_references_and_injection(ledger):
     inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
     req = request(inp['input_id'])

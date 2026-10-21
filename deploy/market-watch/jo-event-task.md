@@ -38,3 +38,7 @@ operational gaps in the native task result.
 When configuring the native task, inline the referenced scheduled steps and
 the exact source/recipient checks from the existing setup task. A saved cloud
 task cannot rely on access to this repository-relative link.
+Include the scheduled workflow's optional phone_summary instructions: preserve
+full reasoning in the existing fields, and never skip a valid correction if
+the short summary is unavailable. Update the native instructions only after
+the app consumer and Check producer support the summary handoff.

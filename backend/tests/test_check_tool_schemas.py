@@ -106,7 +106,9 @@ PAYLOADS = {
     ],
     "market_watch_snapshot": [{}],
     "market_watch_submit": [read(), read(view="no_view", probability=None, previous_read_id=ids("mwr_")),
-        read(message_intent="correction", correction_of_read_id=ids("mwr_"), model_id=None)],
+        read(message_intent="correction", correction_of_read_id=ids("mwr_"), model_id=None),
+        read(phone_summary=PROSE), read(phone_summary=None), read(phone_summary=" " * 701),
+        read(phone_summary={"unexpected": "cosmetic failure must reach the ledger fallback"})],
     "conditional_plan_create": [
         {"operation_id": "jo-plan:2026-10-20:nbis", "source_kind": "check", "source_id": ids("chk_"),
             "direction": "long", "trigger_price": 112.5, "invalidation_price": 108, "confirm_bars": 2,

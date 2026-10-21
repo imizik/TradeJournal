@@ -72,14 +72,16 @@ def pointer(snapshot, ref):
 def validate_request(req, snapshot):
     required = {'operation_id', 'input_id', 'view', 'main', 'alternative', 'invalidation',
                 'change_summary', 'forecasts', 'message_intent', 'prompt_version'}
-    optional = {'previous_read_id', 'correction_of_read_id', 'model_id'}
+    optional = {'previous_read_id', 'correction_of_read_id', 'model_id', 'phone_summary'}
     if not isinstance(req, dict) or not required <= req.keys() or req.keys() - required - optional:
         raise ValueError('Invalid submit fields')
     if len(canonical(req)) > 16384:
         raise ValueError('Submit exceeds 16 KiB')
     for key in ('operation_id', 'input_id', 'prompt_version'):
         text(req[key], key, 200)
-    for key in optional:
+    # Presentation is optional: malformed/verbose summaries remain saved but
+    # never prevent an otherwise valid read or correction from committing.
+    for key in optional - {'phone_summary'}:
         if req.get(key) is not None:
             text(req[key], key, 200)
     if req['view'] not in ('up', 'down', 'mixed', 'no_view') or req['message_intent'] not in ('none', 'update', 'correction'):
@@ -398,7 +400,11 @@ def read_notice(read, intent):
     verify(read)
     if intent is not None:
         verify(intent)
-    return seal({'notice_version': NOTICE_VERSION, 'read_id': read['read_id'], 'actor': read['actor'],
+    # Preserve byte-identical v1 handoffs for old reads, including retries after
+    # an upgrade. Only reads submitted with the new field produce v2 notices.
+    summary = {'phone_summary': read['phone_summary']} if 'phone_summary' in read else {}
+    return seal({'notice_version': 'mw-read-notice-v2' if summary else NOTICE_VERSION,
+                 **summary, 'read_id': read['read_id'], 'actor': read['actor'],
                  'received_at': read['received_at'], 'created_at': read['received_at'],
                  'session_date': read['session_date'], 'protocol_id': read['protocol_id'],
                  'snapshot_id': read['snapshot_id'], 'snapshot_sha256': read['snapshot_sha256'],

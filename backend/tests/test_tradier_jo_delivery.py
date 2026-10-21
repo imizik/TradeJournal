@@ -138,6 +138,33 @@ def test_full_market_snapshot_read_submit_and_notice_work(harness, tmp_path):
     assert validate_notice(notice, public, NOW + timedelta(seconds=1))
 
 
+@pytest.mark.parametrize('summary', ['Earlier bearish watch withdrawn. Wait for a new read.', '', 'x' * 701,
+                                     {'unexpected': 'shape'}, None])
+def test_phone_summary_tool_handoff_and_exact_retry(harness, tmp_path, summary):
+    from tests.test_market_watch_ledger import request
+    from app.engine.market_watch_wakes import validate_notice
+    public, outbox = tmp_path / 'public', tmp_path / 'outbox'
+    outbox.mkdir()
+    publish_snapshot(public, full_market_snapshot())
+    harness.configure(market_watch_snapshots_dir=str(public), market_watch_outbox_dir=str(outbox))
+    scope = 'check:read market-watch:read market-watch:submit'
+    with TestClient(harness.server(now=NOW).streamable_http_app()) as client:
+        inp = call(client, 'market_watch_snapshot', {}, harness.token(scope=scope))['structuredContent']
+        req = request(inp['input_id'], phone_summary=summary)
+        result = call(client, 'market_watch_submit', req, harness.token(scope=scope))
+        assert not result.get('isError'), result
+        receipt = result['structuredContent']
+        path = outbox / f"read-{receipt['read_id']}.json"
+        original = path.read_bytes()
+        again = call(client, 'market_watch_submit', req, harness.token(scope=scope))['structuredContent']
+        assert again['read_id'] == receipt['read_id'] and again['replayed']
+        assert path.read_bytes() == original
+    notice = json.loads(original)
+    assert notice.get('phone_summary') == summary
+    assert notice['notice_version'] == ('mw-read-notice-v1' if summary is None else 'mw-read-notice-v2')
+    assert validate_notice(notice, public, NOW + timedelta(seconds=1))
+
+
 def test_market_watch_producer_reads_tradier_and_preserves_full_session_metrics():
     from app.engine.market_watch_snapshot import build_snapshot
     from tests.test_market_watch_snapshot import _sources, OPEN

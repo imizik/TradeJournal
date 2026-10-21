@@ -41,7 +41,7 @@ import sqlite3
 import uuid
 from zoneinfo import ZoneInfo
 
-from market_watch_common import digest, parse_time, seal, session_bounds, validate_snapshot, verify
+from market_watch_common import PHONE_SUMMARY_MAX_CHARS, digest, parse_time, seal, session_bounds, validate_snapshot, verify
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
@@ -76,7 +76,7 @@ WAKE_POLICY = {
     "read_attribution_minutes": 30,
 }
 MESSAGE_POLICY = {
-    "message_policy_version": "mw-message-v1",
+    "message_policy_version": "mw-message-v2",
     "channel": "push",
     "transport": "ntfy",
     "discretionary_per_session": 3,
@@ -84,7 +84,7 @@ MESSAGE_POLICY = {
     "freshness_minutes": 10,
     "max_attempts": 3,
     "retry_seconds": 60,
-    "max_chars": 3500,
+    "max_bytes": 3500,
     "budget_free_corrections_per_session": 3,
     "cautions": ["puts in the first 15 minutes", "chasing extended moves", "late-day holds"],
 }
@@ -334,7 +334,10 @@ NOTICE_FIELDS = {"schema_version", "created_at", "content_sha256", "notice_versi
 def validate_notice(notice: dict, snapshots_dir: str | Path, now: datetime) -> dict:
     """Verify one outbox notice against its seal and the snapshot this app published."""
     verify(notice)
-    if set(notice) != NOTICE_FIELDS or notice["notice_version"] != "mw-read-notice-v1" or notice["protocol_id"] not in {"mw-v1", "mw-tradier-v2"}:
+    version = notice.get("notice_version")
+    fields = NOTICE_FIELDS | {"phone_summary"} if version == "mw-read-notice-v2" else NOTICE_FIELDS
+    if (set(notice) != fields or version not in {"mw-read-notice-v1", "mw-read-notice-v2"}
+            or notice["protocol_id"] not in {"mw-v1", "mw-tradier-v2"}):
         raise ValueError("read notice fields are invalid")
     if not re.fullmatch(r"mwr_[0-9a-f-]{36}", notice["read_id"]) or not re.fullmatch(r"check_[0-9a-f-]{36}", notice["actor"]):
         raise ValueError("read notice identity is invalid")
@@ -379,23 +382,81 @@ def load_snapshot(snapshots_dir: str | Path, sha: str) -> dict:
     return snapshot
 
 
-def message_text(notice: dict) -> tuple[str, str]:
-    """Title and body: the read in one line, named forecast, what proves it wrong, cautions as flags."""
+def _data_limits(notice: dict, snapshot: dict | None) -> str:
+    """Use source observations, not receipt time or freshness labels as quote times."""
+    parts = []
+    names = {"SPY": "SPY", "QQQ": "QQQ", "volatility": "VIX", "calendar": "Calendar", "headlines": "News"}
+    for name, label in names.items():
+        group = (snapshot["indices"][name] if name in ("SPY", "QQQ") else snapshot[name]) if snapshot else None
+        if group is not None:
+            status = group.get("status", "missing")
+            stamp = group.get("retrieved_at") if name == "headlines" else group.get("observed_at")
+            if status != "fresh":
+                parts.append(f"{label} {status}")
+            if stamp and name in ("SPY", "QQQ", "volatility"):
+                parts.append(f"{label} observed {parse_time(stamp).astimezone(ET):%H:%M:%S %Z}")
+    # Submission can be later than collection. Keep its stale/field-level
+    # flags even when the snapshot's collection-time group status was fresh.
+    for flag in notice["quality_flags"]:
+        if flag == "independence-unverified":
+            continue
+        source, sep, status = flag.partition(":")
+        label = names.get(source, source.replace(".", " "))
+        disclosure = f"{label} {status}" if sep else {
+            "snapshot-stale": "snapshot stale", "not-rth-eligible": "outside regular session"
+        }.get(flag, flag)
+        if disclosure not in parts:
+            parts.append(disclosure)
+    if snapshot is None:
+        parts.append("source observation times unavailable")
+    parts.append("analysis independence unverified")
+    return "Data: " + "; ".join(parts) + "."
+
+
+def message_text(notice: dict, snapshot: dict | None = None) -> tuple[str, str]:
+    """Short phone summary; cosmetic failures fall back without changing send eligibility.
+
+    Keep whole sections, never a cut-off condition. Extreme legacy fields may
+    not fit in ntfy's text budget; disclose that omission rather than silently
+    slicing a sentence. The complete sealed read and notice remain saved.
+    """
     label = {"up": "UP", "down": "DOWN", "mixed": "MIXED", "no_view": "NO VIEW"}[notice["view"]]
     title = ("Jo correction: " if notice["is_correction"] else "Jo market read: ") + label
-    probabilities = " · ".join(f"{f['horizon']} {f['probability']:.2f}" if f.get("probability") is not None else f"{f['horizon']} —"
-                               for f in sorted(notice["forecasts"], key=lambda f: ("30m", "60m", "close").index(f["horizon"])))
-    lines = [notice["main_text"].strip(),
-             f"P(SPY lower than at the read): {probabilities}",
-             f"Wrong if: {notice['invalidation_text'].strip()}",
-             f"Alternative: {notice['alternative_text'].strip()}",
-             f"Changed: {notice['change_summary'].strip()}",
-             "Your cautions (flags, not rules): " + "; ".join(MESSAGE_POLICY["cautions"]),
-             f"Read {notice['read_id']}" + (f" corrects message {notice['corrects_message_id']}" if notice["is_correction"] else "")]
-    body = "\n".join(lines)
-    if len(body) > MESSAGE_POLICY["max_chars"]:
-        body = body[: MESSAGE_POLICY["max_chars"] - 1] + "…"
-    return title, body
+    title += f" · {parse_time(notice['received_at']).astimezone(ET):%H:%M %Z} saved"
+    limits = _data_limits(notice, snapshot)
+    summary = notice.get("phone_summary")
+    usable = (isinstance(summary, str) and bool(summary.strip()) and len(summary) <= PHONE_SUMMARY_MAX_CHARS
+              and not any(ord(c) < 32 and c not in "\n\t" for c in summary))
+    forecasts = [f"{f['horizon']} {f['probability']:.0%}" for f in sorted(notice["forecasts"],
+                 key=lambda f: ("30m", "60m", "close").index(f["horizon"])) if f["probability"] is not None]
+    forecast = "Chance SPY return is negative (post-read anchor): " + " · ".join(forecasts) if forecasts else ""
+    budget = MESSAGE_POLICY["max_bytes"]
+    def size(lines):
+        return len("\n\n".join(lines).encode("utf-8"))
+    if usable and size([summary.strip(), limits]) <= budget:
+        lines = [summary.strip()]
+        if forecast and size([*lines, forecast, limits]) <= budget:
+            lines.append(forecast)
+        return title, "\n\n".join([*lines, limits])
+
+    lines = ["Short summary unavailable; showing saved read."]
+    # Reserve the complete invalidation before spending space on the main read.
+    condition = "What changes this view: " + notice["invalidation_text"].strip()
+    omitted = "Full alternative and detailed reasoning are saved."
+    tail = [limits, omitted]
+    if size([*lines, condition, *tail]) > budget:
+        condition = "What changes this view: too long for this notification; see saved reasoning."
+    main = notice["main_text"].strip()
+    if size([*lines, main, condition, *tail]) <= budget:
+        lines.append(main)
+    else:
+        lines.append("Main read too long for this notification; see saved reasoning.")
+    lines.append(condition)
+    changed = "Changed: " + notice["change_summary"].strip()
+    for optional in (changed, forecast):
+        if optional and size([*lines, optional, *tail]) <= budget:
+            lines.append(optional)
+    return title, "\n\n".join([*lines, *tail])
 
 
 # ----------------------------------------------------------------- runner
@@ -700,7 +761,12 @@ class MarketWatchRunner:
             if d["decision"] != "send" or message_id not in notices:
                 continue
             notice = notices[message_id]
-            title, body = message_text(notice)
+            try:
+                snapshot = load_snapshot(self.snapshots_dir, notice["snapshot_sha256"])
+            except (ValueError, OSError):
+                # A missing archived snapshot must not lose an imported correction.
+                snapshot = None
+            title, body = message_text(notice, snapshot)
             self._deliver("message_attempt", now, d["session_date"], "message_id", message_id, parse_time(notice["received_at"]),
                           MESSAGE_POLICY["freshness_minutes"], MESSAGE_POLICY, MESSAGE_POLICY["channel"],
                           lambda: self.push(title, body),
