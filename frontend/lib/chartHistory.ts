@@ -1,6 +1,8 @@
-import type { ChartBar, FillMarker, PriceAdjustment } from "./charts";
+import type { ChartBar, FillMarker, PriceAdjustment, RvolBaseline } from "./charts";
 
-export type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null; historyStart?: string | null };
+export type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null; historyStart?: string | null;
+  /** Each loaded older session's RVol baseline by New York date (C2.6). */
+  rvol?: Record<string, RvolBaseline> };
 /** Older history per frame (`symbol|interval`), for one session. */
 export type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
 

@@ -1,4 +1,4 @@
-"""The morning relative-volume history job (Charts C2.4).
+"""The morning relative-volume history job (Charts C2.4, C2.6).
 
 No network: a fake history store and calendar stand in for Alpaca and Tradier.
 The database is an in-memory SQLite built from the models.
@@ -75,6 +75,8 @@ class History:
 
 
 WINDOW = [d for d in (date(2026, 8, 28) + timedelta(days=n) for n in range(31)) if d.weekday() < 5 and d != LABOR_DAY][:20]
+# The 20 sessions before those: each of the last 20 sessions' own window (C2.6).
+OLDER = [d for d in (date(2026, 7, 31) + timedelta(days=n) for n in range(28)) if d.weekday() < 5]
 
 
 def run(db, history, **kwargs):
@@ -87,15 +89,20 @@ def test_scope_is_the_shared_watchlist_each_name_once(db):
     assert scope(db) == ["SPY", "QQQ", "BRK.B", "NVDA"]
 
 
-def test_it_stores_the_twenty_sessions_before_today_and_a_rerun_costs_nothing(db):
+def test_it_stores_the_forty_sessions_before_today_todays_twenty_first_and_a_rerun_costs_nothing(db):
     watch(db, ["SPY", "NVDA"])
     assert WINDOW[0] == date(2026, 8, 28) and WINDOW[-1] == date(2026, 9, 25) and len(WINDOW) == 20
+    assert OLDER[0] == date(2026, 7, 31) and OLDER[-1] == date(2026, 8, 27) and len(OLDER) == 20
     history = History(stored=[("SPY", day) for day in WINDOW[:19]])
     seen = []
     fetched, message = run(db, history, progress=lambda done, total, text: seen.append((done, total, text)))
-    assert history.fetched == [("SPY", WINDOW[-1])] + [("NVDA", day) for day in reversed(WINDOW)]  # newest first
-    assert fetched == 21 and message == "2026-09-28: stored 21 session(s); 2 of 2 watchlist names have the 20 sessions before today."
-    assert seen == [(0, 2, "SPY: 1 of 2 watchlist names"), (1, 2, "NVDA: 2 of 2 watchlist names")]
+    # Newest first: every name's 20 before today, then every name's 20 before those.
+    assert history.fetched == [("SPY", WINDOW[-1])] + [("NVDA", day) for day in reversed(WINDOW)] + \
+        [("SPY", day) for day in reversed(OLDER)] + [("NVDA", day) for day in reversed(OLDER)]
+    assert fetched == 61 and message == ("2026-09-28: stored 61 session(s); 2 of 2 watchlist names have the 20 sessions before today, "
+                                         "2 the 20 before those for older candles.")
+    assert seen == [(0, 2, "SPY: 1 of 2 watchlist names"), (1, 2, "NVDA: 2 of 2 watchlist names"),
+                    (0, 2, "SPY: 1 of 2 watchlist names, older sessions"), (1, 2, "NVDA: 2 of 2 watchlist names, older sessions")]
     history.fetched.clear()
     assert run(db, history)[0] == 0 and history.fetched == []
 
@@ -104,13 +111,13 @@ def test_on_a_weekend_it_stores_the_next_sessions_window(db):
     watch(db, ["SPY"])
     history = History()
     store(db, history=history, calendar=Calendar(), clock=lambda: datetime(2026, 9, 26, 6, 0, tzinfo=ET))
-    assert [day for _, day in history.fetched] == WINDOW[::-1]
+    assert [day for _, day in history.fetched] == WINDOW[::-1] + OLDER[::-1]
 
 
 def test_it_waits_out_the_alpaca_budget_instead_of_exceeding_it(db, monkeypatch):
     watch(db, ["SPY"])
     monkeypatch.setattr(job_module, "time", SimpleNamespace(time=lambda: 1_000.0, monotonic=time.monotonic))
-    history = History(stored=[("SPY", day) for day in WINDOW[:-1]], errors={("SPY", WINDOW[-1]): [
+    history = History(stored=[("SPY", day) for day in WINDOW[:-1] + OLDER], errors={("SPY", WINDOW[-1]): [
         HistoryError("Alpaca chart history is cooling down.", "rate_limited", 1_030), HistoryError("History is still loading.", "pending", 1_000)]})
     sleeps = []
     assert run(db, history, sleep=sleeps.append)[0] == 1
@@ -131,8 +138,8 @@ def test_a_session_that_fails_is_named_after_the_others_are_stored(db):
     with pytest.raises(RvolHistoryError) as failed:
         run(db, history)
     assert str(failed.value).startswith("Relative volume history incomplete: SPY 2026-09-02 (Alpaca returned malformed history data.).")
-    assert "stored 59 session(s); 2 of 3 watchlist names" in str(failed.value)
-    assert ("SPY", WINDOW[3]) not in history.kept and len(history.kept) == 59
+    assert "stored 119 session(s); 2 of 3 watchlist names" in str(failed.value)
+    assert ("SPY", WINDOW[3]) not in history.kept and len(history.kept) == 119
 
 
 def test_a_name_alpaca_has_no_minutes_for_is_noted_and_never_fails_the_run(db):
@@ -145,7 +152,8 @@ def test_a_name_alpaca_has_no_minutes_for_is_noted_and_never_fails_the_run(db):
     fetched, message = run(db, history)
     # One request for the index; the new stock's five sessions, then one that shows nothing older trades.
     assert [s for s, _ in history.fetched].count("NEW") == 5 and "SPX" not in {s for s, _ in history.fetched}
-    assert fetched == 25 and message == ("2026-09-28: stored 25 session(s); 1 of 3 watchlist names have the 20 sessions before today. "
+    assert fetched == 45 and message == ("2026-09-28: stored 45 session(s); 1 of 3 watchlist names have the 20 sessions before today, "
+                                         "1 the 20 before those for older candles. "
                                          "Alpaca has no minutes for SPX on 2026-09-25 and earlier, NEW on 2026-09-18 and earlier "
                                          "(an index, or not listed yet), so RVol waits.")
 
@@ -156,9 +164,10 @@ def test_a_run_stops_after_its_time_and_the_next_one_continues(db, monkeypatch):
     monkeypatch.setattr(job_module, "time", SimpleNamespace(time=time.time, monotonic=lambda: next(clock)))
     history = History()
     fetched, message = run(db, history)
-    assert fetched == 25 and message.endswith("1 of 2 watchlist names have the 20 sessions before today. 15 session(s) left for the next run.")
+    assert fetched == 25 and message.endswith("1 of 2 watchlist names have the 20 sessions before today, 0 the 20 before those for older "
+                                              "candles. 55 session(s) left for the next run.")
     monkeypatch.setattr(job_module, "time", SimpleNamespace(time=time.time, monotonic=lambda: 0.0))
-    assert run(db, history)[0] == 15 and len(history.kept) == 40
+    assert run(db, history)[0] == 55 and len(history.kept) == 80
 
 
 def test_without_the_calendar_nothing_is_chosen_and_the_run_fails(db):

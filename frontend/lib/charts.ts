@@ -162,6 +162,8 @@ export type HistoryPage = {
   issue: { code: string; message: string; retry_at: number } | null;
   /** Set when a shown session was resampled with clock hours because the calendar was unavailable. */
   calendar_note?: string | null;
+  /** Each shown session's relative-volume baseline by New York date (C2.6); absent from a backend older than C2.6. */
+  rvol?: Record<string, RvolBaseline>;
 };
 /** Today's session windows from the backend's market calendar (UTC seconds), the same ones resampling uses. */
 export type MarketDay = {
@@ -875,6 +877,8 @@ export const gapSeconds = (interval: Interval) => (interval === "1W" ? 21 : inte
 
 const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+/** A moment's New York date, "2026-10-21": the key of a session's RVol baseline. */
+export const nyDay = (stamp: number) => nyDate.format(stamp * 1000);
 export type SessionWindow = MarketDay["sessions"][number];
 /**
  * The session windows that apply at `now`: the backend's calendar day when it

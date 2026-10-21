@@ -147,7 +147,7 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | done ([PR #138](https://github.com/imizik/TradeJournal/pull/138); ahead of C5.2 at the user's request) |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
-| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
+| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | done (this branch; the morning job now keeps 40 sessions) |
 | C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 | C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
@@ -642,8 +642,7 @@ sessions before today for each watchlist name, and the workspace builds the
 390-number baseline from those files, read once per process, so it costs no
 provider request and is on today's split basis. Any charted symbol whose
 sessions are stored gets one, not only watchlist names. Only today's
-regular-session candles have RVol; older sessions keep plain volume colors
-(C2.6). A live probe found that Alpaca answers a day without minutes (SPX, or
+regular-session candles had RVol until C2.6 gave older sessions theirs. A live probe found that Alpaca answers a day without minutes (SPX, or
 CRWV before it listed) with `"bars": null`, which C0.0 called malformed; it now
 reads "no minute bars" and is still not stored, and the job notes such names
 instead of failing. The main chart's study row reads "RVol 2.6× for 10:17 AM" and names the

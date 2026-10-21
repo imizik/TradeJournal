@@ -19,7 +19,7 @@ from uuid import uuid4
 import httpx
 
 from app.engine import alpaca, chart_rvol
-from app.engine.chart_adjust import BASIS, adjust_minutes, describe, suspect_gaps
+from app.engine.chart_adjust import BASIS, adjust_minutes, describe, factor_before, suspect_gaps
 from app.engine.chart_calendar import ChartCalendar, chart_calendar
 from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
 from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, normalize_bars
@@ -309,6 +309,7 @@ class ChartHistory:
                 issue = {"code": "pending", "message": "Indicator warmup is still loading.", "retry_at": int(time.time() + 1)}
             if ready:
                 self._work.pop(key, None)
+            visible, rvol = self._past_rvol(symbol, visible, info)
             shown = {datetime.fromtimestamp(b["time"], ET).date() for b in visible}
             return {"symbol": symbol, "interval": interval, "session": session, "before": before,
                     "limit": limit, "bars": visible, "older_cursor": visible[0]["time"] if visible else (int(datetime.combine(work.day, wall_time(20), ET).timestamp()) if not exhausted else None),
@@ -316,7 +317,29 @@ class ChartHistory:
                     "warmup": "ready" if warmed else "insufficient" if exhausted else "pending",
                     "source": "alpaca_sip", "price_basis": BASIS, "issue": issue,
                     "adjustment": describe(info, suspects=suspect_gaps(visible)),
-                    "calendar_note": CLOCK_NOTE if shown & work.clock_days else None}
+                    "calendar_note": CLOCK_NOTE if shown & work.clock_days else None, "rvol": rvol}
+
+    def _past_rvol(self, symbol: str, bars: list[dict], info: dict) -> tuple[list[dict], dict[str, dict]]:
+        """Each shown session's regular-session candles with their RVol (C2.6), against that
+        session's own 20 sessions before it, and what the chart says about each baseline, by
+        date. From disk only, like today's (C2.4): a session whose window is not stored yet has
+        candles with ``rvol`` None and a ``building`` baseline, never a fetch."""
+        hours = self.calendar.hours if self.calendar else None
+        days: dict[date, list[dict]] = {}
+        for bar in bars:
+            if not bar.get("extended"):
+                days.setdefault(datetime.fromtimestamp(bar["time"], ET).date(), []).append(bar)
+        states, values = {}, {}
+        for day, day_bars in days.items():
+            state, average = chart_rvol.day_baseline(day, hours(day) if hours else None, hours, lambda d: self.volume_profile(symbol, d),
+                                                     lambda d: factor_before(info["splits"], d), past=True)
+            if state is None:
+                continue
+            states[day.isoformat()] = state
+            session = self.volume_profile(symbol, day) if average else None
+            found = chart_rvol.session_rvol(day_bars, session, average, factor_before(info["splits"], day)) if session else [None] * len(day_bars)
+            values.update({bar["time"]: value for bar, value in zip(day_bars, found)})
+        return [{**bar, "rvol": values[bar["time"]]} if bar["time"] in values else bar for bar in bars], states
 
 
 chart_history = ChartHistory(calendar=chart_calendar, splits=chart_splits)

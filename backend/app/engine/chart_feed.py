@@ -234,34 +234,8 @@ class ChartFeed:
         """Today's time-of-day volume baseline (C2.4) from the stored sessions before it, on
         today's price basis. None on a day with no session; otherwise what the chart says about
         it, with the baseline only when it is ready."""
-        def state(name: str, message: str | None, days=(), traded=(), missing=()) -> dict:
-            return {"state": name, "day": today.isoformat(), "sessions": [d.isoformat() for d in days],
-                    "traded": len(traded), "missing": [d.isoformat() for d in missing], "message": message}
-
-        if hours is not None and hours["status"] != "open":
-            return None, None
-        days = chart_rvol.window(today, calendar.hours) if hours is not None else None
-        if days is None:
-            return state("unavailable", "The market calendar is unavailable, so the 20 sessions before today cannot be chosen."), None
-        if hours["open"] != chart_rvol.OPEN:
-            return state("unavailable", "Today's regular session does not open at 9:30, so its minutes cannot be compared.", days), None
-        profiles, missing = [], []
-        for day in days:
-            profile = volume_profile(symbol, day)
-            if profile is None:
-                missing.append(day)
-                continue
-            # Raw stored volume, multiplied by every split from that session up to today.
-            factor = factor_before(info["splits"], day)
-            profiles.append((day, profile if factor == 1.0 else tuple(None if v is None else v * factor for v in profile)))
-        if missing:
-            return state("building", f"RVol needs the 20 sessions before today; {len(missing)} not stored yet. Watchlist names are stored each "
-                         "morning before the open, and any symbol's sessions as its older candles load.", days, missing=missing), None
-        found = chart_rvol.baseline(profiles)
-        if len(found.traded) < chart_rvol.MIN_SESSIONS:
-            return state("insufficient", f"Only {len(found.traded)} of the 20 sessions before today traded in regular hours; RVol needs "
-                         f"{chart_rvol.MIN_SESSIONS}.", days, found.traded), None
-        return state("ready", None, days, found.traded), found.average
+        return chart_rvol.day_baseline(today, hours, calendar.hours if calendar is not None else None,
+                                       lambda day: volume_profile(symbol, day), lambda day: factor_before(info["splits"], day))
 
     def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels=None, auto=True,
                 range_levels=None, session="extended") -> dict:

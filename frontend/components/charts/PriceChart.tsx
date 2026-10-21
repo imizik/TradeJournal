@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
-import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, nyDay, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, FillLabels, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
 import { newsMarks, newsTip } from "@/lib/newsMarkers";
@@ -163,12 +163,14 @@ function hoverStore() {
 }
 
 /** The candle values row: the hovered candle's, else the latest. Its own component, so a crosshair move renders only this row. */
-function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, rvol, showRvol, timer }: {
+function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, rvol: today, pastRvol, showRvol, timer }: {
   id: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
-  indicators: Indicators; colors: Record<ColorKey, string>; rvol: RvolBaseline | null; showRvol: boolean; timer: React.ReactNode;
+  indicators: Indicators; colors: Record<ColorKey, string>; rvol: RvolBaseline | null; pastRvol?: Record<string, RvolBaseline>; showRvol: boolean; timer: React.ReactNode;
 }) {
   const time = useSyncExternalStore(hover.subscribe, hover.get, hover.get);
   const bar = (time !== null && barAt(bars ?? [], time)) || bars?.at(-1);
+  // An older session's own baseline from its history page (C2.6); otherwise today's, from the workspace.
+  const rvol = (bar && pastRvol?.[nyDay(bar.time)]) || today;
   // The main chart's study row says it in full. A smaller chart's row is already tight beside its
   // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
   const volumeText = bar ? compactVolume.format(bar.volume) : "";
@@ -283,7 +285,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onMenu?(request: MenuRequest): void;
   /** The selection bar's lock, on a locked item. */
   onUnlock?(id: string): void;
-  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
+  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null; rvol?: Record<string, RvolBaseline> };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   /** The trader moved this chart's view themself (a drag, the wheel, a touch, Latest candles). */
   onUserMove?(): void;
@@ -1137,7 +1139,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           </span>
         </div>
       </div>
-      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} rvol={rvol} showRvol={showRvol} timer={!main && timer} />
+      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
