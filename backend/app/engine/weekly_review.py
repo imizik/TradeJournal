@@ -9,7 +9,9 @@ saving or checking a rule never needs a model call.
 A week is Monday 00:00 to the next Monday, New York (journal times are naive
 New York wall clocks). Leak rows use trades that **closed** in the week, the
 analytics rule. The rule check uses trades **entered** after the rule was
-chosen, up to the end of the week it was chosen for. Option trades only;
+chosen, up to the end of the week it was chosen for or until the owner
+confirms the result, which closes the check and freezes its evidence: trades
+entered after that count toward the next rule. Option trades only;
 Webull is excluded, as for Jo's history.
 
 Every trade is judged per rule as ``untested`` (the situation never arose),
@@ -179,7 +181,8 @@ def suggest(tested: int, broke: int) -> str:
 
 
 def check(db: Session, record: WeeklyReviewRecord) -> dict:
-    """How the rule chosen in ``record`` went: trades entered after it was chosen, up to the end of the following week."""
+    """How the rule chosen in ``record`` went: trades entered after it was chosen, up to the end of the following week.
+    Run at confirmation, so the frozen check ends there."""
     params = json.loads(record.rule_params_json or "{}")
     scope = _scope(db)
     start = _ny(record.chosen_at)

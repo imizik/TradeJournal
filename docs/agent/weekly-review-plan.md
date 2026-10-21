@@ -7,7 +7,7 @@ below were not answered, so the slice uses the defaults: a +10% winner line, a
 used on real weeks. Implements the
 roadmap's [J2](../product-roadmap.md#j2--turn-weekly-review-into-one-action)
 in its smallest form, shaped by the October 21 behavior audit
-(`backend/reports/behavior_audit_2026-10-21.md`, not yet committed) and the
+(a D0 report not yet committed to the repository) and the
 July [edge audit](../../backend/reports/edge_audit_2026-07-07.md).
 
 ## Why this, and why exits
@@ -74,18 +74,21 @@ One new additive table, `weekly_review`, in the `MonthlyReviewRecord` style:
 - `week_start` (New York Monday, unique), `rule_key` (one of the three, or
   null for skip), `rule_params_json` (the threshold frozen at choice time,
   e.g. `{"peak_pct": 10}`), optional `note`, `chosen_at` (UTC).
-- Last week's check: `result` (kept / partly / broken / not_enough /
-  skipped), `result_source` (suggested vs changed by Isaac), and
+- Last week's check: `result` (kept / partly / broken / not_enough; a
+  skipped week is a row with no rule), `result_source` (suggested vs changed by Isaac), and
   `evidence_json` — the counts as shown plus each trade's **source anchor**
   (account + first entry fill `raw_email_id`, the `CaptureLink`/`CheckLink`
   pattern), so the frozen evidence survives `rebuild-all`.
 
 Next week the page recomputes the check from current trades for trades entered
-between `chosen_at` and the review; once Isaac confirms, the snapshot freezes.
+between `chosen_at` and the moment he confirms the result (at the latest, the
+end of the practice week). Confirming closes the check and freezes the
+snapshot; trades entered afterwards count toward the next rule, and the page
+says so beside the result buttons.
 History of rules and results is a simple list at the bottom of the page —
 "3 of the last 4 weeks kept" is the progress signal, not P&L.
 
-Week boundaries: Monday 00:00 → Friday close, New York. The leak rows use the
+Week boundaries: Monday 00:00 → the next Monday 00:00, New York. The leak rows use the
 analytics rule (trades **closed** in the week); the rule check uses trades
 **entered** after the rule was chosen. Both are stated on the page.
 
@@ -124,7 +127,7 @@ way, the line reads "alerts not recorded" and nothing else changes.
 ## Smallest first slice
 
 Backend: one table + migration, one engine module computing the three leaks
-and the rule check, `GET/POST /weekly-review` mirroring `monthly_review.py`.
+and the rule check, `GET/PUT /weekly-review/{monday}` mirroring `monthly_review.py`.
 Frontend: the week page and a link from the Review Calendar. No AI, no alerts
 line (until that work lands), no Jo memory toggle.
 

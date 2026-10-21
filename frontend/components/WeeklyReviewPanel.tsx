@@ -181,7 +181,7 @@ function PreviousRule({ rule, note, check, result, busy, onConfirm }: {
       {check.trades.length > 0 && <TradeList trades={check.trades} />}
       <div>
         <p className="mb-1.5 text-xs text-muted-foreground">
-          {result ? "You marked it:" : "How did it go?"} Suggested from the trades: <span className="font-medium">{RESULTS.find((r) => r.key === check.suggested)?.label}</span>.
+          {result ? `You marked it ${RESULTS.find((r) => r.key === result)?.label.toLowerCase()}.` : "How did it go?"} Suggested from the trades: <span className="font-medium">{RESULTS.find((r) => r.key === check.suggested)?.label}</span>.
         </p>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Result for last week's rule">
           {RESULTS.map((option) => (
@@ -191,7 +191,10 @@ function PreviousRule({ rule, note, check, result, busy, onConfirm }: {
             </button>
           ))}
         </div>
-        {check.frozen && <p className="mt-1.5 text-xs text-muted-foreground">Checked {when(check.checked_at)}; these trades are kept as they were then.</p>}
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {check.frozen ? `Checked ${when(check.checked_at)}; these trades are kept as they were then. Trades entered later count toward the next rule.`
+            : "Saving a result closes this check: trades you enter after that count toward next week's rule."}
+        </p>
       </div>
     </div>
   );
