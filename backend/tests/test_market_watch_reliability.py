@@ -1,4 +1,4 @@
-"""Scheduled market-read reliability: packets, reads seen and measured delays, with no tolerance."""
+"""Scheduled market-read reliability: packets, reads seen, measured delays and delivery against the deadline."""
 from datetime import UTC, date, datetime, timedelta
 import json
 import sqlite3
@@ -56,7 +56,7 @@ def slots(session):
     return {s["slot"]: s for s in session["slots"]}
 
 
-def test_slots_show_packets_reads_and_measured_delays_without_a_tolerance(env, tmp_path):
+def test_slots_show_packets_reads_delays_and_delivery(env, tmp_path):
     runner, *_ = env
     receipts = tmp_path / "receipts"
     jo = Jo(runner, tmp_path)
@@ -85,7 +85,14 @@ def test_slots_show_packets_reads_and_measured_delays_without_a_tolerance(env, t
     session = report(runner, receipts)
     assert [r["read_id"] for r in session["reads_not_credited_to_a_slot"]] == [beyond["read_id"]]
     assert session["summary"] == {"read_seen": 2, "no_read_seen": 2, "upcoming": 0, "not_expected": 0, "unknown": 0}
-    assert not any(k in json.dumps(session) for k in ("on_time", "late\"", "tolerance"))
+    # On time means Check received the read within 15 minutes of the slot (a proposed tolerance).
+    s = slots(session)
+    assert s["09:50"]["deadline"] == "2026-10-14T14:05:00.000000Z"
+    assert (s["09:50"]["delivery"], s["09:50"]["late_by_seconds"]) == ("on_time", None)
+    assert (s["11:00"]["delivery"], s["11:00"]["late_by_seconds"]) == ("late", 150)
+    assert s["12:30"]["delivery"] == "missing"
+    assert s["14:00"]["delivery"] == "missing"  # a read beyond the window is not credited
+    assert session["delivery_summary"] == {"on_time": 1, "late": 1, "missing": 2, "pending": 0, "not_expected": 0, "unknown": 0}
 
     # The exported operation ID links the 14:00 read exactly, so its real delay shows.
     outcomes = MarketWatchOutcomeStore(tmp_path / "outcomes.sqlite")
@@ -94,7 +101,7 @@ def test_slots_show_packets_reads_and_measured_delays_without_a_tolerance(env, t
     exact = report(runner, receipts, outcome_store=outcomes)
     s = slots(exact)
     assert s["14:00"]["read_id"] == beyond["read_id"] and s["14:00"]["attribution"] == "operation_id"
-    assert s["14:00"]["receipt_delay_seconds"] == 45 * 60
+    assert s["14:00"]["receipt_delay_seconds"] == 45 * 60 and s["14:00"]["delivery"] == "late"
     assert s["09:50"]["attribution"] == "operation_id" and exact["reads_not_credited_to_a_slot"] == []
 
 
@@ -150,16 +157,19 @@ def test_holiday_early_close_unknown_calendar_and_upcoming(env, tmp_path):
     receipt(receipts, DAY, "09-49", 1, "skipped", "skipped_exchange_closed")
     holiday = report(runner, receipts, hours=lambda day: {"status": "closed", "open": None, "close": None})
     assert {s["status"] for s in holiday["slots"]} == {"not_expected"}
+    assert {s["delivery"] for s in holiday["slots"]} == {"not_expected"} and {s["deadline"] for s in holiday["slots"]} == {None}
     assert {s["not_expected_reason"] for s in holiday["slots"]} == {"exchange_closed"}
     assert slots(holiday)["09:50"]["packet"]["status"] == "skipped_exchange_closed"
 
     half = slots(report(runner, receipts, hours=lambda day: {"status": "open", "open": 570, "close": 780}))
     assert half["12:30"]["expected"] is True and half["12:30"]["status"] == "no_read_seen"
     assert (half["14:00"]["expected"], half["14:00"]["not_expected_reason"], half["14:00"]["status"]) == (False, "after_close", "not_expected")
+    assert (half["12:30"]["delivery"], half["14:00"]["delivery"]) == ("missing", "not_expected")
 
     unknown = slots(report(runner, receipts, hours=lambda day: None))
     assert unknown["09:50"]["expected"] is None and unknown["09:50"]["not_expected_reason"] == "exchange_calendar_unavailable"
     assert unknown["09:50"]["status"] == "unknown"  # never "no read seen" when the day may have been closed
+    assert unknown["09:50"]["delivery"] == "unknown"
 
     def broken(day):
         raise RuntimeError("tradier down")
@@ -168,6 +178,21 @@ def test_holiday_early_close_unknown_calendar_and_upcoming(env, tmp_path):
     midday = slots(report(runner, receipts, now=et(12, 0)))
     assert midday["09:50"]["status"] == "no_read_seen" and midday["12:30"]["status"] == "upcoming"
     assert midday["12:30"]["packet"]["status"] == "not_due" and midday["11:00"]["packet"]["status"] == "no_receipt"
+    assert (midday["09:50"]["delivery"], midday["12:30"]["delivery"]) == ("missing", "pending")
+    assert slots(report(runner, receipts, now=et(10, 4, 59)))["09:50"]["delivery"] == "pending"
+    assert slots(report(runner, receipts, now=et(10, 5, 30)))["09:50"]["delivery"] == "unknown"  # no import after the deadline yet
+
+
+def test_missing_waits_for_an_import_after_the_deadline(env, tmp_path):
+    runner, *_ = env
+    receipts = tmp_path / "receipts"
+    # The last import ran before the 10:05 deadline: a read saved just before it may be unseen.
+    stale = slots(report(runner, receipts, now=et(10, 30), reads_through=et(10, 5, 30)))
+    assert stale["09:50"]["delivery"] == "unknown" and stale["09:50"]["status"] == "no_read_seen"
+    assert slots(report(runner, receipts, now=et(10, 30), reads_through=et(10, 6)))["09:50"]["delivery"] == "missing"
+    # A read the importer did see is judged on its Check receipt time either way.
+    Jo(runner, tmp_path).read(et(10, 4), "manual")
+    assert slots(report(runner, receipts, now=et(10, 30), reads_through=et(9, 0)))["09:50"]["delivery"] == "on_time"
 
 
 def test_read_near_a_slot_after_an_early_close_is_not_credited_as_expected(env, tmp_path):
@@ -182,6 +207,7 @@ def test_missing_evidence_is_unknown_not_missing(tmp_path):
     assert session["reads_available"] is False and session["receipts_available"] is False
     s = slots(session["sessions"][0])
     assert s["09:50"]["status"] == "unknown" and s["09:50"]["packet"]["status"] == "unknown"
+    assert s["09:50"]["delivery"] == "unknown"
 
 
 @pytest.fixture
@@ -203,6 +229,33 @@ def test_route_lists_weekdays_back_to_the_first_evidence(client):
     assert [s["session_date"] for s in view["sessions"]] == ["2026-10-16", "2026-10-15", "2026-10-14"]
     assert view["reads_available"] and view["receipts_available"]
     assert {s["status"] for s in view["sessions"][0]["slots"]} == {"no_read_seen"}
+    # No runner in this app: nothing imports reads, so absence is unknown, never missing.
+    assert view["importer"] == {"running": False, "outbox_configured": False, "last_ingest": None, "current": False}
+    assert {s["delivery"] for s in view["sessions"][0]["slots"]} == {"unknown"}
+    assert view["sessions"][0]["watchdog"]["state"] in ("unknown", "on", "off")
+
+
+def test_route_judges_missing_reads_after_a_fresh_import(client, env, tmp_path, monkeypatch):
+    runner, *_ = env
+    runner.ingest_notices(datetime(2026, 10, 16, 20, 59, tzinfo=UTC))
+    client.app.state.market_watch = runner
+    state = tmp_path / "alerts-state.json"
+    state.write_text(json.dumps({"jo_market_reads": {"enabled": True, "checked_at": "2026-10-16T20:59:00Z", "notices": {
+        "2026-10-16": [{"kind": "1100", "title": "Jo's 11:00 AM market read is missing", "recovered": False, "outcome": "sent"}]}}}))
+    from app.engine import jo_morning
+    monkeypatch.setattr(jo_morning, "ALERTS_STATE", state)
+    view = client.get("/jo/market-reads").json()
+    assert view["importer"]["current"] is True and view["importer"]["outbox_configured"] is True
+    assert {s["delivery"] for s in view["sessions"][0]["slots"]} == {"missing"}
+    assert view["sessions"][0]["watchdog"]["state"] == "on"
+    assert [n["kind"] for n in view["sessions"][0]["watchdog"]["notices"]] == ["1100"]
+    assert view["sessions"][1]["watchdog"]["notices"] == []
+    # An importer that stopped before today's deadlines leaves today's slots unknown.
+    runner.last_ingest = "2026-10-16T13:00:00.000000Z"
+    view = client.get("/jo/market-reads").json()
+    assert view["importer"]["current"] is False
+    assert {s["delivery"] for s in view["sessions"][0]["slots"]} == {"unknown"}
+    assert {s["delivery"] for s in view["sessions"][1]["slots"]} == {"missing"}
 
 
 def test_corrupt_store_makes_reads_unknown_not_a_failure(client, monkeypatch):

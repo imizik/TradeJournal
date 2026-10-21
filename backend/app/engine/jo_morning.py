@@ -416,14 +416,14 @@ def morning_view(session, day, now, briefing_id=None, config=None, calendar=None
             "first_opened_at": store.timestamp(feedback.first_opened_at) if feedback and feedback.first_opened_at else None}}
 
 
-def watchdog_status(day, path=None):
-    """The phone watchdog's morning record for one day, or unknown when it cannot be read.
+def watchdog_status(day, path=None, section="jo_morning"):
+    """The phone watchdog's record for one day (morning brief, or ``jo_market_reads``), or unknown when unreadable.
 
     Only the watchdog's own ntfy attempts are known here; any notification ChatGPT sends
     about a Jo task is outside TradeJournal and is never reported as delivered or missing.
     """
     try:
-        state = json.loads((path or ALERTS_STATE).read_text()).get("jo_morning")
+        state = json.loads((path or ALERTS_STATE).read_text()).get(section)
     except (OSError, ValueError, AttributeError):
         return {"state": "unknown", "checked_at": None, "notices": []}
     if not isinstance(state, dict):

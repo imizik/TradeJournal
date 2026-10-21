@@ -96,6 +96,11 @@ NO_WAKE_EVENTS = ("minute_gap",)  # recorded so a blind spot is visible, never a
 TERMINAL = ("accepted", "expired", "unknown")
 APPLICATION_ID = 0x4D574431  # MWD1: the isolated MW-2 wake/delivery file.
 NOTICE_LIMIT = 64 * 1024
+# Owner reliability only, outside the hashed policies: a scheduled read is on time when the
+# Check service received it within this many minutes of its slot. A proposal (October 21,
+# 2026), not yet confirmed by Isaac; reads observed Oct 15-21 arrived 18 s to 12.4 min after
+# their slot. It ends before the 30-minute attribution window, so a late read still links.
+SCHEDULED_READ_DEADLINE_MINUTES = 15
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS record(id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_date TEXT NOT NULL,
@@ -472,6 +477,7 @@ class MarketWatchRunner:
         self.bounds = bounds
         self.mail, self.push, self.daily, self.setup_window = mail, push, daily, setup_window
         self._atr: dict[date, dict | None] = {}
+        self.last_ingest: str | None = None  # last outbox pass that finished, for the owner screen and watchdog
 
     # The real exchange calendar is warmed once per pass; tests inject bounds.
     def _session(self, day: date):
@@ -644,6 +650,7 @@ class MarketWatchRunner:
         # Receipt order decides the message budget, so store notices in the order Jo submitted them.
         for notice in sorted(found, key=lambda n: (parse_time(n["received_at"]), n["read_id"])):
             self.store.append("read_notice", notice, ident=notice["read_id"], ref=notice["message_id"])
+        self.last_ingest = _iso(now)
 
     def deliver_messages(self, now: datetime) -> None:
         decided = {d["message_id"]: d for d in self.store.records("message_decision")}
@@ -860,18 +867,23 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
 
 
 def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: str | Path | None, days: list[date], *,
-                       hours, now: datetime, outcome_store=None) -> dict:
-    """Jo's expected scheduled reads per session: publisher packet, read seen, measured receipt delay.
+                       hours, now: datetime, outcome_store=None, reads_through: datetime | None = None) -> dict:
+    """Jo's expected scheduled reads per session: publisher packet, read seen, receipt delay and delivery.
 
     Built only from existing records: #315's publisher receipts, the read links of
     ``session_report`` and the exchange calendar (``hours(day)`` → the
-    calendar row or None). No lateness tolerance is applied; a delay is a
-    number. ``store=None`` or a missing receipt directory means that evidence is
-    unknown, never that nothing happened.
+    calendar row or None). ``delivery`` judges the Check receipt time against
+    the slot plus ``SCHEDULED_READ_DEADLINE_MINUTES``: on_time, late, missing,
+    pending, not_expected or unknown. ``reads_through`` is when read notices were
+    last imported (default ``now``); a slot is missing only once an import that
+    started a minute after its deadline found no read, else unknown. ``store=None``
+    or a missing receipt directory means that evidence is unknown, never that
+    nothing happened.
     """
     import market_watch_schedule as schedule
 
     receipts = Path(receipt_directory) if receipt_directory else None
+    reads_through = now if reads_through is None else reads_through
     receipts_available = bool(receipts and receipts.is_dir())
     linked = session_report(store, outcome_store)["sessions"] if store is not None else {}
     exported = [r for e in (outcome_store.imported_exports() if outcome_store is not None else []) for r in e["reads"]]
@@ -919,6 +931,18 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
             # A read near a slot that was not expected stays visible but never makes the slot "read".
             status = ("not_expected" if expected is False else "unknown" if store is None else "read_seen" if read_id
                       else "upcoming" if at > now else "unknown" if expected is None else "no_read_seen")
+            deadline = at + timedelta(minutes=SCHEDULED_READ_DEADLINE_MINUTES)
+            if expected is False:
+                delivery = "not_expected"
+            elif received:
+                delivery = "on_time" if parse_time(received) <= deadline else "late"
+            elif expected is None or store is None or read_id:
+                delivery = "unknown"
+            elif now < deadline:
+                delivery = "pending"
+            else:
+                # A read Check saved just before the deadline may not be imported yet.
+                delivery = "missing" if reads_through >= deadline + timedelta(minutes=1) else "unknown"
             if packet["status"] == "no_receipt" and at - timedelta(minutes=schedule.READ_MINUTES) > now:
                 packet["status"] = "not_due"
             slot_rows.append({"slot": slot, "scheduled_at": _iso(at), "expected": expected, "not_expected_reason": reason,
@@ -926,6 +950,8 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
                               "packet": packet, "status": status, "read_id": read_id, "attribution": link,
                               "received_at": received,
                               "receipt_delay_seconds": round((parse_time(received) - at).total_seconds()) if received else None,
+                              "deadline": _iso(deadline) if expected is not False else None, "delivery": delivery,
+                              "late_by_seconds": max(0, round((parse_time(received) - deadline).total_seconds())) if delivery == "late" else None,
                               "read_used_slot_packet": (read.get("snapshot_id") == packet["snapshot_id"]
                                                         if read and packet["snapshot_id"] else None)})
         credited = {r["read_id"] for r in slot_rows if r["read_id"]}
@@ -936,11 +962,15 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
                          "hours": ({"status": row["status"], "open": row.get("open"), "close": row.get("close")} if known else None),
                          "slots": slot_rows, "reads_not_credited_to_a_slot": others,
                          "summary": {k: sum(r["status"] == k for r in slot_rows)
-                                     for k in ("read_seen", "no_read_seen", "upcoming", "not_expected", "unknown")}})
+                                     for k in ("read_seen", "no_read_seen", "upcoming", "not_expected", "unknown")},
+                         "delivery_summary": {k: sum(r["delivery"] == k for r in slot_rows)
+                                              for k in ("on_time", "late", "missing", "pending", "not_expected", "unknown")}})
     return {"checked_at": _iso(now), "reads_available": store is not None, "receipts_available": receipts_available,
-            "attribution_window_minutes": WAKE_POLICY["read_attribution_minutes"], "sessions": sessions,
+            "reads_through": _iso(reads_through), "attribution_window_minutes": WAKE_POLICY["read_attribution_minutes"],
+            "deadline_minutes": SCHEDULED_READ_DEADLINE_MINUTES, "sessions": sessions,
             "limits": ["received_at is when the Check service committed the read, not when Jo started; the delay is measured from the slot time",
-                       "no lateness tolerance is applied; delays are numbers only",
+                       f"on time means received within {SCHEDULED_READ_DEADLINE_MINUTES} minutes of the slot, a proposed tolerance the owner has not confirmed",
+                       "a read later than the attribution window is not credited, so its slot stays missing",
                        f"without an exported operation ID a read is linked by time: the first unclaimed read within {WAKE_POLICY['read_attribution_minutes']} minutes "
                        "of the slot and before the next wake; a later read is listed as not credited and the slot shows no read seen",
                        "without an export, any read in the window is linked by time, so a manual or setup-context read there can stand in for a missed scheduled read",

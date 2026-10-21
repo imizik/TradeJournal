@@ -105,6 +105,12 @@ MORNING_CALENDAR_GRACE = TIMER_GRACE  # the calendar retries on its own; a lasti
 MORNING_STATUS_GRACE = 10 * 60  # /jo/morning unreadable while the rest of the API answers
 MORNING_KEEP_DAYS = 7  # long enough to review a five-session acceptance run
 
+# Jo's scheduled market reads (09:50, 11:00, 12:30, 14:00 ET), opt-in with
+# JO_MARKET_READ_ALERTS=true. Judged from GET /jo/market-reads, whose per-slot deadline
+# (slot + 15 min, a proposal for the owner) and exchange calendar decide what is due.
+MARKET_READ_IMPORT_STALE = 3 * 60  # the API checks Jo's read outbox every 30 s
+MARKET_READ_STATUS_GRACE = MORNING_STATUS_GRACE
+
 
 @dataclass
 class Problem:
@@ -124,7 +130,7 @@ def load_config() -> dict[str, str]:
                 config[key.strip()] = value.strip().strip("'\"")
     except OSError:
         pass
-    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL", "JO_MORNING_ALERTS"}})
+    config.update({key: value for key, value in os.environ.items() if key in {"NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL", "HEALTHCHECK_PING_URL", "JO_MORNING_ALERTS", "JO_MARKET_READ_ALERTS"}})
     return config
 
 
@@ -371,6 +377,64 @@ def observe_morning(now: float) -> tuple[dict[str, Problem | None], str | None, 
         return {"jo_morning:status": unreadable}, f"Morning status unreadable ({type(exc).__name__})", False
 
 
+def market_read_problems(view: dict, day: str, now: float) -> dict[str, Problem | None]:
+    """Scheduled market-read conditions from one /jo/market-reads read; a key left out is unknown."""
+    importer = view.get("importer") or {}
+    stopped = Problem(
+        "Jo's market reads aren't being checked",
+        "The app isn't checking for Jo's market reads, so a missed read can't be seen.",
+        API_GRACE, "Jo's market reads are being checked again",
+    )
+    if not importer.get("outbox_configured"):
+        return {"jo_market_read:importer": stopped}
+    last = timestamp(importer.get("last_ingest"))
+    if last is None or now - last > MARKET_READ_IMPORT_STALE:
+        # Without fresh imports a read may have arrived unseen; the slots stay unknown.
+        return {"jo_market_read:importer": stopped}
+    observed: dict[str, Problem | None] = {"jo_market_read:importer": None}
+    session = next((s for s in view.get("sessions") or [] if s.get("session_date") == day), None)
+    for slot in (session or {}).get("slots") or []:
+        key, state = f"jo_market_read:{day}:{slot['slot'].replace(':', '')}", slot.get("delivery")
+        label = et_clock(slot.get("scheduled_at")).removesuffix(" ET")
+        if state == "missing":
+            packet = (slot.get("packet") or {}).get("status")
+            cause = {"failed": " The app's packet for this read failed, so Jo had no fresh data.",
+                     "no_receipt": " The app has no record of preparing this read's packet."}.get(packet, "")
+            observed[key] = Problem(
+                f"Jo's {label} market read is missing",
+                f"No read for the {label} slot reached TradeJournal by {et_clock(slot.get('deadline'))}.{cause}"
+                " A read saved within 30 minutes of the slot will still show as late.",
+                recovered=f"Jo's {label} market read arrived late",
+            )
+        elif state in ("on_time", "late", "pending", "not_expected"):
+            observed[key] = None
+    return observed
+
+
+def observe_market_reads(now: float) -> tuple[dict[str, Problem | None], str | None, bool]:
+    """Read today's scheduled market reads: (conditions, read error, market watch deliberately off)."""
+    day = datetime.fromtimestamp(now, ET).date().isoformat()
+    unreadable = Problem(
+        "Market read status unreadable",
+        "The app answers, but its scheduled market read status doesn't, so the watchdog can't tell whether Jo's reads arrived.",
+        MARKET_READ_STATUS_GRACE, "Market read status is readable again",
+    )
+    try:
+        view = get("/jo/market-reads")
+        if not view.get("market_watch_enabled"):
+            return {"jo_market_read:status": None}, None, True
+        return {**market_read_problems(view, day, now), "jo_market_read:status": None}, None, False
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, HTTPException) as exc:
+        return {"jo_market_read:status": unreadable}, f"Market read status unreadable ({type(exc).__name__})", False
+
+
+# Opt-in Jo watchdogs: state section, condition prefix, alerts.env flag, observer.
+JO_WATCHES = (
+    ("jo_morning", "jo_morning:", "JO_MORNING_ALERTS", lambda now: observe_morning(now)),
+    ("jo_market_reads", "jo_market_read:", "JO_MARKET_READ_ALERTS", lambda now: observe_market_reads(now)),
+)
+
+
 def notice_day(key: str, today: str) -> str:
     parts = key.split(":")
     return parts[1] if len(parts) == 3 else today
@@ -489,30 +553,34 @@ def check(config: dict[str, str], now: float | None = None) -> bool:
     state.setdefault("watching_since", now)
     observed = observe(state["watching_since"])
     today = datetime.fromtimestamp(now, ET).date().isoformat()
-    morning_on = config.get("JO_MORNING_ALERTS", "").strip().lower() == "true"
-    morning = dict(state.get("jo_morning") or {}, enabled=morning_on)
-    found, off = {}, False
-    if morning_on and observed.get("api", False) is None:
-        found, error, off = observe_morning(now)
-        morning.update(error=error, **({} if error else {"checked_at": datetime.fromtimestamp(now, timezone.utc).isoformat()}))
-    # Yesterday's brief conditions end with their day, and switching the watchdog or the
-    # morning automation off ends them all: silently, neither "resolved" nor repeated.
-    state["conditions"] = {key: value for key, value in state.get("conditions", {}).items()
-        if not key.startswith("jo_morning:") or (morning_on and not off and notice_day(key, today) == today)}
-    observed.update(found)
+    watches, logs = {}, {}
+    for section, prefix, flag, observer in JO_WATCHES:
+        on = config.get(flag, "").strip().lower() == "true"
+        record = dict(state.get(section) or {}, enabled=on)
+        found, off = {}, False
+        if on and observed.get("api", False) is None:
+            found, error, off = observer(now)
+            record.update(error=error, **({} if error else {"checked_at": datetime.fromtimestamp(now, timezone.utc).isoformat()}))
+        # Yesterday's conditions end with their day, and switching a watchdog or the
+        # automation it watches off ends them all: silently, neither "resolved" nor repeated.
+        state["conditions"] = {key: value for key, value in state.get("conditions", {}).items()
+            if not key.startswith(prefix) or (on and not off and notice_day(key, today) == today)}
+        observed.update(found)
+        watches[prefix] = (section, record)
+        logs[prefix] = {day: entries for day, entries in (record.get("notices") or {}).items()
+            if (date.fromisoformat(today) - date.fromisoformat(day)).days < MORNING_KEEP_DAYS}
     notices, following = evaluate(observed, state, now)
-    log = {day: entries for day, entries in (morning.get("notices") or {}).items()
-        if (date.fromisoformat(today) - date.fromisoformat(day)).days < MORNING_KEEP_DAYS}
     delivered = True
     for notice in notices:
-        is_morning = notice["keys"][0].startswith("jo_morning:")
+        prefix = next((p for p in watches if notice["keys"][0].startswith(p)), None)
+        is_jo = prefix is not None
         try:
             publish(config, notice["title"], notice["message"], recovered=notice["recovered"])
             print(f"Sent: {notice['title']}")
             outcome = "sent"
         except OSError as exc:
             print(f"Could not send '{notice['title']}': {first_line(str(exc), 120)}")
-            outcome = "unknown" if is_morning and uncertain(exc) else "failed"
+            outcome = "unknown" if is_jo and uncertain(exc) else "failed"
             if outcome == "failed":
                 delivered = False
                 # Leave the condition as it was so the next pass tries again.
@@ -521,10 +589,10 @@ def check(config: dict[str, str], now: float | None = None) -> bool:
                         following["conditions"][key] = state["conditions"][key]
                     else:
                         following["conditions"][key]["alerted"] = False
-            # An unknown morning send may have reached the phone; it is recorded, never resent.
-        if is_morning:
+            # An unknown Jo send may have reached the phone; it is recorded, never resent.
+        if is_jo:
             key = notice["keys"][0]
-            entries = log.setdefault(notice_day(key, today), [])
+            entries = logs[prefix].setdefault(notice_day(key, today), [])
             entry = {"kind": key.split(":")[-1], "title": notice["title"], "recovered": notice["recovered"],
                 "outcome": outcome, "at": datetime.fromtimestamp(now, timezone.utc).isoformat(), "attempts": 1}
             last = entries[-1] if entries else None
@@ -533,7 +601,8 @@ def check(config: dict[str, str], now: float | None = None) -> bool:
                 entries[-1] = dict(entry, attempts=last.get("attempts", 1) + 1)
             else:
                 entries.append(entry)
-    following["jo_morning"] = dict(morning, notices=log)
+    for prefix, (section, record) in watches.items():
+        following[section] = dict(record, notices=logs[prefix])
     following["checked_at"] = now
     write_state(following)
     ping(config, delivered)
