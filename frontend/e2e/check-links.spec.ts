@@ -75,6 +75,30 @@ test("private journal opens saved checks without requesting the isolated advisor
   expect(trialReads).toEqual([]);
 });
 
+for (const format of ["structured", "text"] as const) test(`saved ${format} trigger and invalidation render when a check opens`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const trade = await nvda(page);
+  await connect(page, trade);
+  const { detail } = savedCheck(trade);
+  const triggerText = "1m close above opening_range_high at 902 with expanding volume";
+  const invalidationText = "1m close back below vwap at 899 kills the setup";
+  const trigger = format === "structured" ? { description: triggerText, level: "opening_range_high", price: 902 } : triggerText;
+  const invalidation = format === "structured" ? { description: invalidationText, level: "vwap", price: 899 } : invalidationText;
+  await page.route(`**/api/check-owner/checks/${CHECK}`, route => route.fulfill({ json: { ...detail, answer: {
+    ...detail.answer, wait_for: { condition: trigger, expires_at: detail.received_at }, would_change: invalidation,
+    live: { ...detail.answer.live, trigger, invalidation },
+  } } }));
+  await page.goto(`/advisor-review?check=${CHECK}`);
+  const opened = page.getByTestId("pretrade-check-detail");
+  await expect(opened.getByText(`Wait for: ${triggerText}`, { exact: false })).toBeVisible();
+  await expect(opened.getByText(`Would change: ${invalidationText}`, { exact: true })).toBeVisible();
+  await expect(opened.getByText(`Trigger: ${triggerText}`, { exact: true })).toBeVisible();
+  await expect(opened.getByText(`Invalidation: ${invalidationText}`, { exact: true })).toBeVisible();
+  await fitsPhone(page, `${format}-conditions`);
+  expect(errors).toEqual([]);
+});
+
 test("possible later activity is labelled for review, then linked and unlinked by the owner", async ({ page }) => {
   const trade = await nvda(page);
   await connect(page, trade);
