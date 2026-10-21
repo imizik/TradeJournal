@@ -18,6 +18,35 @@ from app.routers import quotes
 state = "ready"
 
 
+@core_app.post("/__test/scanner-amzn", include_in_schema=False)
+def scanner_amzn():
+    """Monday's AMZN rules paper trade: 10:10 bar close, 10:11:10 entry, 10:55:54 target exit."""
+    import json
+    from datetime import date, datetime
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import ScannerCandidate, ScannerEvent
+
+    with Session(engine) as db:
+        if db.exec(select(ScannerCandidate).where(ScannerCandidate.symbol == "AMZN", ScannerCandidate.session_date == date(2026, 10, 19))).first():
+            return {"seeded": False}
+        contract = {"symbol": "AMZN261023C00220000", "expiration": "2026-10-23", "option_type": "call", "strike": 220.0,
+                    "delta": 0.35, "bid": 1.75, "ask": 1.80, "multiplier": 100}
+        c = ScannerCandidate(scanner_version="s1-v1", params_hash="0" * 64, session_date=date(2026, 10, 19), symbol="AMZN", setup="orb",
+                             direction="long", bar_start=datetime(2026, 10, 19, 14, 5), bar_end=datetime(2026, 10, 19, 14, 10),
+                             detected_at=datetime(2026, 10, 19, 14, 10, 31), expires_at=datetime(2026, 10, 19, 14, 20), stop=219.10,
+                             target=222.40, facts_json="{}", contract_json=json.dumps(contract), source="e2e")
+        db.add(c)
+        db.flush()
+        for kind, at, data in (("entry", datetime(2026, 10, 19, 14, 11, 10), {"ask": 1.80, "bid": 1.75}),
+                               ("exit_intent", datetime(2026, 10, 19, 14, 55, 30), {"reason": "target"}),
+                               ("exit", datetime(2026, 10, 19, 14, 55, 54), {"bid": 4.70, "ask": 4.80, "reason": "target", "pnl": 288.70,
+                                                                             "pnl_2x_spread": 268.70, "return_on_premium": 1.6})):
+            db.add(ScannerEvent(candidate_id=c.id, key=kind, event_type=kind, effective_at=at, recorded_at=at, data_json=json.dumps(data)))
+        db.commit()
+    return {"seeded": True}
+
+
 @core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state

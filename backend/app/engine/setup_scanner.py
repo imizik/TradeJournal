@@ -577,12 +577,14 @@ class SetupScanner:
 
 
 def day_view(db: Session, day: date, own_entries: list[datetime] | None = None,
-             own_trades: list[Trade] | None = None) -> dict:
+             own_trades: list[Trade] | None = None, session=None) -> dict:
     """The owner-only three-way comparison for the day and cumulative history.
 
     ``own_entries`` are the open times of Isaac's option trades that day (New
     York wall clock); they fill the review-time ``sixth_plus_entry`` flag and are never
-    read by the scanner itself."""
+    read by the scanner itself. ``session`` (the day's regular session, when the
+    calendar knows it) lets each entered paper trade show its exit deadline: the
+    60-minute time stop or, when earlier, the flat-by-close time."""
     rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == day).order_by(ScannerCandidate.bar_end)).all()
     cumulative_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date <= day)).all()
     linked = link_isaac_trades(list(cumulative_rows), own_trades or [])
@@ -620,6 +622,7 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None,
             "contract": json.loads(c.contract_json) if c.contract_json else None, "status": status,
             "shadow": _shadow_view(state, shadow_status),
             "isaac": isaac[c.id],
+            "paper_deadline": _paper_deadline(c, state, session),
             "events": {k: {**v, "at": datetime.fromtimestamp(v["at"], UTC).isoformat().replace("+00:00", "Z")} for k, v in state.items()},
         })
     totals["pnl"], totals["pnl_2x_spread"] = round(totals["pnl"], 2), round(totals["pnl_2x_spread"], 2)
@@ -627,6 +630,19 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None,
     cumulative_score = _shadow_scorecard([(c, states[c.id]) for c in cumulative_rows], isaac)
     return {"date": day.isoformat(), "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH,
             "enabled": enabled(), "totals": totals, "scorecard": {"day": day_score, "cumulative": cumulative_score}, "candidates": items}
+
+
+def _paper_deadline(candidate: ScannerCandidate, state: dict, session) -> dict | None:
+    """When the rules paper trade must exit at the latest; display only, from the saved entry."""
+    if "entry" not in state or not candidate.contract_json:
+        return None
+    at, kind = state["entry"]["at"] + rules.TIME_STOP_SECONDS, "time_stop"
+    if session is not None:
+        same_day = json.loads(candidate.contract_json)["expiration"] == candidate.session_date.isoformat()
+        flat = rules.flat_at(session.open_at, session.close_at, same_day)
+        if flat < at:
+            at, kind = flat, "flat"
+    return {"at": datetime.fromtimestamp(at, UTC).isoformat().replace("+00:00", "Z"), "kind": kind}
 
 
 def link_isaac_trades(candidates: list[ScannerCandidate], trades: list[Trade]) -> dict:
