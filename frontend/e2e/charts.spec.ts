@@ -926,7 +926,7 @@ test("switching symbol, interval, session and RSI keeps every chart instance and
 });
 
 type RenderWindow = typeof window & { __tjRenders?: Map<string, number>; __chartTick?: (value: unknown) => void };
-test("a tick re-renders only the charts whose candles moved, and the clock re-renders no chart", async ({ page }) => {
+test("a tick re-renders only the charts whose candles moved; the clock and the crosshair re-render no chart", async ({ page }) => {
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
     class MockEventSource {
@@ -963,6 +963,20 @@ test("a tick re-renders only the charts whose candles moved, and the clock re-re
   await page.clock.runFor(3000);
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:37");
   await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:37");
+  expect(await settled()).toEqual(before);
+
+  // Scrubbing the crosshair across the main chart changes the readouts on it and on a linked chart, and renders no chart (UX-G).
+  const box = (await page.getByTestId("canvas-main").boundingBox())!;
+  const readouts = async () => [await page.getByLabel("main candle values").textContent(), await page.getByLabel("Panel 2 candle values").textContent()];
+  const latest = await readouts();
+  for (let i = 0; i <= 20; i++) await page.mouse.move(box.x + box.width * (0.2 + i * 0.02), box.y + box.height * 0.4);
+  const scrubbed = await readouts();
+  expect(scrubbed[0]).not.toBe(latest[0]);
+  expect(scrubbed[1]).not.toBe(latest[1]);
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.4);
+  await expect.poll(async () => (await readouts())[0]).not.toBe(scrubbed[0]);
+  await page.mouse.move(1, 1);
+  await expect.poll(readouts).toEqual(latest);
   expect(await settled()).toEqual(before);
 
   // The fixture's newest candles end at 10:32:45 in every interval (5m main, 15m, 1h, 1D, 1m).
@@ -4451,7 +4465,8 @@ test("maximize and restore each chart: the same instances, view, selection and s
     await page.getByRole("button", { name: "Restore charts" }).click();
     await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
     await expect.poll(async () => (await boxes()).every((box, at) => near(box.x, geometry[at].x, 1) && near(box.y, geometry[at].y, 1) && near(box.width, geometry[at].width, 1) && near(box.height, geometry[at].height, 1)), `${id}: geometry restored`).toBe(true);
-    expect(await ranges(), `${id}: every chart's view as it was`).toEqual(views);
+    // The library applies the restored size on its next frame, after the boxes.
+    await expect.poll(ranges, `${id}: every chart's view as it was`).toEqual(views);
   }
   expect(await sameCharts(page)).toBe(true);
   await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);

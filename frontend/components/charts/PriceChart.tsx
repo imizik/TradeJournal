@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
@@ -146,6 +146,64 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
   return <span role="timer" aria-label={`${label} next bar`} title={live ? "Time until this candle closes" : undefined}
     className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-sky-400/10 text-sky-300" : value === "closed" || value === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
     <Timer size={11} />{live ? countdown(value) : CLOCK_TEXT[value]}</span>;
+}
+
+const compactVolume = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+type HoverStore = ReturnType<typeof hoverStore>;
+/** The candle under a chart's crosshair, by time; followers of a linked crosshair set theirs too. */
+function hoverStore() {
+  let time: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => time,
+    set(next: number | null) { if (next === time) return; time = next; listeners.forEach((fn) => fn()); },
+    subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
+  };
+}
+
+/** The candle values row: the hovered candle's, else the latest. Its own component, so a crosshair move renders only this row. */
+function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, rvol, showRvol, timer }: {
+  id: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
+  indicators: Indicators; colors: Record<ColorKey, string>; rvol: RvolBaseline | null; showRvol: boolean; timer: React.ReactNode;
+}) {
+  const time = useSyncExternalStore(hover.subscribe, hover.get, hover.get);
+  const bar = (time !== null && barAt(bars ?? [], time)) || bars?.at(-1);
+  // The main chart's study row says it in full. A smaller chart's row is already tight beside its
+  // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
+  const volumeText = bar ? compactVolume.format(bar.volume) : "";
+  const rvolValue = showRvol && bar && bar.rvol !== undefined && !bar.extended ? (typeof bar.rvol === "number"
+    ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
+      RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
+    : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
+  const emas = (["ema9", "ema20", "ema50", "ema200"] as const).filter((key) => indicators[key]);
+  // Why a candle has no VWAP, from how the backend builds it (chart_math.chart_bars): regular-session minutes only, never daily or weekly.
+  const vwapWhy = interval === "1D" || interval === "1W" ? "VWAP is an intraday study: daily and weekly candles have none."
+    : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
+    : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
+  return (
+    <div className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1" : "h-6"}`}>
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
+      {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
+        {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
+      </div>
+      {!main && timer}
+      {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
+        {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+        {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
+        {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
+        {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+        {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
+          <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+          <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
+            {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+        </span>}
+        {rvolValue}
+        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
+      </div>}
+    </div>
+  );
 }
 
 type Bundle = {
@@ -297,7 +355,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const wallRef = useRef<WallLayer | null>(null);
   const liquidityRef = useRef(liquidity);
   useEffect(() => { liquidityRef.current = liquidity; profileRef.current?.set(liquidity?.profile ?? null, !!liquidity?.stale); }, [liquidity]);
-  const [hover, setHover] = useState<ChartBar | null>(null);
+  // The crosshair's candle, outside React state: a move re-renders only the readout row, not the chart.
+  const [hover] = useState(hoverStore);
   const [card, setCard] = useState<Card | null>(null);
   // A new frame dismisses cards until the next pointer input, while its crosshair readout still updates.
   const cardHoverEnabled = useRef(false);
@@ -395,7 +454,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const bar = time === null ? undefined : barAt(barsRef.current, time);
       if (bar) chart.setCrosshairPosition(bar.close, bar.time as UTCTimestamp, candles);
       else chart.clearCrosshairPosition();
-      setHover(bar ?? null);
+      hover.set(bar?.time ?? null);
       syncing = false;
     });
     chart.subscribeCrosshairMove((event) => {
@@ -411,7 +470,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         autoLayer.updateAllViews();
       }
       const time = typeof event.time === "number" ? event.time : null;
-      setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
+      hover.set(time === null ? null : barAt(barsRef.current, time)?.time ?? null);
       link.emit(time, id);
       const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
       // A fill chevron under the pointer lists its fills (C3.1); a news marker, its headlines (T3.5). A list a tap or click pinned stays until the next one.
@@ -1030,22 +1089,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     bundle.current?.layer.setPreview(null);
   }, [tool]);
 
-  const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
   // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
   // A compact chart keeps the readout, which costs no room, while it leaves out the volume bars.
   const showRvol = given.volume && intradayInterval(interval);
-  // The main chart's study row says it in full. A smaller chart's row is already tight beside its
-  // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
-  const volumeText = bar ? Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume) : "";
-  const rvolValue = showRvol && bar && bar.rvol !== undefined && !bar.extended ? (typeof bar.rvol === "number"
-    ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
-      RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
-    : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
-  const emas = (["ema9", "ema20", "ema50", "ema200"] as const).filter((key) => indicators[key]);
-  // Why a candle has no VWAP, from how the backend builds it (chart_math.chart_bars): regular-session minutes only, never daily or weekly.
-  const vwapWhy = interval === "1D" || interval === "1W" ? "VWAP is an intraday study: daily and weekly candles have none."
-    : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
-    : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   const chosenLevel = selected ? levels.find((level) => level.id === selected) : undefined;
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
@@ -1091,27 +1137,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           </span>
         </div>
       </div>
-      <div className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1" : "h-6"}`}>
-        <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
-        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
-          {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
-        </div>
-        {!main && timer}
-        {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
-          {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
-          {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
-          {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
-          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
-          {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
-            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
-            <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
-              {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
-          </span>}
-          {rvolValue}
-          {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
-            {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
-        </div>}
-      </div>
+      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} rvol={rvol} showRvol={showRvol} timer={!main && timer} />
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
