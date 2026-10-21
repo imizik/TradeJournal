@@ -1,5 +1,6 @@
 """Opt-in personal Jo tools on the existing Check OAuth resource."""
 import asyncio
+import logging
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -9,6 +10,8 @@ from mcp.types import ToolAnnotations
 
 from jo_briefing_common import BriefingSave, MemorySave, Operation
 import jo_briefing_exchange as exchange
+
+LOG = logging.getLogger(__name__)
 
 
 def register(server, config, authenticated, scopes, clock):
@@ -31,6 +34,7 @@ def register(server, config, authenticated, scopes, clock):
         If unavailable, report no packet; never substitute yesterday or invent a briefing.
         Research/interpret only the frozen evidence and disclose gaps. Submit with a stable
         operation ID, then recover jo_receipt; pending_import is not an app save.
+        The first read each day is recorded (time and packet ID only, no content).
         No scheduling, notifications or Shadow isolation is implied by this tool."""
         def read(actor):
             now = clock()
@@ -38,7 +42,13 @@ def register(server, config, authenticated, scopes, clock):
             pointer = exchange.read(snapshots, f"jo-morning-{actor}-{day}.json")
             if pointer.get("profile_id") != actor or pointer.get("day") != day:
                 raise ValueError("Morning packet identity mismatch")
-            return exchange.context(snapshots, actor, UUID(pointer["packet_id"]), now)
+            packet_id = UUID(pointer["packet_id"])
+            result = exchange.context(snapshots, actor, packet_id, now)
+            try:
+                exchange.record_read(outbox, actor, day, packet_id, now)
+            except Exception as error:  # The trace is best-effort; the read itself succeeded.
+                LOG.warning("Jo morning read marker not recorded (%s)", type(error).__name__)
+            return result
         return await invoke("jo_morning_context", read)
 
     @server.tool(meta=meta("jo_context"), annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))

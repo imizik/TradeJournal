@@ -300,14 +300,16 @@ def delivery(session, day, now, config, actor, hours):
     at 09:14 but imported at 09:40 still missed a 09:15 deadline. Only a record citing the
     day's own scheduled packet fulfils it; manual or recovery packets for the same day are
     counted separately. Who started the run (the scheduled task or a manual chat) is not
-    visible to the app, so origin stays unknown. Past days are judged with today's
+    visible to the app, so origin stays unknown. ``context_read_at`` is Check's first
+    jo_morning_context read of the scheduled packet: it separates "never ran" (no read)
+    from "ran but nothing arrived", without proving who started the run. Past days are judged with today's
     configuration, so a day before automation was on can read as "not published".
     """
     calendar = "unavailable" if not hours else hours.get("status") or "unavailable"
     result = {"calendar": calendar, "publication": "unknown", "fulfilment": "unknown", "deadline": None,
         "publish_at": None, "packet_id": None, "published_at": None, "briefing_id": None, "available_at": None,
         "submitted_at": None, "import_lag_seconds": None, "late_by_seconds": None, "origin": "unknown",
-        "other_briefings": 0, "notifications": {"chatgpt": "not_observable", "watchdog": None}}
+        "other_briefings": 0, "context_read": "unknown", "context_read_at": None, "notifications": {"chatgpt": "not_observable", "watchdog": None}}
     if config is None:
         result.update(publication="not_expected", fulfilment="not_expected")
         return result
@@ -331,6 +333,13 @@ def delivery(session, day, now, config, actor, hours):
         result["fulfilment"] = "pending" if now < deadline else "missing"
         return result
     result.update(publication="published", packet_id=str(packet.id), published_at=store.timestamp(packet.created_at))
+    try:
+        read_at = exchange.read_marker(load_binding(config.check_config).market_watch_outbox_dir, actor, day.isoformat(), packet.id)
+        result.update(context_read="recorded" if read_at else "not_recorded", context_read_at=read_at)
+    except LookupError:
+        pass  # No earlier marker: the trace isn't proven live, so absence stays unknown.
+    except Exception:
+        LOG.warning("Jo morning read marker unreadable")  # Stays unknown, never "not read".
     if not mine:
         result["fulfilment"] = "pending" if now < deadline else "missing"
         return result

@@ -82,6 +82,47 @@ def context(directory, actor, packet_id, now, *, allow_expired=False):
     return value.model_dump(mode="json")
 
 
+def read_marker_name(actor, day):
+    return f"jo-read-{profile(actor)}-{day}.json"
+
+
+def record_read(outbox, actor, day, packet_id, now):
+    """Keep the first morning read per profile and New York day; later reads leave it alone.
+
+    No packet content: only who, which day/packet and when Check served it. A read shows
+    the tool was called, not who started the run or how the packet was used.
+    """
+    name = read_marker_name(actor, day)
+    if (Path(outbox) / name).exists():
+        return
+    try:
+        write(outbox, name, {"schema_version": "jo-read-v1", "profile_id": actor, "day": day,
+            "packet_id": str(UUID(str(packet_id))), "read_at": now.isoformat()})
+    except ValueError:
+        if not (Path(outbox) / name).exists():
+            raise  # A concurrent first read already kept its own time; anything else is a real failure.
+
+
+def read_marker(outbox, actor, day, packet_id):
+    """The recorded first read of this packet, None when absent, or raise when it can't be trusted.
+
+    Absence means "not read" only once this profile's trace is known to be live: an
+    earlier day's marker exists. Before that (an old Check runtime, or days before the
+    trace existed) the caller must report unknown, never "not read".
+    """
+    name = read_marker_name(actor, day)
+    try:
+        value = read(outbox, name)
+    except FileNotFoundError:
+        prefix = f"jo-read-{profile(actor)}-"
+        if not any(p.name < name for p in Path(outbox).glob(prefix + "*.json")):
+            raise LookupError("Read trace not yet live for this profile") from None
+        return None
+    if value.get("profile_id") != actor or value.get("day") != day or value.get("packet_id") != str(packet_id):
+        raise ValueError("Read marker does not match this packet")
+    return value["read_at"]
+
+
 class Submission(Strict):
     schema_version: Literal["jo-submission-v1"] = "jo-submission-v1"
     profile_id: str

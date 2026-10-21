@@ -204,6 +204,7 @@ test("scheduled delivery: availability time, kept miss, unknown origin and watch
   const delivery = { calendar: "open", publication: "published", fulfilment: "late", deadline: `${day}T13:15:00+00:00`, publish_at: `${day}T12:45:00+00:00`,
     packet_id: base.packet.id, published_at: `${day}T12:45:18+00:00`, briefing_id: brief.id, available_at: `${day}T13:26:56+00:00`,
     submitted_at: `${day}T13:26:40+00:00`, import_lag_seconds: 16, late_by_seconds: 716, origin: "unknown", other_briefings: 1,
+    context_read: "recorded", context_read_at: `${day}T13:02:00+00:00`,
     notifications: { chatgpt: "not_observable", watchdog: { state: "on", checked_at: `${day}T13:27:00+00:00`, notices: [
       { kind: "brief", title: "Jo's morning brief is missing", recovered: false, outcome: "sent", at: `${day}T13:15:10+00:00` },
       { kind: "brief", title: "Jo's morning brief arrived late", recovered: true, outcome: "unknown", at: `${day}T13:27:00+00:00` }] } } };
@@ -215,6 +216,7 @@ test("scheduled delivery: availability time, kept miss, unknown origin and watch
   await expect(status).toContainText("Late. In the journal at 9:26 AM ET, 12 min after the 9:15 AM ET deadline. The miss stays recorded.");
   await expect(status).toContainText("Check received it at 9:26 AM ET; importing took 16 s.");
   await expect(status).toContainText("Who started the run (the scheduled task or a manual request) isn’t visible to TradeJournal.");
+  await expect(status).toContainText("Jo read the packet at 9:02 AM ET. A read shows the tool was called; it doesn’t prove who started the run or that Jo used the packet well.");
   await expect(status).toContainText("1 other brief was saved for this date from a separate packet");
   await expect(status).toContainText("“Jo's morning brief is missing” at 9:15 AM ET: sent.");
   await expect(status).toContainText("“Jo's morning brief arrived late” at 9:27 AM ET: outcome unknown, may have reached your phone; not resent.");
@@ -227,6 +229,8 @@ test("scheduled delivery: availability time, kept miss, unknown origin and watch
     [{ ...delivery, fulfilment: "missing", publication: "missing", available_at: null, submitted_at: null, other_briefings: 0,
       notifications: { chatgpt: "not_observable", watchdog: { state: "off", checked_at: null, notices: [] } } },
       ["Missing. Nothing reached the journal by 9:15 AM ET. The packet for Jo was never published", "Phone watchdog: off"]],
+    [{ ...delivery, fulfilment: "missing", available_at: null, submitted_at: null, other_briefings: 0, context_read: "not_recorded", context_read_at: null },
+      ["Missing. Nothing reached the journal by 9:15 AM ET.", "No read of this date’s packet was recorded."]],
     [{ ...delivery, fulfilment: "on_time", available_at: `${day}T13:10:00+00:00`, submitted_at: null, other_briefings: 0,
       notifications: { chatgpt: "not_observable", watchdog: { state: "on", checked_at: null, notices: [] } } },
       ["On time. In the journal at 9:10 AM ET, due 9:15 AM ET.", "Check’s receipt time wasn’t recorded for this brief.", "on; nothing sent for this date."]],
