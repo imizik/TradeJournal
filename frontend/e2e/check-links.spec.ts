@@ -47,11 +47,55 @@ test("switched off: review and trade pages say saved advice isn't connected", as
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/advisor-review");
+  await expect(page.getByRole("heading", { name: "Advisor review", exact: true })).toBeVisible();
+  await expect(page.getByTestId("advisor-owner-review")).toHaveCount(0);
+  await expect(page.getByText("Authenticated owner entrance required")).toHaveCount(0);
   await expect(page.getByTestId("pretrade-checks-dormant")).toContainText("Saved advice isn't connected to the journal yet");
   await fitsPhone(page, "off-review");
   await page.goto(`/trades/${(await nvda(page)).id}`);
   await expect(page.getByTestId("trade-advice")).toContainText("Saved advice isn't connected to the journal yet");
   await fitsPhone(page, "off-trade");
+  expect(errors).toEqual([]);
+});
+
+test("private journal opens saved checks without requesting the isolated advisor trial", async ({ page }) => {
+  const trialReads: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/advisor-owner")) trialReads.push(request.url()); });
+  await connect(page, await nvda(page));
+  await page.goto("/");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("link", { name: "Advisor review", exact: true }).click();
+  await expect(page.getByTestId("pretrade-check-row")).toHaveCount(1);
+  await expect(page.getByTestId("advisor-owner-review")).toHaveCount(0);
+  await page.getByTestId("pretrade-check-row").getByRole("button").click();
+  await expect(page.getByTestId("pretrade-check-detail")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("advisor-review-private-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fitsPhone(page, "private-review");
+  expect(trialReads).toEqual([]);
+});
+
+for (const format of ["structured", "text"] as const) test(`saved ${format} trigger and invalidation render when a check opens`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const trade = await nvda(page);
+  await connect(page, trade);
+  const { detail } = savedCheck(trade);
+  const triggerText = "1m close above opening_range_high at 902 with expanding volume";
+  const invalidationText = "1m close back below vwap at 899 kills the setup";
+  const trigger = format === "structured" ? { description: triggerText, level: "opening_range_high", price: 902 } : triggerText;
+  const invalidation = format === "structured" ? { description: invalidationText, level: "vwap", price: 899 } : invalidationText;
+  await page.route(`**/api/check-owner/checks/${CHECK}`, route => route.fulfill({ json: { ...detail, answer: {
+    ...detail.answer, wait_for: { condition: trigger, expires_at: detail.received_at }, would_change: invalidation,
+    live: { ...detail.answer.live, trigger, invalidation },
+  } } }));
+  await page.goto(`/advisor-review?check=${CHECK}`);
+  const opened = page.getByTestId("pretrade-check-detail");
+  await expect(opened.getByText(`Wait for: ${triggerText}`, { exact: false })).toBeVisible();
+  await expect(opened.getByText(`Would change: ${invalidationText}`, { exact: true })).toBeVisible();
+  await expect(opened.getByText(`Trigger: ${triggerText}`, { exact: true })).toBeVisible();
+  await expect(opened.getByText(`Invalidation: ${invalidationText}`, { exact: true })).toBeVisible();
+  await fitsPhone(page, `${format}-conditions`);
   expect(errors).toEqual([]);
 });
 

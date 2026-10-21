@@ -54,6 +54,10 @@ function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery;
         {delivery.available_at && <p>{delivery.submitted_at
           ? <>Check received it at {clock(delivery.submitted_at, day)}; importing took {minutes(delivery.import_lag_seconds ?? 0)}.</>
           : "Check’s receipt time wasn’t recorded for this brief."} Who started the run (the scheduled task or a manual request) isn’t visible to TradeJournal.</p>}
+        {delivery.publication === "published" && <p>{delivery.context_read === "recorded" && delivery.context_read_at
+          ? <>Jo read the packet at {clock(delivery.context_read_at, day)}.</>
+          : delivery.context_read === "not_recorded" ? "No read of this date’s packet was recorded."
+          : "Whether Jo read the packet couldn’t be checked (the read trace may not have been running yet)."} A read shows the tool was called; it doesn’t prove who started the run or that Jo used the packet well.</p>}
         {!!delivery.other_briefings && <p>{delivery.other_briefings} other {delivery.other_briefings === 1 ? "brief was" : "briefs were"} saved for this date from a separate packet (a manual or recovery request); {delivery.other_briefings === 1 ? "it doesn’t" : "they don’t"} count as the scheduled delivery.</p>}
         <p>Phone watchdog: {!watchdog || watchdog.state === "unknown" ? "status unavailable."
           : watchdog.state === "off" ? "off, so no phone alert is sent for this brief."

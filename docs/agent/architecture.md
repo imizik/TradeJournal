@@ -162,6 +162,15 @@ These domains share persistence infrastructure, with explicit boundaries. Do not
    and shared benchmarks never enter journal fills/FIFO or factory ledgers.
    A3 preparation uses `JobRun` infrastructure in its own lane; its timer and
    paid adapter are disabled by default.
+5. **Personal Jo** — versioned memories and frozen morning packets/briefings in
+   the journal database (`app/engine/jo_briefing.py`, `jo_morning.py`), with
+   bounded publication and receipt import through the existing Check connection.
+   Saved checks remain in Check's separate ledger. The private journal's own
+   read-only Unix reader exposes them; explicit `check_link` records associate
+   later journal activity without changing checks or fills. Personal memories
+   stay outside Shadow's frozen packet; a shared Jo context still leaves
+   independence unverified. [The delivery board](dots-integration.md) owns scope
+   and activation evidence.
 
 ## Persistence
 

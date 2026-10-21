@@ -117,6 +117,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /trades/fills/bulk',
     'GET /trades/{trade_id}',
     'GET /trades/{trade_id}/fills',
+    'GET /trades/{trade_id}/phone-alerts',
     'GET /tradingview/alerts',
     'GET /tradingview/alerts/{alert_id}',
     'GET /webull/accounts',

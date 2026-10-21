@@ -315,6 +315,79 @@ def test_delivery_on_time_closed_unknown_and_owner_saves_have_no_submission_time
         assert session.get(MorningBriefingSubmission, UUID(on_time["briefing_id"])) is not None
 
 
+def test_first_morning_read_leaves_one_content_free_marker_and_the_view_reports_it(morning, monkeypatch):
+    """A read tells "never ran" apart from "ran but nothing arrived"; it proves neither origin nor use."""
+    h, db, config = morning
+    check = read_config(h.config_path)
+    actor = check.profiles[0].id
+    open_day = lambda day: {"status": "open", "open": 570, "close": 960}  # noqa: E731
+    outbox = Path(check.market_watch_outbox_dir)
+    marker = outbox / f"jo-read-{actor}-{NOW.date().isoformat()}.json"
+    token = h.token(scope="check:read jo:read jo:submit")
+
+    def read_at(now):
+        with TestClient(h.server(now=now).streamable_http_app()) as browser:
+            return call(browser, "jo_morning_context", {}, token)
+
+    assert read_at(NOW - timedelta(minutes=1))["isError"]  # No pointer published yet.
+    assert not list(outbox.iterdir())
+    MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], [])).run_once(NOW)
+    with Session(db) as session:
+        packet_id = str(session.exec(select(MorningBriefingPacket)).one().id)
+        view = lambda: morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]  # noqa: E731
+        # No earlier marker: an old Check runtime or a day before the trace existed, so absence is unknown.
+        assert view()["fulfilment"] == "missing" and view()["context_read"] == "unknown"
+        exchange.record_read(str(outbox), actor, (NOW.date() - timedelta(days=1)).isoformat(), uuid4(), NOW - timedelta(days=1))
+        unread = view()
+        assert unread["context_read"] == "not_recorded" and unread["context_read_at"] is None
+
+    # A marker that can't be written never fails the read.
+    def broken(*args):
+        raise OSError("fixture outbox unavailable")
+    with monkeypatch.context() as patch:
+        patch.setattr(exchange, "record_read", broken)
+        assert not read_at(NOW + timedelta(minutes=5)).get("isError")
+    assert not marker.exists()
+
+    first = read_at(NOW + timedelta(minutes=17))
+    assert not first.get("isError") and first["structuredContent"]["packet"]["id"] == packet_id
+    recorded = json.loads(marker.read_text())
+    assert recorded == {"schema_version": "jo-read-v1", "profile_id": actor, "day": NOW.date().isoformat(),
+        "packet_id": packet_id, "read_at": (NOW + timedelta(minutes=17)).isoformat()}
+    original = marker.read_bytes()
+    assert not read_at(NOW + timedelta(minutes=25)).get("isError")
+    assert marker.read_bytes() == original  # Later reads keep the first.
+    assert read_at(NOW + timedelta(hours=5))["isError"]  # Expired publication: refused, marker untouched.
+    assert marker.read_bytes() == original and len(list(outbox.glob("jo-read-*.json"))) == 2
+    # A concurrent first read that loses the race to a different clock keeps the winner without failing.
+    later = (NOW.date() + timedelta(days=1)).isoformat()
+    real_write = exchange.write
+    def race(directory, name, value):
+        real_write(directory, name, {**value, "read_at": "winner"})
+        real_write(directory, name, value)
+    with monkeypatch.context() as patch:
+        patch.setattr(exchange, "write", race)
+        exchange.record_read(str(outbox), actor, later, packet_id, NOW + timedelta(days=1))
+    assert json.loads((outbox / f"jo-read-{actor}-{later}.json").read_text())["read_at"] == "winner"
+    (outbox / f"jo-read-{actor}-{later}.json").unlink()
+    with Session(db) as session:
+        view = morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]
+        assert view["context_read"] == "recorded" and view["context_read_at"] == (NOW + timedelta(minutes=17)).isoformat()
+        assert view["fulfilment"] == "missing" and view["origin"] == "unknown"
+    # A marker for another packet, or one the app can't read, stays unknown, never "not read".
+    with pytest.raises(ValueError, match="does not match"):
+        exchange.read_marker(str(outbox), actor, NOW.date().isoformat(), uuid4())
+    marker.chmod(0)
+    try:
+        with Session(db) as session:
+            assert morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]["context_read"] == "unknown"
+    finally:
+        marker.chmod(0o640)
+    # The importer's scan never treats the marker as a submission.
+    runner = MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], []))
+    assert runner.run_once(NOW + timedelta(minutes=32))["errors"] == 0 and runner.pending["unreadable"] == 0
+
+
 def test_runner_reports_waiting_and_unreadable_submissions_for_its_own_profile(morning):
     h, db, config = morning
     check = read_config(h.config_path)

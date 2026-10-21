@@ -19,6 +19,7 @@ from app.routers import health, accounts, fills, trades, stats, rebuild, quotes,
 from app.routers import level_alerts as level_alerts_router
 from app.routers import captures as captures_router
 from app.routers import check_links as check_links_router
+from app.routers import position_alerts as position_alerts_router
 from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
@@ -196,12 +197,14 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     from app.engine.options_chain import options_chain
     from app.engine.setup_scanner import SetupScanner, enabled as scanner_enabled
     from app.engine.stock_watch import enabled as stock_watch_enabled
+    from app.engine.position_alerts import PositionAlerts, enabled as position_alerts_enabled
 
     paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
     scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time,
                            paper_enabled=scanner_enabled()) if scanner_enabled() or stock_watch_enabled() else None
+    positions = PositionAlerts(engine, chart_calendar, clock=time.time) if position_alerts_enabled() else None
     monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper,
-                                scanner=scanner)
+                                scanner=scanner, positions=positions)
     stream.attach(monitor)
     await monitor.start()
     app_.state.level_alerts = monitor
@@ -345,6 +348,7 @@ if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     app.include_router(scanner_router.router, prefix="/scanner", tags=["scanner"])
 app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
+app.include_router(position_alerts_router.router, prefix="/trades", tags=["position alerts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     # The isolated replay overlay has no journal monthly-review module/models.

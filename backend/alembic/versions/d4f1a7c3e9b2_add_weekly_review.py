@@ -1,13 +1,13 @@
 """Weekly review: one exit rule per week and how it went.
 
 Revision ID: d4f1a7c3e9b2
-Revises: c7e2a9d4b1f8
+Revises: a3d8f6c2e9b1
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "d4f1a7c3e9b2"
-down_revision = "c7e2a9d4b1f8"
+down_revision = "a3d8f6c2e9b1"
 branch_labels = None
 depends_on = None
 

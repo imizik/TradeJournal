@@ -505,6 +505,65 @@ class LevelAlertEvent(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class PositionWatch(SQLModel, table=True):
+    """What the open-trade alerts remember about one open option position, so a
+    restart keeps its peak. Anchored like CheckLink in the first entry fill's
+    source identity (account plus ``raw_email_id``), which survives trade
+    rebuilds. ``generation`` counts armings: a new cost basis (buying more, or a
+    first-in-first-out sale that leaves differently priced lots) starts a new one
+    with a fresh peak; a sale that leaves the basis unchanged only lowers ``contracts``."""
+
+    __tablename__ = "position_watch"
+    __table_args__ = (UniqueConstraint("account_id", "source_key", name="uq_position_watch_position"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID
+    source_key: str
+    generation: int = 0
+    contracts: float  # still open, as last seen
+    avg_cost: float  # per contract, of what is still open: the basis this generation is judged on
+    peak_mark: Optional[float] = None  # per contract: the best midpoint seen this generation
+    peak_at: Optional[datetime] = None  # UTC
+    armed_at: Optional[datetime] = None  # UTC: the gain first reached the arming threshold this generation
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PositionAlert(SQLModel, table=True):
+    """One open-trade phone alert (give-back or last-day expiry), written once:
+    the unique (position, kind, generation) keeps a restart or a second process
+    from recording it twice. Delivery is an outbox on the same row; a send that
+    may have reached ntfy is recorded ``unknown`` and never resent."""
+
+    __tablename__ = "position_alert"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source_key", "kind", "generation", name="uq_position_alert_firing"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)
+    kind: str  # giveback | expiry_first | expiry_final
+    generation: int  # the give-back arming; 0 for expiry alerts
+    trade_id: uuid.UUID  # the trade when it fired, for the notification's link (trades are rebuilt; read by source_key)
+    contract: str  # e.g. "SNDK 9/18/26 230C"
+    contracts: float
+    avg_cost: float  # per contract, of what was still open
+    mark: Optional[float] = None  # per contract: the bid/ask midpoint judged
+    bid: Optional[float] = None  # per contract
+    gain: Optional[float] = None  # dollars at the mark
+    gain_pct: Optional[float] = None
+    peak_gain: Optional[float] = None
+    peak_gain_pct: Optional[float] = None
+    quoted_at: Optional[datetime] = None  # UTC, Tradier's bid time
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class CaptureTemplate(SQLModel, table=True):
     """A favorite pre-trade template (Charts C3.4): the user's setup label and
     their own invalidation/exit wording. Editing bumps ``revision``; a capture
