@@ -341,7 +341,7 @@ class PlanMonitor:
             message = f"{messages[e['state']]}\nObserved {at:%H:%M:%S} ET. "
             if e["bar"]:
                 message += f"Close {e['bar']['close']:g}. "
-            message += f"\nYour saved plan: {plan['rationale']}\nAdvisory only; no entry, exit, or order assumed.\nPlan {plan['plan_id']}"
+            message += f"\nYour saved plan: {plan['rationale']}\nAdvisory only; no entry, exit, or order assumed."
 
             def send(e=e, message=message):
                 current = self.clock()
