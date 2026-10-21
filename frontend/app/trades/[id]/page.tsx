@@ -11,6 +11,7 @@ import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
 import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
 import TradeAdvice from "@/components/TradeAdvice";
+import TradePhoneAlerts from "@/components/TradePhoneAlerts";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -155,6 +156,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
         <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
       </section>}
+
+      <TradePhoneAlerts tradeId={id} />
 
       <TradeAdvice tradeId={id} />
 
