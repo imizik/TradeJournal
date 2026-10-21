@@ -64,6 +64,19 @@ assertion on the fact it is meant to show.
 bash scripts/ux_sandbox.sh        # run in the background; ready in ~10 s
 ```
 
+In a worktree without installed dependencies, reuse an existing checkout
+without installing packages or changing that checkout:
+
+```bash
+UX_BACKEND_PYTHON=/path/to/TradeJournal/backend/.venv/bin/python \
+UX_FRONTEND_NODE_MODULES_DIR=/path/to/TradeJournal/frontend/node_modules \
+bash scripts/ux_sandbox.sh --no-keys
+```
+
+The sandbox temporarily links the supplied frontend dependencies into the
+worktree and removes that link when it stops. It runs Next.js in webpack mode
+so the external dependency link is supported by the bundler.
+
 - Real candles, quotes, news and automatic levels from the market-data keys
   in the main checkout's `backend/.env` (or `--keys-from FILE`; `--no-keys`
   for records only). Nothing else from that file is loaded.

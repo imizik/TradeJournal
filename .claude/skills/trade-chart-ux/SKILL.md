@@ -40,6 +40,10 @@ request to review):
 How to get pictures and drive the app: `references/seeing-the-ui.md`. Read
 it before the first screenshot.
 
+For the owner's morning outlook → intraday thoughts → end-of-day comparison,
+use [the repeatable day journey](references/day-review-journey.md). It defines
+the scenario, persistence checks and completion criteria for the UX follow-up.
+
 ## Evidence before taste
 
 Label every claim, and never upgrade a label without doing the work:
