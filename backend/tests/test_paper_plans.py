@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import UTC, date, datetime
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -264,6 +265,111 @@ def test_each_paper_event_is_sent_once_and_retried_on_failure(engine, monkeypatc
     assert len(sent) == 1
     title, body, path = sent[0]
     assert title == "PRACTICE · SPY trigger" and "Not a real trade" in body and path == f"/?decision={rid}"
+
+
+def trigger_event(engine):
+    with Session(engine) as db:
+        return db.exec(select(DecisionEvent).where(DecisionEvent.event_type == "trigger")).one()
+
+
+def test_a_stale_claim_is_recorded_unknown_and_never_resent(engine, monkeypatch):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    sent = []
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, path="": sent.append(title))
+    with Session(engine) as db:
+        event = trigger_event(engine)
+        event = db.get(DecisionEvent, event.id)
+        # A pass claimed it and died; its request may already have reached ntfy.
+        event.delivery, event.claimed_at, event.attempts = "sending", datetime.fromtimestamp(clock.now - paper.CLAIM_SECONDS - 1, UTC), 1
+        db.add(event)
+        db.commit()
+    w.deliver()
+    clock.now += 3600
+    w.deliver()
+    event = trigger_event(engine)
+    assert sent == [] and event.delivery == "unknown" and event.attempts == 1
+    assert "may have reached the phone" in event.last_error
+    with Session(engine) as db:
+        shown = [e for e in paper.paper_row(db, rid)["events"] if e["type"] == "trigger"][0]
+    assert shown["delivery"] == "unknown" and "not resent" in shown["delivery_error"]
+
+
+def test_a_fresh_claim_is_left_alone(engine, monkeypatch):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: pytest.fail("a claimed event was sent again"))
+    with Session(engine) as db:
+        event = db.get(DecisionEvent, trigger_event(engine).id)
+        event.delivery, event.claimed_at = "sending", datetime.fromtimestamp(clock.now - 30, UTC)
+        db.add(event)
+        db.commit()
+    w.deliver()
+    assert trigger_event(engine).delivery == "sending"
+
+
+@pytest.mark.parametrize("cause,outcome", [
+    (None, "pending"),  # not configured, or ntfy answered with a refusal status
+    (httpx.ConnectError("refused"), "pending"),
+    (httpx.ConnectTimeout("no route"), "pending"),
+    (httpx.ReadTimeout("no answer"), "unknown"),
+    (httpx.RemoteProtocolError("dropped"), "unknown"),
+    (httpx.WriteError("broken pipe"), "unknown"),
+])
+def test_only_a_send_that_surely_never_left_is_retried(engine, monkeypatch, cause, outcome):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    calls = []
+
+    def publish(title, body, path=""):
+        calls.append(title)
+        if len(calls) == 1:
+            raise ntfy.NtfyError("ntfy failed") from cause
+
+    monkeypatch.setattr(ntfy, "publish", publish)
+    w.deliver()
+    event = trigger_event(engine)
+    assert event.delivery == outcome and event.attempts == 1
+    clock.now += 60
+    w.deliver()
+    w.deliver()
+    assert len(calls) == (2 if outcome == "pending" else 1)
+    assert trigger_event(engine).delivery == ("sent" if outcome == "pending" else "unknown")
+
+
+def test_an_event_older_than_six_hours_expires_instead_of_sending(engine, monkeypatch):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: (_ for _ in ()).throw(ntfy.NtfyError("down")))
+    w.deliver()
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: pytest.fail("a six-hour-old event was sent"))
+    clock.now += paper.EXPIRE_SECONDS + 1
+    w.deliver()
+    event = trigger_event(engine)
+    assert event.delivery == "expired" and event.attempts == 1
+
+
+def test_concurrent_delivery_passes_send_each_event_once(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    db_engine = create_engine(f"sqlite:///{tmp_path / 'deliver.db'}", connect_args={"check_same_thread": False, "timeout": 10})
+    SQLModel.metadata.create_all(db_engine)
+    try:
+        rid, feed, clock, w = lifecycle(db_engine)
+        w.run()
+        sent, start = [], Barrier(2)
+        monkeypatch.setattr(ntfy, "publish", lambda title, body, path="": sent.append(title))
+
+        def run_pass(_):
+            start.wait(timeout=5)
+            watcher(db_engine, feed, clock).deliver()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(run_pass, range(2)))
+        assert sent == ["PRACTICE · SPY trigger"] and trigger_event(db_engine).delivery == "sent"
+    finally:
+        db_engine.dispose()
 
 
 def test_a_late_message_says_it_is_late_and_an_on_time_one_does_not():
