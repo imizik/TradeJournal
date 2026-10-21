@@ -35,6 +35,12 @@ slice; the detailed contracts continue to own implementation and acceptance.
    Dry run approved; exactly two development sessions await the new isolated
    connection. Evaluation remains inactive. Shadow and production remain
    unchanged. This does not reopen unrelated advisor features.
+   **Bounded exception October 21, 2026:** after the read-only
+   [behavior audit](../backend/reports/behavior_audit_2026-10-21.md) found exits,
+   not entries, losing the money, Isaac selected open-trade phone alerts: a long
+   option that was up gives its gain back, or is still open on its last day.
+   Alerts only, off until he enables `POSITION_ALERTS_ENABLED`. This does not
+   reopen other non-Dots work.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
    now merged), close its remaining activation/operational gates, and observe one
