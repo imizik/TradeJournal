@@ -258,7 +258,7 @@ export function phoneAlerts(data: JoDayData, day: string) {
   notices.forEach((n, i) => alerts.push({ key: `watchdog-${i}-${n.at}`, at: n.at ?? null, about: `Watchdog: ${n.title}`, outcome: pushOutcome[n.outcome] ?? pushOutcome.unknown }));
   // Sources whose record couldn't be read: their pushes may exist but aren't shown.
   const unread = [!data.plans ? "price watches" : null, !reads || !data.reads?.messages ? "Jo's read messages" : null,
-    data.morning?.delivery?.notifications.watchdog?.state === "unknown" || reads?.watchdog.state === "unknown" || !data.morning || !reads ? "the watchdog" : null]
+    !data.morning?.delivery?.notifications.watchdog || data.morning.delivery.notifications.watchdog.state === "unknown" || reads?.watchdog.state === "unknown" || !data.morning || !reads ? "the watchdog" : null]
     .filter(Boolean) as string[];
   return { alerts: alerts.sort((a, b) => Date.parse(a.at ?? "") - Date.parse(b.at ?? "")), unread };
 }
@@ -277,7 +277,7 @@ function PhoneAlerts({ data, day, live }: { data: JoDayData; day: string; live: 
       </div></li>)}</ul>
       : <p className="mt-1 py-2 text-sm text-muted-foreground">No phone alerts recorded{live ? " today" : " for this day"}.</p>}
     <p className="text-xs text-muted-foreground">&ldquo;Sent to ntfy&rdquo; means the push service accepted it; the app can&apos;t see whether your phone showed it.
-      ChatGPT&apos;s own notifications aren&apos;t recorded here.{unread.length ? ` Couldn't read the record of ${unread.join(" or ")}, so pushes from it may be missing here.` : ""}</p>
+      ChatGPT&apos;s own notifications aren&apos;t recorded here.{unread.length ? ` Couldn't read the record of ${unread.length > 1 ? `${unread.slice(0, -1).join(", ")} or ${unread.at(-1)}` : unread[0]}, so some pushes may be missing here.` : ""}</p>
   </div>;
 }
 

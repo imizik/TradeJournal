@@ -115,7 +115,8 @@ async function joMonths(months: string[]): Promise<JoMonths> {
   const [morning, reads, plans] = settled;
   return {
     morning: new Map(morning.status === "fulfilled" ? morning.value.flatMap((m) => m.days.map((d) => [d.day, d] as const)) : []),
-    reads: new Map(reads.status === "fulfilled" ? reads.value.flatMap((v) => v.sessions.map((s) => [s.session_date, s] as const)) : []),
+    // A server without the market-read store has no read records at all: no mark, not "unknown".
+    reads: new Map(reads.status === "fulfilled" ? reads.value.filter((v) => v.reads_available).flatMap((v) => v.sessions.map((s) => [s.session_date, s] as const)) : []),
     plans: plans.status === "fulfilled" ? plans.value : null,
     failed: [["briefings", morning], ["market reads", reads], ["price watches", plans]]
       .filter(([, r]) => (r as PromiseSettledResult<unknown>).status === "rejected").map(([name]) => name as string),
@@ -219,9 +220,12 @@ function MonthGrid({ month, days, weekends, review, jo }: { month: string; days:
           const day = byDay.get(dayNumber);
           const date = `${month}-${String(dayNumber).padStart(2, "0")}`;
           const mark = jo ? joMark(jo, date) : null;
-          if (!day) return <div key={dayNumber} aria-label={mark ? `${formatDate(date)}: no trades, Jo: ${mark.text}` : undefined}
-            className="flex min-h-14 flex-col justify-between rounded-md border border-border/50 p-1.5 text-xs text-muted-foreground/50 sm:min-h-20 sm:p-2">
-            <span>{dayNumber}</span>{mark && <JoBadge mark={mark} />}</div>;
+          const empty = "flex min-h-14 flex-col justify-between rounded-md border border-border/50 p-1.5 text-xs text-muted-foreground/50 sm:min-h-20 sm:p-2";
+          // A day with no trades but a Jo record opens that day's Jo section.
+          if (!day) return mark
+            ? <a key={dayNumber} href={`/daily/${date}#jo`} aria-label={`${formatDate(date)}: no trades, Jo: ${mark.text}`} className={`${empty} transition-colors hover:border-foreground/40`}>
+              <span>{dayNumber}</span><JoBadge mark={mark} /></a>
+            : <div key={dayNumber} className={empty}>{dayNumber}</div>;
           const state = reviewState(day);
           const trades = `${day.trade_count} trade${day.trade_count === 1 ? "" : "s"}`;
           const pnl = day.closed_pnl == null ? "nothing closed" : money(day.closed_pnl, { signed: true, cents: false });
