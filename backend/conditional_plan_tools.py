@@ -77,7 +77,13 @@ def register(server, config, ledger, authenticated, scopes, clock):
         except Conflict as exc:
             raise ToolError(str(exc)) from None
         except (ValueError, NotFound) as exc:
-            # Our own refusal reasons; nothing was saved.
+            # Our own refusal reasons; no plan was saved. The bounded refusal receipt
+            # goes to the app so the owner sees it without relying on Jo's reply.
+            if getattr(exc, "refusal", None):
+                try:
+                    await asyncio.to_thread(export, config.market_watch_outbox_dir, exc.refusal)
+                except errors:
+                    pass
             raise ToolError(
                 f"REFUSED, nothing saved: {exc}. Tell the owner you cannot watch "
                 "this and why; do not promise monitoring."

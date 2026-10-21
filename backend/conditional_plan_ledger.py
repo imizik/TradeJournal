@@ -9,14 +9,25 @@ from cloud_mcp_check_ledger import Conflict, NotFound
 from conditional_plan_common import (
     FORMAT,
     MAX_DAILY_PLANS,
+    MAX_DAILY_REFUSALS,
+    REFUSAL_FORMAT,
     FRESH_SECONDS,
     price,
     readiness,
     validate_plan,
     validate_cancel,
+    validate_refusal,
 )
 from market_watch_common import digest, parse_time, seal
-from stock_watch_common import stamp, write_once, validate_alert
+from stock_watch_common import ET, stamp, write_once, validate_alert
+
+# Our own refusal messages, by the code the owner's screens explain in plain words.
+REFUSAL_CODES = (
+    ("not one of the owner's selected scanner tickers", "ticker_not_selected"),
+    ("monitor", "monitor_off"),
+    ("No verified open regular session", "no_session"),
+    ("new plans per session reached", "daily_cap"),
+)
 
 
 class PlanLedger:
@@ -30,14 +41,21 @@ class PlanLedger:
                   request_sha256 TEXT NOT NULL, record_json TEXT NOT NULL, UNIQUE(actor,operation_id));
                 CREATE TABLE IF NOT EXISTS conditional_plan_cancel (
                   plan_id TEXT PRIMARY KEY, actor TEXT NOT NULL, record_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS conditional_plan_refusal (
+                  refusal_id TEXT PRIMARY KEY, actor TEXT NOT NULL, session_date TEXT NOT NULL,
+                  record_json TEXT NOT NULL);
             """)
-            for table in ("conditional_plan", "conditional_plan_cancel"):
+            for table, key in (
+                ("conditional_plan", "plan_id"),
+                ("conditional_plan_cancel", "plan_id"),
+                ("conditional_plan_refusal", "refusal_id"),
+            ):
                 for action in ("UPDATE", "DELETE"):
                     db.execute(
                         f"CREATE TRIGGER IF NOT EXISTS {table}_no_{action.lower()} BEFORE {action} ON {table} BEGIN SELECT RAISE(ABORT,'immutable conditional plan'); END"
                     )
                 db.execute(
-                    f"CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table} WHEN EXISTS(SELECT 1 FROM {table} WHERE plan_id=NEW.plan_id) BEGIN SELECT RAISE(ABORT,'immutable conditional plan'); END"
+                    f"CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table} WHEN EXISTS(SELECT 1 FROM {table} WHERE {key}=NEW.{key}) BEGIN SELECT RAISE(ABORT,'immutable conditional plan'); END"
                 )
         finally:
             db.close()
@@ -132,6 +150,7 @@ class PlanLedger:
             raise ValueError("Require bounded retry key")
         request_hash = digest(request)
         db = self.ledger._connect()
+        symbol = None
         try:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute(
@@ -205,8 +224,88 @@ class PlanLedger:
             )
             db.commit()
             return record
+        except (ValueError, NotFound) as exc:
+            # Nothing is saved, but the owner can see what Jo asked for and why it was
+            # refused. The caller exports exc.refusal (None once the daily cap is hit).
+            db.rollback()
+            try:
+                exc.refusal = self.refuse(
+                    db, actor, request, request_hash, str(exc), symbol, clock()
+                )
+            except Exception:  # never mask the refusal Jo must relay
+                db.rollback()
+                exc.refusal = None
+            raise
         finally:
             db.close()
+
+    def refuse(self, db, actor, request, request_hash, reason, symbol, now):
+        """Bounded receipt of a refused create; an exact retry returns the same receipt."""
+        session_date = now.astimezone(ET).date().isoformat()
+        refusal_id = "cpr_" + str(uuid.UUID(digest([actor, request_hash, reason])[:32]))
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT record_json FROM conditional_plan_refusal WHERE refusal_id=? AND actor=?",
+            (refusal_id, actor),
+        ).fetchone()
+        if row:
+            db.rollback()
+            return validate_refusal(json.loads(row[0]))
+        if (
+            db.execute(
+                "SELECT COUNT(*) FROM conditional_plan_refusal WHERE actor=? AND session_date=?",
+                (actor, session_date),
+            ).fetchone()[0]
+            >= MAX_DAILY_REFUSALS
+        ):
+            db.rollback()
+            return None
+
+        def level(key):
+            try:
+                return price(request.get(key))
+            except ValueError:
+                return None
+
+        expires = request.get("expires_at")
+        try:
+            expires = stamp(parse_time(expires))
+        except (ValueError, TypeError):
+            expires = None
+        record = seal(
+            {
+                "format": REFUSAL_FORMAT,
+                "refusal_id": refusal_id,
+                "actor": actor,
+                "session_date": session_date,
+                "symbol": symbol,
+                "source_kind": request.get("source_kind")
+                if request.get("source_kind") in ("check", "stock_alert")
+                else None,
+                "direction": request.get("direction")
+                if request.get("direction") in ("long", "short")
+                else None,
+                "trigger_price": level("trigger_price"),
+                "invalidation_price": level("invalidation_price"),
+                "confirm_bars": request.get("confirm_bars")
+                if request.get("confirm_bars") in (1, 2, 3)
+                and type(request.get("confirm_bars")) is int
+                else None,
+                "expires_at": expires,
+                "reason": reason[:300] or "refused",
+                "reason_code": next(
+                    (code for text, code in REFUSAL_CODES if text in reason), "other"
+                ),
+                "created_at": stamp(now),
+            }
+        )
+        validate_refusal(record)
+        db.execute(
+            "INSERT INTO conditional_plan_refusal VALUES(?,?,?,?)",
+            (refusal_id, actor, session_date, json.dumps(record)),
+        )
+        db.commit()
+        return record
 
     def cancel(self, actor, plan_id, clock):
         plan = self.get(actor, plan_id)
@@ -241,6 +340,9 @@ class PlanLedger:
 
 
 def export(directory, record):
+    if record["format"] == REFUSAL_FORMAT:
+        write_once(directory, f"conditional-plan-refusal-{record['refusal_id']}.json", record)
+        return
     prefix = (
         "conditional-plan" if record["format"] == FORMAT else "conditional-plan-cancel"
     )

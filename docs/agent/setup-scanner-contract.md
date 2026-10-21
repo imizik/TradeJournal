@@ -459,12 +459,24 @@ It claims active monitoring only from the derived status's fresh heartbeat with
 the app flag on; a stale heartbeat, a failed or ended plan, or a switched-off
 feature never reads as watching. It adds no store and no assistant or service grant.
 
-A refused `conditional_plan_create` saves nothing and returns the specific reason
+A refused `conditional_plan_create` saves no plan and returns the specific reason
 (monitor off, never reported or stale; no open session; ticker not selected,
 with the selected list; stale or missing source; levels or expiry; the 24-plan
-cap) so Jo can say what it cannot watch and why. Refusals are not recorded:
-the Check ledger keeps only the time and tool name of each call, so the owner
-sees refusals in Jo's reply, not on the watches screen.
+cap) so Jo can say what it cannot watch and why. It also writes a refusal
+receipt (`conditional-plan-refusal-v1`) to the new append-only
+`conditional_plan_refusal` Check-ledger table and exports it to the outbox as
+`conditional-plan-refusal-cpr_*.json`: time, ET session date, symbol (null when
+refused before the source was read), source kind, direction, levels, confirm
+bars and expiry as Jo sent them, the reason (≤300 characters) and a reason code
+(`ticker_not_selected`, `monitor_off`, `no_session`, `daily_cap`, `other`). No
+rationale, source ID, operation ID or credential is kept. An exact retry
+returns the same receipt; at most 24 are recorded per actor and session, after
+which refusals still return their reason but are not recorded. Recording or
+export failure never masks the reason Jo receives. The owner view validates
+these files and returns the latest 50 as `refusals`; Morning → Jo's price
+watches lists them as refused requests and the Daily Review's Jo's day shows
+each as a Done row ("Jo couldn't watch TSLA: not one of your scanner tickers").
+They are never counted or monitored as plans.
 
 ### Activation and acceptance
 

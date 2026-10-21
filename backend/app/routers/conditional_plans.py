@@ -1,7 +1,8 @@
 """Owner view of Jo's conditional price plans. Read-only; no store of its own.
 
 Plans come from the immutable market-watch wake store (accepted by the app
-monitor) and the Check outbox (saved by Jo, maybe not yet picked up). Monitoring
+monitor) and the Check outbox (saved by Jo, maybe not yet picked up); refused
+requests come only from the Check outbox. Monitoring
 is claimed only from the derived status projection's fresh heartbeat.
 """
 
@@ -13,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from app.engine import ntfy
-from conditional_plan_common import HEARTBEAT_SECONDS, MAX_DAILY_PLANS, read_json, status, validate_plan
+from conditional_plan_common import HEARTBEAT_SECONDS, MAX_DAILY_PLANS, read_json, status, validate_plan, validate_refusal
 from market_watch_common import parse_time, verify
 from stock_watch_common import ET, stamp
 
@@ -72,7 +73,7 @@ def list_plans():
     configured = all(p and Path(p).is_absolute() for p in (store_path, snapshots, outbox))
     view = {"checked_at": stamp(now), "app_flag": enabled(), "stock_watch": stock_enabled(), "configured": configured,
             "readiness": {"heartbeat": "missing"}, "max_daily_plans": MAX_DAILY_PLANS, "limit": LIMIT,
-            "delivery": {"channel": "ntfy phone push", "configured": ntfy.configured()}, "plans": []}
+            "delivery": {"channel": "ntfy phone push", "configured": ntfy.configured()}, "plans": [], "refusals": []}
     view["enabled"] = view["app_flag"] and view["stock_watch"]
     if not configured:
         return view
@@ -95,6 +96,16 @@ def list_plans():
                 plans.setdefault(p["plan_id"], p)
         except Exception:
             log.exception("Conditional plan export unreadable: %s", path.name)
+    # Watches Jo asked for that the Check service refused: nothing was saved or watched.
+    refusals = []
+    for path in Path(outbox).glob("conditional-plan-refusal-cpr_*.json"):
+        try:
+            r = validate_refusal(read_json(path))
+            if path.name == f"conditional-plan-refusal-{r['refusal_id']}.json":
+                refusals.append({k: v for k, v in r.items() if k not in ("schema_version", "content_sha256")})
+        except Exception:
+            log.exception("Conditional plan refusal unreadable: %s", path.name)
+    view["refusals"] = sorted(refusals, key=lambda r: r["created_at"], reverse=True)[:LIMIT]
     chosen = sorted(plans.values(), key=lambda p: p["created_at"], reverse=True)[:LIMIT]
 
     by_session = {}

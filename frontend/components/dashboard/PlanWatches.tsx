@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { getPlans, type PlanDelivery, type PlansView, type PlanState, type PlanView } from "@/lib/conditionalPlans";
+import { getPlans, refusalRule, refusalWords, type PlanDelivery, type PlanRefusal, type PlansView, type PlanState, type PlanView } from "@/lib/conditionalPlans";
 
 const zone = "America/New_York";
 const clock = (value: string | number) => new Date(typeof value === "number" ? value * 1000 : value).toLocaleTimeString("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
@@ -124,6 +124,19 @@ function Plan({ p }: { p: PlanView }) {
   </li>;
 }
 
+function Refusal({ r, max }: { r: PlanRefusal; max: number }) {
+  const rule = refusalRule(r);
+  return <li data-testid="plan-refusal" className="min-w-0 space-y-1 rounded-lg border bg-card p-4 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="font-semibold">{r.symbol ?? "Unknown ticker"}{r.direction ? ` · ${r.direction === "long" ? "Long" : "Short"} watch` : ""}</h3>
+      <span className={`rounded-full border px-2 py-0.5 text-xs ${warn}`}>Refused · not saved</span>
+    </div>
+    <p>Jo couldn&apos;t watch this: {refusalWords(r, max)}.</p>
+    {rule && <p className="text-muted-foreground">Asked for: {rule}{r.expires_at ? ` · until ${clock(r.expires_at)}` : ""}</p>}
+    <p className="text-muted-foreground">{new Date(r.created_at).toLocaleDateString("en-US", { timeZone: zone, month: "short", day: "numeric" })} {clock(r.created_at)} · reason given to Jo: {r.reason}</p>
+  </li>;
+}
+
 export default function PlanWatches() {
   const [data, setData] = useState<PlansView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,7 +178,7 @@ export default function PlanWatches() {
         <p className="font-medium">Monitoring status unknown</p>
         <p className="text-sm">This screen could not refresh, so it cannot confirm anything is being watched. Pull to reload or tap Refresh.</p>
       </section> : <Banner v={data} />}
-      <p className="text-sm text-muted-foreground">Alerts go to your phone as an ntfy push.{data.delivery.configured ? " ntfy accepting a push does not prove your phone showed it." : " ntfy is not configured on this server, so no phone alert can be sent."} When Jo can&apos;t accept a watch it is told why and should tell you; refused requests are not saved here.</p>
+      <p className="text-sm text-muted-foreground">Alerts go to your phone as an ntfy push.{data.delivery.configured ? " ntfy accepting a push does not prove your phone showed it." : " ntfy is not configured on this server, so no phone alert can be sent."} When Jo can&apos;t accept a watch it is told why, and the refused request is listed below; nothing is watched for it.</p>
       <section aria-label="Active watches" className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current ({active.length})</h2>
         {active.length ? <ul className="space-y-3">{active.map((p) => <Plan key={p.plan_id} p={p} />)}</ul> : <p className="text-sm text-muted-foreground">No current watches. Nothing is being monitored for you.</p>}
@@ -173,6 +186,10 @@ export default function PlanWatches() {
       {!!ended.length && <section aria-label="Ended watches" className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Ended ({ended.length})</h2>
         <ul className="space-y-3">{ended.map((p) => <Plan key={p.plan_id} p={p} />)}</ul>
+      </section>}
+      {!!data.refusals?.length && <section aria-label="Refused requests" className="space-y-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Refused requests ({data.refusals.length})</h2>
+        <ul className="space-y-3">{data.refusals.map((r) => <Refusal key={r.refusal_id} r={r} max={data.max_daily_plans} />)}</ul>
       </section>}
       <p className="text-xs text-muted-foreground">Checked {clock(data.checked_at)} · latest {data.limit} watches</p>
     </>}

@@ -3,7 +3,7 @@
 Run only through ``bash scripts/ux_sandbox.sh --jo-day``, which seeds the sandbox database and starts
 the frontend. This replaces the sandbox backend with the same app plus a simulation clock and a
 ``/__sim`` control route. Scripted Jo writes through the same ledgers and outboxes the Check service
-uses after sign-in (briefing submission, market-read notice, conditional-plan export); the app's own
+uses after sign-in (briefing submission, market-read notice, conditional-plan export and refusal receipt); the app's own
 importers, plan monitor and API judge them. The MCP sign-in layer, ChatGPT and real prices are not
 involved: prices are invented and phone pushes are recorded, never sent.
 
@@ -255,7 +255,9 @@ def main():
             plan_ledger.create(profile, {"operation_id": "sim-tsla", "source_kind": "stock_alert", "source_id": stock_alert("TSLA", 250)["alert_id"],
                 "direction": "long", "trigger_price": 252.0, "invalidation_price": 245.0, "confirm_bars": 2,
                 "expires_at": stamp(Clock.now + timedelta(hours=2)), "rationale": "TSLA breakout"}, public, lambda: Clock.now)
-        except Exception as error:  # the refusal Jo would relay in chat; nothing is saved
+        except ValueError as error:  # Jo relays this in chat; the receipt goes to the app as the Check tool does
+            if error.refusal:
+                export(outbox, error.refusal)
             return f"refused: {error}"
         return "unexpectedly accepted"
 

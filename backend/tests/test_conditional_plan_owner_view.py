@@ -1,13 +1,16 @@
 """Owner view of Jo's plans and the refusal reasons Jo receives."""
 
 from datetime import timedelta
+import json
+import sqlite3
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
 from app.routers import conditional_plans as route
-from conditional_plan_common import MAX_DAILY_PLANS
+from conditional_plan_common import MAX_DAILY_PLANS, MAX_DAILY_REFUSALS, read_json, validate_refusal
+from conditional_plan_ledger import export
 from stock_watch_common import stamp
 from tests.test_conditional_plans import bar, create, monitor, observe, ready, setup as setup
 from tests.test_cloud_mcp_check import call, harness as harness, signing_key as signing_key
@@ -150,4 +153,55 @@ def test_jo_receives_the_refusal_reason(harness, tmp_path):
         assert result["isError"]
         text = result["content"][0]["text"]
         assert "REFUSED, nothing saved: NBIS is not one of the owner's selected scanner tickers (SPY)" in text
-        assert list(outbox.iterdir()) == []
+        # No plan is exported, only the refusal receipt the owner's screens show.
+        (exported,) = outbox.iterdir()
+        assert exported.name.startswith("conditional-plan-refusal-cpr_")
+        refusal = validate_refusal(read_json(exported))
+        assert refusal["symbol"] == "NBIS" and refusal["reason_code"] == "ticker_not_selected"
+        assert refusal["trigger_price"] == 105.0 and "rationale" not in refusal
+        assert call(client, "conditional_plan_create", request, token)["isError"]
+        assert len(list(outbox.iterdir())) == 1  # an exact retry is the same receipt
+
+
+def refused(s, **changes):
+    with pytest.raises(ValueError) as caught:
+        create(s, **changes)
+    if caught.value.refusal:
+        export(s.outbox, caught.value.refusal)
+    return caught.value.refusal
+
+
+def test_refusals_are_recorded_bounded_and_shown_to_the_owner(setup, view):
+    s = setup
+    ready(s.public, symbols=["SPY"])
+    r = refused(s, operation_id="tsla")
+    assert r["symbol"] == "NBIS" and r["direction"] == "long" and r["confirm_bars"] == 2
+    assert r["reason"] == "NBIS is not one of the owner's selected scanner tickers (SPY)"
+    assert r["session_date"] == s.now.date().isoformat()
+    assert refused(s, operation_id="tsla") == r
+    ready(s.public, enabled=False)
+    off = refused(s, operation_id="off")
+    assert off["reason_code"] == "monitor_off" and off["symbol"] is None  # refused before the source was read
+    ready(s.public)
+    bad = refused(s, operation_id="bad", source_id="sta_" + "0" * 8 + "-0000-4000-8000-" + "0" * 12)
+    assert bad["reason_code"] == "other" and bad["reason"] == "Stock alert not found"
+    with s.ledger._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM conditional_plan").fetchone()[0] == 0
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            db.execute("DELETE FROM conditional_plan_refusal")
+
+    v = view()
+    assert v["plans"] == [] and v["plans_today"] == 0
+    assert {x["refusal_id"] for x in v["refusals"]} == {bad["refusal_id"], off["refusal_id"], r["refusal_id"]}
+    shown = next(x for x in v["refusals"] if x["refusal_id"] == r["refusal_id"])
+    assert shown["reason_code"] == "ticker_not_selected" and "content_sha256" not in shown
+
+    # A tampered or misnamed file is ignored, not shown.
+    (s.outbox / f"conditional-plan-refusal-{r['refusal_id']}.json").write_text(json.dumps({**r, "symbol": "TSLA"}))
+    assert r["refusal_id"] not in {x["refusal_id"] for x in view()["refusals"]}
+
+    for i in range(MAX_DAILY_REFUSALS):
+        refused(s, operation_id=f"cap-{i}", source_id="sta_" + "0" * 8 + "-0000-4000-8000-" + "0" * 12)
+    with pytest.raises(ValueError, match="Stock alert not found") as caught:
+        create(s, operation_id="past-cap", source_id="sta_" + "0" * 8 + "-0000-4000-8000-" + "0" * 12)
+    assert caught.value.refusal is None  # still refused, just not recorded past the bound

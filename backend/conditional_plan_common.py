@@ -15,6 +15,8 @@ TERMINAL = {"invalidated", "expired", "cancelled", "unavailable"}
 FRESH_SECONDS = 180
 HEARTBEAT_SECONDS = 90
 MAX_DAILY_PLANS = 24
+REFUSAL_FORMAT = "conditional-plan-refusal-v1"
+MAX_DAILY_REFUSALS = 24
 
 
 def price(value):
@@ -130,6 +132,57 @@ def validate_cancel(c, plan):
     ) < parse_time(plan["created_at"]):
         raise ValueError("Cancellation does not match plan")
     return c
+
+
+def validate_refusal(r):
+    """A refused create: what Jo asked for and why; nothing was saved or watched."""
+    import re
+
+    verify(r)
+    if set(r) != {
+        "format",
+        "refusal_id",
+        "actor",
+        "session_date",
+        "symbol",
+        "source_kind",
+        "direction",
+        "trigger_price",
+        "invalidation_price",
+        "confirm_bars",
+        "expires_at",
+        "reason",
+        "reason_code",
+        "created_at",
+        "schema_version",
+        "content_sha256",
+    } or r["format"] != REFUSAL_FORMAT:
+        raise ValueError("Invalid conditional-plan refusal schema")
+    identifier(r["refusal_id"], "cpr")
+    if not isinstance(r["actor"], str) or not r["actor"]:
+        raise ValueError("Missing refusal owner")
+    if r["symbol"] is not None and not (
+        isinstance(r["symbol"], str) and re.fullmatch(r"[A-Z]{1,6}(\.[A-Z])?", r["symbol"])
+    ):
+        raise ValueError("Invalid refusal symbol")
+    if (
+        r["direction"] not in (None, "long", "short")
+        or r["source_kind"] not in (None, "check", "stock_alert")
+        or r["confirm_bars"] not in (None, 1, 2, 3)
+        or r["reason_code"]
+        not in ("ticker_not_selected", "monitor_off", "no_session", "daily_cap", "other")
+        or not isinstance(r["reason"], str)
+        or not 1 <= len(r["reason"]) <= 300
+    ):
+        raise ValueError("Invalid refusal content")
+    for k in ("trigger_price", "invalidation_price"):
+        if r[k] is not None:
+            price(r[k])
+    if r["expires_at"] is not None:
+        parse_time(r["expires_at"])
+    if parse_time(r["created_at"]).astimezone(ET).date().isoformat() != r["session_date"]:
+        raise ValueError("Refusal session mismatch")
+    return r
 
 
 def read_json(path, limit=128 * 1024):
