@@ -21,3 +21,7 @@ Apply the same material-change thresholds, quiet unchanged-read behavior and
 linked-correction exception. Preserve Go alerts already required by the setup
 task; this market-note budget covers market-watch notes, not those existing Go
 alerts. Never add market calls before the shadow commit.
+
+Include the scheduled workflow's optional phone_summary instructions in the
+native setup task after consumer/producer rollout. Keep the full reasoning in
+the existing fields; summary failure must never suppress a valid correction.

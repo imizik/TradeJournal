@@ -306,7 +306,7 @@ Opt-in catalog additions to the existing check service:
   call. No arbitrary URL/path/symbol/query or provider/model request.
 - `market_watch_submit(operation_id, input_id, previous_read_id?, view,
   main, alternative, invalidation, change_summary, forecasts,
-  message_intent, correction_of_read_id?, prompt_version, model_id?)`
+  message_intent, correction_of_read_id?, prompt_version, model_id?, phone_summary?)`
   → `{read_id, received_at, snapshot_id, snapshot_sha256, content_sha256,
   comparator_id, message_id?, replayed, quality_flags}`. No order, notification
   or scorer runs as a side effect. An exact retry returns the original receipt;
@@ -342,6 +342,17 @@ flags are server-derived at submission, including snapshot age, missingness,
 RTH eligibility and `independence-unverified`; stale inputs do not erase a read.
 New submissions must reference an input from the current session; old-input
 replays are not live reads. A new revision never cancels scoring of the old one.
+
+`phone_summary` is optional presentation content, normally a short string with
+a 500–700 character writing target (700 maximum for short rendering). Jo states
+the takeaway, reason, key conditions and material limitations; the renderer does
+not infer new trading states or entry triggers. Full `main`, `alternative`,
+`invalidation`, references and correction links remain saved. A missing, blank,
+overlong or malformed summary never rejects an otherwise valid submission:
+its original JSON value is preserved within the existing 16 KiB request limit,
+and the phone uses the longer saved-read fallback. Non-finite/unserializable
+JSON and oversized requests remain invalid. Exact retries must retain the same
+summary as the original request. No additional model call is used.
 
 For `update` or `correction`, submit atomically appends one message **intent**
 with the read's main text, channel `none`; `correction` requires an earlier same-actor message intent,
@@ -712,7 +723,8 @@ scheduled wakes.
 
 `backend/app/engine/market_watch_wakes.py` holds the frozen `DETECTOR`
 (`mw-detect-v1`), `WAKE_POLICY` (`mw-wake-v1`) and `MESSAGE_POLICY`
-(`mw-message-v1`); their joint hash is stamped on every record. The API process
+(`mw-message-v2` for short-summary presentation; eligibility/budgets unchanged);
+their joint hash is stamped on every record. The API process
 runs one pass about every 30 seconds during the regular session, only when
 `MARKET_WATCH_ENABLED` is true and `MARKET_WATCH_SNAPSHOTS_DIR` (#315's
 publication directory) and `MARKET_WATCH_STORE` are absolute paths; a bad
@@ -769,6 +781,12 @@ reads never reach Shadow Isaac.
   existing read-only directory-open fallback. No private-parent ACL widening
   is required. Notices cover every read: scheduled, setup-context,
   event and manual.
+  Existing reads keep byte-identical `mw-read-notice-v1` notices for handoff
+  recovery. Reads submitted with `phone_summary` use `mw-read-notice-v2`, whose
+  exact field set adds that field. The consumer accepts both versions, validates
+  the seal/snapshot normally and treats summary usability only as a rendering
+  concern. Deploy the compatible app consumer before enabling summaries in
+  Check/native tasks; an old consumer cannot import v2 notices.
 - **Messages.** Channel: **phone push through the server's existing ntfy alerts**
   (`NTFY_URL`). Every committed `update` or `correction` intent gets one
   decision: `send`, `suppressed_budget` or `expired_before_send`. The check
@@ -777,9 +795,27 @@ reads never reach Shadow Isaac.
   undelivered. A correction skips the app budget when the message it corrects
   reached Isaac (`accepted` or `unknown`), once per corrected message and at
   most 3 times a session; any other correction is budgeted like an update. A
-  budget decision is final. The push carries the read's main text, the three
-  named forecast probabilities, invalidation, alternative, change summary,
-  Isaac's recorded cautions as flags, and the read ID. ntfy's reply ID is
+  budget decision is final. The push title carries the existing direction and
+  correction label plus the server's save time in Eastern time (not a quote
+  timestamp). The body uses Jo's usable `phone_summary`, populated forecasts
+  only, and source limitations/observation times from the referenced snapshot.
+  Forecasts remain probabilities of negative SPY return from the post-receipt
+  anchor, regardless of the view; they are not confidence or entry signals.
+  Generic cautions, internal IDs and the repeated alternative are omitted from
+  phone prose. Full reasoning, references, forecasts and links remain saved.
+  The renderer never derives "setup invalidated" or "conditions met" states.
+  If the summary is unusable, the fallback identifies itself and prioritizes
+  the full invalidation and main text, then change summary and available
+  forecasts. A 3,500 UTF-8-byte budget reserves data limitations; whole sections
+  that cannot fit get an explicit omission notice rather than a cut-off
+  sentence. This fallback may be longer than the short summary. Losing an
+  archived snapshot after import does not block sending: source flags remain
+  visible and observation times are labelled unavailable. Summary failure
+  does not bypass or alter any correction, budget, age or retry guard.
+  No full-read page/link is provided by this change: `/morning/market-reads`
+  remains a reliability view. Native scheduled/event/setup task instructions
+  must be updated separately after compatible consumer/producer rollout;
+  repository prompt edits alone are not live task proof. ntfy's reply ID is
   recorded as `accepted` — evidence ntfy took it, not that the phone showed it.
   Failures are retried at most 3 times within 10 minutes of the read, then
   `expired`; timeouts and interrupted sends are `unknown`.

@@ -7,6 +7,8 @@ import hashlib
 import json
 import math
 
+PHONE_SUMMARY_MAX_CHARS = 700
+
 
 def _check_finite(value):
     if isinstance(value, float) and not math.isfinite(value):
