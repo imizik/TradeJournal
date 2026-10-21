@@ -10,7 +10,7 @@ const python = existsSync(path.join(BACKEND_DIR, ".venv", "bin", "python"))
   ? path.join(BACKEND_DIR, ".venv", "bin", "python")
   : "python3";
 
-function seedNoProviderRun(day: string) {
+function seedNoProviderRun(day: string, withFacts = false) {
   const runId = crypto.randomUUID();
   const oppId = crypto.randomUUID();
   const contextId = crypto.randomUUID();
@@ -18,23 +18,30 @@ function seedNoProviderRun(day: string) {
   const script = `
 import json, sqlite3, sys
 from datetime import datetime, timedelta, timezone
-run_id, opp_id, context_id, job_id, day = sys.argv[2:]
+run_id, opp_id, context_id, job_id, day, with_facts = sys.argv[2:]
+with_facts = with_facts == "1"
 now = datetime.now(timezone.utc).replace(tzinfo=None)
 stamp = now.isoformat(sep=" ")
 captured = now.replace(tzinfo=timezone.utc).isoformat()
 db = sqlite3.connect(sys.argv[1])
 db.execute("PRAGMA foreign_keys=ON")
 db.execute("insert into job_run (id, job_type, status, params_json, total, done, enriched, created_at, updated_at) values (?,?,?,?,?,?,?,?,?)", (job_id, "practice_prepare", "failed", "{}", 1, 0, 0, stamp, stamp))
-db.execute("insert into practice_run (id, session_key, day, revision, parent_id, job_id, mode, comparison, status, result, late, deadline, created_at, finished_at, policy_version, policy_hash, calendar_json, brief_json, timings_json, error) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, "e2e-a3-" + run_id, day, 0, None, job_id, "manual", "independent", "failed", "failed", 0, (now + timedelta(hours=2)).isoformat(sep=" "), stamp, (now + timedelta(seconds=1)).isoformat(sep=" "), "practice-long-15m-v1", "fixture-policy-hash", json.dumps({"status":"unavailable"}), json.dumps([{ "title":"MARKET TAPE", "text":"Unavailable: provider credentials are disabled in this fixture.", "sources":[] }, { "title":"IMPORTANT NEWS", "text":"Unavailable.", "sources":[] }, { "title":"SETUP BOARD", "text":"Provider unavailable; frozen context retained for a reasoned SKIP.", "sources":[] }]), "{}", "Provider unavailable; no agent call was attempted"))
+db.execute("insert into practice_run (id, session_key, day, revision, parent_id, job_id, mode, comparison, status, result, late, deadline, created_at, finished_at, policy_version, policy_hash, calendar_json, brief_json, timings_json, error) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, "e2e-a3-" + run_id, day, 0, None, job_id, "manual", "independent", "failed", "failed", 0, (now + timedelta(hours=2)).isoformat(sep=" "), stamp, (now + timedelta(seconds=1)).isoformat(sep=" "), "practice-long-15m-v1", "fixture-policy-hash", json.dumps({"status":"open" if with_facts else "unavailable"}), json.dumps([{ "title":"MARKET TAPE", "text":"Unavailable: provider credentials are disabled in this fixture.", "sources":[] }, { "title":"IMPORTANT NEWS", "text":"Unavailable.", "sources":[] }, { "title":"SETUP BOARD", "text":"Provider unavailable; frozen context retained for a reasoned SKIP.", "sources":[] }]), "{}", "Provider unavailable; no agent call was attempted"))
 packet = {"symbol":"SPY", "data_source":"unavailable", "missing":["Provider unavailable"], "recent_minute_bars":[]}
-evidence = {"context_version":1,"context_state":"unavailable","symbol":"SPY","provider":"unavailable","captured_at":captured,"packet":packet,"price_facts":[]}
+facts = []
+if with_facts:
+    for index, minutes, bar in ((0, 10, {"o":100.0,"h":101.0,"l":99.0,"c":100.5}), (1, 5, {"o":100.5,"h":103.0,"l":100.2,"c":102.0})):
+        formed = (now - timedelta(minutes=minutes)).replace(tzinfo=timezone.utc).isoformat()
+        for field, value in bar.items():
+            facts.append({"name":f"minute:{index}:{field}","source_path":f"recent_minute_bars.{index}.{field}","value":value,"currency":"USD","unit":"USD/share","source":"alpaca_sip","formed_at":formed,"observed_at":captured,"symbol":"SPY","split_basis":"raw"})
+evidence = {"context_version":1,"context_state":"ready" if with_facts else "unavailable","symbol":"SPY","provider":"alpaca_sip" if with_facts else "unavailable","captured_at":captured,"packet":packet,"price_facts":facts}
 db.execute("insert into decision_context (id, operation_id, symbol, captured_at, provider, data_json, context_sha256) values (?,?,?,?,?,?,?)", (context_id, "e2e-a3-context-" + run_id, "SPY", stamp, "unavailable", json.dumps(evidence, separators=(",",":")), "fixture-context-hash"))
 benchmark = {"version":"underlying-open-close-v1", "status":"unavailable", "reason":"Provider unavailable in fixture"}
 db.execute("insert into practice_opportunity (id, run_id, symbol, context_id, revealed_at, benchmark_json, feedback_json) values (?,?,?,?,?,?,?)", (opp_id, run_id, "SPY", context_id, None, json.dumps(benchmark), json.dumps({"rating":"unrated","phone_received":None})))
 db.commit()
 db.close()
 `;
-  execFileSync(python, ["-c", script, E2E_DB, runId.replace(/-/g, ""), oppId.replace(/-/g, ""), contextId.replace(/-/g, ""), jobId.replace(/-/g, ""), day], { cwd: BACKEND_DIR });
+  execFileSync(python, ["-c", script, E2E_DB, runId.replace(/-/g, ""), oppId.replace(/-/g, ""), contextId.replace(/-/g, ""), jobId.replace(/-/g, ""), day, withFacts ? "1" : "0"], { cwd: BACKEND_DIR });
   return { runId, oppId };
 }
 
@@ -74,9 +81,10 @@ test("manual no-provider choice persists, reveal refuses without agent output, a
   await expect(routine).toContainText("Agent disabled");
   const opportunity = routine.getByTestId("practice-opportunity");
   await expect(opportunity).toContainText("SPY");
-  await opportunity.getByLabel("Rationale").fill("No verified market facts are available; preserve the decision as SKIP.");
-  await opportunity.getByRole("button", { name: "Save frozen choice" }).click();
-  await expect(opportunity).toContainText("Human: SKIP");
+  await opportunity.getByText("Skip", { exact: true }).click();
+  await opportunity.getByLabel("Reason").fill("No verified market facts are available; preserve the decision as SKIP.");
+  await opportunity.getByRole("button", { name: "Save choice (final)" }).click();
+  await expect(opportunity).toContainText("Your choice: SKIP");
   await expect(opportunity).toContainText("No verified market facts are available");
 
   const denied = await request.post(`${API}/practice/opportunities/${fixture.oppId}/reveal`, { data: {} });
@@ -85,7 +93,7 @@ test("manual no-provider choice persists, reveal refuses without agent output, a
 
   await page.reload();
   const reopened = page.getByTestId("practice-routine").getByTestId("practice-opportunity");
-  await expect(reopened).toContainText("Human: SKIP");
+  await expect(reopened).toContainText("Your choice: SKIP");
   await expect(reopened).toContainText("No verified market facts are available");
   await expect(reopened).toContainText("unavailable");
   await expect(reopened.getByText("Agent choice: Unavailable")).toHaveCount(0);
@@ -97,6 +105,37 @@ test("manual no-provider choice persists, reveal refuses without agent output, a
   }));
   expect(widths.routine).toBeLessThanOrEqual(widths.viewport + 1);
   expect(widths.scrollWidth).toBeLessThanOrEqual(widths.viewport + 1);
+});
+
+test("TAKE is answered with plain fields from saved prices, not JSON, and the server's plan check accepts it", async ({ page, request }) => {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const fixture = seedNoProviderRun(day, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/practice?practice_run=${fixture.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine).toContainText("choose Take, Wait or Skip on 1 setup");
+  await expect(routine).toContainText("0 of 1 answered");
+  const opp = routine.getByTestId("practice-opportunity");
+  await expect(opp).not.toContainText("JSON");
+  await opp.getByText("Take", { exact: true }).click();
+  await opp.getByLabel("Reason").fill("Holding above the opening range");
+  await opp.getByLabel("Trigger (15-min close above)").selectOption("minute:0:h");
+  await opp.getByLabel("Stop").selectOption("minute:0:l");
+  await opp.getByLabel("Target").selectOption("minute:1:h");
+  await expect(opp.getByLabel("Enter only between")).toHaveValue("101");
+  await opp.getByLabel("and", { exact: true }).fill("102");
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  const local = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  await opp.getByLabel("Plan expires").fill(local);
+  await expect(opp).toContainText("Risk 2.00 per share · reward 2.00 · about 1.0R");
+  await page.screenshot({ path: test.info().outputPath("practice-take-fields-phone.png"), animations: "disabled", fullPage: true });
+  await opp.getByRole("button", { name: "Save choice (final)" }).click();
+  await expect(opp).toContainText("Your choice: TAKE");
+  await expect(opp).toContainText("Trigger 101 · Stop 99 · Target 103");
+  await expect(routine).toContainText("All 1 setup answered");
+  const saved = (await (await request.get(`${API}/practice/runs/${fixture.runId}`)).json()).opportunities[0].human;
+  expect(saved.plan).toMatchObject({ instrument: "stock", direction: "long", trigger_level: 101, stop: 99, target: 103, trigger_fact: "minute:0:h", entry_guard: { min: 101, max: 102 }, max_holding_sessions: 2, freshness_limit_seconds: 3600, cost_model: { version: "p0-cost-v1" } });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("independent comparison hides a committed agent choice until human commit and explicit reveal", async ({ page, request }) => {
@@ -122,24 +161,25 @@ with Session(engine) as db:
   await routine.getByLabel("Review records").selectOption("wait");
   await expect(routine.getByTestId("practice-opportunity")).toHaveCount(0);
   await routine.getByLabel("Review records").selectOption("all");
-  await opp.getByLabel("Rationale").fill("Human fixture committed without agent result");
-  await opp.getByRole("button", { name: "Save frozen choice" }).click();
-  await expect(opp).toContainText("Human: SKIP");
+  await opp.getByText("Skip", { exact: true }).click();
+  await opp.getByLabel("Reason").fill("Human fixture committed without agent result");
+  await opp.getByRole("button", { name: "Save choice (final)" }).click();
+  await expect(opp).toContainText("Your choice: SKIP");
   await expect(routine).not.toContainText("Agent WAIT verdict");
-  await opp.getByRole("button", { name: "Reveal agent choice after both commit" }).click();
+  await opp.getByRole("button", { name: "Reveal agent choice" }).click();
   await expect(opp).toContainText("Agent choice: WAIT");
   await expect(opp).toContainText("Agent WAIT verdict withheld until reveal");
   await routine.getByLabel("Review records").selectOption("wait");
-  await expect(routine.getByTestId("practice-opportunity")).toContainText("Human: SKIP");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText("Your choice: SKIP");
   await expect(routine.getByTestId("practice-opportunity")).toContainText("Agent choice: WAIT");
   await page.reload();
   const reopened = page.getByTestId("practice-routine");
   await expect(reopened).toContainText("Agent choice: WAIT");
-  await expect(reopened).toContainText("Human: SKIP");
+  await expect(reopened).toContainText("Your choice: SKIP");
   await reopened.getByLabel("Review records").selectOption("wait");
   await expect(reopened.getByTestId("practice-opportunity")).toContainText("Agent choice: WAIT");
-  await expect(reopened.getByTestId("practice-opportunity")).toContainText("Human: SKIP");
-  await expect(reopened.getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
+  await expect(reopened.getByTestId("practice-opportunity")).toContainText("Your choice: SKIP");
+  await expect(reopened.getByRole("button", { name: "Save choice (final)" })).toHaveCount(0);
 });
 
 for (const stage of ["list", "detail"] as const) for (const failure of [false, true]) test(`an initial historical ${stage} ${failure ? "failure" : "held response"} survives Reload`, async ({ page, request }) => {
@@ -267,7 +307,7 @@ for (const width of [1440, 390]) test(`pending run selection and delayed reload 
   await expect(routine.getByLabel("Saved run")).toHaveValue(other.runId);
   await expect(routine.getByTestId("practice-opportunity")).toHaveCount(0);
   await expect(routine.getByRole("button", { name: "Start morning timing" })).toBeDisabled();
-  await expect(routine.getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
+  await expect(routine.getByRole("button", { name: "Save choice (final)" })).toHaveCount(0);
   await routine.getByRole("button", { name: "Save morning time" }).click();
   await page.screenshot({ path: test.info().outputPath(`practice-selection-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
   await expect(routine).toContainText("Select the run where this timer began");
@@ -384,13 +424,16 @@ test("an explicit historical run deep-link reopens its frozen choices without ov
   await page.goto(`/?practice_run=${fixture.runId}`);
   const routine = page.getByTestId("practice-routine");
   await expect(routine.getByTestId("practice-opportunity")).toContainText(fixture.oppId);
+  await routine.getByText("Run details", { exact: true }).click();
+  await expect(routine.getByRole("button", { name: "Refresh underlying benchmark" })).toBeVisible();
   await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
-  await routine.getByLabel("Rationale").fill("Historical fixture choice preserves its frozen context");
-  await routine.getByRole("button", { name: "Save frozen choice" }).click();
-  await expect(routine).toContainText("Human: SKIP");
+  await routine.getByText("Skip", { exact: true }).click();
+  await routine.getByLabel("Reason").fill("Historical fixture choice preserves its frozen context");
+  await routine.getByRole("button", { name: "Save choice (final)" }).click();
+  await expect(routine).toContainText("Your choice: SKIP");
   await page.reload();
   await expect(routine.getByTestId("practice-opportunity")).toContainText(fixture.oppId);
-  await expect(routine).toContainText("Human: SKIP");
+  await expect(routine).toContainText("Your choice: SKIP");
   await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
   await routine.getByRole("button", { name: "Start morning timing" }).click();
   const next = new Date();
@@ -417,5 +460,7 @@ test("historical runs do not offer current-facts assisted revisions", async ({ p
   await page.goto(`/daily/${day}?practice_run=${old.runId}`);
   const routine = page.getByTestId("practice-routine");
   await expect(routine.getByTestId("practice-run")).toBeVisible();
+  await routine.getByText("Run details", { exact: true }).click();
+  await expect(routine.getByRole("button", { name: "Refresh underlying benchmark" })).toBeVisible();
   await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
 });

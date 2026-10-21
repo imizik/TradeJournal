@@ -92,8 +92,8 @@ test("read-only calendar includes the practice-only date and opens its saved evi
   await expect(linked).toBeVisible();
   await linked.click();
   await expect(page).toHaveURL(new RegExp(`/daily/${run.day}\\?practice_run=${run.id}`));
-  await expect(page.getByText("Daily practice routine", { exact: true })).toBeVisible();
-  await page.getByText("Frozen neutral context", { exact: true }).first().click();
+  await expect(page.getByTestId("practice-routine").getByRole("heading", { level: 2, name: /^Daily practice/ })).toBeVisible();
+  await page.getByText("Saved setup details", { exact: true }).first().click();
   await expect(page.getByText(/sample_fixture/).first()).toBeVisible();
 });
 
