@@ -11,6 +11,7 @@
 #   bash scripts/ux_sandbox.sh                    # keys from the main checkout's backend/.env
 #   bash scripts/ux_sandbox.sh --keys-from FILE   # keys from another env file
 #   bash scripts/ux_sandbox.sh --no-keys          # seeded records only, no candles
+#   UX_BACKEND_PYTHON=/path/to/python UX_FRONTEND_NODE_MODULES_DIR=/path/to/node_modules bash scripts/ux_sandbox.sh --no-keys
 #
 # Both servers start from an empty environment: only the allow-listed
 # market-data keys from that file and the sandbox's own settings reach them,
@@ -19,7 +20,10 @@
 # checkout that has its own backend/.env, .env or Gmail credential files.
 # Use a worktree or a clean clone.
 #
-# Backend 8098, frontend 3098 (UX_BACKEND_PORT / UX_FRONTEND_PORT). Ctrl+C
+# Backend 8098, frontend 3098 (UX_BACKEND_PORT / UX_FRONTEND_PORT). The
+# frontend uses webpack so an explicitly shared node_modules symlink works
+# from a worktree. That temporary symlink is removed when the sandbox stops.
+# Ctrl+C
 # stops both. Data lives in backend/data/ux_sandbox/; delete it to start over.
 
 set -uo pipefail
@@ -33,6 +37,21 @@ KEY_NAMES=(ALPACA_API_KEY ALPACA_API_SECRET ALPACA_DATA_FEED ALPACA_OPTIONS_FEED
   TRADIER_API_KEY TRADIER_BASE_URL POLYGON_API_KEY POLYGON_CALLS_PER_MINUTE)
 
 die() { echo "ux_sandbox: $*" >&2; exit 1; }
+
+TEMP_NODE_MODULES_LINK=0
+pids=()
+stopped=0
+cleanup() {
+  [[ $stopped -eq 1 ]] && return
+  stopped=1
+  [[ ${#pids[@]} -gt 0 ]] && kill "${pids[@]}" 2>/dev/null
+  wait 2>/dev/null
+  if [[ $TEMP_NODE_MODULES_LINK -eq 1 ]]; then
+    rm "$ROOT/frontend/node_modules"
+  fi
+}
+trap 'cleanup; exit 130' INT TERM
+trap cleanup EXIT
 
 KEYS_FROM=""
 USE_KEYS=1
@@ -50,16 +69,22 @@ for env_file in "$ROOT/backend/.env" "$ROOT/.env" "$ROOT/backend/token.json" \
   [[ -e "$env_file" ]] && die "$env_file exists; the backend would use it (database, Gmail, alerts). Run from a worktree or clean clone without it."
 done
 
-PYTHON="$ROOT/backend/.venv/bin/python"
+PYTHON="${UX_BACKEND_PYTHON:-$ROOT/backend/.venv/bin/python}"
 [[ -x "$PYTHON" ]] || die "backend/.venv is missing; run bash scripts/setup.sh"
+if [[ ! -d "$ROOT/frontend/node_modules" && -n "${UX_FRONTEND_NODE_MODULES_DIR:-}" ]]; then
+  [[ -d "$UX_FRONTEND_NODE_MODULES_DIR" ]] || die "UX_FRONTEND_NODE_MODULES_DIR is not a directory"
+  [[ ! -e "$ROOT/frontend/node_modules" && ! -L "$ROOT/frontend/node_modules" ]] || die "frontend/node_modules already exists"
+  ln -s "$UX_FRONTEND_NODE_MODULES_DIR" "$ROOT/frontend/node_modules" || die "could not link the supplied frontend dependencies"
+  TEMP_NODE_MODULES_LINK=1
+fi
 [[ -d "$ROOT/frontend/node_modules" ]] || die "frontend/node_modules is missing; run bash scripts/setup.sh"
-if ! command -v npm >/dev/null 2>&1; then
+if ! command -v node >/dev/null 2>&1; then
   for d in "$HOME/.local/node/bin" "$HOME/.volta/bin" "/opt/homebrew/bin" "/usr/local/bin"; do
-    if [[ -x "$d/npm" ]]; then PATH="$d:$PATH"; break; fi
+    if [[ -x "$d/node" ]]; then PATH="$d:$PATH"; break; fi
   done
   export PATH
 fi
-command -v npm >/dev/null 2>&1 || die "npm not found on PATH"
+command -v node >/dev/null 2>&1 || die "node not found on PATH"
 
 for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -114,22 +139,9 @@ FRONTEND_ENV=("${CHILD_ENV[@]}" NEXT_PUBLIC_API_URL=/api/backend PORT="$FRONTEND
 (cd "$ROOT/backend" && env -i "${BACKEND_ENV[@]}" "$PYTHON" scripts/seed_dev_data.py --database-url "$DATABASE_URL") \
   || die "seeding $DB_FILE failed; if you added fills by hand there, delete $SANDBOX to start over"
 
-pids=()
-stopped=0
-cleanup() {
-  [[ $stopped -eq 1 ]] && return
-  stopped=1
-  echo
-  echo "Stopping the UX sandbox..."
-  [[ ${#pids[@]} -gt 0 ]] && kill "${pids[@]}" 2>/dev/null
-  wait 2>/dev/null
-}
-trap 'cleanup; exit 130' INT TERM
-trap cleanup EXIT
-
 (cd "$ROOT/backend" && exec env -i "${BACKEND_ENV[@]}" "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT") &
 pids+=("$!")
-(cd "$ROOT/frontend" && exec env -i "${FRONTEND_ENV[@]}" npx next dev --port "$FRONTEND_PORT" --hostname 127.0.0.1) &
+(cd "$ROOT/frontend" && exec env -i "${FRONTEND_ENV[@]}" ./node_modules/.bin/next dev --webpack --port "$FRONTEND_PORT" --hostname 127.0.0.1) &
 pids+=("$!")
 
 alive() { kill -0 "${pids[0]}" 2>/dev/null && kill -0 "${pids[1]}" 2>/dev/null; }
