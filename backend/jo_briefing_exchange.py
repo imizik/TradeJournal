@@ -95,18 +95,31 @@ def record_read(outbox, actor, day, packet_id, now):
     name = read_marker_name(actor, day)
     if (Path(outbox) / name).exists():
         return
-    write(outbox, name, {"schema_version": "jo-read-v1", "profile_id": actor, "day": day,
-        "packet_id": str(UUID(str(packet_id))), "read_at": now.isoformat()})
+    try:
+        write(outbox, name, {"schema_version": "jo-read-v1", "profile_id": actor, "day": day,
+            "packet_id": str(UUID(str(packet_id))), "read_at": now.isoformat()})
+    except ValueError:
+        if not (Path(outbox) / name).exists():
+            raise  # A concurrent first read already kept its own time; anything else is a real failure.
 
 
 def read_marker(outbox, actor, day, packet_id):
-    """The recorded first read of this packet, or None. Unreadable markers raise."""
+    """The recorded first read of this packet, None when absent, or raise when it can't be trusted.
+
+    Absence means "not read" only once this profile's trace is known to be live: an
+    earlier day's marker exists. Before that (an old Check runtime, or days before the
+    trace existed) the caller must report unknown, never "not read".
+    """
+    name = read_marker_name(actor, day)
     try:
-        value = read(outbox, read_marker_name(actor, day))
+        value = read(outbox, name)
     except FileNotFoundError:
+        prefix = f"jo-read-{profile(actor)}-"
+        if not any(p.name < name for p in Path(outbox).glob(prefix + "*.json")):
+            raise LookupError("Read trace not yet live for this profile") from None
         return None
     if value.get("profile_id") != actor or value.get("day") != day or value.get("packet_id") != str(packet_id):
-        return None
+        raise ValueError("Read marker does not match this packet")
     return value["read_at"]
 
 

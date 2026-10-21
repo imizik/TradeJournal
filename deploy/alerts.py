@@ -337,7 +337,8 @@ def morning_problems(view: dict, now: float) -> dict[str, Problem | None]:
         observed[publication] = None
     if fulfilment == "missing":
         # Only the first alert is sent, so a read recorded later never triggers a resend.
-        read = {"recorded": f" Jo read the packet at {et_clock(delivery.get('context_read_at'))} but nothing was saved.",
+        read = {"recorded": f" Jo read the packet at {et_clock(delivery.get('context_read_at'))} but nothing was saved"
+                    " (a read doesn't show who started the run).",
                 "not_recorded": " No read of the packet was recorded."}.get(delivery.get("context_read"), "")
         # A missing packet already explains the missing brief; one message, not two.
         observed[brief] = None if state == "missing" else Problem(

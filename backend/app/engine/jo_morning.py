@@ -336,6 +336,8 @@ def delivery(session, day, now, config, actor, hours):
     try:
         read_at = exchange.read_marker(load_binding(config.check_config).market_watch_outbox_dir, actor, day.isoformat(), packet.id)
         result.update(context_read="recorded" if read_at else "not_recorded", context_read_at=read_at)
+    except LookupError:
+        pass  # No earlier marker: the trace isn't proven live, so absence stays unknown.
     except Exception:
         LOG.warning("Jo morning read marker unreadable")  # Stays unknown, never "not read".
     if not mine:

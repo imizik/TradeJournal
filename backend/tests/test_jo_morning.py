@@ -334,8 +334,12 @@ def test_first_morning_read_leaves_one_content_free_marker_and_the_view_reports_
     MorningRunner(db, lambda: config, open_day, lambda symbols, cutoff: ([], [])).run_once(NOW)
     with Session(db) as session:
         packet_id = str(session.exec(select(MorningBriefingPacket)).one().id)
-        unread = morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]
-        assert unread["fulfilment"] == "missing" and unread["context_read"] == "not_recorded" and unread["context_read_at"] is None
+        view = lambda: morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]  # noqa: E731
+        # No earlier marker: an old Check runtime or a day before the trace existed, so absence is unknown.
+        assert view()["fulfilment"] == "missing" and view()["context_read"] == "unknown"
+        exchange.record_read(str(outbox), actor, (NOW.date() - timedelta(days=1)).isoformat(), uuid4(), NOW - timedelta(days=1))
+        unread = view()
+        assert unread["context_read"] == "not_recorded" and unread["context_read_at"] is None
 
     # A marker that can't be written never fails the read.
     def broken(*args):
@@ -354,12 +358,25 @@ def test_first_morning_read_leaves_one_content_free_marker_and_the_view_reports_
     assert not read_at(NOW + timedelta(minutes=25)).get("isError")
     assert marker.read_bytes() == original  # Later reads keep the first.
     assert read_at(NOW + timedelta(hours=5))["isError"]  # Expired publication: refused, marker untouched.
-    assert marker.read_bytes() == original and [p.name for p in outbox.iterdir()] == [marker.name]
+    assert marker.read_bytes() == original and len(list(outbox.glob("jo-read-*.json"))) == 2
+    # A concurrent first read that loses the race to a different clock keeps the winner without failing.
+    later = (NOW.date() + timedelta(days=1)).isoformat()
+    real_write = exchange.write
+    def race(directory, name, value):
+        real_write(directory, name, {**value, "read_at": "winner"})
+        real_write(directory, name, value)
+    with monkeypatch.context() as patch:
+        patch.setattr(exchange, "write", race)
+        exchange.record_read(str(outbox), actor, later, packet_id, NOW + timedelta(days=1))
+    assert json.loads((outbox / f"jo-read-{actor}-{later}.json").read_text())["read_at"] == "winner"
+    (outbox / f"jo-read-{actor}-{later}.json").unlink()
     with Session(db) as session:
         view = morning_view(session, NOW.date(), NOW + timedelta(minutes=31), config=config, calendar=open_day, actor=actor)["delivery"]
         assert view["context_read"] == "recorded" and view["context_read_at"] == (NOW + timedelta(minutes=17)).isoformat()
         assert view["fulfilment"] == "missing" and view["origin"] == "unknown"
-    # A marker the app can't read stays unknown, never "not read".
+    # A marker for another packet, or one the app can't read, stays unknown, never "not read".
+    with pytest.raises(ValueError, match="does not match"):
+        exchange.read_marker(str(outbox), actor, NOW.date().isoformat(), uuid4())
     marker.chmod(0)
     try:
         with Session(db) as session:

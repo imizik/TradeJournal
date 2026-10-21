@@ -256,7 +256,11 @@ profile and New York day leaves one immutable `jo-read-<profile>-<day>.json`
 marker in the existing outbox (profile, day, packet ID and Check's receipt time;
 no content). Later reads keep it, and a failed marker write never fails the read.
 `/jo/morning` reports it as `delivery.context_read` / `context_read_at`, so a
-missed brief separates "no read" from "read but nothing arrived". A read shows the
+missed brief separates "no read" from "read but nothing arrived". A missing marker
+reads as `not_recorded` only once an earlier day's marker proves the trace is live;
+before that (an un-upgraded Check runtime, or days before the trace) it stays
+`unknown`. The API autodeploys, but the Check runtime upgrade is a separate owner
+step, as is refreshing the connector's tool metadata. A read shows the
 tool was called; it does not prove who started the run or how Jo used the packet. Submissions keep the
 existing `jo:submit` grant, validation, expiry and receipt protocol. The importer
 skips completed receipts, rotates bounded pending batches, and tolerates malformed
