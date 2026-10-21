@@ -28,8 +28,8 @@ reference picture defines hierarchy, not records, prices or new permissions.
 | Today's Notes / New Note | New functionality | Trade/daily AI reviews and decision rationales are not a general notes journal; needs approved persistence/edit contract | Separate PR 3 slice |
 | Upcoming | Existing data plus new UI | Expirations and chart earnings/events can be reused; no general scheduled-task calendar, fabricated reminders or nonworking controls | PR 3 |
 | Quick Actions | Removed (October 2026) | The four links repeated the sidebar; the scoped Trades and Analytics links remain on their cards. No New Trade, Journal or Playbook route is invented | PR 1 |
-| Daily Practice summary | Reuse, new summary | Existing decisions count; anchors to untouched `PracticeRoutine` and `PracticeDecisions`. `/daily` and `/daily/{day}?practice_run=` remain available | PR 1 |
-| Full Practice / saved-decision reopening | Needs relocation later | Preserve `/`, `/?decision=`, `/?practice_run=` and all form/arm/reveal capabilities until replacement works. `practice-decisions`, `practice-routine`, `advisor-shadow` browser specs | PR 4 only |
+| Daily Practice summary | Removed from Dashboard | Daily Practice is available in the sidebar and phone More menu at `/practice` | Relocated October 21, 2026 |
+| Full Practice / saved-decision reopening | Relocated to `/practice` | Existing components and saved records retained; owner `/?decision=` and `/?practice_run=` links forward with their references. Daily Review and assistant surfaces remain available. `practice-decisions`, `practice-routine`, `advisor-shadow` browser specs | Relocated October 21, 2026 |
 | Assistant variants | Preserve | Early authorization branches in `app/page.tsx`; journal-reader retains legacy rendering, writer/market-only retains assigned practice. Owner component never mounted for an assistant. Browser auth/sample suites, `test_browser_access.py` | Every PR |
 
 ## Integrity prerequisite

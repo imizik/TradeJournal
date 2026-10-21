@@ -7,8 +7,6 @@ import { money } from "@/lib/format";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
-import PracticeRoutine from "@/components/PracticeRoutine";
-import PracticeDecisions from "@/components/PracticeDecisions";
 import DataFreshness from "./DataFreshness";
 import MorningBriefing from "./MorningBriefing";
 import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
@@ -124,17 +122,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
       </div>
       <aside className="min-w-0 space-y-4" aria-label="Dashboard actions and status">
         <DataFreshness />
-        <DashboardCard title="Daily Practice">
-          <p className="text-sm tabular-nums">{decisions.length} recent saved choices</p>
-          <p className="mt-1 text-xs text-muted-foreground">Practice records are separate from this journal. TAKEs require explicit paper arming.</p>
-          <a href="#daily-practice" className={`${dashboardLink} mt-3`}>Open practice workspace ↓</a>
-          <a href="#saved-decisions" className={`${dashboardLink} mt-2`}>Reopen saved decisions ↓</a>
-        </DashboardCard>
       </aside>
     </div>
-    {/* Keep every existing capability and deep link until its dedicated
-        destination is complete. These components also support assigned runs. */}
-    <div id="daily-practice" className="scroll-mt-4"><PracticeRoutine /></div>
-    <div id="saved-decisions" className="scroll-mt-4"><PracticeDecisions records={decisions} focusId={params.decision} /></div>
   </div>;
 }

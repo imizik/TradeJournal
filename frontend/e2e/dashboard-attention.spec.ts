@@ -77,7 +77,7 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
   expect(byId["job:trade_rebuild"].href).toBe("/?sync=open");
   expect(byId["alert:recent"].title).toBe("SPY crossed 700.00");
   expect(byId["alert:recent"].when).toBe("30m ago");
-  expect(byId["wait:open"].href).toBe("/?decision=open#saved-decisions");
+  expect(byId["wait:open"].href).toBe("/practice?decision=open#saved-decisions");
   expect(byId["wait:open"].detail).toContain("Reclaims VWAP on volume");
   // Expired options get no "no price" noise; AMD 10/16 is outside the 3-day window and its earnings fall after expiry.
   expect(items.some((item) => item.id === "no-price:expired" || item.id === "expiring:later" || item.id === "earnings:later")).toBe(false);

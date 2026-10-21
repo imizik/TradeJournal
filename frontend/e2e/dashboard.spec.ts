@@ -58,7 +58,18 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await expect(page.getByText("Gross Marked Value", { exact: true })).toBeVisible();
   await performance.getByText("More performance metrics", { exact: true }).click();
   await expect(performance.getByText("Avg Hold", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Open practice workspace" }).click();
+  await expect(page.getByTestId("practice-routine")).toHaveCount(0);
+  await expect(page.getByTestId("practice-decisions")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Daily Practice", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Open menu/ }).click();
+  await page.getByRole("link", { name: "Daily Practice", exact: true }).filter({ visible: true }).click();
+  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page.getByTestId("practice-decisions")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare today", exact: true })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("practice-workspace-phone.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.screenshot({ path: test.info().outputPath("practice-workspace-desktop.png"), animations: "disabled" });
   await expect(page.getByRole("button", { name: "Prepare today", exact: true })).toBeInViewport();
   const trades = await (await page.request.get("/api/backend/trades")).json() as Trade[];
   const rnxt = trades.find((trade) => trade.ticker === "RNXT")!;
@@ -126,11 +137,9 @@ print(json.dumps(ids))
     await recent.getByRole("link", { name: "EARLY", exact: true }).click();
     await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+$/);
     await expect(page.getByText("Trade Summary", { exact: true })).toBeVisible();
-    const decision = "00000000-0000-0000-0000-000000000001";
-    const run = "00000000-0000-0000-0000-000000000002";
-    await page.goto(`/?account=roth_ira&decision=${decision}&practice_run=${run}`);
+    await page.goto("/?account=roth_ira");
     const filters = page.getByLabel("Dashboard filters", { exact: true });
-    await expect(filters.getByRole("link", { name: "Options", exact: true })).toHaveAttribute("href", `/?account=roth_ira&type=option&decision=${decision}&practice_run=${run}`);
+    await expect(filters.getByRole("link", { name: "Options", exact: true })).toHaveAttribute("href", "/?account=roth_ira&type=option");
     await filters.getByRole("link", { name: "Options", exact: true }).click();
     await expect(page.getByRole("region", { name: "Active Options" })).toContainText("1 positions");
     await expect(recent.getByRole("link", { name: "All trades" })).toHaveAttribute("href", "/trades?account=roth_ira&type=option");
@@ -192,9 +201,9 @@ test("empty, missing quote, quote error and journal retry states are explicit", 
   } finally { await state("ready"); }
 });
 
-test("journal retry makes a fresh page GET and preserves scoped deep links", async ({ page, request }) => {
+test("journal retry makes a fresh page GET and preserves scope", async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  const params = new URLSearchParams({ account: "all", type: "option", decision: "00000000-0000-0000-0000-000000000001", practice_run: "00000000-0000-0000-0000-000000000002" });
+  const params = new URLSearchParams({ account: "all", type: "option" });
   try {
     expect((await request.post(`${API}/__test/dashboard-state?value=journal_error`)).ok()).toBe(true);
     await page.goto(`/?${params}`);
@@ -213,4 +222,11 @@ test("journal retry makes a fresh page GET and preserves scoped deep links", asy
   } finally {
     await request.post(`${API}/__test/dashboard-state?value=ready`);
   }
+});
+
+test("legacy dashboard record links forward both saved references to Practice", async ({ page }) => {
+  const params = new URLSearchParams({ decision: "00000000-0000-0000-0000-000000000001", practice_run: "00000000-0000-0000-0000-000000000002" });
+  await page.goto(`/?${params}#saved-decisions`);
+  await expect(page).toHaveURL(`/practice?${params}#saved-decisions`);
+  await expect(page.getByTestId("practice-decisions")).toBeVisible();
 });

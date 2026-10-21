@@ -24,6 +24,7 @@ const navItems = [
   { href: "/fills", label: "Fills", icon: Activity },
   { href: "/signals", label: "Signals", icon: Radio },
   { href: "/scanner", label: "Scanner", icon: Radar },
+  { href: "/practice", label: "Daily Practice", icon: ClipboardList },
   { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },

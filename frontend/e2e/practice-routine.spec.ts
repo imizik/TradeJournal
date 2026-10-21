@@ -67,7 +67,7 @@ test("manual no-provider choice persists, reveal refuses without agent output, a
   expect(await response.json()).toMatchObject({ id: fixture.runId, agent: { status: "disabled" }, comparison: "independent" });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/practice");
   const routine = page.getByTestId("practice-routine");
   await expect(routine).toBeVisible();
   await expect(routine).toContainText("Provider unavailable");
