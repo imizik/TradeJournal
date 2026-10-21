@@ -14,8 +14,9 @@ def article(**kwargs):
 
 
 def collect(symbols=("MU",), snapshots=None, articles=None):
-    return collect_market(symbols, NOW, snapshots_reader=lambda _: snapshots or {},
-                          news_reader=lambda *_: articles or [], clock=lambda: NOW+timedelta(seconds=2))
+    rows, gaps = collect_market(symbols, NOW, snapshots_reader=lambda _: snapshots or {},
+                          news_reader=lambda tickers, *_: (articles or []) if tickers else [], clock=lambda: NOW+timedelta(seconds=2))
+    return [r for r in rows if r["id"] != "discovery-scope"], gaps
 
 
 def test_observation_and_retrieval_are_distinct_and_only_scoped_data_is_returned():
@@ -57,7 +58,7 @@ def test_sources_fail_independently_without_retries_or_raw_exception_leaks():
         calls.append("prices")
         raise RuntimeError("private credentials should not leak")
     rows, gaps = collect_market(["MU"], NOW, snapshots_reader=fail, news_reader=lambda *_: [article()], clock=lambda: NOW)
-    assert calls == ["prices"] and len(rows) == 1
+    assert calls == ["prices"] and len(rows) == 2
     assert "private credentials" not in str(gaps)
     assert any("Price source unavailable" in gap for gap in gaps)
 
@@ -68,9 +69,9 @@ def test_scope_is_deduplicated_bounded_and_no_news_does_not_imply_no_catalysts()
     rows, gaps = collect_market(symbols, NOW, snapshots_reader=lambda s: calls.append(s) or {},
         news_reader=lambda s, start, end: calls.append(s) or [], clock=lambda: NOW)
     # Backdrop ETFs are priced ahead of, and outside, the 20 owner symbols; ticker news stays owner-only.
-    assert len(calls) == 3 and calls[0] == [*BACKDROP, *calls[1]] and len(calls[1]) == 20 and calls[1][0] == "MU"
-    assert calls[2] is None
-    assert not rows
+    assert len(calls) == 3 and calls[1] == [*BACKDROP, *calls[2]] and len(calls[2]) == 20 and calls[2][0] == "MU"
+    assert calls[0] is None
+    assert [r["id"] for r in rows] == ["discovery-scope"]
     assert any("unsupported" in gap for gap in gaps)
     assert any("limited to 20" in gap for gap in gaps)
     assert any("do not infer" in gap for gap in gaps)
@@ -101,6 +102,7 @@ def test_default_prices_use_existing_tradier_quotes_once_and_keep_news_independe
     monkeypatch.setattr(chart_feed, "read", no_minutes)
     rows, gaps = market.collect_market(["MU"], NOW, news_reader=lambda *_: [article()], clock=lambda: NOW)
     assert calls == [[*BACKDROP, "MU"]]
+    rows = [r for r in rows if r["id"] != "discovery-scope"]
     assert rows[0]["id"] == "market-MU"
     assert rows[0]["source"] == "Tradier full-market latest trade; not an executable quote"
     assert rows[0]["observed_at"] == NOW-timedelta(seconds=30)
@@ -110,7 +112,7 @@ def test_default_prices_use_existing_tradier_quotes_once_and_keep_news_independe
     monkeypatch.setattr(tradier, "TRADIER_BASE_URL", "https://sandbox.tradier.com")
     rows, gaps = market.collect_market(["MU"], NOW, news_reader=lambda *_: [article()], clock=lambda: NOW)
     assert len(calls) == 1  # Sandbox must not be advertised as live full-market evidence.
-    assert [row["id"] for row in rows] == ["headline-1"]
+    assert [row["id"] for row in rows] == ["discovery-scope", "headline-1"]
     assert any("Price source unavailable" in gap for gap in gaps)
 
 
@@ -129,7 +131,7 @@ def test_extended_hours_minutes_give_premarket_change_and_fall_back_per_symbol(m
         if params["symbol"] == "QQQ":
             return minutes((today - timedelta(days=1), 99), ), 0, None  # Yesterday's bars are not today's premarket.
         return minutes((today - timedelta(minutes=5), 101), (today, 101.5)), 0, None
-    snaps = tradier_snapshots(["SPY", "QQQ", "MU"], quotes=quotes, read=read)
+    snaps = tradier_snapshots(["SPY", "QQQ", "MU"], quotes=quotes, read=read, now=today + timedelta(minutes=1))
     assert reads[0] == ("/v1/markets/timesales", "SPY", "all")
     assert snaps["SPY"]["session"] == "extended" and snaps["SPY"]["latestTrade"]["p"] == 101.5
     assert snaps["QQQ"]["session"] == "regular" and snaps["MU"]["session"] == "unverified"
@@ -161,16 +163,16 @@ def test_market_wide_headlines_are_theme_filtered_bounded_and_fail_alone():
     rows, gaps = collect_market(["MU"], NOW, snapshots_reader=lambda _: {},
         news_reader=news, clock=lambda: NOW)
     ids = [r["id"] for r in rows]
-    assert ids == ["headline-1", "macro-headline-1", "macro-headline-2", "macro-headline-3", "macro-headline-4"]
-    assert "Powell" in rows[1]["text"] and rows[1]["text"].startswith("Market-wide")
+    assert ids == ["discovery-scope", "headline-1", "macro-headline-1", "macro-headline-2", "macro-headline-3", "macro-headline-4"]
+    assert "Powell" in rows[2]["text"] and rows[2]["text"].startswith("Market-wide")
     assert any("keyword-filtered" in gap for gap in gaps)
     def broad_fails(tickers, start, end):
         if tickers is None:
             raise RuntimeError("secret")
         return [article()]
     rows, gaps = collect_market(["MU"], NOW, snapshots_reader=lambda _: {}, news_reader=broad_fails, clock=lambda: NOW)
-    assert [r["id"] for r in rows] == ["headline-1"]
-    assert any("Market-wide headline source unavailable" in gap for gap in gaps) and "secret" not in str(gaps)
+    assert [r["id"] for r in rows] == ["discovery-scope", "headline-1"]
+    assert any("Broad-market discovery/news unavailable" in gap for gap in gaps) and "secret" not in str(gaps)
 
 
 def backdrop_db(tmp_path):
@@ -229,3 +231,61 @@ def test_backdrop_parts_fail_independently(tmp_path):
         rows, gaps = collect_backdrop(session, ["TSLA"], NOW, events_reader=lambda day, end: [])
     assert [r["id"] for r in rows] == ["macro-calendar"] and "No FOMC, CPI or jobs releases" in rows[0]["text"]
     assert any("No saved VIX reading" in gap for gap in gaps)
+
+
+def test_discovery_is_independent_of_saved_symbols_and_prices_new_candidates_first():
+    broad = [dict(article(), symbols=["HELD", "WATCH", "CAPPED", "NEW"], headline="NEW wins a major contract")]
+    calls = []
+    def snapshots(symbols):
+        calls.append(symbols)
+        return {"NEW": {"latestTrade": {"p": 42, "t": (NOW-timedelta(minutes=1)).isoformat()},
+                        "session": "extended", "premarket": dict(low=40, high=43, volume=100000, bars=20,
+                            observed_at=(NOW-timedelta(minutes=1)).isoformat())}}
+    rows, gaps = collect_market(["HELD", "WATCH"], NOW, excluded_symbols={"CAPPED"}, snapshots_reader=snapshots,
+        news_reader=lambda tickers, *_: broad if tickers is None else [], clock=lambda: NOW)
+    ids = [r["id"] for r in rows]
+    assert calls == [[*BACKDROP, "NEW", "HELD", "WATCH"]]
+    assert "discovery-NEW" in ids and "setup-NEW" in ids and "market-NEW" in ids
+    assert not any(f"discovery-{s}" in ids for s in ["HELD", "WATCH", "CAPPED"])
+    assert "$40–$43" in next(r["text"] for r in rows if r["id"] == "setup-NEW")
+    assert any("not a complete market scan" in gap for gap in gaps)
+
+
+def test_discovery_bounds_rejects_unsafe_news_and_prioritizes_material_catalysts():
+    base = article()
+    broad = [{**base, "symbols": ["NOISE"], "headline": "Commentator likes a stock", "url": "https://example.com/noise"}]
+    broad += [{**base, "symbols": [f"A{chr(65+i)}"], "headline": "Company raises guidance", "url": f"https://example.com/{i}"} for i in range(9)]
+    broad += [{**base, "symbols": ["UNSAFE"], "url": "https://user:secret@example.com"},
+              {**base, "symbols": ["FUTURE"], "created_at": (NOW+timedelta(minutes=1)).isoformat()},
+              {**base, "symbols": ["NAIVE"], "created_at": NOW.replace(tzinfo=None).isoformat()}]
+    calls = []
+    rows, _ = collect_market([], NOW, snapshots_reader=lambda s: calls.append(s) or {},
+        news_reader=lambda *_: broad, clock=lambda: NOW)
+    discovered = [r["id"] for r in rows if r["id"].startswith("discovery-") and r["id"] != "discovery-scope"]
+    assert discovered == [f"discovery-A{chr(65+i)}" for i in range(6)]
+    assert calls == [[*BACKDROP, *[f"A{chr(65+i)}" for i in range(6)]]]
+    assert "UNSAFE" not in str(rows) and "secret" not in str(rows)
+
+
+def test_saved_symbol_catalysts_survive_newer_generic_headline_crowding():
+    base = article()
+    articles = [{**base, "headline": "A commentator's market view", "symbols": ["SPY"],
+                 "url": f"https://example.com/noise{i}"} for i in range(10)]
+    articles += [{**base, "headline": "Applied Digital announces joint venture", "symbols": ["APLD"], "url": "https://example.com/apld"},
+                 {**base, "headline": "Analyst cuts Nebius price target", "symbols": ["NBIS"], "url": "https://example.com/nbis"}]
+    rows, _ = collect_market(["SPY", "APLD", "NBIS"], NOW, snapshots_reader=lambda _: {},
+        news_reader=lambda tickers, *_: articles if tickers else [], clock=lambda: NOW)
+    headlines = [r["text"] for r in rows if r["id"].startswith("headline-")]
+    assert len(headlines) == 4
+    assert "joint venture" in headlines[0] and "price target" in headlines[1]
+
+
+def test_setup_range_uses_completed_premarket_bars_and_preserves_its_own_time(monkeypatch):
+    from app.engine import jo_morning_market as market
+    t = NOW - timedelta(minutes=3)
+    bars = minutes((t, 40), (t+timedelta(minutes=1), 42), (t+timedelta(hours=2), 99), (t+timedelta(hours=4), 999))
+    last, stats = market.session_minutes(lambda *_: (bars, 0, None), "NEW", NOW.astimezone(market.ET).date(),
+                                        now=NOW+timedelta(hours=3))
+    assert last["close"] == 99  # Future/incomplete minutes cannot supply levels.
+    assert stats["low"] == 40 and stats["high"] == 42 and stats["bars"] == 2 and stats["volume"] == 200
+    assert stats["observed_at"] == (t+timedelta(minutes=1)).isoformat()

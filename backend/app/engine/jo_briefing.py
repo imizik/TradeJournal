@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 from app.models import JoMemoryRevision, MorningBriefingPacket, MorningBriefingRecord, MorningBriefingSubmission, utc_now_naive
 
 from jo_briefing_common import (  # noqa: F401 — retained owner API imports
-    BriefingSave, MemoryRedact, MemorySave, PacketSave,
+    BriefingSave, MemoryRedact, MemorySave, PacketSave, validate_opportunity_evidence,
 )
 
 
@@ -174,10 +174,11 @@ def save_briefing(session, body: BriefingSave, submitted_at=None):
     if packet["redacted_at"]:
         raise Conflict("Cannot submit against a redacted packet")
     evidence_ids = {item["id"] for item in packet["body"]["evidence"]}
-    references = body.summary_evidence_ids + [ref for item in body.items for ref in item.evidence_ids]
+    references = body.summary_evidence_ids + [ref for item in [*body.items, *body.opportunities, *body.urgent_positions] for ref in item.evidence_ids]
     if any(ref not in evidence_ids for ref in references):
         raise ValueError("Every citation must resolve to the frozen packet")
-    if not body.summary_evidence_ids and (body.items or not body.limitations):
+    validate_opportunity_evidence(body, packet)
+    if not body.summary_evidence_ids and (body.items or body.opportunities or body.urgent_positions or not body.limitations):
         raise ValueError("An uncited summary must be an unavailable briefing with explicit limitations")
     if body.supersedes_id:
         previous = session.get(MorningBriefingRecord, body.supersedes_id)

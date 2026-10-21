@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field
 
 from app.engine.market_watch_snapshot import _publish_immutable, _read_bounded, _fsync_directory
-from jo_briefing_common import BriefingSave, MemorySave, Operation, PacketSave, Strict
+from jo_briefing_common import BriefingSave, MemorySave, Operation, PacketSave, Strict, validate_opportunity_evidence
 
 READ_SCOPE = "jo:read"
 SUBMIT_SCOPE = "jo:submit"
@@ -144,10 +144,11 @@ def validate_body(kind, body, packet):
         if str(value.packet_id) != packet["id"] or value.author != "Jo":
             raise ValueError("Briefing must name this packet and Jo as its supplied author")
         ids = {e["id"] for e in packet["body"]["evidence"]}
-        refs = value.summary_evidence_ids + [ref for item in value.items for ref in item.evidence_ids]
+        refs = value.summary_evidence_ids + [ref for item in [*value.items, *value.opportunities, *value.urgent_positions] for ref in item.evidence_ids]
         if any(ref not in ids for ref in refs):
             raise ValueError("Citations must resolve to the frozen packet")
-        if not value.summary_evidence_ids and (value.items or not value.limitations):
+        validate_opportunity_evidence(value, packet)
+        if not value.summary_evidence_ids and (value.items or value.opportunities or value.urgent_positions or not value.limitations):
             raise ValueError("Uncited output must be unavailable with limitations")
     data = value.model_dump(mode="json")
     if len(canonical(data).encode()) > 128 * 1024:

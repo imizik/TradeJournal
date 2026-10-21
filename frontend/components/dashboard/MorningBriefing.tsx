@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
-import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
+import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefOpportunity, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 import DayJournal from "@/components/DayJournal";
 
@@ -78,6 +78,10 @@ function joReference(briefId: string, packetId: string | undefined, day: string,
     if (item.evidence_ids.length) lines.push(`Evidence IDs: ${item.evidence_ids.join(", ")}`);
     if (memoryIds.length) lines.push(`Saved memory revisions used: ${memoryIds.join(", ")}`);
   }
+  if (item && "entry_trigger" in item) {
+    const setup = item as BriefOpportunity;
+    lines.push(`Setup status: ${setup.status}`, `Entry condition: ${setup.entry_trigger}`, `Invalidation: ${setup.invalidation}`, `Timeframe: ${setup.timeframe}`);
+  }
   lines.push(`My question: ${question.trim() || "(add your question here)"}`);
   lines.push("Use jo_context with this packet ID only while its publication remains valid, and say so if it has expired. Treat memories as beliefs and disclose evidence gaps.");
   return lines.join("\n");
@@ -121,6 +125,9 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   const brief = data?.briefing;
   const body = data?.state === "ready" ? brief?.body : null;
   const packet = data?.packet;
+  const opportunityFirst = body?.prompt_version === "jo-morning-v4" || !!body?.opportunities?.length || !!body?.urgent_positions?.length;
+  const opportunities = body?.opportunities ?? [];
+  const priorities: BriefItem[] = opportunityFirst ? [...opportunities, ...(body?.urgent_positions ?? [])] : body?.items ?? [];
   const gaps = [...new Set([...(packet?.body.gaps ?? []), ...(body?.limitations ?? [])])];
   const evidence = new Map((packet?.body.evidence ?? []).map((e) => [e.id, e]));
   const openDetails = (key: string) => () => {
@@ -212,11 +219,11 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   </>;
   const longSummary = (body?.summary?.length ?? 0) > 360;
   const focus = body?.summary && <section aria-label="Today’s focus" className="space-y-2">
-    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today’s focus</h2>
+    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Market context" : "Today’s focus"}</h2>
     <p data-testid="brief-summary" className={`whitespace-pre-wrap leading-relaxed ${compact ? "text-sm" : "text-base"} ${longSummary && !fullSummary ? "line-clamp-4" : ""}`}>{body.summary}</p>
     {longSummary && <button type="button" aria-expanded={fullSummary} className={textButton} onClick={() => setFullSummary((v) => !v)}>{fullSummary ? "Show less" : "Read Jo’s full summary"}</button>}
     {!compact && sources(body.summary_evidence_ids)}
-    {!compact && packet && !packet.redacted_at && !memories.length && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
+    {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
   </section>;
 
   if (compact) return <DashboardCard title="Morning briefing" action={<a href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</a>}>
@@ -226,7 +233,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {status}
       {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
       {focus}
-      {body && <p className="text-xs text-muted-foreground">{body.items?.length ?? 0} priorities{gaps.length ? " · Evidence gaps disclosed in the brief" : ""} · Personal advice. Uses the account scope saved with this briefing.</p>}
+      {body && <p className="text-xs text-muted-foreground">{opportunityFirst ? `${opportunities.length} new opportunities · ${body.urgent_positions?.length ?? 0} urgent position reviews` : `${body.items?.length ?? 0} priorities`}{gaps.length ? " · Evidence gaps disclosed in the brief" : ""} · Personal advice. Uses the account scope saved with this briefing.</p>}
     </div>
   </DashboardCard>;
 
@@ -243,19 +250,33 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
     {focus}
     {body && <section aria-label="Priorities" className="space-y-3">
-      {!body.items?.length && <p className="text-sm">No supported priority in this briefing. Review the coverage details before drawing conclusions.</p>}
-      {body.items?.map((item, index) => <article key={index} className="space-y-3 rounded-lg border bg-card p-4">
+      {opportunityFirst && <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">New opportunities</h2>}
+      {opportunityFirst && !opportunities.length && <p className="text-sm">No supported new setup in this packet. Review discovery coverage and missing evidence before looking for an entry.</p>}
+      {!opportunityFirst && !body.items?.length && <p className="text-sm">No supported priority in this briefing. Review the coverage details before drawing conclusions.</p>}
+      {priorities.map((item, index) => {
+        const opportunity = opportunityFirst && index < opportunities.length ? opportunities[index] : null;
+        const details: [string, string, string][] = opportunity ? [
+          ["Entry condition", opportunity.entry_trigger, ""], ["Invalidation", opportunity.invalidation, ""],
+          ["Timeframe", opportunity.timeframe, ""], ["Why this setup", item.why_personal, ""],
+          ["Before acting", item.watch_out, "text-amber-300"], ["Counterpoint", item.contrary_evidence, ""],
+        ] : opportunityFirst ? [["Before acting", item.watch_out, "text-amber-300"]] : [
+          ["Why you", item.why_personal, ""], ["Before acting", item.watch_out, "text-amber-300"],
+          ["What changed", item.what_changed, ""], ["Counterpoint", item.contrary_evidence, ""],
+        ];
+        return <div key={index} className="space-y-3">
+        {opportunityFirst && index === opportunities.length && <h2 className="pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Urgent positions</h2>}
+        <article className="space-y-3 rounded-lg border bg-card p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="text-base font-semibold"><span className="mr-2 tabular-nums text-muted-foreground">{index + 1}</span>{item.symbol ?? "Portfolio review"}</h3>
+          <h3 className="text-base font-semibold"><span className="mr-2 tabular-nums text-muted-foreground">{opportunityFirst && index >= opportunities.length ? index - opportunities.length + 1 : index + 1}</span>{item.symbol ?? "Portfolio review"}</h3>
           <div className="flex flex-wrap items-center gap-x-4">
             {item.symbol && <a href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</a>}
             <button type="button" aria-expanded={asking === index} className={textButton} onClick={() => ask(index)}>Ask Jo about {item.symbol ?? `priority ${index + 1}`}</button>
           </div>
         </div>
+        {opportunity && <p className={`text-xs font-medium ${opportunity.status === "research_only" ? "text-amber-300" : "text-primary"}`}>{opportunity.status === "research_only" ? "Research only · confirmation missing" : "Conditional setup · wait for trigger"}</p>}
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.what_matters}</p>
         <dl className="space-y-2 text-sm">
-          {([["Why you", item.why_personal, ""], ["Before acting", item.watch_out, "text-amber-300"], ["What changed", item.what_changed, ""], ["Counterpoint", item.contrary_evidence, ""]] as const)
-            .filter(([, value]) => value?.trim()).map(([label, value, tone]) => <div key={label} className="sm:grid sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-3">
+          {details            .filter(([, value]) => value?.trim()).map(([label, value, tone]) => <div key={label} className="sm:grid sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-3">
               <dt className={`text-xs font-medium sm:pt-0.5 ${tone || "text-muted-foreground"}`}>{label}</dt><dd className="whitespace-pre-wrap leading-relaxed">{value}</dd>
             </div>)}
           {(() => {
@@ -268,7 +289,8 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         </dl>
         {sources(item.evidence_ids)}
         {asking === index && joPanel(item, index)}
-      </article>)}
+      </article></div>;
+      })}
       <div className="space-y-3">
         <button type="button" aria-expanded={asking === "brief"} className={textButton} onClick={() => ask("brief")}>Ask Jo about this brief</button>
         {asking === "brief" && joPanel(null, 0)}
