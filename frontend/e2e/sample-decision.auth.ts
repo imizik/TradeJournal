@@ -445,7 +445,7 @@ test("market pilot saves source-linked own decisions and privately reviews them 
   await privatePage.goto(`/daily/${run.day}?practice_run=${run.id}`);
   await expect(privatePage.getByRole("article",{name:"NBIS market opportunity"}).getByText("PRACTICE · UNARMED",{exact:true})).toBeVisible();
   await expect(privatePage.getByRole("button",{name:"Save MU decision"})).toHaveCount(0);
-  await privatePage.goto("/");
+  await privatePage.goto("/practice");
   const genericCard=privatePage.getByTestId("practice-decisions").locator(`#decision-${before.find((r:{symbol:string})=>r.symbol==="MU").id}`);
   await genericCard.locator("summary").click();
   await expect(genericCard.getByTestId("paper-plan")).toHaveCount(0);
