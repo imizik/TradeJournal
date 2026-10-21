@@ -552,7 +552,8 @@ export default function ChartWorkspace() {
       }
     } finally {
       if (historyFlights.current.get(key) === controller) historyFlights.current.delete(key);
-      setOlder((state) => state.key !== session || !state.panels[key] ? state : ({ ...state,
+      // A load replaced by another (a past trade's page) leaves the new one's state alone.
+      if (!historyFlights.current.has(key)) setOlder((state) => state.key !== session || !state.panels[key] ? state : ({ ...state,
         panels: { ...state.panels, [key]: { ...state.panels[key], loading: false } } }));
     }
   }, [feedFor, currentOlder, session]);
@@ -597,6 +598,10 @@ export default function ChartWorkspace() {
     const targets = slots.filter((s) => s.symbol === past.symbol);
     pastJumps.current = new Set(targets.map(frameKey));
     for (const slot of targets) {
+      // A load from today may be in flight (today's candles are few before the open, and on 15m and coarser
+      // early in the day); it would walk back from today first, so the trade's page replaces it.
+      historyFlights.current.get(frameKey(slot))?.abort();
+      historyFlights.current.delete(frameKey(slot));
       // Older candles are trimmed around what is in view; until the user pans, that is the trade.
       visibleTimes.current.set(frameKey(slot), { from: past.from - 3600, to: past.to + 3600 });
       void loadOlder(slot, pastPageEnd(past, slot.interval));
@@ -604,13 +609,16 @@ export default function ChartWorkspace() {
     if (past.fill) openFill(past.fill);
     else if (past.trade) { const trade = past.trade; openCard(`trade:${trade}`, () => fetchTradeCard(trade)); }
   }, [past, ready, current, slots, loadOlder, openFill, openCard]);
-  // Each chart centres on the trade once its page is drawn: a jump before that would page back from today instead.
+  // Each chart centres on the trade once its candles reach the trade's start: a jump before that would page back
+  // from today instead. Older candles and indicator warmup may still be loading; waiting for them could move the
+  // chart minutes later, after the trader has moved it (a chart they move drops its jump, `onUserMove`).
   useEffect(() => {
     if (!past?.started || !pastJumps.current.size) return;
     for (const slot of slots) {
       const key = frameKey(slot);
       const loaded = currentOlder[key];
-      if (!pastJumps.current.has(key) || !loaded || loaded.loading) continue;
+      const first = loaded?.bars[0]?.time;
+      if (!pastJumps.current.has(key) || !loaded || (loaded.loading && (first === undefined || first > past.from))) continue;
       pastJumps.current.delete(key);
       commands.jump({ panel: slot.index === 0 ? "main" : `Panel ${slot.index + 1}`, times: [past.from, past.to], prices: [] });
     }
@@ -1051,7 +1059,7 @@ export default function ChartWorkspace() {
       setEntry(NO_ENTRY);
       if (hotkey.kind === "interval") actions.current.interval(hotkey.interval);
       else if (hotkey.kind === "step") { const next = stepWatchlist(state.watchlist, state.symbol, hotkey.by); if (next) actions.current.choose(next); }
-      else if (hotkey.kind === "reset" || hotkey.kind === "realtime") commands.emit(hotkey.kind);
+      else if (hotkey.kind === "reset" || hotkey.kind === "realtime") { pastJumps.current.clear(); commands.emit(hotkey.kind); }
       else if (hotkey.kind === "help") setHelp(true);
       else if (hotkey.kind === "undo" || hotkey.kind === "redo") actions.current.replay(hotkey.kind === "undo" ? "before" : "after");
       else if (hotkey.kind === "delete" && state.selected) actions.current.deleteItem(state.selected.symbol, state.selected.id);
@@ -1727,7 +1735,7 @@ export default function ChartWorkspace() {
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                 onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                 maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined} onPlan={narrow ? openPlan : undefined}
-                history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />
+                history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))} />
               </div>
             </div>)}
             {sized ? <Splitter key="rows" label="Resize main chart and smaller charts" orientation="horizontal" className={`h-1 ${cover ? "invisible" : ""}`}
@@ -1749,7 +1757,7 @@ export default function ChartWorkspace() {
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
                   notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={settings.newsOnSmall ? newsMarkers : null} newsSmall={settings.newsOnSmall} onNews={openNews} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
-                  history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
+                  history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}

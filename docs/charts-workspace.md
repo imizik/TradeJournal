@@ -1587,7 +1587,14 @@ except the option mark, which is asked for from a card.
   charts switch to that symbol, load the stored history page that ends at the
   close of the trade's last day (20:00 New York; daily and weekly charts about
   three months after it) into every chart of the symbol, centre each on the
-  trade with its arrows, and open the card. Candles come from the same deep
+  trade with its arrows, and open the card. The trade's page replaces a load of
+  older sessions from today that is already under way (today is short before
+  the open, and on 15m and coarser early in the day). Each chart centres as soon as its
+  candles reach the trade's start, while older candles and indicator warmup may
+  still be loading (on a symbol with little stored history that can take
+  minutes); a chart the trader moves first (a drag, the wheel, a touch,
+  **Latest candles**, End or Alt+R) is left where they put it, and **Show whole
+  trade** on the card still brings the main chart there. Candles come from the same deep
   history as scrolling back (C0.0): Alpaca SIP minutes for intraday charts,
   Tradier's daily bars for 1D/1W, never Alpaca IEX. A banner names the dates
   with **Back to live**, which drops the trade's pages, returns to the symbol
@@ -1752,7 +1759,9 @@ and context (including single-venue context), an orphan fill, and the option
 mark's age and open P&L. `frontend/e2e/chart-journal.spec.ts` hovers and clicks
 a fill arrow for its card, reads the labeled states and an old mark, checks the
 lines and the Journal toggle, opens a months-old trade from a link with its
-page request, centring, arrows and card, goes back to live, shows the card as
+page request, centring, arrows and card, goes back to live, centres on a trade
+whose page still arrives in slow continuations and leaves a chart moved first
+(End, a scroll) where it is, shows the card as
 a bottom sheet at 390px, and follows a seeded trade's **Open on chart** link to
 a card read from the real journal route. A live option mark is not exercised.
 

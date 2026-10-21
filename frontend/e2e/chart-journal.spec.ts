@@ -206,6 +206,87 @@ for (const arrival of ["together", "main first", "main last"]) {
   });
 }
 
+// A symbol with little stored history: the page holding the trade arrives in slow continuations
+// (older candles and indicator warmup still loading). Each chart centres once its candles reach the
+// trade, and a chart the trader has already moved stays where they put it.
+async function slowPastPages(page: Page, now: number, { hold = 0, rounds = 4, short = false } = {}) {
+  const calls: { interval: string; before: number; continuation: string | null }[] = [];
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = workspace(route.request().url(), now);
+    // Before the open (or early in the day on coarser charts) today has few candles, so each chart
+    // starts loading older sessions from today as the past trade opens.
+    if (short && data.panels["5m"]) data.panels["5m"].bars = data.panels["5m"].bars.slice(-40);
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const interval = query.get("interval") as Interval;
+    const before = Number(query.get("before"));
+    const continuation = query.get("continuation");
+    calls.push({ interval, before, continuation });
+    if (hold && query.get("symbol") === "NVDA" && interval === "5m" && !continuation) await Promise.race([held, new Promise((resolve) => setTimeout(resolve, hold))]);
+    const round = continuation ? Number(continuation.split(":")[1]) : 0;
+    const step = STEP[interval];
+    // The server walks back from the trade's day, a session at a time: the trade comes first, then older candles.
+    const reach = Math.ceil((before - ENTRY) / step) + 60;
+    const count = Math.min(1200, reach + Math.round(((1200 - reach) * round) / rounds));
+    const more = round < rounds;
+    const candles = bars(Math.floor(before / step) * step, step, Math.max(count, 1), 90);
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval, session: "extended", before, limit: 1200, bars: candles, markers: [],
+      older_cursor: candles[0].time, exhausted: false, continuation: more ? `${interval}:${round + 1}` : null, warmup: more ? "pending" : "ready",
+      source: interval === "1D" ? "tradier" : "alpaca_sip", price_basis: "split_adjusted",
+      adjustment: { basis: "split_adjusted", status: "ok", source: "alpaca_corporate_actions", as_of: now, splits: [], daily: {}, dividends: "unsupported", dividends_note: "", warnings: [] },
+      fills_truncated: false, issue: more ? { code: "pending", message: "History is still loading.", retry_at: Math.floor(Date.now() / 1000) + 1 } : null } });
+  });
+  await page.route(`**/api/backend/charts/journal/trades/${TRADE}`, (route) => route.fulfill({ json: { ...CARD, fill: null } }));
+  return { calls, release: () => release() };
+}
+
+test("a past trade's chart centres once its candles arrive, while older candles and warmup still load", async ({ page }) => {
+  await registerCharts(page);
+  const now = Math.floor(Date.now() / 1000);
+  const { calls } = await slowPastPages(page, now, { rounds: 30, short: true });
+  await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
+  await expect(page.getByRole("status", { name: "Past trade view" })).toBeVisible();
+  // Today's load had started; the trade's own page (ending that day, 20:00 New York) replaces it.
+  await expect.poll(() => calls.some((c) => c.interval === "5m" && !c.continuation && c.before === Date.parse("2026-07-15T01:00:00Z") / 1000)).toBe(true);
+  expect(calls.some((c) => c.interval === "5m" && !c.continuation && c.before > EXIT + 86400)).toBe(true);
+  await expect.poll(async () => { const range = await visible(page); return !!range && range.from <= ENTRY && range.to >= EXIT; }).toBe(true);
+  // Still loading: the jump did not wait for the last page.
+  expect(calls.filter((c) => c.interval === "5m" && c.continuation === "5m:30")).toHaveLength(0);
+  // Older candles keep arriving underneath without moving the view off the trade.
+  await expect.poll(() => calls.filter((c) => c.interval === "5m" && c.continuation).length).toBeGreaterThanOrEqual(2);
+  const range = (await visible(page))!;
+  expect(range.from <= ENTRY && range.to >= EXIT).toBe(true);
+});
+
+for (const move of ["End", "a scroll"]) {
+  test(`a past trade's chart the trader moves before its candles arrive stays where they put it (${move})`, async ({ page }) => {
+    await registerCharts(page);
+    const now = Math.floor(Date.now() / 1000);
+    const { calls, release } = await slowPastPages(page, now, { hold: 15000, rounds: 1 });
+    await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
+    await expect(page.getByRole("status", { name: "Past trade view" })).toBeVisible();
+    await expect(page.getByTestId("canvas-main")).toBeVisible();
+    await expect.poll(() => calls.some((c) => c.interval === "5m" && !c.continuation)).toBe(true);
+    if (move === "End") await page.keyboard.press("End");
+    else {
+      const box = (await page.getByTestId("canvas-main").boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(-120, 0);
+    }
+    release();
+    // The page holding the trade arrives and finishes; this chart stays on today's candles.
+    await expect.poll(() => calls.some((c) => c.interval === "5m" && c.continuation === "5m:1")).toBe(true);
+    await page.waitForTimeout(800);
+    const range = (await visible(page))!;
+    expect(range.to).toBeGreaterThan(now - 7 * 86400);
+    expect(range.from).toBeGreaterThan(EXIT);
+  });
+}
+
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   test("the trade card is a bottom sheet at 390px", async ({ page }) => {
