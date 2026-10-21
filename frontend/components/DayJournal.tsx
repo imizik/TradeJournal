@@ -49,6 +49,10 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
   };
   const save = async () => {
     if (!draft || saveLock.current || !draft.write.text.trim()) return;
+    if (draft.write.symbol && !/^[A-Z][A-Z0-9./-]{0,14}$/.test(draft.write.symbol)) {
+      setSaveError("Use a stock or ETF symbol such as SPY, or leave the symbol empty. Your draft is still editable.");
+      return;
+    }
     const immutable = { ...draft, attempted: true, write: { ...draft.write, text: draft.write.text.trim() } };
     saveLock.current = true; changeDraft(immutable); setSaving(true); setSaveError(null); setSaveMessage(null);
     try {

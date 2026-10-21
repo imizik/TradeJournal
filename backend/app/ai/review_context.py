@@ -89,7 +89,7 @@ def build(session: Session, day: date, trades: list[Trade]) -> dict:
             text_truncated_count += 1
     if truncated_count:
         context["owner_timeline_truncated_count"] = truncated_count
-        gaps.append(f"Owner thought context includes the latest {OWNER_TIMELINE_LIMIT} of {timeline_total} entries")
+        gaps.append(f"Owner thought context includes the first entry and latest {OWNER_TIMELINE_LIMIT - 1} of {timeline_total} entries")
     if text_truncated_count:
         context["owner_timeline_text_truncated_count"] = text_truncated_count
         gaps.append(f"Owner thought text was capped at {OWNER_THOUGHT_TEXT_LIMIT} characters in {text_truncated_count} entries")
@@ -190,9 +190,16 @@ def owner_timeline_for_review(session: Session, day: date) -> tuple[list[dict], 
     total = session.exec(select(func.count(DayJournalEntry.id)).where(DayJournalEntry.day == day)).one()
     if not total:
         return None
-    ids = session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)
-                       .order_by(DayJournalEntry.created_at.desc(), DayJournalEntry.id.desc())
-                       .limit(OWNER_TIMELINE_LIMIT)).all()
+    recent_limit = OWNER_TIMELINE_LIMIT if total <= OWNER_TIMELINE_LIMIT else OWNER_TIMELINE_LIMIT - 1
+    recent_ids = session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)
+                              .order_by(DayJournalEntry.created_at.desc(), DayJournalEntry.id.desc())
+                              .limit(recent_limit)).all()
+    if total > OWNER_TIMELINE_LIMIT:
+        first_id = session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)
+                                .order_by(DayJournalEntry.created_at, DayJournalEntry.id).limit(1)).first()
+        ids = [first_id, *recent_ids]
+    else:
+        ids = recent_ids
     selected = session.exec(select(DayJournalEntry).where(DayJournalEntry.id.in_(ids))
                             .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all() if ids else []
     return [_serialize_owner_entry(row, day) for row in selected], int(total or 0)
@@ -209,7 +216,7 @@ def _serialize_owner_entry(row: DayJournalEntry, day: date) -> dict:
     return {"id": str(row.id), "kind": row.kind, "text": row.text, "symbol": row.symbol,
             "not_traded": row.not_traded,
             "created_at": created.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "actor": "owner", "retrospective": created.astimezone(ET).date() != day}
+            "actor": "owner", "retrospective": created.astimezone(ET).date() > day}
 
 
 def tags(session: Session, trades: list[Trade]) -> dict:

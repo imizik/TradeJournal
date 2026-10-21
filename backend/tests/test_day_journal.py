@@ -88,6 +88,7 @@ def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(
     generated = client.post("/daily-review", json={"day": DAY.isoformat(), "trade_ids": []})
     assert generated.status_code == 200, generated.text
     assert generated.json()["trade_count"] == 0
+    assert generated.json()["review"]["owner_thoughts_included"] is True
     assert generated.json()["review"]["expectation_checks"][0]["assessment"] == "unresolved"
     assert len(generated.json()["review"]["expectation_checks"]) == 1
     assert any("not in this day's saved timeline" in gap for gap in generated.json()["review"]["data_gaps"])
@@ -114,6 +115,23 @@ def test_daily_review_rejects_a_foreign_day_trade_selection(journal):
     assert response.status_code == 400 and "belong to the review day" in response.json()["detail"]
 
 
+def test_review_generation_fails_if_it_omits_a_saved_outlook_check(journal, monkeypatch):
+    _, engine = journal
+    from app.ai import daily_reviewer, plan_runner, review_context
+
+    monkeypatch.setattr(review_context, "build", lambda *_: {"owner_timeline": [{"id": "outlook-1", "kind": "outlook"}]})
+    incomplete = {"summary": "A summary", "day_grade": "B: clear plan", "key_takeaways": [],
+                  "best_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
+                  "worst_trade": {"trade_id": None, "ticker": None, "reason": "No trade"}, "patterns": [],
+                  "next_session_rules": [], "rules_check": [], "vs_baseline": [], "data_gaps": [],
+                  "market_read": "Unclear", "plan_vs_execution": []}
+    monkeypatch.setattr(plan_runner, "ask", lambda *_args, **_kwargs: type("Answer", (), {
+        "data": dict(incomplete), "author": "test", "input_tokens": 0, "output_tokens": 0,
+        "api_equivalent_usd": 0, "seconds": 0})())
+    with Session(engine) as session, pytest.raises(ValueError, match="expectation_checks"):
+        daily_reviewer.review_trading_day(DAY.isoformat(), [], {}, session)
+
+
 def test_review_context_preserves_creation_time_and_retrospective_provenance(journal):
     _, engine = journal
     from app.ai import review_context
@@ -121,7 +139,9 @@ def test_review_context_preserves_creation_time_and_retrospective_provenance(jou
     with Session(engine) as session:
         row = DayJournalEntry(operation_id="retro", day=DAY, kind="update", text="Changed my mind",
                               created_at=datetime(2026, 10, 1, 12, 0), actor="owner")
-        session.add(row)
+        prior = DayJournalEntry(operation_id="prior-evening", day=DAY, kind="outlook", text="Plan for tomorrow",
+                                created_at=datetime(2026, 9, 29, 20, 0), actor="owner")
+        session.add_all([row, prior])
         capture = TradeCapture(id=UUID(int=990), client_id="late-plan", received_at=datetime(2026, 10, 1, 12, 1),
                                account_id=UUID(int=10), account_label="IRA", underlying="SPY", side="buy_calls",
                                instrument="option", mode="discretionary", context_state="captured", image_state="unavailable")
@@ -132,6 +152,8 @@ def test_review_context_preserves_creation_time_and_retrospective_provenance(jou
         session.commit()
         timeline = review_context.owner_timeline(session, DAY)
         plans = review_context.plans(session, date(2026, 10, 1), [])
-    assert timeline[0]["retrospective"] is True and timeline[0]["created_at"] == "2026-10-01T12:00:00Z"
+    assert timeline[0]["retrospective"] is False
+    assert timeline[0]["created_at"] == "2026-09-29T20:00:00Z"
+    assert timeline[1]["retrospective"] is True and timeline[1]["created_at"] == "2026-10-01T12:00:00Z"
     assert plans["not_traded"][0]["later_notes"] == [{"text": "Later thought", "created_at": "2026-10-01T12:02:00Z", "kind": "note"}]
 

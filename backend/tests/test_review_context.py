@@ -2,7 +2,7 @@
 option walls from the database, the market and per-ticker parts from stubbed
 providers, and a gap for every part that is missing. Nothing reaches a network."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from uuid import UUID
@@ -100,6 +100,28 @@ def test_owner_thoughts_join_the_day_context_and_their_symbols_get_market_contex
     assert context["owner_timeline"][0]["text"] == "NVDA relative strength holds"
     assert context["owner_timeline"][0]["retrospective"] is False
     assert "NVDA" in offline["daily_symbols"]
+
+
+def test_owner_timeline_keeps_first_morning_entry_and_latest_entries_when_capped(session, offline):
+    start = datetime(2026, 9, 30, 12, 0)
+    session.add_all([
+        DayJournalEntry(operation_id=f"thought-{index}", day=DAY,
+                        kind="outlook" if index == 0 else "update",
+                        text="Morning outlook" if index == 0 else f"Update {index}",
+                        created_at=start + timedelta(minutes=index))
+        for index in range(61)
+    ])
+    session.commit()
+
+    context = review_context.build(session, DAY, [])
+
+    timeline = context["owner_timeline"]
+    assert len(timeline) == 50
+    assert timeline[0]["text"] == "Morning outlook"
+    assert [row["text"] for row in timeline[1:]] == [f"Update {index}" for index in range(12, 61)]
+    assert [row["created_at"] for row in timeline] == sorted(row["created_at"] for row in timeline)
+    assert context["owner_timeline_truncated_count"] == 11
+    assert "first entry and latest 49 of 61 entries" in " ".join(context["gaps"])
 
 
 def test_levels_alerts_tags_and_open_interest_walls(session):

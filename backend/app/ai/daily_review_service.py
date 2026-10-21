@@ -95,5 +95,15 @@ def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = No
         raise LookupError("Selected trades must belong to the review day")
     if not trades and not has_day_inputs(session, day):
         raise LookupError(f"No trades or saved thoughts/captures on {day.isoformat()}")
+    owner_thought_count = len(session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)).all())
     review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session, backend=backend)
+    review["owner_input_count"] = owner_thought_count
+    # Thoughts are append-only, so a count change means generation used a
+    # snapshot that did not include all owner inputs available at save time.
+    current_thought_count = len(session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)).all())
+    if current_thought_count:
+        review["owner_thoughts_included"] = True
+    if current_thought_count != owner_thought_count:
+        review["source_data_stale"] = True
+        review["source_data_stale_reason"] = "Owner thoughts changed while this review was being generated."
     return save_review(session, day, review, len(trades)), review

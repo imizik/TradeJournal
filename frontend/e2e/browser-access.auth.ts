@@ -38,6 +38,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   expect(forbidden.status()).toBe(403);
   expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
   expect((await page.request.get("/api/backend/jo/morning?day=2026-10-19")).status()).toBe(403);
+  expect((await page.request.get("/api/backend/day-journal/2026-10-19")).status()).toBe(403);
+  expect((await page.request.post("/api/backend/day-journal/2026-10-19/entries", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { operation_id: "refused-thought", kind: "outlook", text: "Must not save" } })).status()).toBe(403);
   expect((await page.request.post("/api/backend/jo/briefings/00000000-0000-0000-0000-000000000001/feedback", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { rating: "useful" } })).status()).toBe(403);
   expect((await page.request.get("/api/backend/scanner/settings")).status()).toBe(403);
   expect((await page.request.put("/api/backend/scanner/settings", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { symbols: ["MU"], base_revision: 0 } })).status()).toBe(403);

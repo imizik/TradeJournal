@@ -15,7 +15,7 @@ load_dotenv(BACKEND_DIR.parent / ".env")
 
 
 REVIEW_FIELDS = ("summary", "day_grade", "key_takeaways", "best_trade", "worst_trade", "patterns", "next_session_rules")
-PROMPT_VERSION = 3
+PROMPT_VERSION = 4
 BASELINE_DAYS = 20
 PRIOR_REVIEWS = 3
 
@@ -38,6 +38,7 @@ def review_trading_day(
     from app.ai import review_context
 
     context["day_context"] = review_context.build(session, date.fromisoformat(day), trades)
+    review_context_data = context["day_context"]
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
     chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
     if chosen == "api":
@@ -54,18 +55,28 @@ def review_trading_day(
     missing = [field for field in REVIEW_FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
+    if "expectation_checks" not in review or not isinstance(review["expectation_checks"], list):
+        raise ValueError("AI response missing required field: expectation_checks (use [] when no outlook or idea needs comparison)")
     valid_thought_ids = {row["id"] for row in context["day_context"].get("owner_timeline", [])}
-    checks = review.get("expectation_checks")
-    if isinstance(checks, list):
-        accepted = [item for item in checks if isinstance(item, dict) and item.get("entry_id") in valid_thought_ids]
-        if len(accepted) != len(checks):
-            review["data_gaps"] = list(review.get("data_gaps") or [])
-            review["data_gaps"].append("An expectation check referenced a thought that was not in this day's saved timeline; that check was omitted")
-        review["expectation_checks"] = accepted
+    required_thought_ids = {row["id"] for row in context["day_context"].get("owner_timeline", [])
+                            if row.get("kind") in {"outlook", "idea"}}
+    checks = review["expectation_checks"]
+    accepted = [item for item in checks if isinstance(item, dict) and item.get("entry_id") in valid_thought_ids]
+    if len(accepted) != len(checks):
+        review["data_gaps"] = list(review.get("data_gaps") or [])
+        review["data_gaps"].append("An expectation check referenced a thought that was not in this day's saved timeline; that check was omitted")
+    accepted_ids = [item["entry_id"] for item in accepted]
+    if len(accepted_ids) != len(set(accepted_ids)):
+        raise ValueError("AI response contains duplicate expectation checks for a saved thought")
+    missing_checks = required_thought_ids - set(accepted_ids)
+    if missing_checks:
+        raise ValueError("AI response omitted expectation checks for saved outlook/idea entries: " + ", ".join(sorted(missing_checks)))
+    review["expectation_checks"] = accepted
     for field in ("owner_timeline_truncated_count", "owner_timeline_text_truncated_count"):
         count = context["day_context"].get(field, 0)
         if count:
             review[field] = count
+    review["owner_thoughts_included"] = bool(review_context_data.get("owner_timeline") or review_context_data.get("plans"))
     review["prompt_version"] = PROMPT_VERSION
     return review
 
@@ -382,7 +393,7 @@ _TRADE_PICK = {
 REVIEW_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps", "market_read", "plan_vs_execution"],
+    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps", "market_read", "plan_vs_execution", "expectation_checks"],
     "properties": {
         "summary": {"type": "string"},
         "day_grade": {"type": "string"},
@@ -444,10 +455,12 @@ from exit decisions.
 
 day_context holds what was around the trades. Use it to judge decisions in their setting, not to explain P&L away:
 - owner_timeline contains the owner's saved outlook and timestamped thoughts for this day. Compare each concrete expectation
-  with observed market/trade evidence only when that evidence is present. If useful, return expectation_checks with the exact
+  return one expectation_checks item for every outlook and idea entry (empty [] when none exist), with the exact
   thought id, a concise expected and observed statement, assessment supported / invalidated / mixed / unresolved, and evidence
   naming the thought id plus source and time. Retrospective entries were saved after their stated day; never present their
-  wording as a premarket forecast. Missing or insufficient market evidence means unresolved. Do not invent prices or levels.
+  wording as a premarket forecast. A prior-evening timestamp may still be before the next session; use the actual timestamp.
+  Same-day thoughts recorded after 09:30 New York time are intraday updates, not premarket views. Missing or insufficient
+  market evidence means unresolved. Do not invent prices or levels.
   Keep forecast accuracy separate from adherence: following a valid plan can still lead to a forecast miss, and a correct
   forecast does not prove that the trader followed their plan.
   Market bars include source_bar_at (UTC) when available. Cite the thought id and relevant source bar time in evidence;

@@ -46,6 +46,11 @@ def install(app):
         context = json.loads(message.split("\n\n", 1)[1])
         day = context["day"]
         thoughts = context["day_context"].get("owner_timeline", [])
+        actions = [{"ticker": trade["ticker"],
+                    "planned": "Synthetic fixture: no contemporaneous linked trade plan is available.",
+                    "did": f"Recorded {trade['ticker']} {trade['instrument_type']} trade opened {trade['opened_at']}; {len(trade['fills'])} saved fills.",
+                    "result": "no_plan"}
+                   for trade in context.get("trades", [])]
         checks = []
         for entry in thoughts:
             if entry["kind"] not in {"outlook", "idea"}:
@@ -70,7 +75,7 @@ def install(app):
             "data_gaps": ["Synthetic market and reviewer boundary; no external model was called."] + context["day_context"].get("gaps", []),
             "market_read": "Market observations unavailable." if state["mode"] == "missing" else
                            "Synthetic market fixture: SPY closed at 577. Invented data for UI integration; not a live market result.",
-            "plan_vs_execution": [], "expectation_checks": checks,
+            "plan_vs_execution": actions, "expectation_checks": checks,
         }
         return SimpleNamespace(data=data, author="Synthetic browser fixture (no model call)", input_tokens=0,
                                output_tokens=0, api_equivalent_usd=0, seconds=0)

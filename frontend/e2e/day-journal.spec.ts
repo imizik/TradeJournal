@@ -1,14 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const fixtureApi = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
+
 // Actual owner routes, persistence, review context and review saving. Only the
 // external market/model boundary is a clearly labeled, disposable-server fixture.
-for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-08-17" },
-  { name: "phone", width: 390, height: 844, day: "2026-08-18" }]) {
-  test(`morning thoughts reach a no-trade review, survive retry/reopen, and preserve revisions (${viewport.name})`, async ({ page, request, browser }) => {
+for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-08-17", hasTrades: false },
+  { name: "phone", width: 390, height: 844, day: "2026-08-18", hasTrades: false },
+  { name: "traded-desktop", width: 1440, height: 900, day: "2026-10-01", hasTrades: true }]) {
+  test(`morning thoughts reach ${viewport.hasTrades ? "a traded-day" : "a no-trade"} review, survive retry/reopen, and preserve revisions (${viewport.name})`, async ({ page, request, browser }) => {
     test.setTimeout(120_000);
     await page.setViewportSize(viewport);
-    const mode = await request.post("/api/backend/__test/day-journal-review?mode=ready");
-    expect(mode.ok()).toBeTruthy();
+    const mode = await request.post(`${fixtureApi}/__test/day-journal-review?mode=ready`);
+    expect(mode.ok(), await mode.text()).toBeTruthy();
     const label = `DayFlow-${viewport.name}-${Date.now()}`;
     const original = `${label}: I expect SPY to hold 580 and test 585. Below 578 invalidates my view.`;
     const revision = `${label}: SPY lost 578. I changed my view and am standing aside.`;
@@ -20,6 +23,10 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       await expect(journal.getByText(/Loading saved thoughts/)).toHaveCount(0);
       await journal.getByTestId("day-journal-add-outlook").click();
       await journal.getByLabel("Your words").fill(original);
+      await journal.getByLabel("Symbol (optional)").fill("SPY??");
+      await journal.getByTestId("day-journal-save").click();
+      await expect(journal.getByRole("alert")).toContainText("still editable");
+      await expect(journal.getByLabel("Your words")).toBeEnabled();
       await journal.getByLabel("Symbol (optional)").fill("SPY");
 
       // Lose the response after a real server commit: reload and retry must
@@ -28,7 +35,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       let committed = false;
       await page.route(path, async (route) => {
         const response = await route.fetch();
-        expect(response.ok()).toBeTruthy();
+        expect(response.ok(), `${response.status()}: ${await response.text()}`).toBeTruthy();
         committed = true;
         await route.abort("failed");
       });
@@ -63,8 +70,13 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       const comparison = page.getByRole("region", { name: "Morning expectations against the day" });
       await expect(comparison).toContainText(original);
       await expect(comparison).toContainText("Synthetic SPY fixture closed at 577");
-      await expect(comparison.getByRole("link", { name: "Open original thought" }).first()).toHaveAttribute("href", `#thought-${entryId}`);
+      await expect(comparison.locator("li").filter({ hasText: original }).getByRole("link", { name: "Open original thought" })).toHaveAttribute("href", `#thought-${entryId}`);
       await expect(page.getByText(/Synthetic browser fixture \(no model call\)/)).toBeVisible();
+      if (viewport.hasTrades) {
+        const actions = page.getByLabel("Plan versus execution");
+        await expect(actions).toContainText("Recorded TSLA");
+        await expect(actions).toContainText("no contemporaneous linked trade plan");
+      }
       await page.screenshot({ path: test.info().outputPath(`day-comparison-${viewport.name}.png`), fullPage: true });
 
       // A new thought must invalidate the review that was just generated,
@@ -73,6 +85,8 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       await expect(page.getByText(/Saved analysis predates|Saved analysis used|thoughts.*changed/i).first()).toBeVisible();
       const stored = await (await request.get(`/api/backend/daily-review/${viewport.day}`)).json();
       expect(stored.review.source_data_stale).toBe(true);
+      if (viewport.hasTrades) expect(stored.trade_count).toBeGreaterThan(0);
+      else expect(stored.trade_count).toBe(0);
 
       const reopened = await browser.newContext({ viewport });
       try {
@@ -86,12 +100,12 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       } finally { await reopened.close(); }
 
       // Missing observations must remain an unresolved comparison.
-      await request.post("/api/backend/__test/day-journal-review?mode=missing");
+      await request.post(`${fixtureApi}/__test/day-journal-review?mode=missing`);
       await run.click();
       await expect(comparison).toContainText("Market observations unavailable");
       await expect(comparison).toContainText(/Unresolved|Not enough evidence/i);
     } finally {
-      await request.post("/api/backend/__test/day-journal-review?mode=off");
+      await request.post(`${fixtureApi}/__test/day-journal-review?mode=off`);
     }
   });
 }

@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine
 
 from app import models as _models  # noqa: F401  # registers all SQLModel tables for create_all
@@ -13,7 +13,8 @@ from app import models as _models  # noqa: F401  # registers all SQLModel tables
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "f1a2b3c4d5e6"
-CURRENT_HEAD = "d4f1a7c3e9b2"
+CURRENT_HEAD = "6b2f9d4a1c73"
+DAY_JOURNAL_PARENT = "d4f1a7c3e9b2"
 
 EXPECTED_COLUMNS = {
     "alert_id",
@@ -142,6 +143,31 @@ def test_migration_chain_has_one_head_and_tradingview_round_trips(tmp_path):
 
     _alembic(database_path, "upgrade", "head")
     assert "tradingview_alert" in inspect(engine).get_table_names()
+
+
+def test_day_journal_migration_round_trips_without_touching_existing_data(tmp_path):
+    database_path = tmp_path / "day-journal-round-trip.sqlite"
+    _alembic(database_path, "upgrade", DAY_JOURNAL_PARENT)
+    engine = create_engine(_database_url(database_path))
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE migration_sentinel (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"))
+        connection.execute(text("INSERT INTO migration_sentinel (id, value) VALUES (1, 'keep')"))
+
+    _alembic(database_path, "upgrade", CURRENT_HEAD)
+    inspector = inspect(engine)
+    assert {column["name"] for column in inspector.get_columns("day_journal_entry")} == {
+        "id", "operation_id", "day", "kind", "text", "symbol", "not_traded", "created_at", "actor"}
+    assert inspector.get_unique_constraints("day_journal_entry") == [
+        {"name": "uq_day_journal_entry_operation_id", "column_names": ["operation_id"]}]
+
+    _alembic(database_path, "downgrade", DAY_JOURNAL_PARENT)
+    assert "day_journal_entry" not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT value FROM migration_sentinel WHERE id = 1")).scalar_one() == "keep"
+
+    _alembic(database_path, "upgrade", CURRENT_HEAD)
+    assert "day_journal_entry" in inspect(engine).get_table_names()
+    engine.dispose()
 
 
 def test_migration_repairs_missing_index_after_create_all(tmp_path):

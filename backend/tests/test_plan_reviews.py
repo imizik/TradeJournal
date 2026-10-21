@@ -19,14 +19,15 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.ai import daily_reviewer, plan_runner
 from app.database import get_session
 from app.jobs import plan_reviews
-from app.models import Account, DailyReviewRecord, Trade
+from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
 from app.routers.daily_review import router
 
 ACCOUNT = UUID(int=1)
 ANSWER = {"summary": "Two trades, +$60.", "day_grade": "B: sized to plan", "key_takeaways": ["SPY 9:31 entry was on plan"],
           "best_trade": {"trade_id": None, "ticker": "SPY", "reason": "waited for the reclaim"},
           "worst_trade": {"trade_id": None, "ticker": "SPY", "reason": "chased"}, "patterns": [],
-          "next_session_rules": ["Max 2 contracts"], "rules_check": [], "vs_baseline": [], "data_gaps": []}
+          "next_session_rules": ["Max 2 contracts"], "rules_check": [], "vs_baseline": [], "data_gaps": [],
+          "expectation_checks": []}
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -195,10 +196,40 @@ def test_the_review_sees_the_last_rules_and_the_traders_normal(fake_claude, engi
     assert (baseline["trading_days"], baseline["trades_per_day"], baseline["median_premium_per_trade"], baseline["win_rate"]) == (2, 1.0, 200.0, 0.5)
     assert (baseline["avg_win"], baseline["avg_loss"], baseline["worst_day_pnl"]) == (50.0, -30.0, -30.0)
     assert [item["id"] for item in context["trades"]] == [str(UUID(int=103))]
-    assert {"rules_check", "vs_baseline", "data_gaps"} <= set(seen["schema"]["required"])
+    assert {"rules_check", "vs_baseline", "data_gaps", "expectation_checks"} <= set(seen["schema"]["required"])
     assert review["generated_by"] == "claude-sonnet-5-5 through claude -p on the Claude plan"
     assert review["prompt_version"] == daily_reviewer.PROMPT_VERSION
     assert json.loads(record.review_json)["usage"]["output_tokens"] == 300
+
+
+@pytest.mark.parametrize("append_during_generation", [False, True])
+def test_review_stales_if_owner_thoughts_change_during_generation(engine, monkeypatch, append_during_generation):
+    from app.ai import daily_review_service
+
+    day = datetime(2026, 9, 3).date()
+    add(engine, trade(1, datetime(2026, 9, 3, 9, 31), datetime(2026, 9, 3, 10, 0)))
+
+    def fake_review(_day, _trades, _fills, session, backend=None):
+        if append_during_generation:
+            session.add(DayJournalEntry(operation_id="during-review", day=day, kind="update", text="New thought"))
+            session.commit()
+        return {**ANSWER, "owner_thoughts_included": False}
+
+    monkeypatch.setattr(daily_reviewer, "review_trading_day", fake_review)
+    with Session(engine) as session:
+        record, review = daily_review_service.generate(session, day)
+        stored = json.loads(record.review_json)
+
+    if append_during_generation:
+        assert review["source_data_stale"] is True
+        assert review["source_data_stale_reason"] == "Owner thoughts changed while this review was being generated."
+        assert review["owner_thoughts_included"] is True
+        assert stored["source_data_stale"] is True and stored["owner_thoughts_included"] is True
+        assert stored["owner_input_count"] == 0
+    else:
+        assert "source_data_stale" not in review
+        assert review["owner_thoughts_included"] is False
+        assert "source_data_stale" not in stored
 
 
 def test_the_review_never_falls_back_to_the_api(fake_claude, engine, monkeypatch):

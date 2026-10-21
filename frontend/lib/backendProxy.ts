@@ -1,13 +1,13 @@
 import "server-only";
 import { accessConfig, upstreamHeaders } from "./accessServer";
 
-const ROOTS = new Set(["health", "accounts", "fills", "trades", "stats", "rebuild", "quotes", "charts", "daily-review", "market-context", "sync", "webull", "gmail", "packets", "practice", "decisions", "tradingview", "research", "research-studio", "strategy-lab", "auth", "advisor-shadow", "scanner", "jo"]);
+const ROOTS = new Set(["health", "accounts", "fills", "trades", "stats", "rebuild", "quotes", "charts", "daily-review", "day-journal", "market-context", "sync", "webull", "gmail", "packets", "practice", "decisions", "tradingview", "research", "research-studio", "strategy-lab", "auth", "advisor-shadow", "scanner", "jo"]);
 const ACCESS = new Set(["challenge", "login", "logout", "me", "assistants", "audit"]);
 
 export async function forward(request: Request, segments: string[], accessRoute = false) {
   try {
     const config = accessConfig();
-    if (!accessRoute && ["advisor-shadow", "research-studio", "scanner", "jo"].includes(segments[0]) && config.profile === "assistant") return Response.json({ detail: "Not permitted" }, { status: 403 });
+    if (!accessRoute && ["advisor-shadow", "research-studio", "scanner", "jo", "day-journal"].includes(segments[0]) && config.profile === "assistant") return Response.json({ detail: "Not permitted" }, { status: 403 });
     if (!segments.length || segments.some((value, index) => {
       const symbolPath = !accessRoute && segments[0] === "charts" && ["symbol", "options"].includes(segments[1]) && index === 2;
       const valid = symbolPath ? /^[A-Za-z0-9_.:-]+(?:\/[A-Za-z0-9_.:-]+)*$/.test(value) : /^[A-Za-z0-9_.:-]+$/.test(value);
