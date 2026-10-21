@@ -45,12 +45,19 @@ export default async function DailyReviewPage() {
           <h1 className="mt-2 text-xl font-semibold text-foreground">Daily Review Calendar</h1>
           <p className="mt-1 text-sm text-muted-foreground">Pick any trading day to open or generate its saved AI review.</p>
         </div>
-        <a
-          href="/trades"
-          className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-        >
-          All Trades
-        </a>
+        <div className="flex flex-wrap gap-2">
+          {access.owner && (
+            <a href="/daily/week" className="rounded border border-sky-500/50 px-3 py-2 text-sm font-medium text-sky-300 transition-colors hover:bg-secondary">
+              Weekly Review
+            </a>
+          )}
+          <a
+            href="/trades"
+            className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            All Trades
+          </a>
+        </div>
       </div>
 
       {access.owner && <PlanReviewStatus runner={runner} />}

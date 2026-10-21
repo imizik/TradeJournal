@@ -22,3 +22,11 @@ export function quantity(value: number | null | undefined): string {
 export function newYorkToday(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
+
+/** The Monday of a YYYY-MM-DD date's week, as YYYY-MM-DD; ``days`` shifts it by whole days first. */
+export function mondayOf(day: string, days = 0): string {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return date.toISOString().slice(0, 10);
+}

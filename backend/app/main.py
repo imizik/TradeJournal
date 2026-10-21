@@ -350,6 +350,8 @@ if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     # The isolated replay overlay has no journal monthly-review module/models.
     from app.routers import monthly_review
     app.include_router(monthly_review.router, prefix="/monthly-review", tags=["monthly-review"])
+    from app.routers import weekly_review
+    app.include_router(weekly_review.router, prefix="/weekly-review", tags=["weekly-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
 app.include_router(webull.router, prefix="/webull", tags=["webull"])

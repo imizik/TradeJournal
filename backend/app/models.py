@@ -277,6 +277,28 @@ class MonthlyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class WeeklyReviewRecord(SQLModel, table=True):
+    """One reviewed week (app/engine/weekly_review.py): the exit rule Isaac chose
+    to practise the following week, and later how it went. ``result`` is
+    written by the next week's review; ``evidence_json`` freezes the trades it
+    was judged on by their source identity (account plus the first entry
+    fill's ``raw_email_id``), so a rebuild never moves the evidence."""
+    __tablename__ = "weekly_review"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    week_start: date = Field(index=True, unique=True)  # New York Monday of the reviewed week
+    rule_key: Optional[str] = None  # winner_to_red | held_hour_red | expiry_day; None = skipped
+    rule_params_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # frozen thresholds
+    note: Optional[str] = None
+    chosen_at: datetime = Field(default_factory=datetime.utcnow)  # UTC; the practice window starts here
+    result: Optional[str] = None  # kept | partly | broken | not_enough
+    result_source: Optional[str] = None  # suggested | changed
+    evidence_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    checked_at: Optional[datetime] = None  # UTC
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ResearchWorkspace(SQLModel, table=True):
     """Durable editable state for a research module (e.g. the AI Buildout
     cockpit). Single-user, local-first: the whole workspace is one JSON blob
