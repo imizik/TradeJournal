@@ -242,7 +242,6 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading saved briefing…</p>}
     {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
     {focus}
-    <DayJournal key={day} day={day} />
     {body && <section aria-label="Priorities" className="space-y-3">
       {!body.items?.length && <p className="text-sm">No supported priority in this briefing. Review the coverage details before drawing conclusions.</p>}
       {body.items?.map((item, index) => <article key={index} className="space-y-3 rounded-lg border bg-card p-4">
@@ -275,6 +274,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         {asking === "brief" && joPanel(null, 0)}
       </div>
     </section>}
+    <DayJournal key={day} day={day} />
     {body && <section aria-label="Briefing feedback"><p className="mb-2 text-sm">Was this brief useful?</p><div className="flex flex-wrap gap-2" role="group" aria-label="Briefing feedback">
       {([["useful", "Useful"], ["meh", "Meh"], ["missed", "Missed something"]] as const).map(([value, label]) => <button key={value} type="button" disabled={saving} aria-pressed={data?.feedback.rating === value} className={`${button} ${data?.feedback.rating === value ? "bg-secondary" : ""}`} onClick={() => void rate(value)}>{label}</button>)}
     </div>{feedbackError && <p role="alert" className="mt-2 text-sm text-amber-300">{feedbackError}</p>}</section>}
