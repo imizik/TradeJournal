@@ -64,12 +64,12 @@ def session_profile(minutes: Sequence[dict]) -> Profile:
     return tuple(out)
 
 
-def window(day: date, hours: Callable[[date], dict | None]) -> list[date] | None:
-    """The 20 open sessions before ``day``, oldest first, from the market calendar
-    (``hours`` is a normalized calendar day); None when the calendar cannot say."""
+def window(day: date, hours: Callable[[date], dict | None], count: int = SESSIONS) -> list[date] | None:
+    """The ``count`` open sessions before ``day`` (20 unless said), oldest first, from the
+    market calendar (``hours`` is a normalized calendar day); None when the calendar cannot say."""
     found: list[date] = []
     current = day
-    for _ in range(LOOKBACK_DAYS):
+    for _ in range(LOOKBACK_DAYS * count // SESSIONS):
         current -= timedelta(days=1)
         if current.weekday() >= 5:
             continue
@@ -78,7 +78,7 @@ def window(day: date, hours: Callable[[date], dict | None]) -> list[date] | None
             return None
         if known.get("status") == "open":
             found.append(current)
-            if len(found) == SESSIONS:
+            if len(found) == count:
                 return sorted(found)
     return None
 
@@ -91,6 +91,67 @@ def baseline(profiles: Sequence[tuple[date, Profile]]) -> Baseline:
         average.append(sum(values) / len(values) if len(values) >= MIN_SESSIONS else None)
     return Baseline(tuple(sorted(day for day, _ in profiles)),
                     tuple(sorted(day for day, profile in profiles if profile[-1] is not None)), tuple(average))
+
+
+def day_baseline(day: date, hours: dict | None, calendar_hours: Callable[[date], dict | None] | None,
+                 profile: Callable[[date], Profile | None], factor: Callable[[date], float],
+                 past: bool = False) -> tuple[dict | None, Profile | None]:
+    """``day``'s baseline from the stored sessions before it, each scaled by ``factor`` (its
+    split factor) onto the chart's price basis. None on a day with no session; otherwise what
+    the chart says about it (``state`` and the window), with the baseline only when it is ready.
+
+    ``hours`` is ``day``'s normalized calendar day, None when the calendar is unavailable.
+    ``past`` words the messages for an older session (C2.6) instead of today (C2.4).
+    """
+    before = "it" if past else "today"
+    named = day.strftime("%b %-d") if past else "Today"
+
+    def state(name: str, message: str | None, days=(), traded=(), missing=()) -> dict:
+        return {"state": name, "day": day.isoformat(), "sessions": [d.isoformat() for d in days],
+                "traded": len(traded), "missing": [d.isoformat() for d in missing], "message": message}
+
+    if hours is not None and hours["status"] != "open":
+        return None, None
+    days = window(day, calendar_hours) if hours is not None and calendar_hours is not None else None
+    if days is None:
+        return state("unavailable", f"The market calendar is unavailable, so the 20 sessions before {before} cannot be chosen."), None
+    if hours["open"] != OPEN:
+        return state("unavailable", f"{named}'s regular session does not open at 9:30, so its minutes cannot be compared.", days), None
+    profiles, missing = [], []
+    for session in days:
+        found = profile(session)
+        if found is None:
+            missing.append(session)
+            continue
+        # Raw stored volume, multiplied by every split from that session up to the chart's basis.
+        scale = factor(session)
+        profiles.append((session, found if scale == 1.0 else tuple(None if v is None else v * scale for v in found)))
+    if missing:
+        where = ("Older candles store them as they load, and each morning stores the 40 sessions before today for watchlist names."
+                 if past else "Watchlist names are stored each morning before the open, and any symbol's sessions as its older candles load.")
+        return state("building", f"RVol needs the 20 sessions before {before}; {len(missing)} not stored yet. {where}", days, missing=missing), None
+    found = baseline(profiles)
+    if len(found.traded) < MIN_SESSIONS:
+        return state("insufficient", f"Only {len(found.traded)} of the 20 sessions before {before} traded in regular hours; RVol needs "
+                     f"{MIN_SESSIONS}.", days, found.traded), None
+    return state("ready", None, days, found.traded), found.average
+
+
+def session_rvol(bars: Sequence[dict], session: Profile, average: Profile, factor: float) -> list[float | None]:
+    """A completed session's candles' RVol (C2.6), from that session's own stored profile (raw
+    volume, scaled by ``factor`` onto the chart's basis): its volume through each candle's last
+    minute over the baseline there. ``bars`` are that session's candles; extended-hours ones have none.
+    The same numbers ``candle_rvol`` gives when the whole session's candles are at hand, so a page
+    that starts mid-session still counts from 09:30."""
+    out: list[float | None] = []
+    for bar in bars:
+        index = _minute(bar["end_time"]) - 1 - OPEN
+        if bar.get("extended") or not 0 <= index < MINUTES:
+            out.append(None)
+            continue
+        through, expected = session[index], average[index]
+        out.append(round(through * factor / expected, 4) if expected and through is not None else None)
+    return out
 
 
 def candle_rvol(bars: Sequence[dict], average: Profile, day: date, last_minute: int | None) -> list[float | None]:

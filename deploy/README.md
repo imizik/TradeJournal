@@ -290,9 +290,9 @@ The release installs five timers:
   open interest cannot be captured after 20:00, so if the job cannot be queued
   within ten minutes the unit fails and the phone alert says so.
 - `tradejournal-rvol-history.timer` queues the relative-volume history at
-  06:00 New York on weekdays, with an 08:40 catch-up: it stores the 20 SIP
-  sessions before today for each chart watchlist name, so chart RVol is ready
-  at the open. A stored session is never fetched again. If the job cannot be
+  06:00 New York on weekdays, with an 08:40 catch-up: it stores the 40 SIP
+  sessions before today for each chart watchlist name, today's 20 first, so
+  chart RVol is ready at the open and the last 20 sessions have their own. A stored session is never fetched again. If the job cannot be
   queued within ten minutes the run is skipped, not failed: RVol waits for the
   next slot.
 - `tradejournal-market-context.timer` queues the earnings and VIX refresh for

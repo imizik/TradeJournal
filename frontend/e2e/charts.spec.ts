@@ -5204,6 +5204,54 @@ test("without a baseline the chart says so and shades nothing", async ({ page })
   expect(new Set(await volumeColors(page, "main", 240))).toEqual(new Set(["#2bc9a43d"]));
 });
 
+test("older sessions from history pages read their own RVol and baseline, and one still building says so (C2.6)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  const template = fixture("http://test/charts/workspace?intervals=5m").panels["5m"]!.bars[0];
+  // Two completed regular sessions of 5m candles: Sep 15's window is still building, Sep 16's is ready.
+  const session = (day: string, rvol: (index: number) => number | null) => Array.from({ length: 78 }, (_, index) => ({ ...template,
+    time: Date.parse(`${day}T13:30:00Z`) / 1000 + index * 300, end_time: Date.parse(`${day}T13:35:00Z`) / 1000 + index * 300,
+    source: "alpaca_sip" as const, extended: false, rvol: rvol(index) }));
+  const bars = [...session("2026-09-15", () => null), ...session("2026-09-16", (index) => index % 2 ? 1.8 : 0.4)];
+  const before = ["2026-08-18", ...RVOL_SESSIONS.slice(0, -1)];
+  const waiting = "RVol needs the 20 sessions before it; 1 not stored yet. Older candles store them as they load, and each morning stores the 40 sessions before today for watchlist names.";
+  const rvol: Record<string, RvolBaseline> = {
+    "2026-09-15": { state: "building", day: "2026-09-15", sessions: ["2026-08-17", ...before.slice(0, -1)], traded: 0, missing: ["2026-08-17"], message: waiting },
+    "2026-09-16": { state: "ready", day: "2026-09-16", sessions: before, traded: 20, missing: [], message: null },
+  };
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = fixture(route.request().url());
+    data.rvol = READY; // today's, which these older candles must not borrow
+    for (const [interval, panel] of Object.entries(data.panels)) if (interval !== "1D" && interval !== "1W" && panel) panel.bars = [];
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const mine = query.get("interval") === "5m";
+    return route.fulfill({ json: { symbol: "MRVL", interval: query.get("interval"), session: "extended", before: Number(query.get("before")),
+      limit: 1200, bars: mine ? bars : [], markers: [], older_cursor: null, exhausted: true, continuation: null, warmup: "ready",
+      source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null, rvol: mine ? rvol : {} } });
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "156");
+
+  // The latest candle is Sep 16's last: its RVol, and the 20 sessions before Sep 16, not today's.
+  const studies = page.getByLabel("main study values");
+  await expect(studies).toContainText("RVol 1.8× for 3:55 PM");
+  await expect(studies.getByRole("note", { name: "Relative volume baseline" })).toHaveText("RVol vs 20 sessions Aug 18 – Sep 15");
+  expect(await volumeColors(page, "main", 4)).toEqual(["#2bc9a41f", "#2bc9a480", "#2bc9a41f", "#2bc9a480"]);
+
+  // A Sep 15 candle has no RVol yet, and the chart says why instead of borrowing another window.
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + await candleX(page, "main", bars[77].time), box.y + box.height * 0.4);
+  const note = studies.getByRole("note", { name: "Relative volume baseline" });
+  await expect(note).toHaveText("RVol baseline not built yet");
+  await expect(note).toHaveAttribute("title", waiting);
+  await expect(studies.getByText("RVol —")).toHaveAttribute("title", waiting);
+  expect((await volumeColors(page, "main", 79))[0]).toBe("#2bc9a43d");
+  await page.screenshot({ path: test.info().outputPath("rvol-older-sessions-desktop.png") });
+});
+
 test.describe("phone relative volume", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   test("the main chart's RVol and its sessions wrap into view on a phone", async ({ page }) => {

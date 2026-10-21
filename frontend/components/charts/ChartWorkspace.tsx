@@ -21,7 +21,7 @@ import PlanSheet from "./PlanSheet";
 import type { ChartSnapshot } from "./PlanSheet";
 import PlanStrip from "./PlanStrip";
 import PriceChart from "./PriceChart";
-import { beginHistoryLoad, type OlderState } from "@/lib/chartHistory";
+import { beginHistoryLoad, mergePastRvol, type OlderState } from "@/lib/chartHistory";
 import Sheet from "./Sheet";
 import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
@@ -520,7 +520,8 @@ export default function ChartWorkspace() {
           if (state.key !== session) return state;
           const prior = state.panels[key];
           const live = feed.panels[frame.interval]?.bars ?? [];
-          const combined = mergeBars(prior?.bars ?? [], page.bars);
+          const past = mergePastRvol(prior?.rvol, page);
+          const combined = mergeBars(prior?.bars ?? [], past.bars);
           const retained = retainHistory(combined, live, visibleTimes.current.get(key) ?? null);
           if (retained.length + live.length > 12000) return { ...state, panels: { ...state.panels, [key]: {
             ...(prior ?? { bars: [], markers: [], exhausted: false, warmup: "pending", loading: false }),
@@ -528,7 +529,7 @@ export default function ChartWorkspace() {
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
           return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers,
-            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment, historyStart: page.history_start ?? prior?.historyStart ?? null,
+            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment, rvol: past.rvol, historyStart: page.history_start ?? prior?.historyStart ?? null,
             // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
             adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
             exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,

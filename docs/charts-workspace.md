@@ -1383,9 +1383,10 @@ weeks back and ten days ahead (months not yet published read as clock hours).
 
 ### Relative volume (C2.4)
 
-A candle's RVol is today's cumulative regular-session volume through that
-candle over the average cumulative volume through the same minute of day in
-the 20 sessions before today. `backend/app/engine/chart_rvol.py` (pure) is fill
+A candle's RVol is its session's cumulative regular-session volume through
+that candle over the average cumulative volume through the same minute of day
+in the 20 sessions before that session: today's against the 20 before today,
+an older session's against its own 20 (C2.6). `backend/app/engine/chart_rvol.py` (pure) is fill
 context's `indicators.compute_rvol_time_adjusted` evaluated at every minute:
 on the same bars a candle's RVol equals the fill-context RVol of a fill at the
 end of that candle.
@@ -1394,14 +1395,21 @@ end of that candle.
   counts toward a minute once it has traded at or after 09:30 by then, and a
   minute that fewer than five sessions had reached has no RVol. A half day in
   the window counts its whole session for the minutes after its 13:00 close,
-  as fill context does. Only today's regular-session candles have an RVol:
-  premarket, postmarket, older sessions (history pages) and daily and weekly
-  charts have none. On a day whose regular session opens at another time
+  as fill context does. Only regular-session candles have an RVol:
+  premarket, postmarket and daily and weekly charts have none. On a day whose regular session opens at another time
   there is none either, since its minutes cannot be compared.
 - **Through which minute.** A completed candle counts through its last minute
   (a 5m candle at 10:15 through 10:19). A candle still forming counts through
   the newest minute bar, so its volume so far is set against the baseline so
   far. A candle's RVol therefore changes only while it forms.
+- **Older sessions (C2.6).** Each history page carries `rvol`, every shown
+  session's baseline by New York date (the same states, worded for that
+  session), and each of its regular-session candles carries `rvol`. A
+  session's volume comes from its own stored minutes, so a page that starts
+  mid-session still counts from 09:30. Like today's, it reads disk only: a
+  session whose 20 are not all stored has candles with no RVol and a
+  `building` baseline, never a fetch. Hovering an older candle shows its own
+  session's value and sessions, and shading follows each candle's own RVol.
 - **The baseline.** 390 numbers per symbol per day, one for each minute from
   09:30 through 15:59, over the market calendar's 20 sessions before today.
   They are read from the completed SIP sessions on disk
@@ -1416,13 +1424,16 @@ end of that candle.
   request for any of this.
 - **Storing the sessions.** Charting a symbol stores its sessions as its older
   candles load (C0.0). `backend/app/engine/rvol_history.py` stores them ahead
-  of time for every name on the shared chart watchlist: it is the
+  of time for every name on the shared chart watchlist, the 40 sessions before
+  today: every name's 20 before today first, then the 20 before those, so
+  each of the last 20 sessions has its own window. It is the
   `rvol_history` job in the sync lane, queued at 06:00 and 08:40 New York on
   weekdays by `tradejournal-rvol-history.timer` or from the Sync Center. It
   uses the chart history's Alpaca budget in its own process (30 requests a
   minute), sleeps when that is spent, and stops after ten minutes; the next
-  run continues. A stored session is never fetched again, so after the first
-  run each morning costs one request per name. Sessions are fetched newest
+  run continues (a first run for 30 names takes about two mornings' runs). A
+  stored session is never fetched again, so after the first runs each morning
+  costs one request per name. Sessions are fetched newest
   first. A day Alpaca has no minutes for (an index such as SPX, or a stock
   before it listed) is not stored, so that name has no baseline until it has
   20 sessions; the job notes it and moves on without failing. Refused
@@ -1934,8 +1945,12 @@ candle at the newest minute). It also pins the five-session minimum per minute,
 the calendar window, today's regular candles only, the workspace values and
 states (ready, building, insufficient, unavailable, a closed day, a late open),
 a split inside the window, the profile read once per process and one session
-fetched once for the job. `backend/tests/test_rvol_history.py` covers the job's
-scope, a rerun that costs nothing, a weekend run, waiting out the budget,
+fetched once for the job. For older sessions (C2.6) it checks that a session's
+RVol from its own profile equals counting its candles, from mid-session too,
+for 1m, 5m, 15m and 1h, on a split basis, and that a real history page on
+stored sessions carries each shown session's baseline (ready and building)
+and never fetches for it. `backend/tests/test_rvol_history.py` covers the job's
+40 sessions (today's 20 first for every name), its scope, a rerun that costs nothing, a weekend run, waiting out the budget,
 refused credentials, a failed session named after the rest are stored, the
 ten-minute stop and resume, a missing calendar and the Sync Center job; the
 timer is in `backend/tests/test_deployment.py`. Browser tests (C2.4) stub the
