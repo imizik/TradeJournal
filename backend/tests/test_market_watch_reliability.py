@@ -287,3 +287,27 @@ def test_route_days_skip_weekends_and_cap():
     assert route._days(date(2026, 10, 19), date(2026, 10, 16)) == [date(2026, 10, 19), date(2026, 10, 16)]
     assert len(route._days(date(2026, 10, 19), date(2026, 1, 1))) == route.SESSIONS
     assert route._days(date(2026, 10, 18), None) == []
+
+
+def test_session_lists_phone_messages_with_their_times(env, tmp_path):
+    runner, clock, _, pushed, _ = env
+    snapshot = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    got = _submit_notice(ledger, runner.outbox_dir, snapshot, "initial", clock.now)
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 1
+    [message] = report(runner, None)["messages"]
+    # "accepted" is ntfy taking the push; the phone showing it is never observed.
+    assert message["read_id"] == got["read_id"] and message["delivery"] == "accepted"
+    assert message["decided_at"] and message["settled_at"]
+    assert mw.reliability_report(None, None, [DAY], hours=lambda day: OPEN_DAY, now=EVENING)["sessions"][0]["messages"] == []
+
+
+def test_route_returns_a_calendar_month(client):
+    sessions = client.get("/jo/market-reads?month=2026-10").json()["sessions"]
+    # Weekdays up to today, never before the first recorded evidence (the 14th here).
+    assert [s["session_date"] for s in sessions] == ["2026-10-16", "2026-10-15", "2026-10-14"]
+    assert client.get("/jo/market-reads?month=2026-09").json()["sessions"] == []
+    assert client.get("/jo/market-reads?month=2026-13").status_code == 422

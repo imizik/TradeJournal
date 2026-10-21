@@ -105,6 +105,8 @@ def main():
     reads_route._now = plans_route._now = lambda: Clock.now
     reads_route._hours = hours
     reads_route._receipts = lambda: receipts
+    # The phone watchdog (deploy/alerts.py) isn't running here; the 12:50 step writes the notice it would record.
+    jo_morning.ALERTS_STATE = base / "alerts-state.json"
     chart_calendar.hours = chart_calendar.cached = hours
     plans_engine.datetime = SimDatetime
 
@@ -157,7 +159,7 @@ def main():
                 "scheduled_read_slot": None, "attempt": 1, "recorded_at": stamp(Clock.now), "phase": phase, "status": status,
                 **({"snapshot_id": snap["snapshot_id"], "quality_flags": []} if phase == "published" else {})})
 
-    def read(operation, view, main, alternative, invalidation, change):
+    def read(operation, view, main, alternative, invalidation, change, intent="none"):
         snap = snapshot()
         publish_snapshot(public, snap)
         served = watch_ledger.serve(profile, snap, lambda: Clock.now)
@@ -167,7 +169,7 @@ def main():
             "invalidation": {"text": invalidation, "evidence_refs": ["/indices/SPY/vwap"]}, "change_summary": change,
             "forecasts": [{"horizon": h, "predicate": "spy_return_lt_zero", "probability": None,
                            "abstention_reason": "No defensible directional forecast."} for h in ("30m", "60m", "close")],
-            "message_intent": "none", "prompt_version": "ux-simulation", "previous_read_id": state["last_read"]}, lambda: Clock.now)
+            "message_intent": intent, "prompt_version": "ux-simulation", "previous_read_id": state["last_read"]}, lambda: Clock.now)
         state["last_read"] = receipt["read_id"]
         write_read_notice(outbox, watch_ledger.read_notice(profile, receipt["read_id"]))
         return snap
@@ -267,12 +269,21 @@ def main():
     def ingest():
         reads.ingest_notices(Clock.now)
 
-    def scheduled(slot, view, main, alt, inval, change):
+    def scheduled(slot, view, main, alt, inval, change, intent="none"):
         def run():
-            snap = read(f"mw-scheduled-v1:{day.isoformat()}:{slot}", view, main, alt, inval, change)
+            snap = read(f"mw-scheduled-v1:{day.isoformat()}:{slot}", view, main, alt, inval, change, intent)
             packet_receipt(slot, snap)
             ingest()
+            reads.deliver_messages(Clock.now)  # Jo's "update" reads go to the phone (recorded here, never sent)
         return run
+
+    def watchdog(notices=()):
+        jo_morning.ALERTS_STATE.write_text(json.dumps({section: {"enabled": True, "checked_at": stamp(Clock.now),
+            "notices": {day.isoformat(): list(notices) if section == "jo_market_reads" else []}} for section in ("jo_morning", "jo_market_reads")}))
+
+    def watchdog_missing(slot, label):
+        watchdog([{"kind": slot.replace(":", ""), "title": f"Jo's {label} market read is missing", "recovered": False,
+                   "outcome": "sent", "at": stamp(Clock.now), "attempts": 1}])
 
     steps = [
         ("08:30", "Before the briefing: nothing from Jo yet; the briefing is due by 9:15.", lambda: None),
@@ -287,9 +298,10 @@ def main():
             "Correction: SPY reclaimed VWAP and its opening high; the weak-tape worry no longer holds.", "This could still stall at 771.",
             "Weakens if SPY loses VWAP again.", "Corrects the 9:50 read."), ingest(), watch_pass())),
         ("10:55", "MU closed above 140 at 10:52 and 10:53: the watch triggered and a phone alert went out.", watch_pass),
-        ("11:03", "Jo's 11:00 read arrives on time.", scheduled("11:00", "up", "Breadth improving; MU and semis leading.",
-            "A fade back under VWAP would undo it.", "Wrong if SPY closes back under 770.", "Upgraded from mixed.")),
-        ("12:50", "Jo's 12:30 read never arrived: it should show as missing.", lambda: (watch_pass(), ingest())),
+        ("11:03", "Jo's 11:00 read arrives on time and Jo flags it for your phone (a market-read message).", scheduled("11:00", "up", "Breadth improving; MU and semis leading.",
+            "A fade back under VWAP would undo it.", "Wrong if SPY closes back under 770.", "Upgraded from mixed.", "update")),
+        ("12:50", "Jo's 12:30 read never arrived: it shows as missing and the phone watchdog's notice is recorded.",
+            lambda: (watch_pass(), ingest(), watchdog_missing("12:30", "12:30 PM"))),
         ("14:22", "Jo's 2:00 read arrives 22 minutes late.", scheduled("14:00", "mixed", "Afternoon chop; MU holding above 140.",
             "A late-day flush is possible into the close.", "Wrong if SPY breaks 769.", "Momentum faded since 11:00.")),
         ("16:05", "After the close: the day is a record; nothing is upcoming.", lambda: (watch_pass(), ingest())),
@@ -323,6 +335,7 @@ def main():
         return where()
 
     Clock.now = at("08:00")
+    watchdog()
     # The simulation's own runners replace the API's background loops, which would use the real clock.
     async def runner_off(app_):
         app_.state.market_watch = reads
