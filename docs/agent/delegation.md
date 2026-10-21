@@ -10,7 +10,9 @@ or a worker is available. Do not duplicate the worker's exploration.
 State the outcome, owned files, constraints and focused checks in a few sentences.
 Use one writer per file/module and at most one migration author at a time.
 Workers preserve others' edits and do not spawn more workers. The owner retains
-product decisions, integration, pushes and PRs; only the user merges.
+product decisions, integration, pushes and PRs. The owner follows the shared
+[PR completion rules](pr-review.md#automatic-repair-and-merge): automatic repair
+and merge for tier 0, user approval and merge for tiers 1/2.
 
 ## Escalation
 

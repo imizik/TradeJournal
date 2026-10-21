@@ -34,8 +34,8 @@ is a trading app. [Review policy](docs/agent/pr-review.md) supplies the detail.
 
 - **Ordinary, bounded work:** localized fixes, UI tweaks, routine tests and
   documentation. Make the smallest change, run focused checks, push/update the
-  PR. No mandatory subagent, independent review or full local suite. CI may
-  finish asynchronously; report pending checks honestly, not as merge-ready.
+  PR, repair actionable failures and finish through passing CI and automatic
+  merge. No mandatory subagent, independent review or full local suite.
 - **Broad work:** cross-system features or refactors need relevant integration
   coverage and one independent reviewer. Broader tests follow affected behavior,
   not every layer in the system.
@@ -67,11 +67,17 @@ feature-specific safety and acceptance gates; fixture proof is not live proof.
 ## Delivery
 
 Develop on a branch, never directly on `main`. Pushes, PR updates and bounded
-repairs are authorized; the user alone merges. Never merge or enable auto-merge.
+repairs are authorized for both Codex and Claude Code. Ordinary (tier 0) PRs
+are authorized for automatic repair and squash merge under the
+[PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge).
+Broad (tier 1) and consequential (tier 2) PRs still require the user's approval
+and merge; never merge or enable auto-merge for them. This policy change is
+itself tier 2 and must be left for the user to merge.
 CI remains enabled for every PR; only call work merge-ready after required checks
-pass on its final head and any required review is complete. Ordinary work may
-be handed back earlier with CI explicitly pending. Do not rerun a failure until
-it passes without diagnosing it, weaken tests, or conceal missing proof.
+pass on its final head and any required review is complete. Keep owning ordinary
+PRs while CI is pending; if interrupted or blocked, report that state honestly.
+Do not rerun a failure until it passes without diagnosing it, weaken tests, or
+conceal missing proof.
 
 Use `bash scripts/setup.sh` when dependencies are missing, `bash startdev.sh`
 to run the app, and the focused commands in the verification reference for
