@@ -323,6 +323,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         <h1 className="text-xl font-semibold text-foreground">Scanner</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
           Rules paper trades from the setup scanner: one contract, bought at the ask and sold at the bid. They are not your trades and nothing here places orders.
+          {" "}<strong className="font-medium text-foreground">Shadow</strong>{" "}is Jo&apos;s own TAKE or SKIP on each setup, kept as a separate paper book.
         </p>
         {!data.enabled && (
           <p className="mt-2 text-sm text-amber-300">The scanner is switched off on this server, so no new setups are being recorded.</p>
@@ -352,18 +353,23 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         )}
       </section>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {/* A day without setups, and a scanner without any history, collapse to one line instead of tables of zeros. */}
+      {t.candidates === 0 && data.scorecard.cumulative.setups === 0 ? (
+        <p className="text-sm text-muted-foreground" data-testid="scanner-no-history">No setups recorded yet, so there are no paper results or scorecards to show.</p>
+      ) : <>
+      {t.candidates > 0 && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Card label="Setups" value={String(t.candidates)} hint={`${t.no_contract} without a contract`} />
         <Card label="Paper trades" value={String(t.trades)} hint={`${t.unresolved} unresolved`} />
         <Card label="Win rate" value={winRate} hint={`${t.resolved} closed`} />
         <Card label="Rules paper P&L · one contract per priced setup" value={money(t.pnl)} hint="after commission" />
         <Card label="At 2× spread" value={money(t.pnl_2x_spread)} hint="pessimistic fills" />
-      </div>
+      </div>}
 
       <div className="grid gap-3 xl:grid-cols-2">
-        <Scorecard label="Day scorecard" score={data.scorecard.day} />
+        {t.candidates > 0 && <Scorecard label="Day scorecard" score={data.scorecard.day} />}
         <Scorecard label="Cumulative scorecard" score={data.scorecard.cumulative} />
       </div>
+      </>}
 
       <ScannerTickers />
 
