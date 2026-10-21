@@ -8,6 +8,7 @@ import AuditPanel from "@/components/AuditPanel";
 import Link from "next/link";
 import { ChartCandlestick } from "lucide-react";
 import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
+import { formatHoldDuration } from "@/lib/dashboard";
 import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
 import TradeAdvice from "@/components/TradeAdvice";
@@ -20,7 +21,7 @@ function pnlColor(val: number | null | undefined) {
 
 function fmt$(val: number | null | undefined) {
   if (val == null) return "-";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(2)}`;
+  return `${val >= 0 ? "+" : "-"}$${Math.abs(val).toFixed(2)}`;
 }
 
 function fmtPct(val: number | null | undefined) {
@@ -48,8 +49,14 @@ function tradeTitle(trade: Trade) {
   return `${trade.ticker} $${trade.strike} ${trade.option_type} | ${trade.expiration}`;
 }
 
-export default function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
+/** Trade times in New York time, labelled, whatever the viewing device's zone. */
+const etTime = (value: string) => `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} ET`;
+
+export default function TradeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string }> }) {
   const { id } = use(params);
+  // Back returns to the page that opened the trade (e.g. a Daily Review day); only same-site paths are followed.
+  const { returnTo: from } = use(searchParams);
+  const back = from && from.startsWith("/") && !from.startsWith("//") ? { href: from, label: from.startsWith("/daily") ? "Back to Daily Review" : "Back" } : { href: "/trades", label: "Back to Trades" };
   const [trade, setTrade] = useState<Trade | null>(null);
   const [fills, setFills] = useState<Fill[] | null>(null);
   const [alpacaContexts, setAlpacaContexts] = useState<Record<string, FillMarketContext>>({});
@@ -115,8 +122,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
     {/* Left column — main content */}
     <div className="flex-1 min-w-0 space-y-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <a href="/trades" className="text-sm text-muted-foreground hover:text-foreground">
-          Back to Trades
+        <a href={back.href} className="text-sm text-muted-foreground hover:text-foreground">
+          {back.label}
         </a>
         <h1 className="text-xl font-semibold text-foreground">{tradeTitle(trade)}</h1>
         <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor}`}>
@@ -142,11 +149,11 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
           <div>
             <Row
               label="Hold Duration"
-              value={trade.hold_duration_mins != null ? `${Math.round(trade.hold_duration_mins)}m` : "-"}
+              value={trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}
             />
             <Row label="Entry Bucket" value={trade.entry_time_bucket ?? "-"} />
-            <Row label="Opened" value={new Date(trade.opened_at).toLocaleString()} />
-            <Row label="Closed" value={trade.closed_at ? new Date(trade.closed_at).toLocaleString() : "-"} />
+            <Row label="Opened" value={etTime(trade.opened_at)} />
+            <Row label="Closed" value={trade.closed_at ? etTime(trade.closed_at) : "-"} />
             <Row label="Expired Worthless" value={trade.expired_worthless ? "Yes" : "No"} />
           </div>
         </div>
@@ -203,7 +210,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
                   >
                     {isEntryFill(fill) ? "ENTRY" : "EXIT"}
                   </span>
-                  <span className="text-xs text-muted-foreground">{new Date(fill.executed_at).toLocaleString()}</span>
+                  <span className="text-xs text-muted-foreground">{etTime(fill.executed_at)}</span>
                   <span className="font-medium">{fill.contracts}x @ ${fill.price}</span>
                   <span className="text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
                   <span className="text-xs font-medium text-foreground/80 sm:ml-auto">Edit fill</span>

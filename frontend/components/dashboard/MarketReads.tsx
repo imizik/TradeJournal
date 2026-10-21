@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ReadText } from "@/components/JoDay";
 import { getMarketReads, type MarketReadPacket, type MarketReadSession, type MarketReadSlot, type MarketReadsView } from "@/lib/marketReads";
 
 const zone = "America/New_York";
@@ -59,6 +60,7 @@ function Slot({ s, close, window }: { s: MarketReadSlot; close: number | null; w
     </div>
     {s.received_at && <p className="text-sm" data-testid="slot-delay">
       Received {clock(s.received_at)} · <strong>{delay(s.receipt_delay_seconds!)}</strong></p>}
+    {s.read && <div data-testid="slot-read" className="rounded-md bg-secondary/30 p-3"><ReadText read={s.read} /></div>}
     {s.read_id && <p className="text-xs text-muted-foreground">
       {s.attribution === "operation_id" ? "Linked by its scheduled operation ID." : `Linked by time: the first read within ${window} min of the slot.`}
       {s.read_used_slot_packet === true ? " Used this slot's packet." : s.read_used_slot_packet === false ? " Used a different packet." : ""}</p>}
@@ -97,9 +99,10 @@ function Session({ s, window, today }: { s: MarketReadSession; window: number; t
     {expected > 0 && <p className="text-sm" data-testid="session-delivery">{d.on_time} on time{d.late ? ` · ${d.late} late` : ""}{d.missing ? ` · ${d.missing} missing` : ""}{d.unknown ? ` · ${d.unknown} unknown` : ""}</p>}
     <ul className="mt-1">{s.slots.map((slot) => <Slot key={slot.slot} s={slot} close={s.hours?.close ?? null} window={window} />)}</ul>
     {!!s.reads_not_credited_to_a_slot.length && <details className="mt-2 rounded-md border px-3">
-      <summary className="min-h-11 cursor-pointer py-3 text-sm">Other reads not credited to a slot ({s.reads_not_credited_to_a_slot.length})</summary>
+      <summary className="min-h-11 cursor-pointer py-3 text-sm">Extra reads outside the schedule ({s.reads_not_credited_to_a_slot.length})</summary>
       <ul className="space-y-1 pb-3 text-sm text-muted-foreground">{s.reads_not_credited_to_a_slot.map((r) =>
-        <li key={r.read_id}>{clock(r.received_at)}{r.event_wake_id ? " · answered an event wake" : ""} · <code className="break-all text-xs">{r.read_id}</code></li>)}</ul>
+        <li key={r.read_id} className="space-y-1" data-testid="extra-read"><p>{clock(r.received_at)}{r.event_wake_id ? " · answered a market alert" : ""}</p>
+          {r.read ? <div className="rounded-md bg-secondary/30 p-3 text-foreground"><ReadText read={r.read} /></div> : <p>Jo&apos;s words for this read weren&apos;t saved in the app.</p>}</li>)}</ul>
     </details>}
     {s.hours?.status !== "closed" && <Watchdog w={s.watchdog} kept={(Date.parse(today) - Date.parse(s.session_date)) / 86400000 < 7} />}
   </li>;

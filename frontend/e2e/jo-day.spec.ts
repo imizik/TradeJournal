@@ -80,7 +80,7 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   await stub(page, today, midday);
   await page.goto(`/daily/${today}`);
   const jo = page.getByTestId("jo-day");
-  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · MU triggered 10:54 AM · .* · next: 11:00 market read$/);
+  await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · MU triggered 10:54 AM · next: 11:00 market read$/);
   await expect(page.getByTestId("jo-day-headline")).toHaveAttribute("data-trouble", "false");
   await expect(jo.getByText("Morning data sent to Jo")).toBeVisible();
   await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
@@ -176,6 +176,19 @@ test("a watch Jo asked for but the app refused is a Done row, with what Jo asked
   await expect(listed).toContainText("Refused · not saved");
   await expect(listed).toContainText("Jo couldn't watch this: not one of your scanner tickers.");
   await expect(page.getByRole("heading", { name: "Refused requests (1)" })).toBeVisible();
+});
+
+test("a past day with no Jo records says so in one line instead of an empty timeline", async ({ page }) => {
+  const day = "2026-10-02";
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: { ...morning(day, { live: false, now: "16:05" }), briefing: null,
+    delivery: { ...morning(day, { live: false, now: "16:05" }).delivery!, publication: "not_expected", fulfilment: "not_expected", published_at: null, available_at: null } } }));
+  await page.route("**/jo/market-reads?**", (route) => route.fulfill({ json: { ...reads(day, { live: false, now: "16:05" }), sessions: [] } }));
+  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: { ...plans(day, { live: false, now: "16:05" }), plans: [] } }));
+  await page.goto(`/daily/${day}`);
+  await expect(page.getByTestId("jo-day-headline")).toHaveText("No Jo record for this day");
+  await expect(page.getByTestId("jo-day").getByRole("heading", { name: "Done" })).toHaveCount(0);
+  // A past day is labelled as that day, not as the most recent one.
+  await expect(page.getByText("Trading day: ")).toBeVisible();
 });
 
 test("one failed record is named and the rest still show", async ({ page }) => {

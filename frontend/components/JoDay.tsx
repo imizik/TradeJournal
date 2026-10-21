@@ -91,7 +91,9 @@ export function joHeadline(data: JoDayData, day: string, live: boolean): { text:
   const refused = refusalsFor(data, day).length;
   if (refused) parts.push({ text: `${refused} ${refused === 1 ? "watch" : "watches"} refused`, tone: "trouble" });
   const setups = data.scanner?.candidates.length ?? 0;
-  parts.push({ text: setups ? `${setups} ${setups === 1 ? "setup" : "setups"}` : "no setups" });
+  // "No setups" only means something while the scanner was running.
+  if (setups || data.scanner?.enabled) parts.push({ text: setups ? `${setups} ${setups === 1 ? "setup" : "setups"}` : "no setups" });
+  if (!live && !joItems(data, day, live).done.length) return { text: "No Jo record for this day", trouble: false, parts: [{ text: "No Jo record for this day" }] };
   if (afterClose(data, live)) parts.push({ text: "market closed" });
   else if (live) {
     const next = data.reads?.slots.find((s) => s.expected && s.delivery === "pending" && !s.read);
@@ -103,7 +105,7 @@ export function joHeadline(data: JoDayData, day: string, live: boolean): { text:
 
 const viewWord: Record<MarketReadText["view"], string> = { up: "Leaning up", down: "Leaning down", mixed: "Mixed", no_view: "No view" };
 
-function ReadText({ read }: { read: MarketReadText }) {
+export function ReadText({ read }: { read: MarketReadText }) {
   return <div className="space-y-2 text-sm">
     <p><span className="text-muted-foreground">{viewWord[read.view]}{read.is_correction ? " · correction" : ""}: </span>{read.main_text}</p>
     <p><span className="text-muted-foreground">Other case: </span>{read.alternative_text}</p>
@@ -267,7 +269,7 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
       ? "Market-read records aren't available on this server, so reads can't be shown."
       : "Market watch is off on this server, so no new reads will arrive; saved reads are shown."}</p>}
     {items && <>
-      <Group title="Done" items={items.done} empty={live ? "Nothing from Jo yet today." : "No Jo activity recorded for this day."} />
+      {(live || items.done.length > 0) && <Group title="Done" items={items.done} empty="Nothing from Jo yet today." />}
       {live && items.closed && <p className="text-sm text-muted-foreground">The market has closed; nothing is being watched and nothing else is scheduled today.</p>}
       {live && !items.closed && <Group title="Watching now" items={items.watching} empty="Nothing is being watched right now." />}
       {live && !items.closed && <Group title="Coming up" items={items.next} empty="Nothing else scheduled today." />}

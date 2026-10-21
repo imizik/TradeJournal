@@ -825,10 +825,12 @@ export function rvolCoverage(baseline: RvolBaseline): string {
 /** "2.6×", with two decimals under 0.1× so a quiet candle never reads 0.0×. */
 export const rvolText = (rvol: number) => `${rvol.toFixed(rvol < 0.1 ? 2 : 1)}×`;
 
-export const price = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-export const etTime = (stamp: number, daily = false) => new Date(stamp * 1000).toLocaleString("en-US", {
-  timeZone: "America/New_York", ...(daily ? { month: "short", day: "numeric", year: "numeric" } : { hour: "numeric", minute: "2-digit" }),
-});
+// Shared formatters: `toLocaleString` builds a new one per call, and the crosshair asks on every move.
+const priceFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const etDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric" });
+const etClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+export const price = (value: number | null | undefined) => value == null ? "—" : priceFormat.format(value);
+export const etTime = (stamp: number, daily = false) => (daily ? etDay : etClock).format(new Date(stamp * 1000));
 export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
   let low = 0, high = bars.length;
   while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= time) low = mid + 1; else high = mid; }

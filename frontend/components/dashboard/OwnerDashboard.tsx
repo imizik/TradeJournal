@@ -67,6 +67,8 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
             className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</a>)}
         </div>)}
     </div>
+    {/* Jo's status first: on a phone this is the morning check-in, above the briefing and P&L. */}
+    <JoTodayLine today={today} />
     <MorningBriefing initialDay={today} compact />
     <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
       <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
@@ -81,7 +83,6 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
         <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-2 text-xs text-muted-foreground">
-            <JoTodayLine today={today} />
             <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
             <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
             <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>

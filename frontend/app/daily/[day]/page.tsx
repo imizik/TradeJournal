@@ -5,7 +5,7 @@ import PracticeRoutine from "@/components/PracticeRoutine";
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
 import { newYorkToday } from "@/lib/format";
-import { buildOpenPositionMeta, computeUnrealizedPnl, isEntryFill, type OpenPositionMeta } from "@/lib/dashboard";
+import { buildOpenPositionMeta, formatHoldDuration, computeUnrealizedPnl, isEntryFill, type OpenPositionMeta } from "@/lib/dashboard";
 
 type TradeWithFills = {
   trade: Trade;
@@ -33,7 +33,7 @@ function formatDate(value: string) {
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} ET`;
 }
 
 function fmtMoney(value: number | null | undefined, decimals = 2) {
@@ -43,7 +43,7 @@ function fmtMoney(value: number | null | undefined, decimals = 2) {
 
 function fmtSignedMoney(value: number | null | undefined) {
   if (value == null) return "-";
-  return `${value >= 0 ? "+" : ""}$${value.toFixed(2)}`;
+  return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toFixed(2)}`;
 }
 
 function fmtPct(value: number | null | undefined) {
@@ -133,7 +133,6 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
   const { day } = await params;
   const [trades, accounts] = await Promise.all([api.trades(), api.accounts()]);
   const accountMap = Object.fromEntries(accounts.map((account: Account) => [account.id, account]));
-  const todayKey = dateKey(new Date().toISOString());
   const selectedDay = dateKey(`${day}T12:00:00`);
 
   const selectedTrades = selectedDay
@@ -261,25 +260,22 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
-            Back to Dashboard
-          </a>
-          <a href="/daily" className="ml-4 text-sm text-muted-foreground hover:text-foreground">
-            Review Calendar
-          </a>
-          {selectedDay && (
-            <>
-              <a href={`/daily/${shiftWeekday(selectedDay, -1)}`} className="ml-4 whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">
-                ← Previous day
+          <nav aria-label="Daily Review navigation" className="-ml-2 flex flex-wrap items-center text-sm text-muted-foreground">
+            {[
+              { href: "/", label: "Back to Dashboard" },
+              { href: "/daily", label: "Review Calendar" },
+              ...(selectedDay ? [{ href: `/daily/${shiftWeekday(selectedDay, -1)}`, label: "← Previous day" }] : []),
+              // No next day from today: a future day has nothing to review.
+              ...(selectedDay && shiftWeekday(selectedDay, 1) <= newYorkToday() ? [{ href: `/daily/${shiftWeekday(selectedDay, 1)}`, label: "Next day →" }] : []),
+            ].map((link) => (
+              <a key={link.href} href={link.href} className="inline-flex min-h-11 items-center whitespace-nowrap px-2 hover:text-foreground md:min-h-8">
+                {link.label}
               </a>
-              <a href={`/daily/${shiftWeekday(selectedDay, 1)}`} className="ml-4 whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">
-                Next day →
-              </a>
-            </>
-          )}
+            ))}
+          </nav>
           <h1 className="mt-2 text-xl font-semibold text-foreground">Daily Review</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {selectedDay === todayKey ? "Current trading day" : "Most recent trading day"}: {dayLabel}
+            {selectedDay === newYorkToday() ? "Current trading day" : "Trading day"}: {dayLabel}
           </p>
         </div>
         <a
@@ -437,7 +433,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                   return (
                     <tr key={trade.id} className="hover:bg-muted/50">
                       <Td>
-                        <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                        <a href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="font-semibold hover:underline">
                           {trade.ticker}
                         </a>
                         <div className="text-xs text-muted-foreground">{tradeLabel(trade)}</div>
@@ -487,7 +483,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                       <Td>
                         <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
                       </Td>
-                      <Td>{trade.hold_duration_mins != null ? `${Math.round(trade.hold_duration_mins)}m` : "-"}</Td>
+                      <Td>{trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}</Td>
                       <Td>{formatDateTime(trade.opened_at)}</Td>
                       <Td>{formatDateTime(trade.closed_at)}</Td>
                     </tr>
@@ -511,7 +507,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
               <div key={trade.id} className="rounded-lg border bg-card">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
                   <div>
-                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                    <a href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="font-semibold hover:underline">
                       {trade.ticker}
                     </a>
                     <span className="ml-2 text-sm text-muted-foreground">{tradeLabel(trade)}</span>
@@ -633,7 +629,7 @@ function ActivityList({
       ) : (
         <div className="mt-3 space-y-2">
           {trades.map((trade) => (
-            <a key={trade.id} href={`/trades/${trade.id}`} className="flex items-center justify-between gap-3 rounded bg-muted px-3 py-2 text-sm hover:bg-muted/80">
+            <a key={trade.id} href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="flex items-center justify-between gap-3 rounded bg-muted px-3 py-2 text-sm hover:bg-muted/80">
               <span className="font-medium">{trade.ticker}</span>
               <ActivityBadge activity={tradeActivityForDay(trade, selectedDay)} />
             </a>
