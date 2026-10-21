@@ -359,7 +359,7 @@ class DecisionEvent(SQLModel, table=True):
     source: str  # where the bars came from, e.g. tradier_timesales_1min
     reconstructed: bool = False  # judged well after it happened, e.g. after a restart
     data_json: str = Field(sa_column=Column(Text, nullable=False))
-    delivery: str = Field(default="none", index=True)  # none | pending | sending | sent | expired
+    delivery: str = Field(default="none", index=True)  # none | pending | sending | sent | expired | unknown
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
     claimed_at: Optional[datetime] = None

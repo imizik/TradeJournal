@@ -168,6 +168,19 @@ pass when `SETUP_SCANNER_ENABLED=true` (default off, and level alerts must
 also be running). Migration `a7c3e9f1b2d4` adds `scanner_candidate` and
 `scanner_event`. The owner page is `/scanner` (`GET /scanner/day`).
 
+The page lists the day's setups first, one phone-width card each: setup bar
+close, paper entry (ask) and exit (bid, reason) times, the stock stop/target,
+option premium and the exit deadline (60-minute time stop, or flat-by-close
+when earlier); the Shadow/Isaac comparison sits behind an expansion and the
+scorecards follow. It refreshes every 60 s only while showing today's date in
+a visible tab. `GET /scanner/day` also returns read-only `session`
+(`open`/`closed`/`unknown`; weekends are closed) and `monitoring`, taken from
+the newest 5-minute bar this process's scanner has judged today: `fresh`,
+`stale` (no judged bar for longer than one bar plus the lateness and delay
+allowances), `outside_window`, `market_closed`, `calendar_unknown`,
+`not_running` or `off`. A page load never counts as monitoring; after a
+restart nothing is fresh until a bar is judged.
+
 Implementation choices within this contract: session VWAP uses each
 minute's typical price; daily ATR is the simple mean of 14 true ranges from
 Tradier daily bars; the scanner judges only the newest completed 5-minute

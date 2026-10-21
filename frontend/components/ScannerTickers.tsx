@@ -106,7 +106,7 @@ export default function ScannerTickers() {
         <p className="mt-2 text-xs text-muted-foreground">Changes are unsaved until you select Save tickers. An empty list pauses new setups.</p>
       </form>}
       {!saved.symbols.length && !editing && <p className="mt-2 text-sm text-amber-300">No tickers selected. New setups are paused.</p>}
-      <p className="mt-3 text-xs text-muted-foreground">Applies to future scans on every device, regardless of the day shown below. Existing paper trades keep being monitored. Saving does not switch the scanner on.</p>
+      <p className="mt-3 text-xs text-muted-foreground">Applies to future scans on every device, regardless of the day shown above. Existing paper trades keep being monitored. Saving does not switch the scanner on.</p>
     </>}
     {error && <div className="mt-3"><p role="alert" className="break-words text-sm text-red-400">{error}</p>{!saved && <button className={`${button} mt-2`} disabled={busy} onClick={() => void load()}>Reload tickers</button>}</div>}
     {notice && <p role="status" className="mt-3 text-sm text-emerald-400">{notice}</p>}
