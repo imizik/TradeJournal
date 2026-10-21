@@ -428,6 +428,7 @@ def watchdog_status(day, path=None, section="jo_morning"):
         return {"state": "unknown", "checked_at": None, "notices": []}
     if not isinstance(state, dict):
         return {"state": "unknown", "checked_at": None, "notices": []}
-    notices = state.get("notices", {}).get(day.isoformat(), [])
+    notices = state.get("notices")
+    notices = notices.get(day.isoformat(), []) if isinstance(notices, dict) else []
     return {"state": "on" if state.get("enabled") else "off", "checked_at": state.get("checked_at"),
         "notices": notices if isinstance(notices, list) else []}

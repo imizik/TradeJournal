@@ -68,13 +68,13 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
   await expect(page.getByTestId("session-summary")).toHaveText("2 of 4 due slots with a read");
   await expect(page.getByTestId("session-delivery")).toHaveText("1 on time · 1 late · 2 missing");
   await expect(slots.nth(0).getByTestId("slot-badge")).toHaveText("On time");
-  await expect(slots.nth(1).getByTestId("slot-badge")).toHaveText("Late · 3 min");
+  await expect(slots.nth(1).getByTestId("slot-badge")).toHaveText("Late · 3 min past due");
   await expect(slots.nth(0).getByTestId("slot-delay")).toContainText("2 min 10 s after the slot");
   await expect(slots.nth(0)).toContainText("Linked by time: the first read within 30 min of the slot. Used this slot's packet.");
   await expect(slots.nth(1).getByTestId("slot-delay")).toContainText("17 min 30 s after the slot");
   await expect(slots.nth(1)).toContainText("Linked by its scheduled operation ID.");
   await expect(slots.nth(2).getByTestId("slot-badge")).toHaveText("Missing");
-  await expect(slots.nth(2)).toContainText("No read reached TradeJournal by 12:45 PM ET. The cause is not visible to the app.");
+  await expect(slots.nth(2)).toContainText("No read was seen in TradeJournal by 12:45 PM ET. The cause is not visible to the app.");
   await expect(slots.nth(2).getByTestId("slot-packet")).toHaveText("Packet 12:29: started, outcome unknown");
   await expect(slots.nth(3).getByTestId("slot-packet")).toHaveText("Packet 13:59: failed (snapshot_collection_failed) · attempt 2");
   await page.getByText("Other reads not credited to a slot (1)").click();

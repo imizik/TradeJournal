@@ -402,9 +402,10 @@ def market_read_problems(view: dict, day: str, now: float) -> dict[str, Problem 
                      "no_receipt": " The app has no record of preparing this read's packet."}.get(packet, "")
             observed[key] = Problem(
                 f"Jo's {label} market read is missing",
-                f"No read for the {label} slot reached TradeJournal by {et_clock(slot.get('deadline'))}.{cause}"
-                " A read saved within 30 minutes of the slot will still show as late.",
-                recovered=f"Jo's {label} market read arrived late",
+                f"No read for the {label} slot was seen in TradeJournal by {et_clock(slot.get('deadline'))}.{cause}"
+                " A read saved within 30 minutes of the slot will still be shown.",
+                # Usually late, but a read Check saved in time can be imported after a failed handoff.
+                recovered=f"Jo's {label} market read arrived; see the reliability screen for on time or late",
             )
         elif state in ("on_time", "late", "pending", "not_expected"):
             observed[key] = None

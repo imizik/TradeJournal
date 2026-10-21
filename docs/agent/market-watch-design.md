@@ -834,14 +834,17 @@ reads never reach Shadow Isaac.
   watchdog](dots-integration.md#delivery-honesty-and-the-morning-watchdog)
   rules: one "Jo's 11:00 AM market read is missing" push per slot and day when
   the slot turns `missing` (no grace), naming a failed or absent packet, and one
-  "arrived late" recovery if a read lands inside the 30-minute window; "Jo's
+  "arrived" recovery if a read lands inside the 30-minute window (usually late;
+  the screen says which); "Jo's
   market reads aren't being checked" when the import is three minutes stale or
   has no outbox (five-minute grace, slots then stay unknown); and the status
   read itself failing (ten-minute grace). An uncertain send is logged `unknown`
   and never resent; notices are kept seven days in the alerts state file and
   shown per session on the reliability screen. Limits: a manual or
-  setup-context read inside a slot's window still counts for that slot, so it
-  can hide a missed scheduled run; an unavailable exchange calendar leaves slots
+  setup-context read, or a late reply to an event wake sent before the slot,
+  inside a slot's window still counts for that slot, so it can hide a missed
+  scheduled run; a read whose notice the app refused counts as missing (the
+  refusal is in the store's `notice_refusal` records); an unavailable exchange calendar leaves slots
   unknown without an alert of its own; and ntfy accepting a push does not prove
   the phone showed it. Tests: the market-read cases in
   `backend/tests/test_deployment.py`.

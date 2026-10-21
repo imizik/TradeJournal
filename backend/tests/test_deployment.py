@@ -1187,7 +1187,7 @@ def test_market_read_conditions_alert_only_on_a_judged_miss(alerts):
     now, key = READ_DEADLINE + 90, "jo_market_read:2026-10-21:1100"
     missing = alerts.market_read_problems(market_reads_view("missing"), "2026-10-21", now)
     assert missing[key].title == "Jo's 11:00 AM market read is missing" and missing[key].grace == 0
-    assert "by 11:15 AM ET" in missing[key].message and missing[key].recovered == "Jo's 11:00 AM market read arrived late"
+    assert "by 11:15 AM ET" in missing[key].message and missing[key].recovered.startswith("Jo's 11:00 AM market read arrived;")
     assert "packet" not in missing[key].message
     failed = alerts.market_read_problems(market_reads_view("missing", packet="failed"), "2026-10-21", now)
     assert "packet for this read failed" in failed[key].message
@@ -1216,7 +1216,7 @@ def test_missed_market_read_alerts_once_then_late_recovery_is_logged(alerts, mon
     assert sends == ["Jo's 11:00 AM market read is missing"]
     market_pass(alerts, monkeypatch, market_reads_view("late", last_ingest=READ_DEADLINE + 400), sends)
     assert alerts.check(config, now=READ_DEADLINE + 410)
-    assert sends == ["Jo's 11:00 AM market read is missing", "Jo's 11:00 AM market read arrived late"]
+    assert sends == ["Jo's 11:00 AM market read is missing", "Jo's 11:00 AM market read arrived; see the reliability screen for on time or late"]
     record = alerts.read_state()["jo_market_reads"]
     assert record["enabled"] is True and record["error"] is None
     assert [(n["kind"], n["recovered"], n["outcome"]) for n in record["notices"]["2026-10-21"]] == [("1100", False, "sent"), ("1100", True, "sent")]

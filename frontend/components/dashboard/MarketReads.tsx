@@ -42,7 +42,7 @@ const outcomeText = { sent: "sent", failed: "couldn’t be sent; retrying", unkn
 function badge(s: MarketReadSlot): [string, string] {
   switch (s.delivery) {
     case "on_time": return ["On time", muted];
-    case "late": return [`Late · ${minutes(s.late_by_seconds ?? 0)}`, warn];
+    case "late": return [`Late · ${minutes(s.late_by_seconds ?? 0)} past due`, warn];
     case "missing": return ["Missing", warn];
     case "pending": return [s.deadline ? `Due by ${short(s.deadline)}` : "Upcoming", muted];
     case "not_expected": return ["Not expected", muted];
@@ -62,7 +62,7 @@ function Slot({ s, close, window }: { s: MarketReadSlot; close: number | null; w
     {s.read_id && <p className="text-xs text-muted-foreground">
       {s.attribution === "operation_id" ? "Linked by its scheduled operation ID." : `Linked by time: the first read within ${window} min of the slot.`}
       {s.read_used_slot_packet === true ? " Used this slot's packet." : s.read_used_slot_packet === false ? " Used a different packet." : ""}</p>}
-    {s.status === "no_read_seen" && s.delivery === "missing" && <p className="text-sm text-muted-foreground">No read reached TradeJournal by {short(s.deadline!)}. The cause is not visible to the app.</p>}
+    {s.status === "no_read_seen" && s.delivery === "missing" && <p className="text-sm text-muted-foreground">No read was seen in TradeJournal by {short(s.deadline!)}. The cause is not visible to the app.</p>}
     {s.status === "no_read_seen" && s.delivery === "unknown" && <p className="text-sm text-muted-foreground">No read seen, but the app hasn’t checked for reads since the {short(s.deadline!)} deadline, so one may still arrive.</p>}
     {s.status === "not_expected" && <p className="text-sm text-muted-foreground">{s.not_expected_reason === "after_close" ? `After the ${close !== null ? minuteOfDay(close) : ""} close.` : "Market closed."}</p>}
     {s.status === "unknown" && <p className="text-sm text-muted-foreground">{s.expected === null ? "Exchange hours are unknown for this day, so whether this read was due is unknown." : "Read records are not available on this server."}</p>}
@@ -76,14 +76,16 @@ function hours(h: MarketReadSession["hours"]) {
   return `${minuteOfDay(h.open!)}–${minuteOfDay(h.close!)}${h.close! < 960 ? " · early close" : ""}`;
 }
 
-function Watchdog({ w }: { w: MarketReadSession["watchdog"] }) {
+/** The watchdog keeps seven days of notices and reports only its current switch. */
+function Watchdog({ w, kept }: { w: MarketReadSession["watchdog"]; kept: boolean }) {
   return <p className="mt-2 text-xs text-muted-foreground" data-testid="session-watchdog">Phone watchdog: {w.state === "unknown" ? "status unavailable."
+    : !kept && !w.notices.length ? "no record kept for this date."
     : w.state === "off" ? "off, so no phone alert is sent for a missing read."
     : w.notices.length ? w.notices.map((n, i) => <span key={i}>{i ? " " : ""}“{n.title}” at {short(n.at)}: {outcomeText[n.outcome]}{(n.attempts ?? 1) > 1 ? ` after ${n.attempts} attempts` : ""}.</span>)
     : "on; nothing sent for this date."}</p>;
 }
 
-function Session({ s, window }: { s: MarketReadSession; window: number }) {
+function Session({ s, window, today }: { s: MarketReadSession; window: number; today: string }) {
   const expected = s.summary.read_seen + s.summary.no_read_seen;
   const d = s.delivery_summary;
   return <li data-testid="read-session" className="min-w-0 rounded-lg border bg-card p-4">
@@ -99,7 +101,7 @@ function Session({ s, window }: { s: MarketReadSession; window: number }) {
       <ul className="space-y-1 pb-3 text-sm text-muted-foreground">{s.reads_not_credited_to_a_slot.map((r) =>
         <li key={r.read_id}>{clock(r.received_at)}{r.event_wake_id ? " · answered an event wake" : ""} · <code className="break-all text-xs">{r.read_id}</code></li>)}</ul>
     </details>}
-    {s.hours?.status !== "closed" && <Watchdog w={s.watchdog} />}
+    {s.hours?.status !== "closed" && <Watchdog w={s.watchdog} kept={(Date.parse(today) - Date.parse(s.session_date)) / 86400000 < 7} />}
   </li>;
 }
 
@@ -130,7 +132,7 @@ export default function MarketReads() {
       {(!data.reads_available || !data.receipts_available) && <p data-testid="reads-evidence" className={`rounded-lg border p-4 text-sm ${warn}`}>
         {!data.reads_available && "Read records are not available on this server, so whether Jo's reads arrived is unknown. "}
         {!data.receipts_available && "Publisher receipts are not available on this server, so packet status is unknown."}</p>}
-      {data.sessions.length ? <ul className="space-y-3">{data.sessions.map((s) => <Session key={s.session_date} s={s} window={data.attribution_window_minutes} />)}</ul>
+      {data.sessions.length ? <ul className="space-y-3">{data.sessions.map((s) => <Session key={s.session_date} s={s} window={data.attribution_window_minutes} today={new Date(data.checked_at).toLocaleDateString("en-CA", { timeZone: zone })} />)}</ul>
         : <p className="text-sm text-muted-foreground">No sessions to show yet.</p>}
       <details className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm">What these numbers can&apos;t show</summary>
@@ -139,7 +141,7 @@ export default function MarketReads() {
           <li>A slot with no read has no visible cause here; Jo&apos;s hosted run history is outside the app.</li>
           <li>This screen links reads by time: the first read within {data.attribution_window_minutes} minutes of a slot and before the next wake. A manual or setup read in that window counts for the slot; a later read is listed under other reads, and the slot shows no read seen.</li>
           <li>A packet receipt proves the app prepared it, not that Jo was woken.</li>
-          <li>On time is judged on the Check service&apos;s save time. A read after the {data.attribution_window_minutes}-minute window isn&apos;t linked to its slot, so the slot stays missing.</li>
+          <li>On time is judged on the Check service&apos;s save time. A read after the {data.attribution_window_minutes}-minute window isn&apos;t linked to its slot, so the slot stays missing; a reply to an event wake or a manual read inside the window can stand in for a missed scheduled run.</li>
         </ul>
       </details>
       <p className="text-xs text-muted-foreground">Checked {clock(data.checked_at)} · latest {data.sessions.length} {data.sessions.length === 1 ? "weekday" : "weekdays"}{data.market_watch_enabled ? "" : " · market watch is off on this server"}</p>

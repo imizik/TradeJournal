@@ -250,6 +250,8 @@ def test_route_judges_missing_reads_after_a_fresh_import(client, env, tmp_path, 
     assert view["sessions"][0]["watchdog"]["state"] == "on"
     assert [n["kind"] for n in view["sessions"][0]["watchdog"]["notices"]] == ["1100"]
     assert view["sessions"][1]["watchdog"]["notices"] == []
+    state.write_text(json.dumps({"jo_market_reads": {"enabled": True, "notices": None}}))  # corrupted: shown, not a failure
+    assert client.get("/jo/market-reads").json()["sessions"][0]["watchdog"]["notices"] == []
     # An importer that stopped before today's deadlines leaves today's slots unknown.
     runner.last_ingest = "2026-10-16T13:00:00.000000Z"
     view = client.get("/jo/market-reads").json()
