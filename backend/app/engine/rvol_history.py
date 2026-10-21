@@ -130,7 +130,7 @@ def store(
     message = (f"{today}: stored {fetched} session(s); {complete} of {len(symbols)} watchlist names have the 20 sessions before today, "
                f"{older} the 20 before those for older candles.")
     if absent:
-        message += f" Alpaca has no minutes for {', '.join(absent)} (an index, or not listed yet), so RVol waits."
+        message += f" Alpaca has no minutes for {', '.join(absent)} (an index, or not listed yet), so RVol waits where it needs those sessions."
     if left:
         message += f" {left} session(s) left for the next run."
     if failures:

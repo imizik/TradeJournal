@@ -60,6 +60,8 @@ class ChartHistory:
         self._cooldown = 0.0
         self._work: dict[str, Work] = {}
         self._profiles: OrderedDict[tuple[str, date], chart_rvol.Profile] = OrderedDict()
+        # Older sessions' ready RVol baselines (C2.6), by symbol, date and splits.
+        self._baselines: OrderedDict[tuple, tuple[dict, chart_rvol.Profile]] = OrderedDict()
         self._profile_lock = threading.Lock()  # never the history lock: a workspace refresh must not wait on Alpaca
 
     def _path(self, symbol: str, day: date) -> Path:
@@ -309,15 +311,17 @@ class ChartHistory:
                 issue = {"code": "pending", "message": "Indicator warmup is still loading.", "retry_at": int(time.time() + 1)}
             if ready:
                 self._work.pop(key, None)
-            visible, rvol = self._past_rvol(symbol, visible, info)
             shown = {datetime.fromtimestamp(b["time"], ET).date() for b in visible}
-            return {"symbol": symbol, "interval": interval, "session": session, "before": before,
+            page = {"symbol": symbol, "interval": interval, "session": session, "before": before,
                     "limit": limit, "bars": visible, "older_cursor": visible[0]["time"] if visible else (int(datetime.combine(work.day, wall_time(20), ET).timestamp()) if not exhausted else None),
                     "exhausted": exhausted and len(eligible) <= limit, "continuation": None if ready else key,
                     "warmup": "ready" if warmed else "insufficient" if exhausted else "pending",
                     "source": "alpaca_sip", "price_basis": BASIS, "issue": issue,
                     "adjustment": describe(info, suspects=suspect_gaps(visible)),
-                    "calendar_note": CLOCK_NOTE if shown & work.clock_days else None, "rvol": rvol}
+                    "calendar_note": CLOCK_NOTE if shown & work.clock_days else None}
+        # RVol (C2.6) reads only stored sessions and changes no time, so it runs after the history lock is released.
+        page["bars"], page["rvol"] = self._past_rvol(symbol, page["bars"], info)
+        return page
 
     def _past_rvol(self, symbol: str, bars: list[dict], info: dict) -> tuple[list[dict], dict[str, dict]]:
         """Each shown session's regular-session candles with their RVol (C2.6), against that
@@ -329,10 +333,22 @@ class ChartHistory:
         for bar in bars:
             if not bar.get("extended"):
                 days.setdefault(datetime.fromtimestamp(bar["time"], ET).date(), []).append(bar)
+        splits = tuple((split["ex_date"], split["ratio"]) for split in info["splits"])
         states, values = {}, {}
         for day, day_bars in days.items():
-            state, average = chart_rvol.day_baseline(day, hours(day) if hours else None, hours, lambda d: self.volume_profile(symbol, d),
-                                                     lambda d: factor_before(info["splits"], d), past=True)
+            # A past session's ready baseline never changes on the same splits: kept, so long 1h and 4h pages stay cheap.
+            key = (symbol, day, splits)
+            with self._profile_lock:
+                kept = self._baselines.get(key)
+                if kept:
+                    self._baselines.move_to_end(key)
+            state, average = kept or chart_rvol.day_baseline(day, hours(day) if hours else None, hours, lambda d: self.volume_profile(symbol, d),
+                                                             lambda d: factor_before(info["splits"], d), past=True)
+            if average and not kept:
+                with self._profile_lock:
+                    self._baselines[key] = (state, average)
+                    while len(self._baselines) > PROFILES:
+                        self._baselines.popitem(last=False)
             if state is None:
                 continue
             states[day.isoformat()] = state

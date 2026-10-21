@@ -383,8 +383,8 @@ def test_a_history_page_without_the_calendar_says_why_and_never_fetches(stored, 
     monkeypatch.setattr(module.httpx, "get", lambda *a, **k: pytest.fail("RVol must not fetch"))
     page = stored.page("SPY", "5m", "regular", int(ny(PAST, "16:00").timestamp()), limit=20)
     assert page["rvol"]["2026-09-28"]["state"] == "ready"
-    stored.calendar = None
-    stored._work.clear()
+    # The same stored sessions without the calendar (a ready baseline already worked out is kept, so a fresh store).
+    stored = type(stored)(stored.root)
     page = stored.page("SPY", "5m", "regular", int(ny(PAST, "16:00").timestamp()), limit=20)
     assert page["rvol"]["2026-09-28"]["state"] == "unavailable" and "calendar is unavailable" in page["rvol"]["2026-09-28"]["message"]
     assert all(bar["rvol"] is None for bar in page["bars"])

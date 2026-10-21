@@ -155,7 +155,7 @@ def test_a_name_alpaca_has_no_minutes_for_is_noted_and_never_fails_the_run(db):
     assert fetched == 45 and message == ("2026-09-28: stored 45 session(s); 1 of 3 watchlist names have the 20 sessions before today, "
                                          "1 the 20 before those for older candles. "
                                          "Alpaca has no minutes for SPX on 2026-09-25 and earlier, NEW on 2026-09-18 and earlier "
-                                         "(an index, or not listed yet), so RVol waits.")
+                                         "(an index, or not listed yet), so RVol waits where it needs those sessions.")
 
 
 def test_a_run_stops_after_its_time_and_the_next_one_continues(db, monkeypatch):
