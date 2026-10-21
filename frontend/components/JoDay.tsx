@@ -140,13 +140,21 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
       badge: !m?.briefing && d.deadline ? [`Briefing due ${time(d.deadline)}`, muted] : undefined });
   }
   if (m?.briefing && !m.briefing.redacted_at) {
-    const symbols = (m.briefing.body.items ?? []).map((i) => i.symbol).filter(Boolean) as string[];
+    const body = m.briefing.body;
+    const symbols = [...new Set([...(body.opportunities ?? []), ...(body.urgent_positions ?? []), ...(body.items ?? [])]
+      .map((i) => i.symbol).filter(Boolean))] as string[];
     done.push({ key: "brief", at: d?.available_at ?? m.briefing.received_at, icon: d?.fulfilment === "late" ? "warn" : "done",
       label: `Morning briefing${symbols.length ? `: ${symbols.slice(0, 3).join(", ")}${symbols.length > 3 ? ` +${symbols.length - 3} more` : ""}` : ""}`,
       badge: d?.fulfilment === "on_time" ? [`On time${d.deadline ? ` · due ${time(d.deadline)}` : ""}`, ok]
         : d?.fulfilment === "late" ? [`Late${d.late_by_seconds ? ` by ${Math.round(d.late_by_seconds / 60)} min` : ""}`, warn] : undefined,
       detail: <div className="space-y-2 text-sm">
         {m.briefing.body.summary && <p>{m.briefing.body.summary}</p>}
+        {(body.opportunities ?? []).map((i, n) => <div key={`opportunity-${n}`} className="space-y-1">
+          <p><span className="font-medium">New opportunity · {i.symbol}: </span>{i.what_matters}</p>
+          <p className="text-muted-foreground">{i.status === "conditional" ? "Conditional setup · wait for trigger" : "Research only · confirmation missing"}</p>
+          <p>Entry condition: {i.entry_trigger}</p><p>Invalidation: {i.invalidation}</p><p>Timeframe: {i.timeframe}</p>
+        </div>)}
+        {(body.urgent_positions ?? []).map((i, n) => <p key={`position-${n}`}><span className="font-medium">Urgent position · {i.symbol ?? "Portfolio"}: </span>{i.what_matters}</p>)}
         {(m.briefing.body.items ?? []).map((i, n) => <p key={n}><span className="font-medium">{i.symbol ?? "Market"}: </span>{i.what_matters}</p>)}
         <a className={link} href={`/morning?day=${day}`}>Full briefing with evidence →</a>
       </div> });

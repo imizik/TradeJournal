@@ -207,3 +207,28 @@ test("the dashboard links to today's Jo timeline", async ({ page }) => {
   await line.click();
   await expect(page).toHaveURL(new RegExp(`/daily/${today}#jo$`));
 });
+
+
+test("Daily Review retains v4 opportunity setups and urgent positions", async ({ page }) => {
+  await stub(page, today, midday);
+  const base = morning(today, midday);
+  const item = base.briefing!.body.items![0];
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: { ...base, briefing: { ...base.briefing,
+    body: { summary: "Mixed market; wait for confirmation.", prompt_version: "jo-morning-v4", items: [],
+      opportunities: [{ ...item, symbol: "NEW", status: "research_only", what_matters: "Investigate the reported contract catalyst.",
+        entry_trigger: "Confirm a fresh range before defining entry.", invalidation: "Reject if the catalyst cannot be verified.", timeframe: "Intraday research only." }],
+      urgent_positions: [item] } } } }));
+  await page.goto(`/daily/${today}`);
+  const brief = page.getByTestId("jo-day-item").filter({ hasText: "Morning briefing: NEW, APLD" });
+  await expect(brief).toBeVisible();
+  await brief.locator("summary").click();
+  await expect(brief).toContainText("New opportunity · NEW: Investigate the reported contract catalyst.");
+  await expect(brief).toContainText("Research only · confirmation missing");
+  await expect(brief).toContainText("Entry condition: Confirm a fresh range before defining entry.");
+  await expect(brief).toContainText("Invalidation: Reject if the catalyst cannot be verified.");
+  await expect(brief).toContainText("Timeframe: Intraday research only.");
+  await expect(brief).toContainText("Urgent position · APLD: Review the six $24 calls expiring Friday.");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await brief.screenshot({ path: test.info().outputPath("jo-day-opportunity-brief-phone.png") });
+});

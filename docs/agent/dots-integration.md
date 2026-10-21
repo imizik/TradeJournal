@@ -765,7 +765,9 @@ opportunities outside the approved account holdings **and** saved Charts
 watchlist, then at most two short urgent position reviews. Urgent reviews cover
 imminent expiry, material new position events or time-sensitive risk; they do not
 become a portfolio inventory. Historical `items` briefs retain their original
-labels/content. Existing packet/briefing records are not rewritten.
+labels/content. Daily Review’s Jo timeline includes both new sections and the
+setup’s conditions, status and timeframe. Existing packet/briefing records are
+not rewritten.
 
 The publisher reads one broad-tape news page (at most 50 stories, past 36 hours)
 independent of saved symbols. Valid HTTPS stories with observation times in that
