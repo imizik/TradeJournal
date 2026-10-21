@@ -416,7 +416,10 @@ and paper review. Checks are `backend/tests/test_advisor_shadow.py`,
 `backend/tests/test_browser_access.py` and `frontend/e2e/advisor-shadow.spec.ts`.
 See the [contract and activation boundaries](advisor-shadow-contract.md).
 
-The optional direct owner page `/advisor-review` uses
+The normal private journal's `/advisor-review` shows saved pre-trade checks
+through its separately enabled journal reader. It omits the isolated demo's
+connection and receipt panels, which require the authenticated owner entrance.
+The optional direct owner view on `/advisor-review` uses
 `frontend/components/AdvisorOwnerReview.tsx` and the shared pure
 `frontend/components/AdvisorReceiptView.tsx`. Its Node-only `GET /api/advisor-owner` BFF requires an
 explicit authenticated owner profile/session before and after a fixed Unix read.

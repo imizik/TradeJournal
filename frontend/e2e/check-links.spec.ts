@@ -47,12 +47,32 @@ test("switched off: review and trade pages say saved advice isn't connected", as
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/advisor-review");
+  await expect(page.getByRole("heading", { name: "Advisor review", exact: true })).toBeVisible();
+  await expect(page.getByTestId("advisor-owner-review")).toHaveCount(0);
+  await expect(page.getByText("Authenticated owner entrance required")).toHaveCount(0);
   await expect(page.getByTestId("pretrade-checks-dormant")).toContainText("Saved advice isn't connected to the journal yet");
   await fitsPhone(page, "off-review");
   await page.goto(`/trades/${(await nvda(page)).id}`);
   await expect(page.getByTestId("trade-advice")).toContainText("Saved advice isn't connected to the journal yet");
   await fitsPhone(page, "off-trade");
   expect(errors).toEqual([]);
+});
+
+test("private journal opens saved checks without requesting the isolated advisor trial", async ({ page }) => {
+  const trialReads: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/advisor-owner")) trialReads.push(request.url()); });
+  await connect(page, await nvda(page));
+  await page.goto("/");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("link", { name: "Advisor review", exact: true }).click();
+  await expect(page.getByTestId("pretrade-check-row")).toHaveCount(1);
+  await expect(page.getByTestId("advisor-owner-review")).toHaveCount(0);
+  await page.getByTestId("pretrade-check-row").getByRole("button").click();
+  await expect(page.getByTestId("pretrade-check-detail")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("advisor-review-private-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fitsPhone(page, "private-review");
+  expect(trialReads).toEqual([]);
 });
 
 test("possible later activity is labelled for review, then linked and unlinked by the owner", async ({ page }) => {
