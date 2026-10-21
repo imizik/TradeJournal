@@ -482,6 +482,22 @@ journal shows "isn't connected" again), then stop
 back to `"enabled": false` to withdraw the grant. The trial owner page is
 unchanged throughout, and saved links stay in `check_link`.
 
+**Operational activation — October 20, 2026.** With the owner's authorization,
+Check was upgraded to `f95559e7` and the normal private journal's separate reader
+was enabled. All prior active Check units were restored and existing Check
+configuration files remained byte-identical. Live list/detail/grades reads and
+the page returned successfully; 50 saved checks loaded. The socket's expected
+UID/group/mode, other-peer and POST refusals, and continued trial-owner reads
+were checked. Stopping the optional journal reader left the frontend active;
+reads resumed after restarting its socket. The frontend drop-in uses `Wants=`
+and `After=` for socket startup without propagating optional-reader shutdown.
+
+The live UI list was observed, but expanding a structured trigger/invalidation
+exposed a pre-existing React rendering crash. PR #365 repairs that rendering
+and omits isolated invented-demo panels from the normal journal page. Those UI
+repairs still require merge/deployment. Real journal link/unlink acceptance was
+not performed; no link or fill was changed during activation.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his

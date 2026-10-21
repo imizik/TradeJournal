@@ -4,6 +4,8 @@ import { advisorStamp } from "./AdvisorReceiptView";
 import CheckActivity from "./CheckActivity";
 
 type Verdict = "go" | "wait" | "pass" | "insufficient_data";
+type Condition = string | { description: string; level: string | null; price: number | null };
+const conditionText = (value: Condition | null) => typeof value === "string" ? value : value?.description;
 type Summary = { check_id: string; received_at: string; ticker: string; side: string; instrument: string; option_type: string | null;
   horizon: string; verdict: Verdict; model_verdict: Verdict | null; total_ms: number };
 type Listing = { schema_version: "check-owner-list-v1"; checks: Summary[]; total: number; limit: number };
@@ -16,12 +18,12 @@ type OptionInfo = { contract: string; bid: number | null; ask: number | null; mi
 type Detail = {
   schema_version: "check-owner-detail-v1"; check_id: string; received_at: string; record_sha256: string;
   idea: Record<string, string | number | null>; free_text: string | null;
-  answer: { verdict: Verdict; rules_version: string; wait_for: { condition: string | null; expires_at: string } | null;
-    reasons: { source: string; text: string }[]; would_change: string | null;
-    risk_check: { stop: number | null; note?: string; reference_price?: number; distance_pct?: number; scorer_invalidation?: string | null };
+  answer: { verdict: Verdict; rules_version: string; wait_for: { condition: Condition | null; expires_at: string } | null;
+    reasons: { source: string; text: string }[]; would_change: Condition | null;
+    risk_check: { stop: number | null; note?: string; reference_price?: number; distance_pct?: number; scorer_invalidation?: Condition | null };
     history: { as_of_ny: string; cohorts: Cohort[]; trades_used: number; available?: boolean };
     live: { price: number | null; vwap: number | null; rvol: number | null; market_state: string | null; setup_score: number | null;
-      trigger: string | null; invalidation: string | null; generated_at: string | null };
+      trigger: Condition | null; invalidation: Condition | null; generated_at: string | null };
     option?: OptionInfo | null;
     caveats: string[] };
   features: { state: string; generated_at: string | null; age_seconds: number | null };
@@ -128,15 +130,15 @@ function CheckDetail({ value, journal }: { value: Detail; journal: boolean }) {
   return <div className="space-y-3 border-t pt-3" data-testid="pretrade-check-detail">
     <div className="flex flex-wrap items-center gap-2"><Pill verdict={answer.verdict} /><span className="font-medium">{idea(value.idea as never)}</span>
       <span className="text-muted-foreground">{value.idea.horizon}{value.idea.stop != null && <> · stop {value.idea.stop}</>}</span></div>
-    {answer.wait_for && <p><span className="font-medium">Wait for:</span> {answer.wait_for.condition ?? "no trigger given"} (until {advisorStamp(answer.wait_for.expires_at)})</p>}
+    {answer.wait_for && <p><span className="font-medium">Wait for:</span> {conditionText(answer.wait_for.condition) || "no trigger given"} (until {advisorStamp(answer.wait_for.expires_at)})</p>}
     {answer.reasons.length > 0 && <ul className="list-disc space-y-0.5 pl-5">{answer.reasons.map((r, i) => <li key={i} className="break-words"><span className="text-muted-foreground">{r.source}:</span> {r.text}</li>)}</ul>}
-    {answer.would_change && <p><span className="font-medium">Would change:</span> {answer.would_change}</p>}
+    {answer.would_change && <p><span className="font-medium">Would change:</span> {conditionText(answer.would_change)}</p>}
     <p><span className="font-medium">Stop:</span> {answer.risk_check.stop == null ? (answer.risk_check.note ?? "none given")
       : <>{answer.risk_check.stop}{answer.risk_check.distance_pct != null && <> · {answer.risk_check.distance_pct}% from {answer.risk_check.reference_price}</>}{answer.risk_check.note && <> · {answer.risk_check.note}</>}</>}</p>
     <section aria-label="Live data"><h4 className="font-medium">Live data</h4>
       <p>Price {num(answer.live.price)} · VWAP {num(answer.live.vwap)} · RVOL {num(answer.live.rvol)} · setup {answer.live.setup_score ?? "—"} · {SESSION[answer.live.market_state ?? ""] ?? "session unknown"}</p>
-      {answer.live.trigger && <p className="text-muted-foreground">Trigger: {answer.live.trigger}</p>}
-      {answer.live.invalidation && <p className="text-muted-foreground">Invalidation: {answer.live.invalidation}</p>}
+      {answer.live.trigger && <p className="text-muted-foreground">Trigger: {conditionText(answer.live.trigger)}</p>}
+      {answer.live.invalidation && <p className="text-muted-foreground">Invalidation: {conditionText(answer.live.invalidation)}</p>}
     </section>
     {answer.option && <section aria-label="Option"><h4 className="font-medium">Option <span className="font-normal text-muted-foreground">{answer.option.contract}{answer.option.dte != null && <> · {answer.option.dte} DTE</>}</span></h4>
       <p>Bid {num(answer.option.bid)} · ask {num(answer.option.ask)} · spread {answer.option.spread_pct == null ? "—" : `${answer.option.spread_pct}%`} · IV {answer.option.iv == null ? "—" : `${Math.round(answer.option.iv * 100)}%`} · delta {num(answer.option.delta)}</p>
