@@ -9,7 +9,7 @@ const packet = (slot: string, extra: Partial<MarketReadPacket> = {}): MarketRead
 
 function slot(day: string, name: string, extra: Partial<MarketReadSlot> = {}): MarketReadSlot {
   return { slot: name, scheduled_at: at(day, slotAt[name]), expected: true, not_expected_reason: null, operation_id: `mw-scheduled-v1:${day}:${name}`,
-    packet: packet(name), status: "no_read_seen", read_id: null, attribution: null, received_at: null, receipt_delay_seconds: null,
+    packet: packet(name), status: "no_read_seen", read_id: null, attribution: null, received_at: null, read: null, receipt_delay_seconds: null,
     read_used_slot_packet: null, deadline: at(day, slotAt[name], 15 * 60), delivery: "missing", late_by_seconds: null, ...extra };
 }
 const read = (day: string, name: string, seconds: number, attribution: "operation_id" | "time_window" = "time_window") =>
@@ -63,7 +63,7 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
     read(monday, "11:00", 17 * 60 + 30, "operation_id"),
     slot(monday, "12:30", { packet: packet("12:30", { status: "started", snapshot_id: null }) }),
     slot(monday, "14:00", { packet: packet("14:00", { status: "failed", error_code: "snapshot_collection_failed", snapshot_id: null, attempts: 2 }) }),
-  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: null }] })]));
+  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: null, read: null }] })]));
   const slots = page.getByTestId("read-slot");
   await expect(page.getByTestId("session-summary")).toHaveText("2 of 4 due slots with a read");
   await expect(page.getByTestId("session-delivery")).toHaveText("1 on time · 1 late · 2 missing");

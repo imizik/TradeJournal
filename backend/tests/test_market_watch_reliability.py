@@ -74,6 +74,11 @@ def test_slots_show_packets_reads_delays_and_delivery(env, tmp_path):
     assert s["09:50"]["status"] == "read_seen" and s["09:50"]["read_id"] == first["read_id"]
     assert s["09:50"]["attribution"] == "time_window" and s["09:50"]["receipt_delay_seconds"] == 130
     assert s["09:50"]["packet"]["status"] == "published" and s["09:50"]["read_used_slot_packet"] is True
+    # Jo's own words travel with the slot so the Daily Review can show what Jo said, not only when.
+    notice = runner.store.records("read_notice")[0]
+    assert s["09:50"]["read"] == {k: notice[k] for k in ("view", "main_text", "alternative_text", "invalidation_text",
+                                                         "change_summary", "is_correction")}
+    assert s["12:30"]["read"] is None
     assert s["11:00"]["receipt_delay_seconds"] == 17 * 60 + 30 and s["11:00"]["read_used_slot_packet"] is None
     assert s["11:00"]["packet"] == {"slot": "10-59", "status": "failed", "attempts": 1, "recorded_at": "2026-10-14T13:49:05Z",
                                      "snapshot_id": None, "error_code": "snapshot_collection_failed", "quality_flags": []}
@@ -84,6 +89,7 @@ def test_slots_show_packets_reads_delays_and_delivery(env, tmp_path):
     assert s["14:00"]["status"] == "no_read_seen" and s["14:00"]["read_id"] is None
     session = report(runner, receipts)
     assert [r["read_id"] for r in session["reads_not_credited_to_a_slot"]] == [beyond["read_id"]]
+    assert session["reads_not_credited_to_a_slot"][0]["read"]["main_text"]
     assert session["summary"] == {"read_seen": 2, "no_read_seen": 2, "upcoming": 0, "not_expected": 0, "unknown": 0}
     # On time means Check received the read within 15 minutes of the slot (a proposed tolerance).
     s = slots(session)
@@ -233,6 +239,14 @@ def test_route_lists_weekdays_back_to_the_first_evidence(client):
     assert view["importer"] == {"running": False, "outbox_configured": False, "last_ingest": None, "current": False}
     assert {s["delivery"] for s in view["sessions"][0]["slots"]} == {"unknown"}
     assert view["sessions"][0]["watchdog"]["state"] in ("unknown", "on", "off")
+
+
+def test_route_returns_one_requested_day(client):
+    assert [s["session_date"] for s in client.get("/jo/market-reads?day=2026-10-15").json()["sessions"]] == ["2026-10-15"]
+    # A weekend or a future day has no scheduled reads to show.
+    assert client.get("/jo/market-reads?day=2026-10-17").json()["sessions"] == []
+    assert client.get("/jo/market-reads?day=2026-10-19").json()["sessions"] == []
+    assert client.get("/jo/market-reads?day=not-a-day").status_code == 422
 
 
 def test_route_judges_missing_reads_after_a_fresh_import(client, env, tmp_path, monkeypatch):
