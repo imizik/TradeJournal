@@ -1,0 +1,37 @@
+{
+  "_note": "Synthetic Radar event and one revision in the RadarEvent / RadarEventRevision shape (app/engine/radar_store.py), for building the API and /radar screen before detection exists. Prices are invented; not a recorded market event.",
+  "event": {
+    "event_id": "rad_sample_mu_20261020_1",
+    "session_date": "2026-10-20",
+    "rule_version": "radar-rules-sample",
+    "universe_version": "radar-universe-v1",
+    "kind": "relative_to_sector",
+    "direction": "up",
+    "symbols": ["MU"],
+    "benchmark": "SMH",
+    "group": "Memory and storage",
+    "first_seen_at": "2026-10-20T15:12:04.000Z",
+    "summary": "MU up 4.1% while SMH is up 0.6%: 3.5 points ahead of its sector on 2.3x usual volume.",
+    "measures": {"change_pct": 4.1, "benchmark_change_pct": 0.6, "relative_pct": 3.5, "volume_ratio": 2.3},
+    "evidence": [
+      {"symbol": "MU", "pass_id": 101, "retrieved_at": "2026-10-20T15:12:03.512Z", "last": 208.4, "change_pct": 4.1},
+      {"symbol": "SMH", "pass_id": 101, "retrieved_at": "2026-10-20T15:12:03.512Z", "last": 301.2, "change_pct": 0.6}
+    ],
+    "coverage": {"passes_expected": 102, "passes_recorded": 101, "symbols_missing": []},
+    "chart": {"symbol": "MU", "from": "2026-10-20T13:30:00.000Z", "to": "2026-10-20T15:13:00.000Z"}
+  },
+  "revisions": [
+    {
+      "event_id": "rad_sample_mu_20261020_1",
+      "revision": 1,
+      "recorded_at": "2026-10-20T16:02:05.000Z",
+      "status": "extended",
+      "measures": {"change_pct": 5.6, "benchmark_change_pct": 0.8, "relative_pct": 4.8, "volume_ratio": 2.6},
+      "evidence": [
+        {"symbol": "MU", "pass_id": 151, "retrieved_at": "2026-10-20T16:02:04.870Z", "last": 211.4, "change_pct": 5.6},
+        {"symbol": "SMH", "pass_id": 151, "retrieved_at": "2026-10-20T16:02:04.870Z", "last": 301.8, "change_pct": 0.8}
+      ],
+      "note": "Lead widened from 3.5 to 4.8 points over the next 50 minutes."
+    }
+  ]
+}
