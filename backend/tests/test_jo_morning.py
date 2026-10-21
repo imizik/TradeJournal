@@ -480,3 +480,33 @@ def test_backdrop_evidence_leads_market_rows_passes_check_citation_rules_and_nev
         packet = collect(session, config, actor, NOW, market, broken)
         assert "vix" not in [e.id for e in packet.evidence] and "market-SPY" in [e.id for e in packet.evidence]
         assert "Macro calendar, VIX and earnings backdrop unavailable." in packet.gaps
+
+
+def test_month_lists_each_weekday_delivery_without_guessing(morning):
+    from datetime import date
+    from app.engine.jo_morning import month_delivery, weekdays_in_month
+    _, db, config = morning
+    assert weekdays_in_month("2026-10", date(2026, 10, 6)) == [date(2026, 10, 6), date(2026, 10, 5), date(2026, 10, 2), date(2026, 10, 1)]
+    assert weekdays_in_month("2026-11", date(2026, 10, 6)) == []
+    days = [date(2026, 10, 19), date(2026, 10, 16)]
+    with Session(db) as session:
+        assert month_delivery(session, days, NOW, config, "actor", lambda day: {"status": "open"}) == []  # nothing published yet
+    assert MorningRunner(db, lambda: config, lambda day: {"status": "open", "open": 570}).run_once(NOW)["status"] == "published"
+    later = NOW + timedelta(hours=2)
+    with Session(db) as session:
+        from jo_briefing_owner import binding, load_binding
+        actor = binding(load_binding(config.check_config))
+        rows = month_delivery(session, days, later, config, actor, lambda day: {"status": "open"})
+        # Before the first packet there is no record, so the 16th is left out instead of read as missed.
+        assert [(r["day"], r["publication"], r["fulfilment"]) for r in rows] == [("2026-10-19", "published", "missing")]
+        assert month_delivery(session, days, later, config, actor, lambda day: None)[0]["fulfilment"] == "unknown"
+
+
+def test_month_route_shape_and_validation(client):  # noqa: F811
+    assert client.get("/jo/morning").status_code == 422
+    assert client.get("/jo/morning?month=2026-13").status_code == 422
+    assert client.get("/jo/morning?month=2026-10").json()["days"] == []  # no packet yet: no record, not "missed"
+    client.post("/jo/packets", json=packet())  # for 2026-10-01
+    view = client.get("/jo/morning?month=2026-10").json()
+    assert view["month"] == "2026-10" and view["days"][-1]["day"] == "2026-10-01"
+    assert set(view["days"][0]) == {"day", "publication", "fulfilment", "deadline", "available_at", "late_by_seconds", "watchdog_notices"}

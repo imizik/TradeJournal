@@ -9,7 +9,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from stock_watch_common import ET
 
@@ -62,8 +62,8 @@ def _parse(value: str) -> datetime:
 
 
 @router.get("")
-def market_reads(request: Request, day: date | None = None):
-    from app.engine.jo_morning import watchdog_status
+def market_reads(request: Request, day: date | None = None, month: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")):
+    from app.engine.jo_morning import watchdog_status, weekdays_in_month
     from app.engine.market_watch_wakes import MarketWatchWakeStore, enabled, reliability_report
 
     now = _now()
@@ -87,15 +87,21 @@ def market_reads(request: Request, day: date | None = None):
                 pass
     except OSError:
         log.exception("Publisher receipts unreadable")
+    def pick(first):
+        if day is not None:
+            return _one(day, now)
+        if month is not None:  # the calendar's month, never before the earliest recorded evidence
+            return [d for d in weekdays_in_month(month, now.astimezone(ET).date()) if d >= (first or now.astimezone(ET).date())]
+        return _days(now.astimezone(ET).date(), first)
     try:
         if store is not None:
             evidence |= {date.fromisoformat(r["session_date"]) for r in store.records("read_notice")}
-        days = _days(now.astimezone(ET).date(), min(evidence, default=None)) if day is None else _one(day, now)
+        days = pick(min(evidence, default=None))
         view = reliability_report(store, receipts, days, hours=_hours, now=now, reads_through=through)
     except Exception:
         # A corrupt or locked store makes reads unknown; it never fails the page.
         log.exception("Market-watch store unreadable")
-        days = _days(now.astimezone(ET).date(), min(evidence, default=None)) if day is None else _one(day, now)
+        days = pick(min(evidence, default=None))
         view = reliability_report(None, receipts, days, hours=_hours, now=now, reads_through=through)
     for session in view["sessions"]:
         session["watchdog"] = watchdog_status(date.fromisoformat(session["session_date"]), section="jo_market_reads")

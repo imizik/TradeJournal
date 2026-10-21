@@ -1,3 +1,6 @@
+import type { MorningMonth } from "./joMorning";
+import type { MarketReadsView } from "./marketReads";
+import type { PlansView } from "./conditionalPlans";
 export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 /** Relative browser requests stay on the private frontend origin. Server-side
@@ -964,6 +967,9 @@ return {
   dayJournal: (day: string) => get<DayJournal>(`/day-journal/${day}`),
   addDayJournalEntry: (day: string, body: DayJournalWrite) => post<DayJournalEntry>(`/day-journal/${day}/entries`, body),
   monthlyReviews: () => get<MonthlyReviewIndexItem[]>("/monthly-review"),
+  joMorningMonth: (month: string) => get<MorningMonth>(`/jo/morning?month=${encodeURIComponent(month)}`),
+  joMarketReadsMonth: (month: string) => get<MarketReadsView>(`/jo/market-reads?month=${encodeURIComponent(month)}`),
+  joPlans: () => get<PlansView>("/jo/conditional-plans"),
   monthlyReview: (month: string) => get<MonthlyReviewResponse | null>(`/monthly-review/${month}`),
   reviewMonth: (month: string) => post<MonthlyReviewResponse>("/monthly-review", { month }),
   weeklyReview: (week: string) => get<WeeklyReview>(`/weekly-review/${week}`),
