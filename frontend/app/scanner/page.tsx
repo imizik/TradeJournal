@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ScannerFreshness from "@/components/ScannerFreshness";
 import ScannerTickers from "@/components/ScannerTickers";
 import { api } from "@/lib/serverApi";
 import type { ScannerCandidateRow, ScannerScorecard, ScannerIsaacScore } from "@/lib/api";
@@ -6,12 +7,12 @@ import type { ScannerCandidateRow, ScannerScorecard, ScannerIsaacScore } from "@
 export const dynamic = "force-dynamic";
 
 const STATUS: Record<ScannerCandidateRow["status"], { label: string; className: string }> = {
-  no_contract: { label: "No contract", className: "bg-muted text-muted-foreground" },
-  pending_entry: { label: "Entering", className: "bg-sky-500/15 text-sky-300" },
-  open: { label: "Open", className: "bg-sky-500/15 text-sky-300" },
-  exiting: { label: "Exiting", className: "bg-sky-500/15 text-sky-300" },
-  exit: { label: "Closed", className: "bg-secondary text-foreground" },
-  unresolved: { label: "Unresolved", className: "bg-amber-500/15 text-amber-300" },
+  no_contract: { label: "Paper: no contract", className: "bg-muted text-muted-foreground" },
+  pending_entry: { label: "Paper: awaiting entry", className: "bg-sky-500/15 text-sky-300" },
+  open: { label: "Paper: open", className: "bg-sky-500/15 text-sky-300" },
+  exiting: { label: "Paper: exiting", className: "bg-sky-500/15 text-sky-300" },
+  exit: { label: "Paper: closed", className: "bg-secondary text-foreground" },
+  unresolved: { label: "Paper: unresolved", className: "bg-amber-500/15 text-amber-300" },
 };
 
 const EXIT_REASON: Record<string, string> = {
@@ -21,8 +22,12 @@ const EXIT_REASON: Record<string, string> = {
   flat: "Flat by close",
 };
 
-function nyTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+function nyTime(iso: string, seconds = false) {
+  return new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}) });
+}
+
+function nyDate(now: Date) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
 }
 
 function money(value: number | null | undefined) {
@@ -171,19 +176,80 @@ function contractLabel(c: ScannerCandidateRow) {
   return `${k.expiration.slice(5)} ${k.strike}${k.option_type === "call" ? "C" : "P"} · Δ${Math.abs(k.delta).toFixed(2)}`;
 }
 
-function Outcome({ c }: { c: ScannerCandidateRow }) {
-  const exit = c.events.exit;
-  if (exit) {
-    const pnl = Number(exit.pnl);
-    return (
-      <div>
-        <span className={pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : ""}>{money(pnl)}</span>
-        <span className="ml-2 text-xs text-muted-foreground">{EXIT_REASON[String(exit.reason)] ?? exit.reason}</span>
+function price(value: unknown) {
+  return `$${Number(value).toFixed(2)}`;
+}
+
+// The newest thing that happened to the rules paper trade, with its own time.
+function latestEvent(c: ScannerCandidateRow): { text: string; pnl?: number } {
+  const { entry, exit, exit_intent: intent, unresolved } = c.events;
+  if (exit) return { text: `Paper exit ${nyTime(exit.at, true)} ET · ${EXIT_REASON[String(exit.reason)] ?? exit.reason}`, pnl: Number(exit.pnl) };
+  if (unresolved) return { text: `Paper unresolved ${nyTime(unresolved.at, true)} ET · ${String(unresolved.reason)}` };
+  if (intent) return { text: `Paper exiting since ${nyTime(intent.at, true)} ET · ${EXIT_REASON[String(intent.reason)] ?? intent.reason}` };
+  if (entry) return { text: `Paper entry ${nyTime(entry.at, true)} ET at ${price(entry.ask)} ask` };
+  if (c.status === "no_contract") return { text: `No paper trade · ${c.facts.contract_note ? String(c.facts.contract_note) : "no qualifying contract"}` };
+  return { text: `Setup bar close ${nyTime(c.bar_end)} ET · waiting for an entry quote` };
+}
+
+function Timing({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="tabular-nums text-foreground">{value}</dd>
+      {hint && <dd className="text-xs text-muted-foreground">{hint}</dd>}
+    </div>
+  );
+}
+
+function SetupCard({ c }: { c: ScannerCandidateRow }) {
+  const status = STATUS[c.status];
+  const { entry, exit } = c.events;
+  const latest = latestEvent(c);
+  const email = emailLabel(c);
+  const deadline = c.paper_deadline;
+  return (
+    <li className="border-t px-4 py-3 first:border-t-0" aria-label={`${c.symbol} ${setupLabel(c)} ${nyTime(c.bar_end)}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-base font-semibold text-foreground">{c.symbol}</span>
+        <span className="text-sm text-muted-foreground">{setupLabel(c)}</span>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${status.className}`}>{status.label}</span>
       </div>
-    );
-  }
-  const reason = c.events.unresolved?.reason ?? (c.status === "no_contract" ? c.facts.contract_note : null);
-  return <span className="text-xs text-muted-foreground">{reason ? String(reason) : "—"}</span>;
+      <p className="mt-1 text-sm" data-testid="latest-event">
+        {latest.text}
+        {latest.pnl !== undefined && (
+          <span className={`ml-2 font-medium tabular-nums ${latest.pnl > 0 ? "text-emerald-400" : latest.pnl < 0 ? "text-red-400" : ""}`}>{money(latest.pnl)}</span>
+        )}
+      </p>
+      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
+        <Timing label="Setup bar close" value={`${nyTime(c.bar_end)} ET`} />
+        <Timing label="Paper entry" value={entry ? `${nyTime(entry.at, true)} ET` : "—"} hint={entry ? `${price(entry.ask)} ask` : undefined} />
+        <Timing label="Paper exit" value={exit ? `${nyTime(exit.at, true)} ET` : "—"}
+          hint={exit ? `${price(exit.bid)} bid · ${EXIT_REASON[String(exit.reason)] ?? exit.reason}` : deadline ? `${deadline.kind === "flat" ? "Flat by" : "Time stop"} ${nyTime(deadline.at, true)} ET` : undefined} />
+        <Timing label="Stock stop/target" value={`${c.stop.toFixed(2)} / ${c.target.toFixed(2)}`} />
+        <Timing label="Option premium" value={entry ? `${price(entry.ask)}${exit ? ` → ${price(exit.bid)}` : ""}` : "—"} hint={contractLabel(c) ?? "No contract"} />
+        {deadline && <Timing label={deadline.kind === "flat" ? "Flat-by-close deadline" : "Time-stop deadline"} value={`${nyTime(deadline.at, true)} ET`} hint={deadline.kind === "flat" ? "before the 60-min time stop" : "entry + 60 min"} />}
+      </dl>
+      {c.flags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {c.flags.map((f) => (
+            <span key={f} className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">{f.replaceAll("_", " ")}</span>
+          ))}
+        </div>
+      )}
+      <details className="mt-1 text-sm">
+        <summary className="min-h-11 cursor-pointer py-2 text-muted-foreground">Comparison detail · Shadow {shadowDecisionLabel(c)} · Isaac {c.isaac.traded ? "traded" : "no linked trade"}</summary>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Setup email</dt><dd className={email.className}>{email.label}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Shadow Isaac</dt><dd><ShadowDecision c={c} /></dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Shadow timing</dt><dd>{c.shadow.timing === "on_time" ? "On time" : c.shadow.timing === "late" ? "Late" : c.shadow.status === "no_response" ? "No response" : "—"}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Clean order</dt><dd>{c.shadow.clean_order === true ? <span className="text-emerald-300">Yes</span> : c.shadow.clean_order === false ? <span className="text-amber-300">No</span> : "—"}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Shadow paper result</dt><dd className="tabular-nums">{shadowResult(c)}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Isaac</dt><dd><IsaacTrade c={c} /></dd></div>
+        </dl>
+        <p className="mt-2 text-xs text-muted-foreground">Scanner configuration: {c.scanner_version} · {c.params_hash.slice(0, 12)} · {Array.isArray(c.facts.scanner_universe) ? c.facts.scanner_universe.join(", ") : "Original 12-ticker universe"}</p>
+      </details>
+    </li>
+  );
 }
 
 function emailLabel(c: ScannerCandidateRow) {
@@ -246,6 +312,8 @@ function shadowResult(c: ScannerCandidateRow) {
 export default async function ScannerPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const { day } = await searchParams;
   const data = await api.scannerDay(day);
+  const now = new Date();
+  const live = data.date === nyDate(now);
   const t = data.totals;
   const winRate = t.resolved ? `${Math.round((100 * t.wins) / t.resolved)}%` : "—";
 
@@ -254,17 +322,12 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
       <div>
         <h1 className="text-xl font-semibold text-foreground">Scanner</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          Setups found by the rules (VWAP fade and opening-range break) and what each would have done as a
-          one-contract paper trade: buy at the ask, sell at the bid, 60-minute time stop. Shadow Isaac takes or
-          skips those setups for a separate paper book with the same contract and exits. Isaac’s matched real trades appear alongside them. Matching does not prove a setup was followed; actual contracts and exits may differ. Nothing here places
-          real orders or changes your fills or trades.
+          Rules paper trades from the setup scanner: one contract, bought at the ask and sold at the bid. They are not your trades and nothing here places orders.
         </p>
         {!data.enabled && (
           <p className="mt-2 text-sm text-amber-300">The scanner is switched off on this server, so no new setups are being recorded.</p>
         )}
       </div>
-
-      <ScannerTickers />
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link href={`/scanner?day=${shiftDay(data.date, -1)}`} className="inline-flex min-h-11 items-center rounded border px-3 hover:bg-secondary">
@@ -276,11 +339,24 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         </Link>
       </div>
 
+      <ScannerFreshness updatedAt={now.toISOString()} monitoring={data.monitoring} live={live} />
+
+      <section className="overflow-hidden rounded-lg border bg-card" aria-label="Setups">
+        <h2 className="border-b px-4 py-2 text-sm font-semibold text-foreground">Setups · {data.candidates.length}</h2>
+        {data.candidates.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            {data.session === "closed" ? "The market was closed on this date, so there was no session and no setups." : "No setups on this day."}
+          </div>
+        ) : (
+          <ul>{data.candidates.map((c) => <SetupCard key={c.id} c={c} />)}</ul>
+        )}
+      </section>
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Card label="Setups" value={String(t.candidates)} hint={`${t.no_contract} without a contract`} />
         <Card label="Paper trades" value={String(t.trades)} hint={`${t.unresolved} unresolved`} />
         <Card label="Win rate" value={winRate} hint={`${t.resolved} closed`} />
-        <Card label="Paper P&L" value={money(t.pnl)} hint="per contract, after commission" />
+        <Card label="Rules paper P&L · one contract per priced setup" value={money(t.pnl)} hint="after commission" />
         <Card label="At 2× spread" value={money(t.pnl_2x_spread)} hint="pessimistic fills" />
       </div>
 
@@ -289,91 +365,14 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         <Scorecard label="Cumulative scorecard" score={data.scorecard.cumulative} />
       </div>
 
-      <section className="overflow-hidden rounded-lg border bg-card">
-        {data.candidates.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">No setups on this day.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium">Time</th>
-                  <th className="px-4 py-2 text-left font-medium">Symbol</th>
-                  <th className="px-4 py-2 text-left font-medium">Setup</th>
-                  <th className="px-4 py-2 text-left font-medium">Stop / target</th>
-                  <th className="px-4 py-2 text-left font-medium">Contract</th>
-                  <th className="px-4 py-2 text-left font-medium">In / out</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                  <th className="px-4 py-2 text-left font-medium">Result</th>
-                  <th className="px-4 py-2 text-left font-medium">Email</th>
-                  <th className="px-4 py-2 text-left font-medium">Shadow Isaac</th>
-                  <th className="px-4 py-2 text-left font-medium">Timing</th>
-                  <th className="px-4 py-2 text-left font-medium">Clean order</th>
-                  <th className="px-4 py-2 text-left font-medium">Shadow result</th>
-                  <th className="px-4 py-2 text-left font-medium">Isaac</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.candidates.map((c) => {
-                  const status = STATUS[c.status];
-                  const entry = c.events.entry;
-                  const exit = c.events.exit;
-                  const email = emailLabel(c);
-                  return (
-                    <tr key={c.id} className="border-t align-top">
-                      <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{nyTime(c.bar_end)}</td>
-                      <td className="px-4 py-2 font-medium text-foreground">{c.symbol}</td>
-                      <td className="px-4 py-2">
-                        <div className="whitespace-nowrap">{setupLabel(c)}</div>
-                        <details className="mt-1 text-xs text-muted-foreground">
-                          <summary className="min-h-11 cursor-pointer">Scanner configuration</summary>
-                          <p>{c.scanner_version} · {c.params_hash.slice(0, 12)}</p>
-                          <p>{Array.isArray(c.facts.scanner_universe) ? c.facts.scanner_universe.join(", ") : "Original 12-ticker universe"}</p>
-                        </details>
-                        {c.flags.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {c.flags.map((f) => (
-                              <span key={f} className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">
-                                {f.replaceAll("_", " ")}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 tabular-nums text-muted-foreground">
-                        {c.stop.toFixed(2)} / {c.target.toFixed(2)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{contractLabel(c) ?? "—"}</td>
-                      <td className="whitespace-nowrap px-4 py-2 tabular-nums">
-                        {entry ? `${Number(entry.ask).toFixed(2)}` : "—"}
-                        {exit ? ` → ${Number(exit.bid).toFixed(2)}` : ""}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${status.className}`}>{status.label}</span>
-                      </td>
-                      <td className="px-4 py-2">
-                        <Outcome c={c} />
-                      </td>
-                      <td className={`whitespace-nowrap px-4 py-2 text-xs ${email.className}`}>{email.label}</td>
-                      <td className="px-4 py-2">
-                        <ShadowDecision c={c} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
-                        {c.shadow.timing === "on_time" ? "On time" : c.shadow.timing === "late" ? "Late" : c.shadow.status === "no_response" ? "No response" : "—"}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-xs">
-                        {c.shadow.clean_order === true ? <span className="text-emerald-300">Yes</span> : c.shadow.clean_order === false ? <span className="text-amber-300">No</span> : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 tabular-nums">{shadowResult(c)}</td>
-                      <td className="px-4 py-2"><IsaacTrade c={c} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <ScannerTickers />
+
+      <p className="max-w-3xl text-xs text-muted-foreground">
+        Setups are found by the rules (VWAP fade and opening-range break). Each would be a one-contract paper trade: buy at the ask, sell at the bid,
+        60-minute time stop. Shadow Isaac takes or skips those setups for a separate paper book with the same contract and exits. Isaac’s matched real
+        trades appear alongside them. Matching does not prove a setup was followed; actual contracts and exits may differ. Nothing here places real
+        orders or changes your fills or trades.
+      </p>
       <p className="text-xs text-muted-foreground">
         Baseline rules {data.scanner_version} · {data.params_hash.slice(0, 12)}. Results include the ticker lists used at detection, including earlier selections. Paper results are not
         evidence of an edge until enough trades have closed.

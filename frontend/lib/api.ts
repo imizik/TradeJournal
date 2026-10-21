@@ -717,7 +717,17 @@ export type ScannerCandidateRow = {
   status: "no_contract" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
   shadow: ScannerShadowRow;
   isaac: ScannerIsaacRow;
+  // The latest the rules paper trade exits: its 60-minute time stop, or flat-by-close when earlier.
+  paper_deadline: { at: string; kind: "time_stop" | "flat" } | null;
   events: Record<string, ScannerEventRow>;
+};
+
+export type ScannerMonitoring = {
+  state: "off" | "not_running" | "market_closed" | "calendar_unknown" | "outside_window" | "fresh" | "stale";
+  checked_at: string;
+  last_judged_bar_end: string | null;
+  symbols_judged: number;
+  symbols_selected: number;
 };
 
 export type ScannerSettings = { symbols: string[]; revision: number; max_symbols: number };
@@ -739,6 +749,8 @@ export type ScannerDay = {
   };
   scorecard: { day: ScannerScorecard; cumulative: ScannerScorecard };
   candidates: ScannerCandidateRow[];
+  session: "open" | "closed" | "unknown";
+  monitoring: ScannerMonitoring;
 };
 
 export type TradingViewAlert = {
