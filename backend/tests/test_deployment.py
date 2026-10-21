@@ -1168,3 +1168,106 @@ def test_weekend_keeps_an_unresolved_calendar_condition(alerts, monkeypatch):
     morning_pass(alerts, monkeypatch, morning_view(day="2026-10-24", last_pass=saturday, status="calendar_unavailable", fulfilment="not_expected"), sends)
     alerts.check(config, now=saturday)
     assert sends == ["Market calendar unavailable for the morning brief"]
+
+
+# Scheduled market-read watchdog: 2026-10-21 is a Wednesday; 15:15 UTC is the 11:00 ET slot's 11:15 deadline.
+READ_DEADLINE = datetime(2026, 10, 21, 15, 15, tzinfo=timezone.utc).timestamp()
+
+
+def market_reads_view(delivery="pending", last_ingest=READ_DEADLINE, enabled=True, outbox=True, day="2026-10-21", packet="published"):
+    iso = lambda value: datetime.fromtimestamp(value, timezone.utc).isoformat() if value else None  # noqa: E731
+    slot = {"slot": "11:00", "scheduled_at": f"{day}T15:00:00+00:00", "deadline": f"{day}T15:15:00+00:00",
+            "delivery": delivery, "packet": {"status": packet}}
+    return {"market_watch_enabled": enabled,
+            "importer": {"running": True, "outbox_configured": outbox, "last_ingest": iso(last_ingest)},
+            "sessions": [{"session_date": day, "slots": [slot]}]}
+
+
+def test_market_read_conditions_alert_only_on_a_judged_miss(alerts):
+    now, key = READ_DEADLINE + 90, "jo_market_read:2026-10-21:1100"
+    missing = alerts.market_read_problems(market_reads_view("missing"), "2026-10-21", now)
+    assert missing[key].title == "Jo's 11:00 AM market read is missing" and missing[key].grace == 0
+    assert "by 11:15 AM ET" in missing[key].message and missing[key].recovered.startswith("Jo's 11:00 AM market read arrived;")
+    assert "packet" not in missing[key].message
+    failed = alerts.market_read_problems(market_reads_view("missing", packet="failed"), "2026-10-21", now)
+    assert "packet for this read failed" in failed[key].message
+    for done in ("on_time", "late", "pending", "not_expected"):
+        assert alerts.market_read_problems(market_reads_view(done), "2026-10-21", now)[key] is None
+    assert key not in alerts.market_read_problems(market_reads_view("unknown"), "2026-10-21", now)
+    # A stale importer or no outbox: slots stay unknown and the gap itself is the condition.
+    for view in (market_reads_view("missing", last_ingest=now - 600), market_reads_view("missing", last_ingest=None),
+                 market_reads_view("missing", outbox=False)):
+        stale = alerts.market_read_problems(view, "2026-10-21", now)
+        assert list(stale) == ["jo_market_read:importer"] and stale["jo_market_read:importer"].grace == alerts.API_GRACE
+    # A day without a session row (weekend, outside the list) says nothing about slots.
+    assert alerts.market_read_problems(market_reads_view("missing"), "2026-10-24", now) == {"jo_market_read:importer": None}
+
+
+def market_pass(alerts, monkeypatch, view, sends, fail=None):
+    morning_pass(alerts, monkeypatch, view, sends, fail)
+
+
+def test_missed_market_read_alerts_once_then_late_recovery_is_logged(alerts, monkeypatch):
+    sends, config = [], {"JO_MARKET_READ_ALERTS": "true"}
+    market_pass(alerts, monkeypatch, market_reads_view("missing", last_ingest=READ_DEADLINE + 80), sends)
+    assert alerts.check(config, now=READ_DEADLINE + 90)
+    market_pass(alerts, monkeypatch, market_reads_view("missing", last_ingest=READ_DEADLINE + 200), sends)
+    assert alerts.check(config, now=READ_DEADLINE + 210)
+    assert sends == ["Jo's 11:00 AM market read is missing"]
+    market_pass(alerts, monkeypatch, market_reads_view("late", last_ingest=READ_DEADLINE + 400), sends)
+    assert alerts.check(config, now=READ_DEADLINE + 410)
+    assert sends == ["Jo's 11:00 AM market read is missing", "Jo's 11:00 AM market read arrived; see the reliability screen for on time or late"]
+    record = alerts.read_state()["jo_market_reads"]
+    assert record["enabled"] is True and record["error"] is None
+    assert [(n["kind"], n["recovered"], n["outcome"]) for n in record["notices"]["2026-10-21"]] == [("1100", False, "sent"), ("1100", True, "sent")]
+    assert alerts.read_state()["jo_morning"]["enabled"] is False  # the morning watchdog stays separate
+
+
+def test_market_read_watchdog_is_opt_in_and_off_with_market_watch(alerts, monkeypatch):
+    sends, reads = [], []
+    market_pass(alerts, monkeypatch, None, sends)
+    monkeypatch.setattr(alerts, "get", lambda path: reads.append(path) or market_reads_view("missing", last_ingest=READ_DEADLINE + 80))
+    alerts.check({}, now=READ_DEADLINE + 90)
+    assert reads == [] and sends == [] and alerts.read_state()["jo_market_reads"]["enabled"] is False
+    config = {"JO_MARKET_READ_ALERTS": "true"}
+    alerts.check(config, now=READ_DEADLINE + 90)
+    assert reads == ["/jo/market-reads"] and sends == ["Jo's 11:00 AM market read is missing"]
+    # Market watch switched off on the server: open conditions end silently.
+    monkeypatch.setattr(alerts, "get", lambda path: market_reads_view("missing", enabled=False))
+    alerts.check(config, now=READ_DEADLINE + 210)
+    assert len(sends) == 1 and not [k for k in alerts.read_state()["conditions"] if k.startswith("jo_market_read:")]
+
+
+def test_uncertain_market_read_send_is_never_resent_and_unreadable_status_alerts(alerts, monkeypatch):
+    sends, config = [], {"JO_MARKET_READ_ALERTS": "true"}
+    market_pass(alerts, monkeypatch, market_reads_view("missing", last_ingest=READ_DEADLINE + 80), sends, fail=TimeoutError("timed out"))
+    assert alerts.check(config, now=READ_DEADLINE + 90)
+    market_pass(alerts, monkeypatch, market_reads_view("missing", last_ingest=READ_DEADLINE + 200), sends)
+    alerts.check(config, now=READ_DEADLINE + 210)
+    assert sends == []
+    assert [n["outcome"] for n in alerts.read_state()["jo_market_reads"]["notices"]["2026-10-21"]] == ["unknown"]
+    monkeypatch.setattr(alerts, "get", lambda path: (_ for _ in ()).throw(OSError("refused")))
+    alerts.check(config, now=READ_DEADLINE + 300)
+    assert alerts.read_state()["jo_market_reads"]["error"] == "Market read status unreadable (OSError)"
+    alerts.check(config, now=READ_DEADLINE + 300 + alerts.MARKET_READ_STATUS_GRACE)
+    assert sends == ["Market read status unreadable"]
+    assert "jo_market_read:2026-10-21:1100" in alerts.read_state()["conditions"]  # unknown, not resolved
+
+
+def test_yesterdays_market_read_miss_ends_silently(alerts, monkeypatch):
+    sends, config = [], {"JO_MARKET_READ_ALERTS": "true"}
+    market_pass(alerts, monkeypatch, market_reads_view("missing", last_ingest=READ_DEADLINE + 80), sends)
+    alerts.check(config, now=READ_DEADLINE + 90)
+    tomorrow = READ_DEADLINE + 86400 - 3600
+    market_pass(alerts, monkeypatch, market_reads_view("pending", last_ingest=tomorrow, day="2026-10-22"), sends)
+    alerts.check(config, now=tomorrow)
+    assert sends == ["Jo's 11:00 AM market read is missing"]
+    assert not [key for key in alerts.read_state()["conditions"] if "2026-10-21" in key]
+
+
+def test_market_read_flag_reaches_the_config_from_systemd(alerts, monkeypatch, tmp_path):
+    monkeypatch.setattr(alerts, "ENV_FILE", tmp_path / "absent.env")
+    monkeypatch.setenv("JO_MARKET_READ_ALERTS", "true")
+    monkeypatch.setenv("JO_MORNING_ALERTS", "true")
+    config = alerts.load_config()
+    assert config["JO_MARKET_READ_ALERTS"] == "true" and config["JO_MORNING_ALERTS"] == "true"

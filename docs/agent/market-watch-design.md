@@ -806,7 +806,18 @@ reads never reach Shadow Isaac.
   and 14:00 slot it joins the prep slot's latest #315 publisher receipt
   (status, attempts, error code; `started` alone is an unknown outcome) with
   the read `session_report` links to it, and reports the Check receipt time and
-  its delay from the slot in seconds. No lateness tolerance is applied. The
+  its delay from the slot in seconds. Each slot also has a `deadline` and a
+  `delivery` state: `on_time` when the Check receipt is within 15 minutes of
+  the slot, `late` after that (with `late_by_seconds`), `missing` once an
+  import of read notices that ran at least a minute after the deadline found
+  none, `pending` before the deadline, `not_expected` or `unknown`. The
+  15 minutes (`SCHEDULED_READ_DEADLINE_MINUTES`, outside the hashed policies)
+  is a **proposal of October 21, 2026, not yet confirmed by Isaac**; the reads
+  observed October 15–21 arrived 18 seconds to 12.4 minutes after their slot.
+  Delivery is judged on Check's receipt time, not on when the app imported the
+  notice; the route reports the API runner's last import (`importer`), and
+  while that is older than the deadline plus a minute a slot without a read is
+  `unknown`, never `missing`. The
   exchange calendar marks slots on closed days or after an early close as not
   expected; an unavailable calendar, store or receipt directory reads as
   unknown, never as missing. The route has no outcome store, so it links by the
@@ -817,6 +828,26 @@ reads never reach Shadow Isaac.
   ID when an export is imported. A receipt time is not when Jo started, and a
   slot with no read has no cause the app can see. Tests:
   `backend/tests/test_market_watch_reliability.py`.
+- **Missed-read phone alert (opt-in).** `deploy/alerts.py` reads
+  `GET /jo/market-reads` every two minutes when `JO_MARKET_READ_ALERTS=true` in
+  `alerts.env` and `MARKET_WATCH_ENABLED` is on, following the [morning
+  watchdog](dots-integration.md#delivery-honesty-and-the-morning-watchdog)
+  rules: one "Jo's 11:00 AM market read is missing" push per slot and day when
+  the slot turns `missing` (no grace), naming a failed or absent packet, and one
+  "arrived" recovery if a read lands inside the 30-minute window (usually late;
+  the screen says which); "Jo's
+  market reads aren't being checked" when the import is three minutes stale or
+  has no outbox (five-minute grace, slots then stay unknown); and the status
+  read itself failing (ten-minute grace). An uncertain send is logged `unknown`
+  and never resent; notices are kept seven days in the alerts state file and
+  shown per session on the reliability screen. Limits: a manual or
+  setup-context read, or a late reply to an event wake sent before the slot,
+  inside a slot's window still counts for that slot, so it can hide a missed
+  scheduled run; a read whose notice the app refused counts as missing (the
+  refusal is in the store's `notice_refusal` records); an unavailable exchange calendar leaves slots
+  unknown without an alert of its own; and ntfy accepting a push does not prove
+  the phone showed it. Tests: the market-read cases in
+  `backend/tests/test_deployment.py`.
 
 Fixture tests: `backend/tests/test_market_watch_wakes.py`. They are not live
 proof of mail, push, Jo's triggers or the 20-session acceptance.

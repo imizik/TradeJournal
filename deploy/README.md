@@ -487,10 +487,17 @@ clears. It never repeats an alert.
 | A Jo submission is waiting to be imported / can't be read | opt-in: a submission has no receipt after two minutes, or an outbox file can never import | — |
 | Market calendar unavailable for the morning brief | opt-in: the runner can't confirm a weekday session, so it publishes nothing | 15 min |
 | Morning brief status unreadable | opt-in: `GET /jo/morning` fails while the rest of the API answers | 10 min |
+| Jo's *11:00 AM* market read is missing / arrived | opt-in (`JO_MARKET_READ_ALERTS=true`): no read for a scheduled 09:50/11:00/12:30/14:00 slot was received 15 minutes after it, once the app has imported reads past that deadline; one recovery when a read arrives inside the 30-minute window | — |
+| Jo's market reads aren't being checked | opt-in: market watch is on but the API's read import hasn't run for three minutes (or has no outbox), so missing reads can't be judged | 5 min |
+| Market read status unreadable | opt-in: `GET /jo/market-reads` fails while the rest of the API answers | 10 min |
 
 The morning rows read `GET /jo/morning`; see [delivery honesty and the morning
 watchdog](../docs/agent/dots-integration.md#delivery-honesty-and-the-morning-watchdog).
-A morning send whose outcome is unknown (a timeout while waiting for ntfy's
+The market-read rows read `GET /jo/market-reads`; see [scheduled-read
+reliability](../docs/agent/market-watch-design.md#mw-2-implementation-and-activation-boundary).
+They are off while `MARKET_WATCH_ENABLED` is off, and closed days and slots after an
+early close are not expected.
+A morning or market-read send whose outcome is unknown (a timeout while waiting for ntfy's
 reply) is recorded and not resent; a connect timeout is a failure and is retried.
 
 Failures that finished before the first check are history and never alerted.
