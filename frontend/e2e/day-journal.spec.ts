@@ -44,10 +44,9 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       expect(committed).toBeTruthy();
       await page.unroute(path);
       await page.reload();
-      await expect(journal.getByLabel("Your words")).toHaveValue(original);
-      await expect(journal.getByLabel("Your words")).toBeDisabled();
-      await journal.getByTestId("day-journal-save").click();
-      await expect(journal.getByRole("status")).toContainText("Saved");
+      // The reloaded timeline already holds the committed save, so its pending draft is retired.
+      await expect(journal.getByRole("status")).toContainText("Your earlier save went through");
+      await expect(journal.getByLabel("Your words")).toHaveCount(0);
       await expect(journal.getByTestId("day-journal-entry").filter({ hasText: original })).toHaveCount(1);
       const payload = await (await request.get(`/api/backend/day-journal/${viewport.day}`)).json();
       expect(payload.entries.filter((entry: { text: string }) => entry.text === original)).toHaveLength(1);
@@ -72,6 +71,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-
       await expect(comparison).toContainText("Synthetic SPY fixture closed at 577");
       await expect(comparison.locator("li").filter({ hasText: original }).getByRole("link", { name: "Open original thought" })).toHaveAttribute("href", `#thought-${entryId}`);
       await expect(page.getByText(/Synthetic browser fixture \(no model call\)/)).toBeVisible();
+      await expect(page.locator("#ai-review").getByText(/^Saved .+ E[DS]T$/)).toBeVisible(); // Zoned save time, shown in ET.
       if (viewport.hasTrades) {
         const actions = page.getByLabel("Plan versus execution");
         await expect(actions).toContainText("Recorded TSLA");
@@ -154,4 +154,14 @@ test("Daily Review refresh receives another tab's thoughts and invalidates its s
     await second.close();
     await request.post(`${fixtureApi}/__test/day-journal-review?mode=off`);
   }
+});
+
+test("Daily Review explains a review that is not set up instead of asking for a retry", async ({ page }) => {
+  await page.route("**/api/backend/daily-review", (route) => route.request().method() === "POST"
+    ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Daily review is not set up on the Claude plan: no plan token" }) })
+    : route.continue());
+  await page.goto("/daily/2026-10-01");
+  await page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ }).click();
+  await expect(page.locator("#ai-review")).toContainText("Daily review is not set up on the Claude plan: no plan token");
+  await expect(page.locator("#ai-review")).not.toContainText("Please retry");
 });
