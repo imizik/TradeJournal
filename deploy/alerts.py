@@ -336,10 +336,13 @@ def morning_problems(view: dict, now: float) -> dict[str, Problem | None]:
     elif state in ("published", "pending", "not_expected"):
         observed[publication] = None
     if fulfilment == "missing":
+        # Only the first alert is sent, so a read recorded later never triggers a resend.
+        read = {"recorded": f" Jo read the packet at {et_clock(delivery.get('context_read_at'))} but nothing was saved.",
+                "not_recorded": " No read of the packet was recorded."}.get(delivery.get("context_read"), "")
         # A missing packet already explains the missing brief; one message, not two.
         observed[brief] = None if state == "missing" else Problem(
             "Jo's morning brief is missing",
-            f"No brief for {day} was in TradeJournal by {et_clock(delivery.get('deadline'))}. A later save will still show as late.",
+            f"No brief for {day} was in TradeJournal by {et_clock(delivery.get('deadline'))}.{read} A later save will still show as late.",
             recovered="Jo's morning brief arrived late",
         )
     elif fulfilment in ("on_time", "late", "pending", "not_expected"):

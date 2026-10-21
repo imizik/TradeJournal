@@ -251,7 +251,13 @@ the existing Alpaca adapters; option-risk data and journal freshness remain unve
 briefs, memories, captures and saved levels are interpretations, not market facts.
 
 `jo_morning_context()` retrieves only today's published pointer through the same
-Check connection and `check:read jo:read` authorization. Submissions keep the
+Check connection and `check:read jo:read` authorization. The first successful read per
+profile and New York day leaves one immutable `jo-read-<profile>-<day>.json`
+marker in the existing outbox (profile, day, packet ID and Check's receipt time;
+no content). Later reads keep it, and a failed marker write never fails the read.
+`/jo/morning` reports it as `delivery.context_read` / `context_read_at`, so a
+missed brief separates "no read" from "read but nothing arrived". A read shows the
+tool was called; it does not prove who started the run or how Jo used the packet. Submissions keep the
 existing `jo:submit` grant, validation, expiry and receipt protocol. The importer
 skips completed receipts, rotates bounded pending batches, and tolerates malformed
 files without blocking publication. Disable the configuration to stop both

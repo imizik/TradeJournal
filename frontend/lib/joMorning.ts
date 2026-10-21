@@ -18,6 +18,7 @@ export type MorningDelivery = {
   deadline: string | null; publish_at: string | null; packet_id: string | null; published_at: string | null;
   briefing_id: string | null; available_at: string | null; submitted_at: string | null;
   import_lag_seconds: number | null; late_by_seconds: number | null; origin: "unknown"; other_briefings: number;
+  context_read?: "recorded" | "not_recorded" | "unknown"; context_read_at?: string | null;
   notifications: { chatgpt: "not_observable"; watchdog: { state: "on" | "off" | "unknown"; checked_at: string | null; notices: WatchdogNotice[] } | null };
 };
 export type MorningView = {

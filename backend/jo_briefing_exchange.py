@@ -82,6 +82,34 @@ def context(directory, actor, packet_id, now, *, allow_expired=False):
     return value.model_dump(mode="json")
 
 
+def read_marker_name(actor, day):
+    return f"jo-read-{profile(actor)}-{day}.json"
+
+
+def record_read(outbox, actor, day, packet_id, now):
+    """Keep the first morning read per profile and New York day; later reads leave it alone.
+
+    No packet content: only who, which day/packet and when Check served it. A read shows
+    the tool was called, not who started the run or how the packet was used.
+    """
+    name = read_marker_name(actor, day)
+    if (Path(outbox) / name).exists():
+        return
+    write(outbox, name, {"schema_version": "jo-read-v1", "profile_id": actor, "day": day,
+        "packet_id": str(UUID(str(packet_id))), "read_at": now.isoformat()})
+
+
+def read_marker(outbox, actor, day, packet_id):
+    """The recorded first read of this packet, or None. Unreadable markers raise."""
+    try:
+        value = read(outbox, read_marker_name(actor, day))
+    except FileNotFoundError:
+        return None
+    if value.get("profile_id") != actor or value.get("day") != day or value.get("packet_id") != str(packet_id):
+        return None
+    return value["read_at"]
+
+
 class Submission(Strict):
     schema_version: Literal["jo-submission-v1"] = "jo-submission-v1"
     profile_id: str

@@ -1024,6 +1024,12 @@ def test_morning_conditions_name_one_cause_and_leave_unknowns_alone(alerts):
     missing = alerts.morning_problems(morning_view(fulfilment="missing"), now)
     assert missing[brief].title == "Jo's morning brief is missing" and "9:15 AM ET" in missing[brief].message
     assert missing[publication] is None and missing[brief].grace == 0
+    assert "read" not in missing[brief].message  # Older API: no trace field, no claim either way.
+    traced = morning_view(fulfilment="missing")
+    traced["delivery"].update(context_read="recorded", context_read_at="2026-10-20T13:02:00+00:00")
+    assert "Jo read the packet at 9:02 AM ET but nothing was saved." in alerts.morning_problems(traced, now)[brief].message
+    traced["delivery"].update(context_read="not_recorded", context_read_at=None)
+    assert "No read of the packet was recorded." in alerts.morning_problems(traced, now)[brief].message
     unpublished = alerts.morning_problems(morning_view(publication="missing", fulfilment="missing"), now)
     assert unpublished[publication].grace == alerts.MORNING_PUBLICATION_GRACE and unpublished[brief] is None
     for done in ("late", "on_time", "pending", "not_expected"):
