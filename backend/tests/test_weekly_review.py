@@ -4,7 +4,7 @@ check against later trades, and evidence that survives a rebuild. No model call.
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import json
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
