@@ -262,7 +262,7 @@ async def _maybe_start_radar(app_: FastAPI):
                 await asyncio.to_thread(runner.run_once)
             except Exception:
                 logging.getLogger(__name__).exception("Radar pass failed")
-            await asyncio.sleep(PASS_SECONDS)
+            await asyncio.sleep(PASS_SECONDS - time.time() % PASS_SECONDS)  # on the minute, without drift
 
     return asyncio.create_task(loop())
 
