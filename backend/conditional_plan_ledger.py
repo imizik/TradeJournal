@@ -227,13 +227,12 @@ class PlanLedger:
         except (ValueError, NotFound) as exc:
             # Nothing is saved, but the owner can see what Jo asked for and why it was
             # refused. The caller exports exc.refusal (None once the daily cap is hit).
-            db.rollback()
             try:
+                db.rollback()
                 exc.refusal = self.refuse(
                     db, actor, request, request_hash, str(exc), symbol, clock()
                 )
             except Exception:  # never mask the refusal Jo must relay
-                db.rollback()
                 exc.refusal = None
             raise
         finally:

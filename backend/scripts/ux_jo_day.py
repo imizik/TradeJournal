@@ -255,8 +255,8 @@ def main():
             plan_ledger.create(profile, {"operation_id": "sim-tsla", "source_kind": "stock_alert", "source_id": stock_alert("TSLA", 250)["alert_id"],
                 "direction": "long", "trigger_price": 252.0, "invalidation_price": 245.0, "confirm_bars": 2,
                 "expires_at": stamp(Clock.now + timedelta(hours=2)), "rationale": "TSLA breakout"}, public, lambda: Clock.now)
-        except ValueError as error:  # Jo relays this in chat; the receipt goes to the app as the Check tool does
-            if error.refusal:
+        except Exception as error:  # Jo relays this in chat; the receipt goes to the app as the Check tool does
+            if getattr(error, "refusal", None):
                 export(outbox, error.refusal)
             return f"refused: {error}"
         return "unexpectedly accepted"
