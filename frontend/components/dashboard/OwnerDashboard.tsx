@@ -10,6 +10,7 @@ import PerformanceOverview from "@/components/PerformanceOverview";
 import DataFreshness from "./DataFreshness";
 import MorningBriefing from "./MorningBriefing";
 import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
+import JoTodayLine from "./JoTodayLine";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -80,6 +81,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
         <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-2 text-xs text-muted-foreground">
+            <JoTodayLine today={today} />
             <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
             <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
             <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>

@@ -43,6 +43,11 @@ def _days(today: date, first: date | None) -> list[date]:
     return days
 
 
+def _one(day: date, now: datetime) -> list[date]:
+    """One requested weekday for the Daily Review; a future date or weekend has no slots."""
+    return [day] if day.weekday() < 5 and day <= now.astimezone(ET).date() else []
+
+
 def _importer(app, now: datetime) -> dict:
     """Is the API's MW-2 runner bringing in Jo's read notices? Missing reads are only judged while it is."""
     runner = getattr(app.state, "market_watch", None)
@@ -57,7 +62,7 @@ def _parse(value: str) -> datetime:
 
 
 @router.get("")
-def market_reads(request: Request):
+def market_reads(request: Request, day: date | None = None):
     from app.engine.jo_morning import watchdog_status
     from app.engine.market_watch_wakes import MarketWatchWakeStore, enabled, reliability_report
 
@@ -85,12 +90,12 @@ def market_reads(request: Request):
     try:
         if store is not None:
             evidence |= {date.fromisoformat(r["session_date"]) for r in store.records("read_notice")}
-        days = _days(now.astimezone(ET).date(), min(evidence, default=None))
+        days = _days(now.astimezone(ET).date(), min(evidence, default=None)) if day is None else _one(day, now)
         view = reliability_report(store, receipts, days, hours=_hours, now=now, reads_through=through)
     except Exception:
         # A corrupt or locked store makes reads unknown; it never fails the page.
         log.exception("Market-watch store unreadable")
-        days = _days(now.astimezone(ET).date(), min(evidence, default=None))
+        days = _days(now.astimezone(ET).date(), min(evidence, default=None)) if day is None else _one(day, now)
         view = reliability_report(None, receipts, days, hours=_hours, now=now, reads_through=through)
     for session in view["sessions"]:
         session["watchdog"] = watchdog_status(date.fromisoformat(session["session_date"]), section="jo_market_reads")

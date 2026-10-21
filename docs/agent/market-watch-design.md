@@ -802,7 +802,11 @@ reads never reach Shadow Isaac.
   that saved nothing; that stays in Jo's native task history and #315's receipts.
 - **Scheduled-read reliability (owner screen).** `GET /jo/market-reads`
   (owner-only; `/morning/market-reads`, linked from Morning) shows the last ten
-  weekdays back to the first recorded evidence. For each 09:50, 11:00, 12:30
+  weekdays back to the first recorded evidence; `?day=YYYY-MM-DD` returns that
+  one weekday for the Daily Review's Jo's day timeline. Each credited slot and
+  each read not credited to a slot carries `read`: Jo's saved `view`,
+  `main_text`, `alternative_text`, `invalidation_text`, `change_summary` and
+  `is_correction` (null when only an export without the text is known). For each 09:50, 11:00, 12:30
   and 14:00 slot it joins the prep slot's latest #315 publisher receipt
   (status, attempts, error code; `started` alone is an unknown outcome) with
   the read `session_report` links to it, and reports the Check receipt time and

@@ -866,6 +866,13 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}
 
 
+def _read_text(read: dict | None) -> dict | None:
+    """Jo's own words for a read as Check saved them; None when only an export without the text is known."""
+    if not read or not isinstance(read.get("main_text"), str):
+        return None
+    return {k: read.get(k) for k in ("view", "main_text", "alternative_text", "invalidation_text", "change_summary", "is_correction")}
+
+
 def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: str | Path | None, days: list[date], *,
                        hours, now: datetime, outcome_store=None, reads_through: datetime | None = None) -> dict:
     """Jo's expected scheduled reads per session: publisher packet, read seen, receipt delay and delivery.
@@ -948,7 +955,7 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
             slot_rows.append({"slot": slot, "scheduled_at": _iso(at), "expected": expected, "not_expected_reason": reason,
                               "operation_id": f"{WAKE_POLICY['jo_scheduled_operation_prefix']}:{session}:{slot}",
                               "packet": packet, "status": status, "read_id": read_id, "attribution": link,
-                              "received_at": received,
+                              "received_at": received, "read": _read_text(read),
                               "receipt_delay_seconds": round((parse_time(received) - at).total_seconds()) if received else None,
                               "deadline": _iso(deadline) if expected is not False else None, "delivery": delivery,
                               "late_by_seconds": max(0, round((parse_time(received) - deadline).total_seconds())) if delivery == "late" else None,
@@ -956,7 +963,7 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
                                                         if read and packet["snapshot_id"] else None)})
         credited = {r["read_id"] for r in slot_rows if r["read_id"]}
         wake_reads = {w["read_id"]: w["wake_id"] for w in report.get("wakes", []) if w["read_id"]}
-        others = sorted(({"read_id": rid, "received_at": r["received_at"], "event_wake_id": wake_reads.get(rid)}
+        others = sorted(({"read_id": rid, "received_at": r["received_at"], "event_wake_id": wake_reads.get(rid), "read": _read_text(r)}
                          for rid, r in reads.items() if rid not in credited), key=lambda r: r["received_at"])
         sessions.append({"session_date": session,
                          "hours": ({"status": row["status"], "open": row.get("open"), "close": row.get("close")} if known else None),
