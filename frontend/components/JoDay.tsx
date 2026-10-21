@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api, type ScannerCandidateRow, type ScannerDay } from "@/lib/api";
-import { getPlans, type PlanState, type PlansView, type PlanView } from "@/lib/conditionalPlans";
+import { getPlans, refusalRule, refusalWords, type PlanState, type PlansView, type PlanView } from "@/lib/conditionalPlans";
 import { getMorning, type MorningView } from "@/lib/joMorning";
 import { getMarketReads, type MarketReadSession, type MarketReadText } from "@/lib/marketReads";
 
@@ -51,6 +51,7 @@ export function useJoDay(day: string, live: boolean) {
 }
 
 const plansFor = (data: JoDayData, day: string) => (data.plans?.plans ?? []).filter((p) => p.session_date === day);
+const refusalsFor = (data: JoDayData, day: string) => (data.plans?.refusals ?? []).filter((r) => r.session_date === day);
 const activePlan = (p: PlanView, checked: string) => ACTIVE.includes(p.state) && Date.parse(p.expires_at) > Date.parse(checked);
 
 const etMinutes = (value: string) => { const [h, m] = new Date(value).toLocaleTimeString("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit" }).split(":").map(Number); return h * 60 + m; };
@@ -87,6 +88,8 @@ export function joHeadline(data: JoDayData, day: string, live: boolean): { text:
   const quiet = watches.filter((p) => !p.events.some((e) => e.state === "triggered")).length;
   if (quiet) parts.push({ text: `${fired.length ? `${quiet} other` : quiet} price ${quiet === 1 ? "watch" : "watches"}` });
   if (watches.some((p) => p.state === "unavailable")) parts.push({ text: "a watch stopped", tone: "trouble" });
+  const refused = refusalsFor(data, day).length;
+  if (refused) parts.push({ text: `${refused} ${refused === 1 ? "watch" : "watches"} refused`, tone: "trouble" });
   const setups = data.scanner?.candidates.length ?? 0;
   // "No setups" only means something while the scanner was running.
   if (setups || data.scanner?.enabled) parts.push({ text: setups ? `${setups} ${setups === 1 ? "setup" : "setups"}` : "no setups" });
@@ -195,6 +198,14 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
       watching.push({ key: `w-${p.plan_id}`, at: null, icon: "watch", label: trig ? `${p.symbol} triggered ${time(trig.occurred_at)}: still checking for a close ${p.direction === "long" ? "below" : "above"} ${p.invalidation_price}` : label,
         badge: !p.monitoring ? ["Monitor not reporting", warn] : [`Until ${time(p.expires_at)}`, ok], detail });
     }
+  }
+
+  for (const r of refusalsFor(data, day)) {
+    const rule = refusalRule(r);
+    done.push({ key: r.refusal_id, at: r.created_at, icon: "warn", label: `Jo couldn't watch ${r.symbol ?? "a stock"}: ${refusalWords(r, data.plans?.max_daily_plans)}`,
+      badge: ["Not saved", warn], detail: <div className="space-y-1 text-sm">
+        {rule && <p>Jo asked for: {r.symbol ?? "a stock"} {rule}{r.expires_at ? ` · until ${time(r.expires_at)}` : ""}</p>}
+        <p className="text-muted-foreground">Refused: {r.reason}. Nothing was saved or watched.</p></div> });
   }
 
   for (const c of data.scanner?.candidates ?? []) {

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { PlansView, PlanView } from "../lib/conditionalPlans";
+import type { PlanRefusal, PlansView, PlanView } from "../lib/conditionalPlans";
 import type { MorningView } from "../lib/joMorning";
 import type { MarketReadSlot, MarketReadsView, MarketReadText } from "../lib/marketReads";
 
@@ -149,6 +149,33 @@ test("with market watch off, saved reads still show with a plain note", async ({
   await page.goto(`/daily/${today}`);
   await expect(page.getByTestId("jo-day-reads-note")).toHaveText("Market watch is off on this server, so no new reads will arrive; saved reads are shown.");
   await expect(page.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" })).toBeVisible();
+});
+
+test("a watch Jo asked for but the app refused is a Done row, with what Jo asked for and why", async ({ page }) => {
+  const refusal: PlanRefusal = { refusal_id: "cpr_1", actor: "check_1", session_date: today, symbol: "TSLA", source_kind: "stock_alert", direction: "long",
+    trigger_price: 252, invalidation_price: 245, confirm_bars: 2, expires_at: iso(today, "12:20"),
+    reason: "TSLA is not one of the owner's selected scanner tickers (MU, SPY)", reason_code: "ticker_not_selected", created_at: iso(today, "10:20") };
+  await stub(page, today, midday);
+  await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: { ...plans(today, midday), refusals: [refusal] } }));
+  await page.goto(`/daily/${today}`);
+  const headline = page.getByTestId("jo-day-headline");
+  await expect(headline.getByText("1 watch refused", { exact: true })).toHaveClass(/text-amber-200/);
+  const row = page.getByTestId("jo-day-item").filter({ hasText: "Jo couldn't watch TSLA: not one of your scanner tickers" });
+  await expect(row).toContainText("10:20");
+  await expect(row).toContainText("Not saved");
+  await row.locator("summary").click();
+  await expect(row).toContainText("Jo asked for: TSLA long · 2 closes above 252, cancel on a close below 245 · until 12:20 PM");
+  await expect(row).toContainText("Refused: TSLA is not one of the owner's selected scanner tickers (MU, SPY). Nothing was saved or watched.");
+  // It is not counted or shown as a watch.
+  await expect(page.getByTestId("jo-day-item").filter({ hasText: "TSLA long watch" })).toHaveCount(0);
+
+  await page.goto("/morning/watches");
+  const listed = page.getByTestId("plan-refusal");
+  await expect(listed).toHaveCount(1);
+  await expect(listed).toContainText("TSLA · Long watch");
+  await expect(listed).toContainText("Refused · not saved");
+  await expect(listed).toContainText("Jo couldn't watch this: not one of your scanner tickers.");
+  await expect(page.getByRole("heading", { name: "Refused requests (1)" })).toBeVisible();
 });
 
 test("a past day with no Jo records says so in one line instead of an empty timeline", async ({ page }) => {
