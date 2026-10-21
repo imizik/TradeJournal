@@ -151,14 +151,16 @@ export default function RadarFeedView() {
   // The last visit as it was when this page opened; opening the page records a new one.
   const baseline = useRef<string | null>(null);
   const visited = useRef(false);
+  const wanted = useRef<string | undefined>(undefined);
 
   const load = useCallback(async (day: string | undefined, signal?: AbortSignal) => {
     try {
       const next = await getFeed(day, baseline.current ?? undefined, signal);
+      if (wanted.current !== day) return; // the session changed while this read was in flight
       if (!visited.current) {
         visited.current = true;
         baseline.current = next.last_visit_at ?? NEVER_VISITED;
-        if (next.state !== "off") recordVisit().catch(() => {});
+        if (next.state !== "off") recordVisit(next.generated_at).catch(() => {});
       }
       setFeed(next);
       setError(null);
@@ -169,6 +171,7 @@ export default function RadarFeedView() {
 
   useEffect(() => {
     const controller = new AbortController();
+    wanted.current = session;
     void load(session, controller.signal);
     return () => controller.abort();
   }, [load, session]);

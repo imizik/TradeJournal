@@ -28,7 +28,7 @@ export type RadarCoverage = {
 };
 export type RadarFeed = {
   state: "off" | "no_data" | "recording" | "stale"; reason: string | null; session: string | null; sessions?: string[];
-  events: RadarFeedEvent[]; since_last_visit: string[]; last_visit_at: string | null; coverage: RadarCoverage | null;
+  events: RadarFeedEvent[]; since_last_visit: string[]; last_visit_at: string | null; coverage: RadarCoverage | null; generated_at: string | null;
 };
 export type RadarDetail = { event: RadarEvent; revisions: RadarRevision[]; rating: RadarRating | null };
 
@@ -45,7 +45,10 @@ export const getFeed = (session?: string, since?: string | null, signal?: AbortS
   return call<RadarFeed>(`/feed${query.size ? `?${query}` : ""}`, { signal });
 };
 export const getEvent = (id: string) => call<RadarDetail>(`/events/${encodeURIComponent(id)}`);
-export const recordVisit = () => call<{ visited_at: string; previous_visit_at: string | null }>("/visits", { method: "POST" });
+export const recordVisit = (visitedAt?: string | null) =>
+  call<{ visited_at: string; previous_visit_at: string | null }>("/visits", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(visitedAt ? { visited_at: visitedAt } : {}),
+  });
 export const rateEvent = (id: string, rating: RadarRating) =>
   call<{ rating: RadarRating }>(`/events/${encodeURIComponent(id)}/feedback`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rating }),

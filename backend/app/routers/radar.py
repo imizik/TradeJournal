@@ -8,6 +8,7 @@ append-only rows in the same Radar file.
 from datetime import UTC, date, datetime
 import logging
 import os
+import sqlite3
 import time
 from typing import Literal
 
@@ -23,6 +24,11 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 STALE_SECONDS = 180
+
+
+class VisitBody(BaseModel):
+    # The feed's own ``generated_at``, so an event saved between reading the feed and posting the visit still counts as new.
+    visited_at: str | None = None
 
 
 class FeedbackBody(BaseModel):
@@ -114,19 +120,40 @@ def _revision_status(revisions: list[dict]) -> str | None:
     return revisions[-1]["status"] if revisions else None
 
 
+def _off(reason: str, session: str | None) -> dict:
+    return {"state": "off", "reason": reason, "session": session, "events": [], "since_last_visit": [],
+            "last_visit_at": None, "coverage": None, "generated_at": None}
+
+
+def _valid_time(value: str, name: str) -> None:
+    try:
+        _parse(value)
+    except ValueError:
+        raise HTTPException(422, f"{name} must be an ISO time")
+
+
 @router.get("/feed")
 def feed(session: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
          since: str | None = Query(None, description="Count events first seen after this time as new instead of the last visit.")):
     now = _now()
-    store, reason = _store()
-    if store is None:
-        return {"state": "off", "reason": reason, "session": session, "events": [], "since_last_visit": [],
-                "last_visit_at": None, "coverage": None}
     if session:
         try:
             date.fromisoformat(session)
         except ValueError:
             raise HTTPException(422, "session must be a real date")
+    if since:
+        _valid_time(since, "since")
+    store, reason = _store()
+    if store is None:
+        return _off(reason, session)
+    try:
+        return _read_feed(store, session, since, now)
+    except (sqlite3.Error, ValueError, KeyError, OSError) as exc:  # a busy or damaged file must not become a 500
+        log.warning("radar feed unreadable: %s", exc)
+        return _off("The Radar file could not be read right now.", session)
+
+
+def _read_feed(store: RadarStore, session: str | None, since: str | None, now: float) -> dict:
     sessions = store.sessions()
     today = datetime.fromtimestamp(now, ET).date().isoformat()
     session = session or (today if today in sessions else (sessions[0] if sessions else today))
@@ -142,7 +169,8 @@ def feed(session: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
                        "rating": ratings.get(event["event_id"])})
     new = [e["event_id"] for e in events if baseline is None or _parse(e["first_seen_at"]) > _parse(baseline)]
     return {"state": _state(coverage, passes_total, now), "reason": None, "session": session, "sessions": sessions[:30],
-            "events": events, "since_last_visit": new, "last_visit_at": last_visit, "coverage": coverage}
+            "events": events, "since_last_visit": new, "last_visit_at": last_visit, "coverage": coverage,
+            "generated_at": _iso(now)}
 
 
 @router.get("/events/{event_id}")
@@ -155,10 +183,14 @@ def event_detail(event_id: str):
 
 
 @router.post("/visits")
-def record_visit():
+def record_visit(body: VisitBody | None = None):
     store = _require_store()
     previous = store.last_visit()
-    visited = _iso(_now())
+    now = _now()
+    visited = _iso(now)
+    if body and body.visited_at:
+        _valid_time(body.visited_at, "visited_at")
+        visited = _iso(min(_parse(body.visited_at), now))
     store.append_visit(visited)
     return {"visited_at": visited, "previous_visit_at": previous}
 

@@ -102,6 +102,26 @@ def test_since_last_visit(api):
     assert second["previous_visit_at"] == first["visited_at"]
 
 
+def test_bad_since_is_rejected_and_a_busy_file_is_not_a_500(api):
+    _seed(api)
+    assert api.client.get("/radar/feed?since=garbage").status_code == 422
+    assert api.client.post("/radar/visits", json={"visited_at": "garbage"}).status_code == 422
+    with sqlite3.connect(api.path) as db:
+        db.execute("INSERT INTO pass VALUES(NULL,'2026-10-20','a','b','v','ok',1,1,'not json',1,NULL,NULL)")
+    body = api.client.get("/radar/feed")
+    assert body.status_code == 200 and body.json()["state"] == "off"
+
+
+def test_visit_can_use_the_time_the_feed_was_read(api):
+    _seed(api)
+    feed = api.client.get("/radar/feed").json()
+    api.clock["now"] += 60
+    visit = api.client.post("/radar/visits", json={"visited_at": feed["generated_at"]}).json()
+    assert visit["visited_at"] == feed["generated_at"]
+    future = api.client.post("/radar/visits", json={"visited_at": "2099-01-01T00:00:00Z"}).json()
+    assert future["visited_at"] <= radar._iso(api.clock["now"])
+
+
 def test_detail_returns_the_saved_original_after_a_revision(api):
     _seed(api, revision=False)
     before = api.client.get(f"/radar/events/{EVENT_ID}").json()
