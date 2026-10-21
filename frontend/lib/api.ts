@@ -263,6 +263,32 @@ export type MonthlyReview = {
 export type MonthlyReviewResponse = { month: string; review: MonthlyReview; generated_at: string | null; trade_count: number };
 export type MonthlyReviewIndexItem = { month: string; closed_trades: number; saved: boolean; grade: string | null; generated_at: string | null };
 
+export type WeeklyRuleKey = "winner_to_red" | "held_hour_red" | "expiry_day";
+export type WeeklyResult = "kept" | "partly" | "broken" | "not_enough";
+export type WeeklyTradeRow = {
+  trade_id: string | null; contract: string; opened_at: number | null; closed_at: number | null; status: string;
+  realized_pnl: number | null; state: "kept" | "broke" | "unmeasured" | null;
+};
+export type WeeklyRule = {
+  week_start: string; rule_key: WeeklyRuleKey | null; rule_text: string | null; label: string | null; params: Record<string, number>;
+  note: string | null; chosen_at: number | null; result: WeeklyResult | null; result_source: "suggested" | "changed" | null;
+};
+export type WeeklyRuleCheck = {
+  entered: number; closed: number; tested: number; broke: number; kept: number; unmeasured: number; order_unclear: number;
+  suggested: WeeklyResult; trades: WeeklyTradeRow[]; still_open: WeeklyTradeRow[]; frozen: boolean; checked_at?: number | null;
+};
+export type WeeklyLeak = { key: WeeklyRuleKey; label: string; rule_text: string; count: number; pnl: number; unmeasured: number; trades: WeeklyTradeRow[] };
+export type WeeklyReview = {
+  week_start: string; week_end: string; in_progress: boolean;
+  summary: { trades: number; pnl: number; wins: number; losses: number };
+  coverage: { trades: number; with_path: number; accounts: string[] };
+  leaks: WeeklyLeak[];
+  previous: (WeeklyRule & { check?: WeeklyRuleCheck }) | null;
+  chosen: WeeklyRule | null;
+  history: WeeklyRule[];
+  rules: { key: WeeklyRuleKey; label: string; rule_text: string }[];
+};
+
 export type DailyReviewResponse = {
   day: string;
   review: DailyReview;
@@ -898,6 +924,10 @@ return {
   monthlyReviews: () => get<MonthlyReviewIndexItem[]>("/monthly-review"),
   monthlyReview: (month: string) => get<MonthlyReviewResponse | null>(`/monthly-review/${month}`),
   reviewMonth: (month: string) => post<MonthlyReviewResponse>("/monthly-review", { month }),
+  weeklyReview: (week: string) => get<WeeklyReview>(`/weekly-review/${week}`),
+  chooseWeeklyRule: (week: string, rule_key: WeeklyRuleKey | null, note: string | null) =>
+    put<WeeklyReview>(`/weekly-review/${week}`, { rule_key, note }),
+  confirmWeeklyResult: (week: string, result: WeeklyResult) => put<WeeklyReview>(`/weekly-review/${week}/result`, { result }),
   reviewDay: (body: { day: string; trade_ids: string[] }) =>
     post<DailyReviewResponse>("/daily-review", body),
   positionQuotes: (positions: { ticker: string; expiration: string; strike: number; option_type: string }[]) =>
