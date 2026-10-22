@@ -190,8 +190,8 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
     : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
     : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   return (
-    <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "h-6 md:pr-16"}`}>
-      <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1" aria-label={`${id} candle values`}>
+    <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "min-h-6 flex-wrap gap-y-0.5 md:pr-16"}`}>
+      <div className={`-ml-1 flex items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1 ${main ? "min-w-0" : "max-w-full flex-none flex-wrap"}`} aria-label={`${id} candle values`}>
       {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{formatPrice(bar.open)}</span></span><span>H <span className="text-slate-300">{formatPrice(bar.high)}</span></span><span>L <span className="text-slate-300">{formatPrice(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{formatPrice(bar.close)}</span></span>{!main && !isMacroSymbol(symbol) && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
         {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
       </div>

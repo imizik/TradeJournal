@@ -5179,6 +5179,8 @@ const candleX = (page: Page, id: string, time: number) => page.evaluate(([key, a
   (window as unknown as { __tjCharts: Map<string, { timeScale(): { timeToCoordinate(t: number): number | null } }> }).__tjCharts.get(key as string)!.timeScale().timeToCoordinate(at as number)!, [id, time] as const);
 
 test("relative volume shades today's volume bars and the legend reads each candle's RVol and the sessions it is measured against", async ({ page }) => {
+  // Keep the older 1m panel waiting during a regular session: the long timer must not squeeze out RVol.
+  await page.clock.install({ time: new Date("2026-09-17T13:56:00Z") });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await registerCharts(page);
   await stubRvol(page, READY);
@@ -5203,6 +5205,7 @@ test("relative volume shades today's volume bars and the legend reads each candl
 
   // A smaller chart's row is tight beside its countdown: RVol takes the volume's place, with the volume, candle and sessions on hover.
   const minute = values(page, "Panel 5");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toContainText("Waiting for bars");
   await expect(minute).toContainText("RVol 1.1×");
   await expect(minute).not.toContainText("Vol 64");
   const row = (await minute.boundingBox())!;
