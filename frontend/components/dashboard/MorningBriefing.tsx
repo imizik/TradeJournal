@@ -223,6 +223,20 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     <p data-testid="brief-summary" className={`whitespace-pre-wrap leading-relaxed ${compact ? "text-sm" : "text-base"} ${longSummary && !fullSummary ? "line-clamp-4" : ""}`}>{body.summary}</p>
     {longSummary && <button type="button" aria-expanded={fullSummary} className={textButton} onClick={() => setFullSummary((v) => !v)}>{fullSummary ? "Show less" : "Read Jo’s full summary"}</button>}
     {sources(body.summary_evidence_ids)}
+    {compact && packet && !packet.redacted_at && !!body.summary_evidence_ids?.length && <details className="rounded-md border px-3" data-testid="brief-cited-context">
+      <summary className="min-h-11 cursor-pointer py-3 text-xs text-primary">Read cited context ({new Set(body.summary_evidence_ids).size})</summary>
+      <p className="mb-3 text-xs text-muted-foreground">Exact saved evidence behind this summary; it has not been refreshed.</p>
+      <ul className="space-y-3 pb-3">{[...new Set(body.summary_evidence_ids)].map((key) => {
+        const item = evidence.get(key);
+        return <li key={key} className="border-t pt-3 text-xs">
+          {item ? <>
+            <p className="font-medium">{sourceLabel(item)} · {kindLabel(item.kind)}</p>
+            <p className="mt-1 whitespace-pre-wrap leading-relaxed">{item.text}</p>
+            <p className="mt-2 text-muted-foreground">{item.source} · {item.observed_at ? <>Observed <time dateTime={item.observed_at}>{time(item.observed_at)}</time></> : "Observation time unavailable"} · Retrieved <time dateTime={item.retrieved_at}>{time(item.retrieved_at)}</time></p>
+          </> : <p className="text-amber-300">Cited evidence unavailable: {key}</p>}
+        </li>;
+      })}</ul>
+    </details>}
     {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
   </section>;
 
@@ -259,7 +273,11 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
           {body.urgent_positions.slice(0, 3).map((item, index) => <p key={index}>{item.symbol && <span className="font-medium">{item.symbol}: </span>}{item.what_matters}</p>)}
         </div>}
       </section>}
-      {body && <p className="text-xs text-muted-foreground">{opportunityFirst ? `${opportunities.length} new opportunities · ${body.urgent_positions?.length ?? 0} urgent position reviews` : `${body.items?.length ?? 0} priorities`}{gaps.length ? " · Evidence gaps disclosed in the brief" : ""} · Personal advice. Uses the account scope saved with this briefing.</p>}
+      {!!gaps.length && <details className="rounded-md border border-amber-500/30 px-3" data-testid="brief-coverage-gaps">
+        <summary className="min-h-11 cursor-pointer py-3 text-xs font-medium text-amber-300">Limited coverage · {gaps.length} {gaps.length === 1 ? "gap" : "gaps"} disclosed</summary>
+        <ul className="list-disc space-y-2 pb-3 pl-4 text-xs text-muted-foreground">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>
+      </details>}
+      {body && <p className="text-xs text-muted-foreground">{opportunityFirst ? `${opportunities.length} new opportunities · ${body.urgent_positions?.length ?? 0} urgent position reviews` : `${body.items?.length ?? 0} priorities`} · Personal advice. Uses the account scope saved with this briefing.</p>}
     </div>
   </DashboardCard>;
 

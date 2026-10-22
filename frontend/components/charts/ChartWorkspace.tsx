@@ -1248,7 +1248,7 @@ export default function ChartWorkspace() {
     { key: "auto", label: "Auto levels", on: !settings.autoLevelsHidden, toggle: toggleAuto },
     { key: "options", label: "Options levels", on: optionsOn, toggle: toggleOptions },
     { key: "ranges", label: "Expected move", on: rangesOn, toggle: toggleRanges },
-    { key: "vwapBands", label: "VWAP bands ±1σ / ±2σ", on: vwapBandsOn, toggle: toggleVwapBands },
+    { key: "vwapBands", label: "VWAP bands ±1σ", on: vwapBandsOn, toggle: toggleVwapBands },
     { key: "news", label: "News markers", on: newsOn, toggle: toggleNews },
     ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: indicators[key], toggle: () => toggleIndicator(key) })),
   ];
@@ -1271,7 +1271,7 @@ export default function ChartWorkspace() {
       info: "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. Hover or tap an expected-move level for its card.",
       status: rangesOn ? rangesStatus(symbol) || undefined : undefined },
     { key: "vwapBands", name: "VWAP bands", hidden: !vwapBandsOn,
-      info: "RTH VWAP uses volume-weighted minute HLC3 and resets at 9:30 ET. Bands show ±1σ (dashed) and ±2σ (dotted) of volume-weighted price dispersion. They are not option-implied expected moves or guaranteed reversal levels. Toggle these independently of Expected move; Indicators hidden also hides VWAP bands.",
+      info: "RTH VWAP uses volume-weighted minute HLC3 and resets at 9:30 ET. Bands show ±1σ (dashed) of volume-weighted price dispersion. They are not option-implied expected moves or guaranteed reversal levels. Toggle these independently of Expected move; Indicators hidden also hides VWAP bands.",
       status: vwapBandsOn ? vwapBandsStatus() : undefined },
     { key: "journal", name: "Journal", hidden: !settings.indicators.fills, labels: settings.fillLabels,
       info: "Your fills as slim chevrons on the candles they fall in: a buy under the low, a sell over the high, one per candle per side with a count when several merged. Hover one to list its fills; click for the trade (a merged one lists them to pick from). Fill labels add text beside them on the main chart: none, the newest candle's, or all; smaller charts never show text. Open positions are lines: a stock at its average cost, an option at the underlying price when it was bought." },
@@ -1804,8 +1804,8 @@ export default function ChartWorkspace() {
                   className="h-4 w-4 cursor-pointer rounded border border-slate-600 bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-[3px] [&::-webkit-color-swatch]:border-0 [&::-moz-color-swatch]:border-0" />
               </label>}
               {key === "vwap" && <button aria-pressed={vwapBandsOn} onClick={toggleVwapBands}
-                title="RTH VWAP ±1σ (dashed) and ±2σ (dotted); regular-session candles only. Independent of option-implied Expected move."
-                className={`flex w-full items-center justify-between gap-2 rounded px-2 text-left text-[11px] hover:bg-slate-800 ${narrow ? "min-h-11" : "min-h-7"} ${vwapBandsOn ? "text-slate-200" : "text-slate-500"}`}>VWAP bands ±1σ / ±2σ{vwapBandsOn ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>}
+                title="RTH VWAP ±1σ (dashed); regular-session candles only. Independent of option-implied Expected move."
+                className={`flex w-full items-center justify-between gap-2 rounded px-2 text-left text-[11px] hover:bg-slate-800 ${narrow ? "min-h-11" : "min-h-7"} ${vwapBandsOn ? "text-slate-200" : "text-slate-500"}`}>VWAP bands ±1σ{vwapBandsOn ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>}
             </div>)}
             <button onClick={() => setSettings((s) => ({ ...s, indicatorColors: {} }))} disabled={!Object.keys(settings.indicatorColors).length}
               className={`rounded px-2 text-left text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:text-slate-600 disabled:hover:bg-transparent ${narrow ? "min-h-11" : "min-h-7"}`}>Reset colors</button>

@@ -24,6 +24,9 @@ market context and up to three investigation ideas, with direct Charts links,
 conditional/research-only labels and expandable trigger, invalidation and
 source evidence. Legacy briefs retain their saved-priority meaning. Empty,
 stale and missing briefs remain explicit; there is no new market summary.
+The compact brief also exposes its exact cited context (source, fact/belief/estimate,
+observation and retrieval times) and saved coverage gaps in disclosures. Unknown
+citations stay unavailable; generic evidence is not reclassified as news or events.
 
 A separate compact Radar preview reads the existing feed GET, caps the latest
 saved events at three, labels session/coverage/snapshot time and supports manual
@@ -33,7 +36,8 @@ screen retains its existing visit behavior.
 
 Attention and import freshness sit beside the market area on desktop and before
 journal detail on phones. Quote errors remain above both. Active options precede
-the journal summary and today's session. Account/type controls live with the
+a collapsed **Journal & performance** disclosure containing the journal summary,
+today's session, stocks, exposure, performance and trade history. Account/type controls live with the
 journal and explicitly do not rescope the saved briefing or Radar. Stock,
 exposure, performance and recent-trade destinations remain available. No
 accounting, authorization, scheduled-task or provider behavior changes. Fixture

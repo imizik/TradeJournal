@@ -91,45 +91,53 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
       <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
         {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
       </DashboardCard>
-      <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
-        <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
-        <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />
-        <SummaryFigure label="Unrealized P&L" value={money(unrealized, { signed: true })} tone={pnlTone(unrealized)} detail={`${quotedCount} of ${rows.length} positions quoted`} />
-        <SummaryFigure label="Open Positions" value={String(rows.length)} detail={`${options.length} options · ${stocks.length} stock${stocks.length === 1 ? "" : "s"}`} />
-        <SummaryFigure label="All-Time Closed P&L" value={money(stats.total_pnl, { signed: true })} tone={pnlTone(stats.total_pnl)} detail={`${stats.closed_trades} closed trades`} />
-      </div>
-      <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs text-muted-foreground">
-          <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
-          <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
-          <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
-            <p className="mt-1">Closed P&amp;L excludes trims of positions still open.</p>
-            <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
-        </div>
-      </DashboardCard>
-      <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
+      <details className="group/journal min-w-0 rounded-lg border bg-card" data-testid="journal-details">
         <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
-          <span>Stock Holdings <span className="ml-1 text-muted-foreground">({stocks.length})</span></span>
-          <span className="text-xs font-normal text-muted-foreground">{coverage(stocks)} · <span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
+          <span>Journal &amp; performance</span>
+          <span className="text-xs font-normal text-muted-foreground">P&amp;L, stocks &amp; trade history · <span className="group-open/journal:hidden">Expand</span><span className="hidden group-open/journal:inline">Collapse</span></span>
         </summary>
-        <div className="border-t p-4">{stocks.length ? <OpenPositionsTable rows={stocks} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open stocks in this scope.</p>}</div>
-      </details>
-      {rows.length > 0 && <details className="min-w-0 rounded-lg border bg-card">
-        <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs text-muted-foreground">Exposure &amp; full position details</summary>
-        <div className="min-w-0 space-y-3 border-t p-4">
-          <p className="text-xs text-muted-foreground">Quoted market value; option values use premium × 100. Excludes cash; not account equity or maximum loss. {quotedCount} of {rows.length} positions marked.</p>
-          <dl className="grid gap-3 sm:grid-cols-3 text-xs text-muted-foreground">
-            <div><dt>Gross Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(grossValue)}</dd></div>
-            <div><dt>Net Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(netValue, { signed: true })}</dd></div>
-            <div><dt>Largest Quoted Position</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{largest ? `${largest.trade.ticker} · ${money(largest.marketValue)}` : "—"}</dd></div>
-          </dl>
-          <OpenPositionsTable rows={rows} accountMap={accountMap} quotes={quotes} today={today} />
+        <div className="min-w-0 space-y-4 border-t p-3 sm:p-4">
+          <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
+            <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
+            <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />
+            <SummaryFigure label="Unrealized P&L" value={money(unrealized, { signed: true })} tone={pnlTone(unrealized)} detail={`${quotedCount} of ${rows.length} positions quoted`} />
+            <SummaryFigure label="Open Positions" value={String(rows.length)} detail={`${options.length} options · ${stocks.length} stock${stocks.length === 1 ? "" : "s"}`} />
+            <SummaryFigure label="All-Time Closed P&L" value={money(stats.total_pnl, { signed: true })} tone={pnlTone(stats.total_pnl)} detail={`${stats.closed_trades} closed trades`} />
+          </div>
+          <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs text-muted-foreground">
+              <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
+              <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
+              <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
+                <p className="mt-1">Closed P&amp;L excludes trims of positions still open.</p>
+                <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
+            </div>
+          </DashboardCard>
+          <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
+            <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
+              <span>Stock Holdings <span className="ml-1 text-muted-foreground">({stocks.length})</span></span>
+              <span className="text-xs font-normal text-muted-foreground">{coverage(stocks)} · <span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
+            </summary>
+            <div className="border-t p-4">{stocks.length ? <OpenPositionsTable rows={stocks} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open stocks in this scope.</p>}</div>
+          </details>
+          {rows.length > 0 && <details className="min-w-0 rounded-lg border bg-card">
+            <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs text-muted-foreground">Exposure &amp; full position details</summary>
+            <div className="min-w-0 space-y-3 border-t p-4">
+              <p className="text-xs text-muted-foreground">Quoted market value; option values use premium × 100. Excludes cash; not account equity or maximum loss. {quotedCount} of {rows.length} positions marked.</p>
+              <dl className="grid gap-3 sm:grid-cols-3 text-xs text-muted-foreground">
+                <div><dt>Gross Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(grossValue)}</dd></div>
+                <div><dt>Net Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(netValue, { signed: true })}</dd></div>
+                <div><dt>Largest Quoted Position</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{largest ? `${largest.trade.ticker} · ${money(largest.marketValue)}` : "—"}</dd></div>
+              </dl>
+              <OpenPositionsTable rows={rows} accountMap={accountMap} quotes={quotes} today={today} />
         </div>
       </details>}
       <PerformanceOverview trades={trades} compact analyticsHref={analyticsHref} />
       <DashboardCard title="Recent Closed Trades" action={<a className={dashboardLink} href={tradesHref}>All trades →</a>}>
         <RecentClosedTable trades={recentCloses(trades)} accountMap={accountMap} />
       </DashboardCard>
+        </div>
+      </details>
     </section>
   </div>;
 }

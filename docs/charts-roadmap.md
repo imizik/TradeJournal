@@ -70,14 +70,15 @@ is unchanged. The speech-to-text provider is Whisper run on the server
 (faster-whisper): no new paid plan, and audio never leaves the app. See
 [Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35).
 
-**VWAP control clarity (October 21, 2026):** VWAP ±1σ/±2σ now has a separate
+**VWAP control clarity (October 21–22, 2026):** VWAP bands now have a separate
 Indicators/Layers control and RTH availability explanation. The former combined
 Range bands switch is labelled Expected move and controls only option-implied
-levels. Existing saved visibility is retained; indicator calculations are unchanged.
+levels. The October 22 simplification shows only the ±1σ upper/lower pair.
+Existing saved visibility is retained; indicator calculations are unchanged.
 
 **Range bands and max pain (2026-10-05):** at the user's request, two new
 rows were added and built ahead of the board's `next`, in one branch: C2.7
-(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ) and
+(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ at delivery) and
 C4.7 (max pain in the options layer, labelled *inferred*). They came from the
 user asking which levels traders use to see where price is likely to range.
 The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
@@ -162,7 +163,7 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | done (this branch; the morning job now keeps 40 sessions) |
-| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ (independent controls since October 21) | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ (independent controls since October 21) | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 | C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
 Why this order: history, correct sessions and smooth updates come first; then
@@ -693,7 +694,7 @@ minutes after the regular open so the quotes have settled, and then fixed for
 the day, so the lines do not slide with price; a straddle captured later (the
 first look at a symbol, a restart) says when it was priced. The bands join the
 automatic levels' zones (so an alert can be made from one) and every one draws
-while the switch is on. VWAP ±1σ and ±2σ use the session's volume-weighted
+while the switch is on. VWAP ±1σ use the session's volume-weighted
 standard deviation of the same minute prices VWAP uses. A band is what the
 options market charged for a move either way, not a forecast of where price
 will stay; the card says so. *Done when:* the capture rule (not before 09:35,

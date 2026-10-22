@@ -52,10 +52,10 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
   const gapAfter = name === "vwap" && next && (next.vwap === null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
   return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
 }
-/** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
-const VWAP_BANDS = [2, 1, -1, -2] as const;
-/** A VWAP band is the VWAP color at a faint alpha, the nearer bands stronger. */
-const bandColor = (vwap: string, k: number) => vwap + (Math.abs(k) === 1 ? "70" : "45");
+/** VWAP plus and minus one session standard deviation. */
+const VWAP_BANDS = [1, -1] as const;
+/** Keep the band pair quieter than the VWAP center line. */
+const bandColor = (vwap: string) => vwap + "70";
 type VwapBand = typeof VWAP_BANDS[number];
 function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
   const b = bars[index];
@@ -198,7 +198,7 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
       {!main && timer}
       {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 rounded bg-[#10151e]/90 px-1 gap-y-0.5 whitespace-normal font-mono text-[10px]">
         {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
-        {vwapBands && <span className="pointer-events-auto" style={{ color: colors.vwap }} title={bar?.vwap == null ? vwapWhy : bar.vwap_sd == null ? "VWAP band data is unavailable for this candle." : `RTH VWAP bands: ±1σ ${price(bar.vwap - bar.vwap_sd)}–${price(bar.vwap + bar.vwap_sd)}; ±2σ ${price(bar.vwap - 2 * bar.vwap_sd)}–${price(bar.vwap + 2 * bar.vwap_sd)}. Volume-weighted HLC3 dispersion since 9:30 ET.`}>VWAP bands {bar?.vwap != null && bar.vwap_sd != null ? "±1σ / ±2σ" : "—"}</span>}
+        {vwapBands && <span className="pointer-events-auto" style={{ color: colors.vwap }} title={bar?.vwap == null ? vwapWhy : bar.vwap_sd == null ? "VWAP band data is unavailable for this candle." : `RTH VWAP bands: ±1σ ${price(bar.vwap - bar.vwap_sd)}–${price(bar.vwap + bar.vwap_sd)}. Volume-weighted HLC3 dispersion since 9:30 ET.`}>VWAP bands {bar?.vwap != null && bar.vwap_sd != null ? "±1σ" : "—"}</span>}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
         {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
         {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}
@@ -241,7 +241,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   optionsNearest?: number | null;
   /** Expected-move levels (C2.7), independently of VWAP bands. */
   rangeBands?: boolean;
-  /** RTH VWAP ±1σ/±2σ; workspace visibility, independent of expected move. */
+  /** RTH VWAP ±1σ; workspace visibility, independent of expected move. */
   vwapBands?: boolean;
   /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
   highlight?: number | null;
@@ -411,8 +411,8 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     const lines = {} as Bundle["lines"];
     for (const name of OVERLAYS) lines[name] = chart.addSeries(LineSeries, { color: colorsRef.current[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const bands = {} as Bundle["bands"];
-    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap, k), lineWidth: 1,
-      lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap), lineWidth: 1,
+      lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     // Fills, report dates and news are one primitive (`lib/chartMarks.ts`): the price scale ignores it, so a mark never shrinks the candles.
     const marks = new MarkLayer(() => barsRef.current);
     candles.attachPrimitive(marks);
@@ -999,7 +999,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     const current = bundle.current;
     if (!current) return;
     for (const name of OVERLAYS) current.lines[name].applyOptions({ color: colors[name] });
-    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ color: bandColor(colors.vwap, k) });
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ color: bandColor(colors.vwap) });
     current.rsi?.applyOptions({ color: colors.rsi });
   }, [colors]);
   useEffect(() => {

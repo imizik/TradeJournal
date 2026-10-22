@@ -139,6 +139,10 @@ legacy/older-tab settings survive; chart menu and per-panel interactions work.
 An optional same-symbol/time/source/session TradingView comparison tests parity;
 it is not a prerequisite to the control fix or a claim of established parity.
 
+**October 22 follow-up:** the owner selected only the ±1σ upper/lower pair;
+the outer ±2σ display is removed without changing VWAP/dispersion calculations
+or saved show/hide settings.
+
 ## Release 1: market-first Dashboard
 
 **Merged in #397:** after the VWAP/roadmap PR merged, Isaac
@@ -147,6 +151,12 @@ GET-only Radar feed; keep Attention/data failures visible and calculations,
 auth, recording activation and providers unchanged. The PR's final-head checks
 own implementation proof. Live usefulness and production rollout remain
 separate acceptance; this does not authorize releases 2–5.
+
+**October 22 follow-up:** the owner approved one presentation PR with the
+single-band VWAP change. Keep Active Options visible; make journal/performance
+detail expandable. Make the compact brief's exact cited context and coverage
+gaps readable in place, with saved source/timestamps and missing evidence explicit.
+No new live market/news feed or brief-generation change is part of this slice.
 
 Outcome: opening the app answers "What matters and what should I inspect?"
 

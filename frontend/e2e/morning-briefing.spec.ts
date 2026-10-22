@@ -371,9 +371,11 @@ test("opportunity brief leads with market context and new setups, then short urg
     evidence_ids: ["discovery-NEW", "market-NEW", "setup-NEW"], status: "conditional", entry_trigger: "Wait for a five-minute close above the observed $43 premarket high and a hold on retest.",
     invalidation: "Failure to hold $43 after the retest invalidates the idea.", timeframe: "Intraday; reassess after the first 15 minutes. No overnight assumption." };
   let view = { ...base, stale: false, late: false, briefing: { ...base.briefing, body: { ...body, prompt_version: "jo-morning-v4", items: [],
-    summary: "Broad-market direction is mixed; check the upcoming FOMC event before the open.", opportunities: [setup],
+    summary: "Broad-market direction is mixed; check the upcoming FOMC event before the open.",
+    summary_evidence_ids: [...body.summary_evidence_ids, "headline-1", "calendar-fixture", "missing-context"], opportunities: [setup],
     urgent_positions: [{ ...body.items[1], what_matters: "Review the Friday-expiring calls; verify remaining contracts." }] } },
     packet: { ...base.packet, body: { ...base.packet.body, evidence: [...base.packet.body.evidence,
+      { id: "calendar-fixture", kind: "fact", text: "Invented calendar: FOMC decision at 2 PM ET.", source: "Saved calendar fixture; schedule may change", observed_at: null, retrieved_at: `${day}T12:45:00Z` },
       ...setup.evidence_ids.map((id) => ({ id, kind: "fact", text: `Invented ${id}: premarket range $40–$43.`, source: "Tradier invented fixture", observed_at: `${day}T12:44:00Z`, retrieved_at: `${day}T12:45:00Z` }))] } } };
   await page.route("**/jo/morning?**", (route) => route.fulfill({ json: view }));
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -409,11 +411,26 @@ test("opportunity brief leads with market context and new setups, then short urg
   await expect(compact).toContainText("Frozen briefing, not a live price feed");
   await expect(compact).toContainText("Tradier invented fixture");
   const first = await compact.boundingBox();
-  const summary = await page.getByLabel("Journal summary", { exact: true }).boundingBox();
+  const summary = await page.getByTestId("journal-details").boundingBox();
   expect(first!.y + first!.height).toBeLessThan(summary!.y);
   await page.screenshot({ path: test.info().outputPath("dashboard-market-first-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: test.info().outputPath("dashboard-market-first-phone.png") });
+  const context = compact.getByTestId("brief-cited-context");
+  await context.locator("summary").click();
+  await expect(context).toContainText("Invented fixture headline about memory pricing");
+  await expect(context).toContainText("Invented calendar: FOMC decision at 2 PM ET.");
+  await expect(context).toContainText("Observation time unavailable");
+  await expect(context).toContainText("Belief / interpretation");
+  await expect(context).toContainText("Cited evidence unavailable: missing-context");
+  await expect(context.locator('time[datetime="'+day+'T12:45:00Z"]').first()).toBeVisible();
+  const gaps = compact.getByTestId("brief-coverage-gaps");
+  await gaps.locator("summary").click();
+  await expect(gaps).toContainText("No live quote or verified earnings date; check current conditions.");
+  await expect(gaps).toContainText("Invented browser fixture; no trading action is implied.");
+  await compact.screenshot({ path: test.info().outputPath("dashboard-context-and-gaps-phone.png") });
+  await context.locator("summary").click();
+  await gaps.locator("summary").click();
   await compact.getByText("Conditions & evidence", { exact: true }).click();
   await expect(compact).toContainText(setup.entry_trigger);
   await expect(compact).toContainText(setup.invalidation);
@@ -433,4 +450,8 @@ test("opportunity brief leads with market context and new setups, then short urg
   await expect(compact.getByRole("heading", { name: "Saved priorities", exact: true })).toBeVisible();
   await expect(compact.getByRole("heading", { name: "Things worth investigating", exact: true })).toHaveCount(0);
   await expect(compact.getByRole("link", { name: "Open MU chart" })).toHaveAttribute("href", "/charts?symbol=MU");
+  view = { ...view, state: "redacted", packet: { ...view.packet, redacted_at: `${day}T14:00:00Z` } };
+  await page.reload();
+  await expect(compact).toContainText("This briefing or its evidence was removed");
+  await expect(compact.getByTestId("brief-cited-context")).toHaveCount(0);
 });
