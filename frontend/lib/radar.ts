@@ -110,3 +110,20 @@ export function coverageLine(feed: RadarFeed): string {
   if (feed.state === "stale") return `Stale since ${c.last_ok_pass_at ? nyTime(c.last_ok_pass_at) : "the open"} · ${passes}${missing}`;
   return `${c.live ? "Recording" : "Recorded"} · ${c.symbols_tracked} symbols · last pass ${last} · ${passes}${missing}`;
 }
+
+export type RadarGroup = { name: string; members: string[] };
+export type GroupEndpoint = { price: number; retrieved_at: string; trade_at: string };
+export type GroupComparison = {
+  symbol: string; state: "off" | "ungrouped" | "insufficient" | "partial" | "stale" | "ready";
+  reason: string | null; groups: RadarGroup[]; group: RadarGroup | null; universe_version: string;
+  source: string; methodology: string; window_minutes: number; session: string | null; live: boolean; generated_at: string;
+  window: { start: string; end: string; start_pass_id: number; end_pass_id: number } | null;
+  rows: { symbol: string; role: "selected" | "peer" | "benchmark"; change_pct: number | null;
+    reason: string | null; start: GroupEndpoint | null; end: GroupEndpoint | null }[];
+  coverage: { peers_total: number; peers_available: number; peers_up: number; peers_down: number; missing: string[]; recorded_minutes: number; expected_minutes: number } | null;
+};
+export function getGroupComparison(symbol: string, group?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ symbol });
+  if (group) query.set("group", group);
+  return call<GroupComparison>(`/groups/compare?${query}`, { signal });
+}

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET, session_windows
+from app.engine.radar_comparison import compare_group, empty_comparison
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
 
@@ -47,7 +48,7 @@ def _parse(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
-def _store() -> tuple[RadarStore | None, str | None]:
+def _store(*, read_only: bool = False) -> tuple[RadarStore | None, str | None]:
     """(store, None) or (None, the plain reason Radar is off)."""
     path = os.environ.get("RADAR_STORE", "").strip()
     if not enabled():
@@ -55,8 +56,8 @@ def _store() -> tuple[RadarStore | None, str | None]:
     if not path or not os.path.isabs(path):
         return None, "Radar has no storage file configured."
     try:
-        return RadarStore(path), None
-    except (ValueError, OSError) as exc:
+        return RadarStore(path, read_only=read_only), None
+    except (ValueError, OSError, sqlite3.Error) as exc:
         log.warning("radar store unreadable: %s", exc)
         return None, "The Radar file could not be opened."
 
@@ -212,3 +213,33 @@ def event_feedback(event_id: str, body: FeedbackBody):
         raise HTTPException(404, "Radar event not found")
     store.append_feedback(event_id, body.rating, _iso(_now()))
     return {"event_id": event_id, "rating": body.rating}
+
+
+@router.get("/groups/compare")
+def group_comparison(symbol: str = Query(..., pattern=r"^[A-Za-z0-9.\-]{1,16}$"),
+                     group: str | None = Query(None, max_length=120)):
+    """Read-only sampled group movement, independent of event detection and feed visits."""
+    now = _now()
+    result = empty_comparison(symbol.upper(), group, load_universe(), now)
+    if group and not any(g["name"] == group for g in result["groups"]):
+        raise HTTPException(422, "Group does not contain this symbol")
+    if result["group"] is None:
+        return result
+    store, reason = _store(read_only=True)
+    if store is None:
+        return {**result, "state": "off", "reason": reason}
+    clock = datetime.fromtimestamp(now, ET)
+    try:
+        hours = chart_calendar.hours(clock.date())
+    except Exception:
+        hours = None
+    if hours is None:
+        return {**result, "reason": "Market calendar unavailable; cannot identify the current recording session."}
+    window = next((w[1:] for w in session_windows(clock.date(), hours) if w[0] == "regular"), None)
+    live = bool(window and window[0] <= clock.hour * 60 + clock.minute < window[1])
+    try:
+        return compare_group(store, result, today=clock.date().isoformat(), now=now, live=live)
+    except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
+        log.warning("radar comparison unreadable: %s", exc)
+        return {**empty_comparison(symbol.upper(), group, load_universe(), now),
+                "state": "off", "reason": "Recorded group observations could not be read right now."}

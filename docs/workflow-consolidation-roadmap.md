@@ -196,6 +196,14 @@ Acceptance:
 
 ## Release 2: peer confirmation in Charts
 
+**October 22 implementation approved:** the first slice is an observational
+15-minute Group movement view in the existing Peers disclosure, backed by
+Radar's shared stored passes. It does not require a calibrated event detector.
+The [Radar contract](radar.md#charts-group-movement) defines the implemented
+eligibility and coverage rules. Recording activation and live owner acceptance
+remain separate. Historical event-context handoff and alternate windows are
+follow-ups, not claimed by this first slice.
+
 Primary question: **"Are these names rebounding or weakening together over the
 same interval as the stock I am investigating?"** This is the first major
 Charts benefit from Radar, ahead of feed decoration or another summary screen.

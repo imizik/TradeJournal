@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import type { SymbolEvents, SymbolFinancials, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview, SymbolShort } from "@/lib/symbolInfo";
+import type { RadarGroup } from "@/lib/radar";
 import type { ChartQuote } from "@/lib/charts";
 import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
@@ -35,7 +36,7 @@ const REFRESH_MS = 60_000;
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 /** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void }) {
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -126,8 +127,11 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
   const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
     : result?.key === `${view.tab}|${symbol}` ? result : null;
-  const peersResult = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview");
-  const peers = onSelectSymbol ? <SymbolInfoPeers symbol={symbol} result={peersResult} onSelect={onSelectSymbol} /> : null;
+  const [localGroup, setLocalGroup] = useState<RadarGroup | null>(null);
+  const chosenGroup = comparisonGroup ?? localGroup;
+  const group = chosenGroup?.members.includes(symbol) ? chosenGroup.name : undefined;
+  const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
+  const peers = onSelectSymbol ? <SymbolInfoPeers symbol={symbol} result={peersResult} movement={movement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}

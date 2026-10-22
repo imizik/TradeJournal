@@ -27,6 +27,7 @@ import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
+import type { RadarGroup } from "@/lib/radar";
 import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
@@ -850,6 +851,7 @@ export default function ChartWorkspace() {
 
   const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? (supportedIntervals((index && s.panelSymbols[index]) || s.symbol).includes(value) ? value : "4h") : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
+  const [comparisonGroup, setComparisonGroup] = useState<RadarGroup | null>(null);
   const chooseSymbol = (symbol: string) => {
     if (settings.symbol !== symbol) startSymbolTiming(symbol);
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, intervals: s.intervals.map((v, i) => ((!i || !s.panelSymbols[i]) && !supportedIntervals(symbol).includes(v)) ? "4h" : v), recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
@@ -1628,7 +1630,7 @@ export default function ChartWorkspace() {
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
     {!isMacroSymbol(settings.symbol) && <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />}
-    {!isMacroSymbol(settings.symbol) && <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
+    {!isMacroSymbol(settings.symbol) && <SymbolInfo comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
     {!isMacroSymbol(settings.symbol) && <><DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
 
       info="Save support, resistance, or a price you’re watching."
