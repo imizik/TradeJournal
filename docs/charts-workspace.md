@@ -407,10 +407,10 @@ cd backend
   automatic levels, and the strike ladder (C4.5) in the dock (see
   [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)),
   with max pain (C4.7).
-- Range bands (C2.7), off until shown from Layers: today's and Friday's
-  expected move from the at-the-money straddle, priced five minutes after the
-  open and fixed for the session, and VWAP ±1σ/±2σ (see
-  [Range bands](#range-bands-c27)).
+- Expected move (C2.7), off until shown from Layers: today's and Friday's
+  at-the-money straddle, priced five minutes after the open and fixed for the
+  session. VWAP ±1σ/±2σ has its own **VWAP bands** control in Indicators and
+  Layers (see [Range bands](#range-bands-c27)).
 - Extended-session shading, one flat band per run of premarket or after-hours
   candles (`frontend/lib/sessionShade.ts`), and regular/extended hours
   selection: the toolbar's **Extended hours** toggle is lit while those candles
@@ -1248,8 +1248,16 @@ existing refresh behavior.
 
 ### Range bands (C2.7)
 
-Off by default. Layers → Range bands (or the chart menu's Layers) shows them
-on every chart, saved in the shared workspace (`rangeBandsHidden`):
+Expected move and VWAP bands have independent controls, both off by default.
+Layers → **Expected move** (or the chart menu's Layers) shows the option-implied
+levels on every chart, saved in the shared workspace (`rangeBandsHidden`).
+Indicators → **VWAP bands ±1σ / ±2σ** or Layers → **VWAP bands** shows the VWAP
+bands independently (`vwapBandsHidden`), without requesting option chains.
+Hiding the Indicators group also hides VWAP bands and keeps their choice.
+Existing settings with the old combined Range bands enabled keep both enabled
+until each is changed; an explicit VWAP band choice survives older tabs' saves.
+The calculations are unchanged:
+
 
 - **Expected move.** For the nearest expiration (0DTE on SPY and QQQ) and the
   nearest Friday, the at-the-money straddle's mid (T2.1's rule: the strike
@@ -1277,9 +1285,12 @@ on every chart, saved in the shared workspace (`rangeBandsHidden`):
 - **VWAP bands.** On intraday charts, VWAP ±1σ (dashed) and ±2σ (dotted),
   where σ is the regular session's volume-weighted standard deviation of the
   same minute HLC3 prices VWAP uses (`vwap_sd` on each candle). None outside
-  the regular session or on daily and weekly charts.
+  the regular session or on daily and weekly charts. Layers explains this
+  separately from expected-move availability. The main chart's study row names
+  the bands; hovering it gives their prices for the selected candle, or the
+  reason they are unavailable.
 
-The workspace request carries `ranges=1` (and `auto=0` when the automatic
+With Expected move enabled, the workspace request carries `ranges=1` (and `auto=0` when the automatic
 levels are hidden). The expected-move levels join the automatic levels before
 confluence, so "262 + EM Fri high" is one zone whose interactions are read
 and from which an alert can be made; every expected-move level draws while the

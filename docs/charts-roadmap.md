@@ -1,5 +1,14 @@
 # Charts epic: roadmap
 
+October 21 workflow planning: the [consolidation roadmap](workflow-consolidation-roadmap.md)
+records the owner's macro → familiar-tech routine, peer-confirmation need and
+optional use of plans/review. The VWAP clarity fix is included with this plan in the owner-approved PR;
+that PR's check/merge receipt owns its release evidence. After the Dashboard
+proposal, prioritize same-window peer context with Radar. Macro grid/data work
+requires the agreed instrument checklist; no chart cap or provider expansion is
+approved here. The September no-macro/futures assumption below is historical,
+not a reason to dismiss the owner's newer macro-view request.
+
 **October 11, 2026 priority:** [Dots functionality comes first](product-roadmap.md#selected-priorities--october-11-2026).
 Existing authorized bounded chart work may close and blocking defects may be
 fixed. New chart polish, Level 2/provider expansion and optional overlays defer
@@ -60,6 +69,11 @@ C3.1–C3.3. C3.6 stays `todo`: it needs C3.1's trade card. The board's `next`
 is unchanged. The speech-to-text provider is Whisper run on the server
 (faster-whisper): no new paid plan, and audio never leaves the app. See
 [Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35).
+
+**VWAP control clarity (October 21, 2026):** VWAP ±1σ/±2σ now has a separate
+Indicators/Layers control and RTH availability explanation. The former combined
+Range bands switch is labelled Expected move and controls only option-implied
+levels. Existing saved visibility is retained; indicator calculations are unchanged.
 
 **Range bands and max pain (2026-10-05):** at the user's request, two new
 rows were added and built ahead of the board's `next`, in one branch: C2.7
@@ -148,7 +162,7 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | done (this branch; the morning job now keeps 40 sessions) |
-| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ (independent controls since October 21) | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 | C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
 Why this order: history, correct sessions and smooth updates come first; then

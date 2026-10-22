@@ -1523,7 +1523,7 @@ const EMPTY_SETTINGS = {
   levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false, proportions: null, layoutProportions: {},
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false },
+  optionsLayer: { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false }, rangeBandsHidden: true, vwapBandsHidden: true,
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
 };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
@@ -5706,12 +5706,13 @@ const rangeMember = (kind: string, label: string, value: number): AutoLevel => (
 const RANGE_MEMBERS = [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_low", "EM 0DTE low", 255.24),
   rangeMember("expected_move_high", "EM Fri high", 261.94), rangeMember("expected_move_low", "EM Fri low", 252.74)];
 const MAX_PAIN = optionMember("max_pain", "Max pain", 248.5, "inferred");
-async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS) {
+async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS, realistic = false) {
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const url = route.request().url();
     requests.push(url);
     const query = new URL(url).searchParams;
     const data = fixture(url);
+    if (realistic) data.panels = realisticPanels(Object.keys(data.panels) as Interval[]);
     // Intraday candles carry VWAP's standard deviation; daily ones have no VWAP.
     for (const panel of Object.values(data.panels)) for (const bar of panel?.bars ?? []) bar.vwap_sd = bar.vwap === null ? null : 0.6;
     const layer = query.get("options");
@@ -5728,7 +5729,7 @@ async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RA
 }
 const RANGE_LEVELS = "EM Fri low,EM 0DTE low,EM 0DTE high,262 + EM Fri high";
 
-test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, explain themselves, and hide from the menu", async ({ page, context }) => {
+test("expected-move levels draw independently of VWAP bands, explain themselves, and hide from the menu", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -5745,14 +5746,14 @@ test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, 
   expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
 
   await page.getByRole("button", { name: "Layers", exact: true }).click();
-  const group = layerGroup(page, "Range bands");
-  await group.getByRole("button", { name: "Show Range bands" }).click();
+  const group = layerGroup(page, "Expected move");
+  await group.getByRole("button", { name: "Show Expected move" }).click();
   await expect.poll(() => requests.at(-1)).toContain("ranges=1");
   // Every expected-move level draws on every chart, however far; Friday's high shares the round 262's zone.
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", RANGE_LEVELS);
   await expect(group).toContainText("MRVL: 0DTE ±2.10, Fri ±4.60.");
-  // VWAP bands on the intraday charts' every candle; the daily chart has no VWAP to band.
-  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  // Showing Expected move leaves VWAP bands off.
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands", "240");
   await expect(drawn(page, "Panel 4")).toHaveAttribute("data-vwap-bands", "0");
   await expect.poll(() => server.data?.rangeBandsHidden).toBe(false);
@@ -5787,11 +5788,96 @@ test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, 
   await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
   await rightClick(page, "main", EMPTY);
   await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
-  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Range bands" }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Expected move" }).click();
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", "");
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
   await expect.poll(() => server.data?.rangeBandsHidden).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("VWAP bands have independent controls, saved visibility, and honest intraday status on desktop and phone", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context, { revision: 1, data: { autoLevelsHidden: true, newsHidden: true, session: "regular" } });
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests, { ...RANGES, state: "closed", message: "The session has closed; expected moves are priced on trading days.", bands: [] }, [], true);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  const controls = page.getByRole("group", { name: "Chart indicators" });
+  const toggle = controls.getByRole("button", { name: "VWAP bands ±1σ / ±2σ", exact: true });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await page.screenshot({ path: test.info().outputPath("vwap-controls-desktop.png"), animations: "disabled" });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await expect.poll(() => server.data?.vwapBandsHidden).toBe(false);
+  expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const bands = layerGroup(page, "VWAP bands");
+  await expect(bands).toContainText("Shown on regular-session candles only");
+  // Expected move can be unavailable while historical RTH VWAP bands still draw.
+  await layerGroup(page, "Expected move").getByRole("button", { name: "Show Expected move" }).click();
+  await expect(layerGroup(page, "Expected move")).toContainText("The session has closed");
+  await expect(bands).not.toContainText("The session has closed");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await layerGroup(page, "Expected move").getByRole("button", { name: "Hide Expected move" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await layerGroup(page, "Indicators").getByRole("button", { name: "Hide Indicators", exact: true }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await bands.getByRole("button", { name: "Show VWAP bands", exact: true }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await expect.poll(() => server.data?.studiesHidden).toBe(false);
+  await page.screenshot({ path: test.info().outputPath("vwap-bands-desktop.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Close layers", exact: true }).click();
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  // Daily and weekly candles have no session VWAP; the control remains saved.
+  await page.getByLabel("Main interval").selectOption("1D");
+  await expect(page.getByLabel("main study values").getByText("VWAP bands —", { exact: true })).toHaveAttribute("title", /intraday study/);
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(layerGroup(page, "VWAP bands")).toContainText("Intraday only");
+  await page.getByRole("button", { name: "Close layers", exact: true }).click();
+  await page.getByLabel("Main interval").selectOption("5m");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  await expect(toggle).toBeInViewport();
+  const size = (await toggle.boundingBox())!;
+  expect(size.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("vwap-controls-phone.png"), animations: "disabled" });
+  await toggle.click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await expect.poll(() => server.data?.vwapBandsHidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("legacy Range bands visibility migrates once and explicit VWAP band choices survive reload", async ({ page, context }) => {
+  const server = await fakeChartSettings(context, { revision: 1, data: { rangeBandsHidden: false } });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, []);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  await page.getByRole("group", { name: "Chart indicators" }).getByRole("button", { name: "VWAP bands ±1σ / ±2σ", exact: true }).click();
+  await expect.poll(() => server.data?.vwapBandsHidden).toBe(true);
+  expect(server.data?.rangeBandsHidden).toBe(false);
+  // An older tab overwrites its known fields, omitting the new top-level choice.
+  const older = { ...server.data };
+  delete older.vwapBandsHidden;
+  const status = await page.evaluate(async (body) => (await fetch("/api/backend/charts/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  })).status, { base_revision: server.revision, data: older });
+  expect(status).toBe(200);
+  expect(server.data?.vwapBandsHidden).toBe(true);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", RANGE_LEVELS);
 });
 
 test("two expected-move levels on the same cent each show their own expiration's straddle", async ({ page, context }) => {

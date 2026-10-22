@@ -81,6 +81,7 @@ isolation. They are not new Dots work; each contract states its own open gate.
 
 | Document | Read it when |
 |---|---|
+| [../workflow-consolidation-roadmap.md](../workflow-consolidation-roadmap.md) | October 21 owner workflow: post-VWAP Dashboard simplification, Radar peer context in Charts, macro feasibility and optional position/review work; planning only |
 | [../product-roadmap.md](../product-roadmap.md) | You need the current Dots-first cross-roadmap priorities or the future journal learning workflow |
 | [../agentic-trading-roadmap.md](../agentic-trading-roadmap.md) | You want the proposed frozen-decision, alert and paper-review loop, grounded factory/thesis design and 30-day evidence goals; planning only |
 | [../radar.md](../radar.md) | You are working on Radar: the five-PR sequence, the quote recorder and its activation boundary |

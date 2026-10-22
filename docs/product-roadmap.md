@@ -10,6 +10,23 @@ moomoo metric-source evaluation added 2026-10-10. This document records future d
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
+## October 21 workflow consolidation — planning only
+
+The owner walkthrough established the daily routine: understand the market,
+investigate charts, trade/manage in Robinhood, and return when TradeJournal has
+useful information. The [workflow consolidation roadmap](workflow-consolidation-roadmap.md)
+records the full findings, Claude critique assessment, proposed order, source
+limitations and acceptance gates. It makes Dashboard orientation the next
+proposed consolidation slice after the already-local VWAP clarity fix, and
+peer confirmation the primary Charts benefit from Radar.
+
+This is a requested specification, not implementation or activation approval.
+Radar retains its separately selected ownership and contract; existing Dots
+acceptance continues. Plans/reviews remain available without assuming a new
+journaling habit. This plan replaces the old journal-first opening-screen
+assumption for future consolidation proposals; it does not remove existing
+capabilities or reopen frozen studies.
+
 ## Selected priorities — October 11, 2026
 
 The owner selected **Dots functionality as the top product priority** after

@@ -12,7 +12,7 @@ export type LayerItem = { id: string; symbol: string; name: string; detail: stri
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "auto" | "ranges"; name: string; hidden: boolean; info: string; status?: string }
+  | { key: "auto" | "ranges" | "vwapBands"; name: string; hidden: boolean; info: string; status?: string }
   | { key: "journal"; name: string; hidden: boolean; info: string; status?: string; labels: FillLabels }
   | { key: "news"; name: string; hidden: boolean; info: string; status?: string; small: boolean }
   | { key: "options"; name: string; hidden: boolean; info: string; status?: string; filters: OptionsLayer }
@@ -26,7 +26,7 @@ function readCollapsed(): string[] {
 
 /**
  * The layers panel (C1.4): what the charts draw, grouped as My levels,
- * Drawings, Auto levels, Options levels, Range bands, Journal and Indicators. Every group hides on all five charts;
+ * Drawings, Auto levels, Options levels, Expected move, VWAP bands, Journal and Indicators. Every group hides on all five charts;
  * levels and drawings also lock and delete as a group (one undo step) and
  * item by item, and a click on an item brings the chart to it. Groups fold
  * (remembered on this device). A tab of the side dock on a desktop (C7.3); a

@@ -165,12 +165,12 @@ function hoverStore() {
 /**
  * The candle values row: the hovered candle's, else the latest. Its own component, so a crosshair move renders only this row.
  * From a tablet's width, like TradingView's legend, it sits over the top of the candles under the title line, so it costs the
- * chart no height; there a click or right-click on it reaches the chart beneath (only the EMA item, which opens on hover, takes the pointer). A phone's
+ * chart no height; there a click or right-click on it reaches the chart beneath (the EMA and VWAP items take the pointer for their explanations). A phone's
  * row wraps to several lines, so there it stays above the candles.
  */
-function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, rvol: today, pastRvol, showRvol, timer }: {
+function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, vwapBands, rvol: today, pastRvol, showRvol, timer }: {
   id: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
-  indicators: Indicators; colors: Record<ColorKey, string>; rvol: RvolBaseline | null; pastRvol?: Record<string, RvolBaseline>; showRvol: boolean; timer: React.ReactNode;
+  indicators: Indicators; colors: Record<ColorKey, string>; vwapBands: boolean; rvol: RvolBaseline | null; pastRvol?: Record<string, RvolBaseline>; showRvol: boolean; timer: React.ReactNode;
 }) {
   const time = useSyncExternalStore(hover.subscribe, hover.get, hover.get);
   const bar = (time !== null && barAt(bars ?? [], time)) || bars?.at(-1);
@@ -197,6 +197,7 @@ function CandleValues({ id, main, pending, bars, hover, interval, indicators, co
       {!main && timer}
       {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 rounded bg-[#10151e]/90 px-1 gap-y-0.5 whitespace-normal font-mono text-[10px]">
         {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+        {vwapBands && <span className="pointer-events-auto" style={{ color: colors.vwap }} title={bar?.vwap == null ? vwapWhy : bar.vwap_sd == null ? "VWAP band data is unavailable for this candle." : `RTH VWAP bands: ±1σ ${price(bar.vwap - bar.vwap_sd)}–${price(bar.vwap + bar.vwap_sd)}; ±2σ ${price(bar.vwap - 2 * bar.vwap_sd)}–${price(bar.vwap + 2 * bar.vwap_sd)}. Volume-weighted HLC3 dispersion since 9:30 ET.`}>VWAP bands {bar?.vwap != null && bar.vwap_sd != null ? "±1σ / ±2σ" : "—"}</span>}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
         {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
         {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
@@ -221,7 +222,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
   colors?: Record<ColorKey, string>;
@@ -236,8 +237,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
   /** With the options layer on (C4.4), how many option zones each side of the price draw besides the walls; null while it is off. */
   optionsNearest?: number | null;
-  /** The range bands (C2.7): every expected-move level of `autoLevels`, and the VWAP ±1σ/±2σ bands. */
+  /** Expected-move levels (C2.7), independently of VWAP bands. */
   rangeBands?: boolean;
+  /** RTH VWAP ±1σ/±2σ; workspace visibility, independent of expected move. */
+  vwapBands?: boolean;
   /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
   highlight?: number | null;
   /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
@@ -998,9 +1001,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
-    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ visible: rangeBands });
-    if (container.current) container.current.dataset.vwapBandsShown = rangeBands ? "true" : "false";
-  }, [rangeBands]);
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ visible: vwapBands });
+    if (container.current) container.current.dataset.vwapBandsShown = vwapBands ? "true" : "false";
+  }, [vwapBands]);
 
   const markers = panel?.markers;
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
@@ -1145,7 +1148,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           </span>
         </div>
       </div>
-      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
+      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} vwapBands={vwapBands} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
