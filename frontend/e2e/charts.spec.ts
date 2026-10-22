@@ -322,6 +322,26 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
 });
 
+test("a laptop keeps the toolbar to one row, and the drawing rail can be put away for a wider chart, remembered on the device", async ({ page }) => {
+  await page.setViewportSize({ width: 1380, height: 700 });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  // One row of controls: the toolbar is no taller than its tallest control plus padding.
+  expect((await page.locator('header[aria-label="Chart toolbar"]').boundingBox())!.height).toBeLessThan(48);
+  await expect(page.getByRole("button", { name: "Extended hours" }).getByText("ETH", { exact: true })).toBeVisible();
+  const before = (await page.getByTestId("canvas-main").boundingBox())!.width;
+  await page.getByRole("button", { name: "Hide drawing tools" }).click();
+  await expect(page.getByRole("group", { name: "Drawing tools" })).toHaveCount(0);
+  await expect.poll(async () => (await page.getByTestId("canvas-main").boundingBox())!.width).toBeGreaterThan(before + 30);
+  await page.reload();
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show drawing tools" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Drawing tools" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Show drawing tools" }).click();
+  await expect(page.getByRole("group", { name: "Drawing tools" })).toBeVisible();
+});
+
 /** The main chart's candle room: the pixel span from the highest visible high to the lowest visible low, and the pane it sits in. */
 const candleRoom = (page: Page) => page.evaluate(() => {
   const layer = (window as unknown as { __tjAutoLevels: Map<string, { candleBoxes(): { top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
