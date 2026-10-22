@@ -20,11 +20,21 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     const card = newSection.getByTestId("radar-event");
     await expect(card).toContainText("MU up 4.1% while SMH is up 0.6%");
     await expect(card).toContainText("Now: Extended");
+    // The latest news check: catalyst headline first, marked against the move, never called its cause.
+    await expect(card.getByTestId("radar-news-line")).toHaveText(
+      "News nearby: Micron raises quarterly revenue forecast on AI memory demand · benzinga · 10:41 AM (before the move)");
     await card.getByRole("button").first().click();
     const original = page.getByRole("region", { name: "Original evidence" });
     await expect(original).toContainText("As first saved");
     await expect(original.getByRole("row")).toHaveCount(3);
     await expect(page.getByRole("region", { name: "Revisions" })).toContainText("Lead widened from 3.5 to 4.8 points");
+    const news = page.getByRole("region", { name: "News nearby" });
+    await expect(news.getByRole("link")).toHaveCount(2);
+    await expect(news.getByRole("link", { name: "Memory stocks extend gains as Micron leads chip names" }))
+      .toHaveAttribute("href", "https://example.com/news/memory-stocks");
+    await expect(news).toContainText("benzinga · 11:20 AM (after the move)");
+    await expect(news).toContainText("Checked 11:13 AM (headlines found) · 11:28 AM (headlines found)");
+    await expect(news).not.toContainText("caused");
     await page.getByRole("button", { name: "Too late", exact: true }).click();
     await expect(page.getByRole("button", { name: "Too late", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("link", { name: /Open chart · MU/ })).toHaveAttribute("href", "/charts?symbol=MU");
@@ -39,5 +49,21 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     const saved = await (await request.get(`${API}/radar/events/${EVENT}`)).json();
     expect(saved.rating).toBe("too_late");
     expect(errors).toEqual([]);
+  });
+}
+
+for (const [status, line] of [["none_found", "No news found — cause unknown"], ["unavailable", "News unavailable — cause unknown"]] as const) {
+  test(`radar says the cause is unknown when news is ${status}`, async ({ page, request }) => {
+    expect((await request.post(`${API}/__test/radar-seed?news=${status}`)).ok()).toBeTruthy();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/radar");
+    const card = page.getByTestId("radar-event");
+    await expect(card.getByTestId("radar-news-line")).toHaveText(line);
+    await card.getByRole("button").first().click();
+    const news = page.getByRole("region", { name: "News nearby" });
+    await expect(news).toContainText(`${line}.`);
+    await expect(news.getByRole("link")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    if (status === "none_found") await page.screenshot({ path: test.info().outputPath("radar-no-news-phone.png"), fullPage: true });
   });
 }

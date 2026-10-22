@@ -8,7 +8,8 @@ rather than guessed. Symbols go out in requests of at most ``BATCH_SIZE``
 through ``tradier.get_quotes_once``, at most ``MAX_REQUESTS`` per pass. A rate
 limit or transport failure ends the pass at once (recorded failed or partial);
 the next minute tries again. Nothing is retried within a pass, detected, sent
-or traded here.
+or traded here. After a regular-hours pass, ``radar_news.enrich`` checks
+headlines near recent events (PR 5); its failures never affect the pass.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import os
 import time
 from typing import Callable
 
-from app.engine import tradier
+from app.engine import radar_news, tradier
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
 from app.engine.radar_store import RadarPass, RadarQuote, RadarStore, load_universe
 
@@ -44,13 +45,14 @@ def _raw_float(raw: dict | None, key: str) -> float | None:
 class RadarRunner:
     def __init__(self, store: RadarStore, calendar, *, universe: dict | None = None,
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
         self.symbols = [row["symbol"] for row in self.universe["symbols"]]
         self.quotes = quotes
         self.clock = clock
+        self.news = news
         self._pruned_for: date | None = None
 
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
@@ -81,7 +83,13 @@ class RadarRunner:
                 self._pruned_for = today
             rows = self._collect(record)
         record["finished_at"] = _iso(datetime.fromtimestamp(self.clock(), ET))
-        return self.store.append_pass(record, rows)
+        pass_id = self.store.append_pass(record, rows)
+        if inside:
+            try:
+                radar_news.enrich(self.store, record["session_date"], datetime.fromtimestamp(self.clock(), UTC), self.news)
+            except Exception:  # news is extra context; the recorded pass stands either way
+                log.exception("Radar news enrichment failed")
+        return pass_id
 
     def _collect(self, record: RadarPass) -> list[RadarQuote]:
         batches = [self.symbols[i:i + BATCH_SIZE] for i in range(0, len(self.symbols), BATCH_SIZE)]

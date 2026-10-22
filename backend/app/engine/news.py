@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from app.engine.alpaca import _alpaca_get, _alpaca_get_fast
+from app.engine.alpaca import AlpacaFastFailure, _alpaca_get, _alpaca_get_fast
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ def fetch_news(
     limit: int = 50,
     include_content: bool = False,
     fast: bool = False,
+    strict: bool = False,
 ) -> list[dict]:
     """
     Fetch news articles, newest first. `symbols=None` returns the broad tape.
@@ -39,6 +40,10 @@ def fetch_news(
 
     `fast=True` is for request paths: one page on a ~2.5 s budget, no retry, no
     rate-limit wait; failures raise `AlpacaFastFailure`.
+
+    `strict=True` also raises `AlpacaFastFailure` when a page has no `news`
+    body (a 403/404 comes back as `{}`), so callers can tell "the provider
+    refused" apart from "no headlines".
     """
     params: dict = {
         "sort": "desc",
@@ -62,6 +67,8 @@ def fetch_news(
         if page_token:
             page_params["page_token"] = page_token
         data = (_alpaca_get_fast if fast else _alpaca_get)("/v1beta1/news", page_params)
+        if strict and not isinstance(data.get("news"), list):
+            raise AlpacaFastFailure("Alpaca returned no news body.")
         for item in data.get("news", []):
             article_id = item.get("id")
             if article_id in seen_ids:

@@ -21,7 +21,13 @@ export type RadarRevision = {
   event_id: string; revision: number; recorded_at: string; status: "extended" | "faded" | "reversed" | "corrected";
   measures: Record<string, number>; evidence: RadarEvidence[]; note: string;
 };
-export type RadarFeedEvent = RadarEvent & { latest_status: RadarRevision["status"] | null; revision_count: number; rating: RadarRating | null };
+export type RadarHeadline = {
+  headline: string; source: string | null; published_at: string; url: string; symbols: string[]; timing: "before" | "after";
+};
+export type RadarNews = { status: "found" | "none_found" | "unavailable"; checked_at: string; headlines: RadarHeadline[] };
+export type RadarFeedEvent = RadarEvent & {
+  latest_status: RadarRevision["status"] | null; revision_count: number; rating: RadarRating | null; news: RadarNews | null;
+};
 export type RadarCoverage = {
   passes_recorded: number; passes_expected: number; passes_failed: number; last_ok_pass_at: string | null;
   symbols_tracked: number; symbols_missing: string[]; universe_version: string; live: boolean;
@@ -30,7 +36,9 @@ export type RadarFeed = {
   state: "off" | "no_data" | "recording" | "stale"; reason: string | null; session: string | null; sessions?: string[];
   events: RadarFeedEvent[]; since_last_visit: string[]; last_visit_at: string | null; coverage: RadarCoverage | null; generated_at: string | null;
 };
-export type RadarDetail = { event: RadarEvent; revisions: RadarRevision[]; rating: RadarRating | null };
+export type RadarDetail = {
+  event: RadarEvent; revisions: RadarRevision[]; rating: RadarRating | null; news: RadarNews | null; news_checks: RadarNews[];
+};
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(`/radar${path}`), { cache: "no-store", ...init });
@@ -70,6 +78,26 @@ export function measureText(key: string, value: number) {
 export const STATUS_TEXT: Record<RadarRevision["status"], string> = {
   extended: "Extended", faded: "Faded", reversed: "Reversed", corrected: "Corrected",
 };
+
+export const TIMING_TEXT: Record<RadarHeadline["timing"], string> = { before: "before the move", after: "after the move" };
+
+/** "Source · 10:05 AM (before the move)"; the time is the day and time when it is not the event's session. */
+export function headlineMeta(h: RadarHeadline, sessionDate: string): string {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: NY }).format(new Date(h.published_at));
+  const when = day === sessionDate
+    ? nyTime(h.published_at)
+    : `${new Date(h.published_at).toLocaleDateString("en-US", { timeZone: NY, month: "short", day: "numeric" })} ${nyTime(h.published_at)}`;
+  return `${h.source ? `${h.source} · ` : ""}${when} (${TIMING_TEXT[h.timing]})`;
+}
+
+/** The quiet news line on a card. It never says the news caused the move. */
+export function newsLine(news: RadarNews | null, sessionDate: string): string {
+  if (!news) return "News not checked yet";
+  if (news.status === "unavailable") return "News unavailable — cause unknown";
+  const first = news.headlines[0];
+  if (news.status === "none_found" || !first) return "No news found — cause unknown";
+  return `News nearby: ${first.headline} · ${headlineMeta(first, sessionDate)}`;
+}
 
 /** The one-line recording status shown above the feed. */
 export function coverageLine(feed: RadarFeed): string {

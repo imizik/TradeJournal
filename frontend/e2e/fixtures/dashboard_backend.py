@@ -48,8 +48,8 @@ def scanner_amzn():
 
 
 @core_app.post("/__test/radar-seed", include_in_schema=False)
-def radar_seed():
-    """A fresh Radar file: three passes on 2026-10-20 and the sample event with its one revision."""
+def radar_seed(news: str = "found"):
+    """A fresh Radar file: three passes on 2026-10-20, the sample event with its one revision, and its news checks."""
     import json
     from app.engine.radar_store import RadarStore
 
@@ -64,6 +64,10 @@ def radar_seed():
                            "error": None, "skip_reason": None})
     store.append_event(sample["event"])
     store.append_revision(sample["revisions"][0])
+    checks = sample["news_checks"] if news == "found" else [
+        {"event_id": sample["event"]["event_id"], "checked_at": "2026-10-20T15:13:05.000Z", "status": news, "headlines": []}]
+    for check in checks:
+        store.append_news(check)
     return {"seeded": True}
 
 

@@ -150,6 +150,22 @@ def test_feedback_validates_and_latest_wins(api):
             db.execute("DELETE FROM visit")
 
 
+def test_feed_and_detail_carry_the_latest_news_check(api):
+    _seed(api)
+    event_id = FIXTURE["event"]["event_id"]
+    assert api.client.get("/radar/feed").json()["events"][0]["news"] is None  # not checked yet
+    for check in FIXTURE["news_checks"]:
+        api.store.append_news(check)
+    latest = {k: FIXTURE["news_checks"][1][k] for k in ("status", "checked_at", "headlines")}
+    [event] = api.client.get("/radar/feed").json()["events"]
+    assert event["news"] == latest
+    assert [h["timing"] for h in event["news"]["headlines"]] == ["before", "after"]
+    detail = api.client.get(f"/radar/events/{event_id}").json()
+    assert detail["event"] == FIXTURE["event"]  # news sits beside the saved event, never inside it
+    assert detail["news"] == latest
+    assert [c["checked_at"] for c in detail["news_checks"]] == ["2026-10-20T15:13:05.000Z", "2026-10-20T15:28:05.000Z"]
+
+
 def test_existing_file_without_new_tables_still_opens(tmp_path):
     path = tmp_path / "old.sqlite"
     RadarStore(path)
