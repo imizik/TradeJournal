@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MEASURE_LABELS, RATINGS, STATUS_TEXT, coverageLine, getEvent, getFeed, measureText, nyTime, rateEvent, recordVisit,
-  type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarRating,
+  MEASURE_LABELS, RATINGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
+  recordVisit, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +52,35 @@ function Measures({ values }: { values: Record<string, number> }) {
   );
 }
 
+const CHECK_TEXT: Record<RadarNews["status"], string> = {
+  found: "headlines found", none_found: "no news found — cause unknown", unavailable: "news unavailable — cause unknown",
+};
+
+function News({ news, checks, sessionDate }: { news: RadarNews | null; checks: RadarNews[]; sessionDate: string }) {
+  return (
+    <section aria-label="News nearby" className="space-y-1.5">
+      <h3 className="text-xs font-semibold text-foreground">News nearby</h3>
+      {!news && <p className="text-xs text-muted-foreground">News not checked yet.</p>}
+      {news && news.status !== "found" && <p className="text-xs text-muted-foreground">{newsLine(news, sessionDate)}.</p>}
+      {news && news.headlines.length > 0 && (
+        <ul className="space-y-1.5">
+          {news.headlines.map((h) => (
+            <li key={h.url} className="min-w-0 text-xs">
+              <a href={h.url} target="_blank" rel="noopener noreferrer" className="break-words text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground">{h.headline}</a>
+              <span className="block text-muted-foreground">{headlineMeta(h, sessionDate)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {checks.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Checked {checks.map((c) => `${nyTime(c.checked_at)} (${CHECK_TEXT[c.status]})`).join(" · ")}. Headlines published near the move; not shown to be its cause.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: RadarRating) => void }) {
   const [detail, setDetail] = useState<RadarDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +109,7 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
           {" "}· {detail.event.rule_version} · {detail.event.universe_version}
         </p>
       </section>
+      <News news={detail.news} checks={detail.news_checks} sessionDate={detail.event.session_date} />
       <section aria-label="Revisions" className="space-y-2">
         <h3 className="text-xs font-semibold text-foreground">Later readings</h3>
         {detail.revisions.length === 0 && <p className="text-xs text-muted-foreground">No later readings yet.</p>}
@@ -137,6 +167,7 @@ function EventCard({ event, fresh, open, onToggle, onRated }: {
           <span>{event.latest_status ? `Now: ${STATUS_TEXT[event.latest_status]}` : "No later reading yet"}</span>
           {event.rating && <span>Rated: {RATINGS.find((r) => r.value === event.rating)?.label}</span>}
         </div>
+        <p className="mt-1 break-words text-xs text-muted-foreground" data-testid="radar-news-line">{newsLine(event.news, event.session_date)}</p>
       </button>
       {open && <div className="border-t p-3"><Detail event={event} onRated={onRated} /></div>}
     </li>

@@ -41,6 +41,11 @@ def stamp(value):
         return None
 
 
+def catalyst_first(articles):
+    """Material-catalyst headlines first; the sort is stable, so recency order holds within each group."""
+    return sorted(articles, key=lambda a: not bool(CATALYST_WORDS.search(a["headline"])))
+
+
 def eligible_headlines(articles, cutoff):
     """Reject unsafe or out-of-window data before it can introduce discovery symbols."""
     if not isinstance(articles, list):
@@ -93,7 +98,7 @@ def collect_market(symbols, cutoff, *, excluded_symbols=None, snapshots_reader=N
         gaps.append("Broad-market discovery/news unavailable; no claim that no opportunities exist.")
     discovery = []
     excluded = set(symbols) | set(excluded_symbols or []) | set(BACKDROP)
-    for item in sorted(broad, key=lambda a: not bool(CATALYST_WORDS.search(a["headline"]))):
+    for item in catalyst_first(broad):
         for symbol in item["symbols"]:
             if (len(discovery) < MAX_DISCOVERY and isinstance(symbol, str)
                     and re.fullmatch(r"[A-Z]{1,6}(\.[A-Z])?", symbol)
@@ -195,7 +200,7 @@ def collect_market(symbols, cutoff, *, excluded_symbols=None, snapshots_reader=N
     seen = set()
     # Diversify the larger sample: catalyst stories first, at most two per saved symbol.
     per_symbol = {}
-    for article in sorted(articles, key=lambda a: not bool(CATALYST_WORDS.search(a["headline"]))):
+    for article in catalyst_first(articles):
         if len(seen) >= MAX_HEADLINES:
             break
         if not isinstance(article, dict):

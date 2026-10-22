@@ -22,8 +22,9 @@ APPLICATION_ID = 0x52414431  # RAD1: the isolated Radar recorder file; foreign f
 RETENTION_SESSIONS = 60
 UNIVERSE_PATH = Path(__file__).resolve().parent.parent / "data" / "radar_universe.json"
 
-TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback"}
+TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback", "event_news"}
 RATINGS = ("useful", "already_knew", "too_late", "irrelevant")
+NEWS_STATUSES = ("found", "none_found", "unavailable")
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pass(id INTEGER PRIMARY KEY AUTOINCREMENT, session_date TEXT NOT NULL,
   started_at TEXT NOT NULL, finished_at TEXT NOT NULL, universe_version TEXT NOT NULL,
@@ -44,6 +45,11 @@ CREATE TABLE IF NOT EXISTS visit(id INTEGER PRIMARY KEY AUTOINCREMENT, visited_a
 CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL REFERENCES event(event_id),
   rating TEXT NOT NULL CHECK(rating IN ('useful','already_knew','too_late','irrelevant')), recorded_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS feedback_event ON feedback(event_id);
+CREATE TABLE IF NOT EXISTS event_news(id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL REFERENCES event(event_id),
+  checked_at TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('found','none_found','unavailable')), headlines TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS event_news_event ON event_news(event_id);
+CREATE TRIGGER IF NOT EXISTS event_news_no_update BEFORE UPDATE ON event_news BEGIN SELECT RAISE(ABORT,'radar news checks are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS event_news_no_delete BEFORE DELETE ON event_news BEGIN SELECT RAISE(ABORT,'radar news checks are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS visit_no_update BEFORE UPDATE ON visit BEGIN SELECT RAISE(ABORT,'radar visits are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS visit_no_delete BEFORE DELETE ON visit BEGIN SELECT RAISE(ABORT,'radar visits are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS feedback_no_update BEFORE UPDATE ON feedback BEGIN SELECT RAISE(ABORT,'radar feedback is immutable'); END;
@@ -121,6 +127,23 @@ class RadarEvent(TypedDict):
     evidence: list[RadarEvidence]
     coverage: RadarCoverage
     chart: dict[str, str]  # {"symbol": ..., "from": ..., "to": ...} for the chart link
+
+
+class RadarNewsHeadline(TypedDict):
+    headline: str
+    source: str | None
+    published_at: str
+    url: str
+    symbols: list[str]
+    timing: Literal["before", "after"]  # published before or after the event's first_seen_at
+
+
+class RadarEventNews(TypedDict):
+    """One news check of an event, saved beside it; the event itself is never rewritten."""
+    event_id: str
+    checked_at: str
+    status: Literal["found", "none_found", "unavailable"]
+    headlines: list[RadarNewsHeadline]
 
 
 class RadarEventRevision(TypedDict):
@@ -277,6 +300,26 @@ class RadarStore:
         """The newest rating per event; earlier ratings stay in the table."""
         with self._db() as db:
             return {row[0]: row[1] for row in db.execute("SELECT event_id, rating FROM feedback ORDER BY id")}
+
+    def append_news(self, check: RadarEventNews) -> None:
+        if check["status"] not in NEWS_STATUSES:
+            raise ValueError("unknown radar news status")
+        with self._db() as db:
+            db.execute("INSERT INTO event_news(event_id, checked_at, status, headlines) VALUES(?,?,?,?)",
+                       (check["event_id"], check["checked_at"], check["status"], _json(check["headlines"])))
+
+    def news_checks(self, event_id: str) -> list[RadarEventNews]:
+        """Every news check of one event, oldest first."""
+        with self._db() as db:
+            rows = db.execute("SELECT event_id, checked_at, status, headlines FROM event_news WHERE event_id=? ORDER BY id",
+                              (event_id,)).fetchall()
+        return [{**dict(row), "headlines": json.loads(row["headlines"])} for row in rows]
+
+    def latest_news(self) -> dict[str, RadarEventNews]:
+        """The newest news check per event; earlier checks stay in the table."""
+        with self._db() as db:
+            rows = db.execute("SELECT event_id, checked_at, status, headlines FROM event_news ORDER BY id").fetchall()
+        return {row["event_id"]: {**dict(row), "headlines": json.loads(row["headlines"])} for row in rows}
 
     def prune_quotes(self, keep_sessions: int = RETENTION_SESSIONS) -> int:
         """Delete quote rows older than the newest ``keep_sessions`` recorded sessions; passes and events stay."""

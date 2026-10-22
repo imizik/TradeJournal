@@ -1,5 +1,5 @@
 {
-  "_note": "Synthetic Radar event and one revision in the RadarEvent / RadarEventRevision shape (app/engine/radar_store.py), for building the API and /radar screen before detection exists. Prices are invented; not a recorded market event.",
+  "_note": "Synthetic Radar event, one revision and two news checks in the RadarEvent / RadarEventRevision / RadarEventNews shapes (app/engine/radar_store.py), for building the API and /radar screen before detection exists. Prices and headlines are invented; not a recorded market event.",
   "event": {
     "event_id": "rad_sample_mu_20261020_1",
     "session_date": "2026-10-20",
@@ -32,6 +32,25 @@
         {"symbol": "SMH", "pass_id": 151, "retrieved_at": "2026-10-20T16:02:04.870Z", "last": 301.8, "change_pct": 0.8}
       ],
       "note": "Lead widened from 3.5 to 4.8 points over the next 50 minutes."
+    }
+  ],
+  "news_checks": [
+    {
+      "event_id": "rad_sample_mu_20261020_1",
+      "checked_at": "2026-10-20T15:13:05.000Z",
+      "status": "found",
+      "headlines": [
+        {"headline": "Micron raises quarterly revenue forecast on AI memory demand", "source": "benzinga", "published_at": "2026-10-20T14:41:00.000Z", "url": "https://example.com/news/micron-forecast", "symbols": ["MU"], "timing": "before"}
+      ]
+    },
+    {
+      "event_id": "rad_sample_mu_20261020_1",
+      "checked_at": "2026-10-20T15:28:05.000Z",
+      "status": "found",
+      "headlines": [
+        {"headline": "Micron raises quarterly revenue forecast on AI memory demand", "source": "benzinga", "published_at": "2026-10-20T14:41:00.000Z", "url": "https://example.com/news/micron-forecast", "symbols": ["MU"], "timing": "before"},
+        {"headline": "Memory stocks extend gains as Micron leads chip names", "source": "benzinga", "published_at": "2026-10-20T15:20:00.000Z", "url": "https://example.com/news/memory-stocks", "symbols": ["MU", "WDC"], "timing": "after"}
+      ]
     }
   ]
 }

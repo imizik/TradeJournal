@@ -25,7 +25,8 @@ involve Jo.
    [Feed API](#feed-api-and-screen).
 4. **`/radar` screen (built),** `frontend/app/radar/page.tsx`, checked against
    the sample event until step 2 writes real ones.
-5. **News enrichment:** "news nearby" or "cause unknown" on each event.
+5. **News enrichment (built):** "news nearby" or "cause unknown" on each
+   event, `backend/app/engine/radar_news.py`. See [News nearby](#news-nearby).
 
 ## Recorder
 
@@ -72,6 +73,29 @@ The screen shows one coverage line, then "New since your last visit" and the
 earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
 here; until step 2 writes events it shows the empty state with coverage.
+
+## News nearby
+
+After each regular-hours pass the recorder checks headlines for events under
+two hours old: once when an event has no check yet, and once more 15 minutes
+after that first check. At most 3 news requests go out per pass; the rest wait
+for the next minute. Each request asks `app.engine.news` (Alpaca/Benzinga, one
+fast page, no retry) for the event's own symbols only, over the 24 hours before
+`first_seen_at` up to the check time. It reuses the morning brief's
+`eligible_headlines` filter and `catalyst_first` ordering and keeps at most 5
+headlines, each marked as published before or after the event was first seen.
+
+Every check is a new row in the append-only `event_news` table (older files gain
+it when opened), with status `found`, `none_found` or `unavailable` (the
+provider failed). The event itself is never rewritten. A news failure never
+affects the quote pass.
+
+The feed and the event detail carry a `news` block with the latest check;
+the detail also lists every check in order. Each card shows one line — "News
+nearby: headline · source · time (before/after the move)", "No news found —
+cause unknown" or "News unavailable — cause unknown" — and the detail lists the
+headlines with links and when they were checked. Nothing says a headline
+caused the move.
 
 ## Activation boundary
 

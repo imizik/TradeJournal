@@ -120,6 +120,13 @@ def _revision_status(revisions: list[dict]) -> str | None:
     return revisions[-1]["status"] if revisions else None
 
 
+def _news_block(check: dict | None) -> dict | None:
+    """A saved news check as served; None until the first check. Headlines carry ``timing`` before/after the move."""
+    if check is None:
+        return None
+    return {"status": check["status"], "checked_at": check["checked_at"], "headlines": check["headlines"]}
+
+
 def _off(reason: str, session: str | None) -> dict:
     return {"state": "off", "reason": reason, "session": session, "events": [], "since_last_visit": [],
             "last_visit_at": None, "coverage": None, "generated_at": None}
@@ -160,13 +167,14 @@ def _read_feed(store: RadarStore, session: str | None, since: str | None, now: f
     coverage = _coverage(store, session, now)
     passes_total = len(store.passes(session))
     ratings = store.latest_ratings()
+    news = store.latest_news()
     last_visit = store.last_visit()
     baseline = since or last_visit
     events = []
     for event in store.events(session):
         revisions = store.revisions(event["event_id"])
         events.append({**event, "latest_status": _revision_status(revisions), "revision_count": len(revisions),
-                       "rating": ratings.get(event["event_id"])})
+                       "rating": ratings.get(event["event_id"]), "news": _news_block(news.get(event["event_id"]))})
     new = [e["event_id"] for e in events if baseline is None or _parse(e["first_seen_at"]) > _parse(baseline)]
     return {"state": _state(coverage, passes_total, now), "reason": None, "session": session, "sessions": sessions[:30],
             "events": events, "since_last_visit": new, "last_visit_at": last_visit, "coverage": coverage,
@@ -179,7 +187,9 @@ def event_detail(event_id: str):
     event = store.event(event_id)
     if event is None:
         raise HTTPException(404, "Radar event not found")
-    return {"event": event, "revisions": store.revisions(event_id), "rating": store.latest_ratings().get(event_id)}
+    checks = [_news_block(c) for c in store.news_checks(event_id)]
+    return {"event": event, "revisions": store.revisions(event_id), "rating": store.latest_ratings().get(event_id),
+            "news": checks[-1] if checks else None, "news_checks": checks}
 
 
 @router.post("/visits")
