@@ -156,3 +156,28 @@ test("Group movement discloses stale and off states", async ({ page }) => {
   await expect(movement).toContainText("Radar recording is not switched on.");
   await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
 });
+
+test("a superseded group request cannot restore values after a newer failure", async ({ page }) => {
+  let held: import("@playwright/test").Route | undefined;
+  let reads = 0;
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    reads++;
+    if (reads === 1) { held = route; return; }
+    return route.fulfill({ status: 503, body: "unavailable" });
+  });
+  await page.clock.install();
+  await page.goto("/charts");
+  await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect.poll(() => reads).toBe(1);
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await page.clock.fastForward(60_000);
+  await expect(movement).toContainText("Group movement unavailable");
+  const response = page.waitForResponse((r) => r.url().includes("/radar/groups/compare") && r.status() === 200);
+  await held!.fulfill({ json: comparison() });
+  await response;
+  // Let the response body and React's update settle before checking the failure remains.
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(movement).toContainText("Group movement unavailable");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
+});

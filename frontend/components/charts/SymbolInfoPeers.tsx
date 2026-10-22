@@ -26,12 +26,15 @@ export function usePeers(symbol: string, enabled: boolean, owner: boolean, group
     if (!enabled) return;
     const controller = new AbortController();
     let active = true;
+    let sequence = 0;
+    queueMicrotask(() => { if (active) setMovement(null); });
     const run = (quiet: boolean) => {
+      const request = ++sequence;
       if (owner) getGroupComparison(symbol, group, controller.signal)
-        .then((data) => { if (active) setMovement({ key: movementKey, data }); })
-        .catch(() => { if (active) setMovement({ key: movementKey, error: true }); });
-      fetchSymbolPeers(symbol, controller.signal).then((data) => { if (active) setResult({ symbol, data }); })
-        .catch(() => { if (active && !quiet) setResult({ symbol, error: true }); });
+        .then((data) => { if (active && request === sequence) setMovement({ key: movementKey, data }); })
+        .catch(() => { if (active && request === sequence) setMovement({ key: movementKey, error: true }); });
+      fetchSymbolPeers(symbol, controller.signal).then((data) => { if (active && request === sequence) setResult({ symbol, data }); })
+        .catch(() => { if (active && request === sequence && !quiet) setResult({ symbol, error: true }); });
     };
     const timer = setTimeout(() => run(false), 300);
     const again = setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS);
