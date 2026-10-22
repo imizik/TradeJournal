@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
-from app.engine import ntfy, position_alerts
+from app.engine import ntfy, position_alerts, reconstructor
 from app.engine.chart_math import ET
 from app.engine.position_alerts import PositionAlerts
 from app.engine.tradier import TradierError, TradierQuote
@@ -75,6 +75,18 @@ def fill(db, side, qty, price, when, expiration=FRI):
     db.commit()
     _rebuild_trades(db, "test")
     db.commit()
+
+
+class _Wednesday(date):
+    @classmethod
+    def today(cls):
+        return WED
+
+
+@pytest.fixture(autouse=True)
+def on_wednesday(monkeypatch):
+    """Trade rebuilds expire contracts past the machine's own date; these trades are held on WED, whatever today is."""
+    monkeypatch.setattr(reconstructor, "date", _Wednesday)
 
 
 @pytest.fixture
