@@ -22,7 +22,7 @@ from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine.chart_indices import is_index
 from app.engine import tradier
-from app.engine.chart_math import ET, INTERVALS
+from app.engine.chart_math import ET, INTERVALS, market_day
 from app.engine import symbol_info_tradier
 from app.engine import chart_journal, access
 from app.engine.quotes import OptionQuoteRequest, option_mark
@@ -223,11 +223,16 @@ def workspace(
             other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
                                          volume_profile=chart_history.volume_profile, **levels_for("nearest"))
             data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
-                                     "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note")}
+                                     "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note"), "market": other.get("market")}
             add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
             data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
+
+    # Equity watchlist/session context stays independent when an index is focused.
+    if is_index(symbol) and any(not is_index(name) for name in [*symbols, *held]):
+        today = datetime.now(ET).date()
+        data["equity_market"] = market_day(today, chart_calendar.hours(today))
 
     # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
     earnings = symbol_info_tradier.symbol_events.chart_earnings([s for s in [symbol, *held] if not is_index(s)], [s for s in symbols if not is_index(s)], datetime.now(ET).date())

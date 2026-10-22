@@ -21,7 +21,9 @@ balanced size and remains resizable. **Tech** restores the main symbol,
 intervals, held symbols, linked-range choice and proportions from before Macro.
 That return snapshot is local to this browser, survives reload, and does not
 replace a named layout. Existing named layouts still leave the main ticker
-unchanged. Five distinct symbols now fit; no extra chart slots were added.
+unchanged. Unsupported index intervals are mapped to 4h for display and data
+requests, including URL/reload and saved-layout entry; the saved stock
+arrangement itself is preserved. Five distinct symbols now fit; no extra chart slots were added.
 
 `chart_indices.py` uses the existing Tradier chart cache, budget and failure
 handling. VIX is an index in points. **US10Y** maps to **TNX:CGI**, the Cboe
@@ -47,6 +49,8 @@ cache even while stock panels refresh every 15 seconds. VIX and US10Y never
 join the stock trade stream. They have no traded volume, VWAP/RVol, equity
 split adjustment, automatic/options levels, earnings, stock fundamentals,
 journal fills or trade-planning controls. Saved stock studies remain intact.
+Equity calendar metadata remains independent when an index is focused, so
+held stock countdowns and watchlist session-change references keep working.
 Index observations can stop at different hours; the screen does not infer an
 NYSE close or describe an old observation as live.
 
@@ -359,6 +363,14 @@ cd backend
   buttons) and its candle values row sit over the top of the candles, like
   TradingView's legend, on a faint backdrop so they stay readable, and only
   their text takes the pointer; a phone keeps them stacked above the candles.
+  Like TradingView, the volume bars carry the latest candle's volume as a tag
+  on the price scale. The watchlist reads Last, Chg% and Vol (today's volume
+  from the Tradier quote), and the dollar Chg too once the dock is at least
+  300px wide. Above the symbol info a price card shows the regular session's
+  price large with its change, a premarket or after-hours price on its own
+  line, and today's volume against Tradier's 30-day average with a bar; that
+  average is one overview read per settled symbol, shared for a minute with
+  the Overview tab (`frontend/lib/symbolInfo.ts`).
   The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
   and latest fills under it, or the layers panel. Those three sections are

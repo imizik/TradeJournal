@@ -180,6 +180,7 @@ export type ChartQuote = {
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
+  market?: MarketDay;
   instrument?: { kind: "index"; unit: "index_points" | "percent"; provider_symbol: string; name: string; scale: number };
   history_note?: string;
   panels: Partial<Record<Interval, ChartPanelData>>; fetched_at: Record<string, number>;
@@ -201,7 +202,7 @@ export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
   refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
   history_note: string; fills: FillMarker[]; fills_truncated: boolean;
-  market?: MarketDay;
+  equity_market?: MarketDay;
   /** Symbols that panels hold on their own (C7.1), without quotes. */
   extras?: Record<string, SymbolPanels>;
   /** Every level alert (C5.1); absent from a backend older than C5.1. */
@@ -441,7 +442,6 @@ export type ChartSettings = {
    * an older build rebuilds every layout from the keys it knows.
    */
   layoutProportions: Record<string, Proportions>;
-  /** Main tickers of newly saved layouts; separate so older tabs preserve them. */
 };
 /**
  * The options levels layer (C4.4): hidden until asked for. `mode` ranks strikes by
@@ -485,7 +485,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
-/** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
+/** Panels may hold four symbols besides the main one: each costs its own chart-feed reads. */
 export const MAX_HELD_SYMBOLS = 4;
 export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
 /** The most layouts this page lets you save. */
@@ -1040,3 +1040,9 @@ export function readTechReturn(value: string | null): TechReturn | null {
 export const macroArrangement = (s: ChartSettings) => s.symbol === "SPY" && s.panelSymbols.join(",") === ",QQQ,IWM,VIX,US10Y";
 
 export const instrumentTime = (stamp: number) => `${etTime(stamp, true)} ${etTime(stamp)} ET`;
+
+/** Effective capabilities cover restored, URL-linked and named layouts without rewriting saved arrangements. */
+export function instrumentSettings(settings: ChartSettings): ChartSettings {
+  const intervals = settings.intervals.map((value, index) => supportedIntervals((index && settings.panelSymbols[index]) || settings.symbol).includes(value) ? value : "4h");
+  return intervals.every((value, index) => value === settings.intervals[index]) ? settings : { ...settings, intervals };
+}

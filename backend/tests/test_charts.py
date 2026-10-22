@@ -656,3 +656,16 @@ def test_macro_route_accepts_five_symbols_and_skips_index_journal(route_client, 
     assert response.status_code == 200
     assert calls == ["SPY", "QQQ", "IWM", "VIX", "US10Y"]
     assert response.json()["extras"]["US10Y"]["positions"] == []
+
+
+def test_index_main_keeps_independent_equity_calendar(route_client, monkeypatch):
+    market = {"date": "2026-10-21", "status": "open", "sessions": [{"part": "regular", "start": 1, "end": 2}]}
+    def workspace(symbol, intervals, watchlist, session, **kwargs):
+        return {"symbol": symbol, "panels": {}, "issues": [], "fetched_at": {}, "intraday_as_of": None,
+                "adjustment": None, "market": market if symbol == "SPY" else {"sessions": []}}
+    monkeypatch.setattr(charts.chart_feed, "workspace", workspace)
+    monkeypatch.setattr(charts.chart_calendar, "hours", lambda day: {"status": "open", "open": 570, "close": 960, "source": "tradier"})
+    data = route_client.get("/charts/workspace?symbol=US10Y&intervals=4h&watchlist=SPY&extras=SPY:4h").json()
+    assert data["market"]["sessions"] == []
+    assert data["equity_market"]["sessions"][1]["part"] == "regular"
+    assert data["extras"]["SPY"]["market"] == market

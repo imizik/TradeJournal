@@ -406,7 +406,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
         } },
     });
     const candles = chart.addSeries(CandlestickSeries, { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", borderVisible: false });
-    const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
+    const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: true });
     volume.priceScale().applyOptions({ scaleMargins: { top: VOLUME_TOP, bottom: 0 } });
     const lines = {} as Bundle["lines"];
     for (const name of OVERLAYS) lines[name] = chart.addSeries(LineSeries, { color: colorsRef.current[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
@@ -1153,7 +1153,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
                 Automatic<span className="block text-[10px] text-slate-500">{macro ? "Same as every chart; only EMA 9 while this chart is small" : "Same as every chart; only EMA 9 and VWAP while this chart is small"}</span></button>
               <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">This chart only</p>
               {studiesHidden && <p className="px-2 text-[10px] text-amber-300">Indicators are hidden on every chart.</p>}
-              {STUDIES.filter((key) => !macro || !["volume", "vwap"].includes(key)).map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
+              {STUDIES.filter((key) => !macro || !["volume", "vwap"].includes(key)).map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, macro ? (ownStudies?.[k] ?? requested[k]) : indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
                 className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
             </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
           <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { actions.current.onUserMove?.(); pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
