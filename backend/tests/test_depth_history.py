@@ -69,7 +69,7 @@ def test_missing_side_adds_nothing_and_columns_merge_exactly(tmp_path):
     index = dh.DayIndex(tmp_path / "NVDA.jsonl.gz")
     index.refresh()
     first, second = index.columns("arca", 0, 10_000)
-    assert first == [T0, 10_000, [99.0, 200.0, 101.0, 10.0]]  # ask mean over the one sample that had asks
+    assert first == [T0, 10_000, [99.0, 200.0, 101.0, 10.0], 1]  # ask mean over the one sample that had asks; one bid pair
     assert second[2] == [99.0, 50.0, 101.0, 30.0]
     assert index.columns("arca", 0, 30_000)[0][2] == [99.0, 150.0, 101.0, 20.0]
 

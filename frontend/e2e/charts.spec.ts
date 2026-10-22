@@ -7018,8 +7018,8 @@ test("recorded depth draws liquidity levels and a depth profile with no Connect,
   const mid = Math.round((245 + 239 * 0.06 + Math.sin(239 / 8) * 2) * 100) / 100;
   const at = (k: number) => Math.round((mid + k * 0.01) * 100) / 100;
   const size = (k: number) => 40 + Math.abs((k * 37) % 90) + (k === -40 ? 9000 : k === 35 ? 2600 : 0);
-  const columns: [number, number, number[]][] = [];
-  for (let t = end - 3000; t < end; t += 10) columns.push([t * 1000, 10_000, Array.from({ length: 60 }, (_, n) => n < 30 ? [at(-1 - n), size(-1 - n)] : [at(n - 29), size(n - 29)]).flat()]);
+  const columns: [number, number, number[], number][] = [];
+  for (let t = end - 3000; t < end; t += 10) columns.push([t * 1000, 10_000, Array.from({ length: 60 }, (_, n) => n < 30 ? [at(-1 - n), size(-1 - n)] : [at(n - 29), size(n - 29)]).flat(), 30]);
   const requests: string[] = [];
   let live = true;
   await page.route("**/api/level2-lab/depth**", (route) => {
