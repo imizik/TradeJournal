@@ -1451,3 +1451,13 @@ reopen them without the user.
     C4.4 and C4.5 were built ahead of G0, C5.2 and Phase 3, with symbol info
     T2.1 in the same PR. The rest of decision 7 stands: replay and pre-trade
     capture still follow G0.
+
+## Macro continuation — October 21, 2026
+
+Owner-approved implementation: the existing five slots get a Macro preset
+(SPY/QQQ/IWM/VIX/US10Y at 4h), a local Tech return, and explicit Tradier
+index routing for VIX and TNX/10. See [the implementation contract](charts-workspace.md#macro-layout-vix-and-10-year-yield)
+for units, observation hours, retained history and cost limits. No crypto,
+futures, eight-panel grid, additional provider or Radar dependency.
+Production deployment and the owner's morning-routine acceptance are separate
+from fixture tests and provider entitlement probes.

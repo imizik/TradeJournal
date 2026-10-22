@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
-import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, nyDay, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import { isMacroSymbol, macroIndicators, instrumentPrice, instrumentTime, supportedIntervals, INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, nyDay, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, FillLabels, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
 import { newsMarks, newsTip } from "@/lib/newsMarkers";
@@ -168,10 +168,11 @@ function hoverStore() {
  * chart no height; there a click or right-click on it reaches the chart beneath (the EMA and VWAP items take the pointer for their explanations). A phone's
  * row wraps to several lines, so there it stays above the candles.
  */
-function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, vwapBands, rvol: today, pastRvol, showRvol, timer }: {
-  id: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
+function CandleValues({ id, symbol, main, pending, bars, hover, interval, indicators, colors, vwapBands, rvol: today, pastRvol, showRvol, timer }: {
+  id: string; symbol: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
   indicators: Indicators; colors: Record<ColorKey, string>; vwapBands: boolean; rvol: RvolBaseline | null; pastRvol?: Record<string, RvolBaseline>; showRvol: boolean; timer: React.ReactNode;
 }) {
+  const formatPrice = (value: number | null | undefined) => instrumentPrice(value, symbol);
   const time = useSyncExternalStore(hover.subscribe, hover.get, hover.get);
   const bar = (time !== null && barAt(bars ?? [], time)) || bars?.at(-1);
   // An older session's own baseline from its history page (C2.6); otherwise today's, from the workspace.
@@ -191,7 +192,7 @@ function CandleValues({ id, main, pending, bars, hover, interval, indicators, co
   return (
     <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "h-6 md:pr-16"}`}>
       <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1" aria-label={`${id} candle values`}>
-      {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
+      {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{formatPrice(bar.open)}</span></span><span>H <span className="text-slate-300">{formatPrice(bar.high)}</span></span><span>L <span className="text-slate-300">{formatPrice(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{formatPrice(bar.close)}</span></span>{!main && !isMacroSymbol(symbol) && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
         {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
       </div>
       {!main && timer}
@@ -200,11 +201,11 @@ function CandleValues({ id, main, pending, bars, hover, interval, indicators, co
         {vwapBands && <span className="pointer-events-auto" style={{ color: colors.vwap }} title={bar?.vwap == null ? vwapWhy : bar.vwap_sd == null ? "VWAP band data is unavailable for this candle." : `RTH VWAP bands: ±1σ ${price(bar.vwap - bar.vwap_sd)}–${price(bar.vwap + bar.vwap_sd)}; ±2σ ${price(bar.vwap - 2 * bar.vwap_sd)}–${price(bar.vwap + 2 * bar.vwap_sd)}. Volume-weighted HLC3 dispersion since 9:30 ET.`}>VWAP bands {bar?.vwap != null && bar.vwap_sd != null ? "±1σ / ±2σ" : "—"}</span>}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
         {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
-        {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+        {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}
         {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group pointer-events-auto relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
           <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
           <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
-            {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+            {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}</span>
         </span>}
         {rvolValue}
         {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
@@ -222,7 +223,8 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: requested, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+  indexAsOf?: number | null;
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
   colors?: Record<ColorKey, string>;
@@ -309,6 +311,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   /** Order flow from the depth recorder or a live session: wall lines and the latest book profile (owner). */
   liquidity?: { walls: WallLine[]; profile: DepthProfile | null; stale: boolean } | null;
 }) {
+  const macro = isMacroSymbol(symbol);
+  const given = useMemo(() => macro ? macroIndicators(requested) : requested, [macro, requested]);
   const container = useRef<HTMLDivElement>(null);
   const colorsRef = useRef(colors);
   const box = useRef<HTMLElement>(null);
@@ -1099,6 +1103,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     bundle.current?.layer.setPreview(null);
   }, [tool]);
 
+  useEffect(() => {
+    const b = bundle.current;
+    if (!b) return;
+    const format = symbol === "US10Y"
+      ? { type: "custom" as const, minMove: 0.001, formatter: (v: number) => `${v.toFixed(3)}%` }
+      : { type: "price" as const, precision: 2, minMove: 0.01 };
+    b.candles.applyOptions({ priceFormat: format });
+    Object.values(b.lines).forEach((line) => line.applyOptions({ priceFormat: format }));
+  }, [symbol]);
   // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
   // A compact chart keeps the readout, which costs no room, while it leaves out the volume bars.
   const showRvol = given.volume && intradayInterval(interval);
@@ -1108,7 +1121,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   // header keeps room for its controls at quarter width.
   // A compact chart's header buttons sit closer, so its symbol and interval keep their room.
   const button = compact ? "p-1" : "p-1.5";
-  const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
+  const timer = !macro && !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
@@ -1122,13 +1135,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
             {symbol}{follows ? <Link2 size={11} className="text-slate-500" aria-hidden /> : <Pin size={11} className="text-sky-300" aria-hidden />}</button>
           : <span className="font-semibold tracking-wide text-slate-200">{symbol}</span>}
           <select aria-label={`${main ? "Main" : id} interval`} value={interval} onChange={(e) => onInterval(e.target.value as Interval)} className="rounded border-0 bg-slate-800 px-1.5 py-1 text-[11px] text-slate-300">
-            {INTERVALS.map((i) => <option key={i}>{i}</option>)}
+            {supportedIntervals(symbol).map((i) => <option key={i}>{i}</option>)}
           </select>
-          {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
+          {macro && <span className="text-[9px] text-slate-400" title="Tradier index observations; 4h clock buckets start at New York midnight">{symbol === "US10Y" ? "Yield %" : "Index pts"}</span>}
+          {!macro && main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
           {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
         <div className={`pointer-events-auto flex shrink-0 items-center rounded bg-[#10151e]/90 ${compact ? "gap-0" : "gap-1"}`}>
-          {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
+          {onPlan && !macro && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
           <span data-quiet-controls={main ? undefined : ""} className={`flex items-center ${compact ? "gap-0" : "gap-1"}`}>
@@ -1136,10 +1150,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
             className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${ownStudies ? "text-sky-300" : "text-slate-500"}`}
             content={() => <div className="flex w-52 flex-col gap-0.5 text-[11px]">
               <button aria-pressed={!ownStudies} onClick={() => onStudies(null)} className={`rounded px-2 py-1 text-left hover:bg-slate-800 ${ownStudies ? "text-slate-400" : "text-slate-200"}`}>
-                Automatic<span className="block text-[10px] text-slate-500">Same as every chart; only EMA 9 and VWAP while this chart is small</span></button>
+                Automatic<span className="block text-[10px] text-slate-500">{macro ? "Same as every chart; only EMA 9 while this chart is small" : "Same as every chart; only EMA 9 and VWAP while this chart is small"}</span></button>
               <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">This chart only</p>
               {studiesHidden && <p className="px-2 text-[10px] text-amber-300">Indicators are hidden on every chart.</p>}
-              {STUDIES.map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
+              {STUDIES.filter((key) => !macro || !["volume", "vwap"].includes(key)).map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
                 className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
             </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
           <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { actions.current.onUserMove?.(); pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
@@ -1148,7 +1162,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           </span>
         </div>
       </div>
-      <CandleValues id={id} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} vwapBands={vwapBands} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
+      <CandleValues id={id} symbol={symbol} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} vwapBands={vwapBands} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
+      {macro && <p className="shrink-0 px-3 text-[9px] text-slate-400 md:absolute md:top-12 md:z-10 md:max-w-[calc(100%-4.5rem)] md:rounded md:bg-[#10151e]/90" title="Provider observations, not trades. No volume/VWAP; recent intraday history only.">Tradier · {indexAsOf ? `observed ${instrumentTime(indexAsOf)}` : interval === "1D" && panel?.bars.length ? `daily through ${nyDay(panel.bars[panel.bars.length - 1].time)}` : "observation time unavailable"} · polling</p>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />

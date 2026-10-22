@@ -34,7 +34,7 @@ export type SplitRecord = { ex_date: string; ratio: number; label: string };
  * available, so prices are as the provider supplied them and `warnings` says so.
  */
 export type PriceAdjustment = {
-  basis: "split_adjusted"; status: "ok" | "stale" | "unknown"; source: string; as_of: number | null;
+  basis: "split_adjusted" | "index_native"; status: "ok" | "stale" | "unknown"; source: string; as_of: number | null;
   splits: SplitRecord[]; daily: Record<string, "provider_adjusted" | "adjusted_here" | "unverified">;
   dividends: "unsupported"; dividends_note: string; warnings: string[];
 };
@@ -156,7 +156,7 @@ export type HistoryPage = {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
   bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
   continuation: string | null; warmup: "ready" | "pending" | "insufficient";
-  source: "alpaca_sip" | "tradier"; price_basis: "split_adjusted"; adjustment: PriceAdjustment; fills_truncated: boolean;
+  source: "alpaca_sip" | "tradier"; price_basis: "split_adjusted" | "index_native"; adjustment: PriceAdjustment; fills_truncated: boolean;
   /** Daily and weekly pages: the date of the earliest bar Tradier holds (not the listing date). */
   history_start?: string | null;
   issue: { code: string; message: string; retry_at: number } | null;
@@ -174,11 +174,14 @@ export type ChartQuote = {
   symbol: string; name: string; instrument_type?: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null;
   /** Tradier's explicit current regular-session close; null until it is known. */
+  unit?: "index_points" | "percent"; provider_symbol?: string; change_bps?: number | null;
   regular_close?: number | null; trade_time: number | null;
   day_high?: number | null; day_low?: number | null; week_52_high?: number | null; week_52_low?: number | null;
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
+  instrument?: { kind: "index"; unit: "index_points" | "percent"; provider_symbol: string; name: string; scale: number };
+  history_note?: string;
   panels: Partial<Record<Interval, ChartPanelData>>; fetched_at: Record<string, number>;
   intraday_as_of: number | null; issues: string[];
   /** Fill markers stop at the newest 1,000 in the window; the chart says so. */
@@ -317,15 +320,16 @@ export const SMALL_SHARES: Record<SmallChartSize, number> = { compact: 0.275, no
 const EQUAL_COLUMNS = [0.25, 0.25, 0.25, 0.25];
 /** New setups start with the compact lower row, so the main chart gets about 72% of the grid; saved settings keep their own size. */
 export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.compact, columns: EQUAL_COLUMNS };
-/** The two built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
+/** The built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
 export const LAYOUT_PRESETS = [
   { id: "active", name: "Active", detail: "Main chart large, lower row compact, side dock closed", smallSize: "compact", dock: false },
+  { id: "macro", name: "Macro", detail: "SPY · QQQ · IWM · VIX · US10Y, 4h; keeps a return to Tech", smallSize: "normal", dock: false },
   { id: "research", name: "Research", detail: "Balanced rows, side dock open", smallSize: "normal", dock: true },
 ] as const satisfies readonly { id: string; name: string; detail: string; smallSize: SmallChartSize; dock: boolean }[];
 export type LayoutPreset = (typeof LAYOUT_PRESETS)[number];
-/** A preset arranges the five charts and sets the desktop split; intervals, held symbols, linked ranges and a phone's chart height stay as they are. */
+/** Macro sets its explicit instruments/4h intervals; other presets only change the split. A phone's chart height stays as it is. */
 export const applyPreset = (settings: ChartSettings, preset: LayoutPreset): ChartSettings =>
-  ({ ...settings, layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
+  ({ ...settings, ...(preset.id === "macro" ? { symbol: "SPY", intervals: ["4h", "4h", "4h", "4h", "4h"] as Interval[], panelSymbols: [null, "QQQ", "IWM", "VIX", "US10Y"], linkRange: false } : {}), layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
 const thousandths = (value: number) => Math.round(value * 1000) / 1000;
 /**
  * Proportions from outside this code, kept to what the dividers can make: the
@@ -437,6 +441,7 @@ export type ChartSettings = {
    * an older build rebuilds every layout from the keys it knows.
    */
   layoutProportions: Record<string, Proportions>;
+  /** Main tickers of newly saved layouts; separate so older tabs preserve them. */
 };
 /**
  * The options levels layer (C4.4): hidden until asked for. `mode` ranks strikes by
@@ -481,7 +486,7 @@ export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, nor
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
 /** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
-export const MAX_HELD_SYMBOLS = 2;
+export const MAX_HELD_SYMBOLS = 4;
 export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
 /** The most layouts this page lets you save. */
 export const MAX_LAYOUTS = 12;
@@ -656,8 +661,9 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
   [intervals[0], intervals[index]] = [intervals[index], intervals[0]];
   const held = settings.panelSymbols[index];
   if (!held || held === settings.symbol) return { ...settings, intervals };
-  return { ...settings, intervals, symbol: held,
-    panelSymbols: settings.panelSymbols.map((other, i) => i === index ? settings.symbol : other === held ? null : other),
+  const panelSymbols = settings.panelSymbols.map((other, i) => i === index ? settings.symbol : other === held ? null : other);
+  return { ...settings, intervals: intervals.map((v, i) => supportedIntervals(panelSymbols[i] || held).includes(v) ? v : "4h"), symbol: held,
+    panelSymbols,
     recent: [settings.symbol, ...settings.recent.filter((r) => r !== settings.symbol && r !== held)].slice(0, 8) };
 }
 
@@ -1015,3 +1021,22 @@ export function createChartCommands() {
     snapshot(panel: string): HTMLCanvasElement | null { try { return pictures.get(panel)?.() ?? null; } catch { return null; } },
   };
 }
+
+/** Index capabilities are applied at render/request time; saved stock studies stay untouched. */
+export const isMacroSymbol = (symbol: string) => symbol === "VIX" || symbol === "US10Y";
+export const macroIndicators = (value: Indicators): Indicators => ({ ...value, volume: false, vwap: false, fills: false });
+export const instrumentPrice = (value: number | null | undefined, symbol: string) => value == null ? "—" : symbol === "US10Y" ? `${value.toFixed(3)}%` : symbol === "VIX" ? `${value.toFixed(2)} pts` : price(value);
+export const supportedIntervals = (symbol: string): readonly Interval[] => isMacroSymbol(symbol) ? ["4h", "1D"] : INTERVALS;
+export type TechReturn = Arrangement & { symbol: string; active: boolean };
+export const TECH_RETURN_KEY = "tradejournal.charts.techReturn.v1";
+export function readTechReturn(value: string | null): TechReturn | null {
+  try {
+    const row = JSON.parse(value ?? "null");
+    if (!row || typeof row.symbol !== "string" || !validSymbol(row.symbol)) return null;
+    const arrangement = savedArrangement(row);
+    return arrangement ? { ...arrangement, symbol: row.symbol, active: row.active !== false, proportions: cleanProportions(row.proportions) } : null;
+  } catch { return null; }
+}
+export const macroArrangement = (s: ChartSettings) => s.symbol === "SPY" && s.panelSymbols.join(",") === ",QQQ,IWM,VIX,US10Y";
+
+export const instrumentTime = (stamp: number) => `${etTime(stamp, true)} ${etTime(stamp)} ET`;

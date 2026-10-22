@@ -466,3 +466,5 @@ revocation and dormant activation boundary. Proof lives in
 `backend/tests/test_advisor_assignments.py`, the existing owner transport test
 `frontend/scripts/advisor-owner.test.js`, and
 `frontend/e2e/advisor-assignments.auth.ts`. Actual Jo acceptance is separate.
+
+Macro Charts reuse `backend/app/engine/chart_indices.py` and the existing Charts workspace; `backend/tests/test_chart_indices.py` covers units/hours/cache, and `frontend/e2e/charts.spec.ts` covers Macro/Tech switching. See [the contract](../charts-workspace.md#macro-layout-vix-and-10-year-yield).

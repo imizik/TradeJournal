@@ -146,10 +146,11 @@ def test_stream_route_accepts_chart_symbols_and_full_watchlist(monkeypatch):
     with TestClient(app) as client:
         for query in ("symbols=", "symbol=MRVL&symbols=../x"):
             assert client.get(f"/charts/stream?{query}").status_code == 422
-        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(34))).status_code == 422
-        # Three chart symbols plus all 30 watchlist symbols share this route.
-        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(33))).status_code == 503
+        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(36))).status_code == 422
+        # Five chart symbols plus all 30 watchlist symbols share this route.
+        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(35))).status_code == 503
         assert client.get("/charts/stream?symbols=MRVL,SPY,QQQ").status_code == 503
+        assert client.get("/charts/stream?symbols=VIX,US10Y").status_code == 422
         assert client.get("/charts/stream?symbol=MRVL").status_code == 503
 
 

@@ -233,6 +233,14 @@ the peer-confirmation question without cycling through several charts.
 
 ## Release 3: macro workspace, after the checklist
 
+**October 21 scope approved:** implement VIX and US10Y (Tradier TNX:CGI ÷ 10),
+with the existing five slots showing SPY/QQQ/IWM/VIX/US10Y at 4h and a local
+Tech return. Exact units, hours, paging and costs are in the
+[Charts contract](charts-workspace.md#macro-layout-vix-and-10-year-yield).
+Identifier and read-only entitlement probes passed; production deployment and
+owner use remain unverified. The draft below records the broader wish list;
+Bitcoin and oil are deferred, not part of this implementation.
+
 Draft based on the owner's screenshot and attempted US10Y addition:
 
 | Item | Question | Data/selection still to settle |
