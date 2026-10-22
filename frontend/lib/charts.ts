@@ -425,6 +425,8 @@ export type ChartSettings = {
   fillLabels: FillLabels;
   /** News markers on the smaller charts too; off by default (the main chart's layer, News markers). A field of its own like `newsHidden`. */
   newsOnSmall: boolean;
+  /** Candle width follows volume, like TradingView's volume candles; off by default. A field of its own like `newsHidden`. */
+  volumeCandles: boolean;
   /** Each smaller chart's own studies, aligned with `intervals`; null follows the workspace's (slimmed while compact). A field of its own like `newsHidden`. */
   panelStudies: (PanelStudies | null)[];
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
@@ -478,7 +480,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, vwapBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, vwapBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, volumeCandles: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
   proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
@@ -537,6 +539,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       newsHidden: value.newsHidden === true,
       fillLabels: cleanFillLabels(value.fillLabels),
       newsOnSmall: value.newsOnSmall === true,
+      volumeCandles: value.volumeCandles === true,
       panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
