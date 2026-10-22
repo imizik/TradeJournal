@@ -309,6 +309,14 @@ cd backend
   buttons) and its candle values row sit over the top of the candles, like
   TradingView's legend, on a faint backdrop so they stay readable, and only
   their text takes the pointer; a phone keeps them stacked above the candles.
+  Like TradingView, the volume bars carry the latest candle's volume as a tag
+  on the price scale. The watchlist reads Last, Chg% and Vol (today's volume
+  from the Tradier quote), and the dollar Chg too once the dock is at least
+  300px wide. Above the symbol info a price card shows the regular session's
+  price large with its change, a premarket or after-hours price on its own
+  line, and today's volume against Tradier's 30-day average with a bar; that
+  average is one overview read per settled symbol, shared for a minute with
+  the Overview tab (`frontend/lib/symbolInfo.ts`).
   The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
   and latest fills under it, or the layers panel. Those three sections are

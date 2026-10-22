@@ -27,6 +27,7 @@ import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
+import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
@@ -144,7 +145,43 @@ function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: Ch
     {/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 min-[1800px]:not-sr-only">{shown.source}</span></div>;
 }
 
-function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote?: ChartQuote; market?: MarketDay; paused: boolean }) {
+/**
+ * The main symbol's price card atop the dock, like TradingView's: the regular session's price large with its
+ * change from the previous close, a premarket or after-hours price on its own line, and today's volume against
+ * the 30-day average (Tradier's, from the symbol overview; the bar is left out until that arrives).
+ */
+function QuoteCard({ live, quote, candle, market, average }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay; average: number | null }) {
+  const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
+  useQuoteTiming(tick);
+  const shown = shownPrice({ tick, quote, candle, scope: live });
+  const part = shown.source === "Live trade" ? tick?.session ?? null : marketSessionAt(shown.at, market);
+  const extended = part === "pre" || part === "post" ? part : null;
+  // Outside the regular session the large price is the session it follows: today's close after hours, the previous close before the open.
+  const main = extended === "post" ? quote?.regular_close ?? null : extended === "pre" ? quote?.previous_close ?? null : shown.price;
+  const base = quote?.previous_close && quote.previous_close > 0 ? quote.previous_close : null;
+  const mainChange = extended === "pre" ? null : main != null && base ? main - base : null;
+  const extra = extended ? shown.price : null;
+  const extraPercent = extended ? sessionChange(extra, extended, quote) : null;
+  const signed = (value: number, suffix = "") => `${value >= 0 ? "+" : ""}${value.toFixed(2)}${suffix}`;
+  const tone = (value: number | null) => value == null ? "text-slate-500" : value < 0 ? "text-rose-400" : "text-emerald-400";
+  const volume = quote?.volume ?? null;
+  return <section aria-label={`${live.symbol} price`} className="border-b border-slate-700/40 px-3 py-2.5">
+    <div className="flex items-baseline gap-2"><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(main)}</span><span className="text-[10px] text-slate-500">USD</span>
+      {mainChange != null && base && <span className={`font-mono text-sm ${tone(mainChange)}`}>{signed(mainChange)} {signed((mainChange / base) * 100, "%")}</span>}</div>
+    <p className="text-[10px] text-slate-500">{extended === "post" ? "At close" : extended === "pre" ? "Previous close" : shown.source}</p>
+    {extended && <div className="mt-1.5 flex items-baseline gap-2"><span className="font-mono text-base text-slate-200">{price(extra)}</span>
+      {extraPercent != null && <span className={`font-mono text-xs ${tone(extraPercent)}`}>{signed(extraPercent, "%")}</span>}
+      <span className="text-[10px] text-slate-400">{extended === "post" ? "After hours" : "Premarket"}</span></div>}
+    <div className="mt-2 flex items-baseline justify-between text-[10px] text-slate-500"><span>Volume <span className="font-mono text-slate-200">{volume != null ? watchVolume.format(volume) : "—"}</span></span>
+      <span title="30-day average volume · Tradier statistics">Avg 30D <span className="font-mono text-slate-200">{average != null ? watchVolume.format(average) : "—"}</span></span></div>
+    {volume != null && average != null && average > 0 && <div role="meter" aria-label="Volume against the 30-day average" aria-valuemin={0} aria-valuemax={average * 2} aria-valuenow={volume}
+      className="mt-1 h-1 overflow-hidden rounded bg-slate-800"><div className={volume >= average ? "h-full bg-sky-400" : "h-full bg-sky-400/50"} style={{ width: `${Math.min(100, (volume / (average * 2)) * 100)}%` }} /></div>}
+  </section>;
+}
+
+const watchVolume = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+/** A watchlist row's numbers, like TradingView's: last, the change in dollars (a wide dock), the change in percent and the day's volume. */
+function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed; quote?: ChartQuote; market?: MarketDay; paused: boolean; wide: boolean }) {
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   useQuoteTiming(tick);
   const connected = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
@@ -169,9 +206,14 @@ function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote
     : quoteAge == null ? "Tradier quote · timestamp unavailable"
       : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
   const changeSource = closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
-  return <><span title={source} className="text-right font-mono text-slate-400">{price(displayPrice)}</span>
+  // The dollar change against the same reference the percent uses (the previous close, or today's close after hours).
+  const dollars = change != null && displayPrice != null ? displayPrice - displayPrice / (1 + change / 100) : null;
+  const tone = change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400";
+  return <><span title={source} className="text-right font-mono text-slate-300">{price(displayPrice)}</span>
+    {wide && <span aria-hidden title={changeSource} className={`text-right font-mono ${tone} ${closing ? "opacity-70" : ""}`}>{dollars == null ? "—" : `${dollars >= 0 ? "+" : ""}${dollars.toFixed(2)}`}</span>}
     <span title={changeSource} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${changeSource}`}
-      className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</span></>;
+      className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span>
+    <span title={quote?.volume != null ? `Today's volume ${quote.volume.toLocaleString("en-US")} · Tradier quote` : "Volume unavailable"} className="text-right font-mono text-slate-500">{quote?.volume != null ? watchVolume.format(quote.volume) : "—"}</span></>;
 }
 
 function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = false }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean; sample?: boolean }) {
@@ -1517,6 +1559,19 @@ export default function ChartWorkspace() {
     </div>
   </>;
 
+  // The 30-day average volume for the price card: the symbol overview's, cached a day on the server.
+  const [averageVolume, setAverageVolume] = useState<{ symbol: string; value: number | null } | null>(null);
+  const cardSymbol = settings.symbol;
+  useEffect(() => {
+    if (!(narrow ? sheet : dockShown) || dock.tab !== "watchlist") return;
+    const controller = new AbortController();
+    // Only the symbol stepped to and left: a quick run through the watchlist reads nothing on the way.
+    const timer = setTimeout(() => fetchSymbolOverview(cardSymbol, controller.signal).then((data) => setAverageVolume({ symbol: cardSymbol, value: data.datasets?.statistics?.average_volume_30_day ?? null }))
+      .catch(() => { if (!controller.signal.aborted) setAverageVolume({ symbol: cardSymbol, value: null }); }), 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [cardSymbol, narrow, sheet, dockShown, dock.tab]);
+  // A dock dragged wider (or a phone's sheet) has room for the dollar change too.
+  const watchWide = narrow || dockWidth >= 300;
   // The watchlist tab: the list, then the main symbol's levels and its latest fills, like a details pane under a watchlist.
   const watchlistPanel = <>
     <section aria-label="Watchlist">
@@ -1527,18 +1582,19 @@ export default function ChartWorkspace() {
           <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className={`${plain(false)} ${tap}`}><Plus size={14} /></button>
           <button aria-label="Close watchlist" title="Close the side panel" onClick={() => showDock(null)} className={`${plain(false)} ${tap}`}><X size={14} /></button>
         </div></div>
-      <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
+      <div className={`grid ${watchWide ? "grid-cols-[1fr_54px_44px_50px_38px_18px]" : "grid-cols-[1fr_54px_50px_38px_18px]"} gap-1 py-2 pl-3 pr-2 text-[9px] uppercase tracking-wider text-slate-600`}><span>Symbol</span><span className="text-right">Last</span>{watchWide && <span className="text-right">Chg</span>}<span className="text-right">Chg%</span><span className="text-right">Vol</span></div>
       {settings.watchlist.map((symbol) => {
         const quote = latest?.quotes.find((q) => q.symbol === symbol);
         const watchLive = { store: stream, key: streamKey, symbol, session, fetched: 0 } satisfies LiveFeed;
         return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
           {/* On a phone, charting a symbol closes the sheet so the chart shows. */}
-          <button data-watch-row onKeyDown={watchKey} onClick={() => { chooseSymbol(symbol); if (narrow) setSheet(false); }} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className={`grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 pl-2.5 pr-1 text-[11px] ${narrow ? "min-h-11 py-2" : "py-2.5"}`}><span className="truncate text-left font-medium text-slate-200">{symbol}</span><WatchlistQuote live={watchLive} quote={quote} market={latest?.market} paused={paused} /></button>
+          <button data-watch-row onKeyDown={watchKey} onClick={() => { chooseSymbol(symbol); if (narrow) setSheet(false); }} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className={`grid min-w-0 flex-1 ${watchWide ? "grid-cols-[1fr_54px_44px_50px_38px]" : "grid-cols-[1fr_54px_50px_38px]"} items-center gap-1 pl-2.5 pr-1 text-[11px] ${narrow ? "min-h-11 py-2" : "py-2.5"}`}><span className="truncate text-left font-medium text-slate-200">{symbol}</span><WatchlistQuote live={watchLive} quote={quote} market={latest?.market} paused={paused} wide={watchWide} /></button>
           <button aria-label={`Remove ${symbol} from watchlist`} className={`inline-flex shrink-0 items-center justify-center rounded text-slate-600 hover:text-rose-300 ${narrow ? "h-11 w-11" : "mr-2 p-0.5"}`} onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
         </div>;
       })}
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
+    <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />
     <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />
     <DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
       info="Save support, resistance, or a price you’re watching."
