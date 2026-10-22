@@ -4,6 +4,21 @@ Approved direction: dense dark owner Dashboard, with today's journal state
 first, compact realized performance and clear routes to deeper work. The
 reference picture defines hierarchy, not records, prices or new permissions.
 
+## October 21 walkthrough update — planning only
+
+The owner's first-open job is market orientation and opportunity investigation;
+he manages positions in Robinhood and does not routinely journal before entry
+or review after exit. The [workflow consolidation roadmap](workflow-consolidation-roadmap.md)
+owns the proposed next order and acceptance. Its Dashboard slice reuses the
+saved market/opportunity briefing, reserves one bounded Radar preview and keeps
+specific option/data concerns visible, with account/performance/stock detail
+secondary. No new market engine, position-management screen or mandatory review.
+
+The original sequence below records prior design and delivery; its journal-first
+opening hierarchy and pending relocation assumptions are not instructions to
+rebuild already-delivered work. Daily Practice is already at `/practice`.
+This update approves no implementation, data access, activation or deployment.
+
 ## Inventory and dependencies
 
 | Design element | Classification | Existing source, meaning and proof | Delivery |

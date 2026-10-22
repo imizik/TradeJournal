@@ -1,5 +1,14 @@
 # Charts epic: roadmap
 
+October 21 workflow planning: the [consolidation roadmap](workflow-consolidation-roadmap.md)
+records the owner's macro → familiar-tech routine, peer-confirmation need and
+optional use of plans/review. A local VWAP clarity fix is awaiting publication
+approval; this planning note is not its release evidence. After the Dashboard
+proposal, prioritize same-window peer context with Radar. Macro grid/data work
+requires the agreed instrument checklist; no chart cap or provider expansion is
+approved here. The September no-macro/futures assumption below is historical,
+not a reason to dismiss the owner's newer macro-view request.
+
 **October 11, 2026 priority:** [Dots functionality comes first](product-roadmap.md#selected-priorities--october-11-2026).
 Existing authorized bounded chart work may close and blocking defects may be
 fixed. New chart polish, Level 2/provider expansion and optional overlays defer
