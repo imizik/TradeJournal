@@ -96,6 +96,8 @@ const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
 /** The dock's width on this device (C7.4), and whether full screen shows the dock here ("1" or "0"). */
 const DOCK_WIDTH_KEY = "tradejournal.charts.dock.width.v1";
 const FULL_DOCK_KEY = "tradejournal.charts.dock.fullscreen.v1";
+/** Whether the desktop's drawing-tool rail shows on this device ("1" or "0"); hidden, the Draw button brings it back. */
+const RAIL_KEY = "tradejournal.charts.rail.v1";
 /** Saved plans whose strip was dismissed on this device (C3.4); the plans themselves stay. */
 const DISMISSED_PLANS_KEY = "tradejournal.charts.plans.dismissed.v1";
 /** A share as a flex-grow weight: thousandths, so the weights of a row always add up to at least 1. */
@@ -139,7 +141,7 @@ function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: Ch
     <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : signed(change)}</span>
     {sessionName && <span className="hidden whitespace-nowrap text-[10px] text-slate-400 sm:inline">{sessionName}</span>}
     {close != null && <span className="hidden whitespace-nowrap font-mono text-[10px] text-slate-500 lg:inline">· {extended === "post" ? "Close" : "Prev close"} <span className="text-slate-300">{price(close)}</span>{closeChange != null && <span className={closeChange < 0 ? " text-rose-400" : " text-emerald-400"}> {signed(closeChange)}</span>}</span>}
-    {/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 2xl:not-sr-only">{shown.source}</span></div>;
+    {/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 min-[1800px]:not-sr-only">{shown.source}</span></div>;
 }
 
 function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote?: ChartQuote; market?: MarketDay; paused: boolean }) {
@@ -235,6 +237,8 @@ export default function ChartWorkspace() {
   const [tool, setTool] = useState<Tool | null>(null);
   // On a phone the drawing tools wait behind the Draw button, so the chart starts higher; a chosen tool keeps them open.
   const [drawOpen, setDrawOpen] = useState(false);
+  // A desktop's rail beside the charts, unless this device put it away for the width; a chosen tool still brings it out.
+  const [railShown, setRailShown] = useState(true);
   // A note just placed, whose text field opens ready to type.
   const [fresh, setFresh] = useState<string | null>(null);
   const [drawError, setDrawError] = useState("");
@@ -659,6 +663,7 @@ export default function ChartWorkspace() {
       else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
       const wide = Number(localStorage.getItem(DOCK_WIDTH_KEY));
       if (Number.isFinite(wide) && wide > 0) setDockWidth(clamp(Math.round(wide), DOCK_WIDTH.min, DOCK_WIDTH.max));
+      if (localStorage.getItem(RAIL_KEY) === "0") setRailShown(false);
     } catch { /* open on the watchlist, at the default width */ }
   }, [owner]);
   // Full screen's dock was shared until C7.4: a device without its own choice yet starts from the shared one, once loaded.
@@ -1451,7 +1456,9 @@ export default function ChartWorkspace() {
   const control = narrow ? "h-11 min-w-11 px-2" : "h-7 min-w-7 px-1.5";
   const sep = <span aria-hidden className="mx-0.5 h-5 shrink-0 border-l border-slate-700/70" />;
   // Text beside a toolbar icon on a wide screen; in a phone's More menu it always shows.
-  const label = narrow ? "" : "hidden 2xl:inline";
+  const label = narrow ? "" : "hidden min-[1800px]:inline";
+  // A button's name that shows from 1800px and below it stays the button's name, so the toolbar keeps to one row on a laptop.
+  const named = narrow ? "sr-only" : "sr-only min-[1800px]:not-sr-only";
   // The dock's tabs: a press opens that panel, a second press closes the dock. A phone's top row has room for two;
   // its strike ladder opens from the More menu.
   const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"],
@@ -1641,8 +1648,16 @@ export default function ChartWorkspace() {
     try { localStorage.setItem(DISMISSED_PLANS_KEY, JSON.stringify(next)); } catch { /* dismissed for this visit only */ }
   };
   const changePlan = (work: Promise<Capture>) => work.then(keepPlan).catch((failure: Error) => setNotice(failure.message));
+  const railOut = railShown || !!tool;
+  /** Put the desktop rail away (cancelling a chosen tool) or bring it back, remembered on this device. */
+  const toggleRail = () => {
+    if (tool) chooseTool(tool);
+    const next = !railOut;
+    setRailShown(next);
+    try { localStorage.setItem(RAIL_KEY, next ? "1" : "0"); } catch { /* remembered for this visit only */ }
+  };
   const planButton = <button aria-label="Plan trade" aria-haspopup="dialog" aria-expanded={!!plan} title="Plan trade: what you are taking and your plan, before you enter (Alt+P)" onClick={openPlan}
-    className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={narrow ? "sr-only" : ""}>Plan trade</span></button>;
+    className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={named}>Plan trade</span></button>;
 
   const alerts = [
     past && <div key="past" role="status" aria-label="Past trade view" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-xs text-sky-100">
@@ -1672,7 +1687,7 @@ export default function ChartWorkspace() {
           {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`${plain(settings.intervals[0] === interval)} ${control} text-[11px]`}>{interval}</button>)}
         </div>
         {/* A toggle that looks like one: lit while premarket and after-hours candles show. */}
-        <button aria-pressed={settings.session === "extended"} title={settings.session === "extended" ? "Showing premarket and after-hours candles. Click for the regular session only." : "Showing the regular session only. Click to add premarket and after-hours candles."} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(settings.session === "extended")} ${control} gap-1 whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? <Check size={12} aria-hidden /> : <Square size={11} aria-hidden />}Extended hours</button>
+        <button aria-pressed={settings.session === "extended"} title={settings.session === "extended" ? "Showing premarket and after-hours candles. Click for the regular session only." : "Showing the regular session only. Click to add premarket and after-hours candles."} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(settings.session === "extended")} ${control} gap-1 whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? <Check size={12} aria-hidden /> : <Square size={11} aria-hidden />}{!narrow && <span aria-hidden className="min-[1800px]:hidden">ETH</span>}<span className={narrow ? "" : named}>Extended hours</span></button>
         {!narrow && sep}
         <ToolbarMenu label="Chart indicators" title="Studies and fill arrows on every chart" className={`${plain(false)} ${control} text-[11px]`}
           content={() => <div className="flex w-48 flex-col">
@@ -1693,12 +1708,14 @@ export default function ChartWorkspace() {
                   className={`flex-1 px-1 text-[11px] ${narrow ? "min-h-11" : "min-h-6"} ${zoomSpeed === speed ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{ZOOM_SPEED_NAMES[speed]}</button>)}
               </div>
             </div>
-          </div>}><SlidersHorizontal size={13} aria-hidden /><span className={narrow ? "sr-only" : ""}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
+          </div>}><SlidersHorizontal size={13} aria-hidden /><span className={named}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
         {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
-        <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={narrow ? "sr-only" : ""}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
+        <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={named}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
         {!narrow && focusButton()}
-        {narrow && <button aria-label={drawOpen || tool ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={drawOpen || !!tool} title="Drawing tools, undo and redo"
-          onClick={() => { if (tool) chooseTool(tool); setDrawOpen((open) => !(open || !!tool)); }} className={`${plain(drawOpen || !!tool, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={14} aria-hidden /></button>}
+        {narrow ? <button aria-label={drawOpen || tool ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={drawOpen || !!tool} title="Drawing tools, undo and redo"
+          onClick={() => { if (tool) chooseTool(tool); setDrawOpen((open) => !(open || !!tool)); }} className={`${plain(drawOpen || !!tool, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={14} aria-hidden /></button>
+          : <button aria-label={railOut ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={railOut} title={railOut ? "Hide the drawing tools for a wider chart (remembered on this device)" : "Drawing tools, undo and redo"}
+            onClick={toggleRail} className={`${plain(railOut, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={13} aria-hidden /></button>}
         {!narrow && secondary}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {narrow
@@ -1721,7 +1738,7 @@ export default function ChartWorkspace() {
         needsLinking={needsLinking} onReview={openLinks} onUnlink={(id) => relink(unlinkCapture(id)).catch((failure: Error) => setNotice(failure.message))} />
 
       <div className={fill ? "flex min-h-0 flex-1" : ""}>
-        {!narrow && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
+        {!narrow && railOut && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
         {/* A maximized chart is placed over this box, outside the grid's scrolling (C7.4). */}
         <div className={fill ? "relative flex min-h-0 min-w-0 flex-1" : "relative"}>
         <div data-testid="chart-grid" data-maximized={shown ?? undefined} className={fill ? `flex min-h-0 min-w-0 flex-1 flex-col ${sized ? "" : "gap-1"} ${cover ? "overflow-hidden" : "overflow-y-auto"} overscroll-contain p-1` : "space-y-2"}>

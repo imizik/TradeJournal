@@ -298,9 +298,18 @@ cd backend
   the main chart's intervals, the session, **Indicators** (a menu of the
   studies and fill arrows), **Layouts**, Focus, **Link time ranges**, pause,
   refresh, shortcuts, full screen, and the dock's two tabs, **Watchlist** and
-  **Layers**; below about 1280px it wraps to a
-  second row rather than hiding anything. Undo, redo and the drawing tools
-  are a slim rail left of the charts. The dock on the right shows one panel at
+  **Layers**. Below 1800px the text beside Indicators, Layouts, Focus, Link
+  time ranges, Plan trade and Pause stays only as their names and Extended
+  hours reads **ETH**, so the toolbar keeps to one row down to about 1300px;
+  below that it wraps to a second row rather than hiding anything. Undo, redo
+  and the drawing tools are a slim rail left of the charts; the pencil
+  button in the toolbar hides or shows the rail for a wider chart, remembered
+  on the device, and a tool chosen by hotkey brings it out until it is put
+  away. From a tablet's width each chart's title line (symbol, interval and
+  buttons) and its candle values row sit over the top of the candles, like
+  TradingView's legend, on a faint backdrop so they stay readable, and only
+  their text takes the pointer; a phone keeps them stacked above the candles.
+  The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
   and latest fills under it, or the layers panel. Those three sections are
   one-line folds with their counts ("MU levels 0/30", "Alerts 0/20 active",

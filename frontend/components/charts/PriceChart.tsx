@@ -162,7 +162,12 @@ function hoverStore() {
   };
 }
 
-/** The candle values row: the hovered candle's, else the latest. Its own component, so a crosshair move renders only this row. */
+/**
+ * The candle values row: the hovered candle's, else the latest. Its own component, so a crosshair move renders only this row.
+ * From a tablet's width, like TradingView's legend, it sits over the top of the candles under the title line, so it costs the
+ * chart no height; there a click or right-click on it reaches the chart beneath (only the EMA item, which opens on hover, takes the pointer). A phone's
+ * row wraps to several lines, so there it stays above the candles.
+ */
 function CandleValues({ id, main, pending, bars, hover, interval, indicators, colors, rvol: today, pastRvol, showRvol, timer }: {
   id: string; main: boolean; pending: boolean; bars: ChartBar[] | undefined; hover: HoverStore; interval: Interval;
   indicators: Indicators; colors: Record<ColorKey, string>; rvol: RvolBaseline | null; pastRvol?: Record<string, RvolBaseline>; showRvol: boolean; timer: React.ReactNode;
@@ -184,18 +189,18 @@ function CandleValues({ id, main, pending, bars, hover, interval, indicators, co
     : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
     : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   return (
-    <div className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1" : "h-6"}`}>
-      <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
+    <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "h-6 md:pr-16"}`}>
+      <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1" aria-label={`${id} candle values`}>
       {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
         {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
       </div>
       {!main && timer}
-      {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
+      {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 rounded bg-[#10151e]/90 px-1 gap-y-0.5 whitespace-normal font-mono text-[10px]">
         {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
         {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
         {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
-        {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
+        {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group pointer-events-auto relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
           <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
           <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
             {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
@@ -1105,9 +1110,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
     <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} data-quiet-chrome={main ? undefined : ""} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
-      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
+      {/* From a tablet's width, like TradingView, the title line sits over the top of the chart rather than above it; only its controls take the pointer, so a click or right-click on its text reaches the chart. */}
+      <div className="relative z-20 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 pl-3 pr-1 md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:h-7 md:border-b-0">
         {/* A narrow chart (C7.4's dividers allow 160px) clips its symbol and interval, never its buttons. */}
-        <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs">{onPickSymbol
+        <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1 text-xs md:[&_button]:pointer-events-auto md:[&_select]:pointer-events-auto">{onPickSymbol
           ? <button aria-label={`${id} symbol`} title={follows ? "Follows the main symbol. Choose a symbol for this chart." : "Holds its own symbol. Change it, or follow the main symbol."} onClick={onPickSymbol}
             className={`-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold tracking-wide hover:bg-slate-800 ${follows ? "text-slate-200" : "text-sky-200"}`}>
             {symbol}{follows ? <Link2 size={11} className="text-slate-500" aria-hidden /> : <Pin size={11} className="text-sky-300" aria-hidden />}</button>
@@ -1118,7 +1124,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
           {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
-        <div className={`flex shrink-0 items-center ${compact ? "gap-0" : "gap-1"}`}>
+        <div className={`pointer-events-auto flex shrink-0 items-center rounded bg-[#10151e]/90 ${compact ? "gap-0" : "gap-1"}`}>
           {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
@@ -1148,7 +1154,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           onClick={() => autoScale.current()} style={{ top: manualScale.top }}
           className="absolute right-1 z-10 h-[18px] rounded border border-sky-400/50 bg-[#141b26]/90 px-1.5 text-[10px] font-semibold leading-none text-sky-300 hover:bg-sky-400/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-sky-400">Auto</button>}
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
-        {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
+        {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10 md:top-14" />}
         {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-0.5 font-mono text-[10px] text-slate-200 shadow-lg"
           style={card.above ? { top: Math.max(2, Math.round(card.y) - 26) } : { top: Math.round(card.y) + 8 }}>
           {chartLabel(cardZone)} {cardZone.low === cardZone.high ? price(cardZone.low) : `${price(cardZone.low)}–${price(cardZone.high)}`}<span className="text-slate-500"> · click for more</span></div>
