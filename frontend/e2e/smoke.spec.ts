@@ -41,7 +41,7 @@ test.describe("dashboard", () => {
 
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
-    // Today comes first: today's P&L and the open positions sit above the all-time performance.
+    // Active options precede the optional journal summary and all-time performance.
     const main = page.locator("main").first();
     const order = await main.evaluate((root) => {
       const text = root.textContent ?? "";
@@ -59,6 +59,7 @@ test.describe("dashboard", () => {
     await page.screenshot({ path: test.info().outputPath("dashboard-phone.png") });
     await page.setViewportSize({ width: 1440, height: 1100 });
 
+    await page.getByTestId("journal-details").locator(":scope > summary").click();
     // Aggregates computed from the seeded, reconstructed closed trades.
     await expect(page.getByText("+$1,019.00").first()).toBeVisible();
     await expect(page.getByText("4.40", { exact: true })).toBeVisible();

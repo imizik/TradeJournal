@@ -481,7 +481,7 @@ cd backend
   with max pain (C4.7).
 - Expected move (C2.7), off until shown from Layers: today's and Friday's
   at-the-money straddle, priced five minutes after the open and fixed for the
-  session. VWAP ±1σ/±2σ has its own **VWAP bands** control in Indicators and
+  session. VWAP ±1σ has its own **VWAP bands** control in Indicators and
   Layers (see [Range bands](#range-bands-c27)).
 - Extended-session shading, one flat band per run of premarket or after-hours
   candles (`frontend/lib/sessionShade.ts`), and regular/extended hours
@@ -1322,7 +1322,7 @@ existing refresh behavior.
 Expected move and VWAP bands have independent controls, both off by default.
 Layers → **Expected move** (or the chart menu's Layers) shows the option-implied
 levels on every chart, saved in the shared workspace (`rangeBandsHidden`).
-Indicators → **VWAP bands ±1σ / ±2σ** or Layers → **VWAP bands** shows the VWAP
+Indicators → **VWAP bands ±1σ** or Layers → **VWAP bands** shows the VWAP
 bands independently (`vwapBandsHidden`), without requesting option chains.
 Hiding the Indicators group also hides VWAP bands and keeps their choice.
 Existing settings with the old combined Range bands enabled keep both enabled
@@ -1353,7 +1353,7 @@ The calculations are unchanged:
   market is not captured and is tried on the next read. A capture lives in
   the API process's memory, so the first look at a symbol after 09:35, or a
   restart, prices it later; the card's time says when.
-- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed) and ±2σ (dotted),
+- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed),
   where σ is the regular session's volume-weighted standard deviation of the
   same minute HLC3 prices VWAP uses (`vwap_sd` on each candle). None outside
   the regular session or on daily and weekly charts. Layers explains this

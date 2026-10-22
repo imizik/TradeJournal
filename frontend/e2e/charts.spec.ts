@@ -1,3 +1,4 @@
+import type { IChartApi } from "lightweight-charts";
 import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
@@ -5816,11 +5817,20 @@ test("VWAP bands have independent controls, saved visibility, and honest intrada
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
   await page.getByRole("button", { name: "Indicators", exact: true }).click();
   const controls = page.getByRole("group", { name: "Chart indicators" });
-  const toggle = controls.getByRole("button", { name: "VWAP bands ±1σ / ±2σ", exact: true });
+  const toggle = controls.getByRole("button", { name: "VWAP bands ±1σ", exact: true });
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await page.screenshot({ path: test.info().outputPath("vwap-controls-desktop.png"), animations: "disabled" });
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // Inspect actual chart series: one dashed upper/lower pair, no outer band pair.
+  const bandStyles = await page.evaluate(() => {
+    const chart = (window as unknown as { __tjCharts: Map<string, IChartApi> }).__tjCharts.get("main")!;
+    return chart.panes().flatMap((pane) => pane.getSeries()).filter((series) => series.seriesType() === "Line")
+      .map((series) => series.options()).filter((options) => "lineStyle" in options && (options.lineStyle === 1 || options.lineStyle === 2))
+      .map((options) => ({ style: "lineStyle" in options ? options.lineStyle : null, visible: options.visible }));
+  });
+  expect(bandStyles).toEqual([{ style: 2, visible: true }, { style: 2, visible: true }]);
+  await expect(page.getByLabel("main study values")).not.toContainText("±2σ");
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
   await expect.poll(() => server.data?.vwapBandsHidden).toBe(false);
   expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
@@ -5872,7 +5882,7 @@ test("legacy Range bands visibility migrates once and explicit VWAP band choices
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
   await page.getByRole("button", { name: "Indicators", exact: true }).click();
-  await page.getByRole("group", { name: "Chart indicators" }).getByRole("button", { name: "VWAP bands ±1σ / ±2σ", exact: true }).click();
+  await page.getByRole("group", { name: "Chart indicators" }).getByRole("button", { name: "VWAP bands ±1σ", exact: true }).click();
   await expect.poll(() => server.data?.vwapBandsHidden).toBe(true);
   expect(server.data?.rangeBandsHidden).toBe(false);
   // An older tab overwrites its known fields, omitting the new top-level choice.

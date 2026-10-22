@@ -151,6 +151,7 @@ test("journal calendar dates hydrate across browser locales and timezones", asyn
   const expiration = trades.find((trade: { ticker: string; expiration: string; status: string }) => trade.ticker === "AAPL" && trade.status === "open").expiration;
   const date = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(new Date(`${expiration}T12:00:00Z`));
   await expect(page.getByRole("table").first().getByText(date, { exact: true }).first()).toBeVisible();
+  await page.getByTestId("journal-details").locator(":scope > summary").click();
   await page.getByRole("button", { name: "1M", exact: true }).click();
   await expect(page.getByText("1M Closed P&L", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);

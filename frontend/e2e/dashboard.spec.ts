@@ -34,6 +34,12 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await page.goto("/");
   const owner = page.getByTestId("owner-dashboard");
   const summary = page.getByLabel("Journal summary", { exact: true });
+  const details = page.getByTestId("journal-details");
+  await expect(details).not.toHaveAttribute("open");
+  await expect(summary).not.toBeVisible();
+  await expect(page.getByRole("region", { name: "Active Options" })).toBeVisible();
+  await details.locator(":scope > summary").click();
+  await expect(summary).toBeVisible();
   await expect(summary).toContainText("+$830.00"); // AAPL +$650, RNXT FIFO +$180
   await expect(summary).toContainText("2 options · 1 stock");
   await expect(page.getByRole("region", { name: "Active Options" })).toContainText("2 of 2 quoted");
@@ -53,10 +59,15 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   expect(market!.y).toBeLessThan(options!.y);
   expect(attention!.y).toBeLessThan(options!.y);
   expect(options!.y + options!.height).toBeLessThan(bounds[0]!.y);
+  await details.screenshot({ path: test.info().outputPath("dashboard-journal-expanded-desktop.png") });
+  await details.locator(":scope > summary").click();
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: test.info().outputPath("dashboard-foundation-desktop.png"), animations: "disabled" });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("dashboard-foundation-phone.png"), animations: "disabled" });
+  await details.locator(":scope > summary").click();
+  await expect(summary).toBeVisible();
   await page.getByTestId("stock-holdings").locator("summary").click();
   await expect(page.getByTestId("stock-holdings").getByRole("link", { name: "RNXT" })).toBeVisible();
   await page.getByTestId("stock-holdings").screenshot({ path: test.info().outputPath("dashboard-holdings-phone.png"), animations: "disabled" });
@@ -174,6 +185,7 @@ print(json.dumps(ids))
 `], { cwd: backend, env: { ...process.env, DATABASE_URL: `sqlite:///${backend}/data/e2e_seed.db` }, encoding: "utf8" }).trim();
   try {
     await page.goto("/");
+    await page.getByTestId("journal-details").locator(":scope > summary").click();
     const recent = page.getByRole("region", { name: "Recent Closed Trades" });
     await expect(recent.locator("tbody tr")).toHaveCount(5);
     await expect(recent.locator("tbody tr").first()).toContainText("EARLY");
@@ -185,11 +197,14 @@ print(json.dumps(ids))
     await expect(filters.getByRole("link", { name: "Options", exact: true })).toHaveAttribute("href", "/?account=roth_ira&type=option");
     await filters.getByRole("link", { name: "Options", exact: true }).click();
     await expect(page.getByRole("region", { name: "Active Options" })).toContainText("1 positions");
+    await page.getByTestId("journal-details").locator(":scope > summary").click();
     await expect(recent.getByRole("link", { name: "All trades" })).toHaveAttribute("href", "/trades?account=roth_ira&type=option");
     await recent.getByRole("link", { name: "All trades" }).click();
     await expect(page).toHaveURL(/\/trades\?account=roth_ira&type=option$/);
     await page.goBack();
     await expect(filters.getByRole("link", { name: "Options", exact: true })).toHaveAttribute("aria-current", "true");
+    const restoredDetails = page.getByTestId("journal-details");
+    if (!(await restoredDetails.evaluate((el) => (el as HTMLDetailsElement).open))) await restoredDetails.locator(":scope > summary").click();
     const analytics = page.getByRole("link", { name: "Explore detailed Analytics" });
     const accounts = await (await request.get(`${API}/accounts`)).json();
     await expect(analytics).toHaveAttribute("href", `/analytics?account_id=${accounts.find((a: { type: string }) => a.type === "roth_ira").id}&instrument_type=option`);
@@ -218,6 +233,7 @@ test("empty, missing quote, quote error and journal retry states are explicit", 
   try {
     await page.goto("/?account=no-such-account");
     await expect(page.getByRole("region", { name: "Active Options" })).toContainText("No open options");
+    await page.getByTestId("journal-details").locator(":scope > summary").click();
     await expect(page.getByText("No closed trades in this period.", { exact: true })).toBeVisible();
     await page.screenshot({ path: test.info().outputPath("dashboard-empty-desktop.png"), animations: "disabled" });
     await state("quotes_unavailable");
