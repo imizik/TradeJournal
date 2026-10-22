@@ -1,10 +1,11 @@
 # Dashboard command center
 
-Approved direction: dense dark owner Dashboard, with today's journal state
-first, compact realized performance and clear routes to deeper work. The
-reference picture defines hierarchy, not records, prices or new permissions.
+Current direction: a dense dark owner Dashboard that starts with saved market
+context and investigation ideas, keeps Attention and data failures visible,
+then shows active options and journal detail. Existing calculations, records
+and permissions retain their meaning.
 
-## October 21 walkthrough update — planning only
+## October 21 walkthrough update — market-first presentation
 
 The owner's first-open job is market orientation and opportunity investigation;
 he manages positions in Robinhood and does not routinely journal before entry
@@ -17,7 +18,29 @@ secondary. No new market engine, position-management screen or mandatory review.
 The original sequence below records prior design and delivery; its journal-first
 opening hierarchy and pending relocation assumptions are not instructions to
 rebuild already-delivered work. Daily Practice is already at `/practice`.
-This update approves no implementation, data access, activation or deployment.
+The owner subsequently approved continuing with the next Dashboard slice after
+VWAP. The bounded presentation now uses the existing compact morning brief for
+market context and up to three investigation ideas, with direct Charts links,
+conditional/research-only labels and expandable trigger, invalidation and
+source evidence. Legacy briefs retain their saved-priority meaning. Empty,
+stale and missing briefs remain explicit; there is no new market summary.
+
+A separate compact Radar preview reads the existing feed GET, caps the latest
+saved events at three, labels session/coverage/snapshot time and supports manual
+refresh. It never posts visits/feedback, starts detection or activates recording.
+Off, no-data, stale and load-failure states stay visible. Opening the full Radar
+screen retains its existing visit behavior.
+
+Attention and import freshness sit beside the market area on desktop and before
+journal detail on phones. Quote errors remain above both. Active options precede
+the journal summary and today's session. Account/type controls live with the
+journal and explicitly do not rescope the saved briefing or Radar. Stock,
+exposure, performance and recent-trade destinations remain available. No
+accounting, authorization, scheduled-task or provider behavior changes. Fixture
+verification cannot establish deployment, live discovery quality or owner use.
+
+The inventory and original PR sequence below are historical delivery context;
+the workflow roadmap owns the current consolidation sequence.
 
 ## Inventory and dependencies
 

@@ -11,6 +11,7 @@ import DataFreshness from "./DataFreshness";
 import MorningBriefing from "./MorningBriefing";
 import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
 import JoTodayLine from "./JoTodayLine";
+import RadarPreview from "./RadarPreview";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -56,76 +57,79 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
   return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
     <header>
       <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1><DashboardActions /></div>
-      <p className="mt-1 text-sm text-muted-foreground">Your trading day, at a glance · {today} ET</p>
+      <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
     </header>
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Dashboard filters">
-      {[{ name: "account" as const, label: "Account", choices: [{ value: "all", label: "All accounts" }, ...accountOptions.map((a) => ({ value: a.type, label: a.name }))] },
-        { name: "type" as const, label: "Type", choices: [{ value: "all", label: "All types" }, { value: "option", label: "Options" }, { value: "stock", label: "Stocks" }] }].map(({ name, label, choices }) =>
-        <div key={name} className="flex flex-wrap items-center gap-1" role="group" aria-label={label}>
-          <span className="mr-1 text-xs text-muted-foreground">{label}</span>
-          {choices.map((choice) => <a key={choice.value} href={filterHref(name, choice.value)} aria-current={(params[name] ?? "all") === choice.value ? "true" : undefined}
-            className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</a>)}
-        </div>)}
-    </div>
-    {/* Jo's status first: on a phone this is the morning check-in, above the briefing and P&L. */}
     <JoTodayLine today={today} />
-    <MorningBriefing initialDay={today} compact />
-    <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
-      <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
-      <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />
-      <SummaryFigure label="Unrealized P&L" value={money(unrealized, { signed: true })} tone={pnlTone(unrealized)} detail={`${quotedCount} of ${rows.length} positions quoted`} />
-      <SummaryFigure label="Open Positions" value={String(rows.length)} detail={`${options.length} options · ${stocks.length} stock${stocks.length === 1 ? "" : "s"}`} />
-      <SummaryFigure label="All-Time Closed P&L" value={money(stats.total_pnl, { signed: true })} tone={pnlTone(stats.total_pnl)} detail={`${stats.closed_trades} closed trades`} />
-    </div>
     {quoteError && <p role="alert" className="rounded-md border border-amber-500/30 px-4 py-3 text-sm text-amber-300">Some position quotes could not load. Unavailable marks are shown as —. Reload to retry.</p>}
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="min-w-0 space-y-4">
-        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-2 text-xs text-muted-foreground">
-            <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
-            <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
-            <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
-              <p className="mt-1">Closed P&amp;L excludes trims of positions still open.</p>
-              <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
-          </div>
-        </DashboardCard>
+    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      <div className="min-w-0 space-y-4" aria-label="Market and discovery">
+        <MorningBriefing initialDay={today} compact />
+        <RadarPreview />
+      </div>
+      <aside className="min-w-0 space-y-4" aria-label="Attention and data status">
         <Suspense fallback={<AttentionLoading />}>
           <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
             scope={[params.account && params.account !== "all" ? accountOptions.find((a) => a.type === params.account)?.name ?? params.account : null,
               params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />
         </Suspense>
-        </div>
-        <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
-          {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
-        </DashboardCard>
-        <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
-          <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
-            <span>Stock Holdings <span className="ml-1 text-muted-foreground">({stocks.length})</span></span>
-            <span className="text-xs font-normal text-muted-foreground">{coverage(stocks)} · <span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
-          </summary>
-          <div className="border-t p-4">{stocks.length ? <OpenPositionsTable rows={stocks} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open stocks in this scope.</p>}</div>
-        </details>
-        {rows.length > 0 && <details className="min-w-0 rounded-lg border bg-card">
-          <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs text-muted-foreground">Exposure &amp; full position details</summary>
-          <div className="min-w-0 space-y-3 border-t p-4">
-            <p className="text-xs text-muted-foreground">Quoted market value; option values use premium × 100. Excludes cash; not account equity or maximum loss. {quotedCount} of {rows.length} positions marked.</p>
-            <dl className="grid gap-3 sm:grid-cols-3 text-xs text-muted-foreground">
-              <div><dt>Gross Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(grossValue)}</dd></div>
-              <div><dt>Net Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(netValue, { signed: true })}</dd></div>
-              <div><dt>Largest Quoted Position</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{largest ? `${largest.trade.ticker} · ${money(largest.marketValue)}` : "—"}</dd></div>
-            </dl>
-            <OpenPositionsTable rows={rows} accountMap={accountMap} quotes={quotes} today={today} />
-          </div>
-        </details>}
-        <PerformanceOverview trades={trades} compact analyticsHref={analyticsHref} />
-        <DashboardCard title="Recent Closed Trades" action={<a className={dashboardLink} href={tradesHref}>All trades →</a>}>
-          <RecentClosedTable trades={recentCloses(trades)} accountMap={accountMap} />
-        </DashboardCard>
-      </div>
-      <aside className="min-w-0 space-y-4" aria-label="Dashboard actions and status">
         <DataFreshness />
       </aside>
     </div>
+    <section className="min-w-0 space-y-4" aria-label="Your journal">
+      <div><h2 className="text-base font-semibold">Your journal</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Filters apply to journal positions, Attention position checks and performance. The saved briefing and Radar keep their own scope.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Dashboard filters">
+        {[{ name: "account" as const, label: "Account", choices: [{ value: "all", label: "All accounts" }, ...accountOptions.map((a) => ({ value: a.type, label: a.name }))] },
+          { name: "type" as const, label: "Type", choices: [{ value: "all", label: "All types" }, { value: "option", label: "Options" }, { value: "stock", label: "Stocks" }] }].map(({ name, label, choices }) =>
+          <div key={name} className="flex flex-wrap items-center gap-1" role="group" aria-label={label}>
+            <span className="mr-1 text-xs text-muted-foreground">{label}</span>
+            {choices.map((choice) => <a key={choice.value} href={filterHref(name, choice.value)} aria-current={(params[name] ?? "all") === choice.value ? "true" : undefined}
+              className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</a>)}
+          </div>)}
+      </div>
+      <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
+        {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
+      </DashboardCard>
+      <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
+        <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
+        <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />
+        <SummaryFigure label="Unrealized P&L" value={money(unrealized, { signed: true })} tone={pnlTone(unrealized)} detail={`${quotedCount} of ${rows.length} positions quoted`} />
+        <SummaryFigure label="Open Positions" value={String(rows.length)} detail={`${options.length} options · ${stocks.length} stock${stocks.length === 1 ? "" : "s"}`} />
+        <SummaryFigure label="All-Time Closed P&L" value={money(stats.total_pnl, { signed: true })} tone={pnlTone(stats.total_pnl)} detail={`${stats.closed_trades} closed trades`} />
+      </div>
+      <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs text-muted-foreground">
+          <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
+          <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
+          <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
+            <p className="mt-1">Closed P&amp;L excludes trims of positions still open.</p>
+            <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
+        </div>
+      </DashboardCard>
+      <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
+        <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
+          <span>Stock Holdings <span className="ml-1 text-muted-foreground">({stocks.length})</span></span>
+          <span className="text-xs font-normal text-muted-foreground">{coverage(stocks)} · <span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
+        </summary>
+        <div className="border-t p-4">{stocks.length ? <OpenPositionsTable rows={stocks} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open stocks in this scope.</p>}</div>
+      </details>
+      {rows.length > 0 && <details className="min-w-0 rounded-lg border bg-card">
+        <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs text-muted-foreground">Exposure &amp; full position details</summary>
+        <div className="min-w-0 space-y-3 border-t p-4">
+          <p className="text-xs text-muted-foreground">Quoted market value; option values use premium × 100. Excludes cash; not account equity or maximum loss. {quotedCount} of {rows.length} positions marked.</p>
+          <dl className="grid gap-3 sm:grid-cols-3 text-xs text-muted-foreground">
+            <div><dt>Gross Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(grossValue)}</dd></div>
+            <div><dt>Net Marked Value</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{money(netValue, { signed: true })}</dd></div>
+            <div><dt>Largest Quoted Position</dt><dd className="mt-1 font-medium tabular-nums text-foreground">{largest ? `${largest.trade.ticker} · ${money(largest.marketValue)}` : "—"}</dd></div>
+          </dl>
+          <OpenPositionsTable rows={rows} accountMap={accountMap} quotes={quotes} today={today} />
+        </div>
+      </details>}
+      <PerformanceOverview trades={trades} compact analyticsHref={analyticsHref} />
+      <DashboardCard title="Recent Closed Trades" action={<a className={dashboardLink} href={tradesHref}>All trades →</a>}>
+        <RecentClosedTable trades={recentCloses(trades)} accountMap={accountMap} />
+      </DashboardCard>
+    </section>
   </div>;
 }

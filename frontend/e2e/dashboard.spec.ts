@@ -47,6 +47,12 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   const bounds = await Promise.all([summary.boundingBox(), page.getByRole("region", { name: "Today's Session" }).boundingBox(), performance.boundingBox()]);
   expect(bounds[0]!.y + bounds[0]!.height).toBeLessThan(bounds[1]!.y);
   expect(bounds[1]!.y).toBeLessThan(bounds[2]!.y);
+  const market = await page.getByLabel("Market and discovery", { exact: true }).boundingBox();
+  const attention = await page.getByRole("region", { name: "Attention", exact: true }).boundingBox();
+  const options = await page.getByRole("region", { name: "Active Options", exact: true }).boundingBox();
+  expect(market!.y).toBeLessThan(options!.y);
+  expect(attention!.y).toBeLessThan(options!.y);
+  expect(options!.y + options!.height).toBeLessThan(bounds[0]!.y);
   await page.screenshot({ path: test.info().outputPath("dashboard-foundation-desktop.png"), animations: "disabled" });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
@@ -77,6 +83,43 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   const rnxtRow = page.getByRole("row").filter({ has: page.getByRole("link", { name: "RNXT", exact: true }) });
   await expect(rnxtRow.getByText("+$180.00", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("dashboard Radar preview reads a bounded dated feed without changing visits or feedback", async ({ page, request }) => {
+  expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBe(true);
+  const base = await (await request.get(`${API}/radar/feed`)).json();
+  expect(base.events.length).toBeGreaterThan(0);
+  let view = { ...base, state: "recording", events: Array.from({ length: 4 }, (_, i) => ({ ...base.events[0], event_id: `preview-${i}`, summary: `Saved discovery ${i}` })) };
+  let fail = false;
+  const writes: string[] = [];
+  page.on("request", (req) => { if (req.url().includes("/radar/") && req.method() !== "GET") writes.push(req.url()); });
+  await page.route("**/api/backend/radar/feed*", (route) => route.fulfill(fail ? { status: 503, json: {} } : { json: view }));
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto("/?account=roth_ira&type=option");
+  const preview = page.getByTestId("radar-preview");
+  await expect(preview).toContainText(`${base.session} ET`);
+  await expect(preview.locator("li")).toHaveCount(3);
+  await expect(preview.getByRole("link").first()).toHaveAttribute("href", `/charts?symbol=${base.events[0].chart.symbol}`);
+  await preview.screenshot({ path: test.info().outputPath("dashboard-radar-recorded-desktop.png") });
+  view = { ...view, state: "stale" };
+  await preview.getByRole("button", { name: "Refresh Radar" }).click();
+  await expect(preview).toContainText("Stale since");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await preview.screenshot({ path: test.info().outputPath("dashboard-radar-stale-phone.png") });
+  fail = true;
+  await preview.getByRole("button", { name: "Refresh Radar" }).click();
+  await expect(preview).toContainText("Showing the previous snapshot; current status is unknown");
+  fail = false;
+  view = { ...view, state: "no_data", events: [], coverage: null };
+  await preview.getByRole("button", { name: "Refresh Radar" }).click();
+  await expect(preview).toContainText("No recorded session yet");
+  await expect(preview).toContainText("This does not mean nothing moved");
+  view = { ...view, state: "off", reason: "Recording is not enabled." };
+  await preview.getByRole("button", { name: "Refresh Radar" }).click();
+  await expect(preview).toContainText("Radar is off. Recording is not enabled.");
+  await expect(preview.locator("li")).toHaveCount(0);
+  await expect(page.getByLabel("Dashboard filters", { exact: true }).getByRole("link", { name: "Options", exact: true })).toHaveAttribute("aria-current", "true");
+  expect(writes).toEqual([]);
 });
 
 test("import freshness discloses initial failure, retained history and recovery on one shared poll", async ({ page }) => {

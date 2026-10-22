@@ -222,7 +222,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Market context" : "Today’s focus"}</h2>
     <p data-testid="brief-summary" className={`whitespace-pre-wrap leading-relaxed ${compact ? "text-sm" : "text-base"} ${longSummary && !fullSummary ? "line-clamp-4" : ""}`}>{body.summary}</p>
     {longSummary && <button type="button" aria-expanded={fullSummary} className={textButton} onClick={() => setFullSummary((v) => !v)}>{fullSummary ? "Show less" : "Read Jo’s full summary"}</button>}
-    {!compact && sources(body.summary_evidence_ids)}
+    {sources(body.summary_evidence_ids)}
     {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
   </section>;
 
@@ -233,6 +233,32 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {status}
       {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
       {focus}
+      {body && <section aria-label="Things worth investigating" className="space-y-2 border-t pt-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Things worth investigating" : "Saved priorities"}</h2>
+        {(opportunityFirst ? opportunities : body.items ?? []).slice(0, 3).map((item, index) => {
+          const setup = opportunityFirst ? opportunities[index] : null;
+          return <article key={index} className="space-y-1.5 rounded-md border p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold">{item.symbol ?? "Journal review"}</h3>
+              {item.symbol && <a href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</a>}
+            </div>
+            {setup && <p className="text-xs text-amber-300">{setup.status === "research_only" ? "Research only · confirmation missing" : "Conditional setup · wait for trigger"}</p>}
+            <p className="line-clamp-2 text-sm leading-relaxed">{item.what_matters}</p>
+            {setup && <details className="text-xs">
+              <summary className="min-h-11 cursor-pointer py-2 text-primary sm:min-h-0 sm:py-1">Conditions &amp; evidence</summary>
+              <dl className="space-y-2 py-2">
+                {[["Entry condition", setup.entry_trigger], ["Invalidation", setup.invalidation], ["Timeframe", setup.timeframe], ["Before acting", setup.watch_out], ["Counterpoint", setup.contrary_evidence]].map(([label, value]) => value?.trim() && <div key={label}><dt className="font-medium text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-wrap">{value}</dd></div>)}
+              </dl>
+              {sources(setup.evidence_ids)}
+            </details>}
+          </article>;
+        })}
+        {!(opportunityFirst ? opportunities : body.items ?? []).length && <p className="text-sm text-muted-foreground">{opportunityFirst ? "No supported new setup in this packet. Review the briefing’s discovery coverage and missing evidence." : "No supported priority in this saved briefing."}</p>}
+        {!!body.urgent_positions?.length && <div className="space-y-1 text-xs">
+          <p className="font-medium text-muted-foreground">Position concerns from this briefing</p>
+          {body.urgent_positions.slice(0, 3).map((item, index) => <p key={index}>{item.symbol && <span className="font-medium">{item.symbol}: </span>}{item.what_matters}</p>)}
+        </div>}
+      </section>}
       {body && <p className="text-xs text-muted-foreground">{opportunityFirst ? `${opportunities.length} new opportunities · ${body.urgent_positions?.length ?? 0} urgent position reviews` : `${body.items?.length ?? 0} priorities`}{gaps.length ? " · Evidence gaps disclosed in the brief" : ""} · Personal advice. Uses the account scope saved with this briefing.</p>}
     </div>
   </DashboardCard>;
