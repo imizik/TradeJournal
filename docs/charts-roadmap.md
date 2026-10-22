@@ -2,8 +2,8 @@
 
 October 21 workflow planning: the [consolidation roadmap](workflow-consolidation-roadmap.md)
 records the owner's macro → familiar-tech routine, peer-confirmation need and
-optional use of plans/review. A local VWAP clarity fix is awaiting publication
-approval; this planning note is not its release evidence. After the Dashboard
+optional use of plans/review. The VWAP clarity fix is included with this plan in the owner-approved PR;
+that PR's check/merge receipt owns its release evidence. After the Dashboard
 proposal, prioritize same-window peer context with Radar. Macro grid/data work
 requires the agreed instrument checklist; no chart cap or provider expansion is
 approved here. The September no-macro/futures assumption below is historical,

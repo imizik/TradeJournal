@@ -3,8 +3,11 @@
 Planning date: October 21, 2026. Requested after an owner walkthrough of the
 current app and review of Claude's critique. **Planning only:** this document
 authorizes no implementation, production writes, new grants, activation,
-provider subscription, model calls, deployment or merge. Each next slice needs
-Isaac's approval. Existing separately authorized work retains its scope.
+provider subscription, model calls, deployment or merge for future releases.
+Each next slice needs Isaac's approval. Existing separately authorized work
+retains its scope. Isaac explicitly approved publishing the completed VWAP fix
+with this roadmap and automatically repairing/merging that bounded PR after
+passing checks; that approval does not implement the roadmap's future slices.
 
 The desired routine is:
 
@@ -122,9 +125,10 @@ saved choices and explains RTH/daily/extended-hour availability. It adds no
 anchor, indicator formula, provider call or study preset.
 
 Six focused browser tests, 158 backend/docs tests, typecheck and focused lint
-passed; desktop/390px screenshots were inspected. Remote push/PR was blocked
-by automatic approval review and awaits explicit owner authorization. CI has
-not run; this is not merge-ready or deployed. Do not reopen formula work unless
+passed; desktop/390px screenshots were inspected. Isaac subsequently approved publishing the VWAP fix and this roadmap in one
+PR, with automatic repair and merge after passing checks. The PR's final-head
+check results and merge receipt own completion evidence; do not infer deployment
+or live TradingView parity from local tests. Do not reopen formula work unless
 a reproducible comparison reveals a defect.
 
 Acceptance after approval: passing final-head CI; no expected-move coupling;
