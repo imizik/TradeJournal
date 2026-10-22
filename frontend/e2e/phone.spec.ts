@@ -89,6 +89,7 @@ test("main content gets the width, and key numbers are readable", async ({ page 
   const viewport = page.viewportSize()?.width ?? 0;
   expect(mainWidth).toBeGreaterThan(viewport * 0.9);
 
+  await page.getByTestId("journal-details").locator(":scope > summary").click();
   // The seeded all-time P&L must render in full, not clipped to "+$1,0...".
   // exact: the chart's own tooltip label also contains this number.
   await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();
