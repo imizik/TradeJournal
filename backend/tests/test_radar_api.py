@@ -185,10 +185,12 @@ def test_owner_only(boundary, tmp_path):  # noqa: F811
     boundary.patch.setenv("RADAR_ENABLED", "true")
     boundary.patch.setenv("RADAR_STORE", str(tmp_path / "radar.sqlite"))
     assert boundary.owner.get("/radar/feed").status_code == 200
+    assert boundary.owner.get("/radar/groups/compare?symbol=NVDA").status_code == 200
+    assert boundary.public.get("/radar/groups/compare?symbol=NVDA").status_code == 401
     assert boundary.owner.get(f"/radar/events/{EVENT_ID}").status_code == 200
     assert boundary.owner.post("/radar/visits").status_code == 200
     assert boundary.owner.post(f"/radar/events/{EVENT_ID}/feedback", json={"rating": "useful"}, headers={"x-tj-csrf": "wrong"}).status_code == 403
     assert signin(boundary).status_code == 200
-    for method, path in [("GET", "/radar/feed"), ("GET", f"/radar/events/{EVENT_ID}"), ("POST", "/radar/visits"),
+    for method, path in [("GET", "/radar/feed"), ("GET", "/radar/groups/compare?symbol=NVDA"), ("GET", f"/radar/events/{EVENT_ID}"), ("POST", "/radar/visits"),
                          ("POST", f"/radar/events/{EVENT_ID}/feedback")]:
         assert boundary.public.request(method, path, json={"rating": "useful"} if method == "POST" else None).status_code == 403

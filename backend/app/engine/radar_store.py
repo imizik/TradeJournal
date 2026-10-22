@@ -182,25 +182,29 @@ def load_universe(path: Path = UNIVERSE_PATH) -> dict:
 class RadarStore:
     """Explicit owner-selected SQLite file for Radar's quote passes and events."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, read_only: bool = False):
         self.path = Path(path)
+        self.read_only = read_only
         if not self.path.is_absolute():
             raise ValueError("radar store path must be absolute")
         if self.path.is_symlink():
             raise ValueError("radar store may not be a symlink")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not read_only:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             marker = db.execute("PRAGMA application_id").fetchone()[0]
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            if marker == 0 and not tables:
+            if marker == 0 and not tables and not read_only:
                 db.execute(f"PRAGMA application_id={APPLICATION_ID}")
             elif marker != APPLICATION_ID or not tables <= TABLES:
                 raise ValueError("refusing to adopt a non-Radar database")
-            db.executescript(_SCHEMA)
+            if not read_only:
+                db.executescript(_SCHEMA)
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=10, isolation_level="IMMEDIATE")
+        db = sqlite3.connect(self.path.as_uri() + "?mode=ro" if self.read_only else self.path,
+                             uri=self.read_only, timeout=10, isolation_level="IMMEDIATE")
         db.row_factory = sqlite3.Row
         try:
             with db:
@@ -233,6 +237,17 @@ class RadarStore:
         for row in rows:
             row["unmatched"] = json.loads(row["unmatched"])
         return rows
+
+    def comparison_passes(self, today: str, before: str, *, current_session: bool) -> list[dict]:
+        """At most one recorded session; quote reads later use just two primary-key pass IDs."""
+        with self._db() as db:
+            session = today if current_session else db.execute(
+                "SELECT MAX(session_date) FROM pass WHERE session_date<=? AND finished_at<=?",
+                (today, before)).fetchone()[0]
+            return [dict(row) for row in db.execute(
+                "SELECT id,session_date,started_at,finished_at,universe_version,status FROM pass "
+                "WHERE session_date=? AND finished_at<=? AND started_at<=? "
+                "ORDER BY started_at DESC,id DESC LIMIT 600", (session, before, before))]
 
     def quotes(self, pass_id: int | None = None, session_date: str | None = None) -> list[dict]:
         sql, args = "SELECT * FROM quote WHERE 1=1", []

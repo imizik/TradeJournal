@@ -74,6 +74,58 @@ earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
 here; until step 2 writes events it shows the empty state with coverage.
 
+## Charts group movement
+
+The owner approved a read-only peer comparison on October 22, 2026. Charts
+Overview → Peers adds **Group movement · 15 min**. It uses recorded observations,
+independently of the still-unbuilt event detector. This implementation does not
+activate recording or establish live usefulness.
+
+`GET /radar/groups/compare?symbol=NVDA&group=GPUs%20and%20AI%20compute%20chips`
+is owner-only, including when a market-only assistant can read stock Charts.
+It returns all current curated groups containing the symbol, the selected group,
+source/version, session, shared window/pass IDs, selected-stock/peer/QQQ/SPY
+rows and coverage. With no group parameter it selects the first valid group;
+an explicit unrelated group is rejected. An ungrouped symbol is disclosed.
+
+The comparison uses the latest completed usable pass and the pass at or before
+15 minutes earlier (at most 90 seconds earlier). Both endpoints use the same
+pass IDs for every row, in one session and the current universe version. Older
+membership is not archived, so a version mismatch is refused rather than
+reinterpreted. Passes taking over 90 seconds are refused. Each price must be
+finite and positive; its retrieval must fall within its pass, and its provider
+trade timestamp must be present, no later than retrieval and at most 120 seconds
+old. These are initial observation eligibility limits, not calibrated trading
+thresholds. Return is `100 * (end / start - 1)`; missing observations stay null.
+There is no interpolation, per-symbol substitution, shortened lookback, overnight
+carry, synthesized candle or probability score. Actual trade/retrieval times
+are available per row because batches and trades do not occur simultaneously.
+
+Coverage counts eligible peers (excluding the selected stock and benchmarks),
+up/down peers, missing symbols and recorded minute buckets in the window.
+Two endpoint returns do not demonstrate a continuous or sustained recovery.
+Missing intermediate minutes or rows make the response partial. An end pass
+older than three minutes during regular hours is stale. During the regular
+session, no observations today means insufficient, not yesterday's comparison.
+Outside regular hours the latest recorded session is labeled explicitly.
+An unavailable calendar prevents a claim about the current session.
+
+The API opens only an existing, app-ID-checked Radar file in SQLite read-only
+mode: no schema initialization, visits, feedback or event writes. It reads at
+most 600 pass records from one session and two passes' quote rows. It makes no
+quote/history/news requests; the shared market calendar may refresh its existing
+monthly cache. Charts adds the read to its existing visible Overview peer refresh
+cycle (60 seconds), aborts obsolete symbol/group requests, and hides old values
+on refresh failure. There is no new timer, collector, subscription or AI call.
+Group choice survives peer navigation when membership permits. The older day
+change chips and valuation data remain separate and explicitly labeled.
+
+Tests: `backend/tests/test_radar_comparison.py`, the owner boundary in
+`backend/tests/test_radar_api.py`, and desktop/390px interaction and failure
+coverage in `frontend/e2e/symbol-info-peers.spec.ts`. Historical event-to-chart
+context and alternate lookbacks remain later slices; this is a current recorded
+comparison, not a replay of an event or the chart crosshair time.
+
 ## News nearby
 
 After each regular-hours pass the recorder checks headlines for events under
