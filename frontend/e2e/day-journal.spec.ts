@@ -1,12 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const fixtureApi = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
+/** The seeded TSLA calls expire 20 days before the server's own date (`seed_dev_data._expiry_ago(20)`), so the traded day moves with it. */
+const tradedDay = (() => { const day = new Date(); day.setDate(day.getDate() - 20); return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`; })();
 
 // Actual owner routes, persistence, review context and review saving. Only the
 // external market/model boundary is a clearly labeled, disposable-server fixture.
 for (const viewport of [{ name: "desktop", width: 1440, height: 900, day: "2026-08-17", hasTrades: false },
   { name: "phone", width: 390, height: 844, day: "2026-08-18", hasTrades: false },
-  { name: "traded-desktop", width: 1440, height: 900, day: "2026-10-01", hasTrades: true }]) {
+  { name: "traded-desktop", width: 1440, height: 900, day: tradedDay, hasTrades: true }]) {
   test(`morning thoughts reach ${viewport.hasTrades ? "a traded-day" : "a no-trade"} review, survive retry/reopen, and preserve revisions (${viewport.name})`, async ({ page, request, browser }) => {
     test.setTimeout(120_000);
     await page.setViewportSize(viewport);
@@ -160,7 +162,7 @@ test("Daily Review explains a review that is not set up instead of asking for a 
   await page.route("**/api/backend/daily-review", (route) => route.request().method() === "POST"
     ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Daily review is not set up on the Claude plan: no plan token" }) })
     : route.continue());
-  await page.goto("/daily/2026-10-01");
+  await page.goto(`/daily/${tradedDay}`);
   await page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ }).click();
   await expect(page.locator("#ai-review")).toContainText("Daily review is not set up on the Claude plan: no plan token");
   await expect(page.locator("#ai-review")).not.toContainText("Please retry");
