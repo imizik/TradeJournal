@@ -294,6 +294,14 @@ approved instruments and viewports.
 
 ## Release 4: position context, only if useful
 
+The owner approved a read-only Charts slice on October 22: Overview → Holding
+context reuses recorded option positions and the selected chart trade card,
+with remaining entry premium, expiration, linked plans and a jump to existing
+peer movement. Import completeness, live value and intent remain explicit gaps.
+Desktop/phone fixture acceptance does not prove live usefulness. New alerts,
+structured intent writes and since-entry baselines remain deferred. See
+[the holding contract](charts-workspace.md#holding-context-read-only).
+
 Reuse before adding anything:
 
 - Existing give-back and expiry alerts keep their definitions, transport,
