@@ -77,6 +77,19 @@ def fill(db, side, qty, price, when, expiration=FRI):
     db.commit()
 
 
+class _Wednesday(date):
+    @classmethod
+    def today(cls):
+        return WED
+
+
+@pytest.fixture(autouse=True)
+def rebuild_on_wednesday(monkeypatch):
+    """Rebuild trades as of the clock's New York day, not the real host date: a WED expiry must
+    stay open whatever the date is, and under TZ=UTC after 8pm ET."""
+    monkeypatch.setattr("app.engine.reconstructor.date", _Wednesday)
+
+
 @pytest.fixture
 def engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
