@@ -1817,8 +1817,8 @@ export default function ChartWorkspace() {
           </div>}><SlidersHorizontal size={13} aria-hidden /><span className={named}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
         {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
         <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={named}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
-        <button className={`${plain(macroArrangement(settings))} ${control} text-[11px]`} aria-label="Macro layout" onClick={() => choosePreset(LAYOUT_PRESETS.find((p) => p.id === "macro")!)}>Macro</button>
-        {techReturn && <button className={`${plain(false)} ${control} text-[11px]`} aria-label="Back to Tech" onClick={backToTech}>Tech</button>}
+        {!narrow && <button className={`${plain(macroArrangement(settings))} ${control} text-[11px]`} aria-label="Macro layout" onClick={() => choosePreset(LAYOUT_PRESETS.find((p) => p.id === "macro")!)}>Macro</button>}
+        {techReturn && (!narrow || techReturn.active) && <button className={`${plain(false)} ${control} text-[11px]`} aria-label="Back to Tech" onClick={backToTech}>Tech</button>}
         {!narrow && focusButton()}
         {narrow ? <button aria-label={drawOpen || tool ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={drawOpen || !!tool} title="Drawing tools, undo and redo"
           onClick={() => { if (tool) chooseTool(tool); setDrawOpen((open) => !(open || !!tool)); }} className={`${plain(drawOpen || !!tool, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={14} aria-hidden /></button>

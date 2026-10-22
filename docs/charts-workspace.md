@@ -15,7 +15,7 @@ access. Keys remain on the private backend.
 
 ## Macro layout: VIX and 10-year yield
 
-The **Macro** button (also a built-in Layouts preset) opens the existing five
+The desktop **Macro** button (or **Layouts → Macro** on a phone) opens the existing five
 slots: SPY above QQQ, IWM, VIX and US10Y, all at 4h. The lower row starts at the
 balanced size and remains resizable. **Tech** restores the main symbol,
 intervals, held symbols, linked-range choice and proportions from before Macro.
@@ -2134,7 +2134,7 @@ the old frame stays dimmed under its label, that the loading card never
 appears, and that a failed symbol clears the charts. Per-panel symbol tests
 hold SPY and QQQ beside the traded name through a main-symbol switch (the held
 chart is neither recreated nor redrawn), route each streamed trade to its own
-symbol's chart, pause and resume all three, keep linked time ranges, refuse a
+symbol's chart, pause and resume all three, keep linked time ranges, accept a
 fourth symbol, scroll a held chart back through its own history, and focus a
 held chart into the main one. `backend/tests/test_charts.py` bounds a
 three-symbol layout from two tabs to 17 upstream requests a minute without

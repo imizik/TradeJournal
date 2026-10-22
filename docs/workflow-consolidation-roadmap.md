@@ -63,10 +63,13 @@ rules, justify averaging down with them, or derive a probability of profit.
 
 ## Baseline and evidence boundaries
 
-Reviewed code base: main `99db02f3`; separate local VWAP commit `fcb729ea`.
+Initial review: main `99db02f3` and local VWAP `fcb729ea`.
+October 21 reconciliation: main `0a3ed004` includes VWAP #396 and Dashboard
+#397; VIX/US10Y Macro support is implemented in the current PR, pending its
+final checks and merge.
 GitHub metadata checked October 21: morning-opportunities PR
-[#388](https://github.com/imizik/TradeJournal/pull/388) is merged. No runtime,
-provider-entitlement or live deployment audit was performed for this roadmap.
+[#388](https://github.com/imizik/TradeJournal/pull/388) is merged. No live deployment audit was performed. The later Macro feasibility probes
+verified the configured Tradier index entitlement; see Release 3.
 The walkthrough screenshots establish the owner's experience at those moments,
 not the health of every current service.
 
@@ -76,9 +79,9 @@ not the health of every current service.
 | Opportunity-first briefing | #388 adds bounded news-led outside candidates and separates setups from position concerns. Merged code is not proof the Check catalog/task was upgraded or a natural morning delivered useful content. Preserve legacy briefs. |
 | Radar | [Radar contract](radar.md): recorder, durable store, owner feed/detail/feedback UI and nearby-news enrichment are built; recording is off until separately approved. Detection/calibration remains next. No phone delivery is part of its current contract. |
 | Groups and chart handoff | `backend/app/data/radar_universe.json` contains curated groups; `radar_store.py` supports `group_move`. There is no group-summary endpoint or calibrated detector. `RadarFeedView.tsx` currently opens the primary symbol, without restoring event-time peer context. |
-| VWAP | `backend/app/engine/chart_math.py` computes RTH minute-HLC3 VWAP and volume-weighted dispersion. `backend/tests/test_charts.py` pins weighting, resets, extended-hour exclusion and interval carry-through. Local fcb729ea separates controls; formulas are unchanged. |
+| VWAP | `backend/app/engine/chart_math.py` computes RTH minute-HLC3 VWAP and volume-weighted dispersion. `backend/tests/test_charts.py` pins weighting, resets, extended-hour exclusion and interval carry-through. Merged #396 separates controls; formulas are unchanged. |
 | Other VWAP contexts | `metric_reference.py` uses fill-cutoff minute history; `scanner_rules.py` uses completed scanner bars; `packets.py` can use provider VWAP. Source, session, bar size and cutoff must match before declaring a discrepancy a defect. |
-| Charts | [Workspace](charts-workspace.md) and [roadmap](charts-roadmap.md): five panels, three distinct symbols, saved arrangements, levels, news, peers, captures and trade review. US stock/ETF history does not establish Treasury-yield, crypto, futures or VIX chart support. |
+| Charts | [Workspace](charts-workspace.md) and [roadmap](charts-roadmap.md): five panels, saved arrangements, levels, news, peers, captures and trade review. The current Macro PR raises distinct symbols from three to five and adds explicit VIX/TNX yield routing. Crypto and futures chart support remain unverified. |
 | Existing position alerts | `backend/app/engine/position_alerts.py`: give-back after an armed gain and last-day expiry reminders. Give-back requires a fresh, sufficiently tight Tradier midpoint; calendar-timed expiry reminders can report missing/thin quotes. Dedupe and restart state exist. Does not monitor every losing position or a sector thesis. |
 | Conditional watches | [Scanner contract](agent/setup-scanner-contract.md): explicitly saved numeric triggers/invalidation on eligible selected symbols, with expiry and visible refusal. A promise by Jo is not a saved watch. |
 | Position freshness | Journal positions derive from imported Robinhood execution emails and reconstructed fills, not a live broker holdings feed. Fresh market quotes cannot establish that position quantities are current. |
@@ -104,11 +107,11 @@ collector, and no implicit activation.
 
 | Order | Release | Owner / dependency | Rough effort |
 |---|---|---|---|
-| 0 | Finish VWAP clarity | Consolidation; local work exists | Remaining review/CI/approval only |
-| 1 | Market-first Dashboard | Consolidation; existing saved briefing; agree preview contract with Radar owner | 2–4 engineering days |
+| 0 | Finish VWAP clarity | Merged #396; live parity remains unverified | Implemented |
+| 1 | Market-first Dashboard | Merged #397; owner morning-use acceptance remains open | Implemented |
 | 2 | Peer confirmation in Charts | Radar owns derived observations; Charts owns presentation; valid recorded coverage and detector/observational contract required | 3–6 days after source contract |
-| Parallel planning | Macro checklist and data feasibility | Consolidation/Charts; settle instruments with Isaac | 1–2 days; no provider purchase |
-| 3 | Implement agreed macro layout | Charts; verified data and request budget, not grid work alone | 4–8 days plus any separately scoped data integration |
+| Parallel planning | Macro checklist and data feasibility | Five instruments selected; Tradier probes passed; no provider purchase | Complete for the selected slice |
+| 3 | Implement agreed macro layout | Current PR: five slots, VIX/US10Y units, local Tech return; checks/merge and production acceptance separate | In branch |
 | 4 | Test position-context usefulness | Reuse alerts/watches; verify position freshness and specific owner scenario | 1–2 days assessment; implementation estimated only if selected |
 | 5 | Navigation and optional review continuity | Consolidation; actual remaining friction after releases 1–3 | 1–3 days if justified |
 | Later experiment | Narrative/attention sources | Radar; identify incremental value and source access first | Time-box assessment to 1–2 days; build not selected |
@@ -138,7 +141,7 @@ it is not a prerequisite to the control fix or a claim of established parity.
 
 ## Release 1: market-first Dashboard
 
-**October 21 continuation authorized:** after the VWAP/roadmap PR merged, Isaac
+**Merged in #397:** after the VWAP/roadmap PR merged, Isaac
 selected this next bounded presentation slice. Reuse the saved briefing and
 GET-only Radar feed; keep Attention/data failures visible and calculations,
 auth, recording activation and providers unchanged. The PR's final-head checks
@@ -237,23 +240,22 @@ the peer-confirmation question without cycling through several charts.
 with the existing five slots showing SPY/QQQ/IWM/VIX/US10Y at 4h and a local
 Tech return. Exact units, hours, paging and costs are in the
 [Charts contract](charts-workspace.md#macro-layout-vix-and-10-year-yield).
-Identifier and read-only entitlement probes passed; production deployment and
+Implemented in the current PR. Identifier and read-only entitlement probes passed; production deployment and
 owner use remain unverified. The draft below records the broader wish list;
 Bitcoin and oil are deferred, not part of this implementation.
 
-Draft based on the owner's screenshot and attempted US10Y addition:
+Historical wish list from the screenshot, before the selected slice was settled:
 
-| Item | Question | Data/selection still to settle |
+| Item | Question | Current boundary |
 |---|---|---|
-| SPY and QQQ | Direction, structure, major moving averages and nearby lows/highs | Existing equity/ETF charts; choose default timeframes |
-| IWM | Is participation broader than large tech? | Existing ETF path; distinct-symbol limit currently obstructs comparison |
-| VIX | Is volatility rising/falling? | Saved VIX context is not proof of supported continuous chart history |
-| US10Y | What is the 10-year Treasury yield doing? | Exact provider identifier, yield units, history, freshness and sessions unverified |
+| SPY and QQQ | Direction, structure, major moving averages and nearby lows/highs | Existing equity/ETF charts; selected default is 4h |
+| IWM | Is participation broader than large tech? | Existing ETF path; included in the five-symbol Macro preset |
+| VIX | Is volatility rising/falling? | Current PR adds explicit Tradier index 4h/1D history; finite intraday retention |
+| US10Y | What is the 10-year Treasury yield doing? | Current PR uses TNX:CGI ÷ 10; yield percent, observed timestamps, 4h/1D |
 | Bitcoin | What is crypto doing alongside equities? | Explicit crypto chart data path unverified |
 | Oil exposure | What is oil doing? | Choose actual oil futures/spot versus a named fund such as USO; do not substitute silently |
 
-Isaac should confirm which are essential, which timeframes/averages he reads,
-and whether simultaneous tiles or a fast second layout is required. Eight
+Isaac selected SPY, QQQ, IWM, VIX and US10Y at 4h, with a quick Tech return. Eight
 panels in a screenshot are not automatically the right specification. Do not
 add gold/dollar/futures feeds simply to make it look comprehensive.
 
@@ -262,11 +264,9 @@ permissions, real-time/delay, history, session/calendar, precision, limits/cost
 and whether volume-based studies are meaningful. Bond ETF price is not yield;
 USO is not oil futures; SPY is not SPX. New costs/access require approval.
 
-Then choose the smallest grid/layout change that supports the agreed routine.
-The current five-slot/three-symbol assumptions span frontend settings, backend
-request limits, stream subscriptions and saved layouts. Define compatibility,
-request-budget and interaction coverage before raising caps; preserve old
-layouts without changing their symbols or studies. No giant chart rewrite.
+The current PR retains five slots and raises the distinct-symbol cap to five,
+with compatibility, request-budget and interaction coverage. Existing named
+layouts and stock study choices are preserved. No giant chart rewrite.
 
 Acceptance: open the agreed Macro layout, inspect its supported instruments and
 levels, switch to Tech and back with settings intact; unsupported instruments

@@ -255,7 +255,7 @@ assessment, including why Tradier is not a candidate for the historical side.
 
 ## Frontend
 
-The private Charts workspace (`/charts`) reads today's Tradier candles and
+For stocks and ETFs, the private Charts workspace (`/charts`) reads today's Tradier candles and
 batched watchlist quotes through `/charts/workspace`. Completed New York
 intraday sessions load on scroll through `/charts/history` from explicit
 Alpaca SIP/raw minute requests and a persistent complete-session file cache,
@@ -266,14 +266,18 @@ per symbol, refreshed daily) and are applied to copies at display time, so the
 raw caches never change. Session hours, holidays and early closes come from Tradier's market calendar,
 kept on disk per completed month. One API-owned Tradier WebSocket
 fans out valid trade prices through private `/charts/stream` SSE to visible tabs,
-each following up to three symbols (the main one and two held by panels).
+each following up to five stock symbols (the main one and four held by panels),
+plus its watchlist. VIX and US10Y are separate index observations from Tradier,
+not stock trades: `chart_indices.py` supplies 4h/1D, TNX/10 yield-percent
+conversion, finite intraday history and no stock split/volume semantics. They
+do not join the stream; see [Macro data boundaries](../charts-workspace.md#macro-layout-vix-and-10-year-yield).
 The 15-second REST refresh reconciles candles, volume and studies and remains
 the fallback when streaming is unavailable. Level alerts (`level_alert`,
 `level_alert_event`) are judged in the same API process by
 `level_alert_monitor.py`, with or without a tab open. It adds alerted symbols
 to that one stream, reads 1-minute bars through the chart feed's budget for
 closed candles and stream gaps, and sends phone messages through the ntfy
-topic in `/etc/tradejournal/alerts.env`. Every chart is on one
+topic in `/etc/tradejournal/alerts.env`. Every stock/ETF chart is on one
 split-adjusted price basis: Alpaca corporate actions (one small cached file per
 symbol, refetched once per New York date) say which splits happened, and
 `chart_adjust.py` adjusts copies of bars at display time, so the raw history

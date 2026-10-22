@@ -7141,6 +7141,12 @@ test("Macro opens five instruments, masks index studies, and Tech restores after
   await page.screenshot({ path: test.info().outputPath("macro-phone.png"), animations: "disabled" });
   await page.getByRole("button", { name: "Back to Tech", exact: true }).click();
   await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+  const layouts = await openLayouts(page);
+  await layouts.getByRole("button", { name: "Use Macro preset", exact: true }).click();
+  await expect(page.getByRole("region", { name: "SPY 4h chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "US10Y 4h chart" })).toBeAttached();
+  await page.getByRole("button", { name: "Back to Tech", exact: true }).click();
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
 });
 
 for (const part of ["regular", "post"] as const) test(`index focus preserves equity ${part} clock and watchlist change`, async ({ page }) => {

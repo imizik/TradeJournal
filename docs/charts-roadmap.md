@@ -1107,7 +1107,7 @@ conditions and hidden/closed browsers, not only an open chart tab. Document
 transport delivery semantics separately from event deduplication. The phone
 message names the symbol, level, price and event time, and a live phone delivery
 is observed before claiming it works. Alert subscriptions and REST recovery must
-share the existing token budget with up to three visible symbols.
+share the existing token budget with up to five visible symbols.
 Compound conditions ("and relative volume above 2×") wait until users ask for
 them. An alert made from an options wall (C4.4) is pinned to that wall's strike
 when it is created. Open-interest walls hold still through a session, but a
@@ -1167,7 +1167,7 @@ and compares the recorded decision with the actual trade using correct units.
 **C7.1 Per-panel symbol link groups (done in PR #95).** Each panel follows the main symbol or
 holds its own (for example SPY, QQQ and the traded name). Crosshair and time
 range stay linked by time. Each extra symbol costs its own chart-feed loads, so
-cap it at three distinct symbols.
+cap it at five distinct symbols (raised by the Macro continuation below).
 *Done when:* SPY, QQQ and a stock remain independent through symbol switches,
 range/crosshair linking, pause/resume and scroll-back in browser tests. A backend
 test proves tabs/panels share one upstream WebSocket and stay within aggregate
