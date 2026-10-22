@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType } from "lightweight-charts";
+import { VolumeCandles } from "@/lib/volumeCandles";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
 import { isMacroSymbol, macroIndicators, instrumentPrice, instrumentTime, supportedIntervals, INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, nyDay, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
@@ -217,13 +218,13 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
 
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
-  shade: SessionShade; rsi?: ISeriesApi<"Line">;
+  shade: SessionShade; fat: VolumeCandles; rsi?: ISeriesApi<"Line">;
   lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; marks: MarkLayer; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: requested, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: requested, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, volumeCandles = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
   indexAsOf?: number | null;
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
@@ -243,6 +244,8 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   rangeBands?: boolean;
   /** RTH VWAP ±1σ; workspace visibility, independent of expected move. */
   vwapBands?: boolean;
+  /** Candle bodies as wide as their volume is large among the candles in view. */
+  volumeCandles?: boolean;
   /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
   highlight?: number | null;
   /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
@@ -418,6 +421,8 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     candles.attachPrimitive(marks);
     const shade = new SessionShade(() => barsRef.current);
     candles.attachPrimitive(shade);
+    const fat = new VolumeCandles(() => barsRef.current);
+    candles.attachPrimitive(fat);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
     const heat = new DepthHeatLayer(timeline);
     candles.attachPrimitive(heat);
@@ -437,10 +442,11 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, lines, bands, marks, layer, auto: autoLayer, bells, frame: "" };
+    bundle.current = { chart, candles, volume, shade, fat, lines, bands, marks, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.set(id, marks);
+    (window as typeof window & { __tjVolumeCandles?: Map<string, VolumeCandles> }).__tjVolumeCandles?.set(id, fat);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
     autoLayers?.set(id, autoLayer);
     // An automatic level's card: hovering one shows it (unless the user's own level or drawing is
@@ -889,7 +895,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
       element.removeEventListener("wheel", onWheel, true);
-      candles.detachPrimitive(marks); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); candles.detachPrimitive(heat); heatRef.current = null; candles.detachPrimitive(profile); profileRef.current = null; candles.detachPrimitive(wallLayer); wallRef.current = null; chart.remove(); bundle.current = null; barsRef.current = [];
+      candles.detachPrimitive(marks); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); candles.detachPrimitive(fat); candles.detachPrimitive(heat); heatRef.current = null; candles.detachPrimitive(profile); profileRef.current = null; candles.detachPrimitive(wallLayer); wallRef.current = null; chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
@@ -952,7 +958,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
-      current.shade.update();
+      current.shade.update(); current.fat.update();
       for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
@@ -970,7 +976,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     quiet();
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
-    current.shade.update();
+    current.shade.update(); current.fat.update();
     for (const name of OVERLAYS) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
@@ -1008,6 +1014,17 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     for (const k of VWAP_BANDS) current.bands[k].applyOptions({ visible: vwapBands });
     if (container.current) container.current.dataset.vwapBandsShown = vwapBands ? "true" : "false";
   }, [vwapBands]);
+  // Volume candles: the real candles go transparent (they still own the scale, crosshair and last-price label) and the primitive draws the bodies.
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current) return;
+    const clear = "rgba(0,0,0,0)";
+    current.fat.set(volumeCandles);
+    current.candles.applyOptions(volumeCandles
+      ? { upColor: clear, downColor: clear, wickUpColor: clear, wickDownColor: clear, priceLineColor: (barsRef.current.at(-1)?.close ?? 0) >= (barsRef.current.at(-1)?.open ?? 0) ? "#2bc9a4" : "#ee617a" }
+      : { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", priceLineColor: "" });
+    if (container.current) container.current.dataset.volumeCandles = volumeCandles ? "true" : "false";
+  }, [volumeCandles]);
 
   const markers = panel?.markers;
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.

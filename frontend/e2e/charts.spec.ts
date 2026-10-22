@@ -1498,6 +1498,46 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
   await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
 });
 
+test("watchlist symbols reorder by drag or Shift+Arrow and keep the order after reload", async ({ page }) => {
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  const order = async () => page.locator("[data-watch-item]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-watch-item")));
+  expect(await order()).toEqual(["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"]);
+  await page.locator("[data-watch-item=MSFT]").dragTo(page.locator("[data-watch-item=SPY]"));
+  expect(await order()).toEqual(["MSFT", "SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META"]);
+  const row = page.getByRole("button", { name: "Chart MSFT", exact: true });
+  await row.focus();
+  await page.keyboard.press("Shift+ArrowDown");
+  await expect(row).toBeFocused();
+  expect((await order()).slice(0, 3)).toEqual(["SPY", "MSFT", "QQQ"]);
+  await expect(syncStatus(page)).toHaveText("Saved");
+  await page.reload();
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  expect((await order()).slice(0, 3)).toEqual(["SPY", "MSFT", "QQQ"]);
+});
+
+test("volume-width candles make high-volume bodies fatter and persist", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as { __tjVolumeCandles: Map<string, unknown> }).__tjVolumeCandles = new Map(); });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  const widths = () => page.evaluate(() => (window as unknown as { __tjVolumeCandles: Map<string, { widths(): number[] }> }).__tjVolumeCandles.get("main")!.widths());
+  expect(await widths()).toEqual([]);
+  await openLayers(page);
+  const toggle = chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume-width candles" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  const fat = await widths();
+  expect(fat.length).toBeGreaterThan(10);
+  expect(Math.max(...fat)).toBeGreaterThan(Math.min(...fat) * 1.5);
+  await expect(syncStatus(page)).toHaveText("Saved");
+  await page.reload();
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await expect.poll(async () => (await widths()).length).toBeGreaterThan(10);
+});
+
 // ---- Server-saved settings: shared levels and layout, revision conflicts, offline copy ----
 
 const levelsPanel = (page: Page) => page.getByRole("region", { name: "Saved price levels" });
@@ -3419,8 +3459,8 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await levelsShown.click();
   await expect(levelsShown).toHaveAttribute("aria-checked", "false");
   for (const panel of ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"]) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
-  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume" }).click();
-  await expect(chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume" })).toHaveAttribute("aria-checked", "false");
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume", exact: true }).click();
+  await expect(chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume", exact: true })).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
   await expect(chartMenu(page)).toHaveCount(0);
   await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false });
