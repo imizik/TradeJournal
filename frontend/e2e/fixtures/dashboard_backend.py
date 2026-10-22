@@ -47,6 +47,26 @@ def scanner_amzn():
     return {"seeded": True}
 
 
+@core_app.post("/__test/radar-seed", include_in_schema=False)
+def radar_seed():
+    """A fresh Radar file: three passes on 2026-10-20 and the sample event with its one revision."""
+    import json
+    from app.engine.radar_store import RadarStore
+
+    path = Path(os.environ["RADAR_STORE"])
+    path.unlink(missing_ok=True)
+    store = RadarStore(path)
+    sample = json.loads((Path(__file__).resolve().parents[3] / "backend/tests/fixtures/radar/sample_event.json").read_text())
+    for minute in ("15:10", "15:11", "15:12"):
+        stamp = f"2026-10-20T{minute}:00.000Z"
+        store.append_pass({"session_date": "2026-10-20", "started_at": stamp, "finished_at": stamp, "universe_version": "radar-universe-v1",
+                           "status": "ok", "symbols_requested": 169, "symbols_returned": 168, "unmatched": ["ZZZ"], "requests_used": 4,
+                           "error": None, "skip_reason": None})
+    store.append_event(sample["event"])
+    store.append_revision(sample["revisions"][0])
+    return {"seeded": True}
+
+
 @core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state
