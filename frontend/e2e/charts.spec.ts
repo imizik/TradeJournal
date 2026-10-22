@@ -7225,3 +7225,26 @@ for (const part of ["regular", "post"] as const) test(`index focus preserves equ
   await expect(page.getByRole("button", { name: "Chart SPY", exact: true })).toContainText(part === "post" ? "+10.00%" : "+37.50%");
   await expect(page.getByRole("region", { name: "US10Y price", exact: true })).toHaveCount(0);
 });
+
+test("opt-in initial chart timings record each ready panel once", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("tj:chart-performance", "1"));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    // VWAP is deliberately unavailable outside regular hours, not unfinished.
+    for (const panel of Object.values(data.panels)) if (panel) {
+      panel.bars = panel.bars.map((bar) => ({ ...bar, extended: true, vwap: null }));
+    }
+    await route.fulfill({ json: data });
+  });
+  await page.goto("/charts");
+  await expect.poll(() => page.evaluate(() => window.__tjChartPerformance?.samples.initial_panel_studies?.length ?? 0)).toBe(5);
+  const samples = await page.evaluate(() => window.__tjChartPerformance!.samples);
+  expect(samples.initial_panel_candles).toHaveLength(5);
+  expect(new Set(samples.initial_panel_studies.map((s) => s.symbol)).size).toBe(5);
+  for (const ready of samples.initial_panel_studies) {
+    expect(ready.ms).toBeGreaterThanOrEqual(samples.initial_panel_candles.find((s) => s.symbol === ready.symbol)!.ms);
+  }
+  await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => window.__tjChartPerformance!.samples.initial_panel_studies.length)).toBe(5);
+});

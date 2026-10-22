@@ -669,3 +669,12 @@ def test_index_main_keeps_independent_equity_calendar(route_client, monkeypatch)
     assert data["market"]["sessions"] == []
     assert data["equity_market"]["sessions"][1]["part"] == "regular"
     assert data["extras"]["SPY"]["market"] == market
+
+def test_workspace_timing_is_opt_in_and_does_not_change_payload(route_client):
+    url = '/charts/workspace?symbol=SPY&intervals=5m&session=regular'
+    plain = route_client.get(url)
+    timed = route_client.get(url + '&timing=true')
+    assert plain.status_code == timed.status_code == 200
+    assert 'server-timing' not in plain.headers
+    assert 'total;dur=' in timed.headers['server-timing']
+    assert plain.json() == timed.json()

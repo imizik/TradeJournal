@@ -9,7 +9,7 @@ import time
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.engine.chart_timing import request_timing
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
@@ -78,6 +79,8 @@ def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], 
 @router.get("/history")
 def history(
     request: Request,
+    response: Response,
+    timing: bool = Query(False),
     symbol: str = Query(..., max_length=15),
     interval: str = Query(...),
     session: str = Query(..., pattern="^(regular|extended)$"),
@@ -86,36 +89,36 @@ def history(
     continuation: str | None = Query(None, max_length=64),
     db: Session = Depends(get_session),
 ):
-    symbol = symbol.upper().strip()
-    if not SYMBOL.fullmatch(symbol):
-        raise HTTPException(422, "Use a US stock or ETF ticker.")
-    if is_index(symbol):
+    with request_timing(timing, response):
+        symbol = symbol.upper().strip()
+        if not SYMBOL.fullmatch(symbol):
+            raise HTTPException(422, "Use a US stock or ETF ticker.")
+        if is_index(symbol):
+            try:
+                data = chart_feed.indices.page(symbol, interval, before, limit, session)
+            except ChartFeedError as exc:
+                raise HTTPException(422 if exc.code == "invalid_request" else 503, {"code": exc.code, "message": str(exc)}) from None
+            return {**data, "markers": [], "fills_truncated": False}
+        if interval in ("1D", "1W"):
+            # Daily and weekly bars are Tradier's regular session; `session` and `continuation` do not apply.
+            try:
+                data = chart_feed.daily.page(symbol, interval, before, limit)
+            except ChartFeedError as exc:
+                retry = int(time.time() + (60 if exc.code == "rate_limited" else 15))
+                raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
+            data["session"] = session
+            data["markers"] = []
+            data["fills_truncated"] = _markers(db, symbol, [data])[1] if access.is_journal(request) else False
+            return data
         try:
-            data = chart_feed.indices.page(symbol, interval, before, limit, session)
-        except ChartFeedError as exc:
-            raise HTTPException(422 if exc.code == "invalid_request" else 503, {"code": exc.code, "message": str(exc)}) from None
-        return {**data, "markers": [], "fills_truncated": False}
-    if interval in ("1D", "1W"):
-        # Daily and weekly bars are Tradier's regular session; `session` and `continuation` do not apply.
-        try:
-            data = chart_feed.daily.page(symbol, interval, before, limit)
-        except ChartFeedError as exc:
-            retry = int(time.time() + (60 if exc.code == "rate_limited" else 15))
-            raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
-        data["session"] = session
+            data = chart_history.page(symbol, interval, session, before, limit, continuation)
+        except HistoryError as exc:
+            status = 422 if exc.code == "invalid_request" else 503
+            raise HTTPException(status, {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at}) from None
         data["markers"] = []
-        data["fills_truncated"] = _markers(db, symbol, [data])[1] if access.is_journal(request) else False
+        fills, truncated = _markers(db, symbol, [data]) if access.is_journal(request) else ([], False)
+        data["fills_truncated"] = truncated
         return data
-    try:
-        data = chart_history.page(symbol, interval, session, before, limit, continuation)
-    except HistoryError as exc:
-        status = 422 if exc.code == "invalid_request" else 503
-        raise HTTPException(status, {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at}) from None
-    data["markers"] = []
-    fills, truncated = _markers(db, symbol, [data]) if access.is_journal(request) else ([], False)
-    data["fills_truncated"] = truncated
-    return data
-
 
 @router.get("/stream")
 async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=600)):
@@ -160,6 +163,8 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
 @router.get("/workspace")
 def workspace(
     request: Request,
+    response: Response,
+    timing: bool = Query(False),
     symbol: str = Query("SPY", max_length=15),
     intervals: str = Query("5m,15m,1h,1D,1m", max_length=80),
     watchlist: str = Query("SPY,QQQ,MRVL,NVDA,AMD,META", max_length=500),
@@ -178,88 +183,88 @@ def workspace(
     symbol in that scope, a held symbol at its nearest expiration. ``ranges=1``
     adds the expected-move range bands (C2.7) for every symbol shown. With either,
     ``auto=0`` leaves the automatic levels out of the zones."""
-    symbol = symbol.upper().strip()
-    symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
-    frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
-    held: dict[str, list[str]] = {}
-    for part in filter(None, (p.strip() for p in extras.split(","))):
-        name, _, wanted = part.partition(":")
-        held[name.strip().upper()] = list(dict.fromkeys(i for i in wanted.split(".") if i))
-    if not SYMBOL.fullmatch(symbol) or any(not SYMBOL.fullmatch(s) for s in [*symbols, *held]):
-        raise HTTPException(422, "Use a US stock or ETF ticker.")
-    if len(symbols) > 30 or not frames or len(frames) > 5 or any(f not in INTERVALS for f in frames):
-        raise HTTPException(422, "Choose up to 5 supported intervals and 30 watchlist symbols.")
-    if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
-        raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
-    try:
-        layer = Layer.parse(options) if options else None
-    except ValueError:
-        raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
-
-    def levels_for(scope: str | None):
-        found = {}
-        if layer is not None:
-            held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
-            found["extra_levels"] = lambda name, spot: options_feed.chart(name, held_layer, spot)
-        if ranges:
-            found["range_levels"] = options_feed.ranges
-        return {**found, "auto": auto} if found else {}
-
-    def add_open_interest_changes(levels: dict | None, name: str) -> None:
-        options_data = levels.get("options") if isinstance(levels, dict) else None
-        if isinstance(options_data, dict):
-            attach_open_interest_changes(db, name, options_data.get("root", ""),
-                                         options_data.get("strikes", []), options_data.get("expirations", []))
-
-    try:
-        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
-                                    volume_profile=chart_history.volume_profile, **levels_for(None))
-    except ChartFeedError as exc:
-        raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
-    add_open_interest_changes(data.get("auto_levels"), symbol)
-    data["extras"] = {}
-    for name, wanted in held.items():
+    with request_timing(timing, response):
+        symbol = symbol.upper().strip()
+        symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
+        frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
+        held: dict[str, list[str]] = {}
+        for part in filter(None, (p.strip() for p in extras.split(","))):
+            name, _, wanted = part.partition(":")
+            held[name.strip().upper()] = list(dict.fromkeys(i for i in wanted.split(".") if i))
+        if not SYMBOL.fullmatch(symbol) or any(not SYMBOL.fullmatch(s) for s in [*symbols, *held]):
+            raise HTTPException(422, "Use a US stock or ETF ticker.")
+        if len(symbols) > 30 or not frames or len(frames) > 5 or any(f not in INTERVALS for f in frames):
+            raise HTTPException(422, "Choose up to 5 supported intervals and 30 watchlist symbols.")
+        if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
+            raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
         try:
-            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
-                                         volume_profile=chart_history.volume_profile, **levels_for("nearest"))
-            data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
-                                     "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note"), "market": other.get("market")}
-            add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
+            layer = Layer.parse(options) if options else None
+        except ValueError:
+            raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
+
+        def levels_for(scope: str | None):
+            found = {}
+            if layer is not None:
+                held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
+                found["extra_levels"] = lambda name, spot: options_feed.chart(name, held_layer, spot)
+            if ranges:
+                found["range_levels"] = options_feed.ranges
+            return {**found, "auto": auto} if found else {}
+
+        def add_open_interest_changes(levels: dict | None, name: str) -> None:
+            options_data = levels.get("options") if isinstance(levels, dict) else None
+            if isinstance(options_data, dict):
+                attach_open_interest_changes(db, name, options_data.get("root", ""),
+                                             options_data.get("strikes", []), options_data.get("expirations", []))
+
+        try:
+            data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
+                                        volume_profile=chart_history.volume_profile, **levels_for(None))
         except ChartFeedError as exc:
-            # A held symbol that cannot load leaves the main charts intact.
-            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
+            raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
+        add_open_interest_changes(data.get("auto_levels"), symbol)
+        data["extras"] = {}
+        for name, wanted in held.items():
+            try:
+                other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
+                                             volume_profile=chart_history.volume_profile, **levels_for("nearest"))
+                data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
+                                         "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note"), "market": other.get("market")}
+                add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
+            except ChartFeedError as exc:
+                # A held symbol that cannot load leaves the main charts intact.
+                data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
 
-    # Equity watchlist/session context stays independent when an index is focused.
-    if is_index(symbol) and any(not is_index(name) for name in [*symbols, *held]):
-        today = datetime.now(ET).date()
-        data["equity_market"] = market_day(today, chart_calendar.hours(today))
+        # Equity watchlist/session context stays independent when an index is focused.
+        if is_index(symbol) and any(not is_index(name) for name in [*symbols, *held]):
+            today = datetime.now(ET).date()
+            data["equity_market"] = market_day(today, chart_calendar.hours(today))
 
-    # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
-    earnings = symbol_info_tradier.symbol_events.chart_earnings([s for s in [symbol, *held] if not is_index(s)], [s for s in symbols if not is_index(s)], datetime.now(ET).date())
-    data["earnings"] = earnings.get(symbol)
-    for name, other in data["extras"].items():
-        other["earnings"] = earnings.get(name)
+        # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
+        earnings = symbol_info_tradier.symbol_events.chart_earnings([s for s in [symbol, *held] if not is_index(s)], [s for s in symbols if not is_index(s)], datetime.now(ET).date())
+        data["earnings"] = earnings.get(symbol)
+        for name, other in data["extras"].items():
+            other["earnings"] = earnings.get(name)
 
-    if not access.is_journal(request):
-        data["fills"], data["fills_truncated"], data["positions"], data["alerts"] = [], False, [], []
-        data["journal_access"] = "restricted"
-        for other in data["extras"].values():
-            other["fills_truncated"], other["positions"] = False, []
+        if not access.is_journal(request):
+            data["fills"], data["fills_truncated"], data["positions"], data["alerts"] = [], False, [], []
+            data["journal_access"] = "restricted"
+            for other in data["extras"].values():
+                other["fills_truncated"], other["positions"] = False, []
+            return data
+
+        # Network calls above finish before opening any journal transaction. Select
+        # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
+        data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values())) if not is_index(symbol) else ([], False)
+        for name, other in data["extras"].items():
+            _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values())) if not is_index(name) else ([], False)
+        # Open positions on each symbol shown (C3.2): three queries a symbol, no provider.
+        data["positions"] = chart_journal.positions(db, symbol) if not is_index(symbol) else []
+        for name, other in data["extras"].items():
+            other["positions"] = chart_journal.positions(db, name) if not is_index(name) else []
+        # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
+        data["alerts"] = alert_listing(db)
         return data
-
-    # Network calls above finish before opening any journal transaction. Select
-    # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
-    data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values())) if not is_index(symbol) else ([], False)
-    for name, other in data["extras"].items():
-        _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values())) if not is_index(name) else ([], False)
-    # Open positions on each symbol shown (C3.2): three queries a symbol, no provider.
-    data["positions"] = chart_journal.positions(db, symbol) if not is_index(symbol) else []
-    for name, other in data["extras"].items():
-        other["positions"] = chart_journal.positions(db, name) if not is_index(name) else []
-    # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
-    data["alerts"] = alert_listing(db)
-    return data
-
 
 @router.get("/journal/fills/{fill_id}")
 def journal_fill(fill_id: uuid.UUID, db: Session = Depends(get_session)):

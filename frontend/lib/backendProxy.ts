@@ -59,7 +59,7 @@ export async function forward(request: Request, segments: string[], accessRoute 
     if (accessRoute && response.status >= 400) return Response.json({ detail: response.status === 429 ? "Try again later" : "Authentication request rejected" }, { status: response.status });
     if (config.profile === "assistant" && response.status >= 500) return Response.json({ detail: "App or market data unavailable" }, { status: response.status });
     const selected = new Headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
-    for (const name of ["content-type", "x-accel-buffering", "retry-after"]) { const value = response.headers.get(name); if (value) selected.set(name, value); }
+    for (const name of ["content-type", "x-accel-buffering", "retry-after", "server-timing"]) { const value = response.headers.get(name); if (value) selected.set(name, value); }
     if (accessRoute) for (const cookie of response.headers.getSetCookie()) selected.append("set-cookie", cookie);
     return new Response(response.body, { status: response.status, headers: selected });
   } catch {
