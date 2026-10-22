@@ -31,8 +31,11 @@ export function heatBookKind(book: HeatBook): HeatBookKind | null {
   return book.exchange === "NASDAQ" ? "mpid" : null;
 }
 
-/** A finished or forming column of `width` ms: [price, mean size, …] over the samples where that side was present. */
-export type HeatColumn = { start: number; width: number; cells: Float64Array };
+/**
+ * A finished or forming column of `width` ms: [price, mean size, …] over the samples where that side was present,
+ * bids first; `bids` counts the bid pairs (null from an older recorder that did not say).
+ */
+export type HeatColumn = { start: number; width: number; cells: Float64Array; bids: number | null };
 
 type Building = { start: number; sides: [Map<number, number>, Map<number, number>]; samples: [number, number] };
 
@@ -88,14 +91,14 @@ export class DepthHeatmap {
 
   /**
    * Replace or extend `kind` with recorded columns from the depth recorder
-   * ([start, width, [price, size, …]]), keyed by start: a newer copy of a
-   * column replaces the older one. Recorded maps never mix with live updates.
+   * ([start, width, [price, size, …], bid pairs?]), keyed by start: a newer copy
+   * of a column replaces the older one. Recorded maps never mix with live updates.
    */
-  load(kind: HeatBookKind, columns: [number, number, number[]][]) {
+  load(kind: HeatBookKind, columns: [number, number, number[], number?][]) {
     if (!columns.length) return;
     const first = columns[0][0];
     const kept = this.done[kind].filter((column) => column.start < first);
-    this.done[kind] = [...kept, ...columns.map(([start, width, cells]) => ({ start, width, cells: Float64Array.from(cells) }))];
+    this.done[kind] = [...kept, ...columns.map(([start, width, cells, bids]) => ({ start, width, cells: Float64Array.from(cells), bids: bids ?? null }))];
     const oldest = this.done[kind][this.done[kind].length - 1].start - HEAT_RETAIN_MS;
     this.done[kind] = this.done[kind].filter((column) => column.start >= oldest);
     this.changed();
@@ -135,36 +138,47 @@ export class DepthHeatmap {
 
   private finish(column: Building): HeatColumn {
     const cells: number[] = [];
+    let bids = 0;
     column.sides.forEach((sizes, side) => {
       const samples = column.samples[side];
       if (samples) for (const [key, total] of sizes) cells.push(key / 10_000, total / samples);
+      if (side === 0) bids = cells.length / 2;
     });
-    return { start: column.start, width: HEAT_BUCKET_MS, cells: Float64Array.from(cells) };
+    return { start: column.start, width: HEAT_BUCKET_MS, cells: Float64Array.from(cells), bids };
   }
 }
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
-/** Dark blue through cyan and amber to near white, faint at the low end so the candles stay readable. */
-const STOPS: [number, number, number, number][] = [[30, 64, 175, 0.18], [14, 165, 233, 0.32], [250, 204, 21, 0.5], [255, 247, 237, 0.7]];
+/**
+ * One ramp per side, matching the depth profile and wall colors: bids blue, asks
+ * orange, and amber when an older recorder did not say which side. Each starts
+ * nearly transparent and ends near white, so only the largest size stands out.
+ */
 const SHADES = 24;
-const PALETTE = Array.from({ length: SHADES }, (_, index) => {
-  const t = (index + 1) / SHADES * (STOPS.length - 1);
-  const i = Math.min(STOPS.length - 2, Math.floor(t));
-  const f = t - i;
-  const [a, b] = [STOPS[i], STOPS[i + 1]];
-  const mix = (k: number) => a[k] + (b[k] - a[k]) * f;
-  return `rgba(${Math.round(mix(0))},${Math.round(mix(1))},${Math.round(mix(2))},${mix(3).toFixed(3)})`;
+const ramp = ([r, g, b]: [number, number, number]) => Array.from({ length: SHADES }, (_, index) => {
+  const t = (index + 1) / SHADES;
+  const white = Math.max(0, t - 0.7) / 0.3; // the top shades blend toward white
+  const mix = (c: number) => Math.round(c + (255 - c) * white * 0.8);
+  return `rgba(${mix(r)},${mix(g)},${mix(b)},${(0.08 + 0.72 * t).toFixed(3)})`;
 });
+const PALETTES = [ramp([56, 189, 248]), ramp([251, 146, 60]), ramp([250, 204, 21])];
 /** The price step one cell spans: US stocks over $1 quote in cents; finer sub-dollar steps share a pixel row. */
 const TICK = 0.01;
+/** Price rows are at least this many CSS pixels tall; zoomed out, neighbouring cents are summed into one row of a round step. */
+const MIN_ROW_PX = 3;
+const ROW_STEPS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+/** Size at or below this share of the cells in view is not drawn; at or above BRIGHT_SHARE is the brightest shade. */
+const FLOOR_SHARE = 0.7;
+const BRIGHT_SHARE = 0.98;
 
 /**
  * Draws the heatmap behind the candles. The picture is cached and redrawn only
  * when the data, the visible range, the price scale or the size change, so the
- * crosshair and streamed candles stay cheap. Brightness is relative to the
- * 95th percentile size in view (square-root scale), so it shows where displayed
- * size sits, not absolute or executable liquidity.
+ * crosshair and streamed candles stay cheap. Brightness is relative to the size
+ * in view: the smallest 70% of cells are left out and the scale runs linearly up
+ * to the 98th percentile, so it shows where displayed size stood out, not
+ * absolute or executable liquidity.
  */
 export class DepthHeatLayer implements ISeriesPrimitive<Time> {
   private chart: IChartApi | null = null;
@@ -243,45 +257,55 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
       const logical = this.timeline.toLogical(ms / 1000);
       return logical === null ? null : (zero + logical * (one - zero)) * h;
     };
-    // Bin into screen pixels before drawing: every column that lands on the same
-    // pixel column is averaged, and every price that lands on the same pixel row
-    // is summed, so a zoomed-out view never stacks hundreds of translucent cells.
-    const cell = Math.max(1, Math.round(Math.abs(prices.perDollar) * TICK * v));
-    const bins: { left: number; right: number; rows: Map<number, number>; columns: number }[] = [];
+    // Bin before drawing: every column that lands on the same pixel column is
+    // averaged, and every price in the same row step is summed, so a zoomed-out
+    // view never stacks hundreds of translucent cells or draws 1-pixel pinstripes.
+    const step = ROW_STEPS.find((candidate) => Math.abs(prices.perDollar) * candidate >= MIN_ROW_PX) ?? ROW_STEPS[ROW_STEPS.length - 1];
+    const y = (price: number) => (prices.y + (price - prices.reference) * prices.perDollar) * v;
+    // Rows per side: bids, asks, and cells from a column that did not say.
+    const bins: { left: number; right: number; rows: [Map<number, number>, Map<number, number>, Map<number, number>]; columns: number }[] = [];
     for (const column of columns) {
       const [left, right] = [x(column.start), x(column.start + column.width)];
       if (left === null || right === null || right <= 0 || left >= width || right - left <= 0) continue;
       const l = Math.floor(left);
       let bin = bins[bins.length - 1];
-      if (!bin || bin.left !== l) bins.push(bin = { left: l, right, rows: new Map(), columns: 0 });
+      if (!bin || bin.left !== l) bins.push(bin = { left: l, right, rows: [new Map(), new Map(), new Map()], columns: 0 });
       bin.right = Math.max(bin.right, right);
       bin.columns++;
       const cells = column.cells;
       for (let i = 0; i < cells.length; i += 2) {
-        const y = prices.y + (cells[i] - prices.reference) * prices.perDollar;
-        const top = Math.floor(y * v / cell) * cell;
-        if (top + cell < 0 || top > height) continue;
-        bin.rows.set(top, (bin.rows.get(top) ?? 0) + cells[i + 1]);
+        const row = Math.floor((cells[i] + TICK / 2) / step + 1e-6);
+        const [top, bottom] = [y(row * step + step - TICK / 2), y(row * step - TICK / 2)];
+        if (bottom < 0 || top > height) continue;
+        const rows = bin.rows[column.bids === null ? 2 : i / 2 < column.bids ? 0 : 1];
+        rows.set(row, (rows.get(row) ?? 0) + cells[i + 1]);
       }
     }
     const sample: number[] = [];
-    for (const bin of bins) for (const total of bin.rows.values()) if (sample.length < 20_000) sample.push(total / bin.columns);
+    for (const bin of bins) for (const rows of bin.rows) for (const total of rows.values()) if (sample.length < 20_000) sample.push(total / bin.columns);
     if (!sample.length) return canvas;
     sample.sort((a, b) => a - b);
-    const bright = sample[Math.floor(0.95 * (sample.length - 1))] || 1;
-    const shades: [number, number, number][][] = Array.from({ length: SHADES }, () => []);
+    const floor = sample[Math.floor(FLOOR_SHARE * (sample.length - 1))];
+    const bright = sample[Math.floor(BRIGHT_SHARE * (sample.length - 1))];
+    const range = bright - floor || 1;
+    const shades: [number, number, number, number][][][] = PALETTES.map(() => Array.from({ length: SHADES }, () => []));
     bins.forEach((bin, index) => {
       const next = bins[index + 1]?.left ?? Infinity;
       const w = Math.max(1, Math.min(next, Math.ceil(bin.right)) - bin.left);
-      for (const [top, total] of bin.rows) {
-        const shade = Math.min(SHADES - 1, Math.floor(Math.sqrt(total / bin.columns / bright) * (SHADES - 1)));
-        shades[shade].push([bin.left, top, w]);
-      }
+      bin.rows.forEach((rows, side) => {
+        for (const [row, total] of rows) {
+          const size = total / bin.columns;
+          if (size <= floor) continue;
+          const shade = Math.min(SHADES - 1, Math.floor((size - floor) / range * (SHADES - 1)));
+          const [top, bottom] = [Math.round(y(row * step + step - TICK / 2)), Math.round(y(row * step - TICK / 2))];
+          shades[side][shade].push([bin.left, top, w, Math.max(1, bottom - top)]);
+        }
+      });
     });
-    shades.forEach((rects, shade) => {
-      context.fillStyle = PALETTE[shade];
-      for (const [l, t, w] of rects) context.fillRect(l, t, w, cell);
-    });
+    shades.forEach((side, palette) => side.forEach((rects, shade) => {
+      context.fillStyle = PALETTES[palette][shade];
+      for (const [l, t, w, hgt] of rects) context.fillRect(l, t, w, hgt);
+    }));
     return canvas;
   }
 }

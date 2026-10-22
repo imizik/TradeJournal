@@ -29,8 +29,10 @@ function validProfile(value: unknown): value is DepthProfile {
   return isRecord(value) && typeof value.t === "number" && Array.isArray(value.bids) && value.bids.length <= 120 && value.bids.every(pair)
     && Array.isArray(value.asks) && value.asks.length <= 120 && value.asks.every(pair);
 }
-function validColumns(value: unknown): value is [number, number, number[]][] {
-  return Array.isArray(value) && value.length <= 6000 && value.every((column) => Array.isArray(column) && column.length === 3
+/** [start, width, cells] or, from a newer recorder, [start, width, cells, bid pairs]. */
+function validColumns(value: unknown): value is [number, number, number[], number?][] {
+  return Array.isArray(value) && value.length <= 6000 && value.every((column) => Array.isArray(column) && (column.length === 3
+    || (column.length === 4 && Number.isInteger(column[3]) && column[3] >= 0 && column[3] * 2 <= column[2]?.length))
     && typeof column[0] === "number" && typeof column[1] === "number" && Array.isArray(column[2]) && column[2].length <= 480
     && column[2].every((n: unknown) => typeof n === "number" && Number.isFinite(n)));
 }

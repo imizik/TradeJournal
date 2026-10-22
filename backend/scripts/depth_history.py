@@ -103,7 +103,10 @@ class DayIndex:
             self.last_ms = max(self.last_ms, at)
 
     def columns(self, kind: str, since_ms: int, width_ms: int) -> list[list]:
-        """[[start_ms, width_ms, [price, mean size, ...]], ...] merged into width_ms buckets."""
+        """[[start_ms, width_ms, [price, mean size, ...], bid pairs], ...] merged into width_ms buckets.
+
+        Bids come first in the cells; the fourth field counts them so the heatmap can color the sides.
+        """
         merged: OrderedDict[int, Bucket] = OrderedDict()
         for start, bucket in self.buckets[kind].items():
             if start < since_ms:
@@ -119,11 +122,14 @@ class DayIndex:
         out = []
         for start, bucket in merged.items():
             cells = []
+            bids = 0
             for side in (0, 1):
                 if bucket.samples[side]:
                     for price, total in bucket.sides[side].items():
                         cells += [price / 10_000, round(total / bucket.samples[side], 2)]
-            out.append([start, width_ms, cells])
+                if side == 0:
+                    bids = len(cells) // 2
+            out.append([start, width_ms, cells, bids])
         return out
 
     def profile(self, kind: str) -> dict | None:

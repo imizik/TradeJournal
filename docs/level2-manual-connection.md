@@ -94,10 +94,14 @@ updates that fell in it, and a gap with no updates stays blank, which is not
 zero. The provider alternates two books on this subscription, one with ARCA
 MPIDs (one row per price) and one with other market-maker IDs (NSDQ, NASD,
 ETMM; sometimes several rows per price). They are never merged; the dock picks
-which one is drawn, ARCA-labelled by default. Brightness is relative to the
-95th-percentile size in view (square root). It shows where displayed size sat,
-not consolidated or executable liquidity, and no spread/imbalance signal is
-derived from it.
+which one is drawn, ARCA-labelled by default. Bids are drawn blue and asks
+orange, like the depth profile and walls (amber when an older recorder did not
+send its columns' bid count). Brightness is relative to the size in view: the
+smallest 70% of cells are left out and the scale runs linearly to the 98th
+percentile. Rows are at least 3 pixels tall; zoomed out, neighbouring cents are
+summed into one row of a round price step. It shows where displayed size stood
+out, not consolidated or executable liquidity, and no spread/imbalance signal
+is derived from it.
 
 ## Depth recorder
 
