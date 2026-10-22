@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import httpx
 
+from app.engine.chart_timing import measured, measured_lock
 from app.engine import alpaca, chart_rvol
 from app.engine.chart_adjust import BASIS, adjust_minutes, describe, suspect_gaps
 from app.engine.chart_calendar import ChartCalendar, chart_calendar
@@ -132,7 +133,7 @@ class ChartHistory:
         and ``pending`` carry ``retry_at``. Same budget, batch bounds and lock as a page."""
         if not SYMBOL.fullmatch(symbol):
             raise HistoryError("Invalid chart symbol.", "invalid_request")
-        with self._lock:
+        with measured_lock(self._lock, "history_queue"):
             work = Work((symbol, "1m", "extended", 0, 0), day)
             return self._session(symbol, day, work, time.monotonic() + 10, [0])
 
@@ -176,10 +177,11 @@ class ChartHistory:
         attempts[0] += 1
         self._calls.append(now)
         try:
-            response = httpx.get(f"{alpaca.DATA_URL}/v2/stocks/{quote(symbol, safe='')}/bars", params=params,
-                                 headers={"APCA-API-KEY-ID": alpaca.ALPACA_API_KEY,
-                                          "APCA-API-SECRET-KEY": alpaca.ALPACA_API_SECRET},
-                                 timeout=max(0.05, min(10, deadline - now)))
+            with measured("history_provider"):
+                response = httpx.get(f"{alpaca.DATA_URL}/v2/stocks/{quote(symbol, safe='')}/bars", params=params,
+                                     headers={"APCA-API-KEY-ID": alpaca.ALPACA_API_KEY,
+                                              "APCA-API-SECRET-KEY": alpaca.ALPACA_API_SECRET},
+                                     timeout=max(0.05, min(10, deadline - now)))
         except httpx.HTTPError as exc:
             raise HistoryError("Alpaca history connection failed; retry this page.") from exc
         if response.status_code == 429:
@@ -208,7 +210,8 @@ class ChartHistory:
         return body
 
     def _session(self, symbol: str, day: date, work: Work, deadline: float, attempts: list[int]) -> list[dict]:
-        cached = self._cached(symbol, day)
+        with measured("history_cache"):
+            cached = self._cached(symbol, day)
         if cached is not None:
             return cached
         start, end = self._bounds(day)
@@ -244,7 +247,7 @@ class ChartHistory:
         if not SYMBOL.fullmatch(symbol) or interval not in ("1m", "3m", "5m", "15m", "30m", "1h", "4h") or session not in ("regular", "extended") or limit < 1 or limit > PAGE or before <= 0 or before > time.time() + 60:
             raise HistoryError("Invalid chart history request.", "invalid_request")
         identity = (symbol, interval, session, before, limit)
-        with self._lock:
+        with measured_lock(self._lock, "history_queue"):
             now = time.monotonic()
             self._work = {k: v for k, v in self._work.items() if now - v.touched < 600}
             if len(self._work) > 64:
@@ -278,7 +281,8 @@ class ChartHistory:
                     # The cache stays raw; the display basis is applied to a copy.
                     minutes = adjust_minutes(self._session(symbol, work.day, work, deadline, attempts), work.day, info["splits"])
                     # Each session resamples with its own date's hours (half days end at 13:00).
-                    day_bars = [b for b in chart_bars(minutes, [], interval, session, {work.day: hours}) if b["time"] < before]
+                    with measured("history_resample"):
+                        day_bars = [b for b in chart_bars(minutes, [], interval, session, {work.day: hours}) if b["time"] < before]
                     # Full-day resampling supplies VWAP and complete buckets.
                     work.bars = (day_bars + work.bars)[-(limit + WARMUP):]
                     work.day -= timedelta(days=1)
@@ -298,7 +302,8 @@ class ChartHistory:
             warmed = len(prefix) >= WARMUP
             ready = (warmed and len(eligible) >= limit) or exhausted
             if ready:
-                computed = indicators((prefix + visible)[- (WARMUP + limit):])
+                with measured("history_indicators"):
+                    computed = indicators((prefix + visible)[- (WARMUP + limit):])
                 visible = computed[-len(visible):] if visible else []
                 if not warmed:
                     visible = [{**b, **{f"ema{n}": None for n in (9, 20, 50, 200)}, "rsi": None} for b in visible]

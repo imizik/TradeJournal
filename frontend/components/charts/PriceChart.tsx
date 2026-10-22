@@ -11,7 +11,7 @@ import { newsMarks, newsTip } from "@/lib/newsMarkers";
 import type { NewsCluster } from "@/lib/newsMarkers";
 import { groupFills, MarkLayer } from "@/lib/chartMarks";
 import type { FillGroup } from "@/lib/chartMarks";
-import { chartCommitted } from "@/lib/chartPerformance";
+import { chartCommitted, useInitialPanelTiming } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
@@ -913,6 +913,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     retryJump.current();
     if (bars.length) return chartCommitted(symbol, undefined, main);
   }, [panel, pending, dataKey, symbol, interval, main, live.store]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
+
+  // Match the workspace's opening-history trigger, including panels whose history
+  // request has not started yet. Never count a partial/failed warmup as ready.
+  const timingBars = panel?.bars ?? [];
+  const timingLast = timingBars.at(-1);
+  const timingHistoryReady = history
+    ? history.warmup === "ready" && !history.loading && !history.issue
+    : !intradayInterval(interval) || timingBars.length >= (main ? OPENING_BARS : PANEL_OPENING_BARS);
+  const timingStudiesReady = !!timingLast && ["ema9", "ema20", "ema50", "ema200", "rsi", "vwap"].every((name) =>
+    !indicators[name as keyof typeof indicators] || (name === "vwap" && (!intradayInterval(interval) || timingLast.extended)) ||
+    timingLast[name as keyof typeof timingLast] != null);
+  useInitialPanelTiming(`${id}|${dataKey}`, !pending && timingBars.length > 0,
+    !pending && timingHistoryReady && timingStudiesReady, !pending && timingHistoryReady);
 
   useEffect(() => {
     const current = bundle.current;

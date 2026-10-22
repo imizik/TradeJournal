@@ -14,6 +14,7 @@ import time
 
 import httpx
 
+from app.engine.chart_timing import measured, measured_lock
 from app.engine import chart_levels, chart_rvol, tradier
 from app.engine.chart_adjust import adjust_minutes, describe, factor_before, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
@@ -52,7 +53,7 @@ class ChartFeed:
             raise ChartFeedError("Connect your Tradier account to load charts. Set TRADIER_API_KEY on the private backend.", "not_configured")
         key = (tradier.TRADIER_BASE_URL, path, tuple(sorted(params.items())))
         # The lock also coalesces concurrent requests from several tabs/panels.
-        with self._lock:
+        with measured_lock(self._lock, "tradier_queue"):
             now = time.time()
             saved = self._cache.get(key) if keep else None
             if saved:
@@ -67,11 +68,12 @@ class ChartFeed:
                 if now < self._failed.get(key, 0):
                     raise ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
                 self._calls.append(now)
-                response = httpx.get(
-                    f"{tradier.TRADIER_BASE_URL}{path}", params=params,
-                    headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
-                    timeout=10,
-                )
+                with measured("tradier_provider"):
+                    response = httpx.get(
+                        f"{tradier.TRADIER_BASE_URL}{path}", params=params,
+                        headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
+                        timeout=10,
+                    )
                 if response.status_code == 429:
                     self._retry_at = now + 60
                     raise ChartFeedError("Tradier's data allowance is temporarily exhausted. Retrying in one minute.", "rate_limited")

@@ -2136,3 +2136,30 @@ over a sell and a crowded one is skipped, never overlapped; hover still lists it
 The markers carry no trade id, so "Latest trade" labels the fills on the newest
 candle that has any. `e2e/chart-markers.spec.ts` holds the merge, hover, label,
 cluster and small-chart checks and the pictures.
+
+### Initial chart-load diagnostics
+
+The same opt-in browser diagnostics expose navigation-relative
+`initial_panel_candles`, `initial_panel_history`, and `initial_panel_studies`
+samples, identified by panel, symbol, interval and session. They are recorded
+once per mounted panel identity after a commit and two animation frames (a
+paint opportunity, not a pixel-level paint measurement). History readiness
+requires the existing opening-history request and its warmup to finish, if
+needed. Studies readiness additionally requires the latest applicable enabled
+EMA/RSI/VWAP values. Outside regular hours VWAP is intentionally unavailable;
+it is not an unfinished study. Unavailable studies do not receive a ready time.
+These metrics describe opening loads, not study toggles or subsequent scrolling.
+
+Add `timing=true` to `/charts/workspace` or `/charts/history` to receive opt-in
+`Server-Timing` durations. `total` covers the synchronous handler, excluding
+FastAPI dependency setup, response serialization and transport. Nested metrics
+include `history_queue`, `history_provider`, `history_cache`,
+`history_resample`, `history_indicators`, `tradier_queue` and
+`tradier_provider`. Queue metrics cover lock acquisition only; the existing
+lock lifetimes and provider budgets are unchanged. Metrics overlap where
+nested, and request durations across concurrent panels must not be added as
+wall-clock elapsed time. Browser gaps between continuation requests include
+existing retry delays and rate-limit cooldowns.
+
+The reproducible isolated runner and the first measured comparison are in
+[the October 22 benchmark](benchmarks/chart-load-2026-10-22/README.md).

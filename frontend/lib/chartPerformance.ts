@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ChartStreamTick } from "@/lib/charts";
 
 /** Opt-in, bounded, local diagnostics; no telemetry or provider requests. */
@@ -65,4 +65,21 @@ export function chartCommitted(symbol: string, tick: ChartStreamTick | undefined
       switches.delete(symbol);
     }
   });
+}
+
+/** Navigation-relative, once per panel identity. Two frames are a paint opportunity,
+ * not proof of pixels on the display. Only active when local diagnostics are on. */
+export function useInitialPanelTiming(identity: string, candles: boolean, studies: boolean, history: boolean) {
+  const recorded = useRef({ identity, metrics: new Set<string>() });
+  useEffect(() => {
+    if (!diagnosticsEnabled() || !candles) return;
+    if (recorded.current.identity !== identity) recorded.current = { identity, metrics: new Set<string>() };
+    return afterPaint(() => {
+      for (const metric of ["initial_panel_candles", ...(history ? ["initial_panel_history"] : []), ...(studies ? ["initial_panel_studies"] : [])]) {
+        if (recorded.current.metrics.has(metric)) continue;
+        recorded.current.metrics.add(metric);
+        recordChartTiming(metric, performance.now(), identity);
+      }
+    });
+  }, [identity, candles, studies, history]);
 }

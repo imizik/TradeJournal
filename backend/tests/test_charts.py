@@ -634,3 +634,13 @@ def test_ladder_route_checks_its_scope_and_passes_the_price(route_client, monkey
     assert route_client.get("/charts/options/BRK%2FB/ladder").status_code == 200  # a class share's slash
     assert route_client.get("/charts/options/SPY/ladder?scope=month").status_code == 422
     assert route_client.get("/charts/options/SPY/ladder?spot=-1").status_code == 422
+
+
+def test_workspace_timing_is_opt_in_and_does_not_change_payload(route_client):
+    url = '/charts/workspace?symbol=SPY&intervals=5m&session=regular'
+    plain = route_client.get(url)
+    timed = route_client.get(url + '&timing=true')
+    assert plain.status_code == timed.status_code == 200
+    assert 'server-timing' not in plain.headers
+    assert 'total;dur=' in timed.headers['server-timing']
+    assert plain.json() == timed.json()

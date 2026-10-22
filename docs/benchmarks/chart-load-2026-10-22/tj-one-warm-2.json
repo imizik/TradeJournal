@@ -1,0 +1,58 @@
+{
+  "started": "2026-10-22T19:02:25.031Z",
+  "layout": "single",
+  "settings": {
+    "symbol": "SPY",
+    "layout": "single",
+    "intervals": [
+      "5m",
+      "15m",
+      "1h",
+      "1D",
+      "1m"
+    ],
+    "session": "extended",
+    "watchlist": [
+      "SPY"
+    ],
+    "newsHidden": true
+  },
+  "completed": true,
+  "errors": [],
+  "samples": {
+    "initial_panel_candles": [
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 204.70000004768372
+      }
+    ],
+    "initial_panel_studies": [
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 204.79999995231628
+      }
+    ]
+  },
+  "requests": [
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 183.79999995231628,
+      "timing": "tradier_queue;dur=0.067, total;dur=44.782",
+      "request": {
+        "startTime": 1792695745139.88,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 2.571,
+        "responseStart": 62.609,
+        "responseEnd": 64.833
+      },
+      "issue": null,
+      "continuation": false
+    }
+  ]
+}
