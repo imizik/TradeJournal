@@ -1759,9 +1759,10 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 
   await page.screenshot({ path: test.info().outputPath("panel-symbols.png") });
-  // A fourth symbol is refused; the panel keeps following MRVL.
+  // A fourth symbol is now supported; return to the follower for the streaming checks.
   await holdSymbol(page, "Panel 2", "AAPL");
-  await expect(page.getByRole("alert").filter({ hasText: "Charts show up to three symbols" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "AAPL 15m chart" })).toBeVisible();
+  await followMain(page, "Panel 2", "MRVL");
   await expect(page.getByRole("region", { name: "MRVL 15m chart" })).toBeVisible();
 
   // Switching the main symbol moves the panels that follow it, and only those.
@@ -2099,7 +2100,7 @@ test("saved layouts that are malformed are dropped whole and duplicate names are
   await fakeChartSettings(context, { revision: 1, data: { layouts: [
     names("Index", { panelSymbols: [null, "SPY", "QQQ", null, null] }),
     // None of these is an arrangement anyone saved, so none is repaired into one.
-    names("Three held", { panelSymbols: [null, "SPY", "QQQ", "AAPL", null] }),
+    names("Six panels", { panelSymbols: [null, "SPY", "QQQ", "AAPL", "NVDA", "IWM"] }),
     names("No held list", { panelSymbols: undefined }), names("Short held list", { panelSymbols: [null, "SPY"] }),
     names("Main holds", { panelSymbols: ["SPY", null, null, null, null] }), names("Bad symbol", { panelSymbols: [null, "spy!", null, null, null] }),
     names("Bad mode", { layout: "grid" }), names("No mode", { layout: undefined }), names("Bad size", { smallSize: "huge" }), names("Bad link", { linkRange: "yes" }),
@@ -7060,4 +7061,114 @@ test("Level 2 stays readable at the dock's minimum width and in full screen", as
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("level2-dock-fullscreen.png") });
   expect(calls.post).toBe(2);
+});
+
+test("Macro opens five instruments, masks index studies, and Tech restores after reload", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await mockStreams(page);
+  const requests: URLSearchParams[] = [];
+  await page.route("**/api/backend/charts/history?**", (route) => route.fulfill({ json: { bars: [], exhausted: true, older_cursor: null, continuation: null, warmup: "ready", source: "tradier", price_basis: "index_native", issue: null } }));
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    requests.push(new URL(route.request().url()).searchParams);
+    const data = fixture(route.request().url());
+    const targets = [[data.symbol, data], ...Object.entries(data.extras ?? {})] as const;
+    for (const [symbol, target] of targets) {
+      if (symbol !== "VIX" && symbol !== "US10Y") {
+        target.panels = realisticPanels(Object.keys(target.panels) as Interval[]);
+        continue;
+      }
+      target.panels = realisticPanels(Object.keys(target.panels) as Interval[]);
+      for (const panel of Object.values(target.panels)) if (panel) {
+        panel.markers = [];
+        panel.bars = panel.bars.map((b, i) => {
+          const close = symbol === "US10Y" ? 5.1 + Math.sin(i / 12) * 0.05 : 16 + Math.sin(i / 12) * 2;
+          const delta = symbol === "US10Y" ? 0.01 : 0.15;
+          return { ...b, source: "tradier", open: close - delta, high: close + delta, low: close - 2 * delta, close,
+            volume: 0, vwap: null, ema9: close - delta, ema20: close - delta, ema50: close - delta, ema200: close - delta };
+        });
+      }
+      target.adjustment = { ...ADJUSTED, basis: "index_native", source: "Tradier index values" };
+      target.instrument = { kind: "index", provider_symbol: symbol === "US10Y" ? "TNX:CGI" : "VIX", name: symbol, unit: symbol === "US10Y" ? "percent" : "index_points", scale: symbol === "US10Y" ? 0.1 : 1 };
+      target.intraday_as_of = Math.floor(Date.now() / 1000) - 3600;
+    }
+    data.quotes = data.quotes.map((q) => q.symbol === "US10Y" ? { ...q, last: 5.146, change: 0.029, change_bps: 2.9, unit: "percent", volume: null } : q);
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  const before = await intervalsShown(page);
+  await saveLayout(page, "Tech saved");
+  await expect.poll(() => layoutNames(server)).toEqual(["Tech saved"]);
+  await page.getByRole("button", { name: "Macro layout", exact: true }).click();
+  for (const symbol of ["SPY", "QQQ", "IWM", "VIX", "US10Y"]) await expect(page.getByRole("region", { name: `${symbol} 4h chart` })).toBeVisible();
+  expect(await intervalsShown(page)).toEqual(["4h", "4h", "4h", "4h", "4h"]);
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY", "IWM"]);
+  await expect.poll(() => requests.at(-1)?.get("extras")).toBe("IWM:4h,QQQ:4h,US10Y:4h,VIX:4h");
+  for (const id of ["Panel 4", "Panel 5"]) {
+    await expect(values(page, id)).not.toContainText("Vol");
+    await expect(page.getByLabel(`${id} interval`)).toHaveText("4h1D");
+  }
+  await expect(page.getByRole("region", { name: "US10Y 4h chart" })).toContainText("Yield %");
+  await page.screenshot({ path: test.info().outputPath("macro-desktop.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Panel 5 studies", exact: true }).click();
+  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => (server.data?.panelStudies as { volume: boolean; vwap: boolean }[] | undefined)?.[4]).toMatchObject({ volume: true, vwap: true });
+  await page.getByRole("region", { name: "US10Y 4h chart" }).getByRole("button", { name: "Focus 4h chart" }).click();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("5.146%");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("+2.9 bp");
+  await expect(page.getByRole("button", { name: "Plan trade", exact: true })).toHaveCount(0);
+  await useLayout(page, "Tech saved");
+  expect(await intervalsShown(page)).toEqual(["4h", "4h", "4h", "1D", "4h"]);
+  await expect.poll(() => requests.at(-1)?.get("intervals")).toBe("4h,1D");
+  await page.reload();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("5.146%");
+  expect(await intervalsShown(page)).toEqual(["4h", "4h", "4h", "1D", "4h"]);
+  await page.getByRole("button", { name: "Macro layout", exact: true }).click();
+  await saveLayout(page, "Macro saved");
+  await expect.poll(() => layoutNames(server)).toEqual(["Tech saved", "Macro saved"]);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "US10Y 4h chart" })).toBeVisible();
+  await page.getByRole("button", { name: "Back to Tech", exact: true }).click();
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+  expect(await intervalsShown(page)).toEqual(before);
+  expect(layoutNames(server)).toEqual(["Tech saved", "Macro saved"]);
+  await page.getByRole("button", { name: "Macro layout", exact: true }).click();
+  await expect(page.getByRole("region", { name: "SPY 4h chart" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("macro-phone.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Back to Tech", exact: true }).click();
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+  const layouts = await openLayouts(page);
+  await layouts.getByRole("button", { name: "Use Macro preset", exact: true }).click();
+  await expect(page.getByRole("region", { name: "SPY 4h chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "US10Y 4h chart" })).toBeAttached();
+  await page.getByRole("button", { name: "Back to Tech", exact: true }).click();
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+});
+
+for (const part of ["regular", "post"] as const) test(`index focus preserves equity ${part} clock and watchlist change`, async ({ page }) => {
+  const at = Date.parse(part === "regular" ? "2026-09-29T14:32:15Z" : "2026-09-29T21:30:00Z") / 1000;
+  await stubExhaustedHistory(page);
+  const equity: MarketDay = { date: "2026-09-29", status: "open", source: "tradier", description: null, note: null, sessions: [
+    { part: "pre", start: Date.parse("2026-09-29T08:00:00Z") / 1000, end: Date.parse("2026-09-29T13:30:00Z") / 1000 },
+    { part: "regular", start: Date.parse("2026-09-29T13:30:00Z") / 1000, end: Date.parse("2026-09-29T20:00:00Z") / 1000 },
+    { part: "post", start: Date.parse("2026-09-29T20:00:00Z") / 1000, end: Date.parse("2026-09-30T00:00:00Z") / 1000 }] };
+  await openAt(page, at, (url) => {
+    const data = currentFixture(url, at);
+    data.market = data.symbol === "US10Y" ? { ...equity, source: "index", status: "unknown", sessions: [] } : equity;
+    data.equity_market = equity;
+    for (const [symbol, extra] of Object.entries(data.extras ?? {})) extra.market = symbol === "US10Y" || symbol === "VIX" ? { ...equity, sessions: [] } : equity;
+    for (const quote of data.quotes) Object.assign(quote, { last: 110, previous_close: 80, regular_close: 100, trade_time: at - 2 });
+    return data;
+  });
+  await page.getByRole("button", { name: "Macro layout", exact: true }).click();
+  await page.getByRole("region", { name: "US10Y 4h chart" }).getByRole("button", { name: "Focus 4h chart" }).click();
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveCount(0);
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toBeVisible();
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Chart SPY", exact: true })).toContainText(part === "post" ? "+10.00%" : "+37.50%");
+  await expect(page.getByRole("region", { name: "US10Y price", exact: true })).toHaveCount(0);
 });

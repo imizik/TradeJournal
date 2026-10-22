@@ -7,7 +7,7 @@ below were not answered, so the slice uses the defaults: a +10% winner line, a
 used on real weeks. Implements the
 roadmap's [J2](../product-roadmap.md#j2--turn-weekly-review-into-one-action)
 in its smallest form, shaped by the October 21 behavior audit
-(a D0 report not yet committed to the repository) and the
+([the committed D0 report](../../backend/reports/behavior_audit_2026-10-21.md)) and the
 July [edge audit](../../backend/reports/edge_audit_2026-07-07.md).
 
 ## Why this, and why exits
@@ -26,7 +26,7 @@ The entry flags the AI reviews coach on (chase/extension, trend and day-move
 alignment) did **not** separate his winners from his losers. The July rules
 already existed in a report and changed nothing. The weekly review is the
 "choose one thing and check it" half of the product goal; the in-trade nudge is
-the open-trade alerts being built in another session.
+the open-trade alerts built in #372 (off by default; activation is separate).
 
 ## What the weekly screen shows
 
@@ -143,7 +143,7 @@ line (until that work lands), no Jo memory toggle.
 - Confirm, change, skip and "keep last week's rule" all save and reload.
 - NY week boundaries including a holiday week and Friday expiries.
 - Works with Check, Jo and the Claude plan all unavailable.
-- Browser check at phone and desktop width.
+- Phone and desktop browser acceptance remains unverified by a committed weekly-review browser test.
 
 **Acceptance (in use) — separate, Isaac's call:** he completes three
 consecutive weekly reviews in under ~2 minutes each and can say which rule he

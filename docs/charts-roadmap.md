@@ -1107,7 +1107,7 @@ conditions and hidden/closed browsers, not only an open chart tab. Document
 transport delivery semantics separately from event deduplication. The phone
 message names the symbol, level, price and event time, and a live phone delivery
 is observed before claiming it works. Alert subscriptions and REST recovery must
-share the existing token budget with up to three visible symbols.
+share the existing token budget with up to five visible symbols.
 Compound conditions ("and relative volume above 2×") wait until users ask for
 them. An alert made from an options wall (C4.4) is pinned to that wall's strike
 when it is created. Open-interest walls hold still through a session, but a
@@ -1167,7 +1167,7 @@ and compares the recorded decision with the actual trade using correct units.
 **C7.1 Per-panel symbol link groups (done in PR #95).** Each panel follows the main symbol or
 holds its own (for example SPY, QQQ and the traded name). Crosshair and time
 range stay linked by time. Each extra symbol costs its own chart-feed loads, so
-cap it at three distinct symbols.
+cap it at five distinct symbols (raised by the Macro continuation below).
 *Done when:* SPY, QQQ and a stock remain independent through symbol switches,
 range/crosshair linking, pause/resume and scroll-back in browser tests. A backend
 test proves tabs/panels share one upstream WebSocket and stay within aggregate
@@ -1451,3 +1451,13 @@ reopen them without the user.
     C4.4 and C4.5 were built ahead of G0, C5.2 and Phase 3, with symbol info
     T2.1 in the same PR. The rest of decision 7 stands: replay and pre-trade
     capture still follow G0.
+
+## Macro continuation — October 21, 2026
+
+Owner-approved implementation: the existing five slots get a Macro preset
+(SPY/QQQ/IWM/VIX/US10Y at 4h), a local Tech return, and explicit Tradier
+index routing for VIX and TNX/10. See [the implementation contract](charts-workspace.md#macro-layout-vix-and-10-year-yield)
+for units, observation hours, retained history and cost limits. No crypto,
+futures, eight-panel grid, additional provider or Radar dependency.
+Production deployment and the owner's morning-routine acceptance are separate
+from fixture tests and provider entitlement probes.

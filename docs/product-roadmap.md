@@ -151,7 +151,7 @@ the milestone statuses here.
 | D0 | Read-only data audit and broad personal-pattern analysis | Existing journal data; explicit selection of the analysis task | future research |
 | M0 | Explore moomoo market-data endpoints and evaluate selective metric-source replacement | Phase 1 diagnostic; separately approved bounded comparisons with existing sources | Read-only diagnostics/comparisons delivered; manual Level 2 connection landed in PRs #241/#248 and was observed in market hours on 2026-10-12. On 2026-10-12 the owner chose to bring an until-stopped session and a memory-only liquidity heatmap behind the NVDA candles ahead of Dots ([contract](level2-manual-connection.md#charts-dock-panel-and-heatmap)). This is not metric-source replacement; other new expansion follows Dots |
 | J1 | Short post-trade reflection and review bookmarks | Existing trade detail; durable user-record design | future; recommended first product slice |
-| J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | future |
+| J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | First bounded slice merged #371; deployment and real-week acceptance unverified |
 | J3 | Personal setup playbook with winning and losing examples | J1; C3.4 for pre-trade template selection | future |
 | J4 | Optional planned-risk fields and a session agreement | C3.4; reliable timing and links for comparisons | future |
 | J5 | Prospective personal experiment log | J2; a precisely defined question supported by D0 or recorded observations | conditional |
@@ -252,6 +252,10 @@ and retrieval have browser evidence. Saving and failure states are explicit.
 No automatic psychology labels or score based on whether the trade won.
 
 ### J2 — Turn weekly review into one action
+
+First slice merged in #371: fixed exit-leak evidence and one saved rule at
+`/daily/week`. This does not complete the broader scope or human acceptance
+below; see [the implemented boundary](agent/weekly-review-plan.md).
 
 Extend existing Daily Review and Analytics into a weekly view with selected
 bookmarks, self-reported recurring issues, available outcome summaries, the

@@ -13,6 +13,60 @@ Advanced Charts library. No TradingView subscription or paid data upgrade is
 required by this feature. The Tradier account still needs production market-data
 access. Keys remain on the private backend.
 
+## Macro layout: VIX and 10-year yield
+
+The desktop **Macro** button (or **Layouts → Macro** on a phone) opens the existing five
+slots: SPY above QQQ, IWM, VIX and US10Y, all at 4h. The lower row starts at the
+balanced size and remains resizable. **Tech** restores the main symbol,
+intervals, held symbols, linked-range choice and proportions from before Macro.
+That return snapshot is local to this browser, survives reload, and does not
+replace a named layout. Existing named layouts still leave the main ticker
+unchanged. Unsupported index intervals are mapped to 4h for display and data
+requests, including URL/reload and saved-layout entry; the saved stock
+arrangement itself is preserved. Five distinct symbols now fit; no extra chart slots were added.
+
+`chart_indices.py` uses the existing Tradier chart cache, budget and failure
+handling. VIX is an index in points. **US10Y** maps to **TNX:CGI**, the Cboe
+10-year Treasury yield index, divided by ten: 51.46 becomes **5.146%**; a raw
+change of 0.29 becomes **+2.9 basis points**. This is a yield index, not a bond
+ETF, futures price or a guaranteed match to another vendor's US10Y series.
+The scale is explicit, never inferred from a value's size; see
+[TradingView's TNX unit explanation](https://www.tradingview.com/support/solutions/43000483455-prices-for-cboe-tnx-fvx-and-tyx-are-10-times-higher-than-normal/).
+
+Only **4h and 1D** are supported for these two instruments. Daily OHLC comes
+from Tradier history, with completed history cached for 24h and a short tail
+for 60s. Four-hour candles aggregate 15-minute observations into clock buckets
+starting at New York midnight, including provider observation hours. They do
+not use equities' premarket/RTH/postmarket boundaries. The request is bounded
+to 20 calendar days; actual retained history can be shorter. Paging slices the
+same series and ends there, without an Alpaca stock fallback. Invalid OHLC and
+conflicting daily dates are omitted and disclosed, never reconstructed; EMA
+and RSI use the remaining valid observations. No SMA was added.
+
+Index panels show their latest observation time (or daily date), separate from
+request time, and label yield percent/index points. Candles use a 60-second
+cache even while stock panels refresh every 15 seconds. VIX and US10Y never
+join the stock trade stream. They have no traded volume, VWAP/RVol, equity
+split adjustment, automatic/options levels, earnings, stock fundamentals,
+journal fills or trade-planning controls. Saved stock studies remain intact.
+Equity calendar metadata remains independent when an index is focused, so
+held stock countdowns and watchlist session-change references keep working.
+Index observations can stop at different hours; the screen does not infer an
+NYSE close or describe an old observation as live.
+
+Read-only provider probes on October 21, 2026 verified these identifiers,
+quotes and daily/recent intraday responses with the configured production
+Tradier entitlement. TNX returned no intraday observations with `open` but did
+with `all`; the implementation uses `all`. A malformed TNX daily row on March
+19 was observed and is omitted rather than repaired. These probes do not prove
+this feature is deployed or a production chart has passed human acceptance.
+No new subscription is required under the tested entitlement. Tradier's
+[120 market requests/minute allowance](https://docs.tradier.com/docs/rate-limiting)
+is shared with other app users of that token; Charts retains its own 60/minute
+budget. The two 4h index panels add two cold reads and at most two reads/minute
+while warm; adding daily panels adds a full-history read per symbol/date and
+a tail read/minute. Quote batching remains shared with the workspace.
+
 ## Symbol info panel
 
 The section below the watchlist in the Watchlist dock tab follows the main
@@ -625,7 +679,7 @@ cd backend
   A slow client’s bounded queue merges identical minute buckets; if distinct
   buckets exceed capacity it reports a recovery gap rather than silently
   discarding extremes. The browser requests a REST recovery snapshot. Symbol changes update that
-  single upstream subscription. It carries up to three chart symbols plus the
+  single upstream subscription. It carries up to five chart symbols plus the
   30-symbol watchlist, so watchlist prices update without per-symbol streams or
   extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
   its source and age appear on hover, and pausing keeps the last trade marked
@@ -669,9 +723,8 @@ cd backend
   survives the move.
 - Each smaller chart follows the main symbol or holds its own: click its
   symbol to pick one from the symbol search, or to follow again. A pin marks a
-  held symbol and a link icon a follower. Charts show three symbols at most
-  (the main one and two held), so SPY, QQQ and the traded name fit side by
-  side; a fourth is refused with a message. Switching the main symbol moves
+  held symbol and a link icon a follower. Charts show five symbols at most
+  (the main one and four held). Switching the main symbol moves
   only the followers. **Focus** on a chart holding SPY makes SPY the main
   symbol and leaves that panel holding the previous one. Held symbols are part
   of the saved layout, shared across devices; the main symbol stays per device.
@@ -814,7 +867,7 @@ fills in the requested history are returned, with truncation disclosed.
 Private `GET /charts/stream` holds an SSE response. Only the backend uses the
 Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
-demand-driven; each tab may request up to three chart symbols and 30 watchlist
+demand-driven; each tab may request up to five chart symbols and 30 watchlist
 symbols over that connection.
 
 `backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), a
@@ -2081,7 +2134,7 @@ the old frame stays dimmed under its label, that the loading card never
 appears, and that a failed symbol clears the charts. Per-panel symbol tests
 hold SPY and QQQ beside the traded name through a main-symbol switch (the held
 chart is neither recreated nor redrawn), route each streamed trade to its own
-symbol's chart, pause and resume all three, keep linked time ranges, refuse a
+symbol's chart, pause and resume all three, keep linked time ranges, accept a
 fourth symbol, scroll a held chart back through its own history, and focus a
 held chart into the main one. `backend/tests/test_charts.py` bounds a
 three-symbol layout from two tabs to 17 upstream requests a minute without

@@ -437,8 +437,8 @@ def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, mo
     assert data["extras"]["QQQ"]["panels"]["5m"]["markers"]  # the newest 1,000 are still drawn
 
 
-@pytest.mark.parametrize("extras", ["SPY:5m,QQQ:5m,IWM:5m", "MRVL:5m", "SPY:", "SPY:2m", "SPY:5m.15m.1h.4h.1D.1m", "../x:5m"])
-def test_workspace_route_refuses_more_than_three_symbols_or_bad_held_panels(route_client, extras):
+@pytest.mark.parametrize("extras", ["SPY:5m,QQQ:5m,IWM:5m,AAPL:5m,NVDA:5m", "MRVL:5m", "SPY:", "SPY:2m", "SPY:5m.15m.1h.4h.1D.1m", "../x:5m"])
+def test_workspace_route_refuses_more_than_five_symbols_or_bad_held_panels(route_client, extras):
     assert route_client.get(f"/charts/workspace?symbol=MRVL&intervals=5m&extras={extras}").status_code == 422
 
 
@@ -634,3 +634,38 @@ def test_ladder_route_checks_its_scope_and_passes_the_price(route_client, monkey
     assert route_client.get("/charts/options/BRK%2FB/ladder").status_code == 200  # a class share's slash
     assert route_client.get("/charts/options/SPY/ladder?scope=month").status_code == 422
     assert route_client.get("/charts/options/SPY/ladder?spot=-1").status_code == 422
+
+
+def test_macro_route_accepts_five_symbols_and_skips_index_journal(route_client, monkeypatch):
+    calls = []
+    def workspace(symbol, intervals, watchlist, session, **kwargs):
+        calls.append(symbol)
+        return {"symbol": symbol, "panels": {i: {"bars": [], "markers": []} for i in intervals}, "issues": [],
+                "fetched_at": {}, "intraday_as_of": None, "adjustment": None}
+    monkeypatch.setattr(charts.chart_feed, "workspace", workspace)
+    markers, positions = charts._markers, charts.chart_journal.positions
+    def mark(db, symbol, panels):
+        assert symbol not in ("VIX", "US10Y")
+        return markers(db, symbol, panels)
+    def position(db, symbol):
+        assert symbol not in ("VIX", "US10Y")
+        return positions(db, symbol)
+    monkeypatch.setattr(charts, "_markers", mark)
+    monkeypatch.setattr(charts.chart_journal, "positions", position)
+    response = route_client.get("/charts/workspace?symbol=SPY&intervals=4h&extras=QQQ:4h,IWM:4h,VIX:4h,US10Y:4h")
+    assert response.status_code == 200
+    assert calls == ["SPY", "QQQ", "IWM", "VIX", "US10Y"]
+    assert response.json()["extras"]["US10Y"]["positions"] == []
+
+
+def test_index_main_keeps_independent_equity_calendar(route_client, monkeypatch):
+    market = {"date": "2026-10-21", "status": "open", "sessions": [{"part": "regular", "start": 1, "end": 2}]}
+    def workspace(symbol, intervals, watchlist, session, **kwargs):
+        return {"symbol": symbol, "panels": {}, "issues": [], "fetched_at": {}, "intraday_as_of": None,
+                "adjustment": None, "market": market if symbol == "SPY" else {"sessions": []}}
+    monkeypatch.setattr(charts.chart_feed, "workspace", workspace)
+    monkeypatch.setattr(charts.chart_calendar, "hours", lambda day: {"status": "open", "open": 570, "close": 960, "source": "tradier"})
+    data = route_client.get("/charts/workspace?symbol=US10Y&intervals=4h&watchlist=SPY&extras=SPY:4h").json()
+    assert data["market"]["sessions"] == []
+    assert data["equity_market"]["sessions"][1]["part"] == "regular"
+    assert data["extras"]["SPY"]["market"] == market

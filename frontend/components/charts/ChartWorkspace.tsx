@@ -31,7 +31,7 @@ import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
-import { cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
 import type { ColorKey, ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
@@ -138,6 +138,11 @@ function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: Ch
   const sessionName = extended === "post" ? "After hours" : extended === "pre" ? "Premarket" : null;
   const signed = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
   const closeText = close == null ? "" : `${extended === "post" ? "Close" : "Prev close"} ${price(close)}${closeChange == null ? "" : ` ${signed(closeChange)}`}`;
+  if (isMacroSymbol(live.symbol)) return <div aria-label="Selected symbol quote" className="flex min-w-0 flex-wrap items-baseline gap-2 font-mono" title={`Tradier · observed ${quote?.trade_time ? instrumentTime(quote.trade_time) : "time unavailable"}`}>
+    <span className="text-base text-white">{instrumentPrice(quote?.last, live.symbol)}</span>
+    <span className="text-xs text-slate-400">{live.symbol === "US10Y" ? quote?.change_bps == null ? "—" : `${quote.change_bps >= 0 ? "+" : ""}${quote.change_bps.toFixed(1)} bp` : quote?.change == null ? "—" : `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)} pts`}</span>
+    <span className="text-[10px] text-slate-500">Observed {quote?.trade_time ? instrumentTime(quote.trade_time) : "time unavailable"}</span>
+  </div>;
   return <div className="flex min-w-0 items-baseline gap-2" aria-label="Selected symbol quote" title={[sessionName && `${sessionName} price, change from ${extended === "post" ? "the regular close" : "the previous close"}`, closeText].filter(Boolean).join(". ") || undefined}><span className="sr-only">{live.symbol}</span><span className="font-mono text-base font-medium tracking-tight text-white">{price(shown.price)}</span>
     <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : signed(change)}</span>
     {sessionName && <span className="hidden whitespace-nowrap text-[10px] text-slate-400 sm:inline">{sessionName}</span>}
@@ -206,6 +211,15 @@ function WatchlistQuote({ live, quote, market, paused, wide }: { live: LiveFeed;
     : quoteAge == null ? "Tradier quote · timestamp unavailable"
       : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
   const changeSource = closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
+  if (isMacroSymbol(live.symbol)) {
+    const observed = quote?.trade_time ? `Tradier index · observed ${instrumentTime(quote.trade_time)}` : "Tradier index · observation time unavailable";
+    const relative = quote?.change_percentage;
+    const movement = live.symbol === "US10Y" ? quote?.change_bps : quote?.change;
+    return <><span title={observed} className="text-right font-mono text-slate-400">{instrumentPrice(quote?.last, live.symbol)}</span>
+      {wide && <span title={observed} className="text-right font-mono text-slate-400">{movement == null ? "—" : `${movement >= 0 ? "+" : ""}${movement.toFixed(1)}${live.symbol === "US10Y" ? "bp" : ""}`}</span>}
+      <span title={`${observed} · relative percent change from previous close`} className="text-right font-mono text-slate-400">{relative == null ? "—" : `${relative >= 0 ? "+" : ""}${relative.toFixed(2)}%`}</span>
+      <span title="Indices have no traded volume" className="text-right text-slate-500">—</span></>;
+  }
   // The dollar change against the same reference the percent uses (the previous close, or today's close after hours).
   const dollars = change != null && displayPrice != null ? displayPrice - displayPrice / (1 + change / 100) : null;
   const tone = change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400";
@@ -221,7 +235,7 @@ function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = 
   const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
   return <div className="flex shrink-0 items-center gap-1.5 text-slate-400" role="status">
     <span className={`h-1.5 w-1.5 rounded-full ${paused || failed || stale || delayed ? "bg-amber-400" : hasData ? "bg-sky-400" : "bg-slate-600"}`} />
-    {sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
+    {sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : isMacroSymbol(live.symbol) ? "Tradier index observations · 60s polling" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
     {loading && <Loader2 size={12} className="animate-spin" />}
   </div>;
 }
@@ -243,7 +257,8 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
 
 export default function ChartWorkspace() {
   // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
-  const { settings, setSettings, ready, sync, merged, stored } = useChartSettings();
+  const { settings: storedSettings, setSettings, ready, sync, merged, stored } = useChartSettings();
+  const settings = useMemo(() => instrumentSettings(storedSettings), [storedSettings]);
   const { owner, grants } = useAppAccess();
   const allowedSymbols = (grants.symbols ?? []).join(",");
   const initialLinkSymbol = useRef<string | null | undefined>(undefined);
@@ -353,7 +368,7 @@ export default function ChartWorkspace() {
   const slots = useMemo<Slot[]>(() => (settings.layout === "single" ? [0] : [0, 1, 2, 3, 4]).map((index) => ({
     index, interval: settings.intervals[index], symbol: (index && settings.panelSymbols[index]) || settings.symbol,
   })), [settings.layout, settings.intervals, settings.panelSymbols, settings.symbol]);
-  // The intervals each symbol needs, main symbol first; three symbols at most.
+  // The intervals each symbol needs, main symbol first; five symbols at most.
   const wanted = useMemo(() => {
     const map = new Map<string, Interval[]>([[symbol, []]]);
     for (const slot of slots) {
@@ -380,7 +395,7 @@ export default function ChartWorkspace() {
   // Market trades survive symbol/session/layout changes; each consumer selects
   // its symbol and session. Reconnect only when the subscribed union changes.
   const streamKey = "market";
-  const subscriptionKey = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])].sort().join(",");
+  const subscriptionKey = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])].filter((s) => !isMacroSymbol(s)).sort().join(",");
   const data = response?.key === requestKey ? response.data : null;
   // Candles depend only on the symbol and session. While a request for a new
   // symbol, layout or watchlist loads, a panel keeps the newest response that
@@ -791,7 +806,7 @@ export default function ChartWorkspace() {
 
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
-    if (!ready || !streamReady || paused || sampleChart) return;
+    if (!ready || !streamReady || paused || sampleChart || !subscriptionKey) return;
     let alive = true;
     let source: EventSource | null = null;
     let recovering = false;
@@ -833,25 +848,41 @@ export default function ChartWorkspace() {
     return () => { alive = false; source?.close(); stream.flush(); document.removeEventListener("visibilitychange", visibility); };
   }, [ready, streamReady, paused, sampleChart, subscriptionKey, streamKey, stream]);
 
-  const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? value : v) }));
+  const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? (supportedIntervals((index && s.panelSymbols[index]) || s.symbol).includes(value) ? value : "4h") : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
     if (settings.symbol !== symbol) startSymbolTiming(symbol);
-    setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
+    setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, intervals: s.intervals.map((v, i) => ((!i || !s.panelSymbols[i]) && !supportedIntervals(symbol).includes(v)) ? "4h" : v), recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
     setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null); setStrike(null);
   };
-  // A panel holds its own symbol (null: follow the main one). Two held symbols at most.
+  // A panel holds its own symbol (null: follow the main one). Four held symbols at most.
   const choosePanelSymbol = (index: number, held: string | null) => {
     const next = settings.panelSymbols.map((other, i) => i === index ? held : other);
     if (heldSymbols(next).length > MAX_HELD_SYMBOLS) {
-      setSymbolError(`Charts show up to three symbols. Set another panel to follow ${settings.symbol} before adding ${held}.`);
+      setSymbolError(`Charts show up to five symbols. Set another panel to follow ${settings.symbol} before adding ${held}.`);
       setPalette(null);
       return;
     }
-    setSettings((s) => ({ ...s, panelSymbols: s.panelSymbols.map((other, i) => i === index ? held : other) }));
+    setSettings((s) => ({ ...s, panelSymbols: s.panelSymbols.map((other, i) => i === index ? held : other), intervals: s.intervals.map((v, i) => i === index && !supportedIntervals(held || s.symbol).includes(v) ? "4h" : v) }));
     setSymbolError(""); setPalette(null);
   };
+  const [techReturn, setTechReturn] = useState<ReturnType<typeof readTechReturn>>(null);
+  useEffect(() => { try { setTechReturn(readTechReturn(localStorage.getItem(TECH_RETURN_KEY))); } catch { /* Storage unavailable. */ } }, []);
+  const backToTech = () => {
+    if (!techReturn) return;
+    const arrangement = { ...arrangementOf(techReturn), symbol: techReturn.symbol };
+    setSettings((s) => ({ ...s, ...arrangement }));
+    const next = { ...techReturn, active: false };
+    setTechReturn(next);
+    try { localStorage.setItem(TECH_RETURN_KEY, JSON.stringify(next)); } catch { /* Session return still works. */ }
+    setMaximized(null); setLayoutMenu(false); setTool(null); setSelection(null);
+  };
   const choosePreset = (preset: LayoutPreset) => {
+    if (preset.id === "macro" && !techReturn?.active) {
+      const snapshot = { ...arrangementOf(settings), symbol: settings.symbol, active: true };
+      setTechReturn(snapshot);
+      try { localStorage.setItem(TECH_RETURN_KEY, JSON.stringify(snapshot)); } catch { /* Session return still works. */ }
+    }
     setSettings((s) => applyPreset(s, preset));
     // The dock is per device: a preset opens or closes it here only, and a phone's sheet is left as it is.
     if (!narrow) showDock(preset.dock ? dock.tab : null);
@@ -903,6 +934,7 @@ export default function ChartWorkspace() {
   };
   /** A drawing placed on a chart: the tool's last style, dated today (its anchors are on today's basis), then selected. */
   const placeDrawing = (target: string, kind: DrawingKind, points: Anchor[], panel: string) => {
+    if (isMacroSymbol(target)) return;
     const existing = settings.drawings[target] ?? NO_DRAWINGS;
     setTool(null);
     if (existing.length >= MAX_DRAWINGS) { setDrawError(`Remove a ${target} drawing before adding another (${MAX_DRAWINGS} per symbol).`); return; }
@@ -993,7 +1025,7 @@ export default function ChartWorkspace() {
   const setNewsSmall = (newsOnSmall: boolean) => setSettings((s) => ({ ...s, newsOnSmall }));
   // News markers (T3.5): the main symbol's news is read while the layer is on, shared with the News tab so the two never ask twice.
   const newsOn = !settings.newsHidden;
-  const newsFeed = useSymbolNews(settings.symbol, newsOn && ready); // not before the saved symbol is known: the default one is not worth a read
+  const newsFeed = useSymbolNews(settings.symbol, newsOn && ready && !isMacroSymbol(settings.symbol)); // not before the saved symbol is known: the default one is not worth a read
   const newsMarkers = useMemo(() => newsFeed.data ? { symbol: settings.symbol, articles: newsFeed.data.articles } : null, [newsFeed.data, settings.symbol]);
   // A click on a marker opens the dock's symbol info on the News tab and lights that candle's articles; a phone's sheet opens for it.
   const [newsFocus, setNewsFocus] = useState<NewsFocus | null>(null);
@@ -1040,7 +1072,7 @@ export default function ChartWorkspace() {
     setNotice(await copyText(text) ? `Copied ${text}` : `Could not copy. The price is ${text}.`);
   };
   const select = (target: string, panel: string) => (id: string | null) => { setSelection(id ? { symbol: target, id, panel } : null); setFresh(null); };
-  const chooseTool = (next: Tool) => { setTool((current) => current === next ? null : next); setSelection(null); setDrawError(""); };
+  const chooseTool = (next: Tool) => { if (isMacroSymbol(symbol)) return; setTool((current) => current === next ? null : next); setSelection(null); setDrawError(""); };
   // A dragged level saves the price it was dropped at, dated today: that is the basis the chart shows.
   const moveLevel = (target: string, id: string, value: number) => {
     const rows = settings.levels[target] ?? [];
@@ -1148,6 +1180,7 @@ export default function ChartWorkspace() {
   };
   // Levels belong to a symbol: one drawn on a panel holding SPY is an SPY level.
   const addLevel = (value: number, target = symbol) => {
+    if (isMacroSymbol(target)) return;
     const existing = settings.levels[target] ?? NO_LEVELS;
     if (!Number.isFinite(value) || value <= 0) { setLevelError("Enter a positive price."); return; }
     if (existing.length >= MAX_LEVELS) { setLevelError(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
@@ -1161,7 +1194,7 @@ export default function ChartWorkspace() {
   // both, so the REST candle (without them) is the one that matters here.
   const quoteSlot = slots.find((slot) => slot.symbol === symbol && intradayInterval(slot.interval));
   const latestCandle = quoteSlot ? panels.get(frameKey(quoteSlot))?.bars.at(-1) : undefined;
-  const clockFor = (name: string) => ({ session, market: latest?.market, paused, delayed: !!latest?.delayed,
+  const clockFor = (name: string) => ({ session, market: feedFor(name)?.market ?? latest?.equity_market ?? latest?.market, paused, delayed: !!latest?.delayed,
     failed: requestFailed || !!feedFor(name)?.issues.length, fetched: feedFor(name)?.fetched_at.intraday });
   // Until this request's candles arrive, each chart keeps its last frame under
   // a label naming what is loading. A failed request clears it instead.
@@ -1290,10 +1323,10 @@ export default function ChartWorkspace() {
     if (!bars.some((bar) => bar.vwap !== null && bar.vwap_sd != null)) return "No regular-session VWAP band data in the loaded candles.";
     return "Shown on regular-session candles only; premarket and after-hours candles have no VWAP bands.";
   }
-  const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
+  const ladderPanel = (sheet: boolean) => isMacroSymbol(symbol) ? <p className="p-3 text-xs text-slate-400">Options are unavailable for these index charts.</p> : <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
     highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
   // Level 2 is the owner's: an assistant with a saved Level 2 tab sees the watchlist and starts no request.
-  const level2Panel = (sheet: boolean) => <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={recorded.heatmap ?? heatmaps.get(symbol) ?? null} flow={flow} onFlow={setFlow} recorded={recorded.state} recording={recorded.recording} heatAllowed={heatAllowed} onClose={() => showDock(null)} />;
+  const level2Panel = (sheet: boolean) => isMacroSymbol(symbol) ? <p className="p-3 text-xs text-slate-400">Depth is unavailable for these index charts.</p> : <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={recorded.heatmap ?? heatmaps.get(symbol) ?? null} flow={flow} onFlow={setFlow} recorded={recorded.state} recording={recorded.recording} heatAllowed={heatAllowed} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "vwapBands") toggleVwapBands(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
@@ -1318,7 +1351,7 @@ export default function ChartWorkspace() {
   // the provider is contacted only on Connect. Leaving Charts ends it; the
   // heatmap is memory only and starts empty on every visit.
   const [level2Seen, setLevel2Seen] = useState(false);
-  const level2Open = owner && dockShown && dock.tab === "level2";
+  const level2Open = owner && !isMacroSymbol(symbol) && dockShown && dock.tab === "level2";
   useEffect(() => { if (level2Open) setLevel2Seen(true); }, [level2Open]);
   // One heatmap per ticker, created on its first Connect, so looking at another
   // symbol never discards what an earlier one collected on this visit.
@@ -1336,7 +1369,7 @@ export default function ChartWorkspace() {
     try { localStorage.setItem(FLOW_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
   }, []);
   const addBook = useCallback((event: { symbol: string; books: Parameters<DepthHeatmap["add"]>[0] }) => heatmaps.get(event.symbol.slice(3))?.add(event.books), [heatmaps]);
-  const depthSession = useDepthSession({ active: owner && level2Seen, onBook: addBook });
+  const depthSession = useDepthSession({ active: owner && !isMacroSymbol(symbol) && level2Seen, onBook: addBook });
   const { connect: startDepth } = depthSession;
   const connectDepth = useCallback((ticker: string) => {
     if (!heatmaps.has(ticker)) heatmaps.set(ticker, new DepthHeatmap());
@@ -1345,9 +1378,9 @@ export default function ChartWorkspace() {
   // The session's ticker joins the inputs so the main chart picks up a heatmap created on Connect.
   const depthTicker = depthSession.symbol;
   // The heatmap is drawn only on 1m-5m candles; wider candles turn it into a smear.
-  const heatAllowed = (INTERVAL_SECONDS[slots[0]?.interval] ?? Infinity) <= 300;
+  const heatAllowed = !isMacroSymbol(symbol) && (INTERVAL_SECONDS[slots[0]?.interval] ?? Infinity) <= 300;
   // Recorded tickers need no Connect: the recorder's data, about five seconds behind.
-  const recorded = useRecordedDepth(symbol, { active: owner && (flow.levels || flow.profile || flow.heatmap), history: flow.heatmap && heatAllowed, kind: flow.kind });
+  const recorded = useRecordedDepth(symbol, { active: owner && !isMacroSymbol(symbol) && (flow.levels || flow.profile || flow.heatmap), history: flow.heatmap && heatAllowed, kind: flow.kind });
   const liveHere = depthTicker === symbol && depthSession.started;
   const depth = useMemo(() => {
     if (!owner || !flow.heatmap || !heatAllowed) return null;
@@ -1520,9 +1553,9 @@ export default function ChartWorkspace() {
     ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"], ["level2", "Level 2", ListOrdered, "Level 2: a manual depth session and heatmap"]] as const)
     .filter(([tab]) => (!narrow || (tab !== "options" && tab !== "level2")) && (tab !== "level2" || owner)).map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
-  const level2Button = (close: () => void) => owner && <button aria-label="Level 2" title="Level 2: a manual depth session and heatmap" onClick={() => { close(); showDock("level2"); }}
+  const level2Button = (close: () => void) => owner && !isMacroSymbol(symbol) && <button aria-label="Level 2" title="Level 2: a manual depth session and heatmap" onClick={() => { close(); showDock("level2"); }}
     className={`${plain(false)} ${control} text-[11px]`}><ListOrdered size={13} /><span>Level 2</span></button>;
-  const ladderButton = (close: () => void) => <button aria-label="Strike ladder" title="Strike ladder: open interest, volume and gamma by strike" onClick={() => { close(); showDock("options"); }}
+  const ladderButton = (close: () => void) => !isMacroSymbol(symbol) && <button aria-label="Strike ladder" title="Strike ladder: open interest, volume and gamma by strike" onClick={() => { close(); showDock("options"); }}
     className={`${plain(false)} ${control} text-[11px]`}><Rows3 size={13} /><span>Strike ladder</span></button>;
 
   // Linked ranges sit in the toolbar on a desktop; on a phone they and the smaller charts' height are in its More menu, with pause, refresh and the shortcuts.
@@ -1563,7 +1596,7 @@ export default function ChartWorkspace() {
   const [averageVolume, setAverageVolume] = useState<{ symbol: string; value: number | null } | null>(null);
   const cardSymbol = settings.symbol;
   useEffect(() => {
-    if (!(narrow ? sheet : dockShown) || dock.tab !== "watchlist") return;
+    if (isMacroSymbol(cardSymbol) || !(narrow ? sheet : dockShown) || dock.tab !== "watchlist") return;
     const controller = new AbortController();
     // Only the symbol stepped to and left: a quick run through the watchlist reads nothing on the way.
     const timer = setTimeout(() => fetchSymbolOverview(cardSymbol, controller.signal).then((data) => setAverageVolume({ symbol: cardSymbol, value: data.datasets?.statistics?.average_volume_30_day ?? null }))
@@ -1588,15 +1621,16 @@ export default function ChartWorkspace() {
         const watchLive = { store: stream, key: streamKey, symbol, session, fetched: 0 } satisfies LiveFeed;
         return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
           {/* On a phone, charting a symbol closes the sheet so the chart shows. */}
-          <button data-watch-row onKeyDown={watchKey} onClick={() => { chooseSymbol(symbol); if (narrow) setSheet(false); }} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className={`grid min-w-0 flex-1 ${watchWide ? "grid-cols-[1fr_54px_44px_50px_38px]" : "grid-cols-[1fr_54px_50px_38px]"} items-center gap-1 pl-2.5 pr-1 text-[11px] ${narrow ? "min-h-11 py-2" : "py-2.5"}`}><span className="truncate text-left font-medium text-slate-200">{symbol}</span><WatchlistQuote live={watchLive} quote={quote} market={latest?.market} paused={paused} wide={watchWide} /></button>
+          <button data-watch-row onKeyDown={watchKey} onClick={() => { chooseSymbol(symbol); if (narrow) setSheet(false); }} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className={`grid min-w-0 flex-1 ${watchWide ? "grid-cols-[1fr_54px_44px_50px_38px]" : "grid-cols-[1fr_54px_50px_38px]"} items-center gap-1 pl-2.5 pr-1 text-[11px] ${narrow ? "min-h-11 py-2" : "py-2.5"}`}><span className="truncate text-left font-medium text-slate-200">{symbol}</span><WatchlistQuote live={watchLive} quote={quote} market={latest?.equity_market ?? latest?.market} paused={paused} wide={watchWide} /></button>
           <button aria-label={`Remove ${symbol} from watchlist`} className={`inline-flex shrink-0 items-center justify-center rounded text-slate-600 hover:text-rose-300 ${narrow ? "h-11 w-11" : "mr-2 p-0.5"}`} onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
         </div>;
       })}
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
-    <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />
-    <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />
-    <DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
+    {!isMacroSymbol(settings.symbol) && <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />}
+    {!isMacroSymbol(settings.symbol) && <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
+    {!isMacroSymbol(settings.symbol) && <><DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
+
       info="Save support, resistance, or a price you’re watching."
       status={settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button> : undefined}
       action={(reveal) => <button aria-label="Add level" title={`Add a ${settings.symbol} level`} onClick={() => { reveal(); window.setTimeout(() => levelPriceInput.current?.focus(), 0); }}
@@ -1615,7 +1649,7 @@ export default function ChartWorkspace() {
     <DockSection name="journal" ariaLabel="Journal executions" title="On your journal" count={current?.fills.length ?? 0} defaultOpen={!!current?.fills.length} narrow={narrow}
       info="Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.">
       {current?.fills.length ? <div className="space-y-3">{current.fills.length > 5 && <p className="text-[10px] text-slate-500">Latest 5 of {current.fills.length}</p>}{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">No executions on this chart yet.</p>}
-    </DockSection>
+    </DockSection></>}
   </>;
   // ---- C3.4, C3.5: pre-trade capture ----
   const refreshCaptures = useCallback(() => {
@@ -1661,7 +1695,7 @@ export default function ChartWorkspace() {
   const shownPlan = newestPlan && !dismissedPlans.includes(newestPlan.id) ? newestPlan : null;
   const keepPlan = (row: Capture) => setCaptures((rows) => [row, ...rows.filter((other) => other.id !== row.id)].sort((a, b) => b.received_at - a.received_at));
   function openPlan() {
-    if (plan) return;
+    if (plan || isMacroSymbol(settings.symbol)) return;
     setMenu(null); setEntry(NO_ENTRY);
     setPlan({ symbol: settings.symbol, key: Date.now() });
     // Templates may have changed on another device since the last look.
@@ -1717,7 +1751,7 @@ export default function ChartWorkspace() {
     try { localStorage.setItem(DISMISSED_PLANS_KEY, JSON.stringify(next)); } catch { /* dismissed for this visit only */ }
   };
   const changePlan = (work: Promise<Capture>) => work.then(keepPlan).catch((failure: Error) => setNotice(failure.message));
-  const railOut = railShown || !!tool;
+  const railOut = !isMacroSymbol(symbol) && (railShown || !!tool);
   /** Put the desktop rail away (cancelling a chosen tool) or bring it back, remembered on this device. */
   const toggleRail = () => {
     if (tool) chooseTool(tool);
@@ -1725,7 +1759,7 @@ export default function ChartWorkspace() {
     setRailShown(next);
     try { localStorage.setItem(RAIL_KEY, next ? "1" : "0"); } catch { /* remembered for this visit only */ }
   };
-  const planButton = <button aria-label="Plan trade" aria-haspopup="dialog" aria-expanded={!!plan} title="Plan trade: what you are taking and your plan, before you enter (Alt+P)" onClick={openPlan}
+  const planButton = !isMacroSymbol(symbol) && <button aria-label="Plan trade" aria-haspopup="dialog" aria-expanded={!!plan} title="Plan trade: what you are taking and your plan, before you enter (Alt+P)" onClick={openPlan}
     className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={named}>Plan trade</span></button>;
 
   const alerts = [
@@ -1760,7 +1794,7 @@ export default function ChartWorkspace() {
         {!narrow && sep}
         <ToolbarMenu label="Chart indicators" title="Studies and fill arrows on every chart" className={`${plain(false)} ${control} text-[11px]`}
           content={() => <div className="flex w-56 flex-col">
-            {INDICATORS.map(([key, name]) => <div key={key} className="flex flex-wrap items-center">
+            {INDICATORS.filter(([key]) => !isMacroSymbol(symbol) || !["vwap", "volume", "fills"].includes(key)).map(([key, name]) => <div key={key} className="flex flex-wrap items-center">
               <button aria-pressed={indicators[key]} onClick={() => toggleIndicator(key)}
                 className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded px-2 text-left text-[11px] hover:bg-slate-800 ${narrow ? "min-h-11" : "min-h-7"} ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{name}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>
               {key in INDICATOR_COLORS && <label title={`${name} color`} className={`flex shrink-0 items-center justify-center ${narrow ? "h-11 w-11" : "h-7 w-7"}`}>
@@ -1783,6 +1817,8 @@ export default function ChartWorkspace() {
           </div>}><SlidersHorizontal size={13} aria-hidden /><span className={named}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
         {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
         <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={named}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
+        {!narrow && <button className={`${plain(macroArrangement(settings))} ${control} text-[11px]`} aria-label="Macro layout" onClick={() => choosePreset(LAYOUT_PRESETS.find((p) => p.id === "macro")!)}>Macro</button>}
+        {techReturn && (!narrow || techReturn.active) && <button className={`${plain(false)} ${control} text-[11px]`} aria-label="Back to Tech" onClick={backToTech}>Tech</button>}
         {!narrow && focusButton()}
         {narrow ? <button aria-label={drawOpen || tool ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={drawOpen || !!tool} title="Drawing tools, undo and redo"
           onClick={() => { if (tool) chooseTool(tool); setDrawOpen((open) => !(open || !!tool)); }} className={`${plain(drawOpen || !!tool, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={14} aria-hidden /></button>
@@ -1819,11 +1855,11 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} vwapBands={vwapBandsOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} liquidity={slot.symbol === symbol ? liquidity : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
-                tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
+              <PriceChart id="main" main symbol={slot.symbol} indexAsOf={feedFor(slot.symbol)?.intraday_as_of} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={isMacroSymbol(slot.symbol) ? NO_LEVELS : visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={isMacroSymbol(slot.symbol) ? NO_DRAWINGS : visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn && !isMacroSymbol(slot.symbol) ? settings.optionsLayer.nearest : null} rangeBands={rangesOn && !isMacroSymbol(slot.symbol)} vwapBands={vwapBandsOn && !isMacroSymbol(slot.symbol)} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={isMacroSymbol(slot.symbol) ? NO_MARKS : alertMarks.get(slot.symbol) ?? NO_MARKS} positions={isMacroSymbol(slot.symbol) ? NO_POSITIONS : positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} liquidity={slot.symbol === symbol ? liquidity : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+                tool={isMacroSymbol(slot.symbol) ? null : tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
-                onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
+                onMenu={isMacroSymbol(slot.symbol) ? undefined : openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                 maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined} onPlan={narrow ? openPlan : undefined}
                 history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))} />
               </div>
@@ -1845,14 +1881,14 @@ export default function ChartWorkspace() {
                   style={sized ? { flexGrow: grow(sizes.columns[index]), flexBasis: 0, minWidth: COLUMN_MIN_PX } : undefined}
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
-                <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} vwapBands={vwapBandsOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={settings.newsOnSmall ? newsMarkers : null} newsSmall={settings.newsOnSmall} onNews={openNews} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} indexAsOf={feedFor(slot.symbol)?.intraday_as_of} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={isMacroSymbol(slot.symbol) ? NO_LEVELS : visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={isMacroSymbol(slot.symbol) ? NO_DRAWINGS : visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn && !isMacroSymbol(slot.symbol) ? settings.optionsLayer.nearest : null} rangeBands={rangesOn && !isMacroSymbol(slot.symbol)} vwapBands={vwapBandsOn && !isMacroSymbol(slot.symbol)} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={settings.newsOnSmall ? newsMarkers : null} newsSmall={settings.newsOnSmall} onNews={openNews} alerts={isMacroSymbol(slot.symbol) ? NO_MARKS : alertMarks.get(slot.symbol) ?? NO_MARKS} positions={isMacroSymbol(slot.symbol) ? NO_POSITIONS : positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}
                   onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
-                  onMenu={openMenu(slot.symbol, `Panel ${slot.index + 1}`)} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
+                  onMenu={isMacroSymbol(slot.symbol) ? undefined : openMenu(slot.symbol, `Panel ${slot.index + 1}`)} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                   onFocus={() => { setMaximized(null); setSettings((s) => focusPanel(s, slot.index)); }} />
                 </div>
               </div>]; })}
@@ -1878,9 +1914,9 @@ export default function ChartWorkspace() {
       <footer aria-label="Chart status" className={`flex items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 ${fill && !narrow ? "h-6 shrink-0 whitespace-nowrap border-t border-slate-700/50 px-2" : fill ? "shrink-0 flex-wrap border-t border-slate-700/50 px-2 py-1" : "flex-wrap px-1 pt-1"}`}>
         <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} sample={sampleChart} />
         {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`shrink-0 rounded px-1.5 py-px ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
-        {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
-          {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
-        <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />
+        {basis && <span role="status" aria-label="Price basis" title={basis?.basis === "index_native" ? "Tradier index observations; no split adjustment applies." : basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
+          {basis.basis === "index_native" ? (symbol === "US10Y" ? "Yield % · TNX / 10" : "Index points") : basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
+        {!isMacroSymbol(symbol) && <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />}
         {owner && depthSession.running && <span role="status" aria-label="Level 2 session" className="flex shrink-0 items-center gap-1 rounded bg-sky-400/10 px-1.5 py-px text-sky-200">
           <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />{depthSession.symbol} Level 2 live
           <button onClick={depthSession.stop} className="ml-1 rounded px-1 text-sky-100 underline-offset-2 hover:underline">Stop</button></span>}

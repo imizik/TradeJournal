@@ -443,8 +443,12 @@ is verifiable rather than hopeful.
 - Chart relative volume (`chart_rvol.py`, pure) is fill context's
   `compute_rvol_time_adjusted` evaluated at every minute, and a test holds
   them equal on the same bars; change both or neither. The baseline needs all
-  20 calendar sessions before today stored on disk: until then there is none,
-  never one over fewer sessions. Only today's regular-session candles have RVol.
+  20 open market-calendar sessions before the target date stored on disk;
+  a stored empty symbol session remains in that window. At least five sessions
+  must have traded by the candle minute. Today uses its prior window; loaded
+  historical regular-session candles use their own prior window, from disk
+  only with no lookahead. Missing windows stay building, never a shorter
+  baseline. Extended-hours candles have no RVol.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build
@@ -454,6 +458,9 @@ is verifiable rather than hopeful.
   minutes. The whole series is read once per symbol per New York date into
   memory (no disk copy: the provider rewrites adjusted history after each
   split) and indicators are computed over it whole, so pages are slices.
+- VIX and US10Y charts use index-native values, not equity sessions, volume or
+  split adjustment. US10Y is explicit TNX:CGI divided by ten in yield percent;
+  4h buckets retain provider hours. See [Macro boundaries](../charts-workspace.md#macro-layout-vix-and-10-year-yield).
 - Charts pass `feed=sip` explicitly on every Alpaca request and never change
   `ALPACA_DATA_FEED`; IEX bars never reach a chart.
 - Level alerts (`level_alerts.py` pure, `level_alert_monitor.py`) fire once per
