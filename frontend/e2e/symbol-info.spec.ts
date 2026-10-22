@@ -755,7 +755,7 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   await expect(info.getByRole("group", { name: "Peers" }).getByRole("button", { name: "Peer WDC" })).toBeVisible();
   // Every block has its own edged header; Peers is the last block, after Ownership, above the one source line.
   const order = await info.getByRole("tabpanel").evaluate((tab) => [...tab.querySelectorAll("section[aria-label]")].map((section) => section.getAttribute("aria-label")));
-  expect(order).toEqual(["Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
+  expect(order).toEqual(["Holding context", "Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
   const peersBox = (await info.getByRole("region", { name: "Peers" }).boundingBox())!;
   expect(peersBox.y).toBeGreaterThan((await info.getByRole("region", { name: "Ownership" }).boundingBox())!.y);
   expect(peersBox.y).toBeLessThan((await info.locator("[data-source-footer]").boundingBox())!.y);

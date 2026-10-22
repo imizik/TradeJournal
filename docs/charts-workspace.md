@@ -2246,3 +2246,28 @@ over a sell and a crowded one is skipped, never overlapped; hover still lists it
 The markers carry no trade id, so "Latest trade" labels the fills on the newest
 candle that has any. `e2e/chart-markers.spec.ts` holds the merge, hover, label,
 cluster and small-chart checks and the pictures.
+
+## Holding context (read-only)
+
+Owners can open **Overview → Holding context** above the existing symbol facts.
+The list reuses the workspace's recorded option positions, independently of
+whether fill overlays are visible. An explicit contract/account selection reads
+one existing chart trade card; no option quote, AI call, alert or write is made.
+
+The selected record shows remaining contracts, remaining entry premium paid
+(long) or received (short), realized exits separately, expiration, latest fill
+execution time and detail-read time. Remaining premium is remaining FIFO average
+premium per contract × remaining contracts, with no additional ×100. It is not
+current value, account equity, maximum risk, or remaining loss. Import time and
+completeness are unknown here; quantities are journal records, not live broker
+holdings. Refresh clears old details on failure; a closed record no longer shows
+open exposure. Changing symbols clears selection.
+
+Saved plans reuse the existing read-only summary, including timing, later notes
+and frozen chart-image links. Chart reference prices retain their saved source,
+time and stale flag. No linked plan means unknown rationale; chart interval and
+annotations are not inferred holding intent or invalidation. No structured
+horizon is added. **Compare stock, group & market** jumps to the existing Peers
+block, whose 15-minute window remains independent of entry time and chart
+interval. There is no since-entry baseline, profit probability or thesis verdict.
+Tests: `frontend/e2e/chart-journal.spec.ts` (desktop and 390px phone).
