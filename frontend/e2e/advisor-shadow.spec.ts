@@ -148,9 +148,9 @@ with Session(engine) as db:
     await expect(panel.getByLabel("Your question")).toHaveValue(exported.question);
     await expect(panel.getByLabel("Your plan")).toHaveValue(exported.user_plan);
     const paired = page.getByTestId("practice-opportunity").filter({ hasText: `Opportunity ${first.id}` });
-    await expect(paired).toContainText("Disagreement: human WAIT · agent SKIP");
+    await expect(paired).toContainText("Disagreement: you WAIT · agent SKIP");
     await expect(paired).toContainText("assisted");
-    await expect(paired).toContainText("Human paper none");
+    await expect(paired).toContainText("Your paper none");
     expect(run.agent.cost).toBeNull();
     expect(run.agent.usage).toBeNull();
     expect(run.agent.limits).toBeNull();

@@ -74,6 +74,11 @@ def test_slots_show_packets_reads_delays_and_delivery(env, tmp_path):
     assert s["09:50"]["status"] == "read_seen" and s["09:50"]["read_id"] == first["read_id"]
     assert s["09:50"]["attribution"] == "time_window" and s["09:50"]["receipt_delay_seconds"] == 130
     assert s["09:50"]["packet"]["status"] == "published" and s["09:50"]["read_used_slot_packet"] is True
+    # Jo's own words travel with the slot so the Daily Review can show what Jo said, not only when.
+    notice = runner.store.records("read_notice")[0]
+    assert s["09:50"]["read"] == {k: notice[k] for k in ("view", "main_text", "alternative_text", "invalidation_text",
+                                                         "change_summary", "is_correction")}
+    assert s["12:30"]["read"] is None
     assert s["11:00"]["receipt_delay_seconds"] == 17 * 60 + 30 and s["11:00"]["read_used_slot_packet"] is None
     assert s["11:00"]["packet"] == {"slot": "10-59", "status": "failed", "attempts": 1, "recorded_at": "2026-10-14T13:49:05Z",
                                      "snapshot_id": None, "error_code": "snapshot_collection_failed", "quality_flags": []}
@@ -84,6 +89,7 @@ def test_slots_show_packets_reads_delays_and_delivery(env, tmp_path):
     assert s["14:00"]["status"] == "no_read_seen" and s["14:00"]["read_id"] is None
     session = report(runner, receipts)
     assert [r["read_id"] for r in session["reads_not_credited_to_a_slot"]] == [beyond["read_id"]]
+    assert session["reads_not_credited_to_a_slot"][0]["read"]["main_text"]
     assert session["summary"] == {"read_seen": 2, "no_read_seen": 2, "upcoming": 0, "not_expected": 0, "unknown": 0}
     # On time means Check received the read within 15 minutes of the slot (a proposed tolerance).
     s = slots(session)
@@ -235,6 +241,14 @@ def test_route_lists_weekdays_back_to_the_first_evidence(client):
     assert view["sessions"][0]["watchdog"]["state"] in ("unknown", "on", "off")
 
 
+def test_route_returns_one_requested_day(client):
+    assert [s["session_date"] for s in client.get("/jo/market-reads?day=2026-10-15").json()["sessions"]] == ["2026-10-15"]
+    # A weekend or a future day has no scheduled reads to show.
+    assert client.get("/jo/market-reads?day=2026-10-17").json()["sessions"] == []
+    assert client.get("/jo/market-reads?day=2026-10-19").json()["sessions"] == []
+    assert client.get("/jo/market-reads?day=not-a-day").status_code == 422
+
+
 def test_route_judges_missing_reads_after_a_fresh_import(client, env, tmp_path, monkeypatch):
     runner, *_ = env
     runner.ingest_notices(datetime(2026, 10, 16, 20, 59, tzinfo=UTC))
@@ -273,3 +287,27 @@ def test_route_days_skip_weekends_and_cap():
     assert route._days(date(2026, 10, 19), date(2026, 10, 16)) == [date(2026, 10, 19), date(2026, 10, 16)]
     assert len(route._days(date(2026, 10, 19), date(2026, 1, 1))) == route.SESSIONS
     assert route._days(date(2026, 10, 18), None) == []
+
+
+def test_session_lists_phone_messages_with_their_times(env, tmp_path):
+    runner, clock, _, pushed, _ = env
+    snapshot = snapshot_at(clock.now)
+    publish_snapshot(runner.snapshots_dir, snapshot)
+    ledger = MarketWatchLedger(Ledger(tmp_path / "ledger.sqlite"))
+    got = _submit_notice(ledger, runner.outbox_dir, snapshot, "initial", clock.now)
+    runner.ingest_notices(clock.now)
+    runner.deliver_messages(clock.now)
+    assert len(pushed) == 1
+    [message] = report(runner, None)["messages"]
+    # "accepted" is ntfy taking the push; the phone showing it is never observed.
+    assert message["read_id"] == got["read_id"] and message["delivery"] == "accepted"
+    assert message["decided_at"] and message["settled_at"]
+    assert mw.reliability_report(None, None, [DAY], hours=lambda day: OPEN_DAY, now=EVENING)["sessions"][0]["messages"] == []
+
+
+def test_route_returns_a_calendar_month(client):
+    sessions = client.get("/jo/market-reads?month=2026-10").json()["sessions"]
+    # Weekdays up to today, never before the first recorded evidence (the 14th here).
+    assert [s["session_date"] for s in sessions] == ["2026-10-16", "2026-10-15", "2026-10-14"]
+    assert client.get("/jo/market-reads?month=2026-09").json()["sessions"] == []
+    assert client.get("/jo/market-reads?month=2026-13").status_code == 422

@@ -84,6 +84,8 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
   private reports: PlacedReport[] = [];
   private strip: PlacedNews[] = [];
   private paneHeight = 0;
+  // The library asks for views several times per frame while candles stream; placing waits until a paint or a hit test needs it.
+  private stale = true;
   private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
   private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "top", renderer: () => this.renderer }];
 
@@ -97,16 +99,20 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
   paneViews() { return this.views; }
 
   /** What is drawn, for hover, taps and tests. */
-  drawnLabels() { return this.texts.map((text) => text.text); }
-  clusters() { return this.strip.map(({ cluster, x, y }) => ({ time: cluster.time, last: cluster.last, count: cluster.articles.length, x, y })); }
-  fillBoxes() { return this.fills.map(({ group, x, tip, half }) => ({ id: group.id, buy: group.buy, count: group.fills.length, x, y: tip, half })); }
+  drawnLabels() { this.place(); return this.texts.map((text) => text.text); }
+  clusters() { this.place(); return this.strip.map(({ cluster, x, y }) => ({ time: cluster.time, last: cluster.last, count: cluster.articles.length, x, y })); }
+  fillBoxes() { this.place(); return this.fills.map(({ group, x, tip, half }) => ({ id: group.id, buy: group.buy, count: group.fills.length, x, y: tip, half })); }
 
   private sizes() {
     const { small } = this.set_;
     return { height: small ? 3.2 : 4.6, line: small ? 1.2 : 1.7, stripR: small ? 2.6 : 3.4, bigR: small ? 5 : 6.4 };
   }
 
-  updateAllViews() {
+  updateAllViews() { this.stale = true; }
+
+  private place() {
+    if (!this.stale) return;
+    this.stale = false;
     this.fills = []; this.texts = []; this.reports = []; this.strip = [];
     const { chart, series } = this;
     if (!chart || !series) return;
@@ -183,6 +189,7 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
 
   /** The fill chevron or news marker at a point (pane pixels), nearest first; `slop` widens the reach (a finger). */
   hit(x: number, y: number, slop: number): MarkHit | null {
+    this.place();
     const { height, bigR, stripR } = this.sizes();
     let best: { hit: MarkHit; d: number } | null = null;
     for (const item of this.fills) {
@@ -204,6 +211,7 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
   }
 
   private draw(target: Target) {
+    this.place();
     target.useBitmapCoordinateSpace(({ context: c, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
       const { height, line, stripR, bigR } = this.sizes();
       const small = this.set_.small;

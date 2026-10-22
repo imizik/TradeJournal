@@ -21,8 +21,9 @@ from app.engine.chart_timing import request_timing
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
+from app.engine.chart_indices import is_index
 from app.engine import tradier
-from app.engine.chart_math import ET, INTERVALS
+from app.engine.chart_math import ET, INTERVALS, market_day
 from app.engine import symbol_info_tradier
 from app.engine import chart_journal, access
 from app.engine.quotes import OptionQuoteRequest, option_mark
@@ -35,10 +36,10 @@ from app.models import FILL_LIGHT, ChartSettingsRecord, Fill, Trade
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 SETTINGS = "default"
-# The main symbol plus two held by panels: each costs its own chart-feed reads.
-MAX_SYMBOLS = 3
+# The main symbol plus four held by panels: each costs its own chart-feed reads.
+MAX_SYMBOLS = 5
 # The chart symbols plus the saved watchlist share the same market stream.
-MAX_STREAM_SYMBOLS = 33
+MAX_STREAM_SYMBOLS = 35
 # Thirty levels on each of hundreds of symbols fit; a runaway client does not.
 SETTINGS_BYTES = 512_000
 STREAM_AUTH_INTERVAL = 15
@@ -92,6 +93,12 @@ def history(
         symbol = symbol.upper().strip()
         if not SYMBOL.fullmatch(symbol):
             raise HTTPException(422, "Use a US stock or ETF ticker.")
+        if is_index(symbol):
+            try:
+                data = chart_feed.indices.page(symbol, interval, before, limit, session)
+            except ChartFeedError as exc:
+                raise HTTPException(422 if exc.code == "invalid_request" else 503, {"code": exc.code, "message": str(exc)}) from None
+            return {**data, "markers": [], "fills_truncated": False}
         if interval in ("1D", "1W"):
             # Daily and weekly bars are Tradier's regular session; `session` and `continuation` do not apply.
             try:
@@ -116,8 +123,10 @@ def history(
 @router.get("/stream")
 async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=600)):
     """Relay one private market stream to each visible chart tab as SSE, for
-    up to three chart symbols and its 30-symbol watchlist."""
+    up to five chart symbols and its 30-symbol watchlist."""
     wanted = list(dict.fromkeys(s.strip().upper() for s in f"{symbol},{symbols}".split(",") if s.strip()))
+    if any(is_index(s) for s in wanted):
+        raise HTTPException(422, "VIX and US10Y use the chart polling feed, not the stock stream.")
     if not wanted or len(wanted) > MAX_STREAM_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
         raise HTTPException(422, f"Stream one to {MAX_STREAM_SYMBOLS} US stock or ETF tickers.")
     if not tradier.tradier_configured():
@@ -166,7 +175,7 @@ def workspace(
     auto: bool = Query(True),
     db: Session = Depends(get_session),
 ):
-    """The main symbol's panels and quotes, plus panels for up to two symbols
+    """The main symbol's panels and quotes, plus panels for up to four symbols
     that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``).
 
     ``options=oi.week.0`` (measure, scope, signed) adds the options levels layer
@@ -220,17 +229,22 @@ def workspace(
                 other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
                                              volume_profile=chart_history.volume_profile, **levels_for("nearest"))
                 data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
-                                         "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol")}
+                                         "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol"), "instrument": other.get("instrument"), "history_note": other.get("history_note"), "market": other.get("market")}
                 add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
             except ChartFeedError as exc:
                 # A held symbol that cannot load leaves the main charts intact.
                 data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
 
+        # Equity watchlist/session context stays independent when an index is focused.
+        if is_index(symbol) and any(not is_index(name) for name in [*symbols, *held]):
+            today = datetime.now(ET).date()
+            data["equity_market"] = market_day(today, chart_calendar.hours(today))
+
         # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
-        earnings = symbol_info_tradier.symbol_events.chart_earnings([symbol, *held], symbols, datetime.now(ET).date())
-        data["earnings"] = earnings[symbol]
+        earnings = symbol_info_tradier.symbol_events.chart_earnings([s for s in [symbol, *held] if not is_index(s)], [s for s in symbols if not is_index(s)], datetime.now(ET).date())
+        data["earnings"] = earnings.get(symbol)
         for name, other in data["extras"].items():
-            other["earnings"] = earnings[name]
+            other["earnings"] = earnings.get(name)
 
         if not access.is_journal(request):
             data["fills"], data["fills_truncated"], data["positions"], data["alerts"] = [], False, [], []
@@ -241,13 +255,13 @@ def workspace(
 
         # Network calls above finish before opening any journal transaction. Select
         # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
-        data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
+        data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values())) if not is_index(symbol) else ([], False)
         for name, other in data["extras"].items():
-            _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values()))
+            _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values())) if not is_index(name) else ([], False)
         # Open positions on each symbol shown (C3.2): three queries a symbol, no provider.
-        data["positions"] = chart_journal.positions(db, symbol)
+        data["positions"] = chart_journal.positions(db, symbol) if not is_index(symbol) else []
         for name, other in data["extras"].items():
-            other["positions"] = chart_journal.positions(db, name)
+            other["positions"] = chart_journal.positions(db, name) if not is_index(name) else []
         # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
         data["alerts"] = alert_listing(db)
         return data

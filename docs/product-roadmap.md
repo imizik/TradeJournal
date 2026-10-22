@@ -10,6 +10,23 @@ moomoo metric-source evaluation added 2026-10-10. This document records future d
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
+## October 21 workflow consolidation — planning only
+
+The owner walkthrough established the daily routine: understand the market,
+investigate charts, trade/manage in Robinhood, and return when TradeJournal has
+useful information. The [workflow consolidation roadmap](workflow-consolidation-roadmap.md)
+records the full findings, Claude critique assessment, proposed order, source
+limitations and acceptance gates. It makes Dashboard orientation the next
+proposed consolidation slice after the already-local VWAP clarity fix, and
+peer confirmation the primary Charts benefit from Radar.
+
+This is a requested specification, not implementation or activation approval.
+Radar retains its separately selected ownership and contract; existing Dots
+acceptance continues. Plans/reviews remain available without assuming a new
+journaling habit. This plan replaces the old journal-first opening-screen
+assumption for future consolidation proposals; it does not remove existing
+capabilities or reopen frozen studies.
+
 ## Selected priorities — October 11, 2026
 
 The owner selected **Dots functionality as the top product priority** after
@@ -41,6 +58,10 @@ slice; the detailed contracts continue to own implementation and acceptance.
    option that was up gives its gain back, or is still open on its last day.
    Alerts only, off until he enables `POSITION_ALERTS_ENABLED`. This does not
    reopen other non-Dots work.
+   **Selected October 21, 2026:** Isaac selected [Radar](radar.md), a feed of
+   meaningful intraday market changes outside his watchlist, ahead of other new
+   feature work. In-flight Dots acceptance work continues. Radar sends no alerts
+   and records only after his separate OK.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
    now merged), close its remaining activation/operational gates, and observe one
@@ -130,7 +151,7 @@ the milestone statuses here.
 | D0 | Read-only data audit and broad personal-pattern analysis | Existing journal data; explicit selection of the analysis task | future research |
 | M0 | Explore moomoo market-data endpoints and evaluate selective metric-source replacement | Phase 1 diagnostic; separately approved bounded comparisons with existing sources | Read-only diagnostics/comparisons delivered; manual Level 2 connection landed in PRs #241/#248 and was observed in market hours on 2026-10-12. On 2026-10-12 the owner chose to bring an until-stopped session and a memory-only liquidity heatmap behind the NVDA candles ahead of Dots ([contract](level2-manual-connection.md#charts-dock-panel-and-heatmap)). This is not metric-source replacement; other new expansion follows Dots |
 | J1 | Short post-trade reflection and review bookmarks | Existing trade detail; durable user-record design | future; recommended first product slice |
-| J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | future |
+| J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | First bounded slice merged #371; deployment and real-week acceptance unverified |
 | J3 | Personal setup playbook with winning and losing examples | J1; C3.4 for pre-trade template selection | future |
 | J4 | Optional planned-risk fields and a session agreement | C3.4; reliable timing and links for comparisons | future |
 | J5 | Prospective personal experiment log | J2; a precisely defined question supported by D0 or recorded observations | conditional |
@@ -231,6 +252,10 @@ and retrieval have browser evidence. Saving and failure states are explicit.
 No automatic psychology labels or score based on whether the trade won.
 
 ### J2 — Turn weekly review into one action
+
+First slice merged in #371: fixed exit-leak evidence and one saved rule at
+`/daily/week`. This does not complete the broader scope or human acceptance
+below; see [the implemented boundary](agent/weekly-review-plan.md).
 
 Extend existing Daily Review and Analytics into a weekly view with selected
 bookmarks, self-reported recurring issues, available outcome summaries, the

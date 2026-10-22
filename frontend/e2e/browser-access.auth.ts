@@ -58,7 +58,7 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await page.goto("/charts?symbol=MU");
   await expect(page.getByRole("link", { name: "Charts", exact: true }).first()).toBeVisible();
   await page.goto("/daily");
-  await expect(page.getByText("Daily practice routine", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("practice-routine").getByRole("heading", { level: 2, name: /^Daily practice/ })).toBeVisible();
   expect(journalRequests).toEqual([]);
   const revoked = await owner.request.post(`/api/access/assistants/${identifier}/revoke`, { headers: { Origin: ownerOrigin, "x-tj-csrf": ownerSession.csrf }, data: {} });
   expect(revoked.status()).toBe(200);
@@ -151,6 +151,7 @@ test("journal calendar dates hydrate across browser locales and timezones", asyn
   const expiration = trades.find((trade: { ticker: string; expiration: string; status: string }) => trade.ticker === "AAPL" && trade.status === "open").expiration;
   const date = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(new Date(`${expiration}T12:00:00Z`));
   await expect(page.getByRole("table").first().getByText(date, { exact: true }).first()).toBeVisible();
+  await page.getByTestId("journal-details").locator(":scope > summary").click();
   await page.getByRole("button", { name: "1M", exact: true }).click();
   await expect(page.getByText("1M Closed P&L", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);

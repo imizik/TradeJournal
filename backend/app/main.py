@@ -239,6 +239,34 @@ async def _maybe_start_market_watch(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+async def _maybe_start_radar(app_: FastAPI):
+    """Radar's once-a-minute quote recorder (PR 1); off unless RADAR_ENABLED."""
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        app_.state.radar = None
+        return None
+    from app.engine.radar_runner import PASS_SECONDS, runner_from_env
+
+    try:
+        runner = runner_from_env()
+    except Exception:
+        # A bad store or path must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Radar could not start; it stays off")
+        runner = None
+    app_.state.radar = runner
+    if runner is None:
+        return None
+
+    async def loop():
+        while True:
+            try:
+                await asyncio.to_thread(runner.run_once)
+            except Exception:
+                logging.getLogger(__name__).exception("Radar pass failed")
+            await asyncio.sleep(PASS_SECONDS - time.time() % PASS_SECONDS)  # on the minute, without drift
+
+    return asyncio.create_task(loop())
+
+
 async def _maybe_start_jo_morning(app_: FastAPI):
     """Optional publication/import only, inside the existing API process."""
     app_.state.jo_morning = None
@@ -283,6 +311,7 @@ async def lifespan(_app: FastAPI):
     _app.state.chart_market_stream = chart_market_stream
     level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
     market_watch = await _maybe_start_market_watch(_app)
+    radar = await _maybe_start_radar(_app)
     jo_morning = await _maybe_start_jo_morning(_app)
     try:
         yield
@@ -291,6 +320,8 @@ async def lifespan(_app: FastAPI):
             jo_morning.cancel()
         if market_watch is not None:
             market_watch.cancel()
+        if radar is not None:
+            radar.cancel()
         if level_alerts is not None:
             await level_alerts.stop()
         await chart_market_stream.stop()
@@ -346,6 +377,8 @@ app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"]
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
     from app.routers import scanner as scanner_router
     app.include_router(scanner_router.router, prefix="/scanner", tags=["scanner"])
+    from app.routers import radar as radar_router
+    app.include_router(radar_router.router, prefix="/radar", tags=["radar"])
 app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
 app.include_router(position_alerts_router.router, prefix="/trades", tags=["position alerts"])

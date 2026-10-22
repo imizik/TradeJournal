@@ -1,11 +1,13 @@
-"""Store the sessions the charts' relative volume needs, before the open (Charts C2.4).
+"""Store the sessions the charts' relative volume needs, before the open (Charts C2.4, C2.6).
 
-A candle's RVol compares today's volume with the 20 sessions before today, read
-from the completed SIP sessions the chart history keeps on disk (C0.0). Charting
-a symbol stores its sessions as its older candles load; this job stores them
-ahead of time for every name on the shared chart watchlist, so RVol is ready
-at the open. It is the ``rvol_history`` job in the sync lane, queued at 06:00
-and 08:40 New York on weekdays.
+A candle's RVol compares its session's volume with the 20 sessions before that
+session, read from the completed SIP sessions the chart history keeps on disk
+(C0.0). Charting a symbol stores its sessions as its older candles load; this
+job stores them ahead of time for every name on the shared chart watchlist: the
+40 sessions before today, so today's RVol is ready at the open and each of the
+last 20 sessions has its own 20 for older candles' RVol. Today's 20 come first
+for every name, then the 20 before them. It is the ``rvol_history`` job in the
+sync lane, queued at 06:00 and 08:40 New York on weekdays.
 
 A stored session is never fetched again, so a run after a complete one costs
 no request and every morning after the first fetches one session per name.
@@ -14,7 +16,7 @@ such as SPX, or a stock before it listed) is not stored, so the name has no
 baseline yet: the run notes it, moves to the next name, and does not fail.
 Reads go through the chart history's own Alpaca budget (30 requests a minute
 in this process); the job sleeps when it is spent instead of exceeding it, and
-stops after ten minutes so a first run (20 sessions for each of 30 names) does
+stops after ten minutes so a first run (40 sessions for each of 30 names) does
 not hold the sync lane long. The next run continues where it stopped.
 """
 
@@ -37,6 +39,7 @@ FATAL = {"not_configured", "access_denied"}
 WAIT = {"rate_limited", "pending"}
 LATE = "late"
 NO_DATA = "no_data"
+KEPT = 2 * chart_rvol.SESSIONS  # today's window, then the one before it for the last 20 sessions' own
 
 
 class RvolHistoryError(RuntimeError):
@@ -76,8 +79,9 @@ def store(
     sleep: Callable[[float], None] = time.sleep,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[int, str]:
-    """Store the 20 sessions before today for each watchlist name. Returns (sessions
-    fetched, message); raises RvolHistoryError when a session could not be stored."""
+    """Store the 40 sessions before today for each watchlist name, today's 20 first for every
+    name. Returns (sessions fetched, message); raises RvolHistoryError when a session could not
+    be stored."""
     if history is None:
         from app.engine.chart_history import chart_history as history
     if calendar is None:
@@ -85,40 +89,48 @@ def store(
     clock = clock or (lambda: datetime.now(ET))
     today = clock().astimezone(ET).date()
     # Today's window. On a weekend or holiday it is also the next session's: nothing trades in between.
-    days = chart_rvol.window(today, calendar.hours)
+    days = chart_rvol.window(today, calendar.hours, KEPT)
     if days is None:
         raise RvolHistoryError(f"The market calendar is unavailable, so the sessions before {today} cannot be chosen; the next run retries.")
     symbols = scope(db)
     if not symbols:
         return 0, "The chart watchlist is empty; nothing to store."
     deadline = time.monotonic() + RUN_SECONDS
-    fetched, complete, failures, left, absent = 0, 0, [], 0, []
-    for index, symbol in enumerate(symbols):
-        if progress:
-            progress(index, len(symbols), f"{symbol}: {index + 1} of {len(symbols)} watchlist names")
-        missing = [day for day in reversed(days) if history.stored(symbol, day) is None]
-        problems, remaining, empty = [], 0, False
-        for position, day in enumerate(missing):
-            outcome = _fetch(history, symbol, day, deadline, sleep)
-            if outcome is LATE:
-                remaining = len(missing) - position
-                break
-            if outcome is NO_DATA:
-                absent.append(f"{symbol} on {day} and earlier")
-                empty = True
-                break  # older sessions have none either
-            if outcome is None:
-                fetched += 1
-            else:
-                problems.append(f"{day} ({outcome})")
-        left += remaining
-        if problems:
-            failures.append(f"{symbol} {', '.join(problems[:2])}" + (f" and {len(problems) - 2} more" if len(problems) > 2 else ""))
-        elif not remaining and not empty:
-            complete += 1
-    message = f"{today}: stored {fetched} session(s); {complete} of {len(symbols)} watchlist names have the 20 sessions before today."
+    fetched, complete, older, failures, left, absent = 0, 0, 0, [], 0, []
+    empty: set[str] = set()  # names with no minutes this far back: nothing older trades either
+    for tier, sessions in enumerate((days[-chart_rvol.SESSIONS:], days[:-chart_rvol.SESSIONS])):
+        for index, symbol in enumerate(symbols):
+            if progress:
+                progress(index, len(symbols), f"{symbol}: {index + 1} of {len(symbols)} watchlist names" + (", older sessions" if tier else ""))
+            if symbol in empty:
+                continue
+            missing = [day for day in reversed(sessions) if history.stored(symbol, day) is None]
+            problems, remaining = [], 0
+            for position, day in enumerate(missing):
+                outcome = _fetch(history, symbol, day, deadline, sleep)
+                if outcome is LATE:
+                    remaining = len(missing) - position
+                    break
+                if outcome is NO_DATA:
+                    absent.append(f"{symbol} on {day} and earlier")
+                    empty.add(symbol)
+                    break
+                if outcome is None:
+                    fetched += 1
+                else:
+                    problems.append(f"{day} ({outcome})")
+            left += remaining
+            if problems:
+                failures.append(f"{symbol} {', '.join(problems[:2])}" + (f" and {len(problems) - 2} more" if len(problems) > 2 else ""))
+            elif not remaining and symbol not in empty:
+                if tier:
+                    older += 1
+                else:
+                    complete += 1
+    message = (f"{today}: stored {fetched} session(s); {complete} of {len(symbols)} watchlist names have the 20 sessions before today, "
+               f"{older} the 20 before those for older candles.")
     if absent:
-        message += f" Alpaca has no minutes for {', '.join(absent)} (an index, or not listed yet), so RVol waits."
+        message += f" Alpaca has no minutes for {', '.join(absent)} (an index, or not listed yet), so RVol waits where it needs those sessions."
     if left:
         message += f" {left} session(s) left for the next run."
     if failures:

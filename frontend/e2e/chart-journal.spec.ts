@@ -427,3 +427,136 @@ test("a saved plan, then a fill: the suggested link is confirmed by hand and the
     await request.put(`${CAPTURES}/tracking`, { data: { on: false } });
   }
 });
+
+// Holding context reuses stored chart positions and one selected trade card.
+// No mark lookup, journal mutation, or new alert is needed.
+test("holding context selects a contract, preserves partial-exit units and refreshes closed or failed records", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now, { positions: POSITIONS }) }));
+  let response = { ...CARD, trade: { ...CARD.trade!, id: "o1" } };
+  let fail = false;
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/journal/trades/*", (route) => {
+    reads.push(route.request().method());
+    return fail ? route.fulfill({ status: 503, json: { detail: "unavailable" } }) : route.fulfill({ json: response });
+  });
+  let marks = 0;
+  await page.route("**/api/backend/charts/journal/trades/*/mark", (route) => { marks++; return route.fulfill({ status: 503 }); });
+  await page.goto("/charts?symbol=MRVL");
+  const info = page.getByRole("region", { name: "Symbol info", exact: true });
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const holding = info.getByRole("region", { name: "Holding context", exact: true });
+  await holding.getByRole("button", { name: /Holding context/ }).click();
+  expect(reads).toEqual([]);
+  await expect(holding).toContainText("2 recorded option trades");
+  await expect(holding.getByTestId("holding-details")).toHaveCount(0);
+  await holding.getByRole("combobox").selectOption("o1");
+  await expect(holding).toContainText("Remaining premium paid$310.00"); // one left, not original two or x100 again
+  await expect(holding).toContainText("Realized on recorded exits$110.00");
+  await expect(holding).toContainText("not live broker holdings");
+  await expect(holding).toContainText("Holding horizon: unspecified");
+  await expect(holding).toContainText("Expiration: 2027-01-15");
+  await expect(holding.getByRole("link", { name: "Trade details", exact: true })).toHaveAttribute("href", "/trades/o1");
+  await holding.getByText("Saved plan & reference", { exact: true }).click();
+  await expect(holding).toContainText("Linked plans unavailable");
+  await holding.getByRole("button", { name: /Holding context/ }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("holding-context-desktop.png") });
+  fail = true;
+  await holding.getByRole("button", { name: "Refresh recorded details" }).click();
+  await expect(holding.getByRole("alert")).toContainText("Holding details unavailable");
+  await expect(holding).not.toContainText("$310.00");
+  fail = false;
+  response = { ...response, trade: { ...response.trade, status: "closed" }, position: null };
+  await holding.getByRole("button", { name: "Refresh recorded details" }).click();
+  await expect(holding).toContainText("No remaining open position is recorded");
+  expect(marks).toBe(0);
+  expect(reads.every((method) => method === "GET")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("holding context on phone distinguishes short credit and missing cost, and does not carry a selection to another symbol", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now, { positions: POSITIONS.map((p) => p.trade_id === "o2" ? { ...p, direction: "short" } : p) }) }));
+  await page.route("**/api/backend/charts/journal/trades/*", (route) => route.fulfill({ json: {
+    ...CARD, trade: { ...CARD.trade!, id: "o2", direction: "short", contract: "MRVL 1/15/27 90P", option_type: "put", strike: 90 },
+    position: { open: 1, avg_cost: null, realized: 0 }, plans: [],
+  } }));
+  await page.goto("/charts?symbol=MRVL");
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  const info = page.getByRole("region", { name: "Symbol info", exact: true });
+  await info.getByRole("button", { name: "MRVL symbol info" }).click();
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const holding = info.getByRole("region", { name: "Holding context", exact: true });
+  await holding.getByRole("button", { name: /Holding context/ }).click();
+  await holding.getByRole("combobox").selectOption("o2");
+  await expect(holding).toContainText("Remaining entry premium receivedUnavailable");
+  await expect(holding).not.toContainText("Remaining premium paid");
+  await holding.getByText("Saved plan & reference", { exact: true }).click();
+  await expect(holding).toContainText("No linked plan");
+  await holding.getByRole("link", { name: "Trade details", exact: true }).scrollIntoViewIfNeeded();
+  await expect(holding.getByRole("link", { name: "Trade details", exact: true })).toBeInViewport();
+  expect(await holding.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await holding.getByRole("button", { name: /Holding context/ }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("holding-context-phone.png") });
+  await page.getByRole("button", { name: "Close watchlist" }).click();
+  await page.getByRole("textbox", { name: "Chart symbol" }).fill("NVDA");
+  await page.getByRole("textbox", { name: "Chart symbol" }).press("Enter");
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await expect(info).toContainText("NVDA symbol info");
+  await expect(info.getByTestId("holding-details")).toHaveCount(0);
+});
+
+test("holding context keeps linked plan timing and saved source, and ignores a late response for a previous contract", async ({ page }) => {
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now, { positions: POSITIONS.map((p) => p.trade_id === "o2" ? { ...p, account: "Brokerage", last4: "1234", contract: "MRVL 1/15/27 110C" } : p) }) }));
+  const plan: Capture = {
+    id: "plan-holding", client_id: "plan-holding", received_at: ENTRY + 60, client_captured_at: ENTRY + 60,
+    account_id: "acct", account_label: "Roth", underlying: "MRVL", side: "buy_calls", instrument: "option", mode: "template",
+    template_id: "rebound", template_revision: 1, setup_label: "Rebound", wording: "AI names recovering together", note: null,
+    strike: 110, expiration: "2027-01-15", quantity: 2, context_state: "captured",
+    context: { state: "captured", symbol: "MRVL", panel: "main", interval: "5m", session: "regular", visible_range: null,
+      last_candle: { time: ENTRY, close: 98 }, price: { value: 98, source: "alpaca_sip", at: ENTRY, stale: true },
+      basis: null, levels: [], drawings: [], auto_levels: [], captured_at: ENTRY + 60 },
+    image: { state: "saved", note: null, bytes: 120 }, audio: null, transcript: null, not_taken_at: null, notes: [],
+    link: { id: "link", method: "manual", linked_at: ENTRY + 120, unlinked_at: null, trade_id: "o2", contract: "MRVL call", entry_time: ENTRY,
+      entry_time_reliable: true, status: "open", timing: "retrospective" },
+  };
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let firstStarted = false;
+  let firstFinished = false;
+  await page.route("**/api/backend/charts/journal/trades/o1", async (route) => {
+    firstStarted = true;
+    await pending;
+    await route.fulfill({ json: { ...CARD, trade: { ...CARD.trade!, id: "o1" } } });
+    firstFinished = true;
+  });
+  await page.route("**/api/backend/charts/journal/trades/o2", (route) => route.fulfill({ json: {
+    ...CARD, trade: { ...CARD.trade!, id: "o2", account: { name: "Brokerage", last4: "1234" } },
+    position: { open: 3, avg_cost: 0, realized: -20 }, plans: [plan],
+  } }));
+  await page.goto("/charts?symbol=MRVL");
+  const info = page.getByRole("region", { name: "Symbol info", exact: true });
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const holding = info.getByRole("region", { name: "Holding context", exact: true });
+  await holding.getByRole("button", { name: /Holding context/ }).click();
+  await holding.getByRole("combobox").selectOption("o1");
+  await expect.poll(() => firstStarted).toBe(true);
+  await holding.getByRole("combobox").selectOption("o2");
+  await expect(holding).toContainText("Brokerage · 1234");
+  await expect(holding).toContainText("Remaining premium paid$0.00");
+  release();
+  await expect.poll(() => firstFinished).toBe(true);
+  await expect(holding).toContainText("Brokerage · 1234");
+  await expect(holding).not.toContainText("$310.00");
+  await holding.getByText("Saved plan & reference", { exact: true }).click();
+  await expect(holding).toContainText("After entry (retrospective)");
+  await expect(holding).toContainText("AI names recovering together");
+  await expect(holding).toContainText("stale when saved");
+  await expect(holding.getByRole("link", { name: "Chart when saved" })).toHaveAttribute("href", /plan-holding\/image$/);
+  await holding.getByRole("button", { name: "Compare stock, group & market" }).click();
+  await expect(info.getByRole("group", { name: "Peers", exact: true })).toBeInViewport();
+});

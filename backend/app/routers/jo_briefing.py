@@ -118,9 +118,12 @@ def redact_briefing(briefing_id: UUID, session: Session = Depends(get_session)):
 
 
 @router.get("/morning")
-def morning(request: Request, day: date, briefing_id: UUID | None = None, session: Session = Depends(get_session)):
-    from app.engine.jo_morning import load_config, morning_view, watchdog_status
+def morning(request: Request, day: date | None = None, briefing_id: UUID | None = None,
+            month: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"), session: Session = Depends(get_session)):
+    from app.engine.jo_morning import ET, load_config, month_delivery, morning_view, watchdog_status, weekdays_in_month
     from jo_briefing_owner import binding, load_binding
+    if day is None and month is None:
+        raise HTTPException(422, "day or month is required")
     try:
         config = load_config()
         configuration_error = False
@@ -132,7 +135,15 @@ def morning(request: Request, day: date, briefing_id: UUID | None = None, sessio
             actor = binding(load_binding(config.check_config))
         except Exception:
             configuration_error = True  # delivery stays "unknown" rather than guessing the packet
-    result = call(morning_view, session, day, datetime.now(timezone.utc), briefing_id, config, None, actor)
+    now = datetime.now(timezone.utc)
+    if day is None:
+        # The month calendar's briefing marks: each weekday's delivery only, with its watchdog notices.
+        days = weekdays_in_month(month, now.astimezone(ET).date())
+        rows = month_delivery(session, days, now, config, actor)
+        for row in rows:
+            row["watchdog_notices"] = watchdog_status(date.fromisoformat(row["day"]))["notices"]
+        return {"month": month, "checked_at": now.isoformat(), "configuration_error": configuration_error, "days": rows}
+    result = call(morning_view, session, day, now, briefing_id, config, None, actor)
     runner = getattr(request.app.state, "jo_morning", None)
     result["automation"] = {"enabled": config is not None, "last_pass": getattr(runner, "last_pass", None),
                             "unavailable": configuration_error or bool(getattr(runner, "last_error", None)),

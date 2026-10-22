@@ -302,3 +302,89 @@ def test_the_job_fetches_one_session_once_through_the_chart_budget(tmp_path, mon
     with pytest.raises(module.HistoryError) as refused:
         history.session("../SPY", day)
     assert refused.value.code == "invalid_request"
+
+
+# ---------------------------------------------------------------------------
+# Older sessions (C2.6): each against its own 20 sessions before it
+# ---------------------------------------------------------------------------
+
+PAST = date(2026, 9, 28)
+
+
+def past_minutes(day: date) -> list[dict]:
+    return chart(alpaca(day, "04:00", "19:59", day.toordinal()))
+
+
+def test_a_past_sessions_rvol_from_its_profile_matches_counting_its_candles_even_from_mid_session():
+    days = window(PAST, Calendar().hours)
+    average = baseline([(day, session_profile(past_minutes(day))) for day in days]).average
+    minutes = past_minutes(PAST)
+    checked = 0
+    for interval in ("1m", "5m", "15m", "1h"):
+        bars = chart_bars(minutes, [], interval, "extended", {PAST: open_day()})
+        counted = candle_rvol(bars, average, PAST, None)
+        assert chart_rvol.session_rvol(bars, session_profile(minutes), average, 1.0) == counted, interval
+        # A page that starts mid-session still counts the session's volume from 09:30.
+        middle = len(bars) // 2
+        assert chart_rvol.session_rvol(bars[middle:], session_profile(minutes), average, 1.0) == counted[middle:], interval
+        checked += sum(value is not None for value in counted)
+    assert checked == 390 + 78 + 26 + 7  # every regular-session candle, the last hour 15:30–16:00 included
+
+
+def test_a_past_session_on_a_split_basis_scales_its_own_volume_too():
+    days = window(PAST, Calendar().hours)
+    average = baseline([(day, flat(100.0)) for day in days]).average
+    bars = chart_bars(past_minutes(PAST), [], "1h", "regular", {PAST: open_day()})
+    # Its raw volume, doubled onto a later split's basis, against a baseline already on it.
+    assert chart_rvol.session_rvol(bars, flat(50.0), average, 2.0)[:2] == [1.0, 1.0]
+
+
+@pytest.fixture
+def stored(tmp_path):
+    from app.engine.chart_history import ChartHistory
+
+    history = ChartHistory(tmp_path, calendar=Calendar())
+    for day in weekdays(date(2026, 7, 1), PAST):
+        if day != LABOR_DAY:
+            history._publish("SPY", day, past_minutes(day))
+    return history
+
+
+def test_a_history_page_carries_each_shown_sessions_rvol_against_its_own_window(stored):
+    # Sep 25's window reaches back to Aug 27; Sep 28's starts a session later, so only Sep 25 waits for it.
+    stored._path("SPY", date(2026, 8, 27)).unlink()
+    before = int(ny(PAST, "20:00").timestamp())
+    page = stored.page("SPY", "5m", "extended", before, limit=250)
+    shown = sorted({datetime.fromtimestamp(b["time"], ET).date() for b in page["bars"]})
+    assert shown == [date(2026, 9, 25), PAST] and page["continuation"] is None
+
+    ready, building = page["rvol"]["2026-09-28"], page["rvol"]["2026-09-25"]
+    assert ready == {"state": "ready", "day": "2026-09-28", "sessions": [d.isoformat() for d in window(PAST, Calendar().hours)],
+                     "traded": 20, "missing": [], "message": None}
+    assert (building["state"], building["missing"]) == ("building", ["2026-08-27"])
+    assert building["message"].startswith("RVol needs the 20 sessions before it; 1 not stored yet. Older candles store them as they load")
+
+    average = baseline([(day, session_profile(past_minutes(day))) for day in window(PAST, Calendar().hours)]).average
+    full = chart_bars(past_minutes(PAST), [], "5m", "extended", {PAST: open_day()})
+    expected = dict(zip((b["time"] for b in full), candle_rvol(full, average, PAST, None)))
+    for bar in page["bars"]:
+        day = datetime.fromtimestamp(bar["time"], ET).date()
+        if bar["extended"]:
+            assert "rvol" not in bar
+        elif day == PAST:
+            assert bar["rvol"] == expected[bar["time"]] and bar["rvol"] is not None
+        else:
+            assert bar["rvol"] is None  # its baseline is not built yet: none, never one over fewer sessions
+
+
+def test_a_history_page_without_the_calendar_says_why_and_never_fetches(stored, monkeypatch):
+    from app.engine import chart_history as module
+
+    monkeypatch.setattr(module.httpx, "get", lambda *a, **k: pytest.fail("RVol must not fetch"))
+    page = stored.page("SPY", "5m", "regular", int(ny(PAST, "16:00").timestamp()), limit=20)
+    assert page["rvol"]["2026-09-28"]["state"] == "ready"
+    # The same stored sessions without the calendar (a ready baseline already worked out is kept, so a fresh store).
+    stored = type(stored)(stored.root)
+    page = stored.page("SPY", "5m", "regular", int(ny(PAST, "16:00").timestamp()), limit=20)
+    assert page["rvol"]["2026-09-28"]["state"] == "unavailable" and "calendar is unavailable" in page["rvol"]["2026-09-28"]["message"]
+    assert all(bar["rvol"] is None for bar in page["bars"])

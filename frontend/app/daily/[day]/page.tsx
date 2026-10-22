@@ -1,9 +1,11 @@
 import { requireAccess } from "@/lib/accessServer";
 import DayReviewWorkflow from "@/components/DayReviewWorkflow";
+import JoDay from "@/components/JoDay";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
-import { buildOpenPositionMeta, computeUnrealizedPnl, isEntryFill, type OpenPositionMeta } from "@/lib/dashboard";
+import { newYorkToday } from "@/lib/format";
+import { buildOpenPositionMeta, formatHoldDuration, computeUnrealizedPnl, isEntryFill, type OpenPositionMeta } from "@/lib/dashboard";
 
 type TradeWithFills = {
   trade: Trade;
@@ -31,7 +33,7 @@ function formatDate(value: string) {
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} ET`;
 }
 
 function fmtMoney(value: number | null | undefined, decimals = 2) {
@@ -41,7 +43,7 @@ function fmtMoney(value: number | null | undefined, decimals = 2) {
 
 function fmtSignedMoney(value: number | null | undefined) {
   if (value == null) return "-";
-  return `${value >= 0 ? "+" : ""}$${value.toFixed(2)}`;
+  return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toFixed(2)}`;
 }
 
 function fmtPct(value: number | null | undefined) {
@@ -57,6 +59,14 @@ function fmtQty(value: number | null | undefined) {
 function pnlColor(value: number | null | undefined) {
   if (value == null) return "text-muted-foreground";
   return value >= 0 ? "text-emerald-400" : "text-red-400";
+}
+
+/** The neighbouring weekday, so the arrows skip weekends without a calendar lookup. */
+function shiftWeekday(day: string, step: 1 | -1) {
+  const date = new Date(`${day}T12:00:00Z`);
+  do date.setUTCDate(date.getUTCDate() + step);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  return date.toISOString().slice(0, 10);
 }
 
 function tradeActivityKeys(trade: Trade) {
@@ -123,7 +133,6 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
   const { day } = await params;
   const [trades, accounts] = await Promise.all([api.trades(), api.accounts()]);
   const accountMap = Object.fromEntries(accounts.map((account: Account) => [account.id, account]));
-  const todayKey = dateKey(new Date().toISOString());
   const selectedDay = dateKey(`${day}T12:00:00`);
 
   const selectedTrades = selectedDay
@@ -251,15 +260,22 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
-            Back to Dashboard
-          </a>
-          <a href="/daily" className="ml-4 text-sm text-muted-foreground hover:text-foreground">
-            Review Calendar
-          </a>
+          <nav aria-label="Daily Review navigation" className="-ml-2 flex flex-wrap items-center text-sm text-muted-foreground">
+            {[
+              { href: "/", label: "Back to Dashboard" },
+              { href: "/daily", label: "Review Calendar" },
+              ...(selectedDay ? [{ href: `/daily/${shiftWeekday(selectedDay, -1)}`, label: "← Previous day" }] : []),
+              // No next day from today: a future day has nothing to review.
+              ...(selectedDay && shiftWeekday(selectedDay, 1) <= newYorkToday() ? [{ href: `/daily/${shiftWeekday(selectedDay, 1)}`, label: "Next day →" }] : []),
+            ].map((link) => (
+              <a key={link.href} href={link.href} className="inline-flex min-h-11 items-center whitespace-nowrap px-2 hover:text-foreground md:min-h-8">
+                {link.label}
+              </a>
+            ))}
+          </nav>
           <h1 className="mt-2 text-xl font-semibold text-foreground">Daily Review</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {selectedDay === todayKey ? "Current trading day" : "Most recent trading day"}: {dayLabel}
+            {selectedDay === newYorkToday() ? "Current trading day" : "Trading day"}: {dayLabel}
           </p>
         </div>
         <a
@@ -270,19 +286,27 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         </a>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
-        <StatCard label="Trades" value={String(selectedTrades.length)} />
-        <StatCard label="Fills" value={String(fillCount)} />
-        <StatCard label="Realized P&L" value={fmtSignedMoney(realizedPnl)} valueClass={pnlColor(realizedPnl)} />
-        <StatCard
-          label="Unrealized P&L"
-          value={totalUnrealizedPnl != null ? fmtSignedMoney(totalUnrealizedPnl) : "-"}
-          valueClass={pnlColor(totalUnrealizedPnl)}
-        />
-        <StatCard label="Marked P&L" value={fmtSignedMoney(totalMarkedPnl)} valueClass={pnlColor(totalMarkedPnl)} />
-        <StatCard label="Premium Risked" value={fmtMoney(premiumRisked, 0)} />
-        <StatCard label="Winners / Losers" value={`${winners} / ${losers}`} />
-      </div>
+      <nav
+        aria-label="Sections of this day"
+        className="sticky top-[calc(3.5625rem+env(safe-area-inset-top))] z-20 -mx-1 flex gap-1 overflow-x-auto rounded-md border bg-card/95 p-1 backdrop-blur md:top-0"
+      >
+        {[
+          ...(access.owner ? [{ href: "#jo", label: "Jo's day" }, { href: "#thoughts", label: "Your thoughts" }] : []),
+          { href: "#ai-review", label: "AI analysis" },
+          { href: "#trades", label: `Trades · ${selectedTrades.length}` },
+          { href: "#practice", label: "Practice" },
+        ].map((section) => (
+          <a
+            key={section.href}
+            href={section.href}
+            className="inline-flex min-h-11 shrink-0 items-center rounded px-3 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground md:min-h-9"
+          >
+            {section.label}
+          </a>
+        ))}
+      </nav>
+
+      {access.owner && selectedDay && <JoDay key={selectedDay} day={selectedDay} live={selectedDay === newYorkToday()} />}
 
       <DayReviewWorkflow
         key={`${selectedDay ?? "invalid-day"}:${savedDailyReview?.generated_at ?? "no-review"}`}
@@ -295,6 +319,24 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         initialJournal={dayJournal}
         canEditJournal={access.owner}
       />
+
+      <div id="trades" className="scroll-mt-28 space-y-4 md:scroll-mt-16">
+      <section aria-label="Day totals" className="rounded-lg border bg-card px-5 py-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Trades</h2>
+        <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 xl:grid-cols-7">
+          <DayFigure label="Trades" value={String(selectedTrades.length)} />
+          <DayFigure label="Fills" value={String(fillCount)} />
+          <DayFigure label="Realized P&L" value={fmtSignedMoney(realizedPnl)} valueClass={pnlColor(realizedPnl)} />
+          <DayFigure
+            label="Unrealized P&L"
+            value={totalUnrealizedPnl != null ? fmtSignedMoney(totalUnrealizedPnl) : "-"}
+            valueClass={pnlColor(totalUnrealizedPnl)}
+          />
+          <DayFigure label="Marked P&L" value={fmtSignedMoney(totalMarkedPnl)} valueClass={pnlColor(totalMarkedPnl)} />
+          <DayFigure label="Premium Risked" value={fmtMoney(premiumRisked, 0)} />
+          <DayFigure label="Winners / Losers" value={`${winners} / ${losers}`} />
+        </dl>
+      </section>
 
       {selectedTrades.length === 0 ? (
         <section className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
@@ -391,7 +433,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                   return (
                     <tr key={trade.id} className="hover:bg-muted/50">
                       <Td>
-                        <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                        <a href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="font-semibold hover:underline">
                           {trade.ticker}
                         </a>
                         <div className="text-xs text-muted-foreground">{tradeLabel(trade)}</div>
@@ -441,7 +483,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                       <Td>
                         <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
                       </Td>
-                      <Td>{trade.hold_duration_mins != null ? `${Math.round(trade.hold_duration_mins)}m` : "-"}</Td>
+                      <Td>{trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}</Td>
                       <Td>{formatDateTime(trade.opened_at)}</Td>
                       <Td>{formatDateTime(trade.closed_at)}</Td>
                     </tr>
@@ -465,7 +507,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
               <div key={trade.id} className="rounded-lg border bg-card">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
                   <div>
-                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                    <a href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="font-semibold hover:underline">
                       {trade.ticker}
                     </a>
                     <span className="ml-2 text-sm text-muted-foreground">{tradeLabel(trade)}</span>
@@ -533,25 +575,19 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         </>
       )}
 
+      </div>
+
       {/* Practice is separate from the journal day, so it follows the day's own review and trades. */}
-      <PracticeRoutine day={selectedDay} />
+      <div id="practice" className="scroll-mt-28 md:scroll-mt-16"><PracticeRoutine day={selectedDay} /></div>
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  valueClass = "text-foreground",
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
+function DayFigure({ label, value, valueClass = "text-foreground" }: { label: string; value: string; valueClass?: string }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</dd>
     </div>
   );
 }
@@ -593,7 +629,7 @@ function ActivityList({
       ) : (
         <div className="mt-3 space-y-2">
           {trades.map((trade) => (
-            <a key={trade.id} href={`/trades/${trade.id}`} className="flex items-center justify-between gap-3 rounded bg-muted px-3 py-2 text-sm hover:bg-muted/80">
+            <a key={trade.id} href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="flex items-center justify-between gap-3 rounded bg-muted px-3 py-2 text-sm hover:bg-muted/80">
               <span className="font-medium">{trade.ticker}</span>
               <ActivityBadge activity={tradeActivityForDay(trade, selectedDay)} />
             </a>

@@ -40,6 +40,8 @@ class ChartFeed:
 
         self.splits = splits  # None: no split data, disclosed on every response
         self.daily = ChartDaily(self)
+        from app.engine.chart_indices import ChartIndices
+        self.indices = ChartIndices(self)
         self._lock = threading.RLock()
         self._cache: OrderedDict[tuple, CachedRead] = OrderedDict()
         self._calls: deque[float] = deque()
@@ -127,6 +129,9 @@ class ChartFeed:
         before they merge into zones; ``range_levels`` (the expected-move bands, C2.7) join
         the same way. ``auto=False`` leaves the automatic ones out.
         """
+        from app.engine.chart_indices import is_index
+        if is_index(symbol):
+            return self.indices.workspace(symbol, intervals, watchlist, session, quotes)
         now = datetime.now(ET)
         today = now.date()
         problems = []
@@ -181,22 +186,17 @@ class ChartFeed:
                 if not quiet:
                     problems.append(str(exc))
 
-        quote_data = read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(set([symbol, *watchlist])))}, 15) if quotes else {}
         rows = []
-        for q in _rows(quote_data, "quotes", "quote"):
-            rows.append({
-                "symbol": str(q.get("symbol", "")), "name": str(q.get("description") or q.get("symbol") or ""),
-                "instrument_type": str(q.get("type") or ""),
-                "last": _number(q.get("last")), "change": _number(q.get("change")),
-                "change_percentage": _number(q.get("change_percentage")),
-                "volume": _number(q.get("volume")), "previous_close": _number(q.get("prevclose")),
-                # Tradier's `close` is the current regular-session close. It is
-                # often null before/while RTH is open; never infer it from last.
-                "regular_close": _number(q.get("close")),
-                "day_high": _number(q.get("high")), "day_low": _number(q.get("low")),
-                "week_52_high": _number(q.get("week_52_high")), "week_52_low": _number(q.get("week_52_low")),
-                "trade_time": _number(q.get("trade_date"), divisor=1000),
-            })
+        if quotes:
+            try:
+                rows, stamp, issue = self.quote_rows([symbol, *watchlist])
+                fetched["quotes"] = stamp
+                if issue:
+                    problems.append(issue)
+            except ChartFeedError as exc:
+                if exc.code == "not_configured":
+                    raise
+                problems.append(str(exc))
 
         rvol, average = self._rvol(symbol, today, hours, info, calendar, volume_profile) if volume_profile else (None, None)
         # The newest minute's start ends a candle still forming.
@@ -231,39 +231,36 @@ class ChartFeed:
             data["rvol"] = rvol
         return data
 
+    def quote_rows(self, symbols: list[str]) -> tuple[list[dict], float | None, str | None]:
+        from app.engine.chart_indices import index_quote, provider_symbol
+
+        quote_data, stamp, issue = self.read("/v1/markets/quotes", {
+            "symbols": ",".join(sorted({provider_symbol(s) for s in symbols})),
+        }, 15)
+        rows = []
+        for q in _rows(quote_data, "quotes", "quote"):
+            rows.append(index_quote({
+                "symbol": str(q.get("symbol", "")), "name": str(q.get("description") or q.get("symbol") or ""),
+                "instrument_type": str(q.get("type") or ""),
+                "last": _number(q.get("last")), "change": _number(q.get("change")),
+                "change_percentage": _number(q.get("change_percentage")),
+                "volume": _number(q.get("volume")), "previous_close": _number(q.get("prevclose")),
+                # Tradier's `close` is the current regular-session close. It is
+                # often null before/while RTH is open; never infer it from last.
+                "regular_close": _number(q.get("close")),
+                "day_high": _number(q.get("high")), "day_low": _number(q.get("low")),
+                "week_52_high": _number(q.get("week_52_high")), "week_52_low": _number(q.get("week_52_low")),
+                "trade_time": _number(q.get("trade_date"), divisor=1000),
+            }))
+        return rows, stamp, issue
+
     @staticmethod
     def _rvol(symbol, today, hours, info, calendar, volume_profile) -> tuple[dict | None, chart_rvol.Profile | None]:
         """Today's time-of-day volume baseline (C2.4) from the stored sessions before it, on
         today's price basis. None on a day with no session; otherwise what the chart says about
         it, with the baseline only when it is ready."""
-        def state(name: str, message: str | None, days=(), traded=(), missing=()) -> dict:
-            return {"state": name, "day": today.isoformat(), "sessions": [d.isoformat() for d in days],
-                    "traded": len(traded), "missing": [d.isoformat() for d in missing], "message": message}
-
-        if hours is not None and hours["status"] != "open":
-            return None, None
-        days = chart_rvol.window(today, calendar.hours) if hours is not None else None
-        if days is None:
-            return state("unavailable", "The market calendar is unavailable, so the 20 sessions before today cannot be chosen."), None
-        if hours["open"] != chart_rvol.OPEN:
-            return state("unavailable", "Today's regular session does not open at 9:30, so its minutes cannot be compared.", days), None
-        profiles, missing = [], []
-        for day in days:
-            profile = volume_profile(symbol, day)
-            if profile is None:
-                missing.append(day)
-                continue
-            # Raw stored volume, multiplied by every split from that session up to today.
-            factor = factor_before(info["splits"], day)
-            profiles.append((day, profile if factor == 1.0 else tuple(None if v is None else v * factor for v in profile)))
-        if missing:
-            return state("building", f"RVol needs the 20 sessions before today; {len(missing)} not stored yet. Watchlist names are stored each "
-                         "morning before the open, and any symbol's sessions as its older candles load.", days, missing=missing), None
-        found = chart_rvol.baseline(profiles)
-        if len(found.traded) < chart_rvol.MIN_SESSIONS:
-            return state("insufficient", f"Only {len(found.traded)} of the 20 sessions before today traded in regular hours; RVol needs "
-                         f"{chart_rvol.MIN_SESSIONS}.", days, found.traded), None
-        return state("ready", None, days, found.traded), found.average
+        return chart_rvol.day_baseline(today, hours, calendar.hours if calendar is not None else None,
+                                       lambda day: volume_profile(symbol, day), lambda day: factor_before(info["splits"], day))
 
     def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels=None, auto=True,
                 range_levels=None, session="extended") -> dict:

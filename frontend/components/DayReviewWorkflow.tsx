@@ -34,8 +34,8 @@ export default function DayReviewWorkflow({ day, dayLabel, tradeCount, tradeIds,
     if (foundNewThought) setContextRevision((revision) => revision + 1);
   }, []);
   return <>
-    {day && canEditJournal && <DayJournal key={day} day={day} review initialData={initialJournal} onEntrySaved={handleEntrySaved} onDataLoaded={handleDataLoaded} />}
-    <DailyAiPanel
+    {day && canEditJournal && <div id="thoughts" className="scroll-mt-28 md:scroll-mt-16"><DayJournal key={day} day={day} review initialData={initialJournal} onEntrySaved={handleEntrySaved} onDataLoaded={handleDataLoaded} /></div>}
+    <div id="ai-review" className="scroll-mt-28 md:scroll-mt-16"><DailyAiPanel
       tradeCount={tradeCount}
       day={day}
       dayLabel={dayLabel}
@@ -44,6 +44,6 @@ export default function DayReviewWorkflow({ day, dayLabel, tradeCount, tradeIds,
       initialGeneratedAt={initialGeneratedAt}
       hasDayContext={hasContext}
       contextRevision={contextRevision}
-    />
+    /></div>
   </>;
 }

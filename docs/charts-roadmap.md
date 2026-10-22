@@ -1,5 +1,14 @@
 # Charts epic: roadmap
 
+October 21 workflow planning: the [consolidation roadmap](workflow-consolidation-roadmap.md)
+records the owner's macro → familiar-tech routine, peer-confirmation need and
+optional use of plans/review. The VWAP clarity fix is included with this plan in the owner-approved PR;
+that PR's check/merge receipt owns its release evidence. After the Dashboard
+proposal, prioritize same-window peer context with Radar. Macro grid/data work
+requires the agreed instrument checklist; no chart cap or provider expansion is
+approved here. The September no-macro/futures assumption below is historical,
+not a reason to dismiss the owner's newer macro-view request.
+
 **October 11, 2026 priority:** [Dots functionality comes first](product-roadmap.md#selected-priorities--october-11-2026).
 Existing authorized bounded chart work may close and blocking defects may be
 fixed. New chart polish, Level 2/provider expansion and optional overlays defer
@@ -61,9 +70,15 @@ is unchanged. The speech-to-text provider is Whisper run on the server
 (faster-whisper): no new paid plan, and audio never leaves the app. See
 [Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35).
 
+**VWAP control clarity (October 21–22, 2026):** VWAP bands now have a separate
+Indicators/Layers control and RTH availability explanation. The former combined
+Range bands switch is labelled Expected move and controls only option-implied
+levels. The October 22 simplification shows only the ±1σ upper/lower pair.
+Existing saved visibility is retained; indicator calculations are unchanged.
+
 **Range bands and max pain (2026-10-05):** at the user's request, two new
 rows were added and built ahead of the board's `next`, in one branch: C2.7
-(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ) and
+(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ at delivery) and
 C4.7 (max pain in the options layer, labelled *inferred*). They came from the
 user asking which levels traders use to see where price is likely to range.
 The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
@@ -147,8 +162,8 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | done ([PR #138](https://github.com/imizik/TradeJournal/pull/138); ahead of C5.2 at the user's request) |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
-| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
-| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
+| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | done (this branch; the morning job now keeps 40 sessions) |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ (independent controls since October 21) | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 | C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
 Why this order: history, correct sessions and smooth updates come first; then
@@ -642,8 +657,7 @@ sessions before today for each watchlist name, and the workspace builds the
 390-number baseline from those files, read once per process, so it costs no
 provider request and is on today's split basis. Any charted symbol whose
 sessions are stored gets one, not only watchlist names. Only today's
-regular-session candles have RVol; older sessions keep plain volume colors
-(C2.6). A live probe found that Alpaca answers a day without minutes (SPX, or
+regular-session candles had RVol until C2.6 gave older sessions theirs. A live probe found that Alpaca answers a day without minutes (SPX, or
 CRWV before it listed) with `"bars": null`, which C0.0 called malformed; it now
 reads "no minute bars" and is still not stored, and the job notes such names
 instead of failing. The main chart's study row reads "RVol 2.6× for 10:17 AM" and names the
@@ -680,7 +694,7 @@ minutes after the regular open so the quotes have settled, and then fixed for
 the day, so the lines do not slide with price; a straddle captured later (the
 first look at a symbol, a restart) says when it was priced. The bands join the
 automatic levels' zones (so an alert can be made from one) and every one draws
-while the switch is on. VWAP ±1σ and ±2σ use the session's volume-weighted
+while the switch is on. VWAP ±1σ use the session's volume-weighted
 standard deviation of the same minute prices VWAP uses. A band is what the
 options market charged for a move either way, not a forecast of where price
 will stay; the card says so. *Done when:* the capture rule (not before 09:35,
@@ -1094,7 +1108,7 @@ conditions and hidden/closed browsers, not only an open chart tab. Document
 transport delivery semantics separately from event deduplication. The phone
 message names the symbol, level, price and event time, and a live phone delivery
 is observed before claiming it works. Alert subscriptions and REST recovery must
-share the existing token budget with up to three visible symbols.
+share the existing token budget with up to five visible symbols.
 Compound conditions ("and relative volume above 2×") wait until users ask for
 them. An alert made from an options wall (C4.4) is pinned to that wall's strike
 when it is created. Open-interest walls hold still through a session, but a
@@ -1154,7 +1168,7 @@ and compares the recorded decision with the actual trade using correct units.
 **C7.1 Per-panel symbol link groups (done in PR #95).** Each panel follows the main symbol or
 holds its own (for example SPY, QQQ and the traded name). Crosshair and time
 range stay linked by time. Each extra symbol costs its own chart-feed loads, so
-cap it at three distinct symbols.
+cap it at five distinct symbols (raised by the Macro continuation below).
 *Done when:* SPY, QQQ and a stock remain independent through symbol switches,
 range/crosshair linking, pause/resume and scroll-back in browser tests. A backend
 test proves tabs/panels share one upstream WebSocket and stay within aggregate
@@ -1350,11 +1364,11 @@ One small PR each, in order, through the skill's UI gate:
 |---|---|---|
 | UX-A | "Active" and "Research" layout presets; new setups default the lower row to the compact share | Done in this branch: at 1440×900 the main canvas grew from about 381 to 458 px (+20%, browser-test banner included) with all five charts visible and the dock closed; saved settings untouched. A fixed 560 px needs chrome trimming, which is outside UX-A |
 | UX-B | Small-chart header controls on hover or keyboard focus (always on phone); one-row legend, EMAs folded, "VWAP —" says why | Done in this branch: a small chart shows 2 controls at rest (symbol, interval), the rest on hover or focus and always on touch and phone; the main legend is one row at 1440 px with EMA 9/20/50/200 folded into one hover/focus item |
-| UX-C | Back to live returns to the symbol held before a past trade | Opening a trade from MU and pressing Back to live shows MU |
+| UX-C | Back to live returns to the symbol held before a past trade | Done ([PR #225](https://github.com/imizik/TradeJournal/pull/225)): opening a trade from MU and pressing Back to live shows MU |
 | UX-D | Level labels avoid candles; shaded bands only for the nearest zones; Layers explanations behind an info control | Done in this branch: in the realistic picture auto-level names sit in the clear gap past the last bar and the e2e asserts no tag box meets a candle; only the nearest zone each side is shaded; Layers explanations sit behind an info button, status text stays visible |
 | UX-E | Two-finger swipes lock to their dominant axis, behind a toggle | Only if the trackpad test shows zoom drift: a synthetic dx 10 / dy 1.5 swipe drifts ≤ 0.5%; pinch and wheel unchanged |
-| UX-F | At most one paint per frame per chart for live ticks; no re-render for unseen values | Only if paused feels clearly smoother than live: five charts + live ≤ 1.3× no-live cost, no frame over 34 ms; last price and freshness never lag |
-| UX-G | Crosshair moves stop re-rendering all five chart components | Measured first; only if UX-F leaves a gap |
+| UX-F | At most one paint per frame per chart for live ticks; no re-render for unseen values | Partly done, with UX-G (2026-10-21), and the gate as written cannot be met: ticks already reach each chart once per frame and the library paints each chart at most once per frame. The marker layer now places marks once per paint instead of on every view request, and the shared price/time formatters stopped building a formatter per call: live script time fell about 13%. Measured (production build, CPU 4× slowed, five charts, a tick every frame, three repeats): script about 1,470 ms per 3 s live against about 10 ms paused, of which the library's own canvas paint is about 980 ms and React about 410 ms, so ≤ 1.3× paused is out of reach for any app change. Worst frames 33–68 ms, the higher ones on the first run. Not pursued: moving the candle updates out of React (about 15% more at best) |
+| UX-G | Crosshair moves stop re-rendering all five chart components | Done (2026-10-21): the crosshair's candle lives in a small store read only by each chart's values row. Same setup, 183 moves: chart renders about 410 → 0, script time about 1,100 → 650 ms, worst frame 67 → 19 ms. The tick-render browser test now asserts that a scrub re-renders no chart while both readouts follow it |
 
 The one-minute trackpad test that gates UX-E and UX-F, in five-chart mode then
 Focus: a deliberately sloppy two-finger pan on 5m (does the zoom creep?);
@@ -1438,3 +1452,13 @@ reopen them without the user.
     C4.4 and C4.5 were built ahead of G0, C5.2 and Phase 3, with symbol info
     T2.1 in the same PR. The rest of decision 7 stands: replay and pre-trade
     capture still follow G0.
+
+## Macro continuation — October 21, 2026
+
+Owner-approved implementation: the existing five slots get a Macro preset
+(SPY/QQQ/IWM/VIX/US10Y at 4h), a local Tech return, and explicit Tradier
+index routing for VIX and TNX/10. See [the implementation contract](charts-workspace.md#macro-layout-vix-and-10-year-yield)
+for units, observation hours, retained history and cost limits. No crypto,
+futures, eight-panel grid, additional provider or Radar dependency.
+Production deployment and the owner's morning-routine acceptance are separate
+from fixture tests and provider entitlement probes.

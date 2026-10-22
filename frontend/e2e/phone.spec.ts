@@ -50,7 +50,7 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
   await page.getByRole("button", { name: "Open menu" }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
   await expect(menu.getByRole("heading", { name: "Labs" })).toBeVisible();
-  expect((await menu.getByRole("link").allTextContents()).slice(0, 5)).toEqual(["Dashboard", "Charts", "Daily Review", "Trades", "Analytics"]);
+  expect((await menu.getByRole("link").allTextContents()).slice(0, 6)).toEqual(["Dashboard", "Charts", "Daily Review", "Jo", "Trades", "Analytics"]);
   for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
     await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
     await expect(menu.getByRole("link", { name, exact: true })).toBeInViewport();
@@ -89,6 +89,7 @@ test("main content gets the width, and key numbers are readable", async ({ page 
   const viewport = page.viewportSize()?.width ?? 0;
   expect(mainWidth).toBeGreaterThan(viewport * 0.9);
 
+  await page.getByTestId("journal-details").locator(":scope > summary").click();
   // The seeded all-time P&L must render in full, not clipped to "+$1,0...".
   // exact: the chart's own tooltip label also contains this number.
   await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();

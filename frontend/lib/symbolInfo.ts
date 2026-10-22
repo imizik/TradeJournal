@@ -85,10 +85,26 @@ export type SymbolOverview = {
   datasets: { company: OverviewCompany; ratios: OverviewRatios; statistics: OverviewStatistics };
 };
 
-export async function fetchSymbolOverview(symbol: string, signal: AbortSignal): Promise<SymbolOverview> {
-  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/overview`), { signal, cache: "no-store" });
-  if (!response.ok) throw new Error("Overview unavailable. Try again.");
-  return response.json();
+/** One overview read per symbol for a minute, shared by the dock's price card and the Overview tab; a failure is not kept. */
+const overviews = new Map<string, { at: number; read: Promise<SymbolOverview> }>();
+const OVERVIEW_SHARE_MS = 60_000;
+export function fetchSymbolOverview(symbol: string, signal: AbortSignal): Promise<SymbolOverview> {
+  let entry = overviews.get(symbol);
+  if (!entry || Date.now() - entry.at > OVERVIEW_SHARE_MS) {
+    const read = fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/overview`), { cache: "no-store" }).then((response) => {
+      if (!response.ok) throw new Error("Overview unavailable. Try again.");
+      return response.json() as Promise<SymbolOverview>;
+    });
+    entry = { at: Date.now(), read };
+    overviews.set(symbol, entry);
+    read.catch(() => { if (overviews.get(symbol) === entry) overviews.delete(symbol); });
+  }
+  // The shared read is never cancelled by one reader; this reader stops waiting when its own signal aborts.
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+    signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    entry.read.then(resolve, reject);
+  });
 }
 
 /** One open-market insider purchase or sale (Yahoo, unofficial). */

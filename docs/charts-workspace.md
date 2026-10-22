@@ -13,6 +13,60 @@ Advanced Charts library. No TradingView subscription or paid data upgrade is
 required by this feature. The Tradier account still needs production market-data
 access. Keys remain on the private backend.
 
+## Macro layout: VIX and 10-year yield
+
+The desktop **Macro** button (or **Layouts → Macro** on a phone) opens the existing five
+slots: SPY above QQQ, IWM, VIX and US10Y, all at 4h. The lower row starts at the
+balanced size and remains resizable. **Tech** restores the main symbol,
+intervals, held symbols, linked-range choice and proportions from before Macro.
+That return snapshot is local to this browser, survives reload, and does not
+replace a named layout. Existing named layouts still leave the main ticker
+unchanged. Unsupported index intervals are mapped to 4h for display and data
+requests, including URL/reload and saved-layout entry; the saved stock
+arrangement itself is preserved. Five distinct symbols now fit; no extra chart slots were added.
+
+`chart_indices.py` uses the existing Tradier chart cache, budget and failure
+handling. VIX is an index in points. **US10Y** maps to **TNX:CGI**, the Cboe
+10-year Treasury yield index, divided by ten: 51.46 becomes **5.146%**; a raw
+change of 0.29 becomes **+2.9 basis points**. This is a yield index, not a bond
+ETF, futures price or a guaranteed match to another vendor's US10Y series.
+The scale is explicit, never inferred from a value's size; see
+[TradingView's TNX unit explanation](https://www.tradingview.com/support/solutions/43000483455-prices-for-cboe-tnx-fvx-and-tyx-are-10-times-higher-than-normal/).
+
+Only **4h and 1D** are supported for these two instruments. Daily OHLC comes
+from Tradier history, with completed history cached for 24h and a short tail
+for 60s. Four-hour candles aggregate 15-minute observations into clock buckets
+starting at New York midnight, including provider observation hours. They do
+not use equities' premarket/RTH/postmarket boundaries. The request is bounded
+to 20 calendar days; actual retained history can be shorter. Paging slices the
+same series and ends there, without an Alpaca stock fallback. Invalid OHLC and
+conflicting daily dates are omitted and disclosed, never reconstructed; EMA
+and RSI use the remaining valid observations. No SMA was added.
+
+Index panels show their latest observation time (or daily date), separate from
+request time, and label yield percent/index points. Candles use a 60-second
+cache even while stock panels refresh every 15 seconds. VIX and US10Y never
+join the stock trade stream. They have no traded volume, VWAP/RVol, equity
+split adjustment, automatic/options levels, earnings, stock fundamentals,
+journal fills or trade-planning controls. Saved stock studies remain intact.
+Equity calendar metadata remains independent when an index is focused, so
+held stock countdowns and watchlist session-change references keep working.
+Index observations can stop at different hours; the screen does not infer an
+NYSE close or describe an old observation as live.
+
+Read-only provider probes on October 21, 2026 verified these identifiers,
+quotes and daily/recent intraday responses with the configured production
+Tradier entitlement. TNX returned no intraday observations with `open` but did
+with `all`; the implementation uses `all`. A malformed TNX daily row on March
+19 was observed and is omitted rather than repaired. These probes do not prove
+this feature is deployed or a production chart has passed human acceptance.
+No new subscription is required under the tested entitlement. Tradier's
+[120 market requests/minute allowance](https://docs.tradier.com/docs/rate-limiting)
+is shared with other app users of that token; Charts retains its own 60/minute
+budget. The two 4h index panels add two cold reads and at most two reads/minute
+while warm; adding daily panels adds a full-history read per symbol/date and
+a tail read/minute. Quote batching remains shared with the workspace.
+
 ## Symbol info panel
 
 The section below the watchlist in the Watchlist dock tab follows the main
@@ -148,6 +202,16 @@ kept on the device. Key numbers (52-week range, market cap, enterprise value,
 shares, institutional ownership, average volume and the valuation ratios) have
 a dotted label: a tap shows what the number means and what it is usually
 compared with, as general context rather than a verdict on the symbol.
+
+The owner-only **Group movement · 15 min** section inside Peers compares the
+selected stock, a selectable Radar group, QQQ and SPY using two shared recorded
+passes. Day-change chips stay labeled separately. Window/date, unavailable rows,
+recording gaps and per-row observation times stay visible; no data is presented
+as a buy signal. Group choice carries across member navigation. The comparison
+uses the existing Overview refresh lifecycle and makes no quote/history reads.
+See [Radar group movement](radar.md#charts-group-movement) for eligibility,
+version, session and activation boundaries. This view is independent of chart
+interval/crosshair and historical event context.
 
 A **Peers** block (T3.4) is the last block of the **Overview** tab: the
 active symbol's peers as chips, each with today's percent change, from
@@ -298,9 +362,26 @@ cd backend
   the main chart's intervals, the session, **Indicators** (a menu of the
   studies and fill arrows), **Layouts**, Focus, **Link time ranges**, pause,
   refresh, shortcuts, full screen, and the dock's two tabs, **Watchlist** and
-  **Layers**; below about 1280px it wraps to a
-  second row rather than hiding anything. Undo, redo and the drawing tools
-  are a slim rail left of the charts. The dock on the right shows one panel at
+  **Layers**. Below 1800px the text beside Indicators, Layouts, Focus, Link
+  time ranges, Plan trade and Pause stays only as their names and Extended
+  hours reads **ETH**, so the toolbar keeps to one row down to about 1300px;
+  below that it wraps to a second row rather than hiding anything. Undo, redo
+  and the drawing tools are a slim rail left of the charts; the pencil
+  button in the toolbar hides or shows the rail for a wider chart, remembered
+  on the device, and a tool chosen by hotkey brings it out until it is put
+  away. From a tablet's width each chart's title line (symbol, interval and
+  buttons) and its candle values row sit over the top of the candles, like
+  TradingView's legend, on a faint backdrop so they stay readable, and only
+  their text takes the pointer; a phone keeps them stacked above the candles.
+  Like TradingView, the volume bars carry the latest candle's volume as a tag
+  on the price scale. The watchlist reads Last, Chg% and Vol (today's volume
+  from the Tradier quote), and the dollar Chg too once the dock is at least
+  300px wide. Above the symbol info a price card shows the regular session's
+  price large with its change, a premarket or after-hours price on its own
+  line, and today's volume against Tradier's 30-day average with a bar; that
+  average is one overview read per settled symbol, shared for a minute with
+  the Overview tab (`frontend/lib/symbolInfo.ts`).
+  The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
   and latest fills under it, or the layers panel. Those three sections are
   one-line folds with their counts ("MU levels 0/30", "Alerts 0/20 active",
@@ -398,10 +479,10 @@ cd backend
   automatic levels, and the strike ladder (C4.5) in the dock (see
   [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)),
   with max pain (C4.7).
-- Range bands (C2.7), off until shown from Layers: today's and Friday's
-  expected move from the at-the-money straddle, priced five minutes after the
-  open and fixed for the session, and VWAP ±1σ/±2σ (see
-  [Range bands](#range-bands-c27)).
+- Expected move (C2.7), off until shown from Layers: today's and Friday's
+  at-the-money straddle, priced five minutes after the open and fixed for the
+  session. VWAP ±1σ has its own **VWAP bands** control in Indicators and
+  Layers (see [Range bands](#range-bands-c27)).
 - Extended-session shading, one flat band per run of premarket or after-hours
   candles (`frontend/lib/sessionShade.ts`), and regular/extended hours
   selection: the toolbar's **Extended hours** toggle is lit while those candles
@@ -608,7 +689,7 @@ cd backend
   A slow client’s bounded queue merges identical minute buckets; if distinct
   buckets exceed capacity it reports a recovery gap rather than silently
   discarding extremes. The browser requests a REST recovery snapshot. Symbol changes update that
-  single upstream subscription. It carries up to three chart symbols plus the
+  single upstream subscription. It carries up to five chart symbols plus the
   30-symbol watchlist, so watchlist prices update without per-symbol streams or
   extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
   its source and age appear on hover, and pausing keeps the last trade marked
@@ -637,6 +718,10 @@ cd backend
   candles it moved, plus the quote. The countdowns, the status dot and the
   price age read a shared one-second clock themselves, so a second passing
   re-renders those labels and no chart.
+- The crosshair's candle also stays out of React state: a move, or a linked
+  chart following it, re-renders only that chart's candle values row, never
+  the chart. The fill and news marker layer places its marks once per paint or
+  hit test, not on every one of the library's per-update view requests.
 - Each panel creates its chart once. A new symbol, interval, session or RSI
   setting swaps data and panes on the same chart. Until a new symbol's or
   session's candles arrive, every chart keeps its previous frame, dimmed and
@@ -648,9 +733,8 @@ cd backend
   survives the move.
 - Each smaller chart follows the main symbol or holds its own: click its
   symbol to pick one from the symbol search, or to follow again. A pin marks a
-  held symbol and a link icon a follower. Charts show three symbols at most
-  (the main one and two held), so SPY, QQQ and the traded name fit side by
-  side; a fourth is refused with a message. Switching the main symbol moves
+  held symbol and a link icon a follower. Charts show five symbols at most
+  (the main one and four held). Switching the main symbol moves
   only the followers. **Focus** on a chart holding SPY makes SPY the main
   symbol and leaves that panel holding the previous one. Held symbols are part
   of the saved layout, shared across devices; the main symbol stays per device.
@@ -793,7 +877,7 @@ fills in the requested history are returned, with truncation disclosed.
 Private `GET /charts/stream` holds an SSE response. Only the backend uses the
 Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
-demand-driven; each tab may request up to three chart symbols and 30 watchlist
+demand-driven; each tab may request up to five chart symbols and 30 watchlist
 symbols over that connection.
 
 `backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), a
@@ -1235,8 +1319,16 @@ existing refresh behavior.
 
 ### Range bands (C2.7)
 
-Off by default. Layers → Range bands (or the chart menu's Layers) shows them
-on every chart, saved in the shared workspace (`rangeBandsHidden`):
+Expected move and VWAP bands have independent controls, both off by default.
+Layers → **Expected move** (or the chart menu's Layers) shows the option-implied
+levels on every chart, saved in the shared workspace (`rangeBandsHidden`).
+Indicators → **VWAP bands ±1σ** or Layers → **VWAP bands** shows the VWAP
+bands independently (`vwapBandsHidden`), without requesting option chains.
+Hiding the Indicators group also hides VWAP bands and keeps their choice.
+Existing settings with the old combined Range bands enabled keep both enabled
+until each is changed; an explicit VWAP band choice survives older tabs' saves.
+The calculations are unchanged:
+
 
 - **Expected move.** For the nearest expiration (0DTE on SPY and QQQ) and the
   nearest Friday, the at-the-money straddle's mid (T2.1's rule: the strike
@@ -1261,12 +1353,15 @@ on every chart, saved in the shared workspace (`rangeBandsHidden`):
   market is not captured and is tried on the next read. A capture lives in
   the API process's memory, so the first look at a symbol after 09:35, or a
   restart, prices it later; the card's time says when.
-- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed) and ±2σ (dotted),
+- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed),
   where σ is the regular session's volume-weighted standard deviation of the
   same minute HLC3 prices VWAP uses (`vwap_sd` on each candle). None outside
-  the regular session or on daily and weekly charts.
+  the regular session or on daily and weekly charts. Layers explains this
+  separately from expected-move availability. The main chart's study row names
+  the bands; hovering it gives their prices for the selected candle, or the
+  reason they are unavailable.
 
-The workspace request carries `ranges=1` (and `auto=0` when the automatic
+With Expected move enabled, the workspace request carries `ranges=1` (and `auto=0` when the automatic
 levels are hidden). The expected-move levels join the automatic levels before
 confluence, so "262 + EM Fri high" is one zone whose interactions are read
 and from which an alert can be made; every expected-move level draws while the
@@ -1379,9 +1474,10 @@ weeks back and ten days ahead (months not yet published read as clock hours).
 
 ### Relative volume (C2.4)
 
-A candle's RVol is today's cumulative regular-session volume through that
-candle over the average cumulative volume through the same minute of day in
-the 20 sessions before today. `backend/app/engine/chart_rvol.py` (pure) is fill
+A candle's RVol is its session's cumulative regular-session volume through
+that candle over the average cumulative volume through the same minute of day
+in the 20 sessions before that session: today's against the 20 before today,
+an older session's against its own 20 (C2.6). `backend/app/engine/chart_rvol.py` (pure) is fill
 context's `indicators.compute_rvol_time_adjusted` evaluated at every minute:
 on the same bars a candle's RVol equals the fill-context RVol of a fill at the
 end of that candle.
@@ -1390,14 +1486,21 @@ end of that candle.
   counts toward a minute once it has traded at or after 09:30 by then, and a
   minute that fewer than five sessions had reached has no RVol. A half day in
   the window counts its whole session for the minutes after its 13:00 close,
-  as fill context does. Only today's regular-session candles have an RVol:
-  premarket, postmarket, older sessions (history pages) and daily and weekly
-  charts have none. On a day whose regular session opens at another time
+  as fill context does. Only regular-session candles have an RVol:
+  premarket, postmarket and daily and weekly charts have none. On a day whose regular session opens at another time
   there is none either, since its minutes cannot be compared.
 - **Through which minute.** A completed candle counts through its last minute
   (a 5m candle at 10:15 through 10:19). A candle still forming counts through
   the newest minute bar, so its volume so far is set against the baseline so
   far. A candle's RVol therefore changes only while it forms.
+- **Older sessions (C2.6).** Each history page carries `rvol`, every shown
+  session's baseline by New York date (the same states, worded for that
+  session), and each of its regular-session candles carries `rvol`. A
+  session's volume comes from its own stored minutes, so a page that starts
+  mid-session still counts from 09:30. Like today's, it reads disk only: a
+  session whose 20 are not all stored has candles with no RVol and a
+  `building` baseline, never a fetch. Hovering an older candle shows its own
+  session's value and sessions, and shading follows each candle's own RVol.
 - **The baseline.** 390 numbers per symbol per day, one for each minute from
   09:30 through 15:59, over the market calendar's 20 sessions before today.
   They are read from the completed SIP sessions on disk
@@ -1412,13 +1515,16 @@ end of that candle.
   request for any of this.
 - **Storing the sessions.** Charting a symbol stores its sessions as its older
   candles load (C0.0). `backend/app/engine/rvol_history.py` stores them ahead
-  of time for every name on the shared chart watchlist: it is the
+  of time for every name on the shared chart watchlist, the 40 sessions before
+  today: every name's 20 before today first, then the 20 before those, so
+  each of the last 20 sessions has its own window. It is the
   `rvol_history` job in the sync lane, queued at 06:00 and 08:40 New York on
   weekdays by `tradejournal-rvol-history.timer` or from the Sync Center. It
   uses the chart history's Alpaca budget in its own process (30 requests a
   minute), sleeps when that is spent, and stops after ten minutes; the next
-  run continues. A stored session is never fetched again, so after the first
-  run each morning costs one request per name. Sessions are fetched newest
+  run continues (a first run for 30 names takes about two mornings' runs). A
+  stored session is never fetched again, so after the first runs each morning
+  costs one request per name. Sessions are fetched newest
   first. A day Alpaca has no minutes for (an index such as SPX, or a stock
   before it listed) is not stored, so that name has no baseline until it has
   20 sessions; the job notes it and moves on without failing. Refused
@@ -1930,8 +2036,12 @@ candle at the newest minute). It also pins the five-session minimum per minute,
 the calendar window, today's regular candles only, the workspace values and
 states (ready, building, insufficient, unavailable, a closed day, a late open),
 a split inside the window, the profile read once per process and one session
-fetched once for the job. `backend/tests/test_rvol_history.py` covers the job's
-scope, a rerun that costs nothing, a weekend run, waiting out the budget,
+fetched once for the job. For older sessions (C2.6) it checks that a session's
+RVol from its own profile equals counting its candles, from mid-session too,
+for 1m, 5m, 15m and 1h, on a split basis, and that a real history page on
+stored sessions carries each shown session's baseline (ready and building)
+and never fetches for it. `backend/tests/test_rvol_history.py` covers the job's
+40 sessions (today's 20 first for every name), its scope, a rerun that costs nothing, a weekend run, waiting out the budget,
 refused credentials, a failed session named after the rest are stored, the
 ten-minute stop and resume, a missing calendar and the Sync Center job; the
 timer is in `backend/tests/test_deployment.py`. Browser tests (C2.4) stub the
@@ -2034,7 +2144,7 @@ the old frame stays dimmed under its label, that the loading card never
 appears, and that a failed symbol clears the charts. Per-panel symbol tests
 hold SPY and QQQ beside the traded name through a main-symbol switch (the held
 chart is neither recreated nor redrawn), route each streamed trade to its own
-symbol's chart, pause and resume all three, keep linked time ranges, refuse a
+symbol's chart, pause and resume all three, keep linked time ranges, accept a
 fourth symbol, scroll a held chart back through its own history, and focus a
 held chart into the main one. `backend/tests/test_charts.py` bounds a
 three-symbol layout from two tabs to 17 upstream requests a minute without
@@ -2136,6 +2246,31 @@ over a sell and a crowded one is skipped, never overlapped; hover still lists it
 The markers carry no trade id, so "Latest trade" labels the fills on the newest
 candle that has any. `e2e/chart-markers.spec.ts` holds the merge, hover, label,
 cluster and small-chart checks and the pictures.
+
+## Holding context (read-only)
+
+Owners can open **Overview → Holding context** above the existing symbol facts.
+The list reuses the workspace's recorded option positions, independently of
+whether fill overlays are visible. An explicit contract/account selection reads
+one existing chart trade card; no option quote, AI call, alert or write is made.
+
+The selected record shows remaining contracts, remaining entry premium paid
+(long) or received (short), realized exits separately, expiration, latest fill
+execution time and detail-read time. Remaining premium is remaining FIFO average
+premium per contract × remaining contracts, with no additional ×100. It is not
+current value, account equity, maximum risk, or remaining loss. Import time and
+completeness are unknown here; quantities are journal records, not live broker
+holdings. Refresh clears old details on failure; a closed record no longer shows
+open exposure. Changing symbols clears selection.
+
+Saved plans reuse the existing read-only summary, including timing, later notes
+and frozen chart-image links. Chart reference prices retain their saved source,
+time and stale flag. No linked plan means unknown rationale; chart interval and
+annotations are not inferred holding intent or invalidation. No structured
+horizon is added. **Compare stock, group & market** jumps to the existing Peers
+block, whose 15-minute window remains independent of entry time and chart
+interval. There is no since-entry baseline, profit probability or thesis verdict.
+Tests: `frontend/e2e/chart-journal.spec.ts` (desktop and 390px phone).
 
 ### Initial chart-load diagnostics
 

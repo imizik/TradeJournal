@@ -3,7 +3,7 @@
 Read approved local records and bounded existing-provider market evidence.
 Existing Check OAuth/file boundaries remain. No inference or Shadow mutation.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -75,6 +75,10 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
 
     evidence_bytes = 0
     symbols = []
+    # Exclude every saved holding/watchlist name from discovery, even outside packet display caps.
+    discovery_excluded = set(session.exec(select(Trade.ticker).where(
+        Trade.account_id.in_(config.account_ids), Trade.status == "open",
+        Trade.opened_at <= now.astimezone(ET).replace(tzinfo=None))).all())
     packet_time = now
 
     def add(key, kind, text, source, observed=None, retrieved=None):
@@ -125,6 +129,7 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
         watched = data.get("watchlist")
         if not isinstance(watched, list) or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,14}", s) for s in watched):
             raise ValueError("No valid saved watchlist")
+        discovery_excluded.update(watched)
         add("watchlist", "fact", "Saved Charts watchlist: " + (", ".join(watched[:30]) or "empty"), "Charts saved workspace",
             settings.updated_at.replace(tzinfo=timezone.utc))
         if len(watched) > 30:
@@ -153,7 +158,7 @@ def collect(session, config, actor, now, market_reader=None, backdrop_reader=col
         for row in backdrop_evidence:
             add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"])
     if market_reader is not None:
-        market_evidence, market_gaps = market_reader(symbols, now)
+        market_evidence, market_gaps = market_reader(symbols, now, excluded_symbols=discovery_excluded)
         gaps.extend(market_gaps)
         for row in market_evidence:
             if add(row["id"], row["kind"], row["text"], row["source"], row["observed_at"], row["retrieved_at"]):
@@ -414,6 +419,34 @@ def morning_view(session, day, now, briefing_id=None, config=None, calendar=None
         "versions": [{"id": str(r.id), "received_at": store.timestamp(r.created_at), "redacted": bool(r.redacted_at)} for r in records],
         "feedback": {"rating": feedback.rating if feedback else None,
             "first_opened_at": store.timestamp(feedback.first_opened_at) if feedback and feedback.first_opened_at else None}}
+
+
+def weekdays_in_month(month, today):
+    """Weekdays of ``month`` (YYYY-MM) up to ``today``, newest first, for the calendar's Jo marks."""
+    first = date.fromisoformat(f"{month}-01")
+    days, day = [], first
+    while day.month == first.month and day <= today:
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    return days[::-1]
+
+
+def month_delivery(session, days, now, config, actor, calendar=None):
+    """The briefing obligation for each day, judged as ``delivery`` judges one day; unknown stays unknown.
+
+    Days before the first morning packet ever published are left out (no record), rather than read as missed.
+    """
+    if calendar is None:
+        from app.engine.chart_calendar import chart_calendar
+        calendar = chart_calendar.cached
+    from sqlalchemy import func
+    first = session.exec(select(func.min(MorningBriefingPacket.day))).one()
+    rows = []
+    for day in (d for d in days if first is not None and d >= first):
+        d = delivery(session, day, now, config, actor, calendar(day) if config else None)
+        rows.append({"day": day.isoformat(), **{k: d[k] for k in ("publication", "fulfilment", "deadline", "available_at", "late_by_seconds")}})
+    return rows
 
 
 def watchdog_status(day, path=None, section="jo_morning"):

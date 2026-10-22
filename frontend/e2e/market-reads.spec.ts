@@ -9,7 +9,7 @@ const packet = (slot: string, extra: Partial<MarketReadPacket> = {}): MarketRead
 
 function slot(day: string, name: string, extra: Partial<MarketReadSlot> = {}): MarketReadSlot {
   return { slot: name, scheduled_at: at(day, slotAt[name]), expected: true, not_expected_reason: null, operation_id: `mw-scheduled-v1:${day}:${name}`,
-    packet: packet(name), status: "no_read_seen", read_id: null, attribution: null, received_at: null, receipt_delay_seconds: null,
+    packet: packet(name), status: "no_read_seen", read_id: null, attribution: null, received_at: null, read: null, receipt_delay_seconds: null,
     read_used_slot_packet: null, deadline: at(day, slotAt[name], 15 * 60), delivery: "missing", late_by_seconds: null, ...extra };
 }
 const read = (day: string, name: string, seconds: number, attribution: "operation_id" | "time_window" = "time_window") =>
@@ -63,7 +63,8 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
     read(monday, "11:00", 17 * 60 + 30, "operation_id"),
     slot(monday, "12:30", { packet: packet("12:30", { status: "started", snapshot_id: null }) }),
     slot(monday, "14:00", { packet: packet("14:00", { status: "failed", error_code: "snapshot_collection_failed", snapshot_id: null, attempts: 2 }) }),
-  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: null }] })]));
+  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: null, read: { view: "up", main_text: "Correction: SPY reclaimed VWAP; the weak-tape worry no longer holds.",
+    alternative_text: "Could stall at 771.", invalidation_text: "Loses VWAP again.", change_summary: "Corrects the 9:50 read.", is_correction: true } }] })]));
   const slots = page.getByTestId("read-slot");
   await expect(page.getByTestId("session-summary")).toHaveText("2 of 4 due slots with a read");
   await expect(page.getByTestId("session-delivery")).toHaveText("1 on time · 1 late · 2 missing");
@@ -77,8 +78,11 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
   await expect(slots.nth(2)).toContainText("No read was seen in TradeJournal by 12:45 PM ET. The cause is not visible to the app.");
   await expect(slots.nth(2).getByTestId("slot-packet")).toHaveText("Packet 12:29: started, outcome unknown");
   await expect(slots.nth(3).getByTestId("slot-packet")).toHaveText("Packet 13:59: failed (snapshot_collection_failed) · attempt 2");
-  await page.getByText("Other reads not credited to a slot (1)").click();
+  await page.getByText("Extra reads outside the schedule (1)").click();
   await expect(page.getByText("2:45:00 PM ET")).toBeVisible();
+  // What Jo said, not just when: the extra read's own words show, with no raw record ID.
+  await expect(page.getByTestId("extra-read")).toContainText("the weak-tape worry no longer holds");
+  await expect(page.getByTestId("extra-read")).not.toContainText("mwr_after_window");
   await expect(page.getByTestId("session-watchdog")).toHaveText("Phone watchdog: off, so no phone alert is sent for a missing read.");
   await fitsPhone(page, "measured");
 });

@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import type { SymbolEvents, SymbolFinancials, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview, SymbolShort } from "@/lib/symbolInfo";
+import type { RadarGroup } from "@/lib/radar";
 import type { ChartQuote } from "@/lib/charts";
 import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
@@ -15,6 +16,8 @@ import SymbolInfoNews, { LIT_MS } from "./SymbolInfoNews";
 import SymbolInfoPeers, { usePeers } from "./SymbolInfoPeers";
 import SymbolInfoShort from "./SymbolInfoShort";
 import SymbolInfoYou from "./SymbolInfoYou";
+import HoldingContext from "./HoldingContext";
+import type { ChartPosition } from "@/lib/chartJournal";
 
 const TABS = ["Overview", "News", "Events", "Forecast", "Financials", "Short", "You"] as const;
 type Tab = typeof TABS[number];
@@ -35,7 +38,7 @@ const REFRESH_MS = 60_000;
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 /** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void }) {
+export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup }: { symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -126,8 +129,11 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
   const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
     : result?.key === `${view.tab}|${symbol}` ? result : null;
-  const peersResult = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview");
-  const peers = onSelectSymbol ? <SymbolInfoPeers symbol={symbol} result={peersResult} onSelect={onSelectSymbol} /> : null;
+  const [localGroup, setLocalGroup] = useState<RadarGroup | null>(null);
+  const chosenGroup = comparisonGroup ?? localGroup;
+  const group = chosenGroup?.members.includes(symbol) ? chosenGroup.name : undefined;
+  const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
+  const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers symbol={symbol} result={peersResult} movement={movement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -142,6 +148,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
           }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-sky-400 bg-sky-400/5 text-sky-300" : "border-transparent text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
+        {owner && view.tab === "Overview" && <HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" })} />}
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
               peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}

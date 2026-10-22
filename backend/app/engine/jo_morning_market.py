@@ -15,6 +15,11 @@ UTC = timezone.utc
 ET = ZoneInfo("America/New_York")
 MAX_SYMBOLS = 20
 MAX_HEADLINES = 8
+MAX_DISCOVERY = 6
+# Bounded catalyst discovery from the broad tape, independent of saved symbols.
+CATALYST_WORDS = re.compile(r"\b(earnings|guidance|approv\w*|trial|phase [123]|upgrade\w*|downgrade\w*|"
+    r"price target|contract|partnership|joint venture|acqui\w*|merger|launch\w*|raises|cuts|"
+    r"revenue|profit|sales|forecast|orders|fda|surge\w*|plunge\w*)\b", re.I)
 # Market backdrop proxies, priced ahead of the owner's symbols. No futures feed exists.
 BACKDROP = ("SPY", "QQQ", "SMH")
 BACKDROP_NAMES = {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq-100 ETF", "SMH": "semiconductor ETF"}
@@ -36,8 +41,38 @@ def stamp(value):
         return None
 
 
-def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, clock=None):
-    """Two bounded existing-provider reads, each independently allowed to fail.
+def catalyst_first(articles):
+    """Material-catalyst headlines first; the sort is stable, so recency order holds within each group."""
+    return sorted(articles, key=lambda a: not bool(CATALYST_WORDS.search(a["headline"])))
+
+
+def eligible_headlines(articles, cutoff):
+    """Reject unsafe or out-of-window data before it can introduce discovery symbols."""
+    if not isinstance(articles, list):
+        raise ValueError("Malformed news")
+    clean, seen = [], set()
+    for item in articles[:50]:
+        if not isinstance(item, dict):
+            continue
+        observed = stamp(item.get("created_at"))
+        title, url = item.get("headline"), item.get("url")
+        if (observed is None or not cutoff - timedelta(hours=36) <= observed <= cutoff
+                or not isinstance(title, str) or not title.strip() or not isinstance(url, str)
+                or not isinstance(item.get("symbols"), list)):
+            continue
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or url in seen:
+                continue
+        except ValueError:
+            continue
+        seen.add(url)
+        clean.append(item)
+    return sorted(clean, key=lambda a: stamp(a["created_at"]), reverse=True)
+
+
+def collect_market(symbols, cutoff, *, excluded_symbols=None, snapshots_reader=None, news_reader=None, clock=None):
+    """Bounded broad/ticker news and Tradier reads, each independently allowed to fail.
 
     Only symbol names leave the app. Trade observations after actual retrieval are excluded. News stays within
     the requested cutoff window; retrieval time is the actual completion time.
@@ -51,14 +86,42 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
         gaps.append("Market coverage limited to 20 symbols, approved holdings first, then saved watchlist.")
     selected = selected[:MAX_SYMBOLS]
     rows = []
+    # Read a larger public sample before choosing candidates. No account data is sent.
+    news_reader = news_reader or (lambda tickers, start, end: news.fetch_news(
+        symbols=tickers, start=start, end=end, limit=50, fast=True))
+    broad_retrieved = clock()
+    try:
+        broad = eligible_headlines(news_reader(None, cutoff - timedelta(hours=36), cutoff), cutoff)
+        broad_retrieved = clock()
+    except Exception:
+        broad = []
+        gaps.append("Broad-market discovery/news unavailable; no claim that no opportunities exist.")
+    discovery = []
+    excluded = set(symbols) | set(excluded_symbols or []) | set(BACKDROP)
+    for item in catalyst_first(broad):
+        for symbol in item["symbols"]:
+            if (len(discovery) < MAX_DISCOVERY and isinstance(symbol, str)
+                    and re.fullmatch(r"[A-Z]{1,6}(\.[A-Z])?", symbol)
+                    and symbol not in excluded and symbol not in discovery):
+                discovery.append(symbol)
+                rows.append(dict(id=f"discovery-{symbol}", kind="fact", observed_at=stamp(item["created_at"]),
+                    retrieved_at=broad_retrieved, source="Broad-market news candidate; reported catalyst, not a verified setup",
+                    text=f"{symbol} — {item['headline'].strip()[:500]}\n{item['url'][:1200]}"))
+    rows.insert(0, dict(id="discovery-scope", kind="fact", observed_at=None, retrieved_at=broad_retrieved,
+        source="Morning opportunity discovery coverage",
+        text=f"Screened a maximum of 50 broad-tape headlines over 36 hours; {len(broad)} eligible unique stories. "
+             f"Candidates outside all supplied holdings/watchlist symbols: {', '.join(discovery) or 'none returned'}. "
+             "Material-catalyst keywords first, then recency; maximum six new symbols. "
+             "This is news-led discovery, not a whole-market price/volume or liquidity screen."))
+    gaps.append("Discovery is a bounded broad-news sample, not a complete market scan; candidate liquidity, "
+                "earnings timing and corporate-action basis need verification. No opportunity is guaranteed.")
+    if not discovery:
+        gaps.append("No new candidate outside saved symbols in the broad-news sample; do not fill with holdings.")
     if not selected:
-        gaps.append("No eligible saved symbols; only the market backdrop ETFs were priced.")
-    priced = list(dict.fromkeys([*BACKDROP, *selected]))
+        gaps.append("No eligible saved symbols; market backdrop ETFs and broad-news discovery candidates were priced.")
+    priced = list(dict.fromkeys([*BACKDROP, *discovery, *selected]))
     if snapshots_reader is None:
         snapshots_reader = tradier_snapshots
-    # No tickers reads one page of the broad tape, which market_headlines filters by theme.
-    news_reader = news_reader or (lambda tickers, start, end: news.fetch_news(
-        symbols=tickers, start=start, end=end, limit=MAX_HEADLINES if tickers else 50, fast=True))
     try:
         snapshots = snapshots_reader(priced)
         if not isinstance(snapshots, dict):
@@ -103,6 +166,18 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
             source = "Tradier full-market latest trade; not an executable quote"
         rows.append(dict(id=f"market-{symbol}", kind="fact", observed_at=observed, retrieved_at=retrieved,
             source=source, text=text))
+        setup = snap.get("premarket")
+        if symbol in discovery and isinstance(setup, dict) and setup["bars"] >= 2 and setup["volume"] > 0:
+            setup_time = stamp(setup["observed_at"])
+            if setup_time is None or setup_time > retrieved:
+                continue
+            rows.append(dict(id=f"setup-{symbol}", kind="fact", observed_at=setup_time, retrieved_at=retrieved,
+                source="Tradier completed premarket 1-minute bars; unadjusted underlying levels, not an entry signal",
+                text=f"{symbol}: observed premarket range ${setup['low']}–${setup['high']}; "
+                     f"{setup['volume']} shares across {setup['bars']} returned completed minutes. "
+                     "Range boundaries are possible conditional levels, not confirmed support/resistance. "
+                     "No relative-volume baseline, liquidity guarantee, post-open confirmation or option selection."
+                     + (" Stale; research only." if retrieved - setup_time > timedelta(minutes=10) else " Recheck price/spread at entry.")))
     if missing:
         gaps.append("No valid price at or before retrieval for: " + ", ".join(missing) + ".")
     if unverified:
@@ -114,18 +189,20 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
                 "SPY/QQQ/SMH extended-hours trades are the only market-direction proxy.")
     start = cutoff - timedelta(hours=36)
     if not selected:
-        rows.extend(market_headlines(cutoff, news_reader, clock, gaps))
+        rows.extend(market_headlines(cutoff, lambda *_: broad, clock, gaps))
         return rows, gaps
     try:
-        articles = news_reader(selected, start, cutoff)
-        if not isinstance(articles, list):
-            raise ValueError("Malformed news")
+        articles = eligible_headlines(news_reader(selected, start, cutoff), cutoff)
     except Exception:
         articles = []
         gaps.append("Headline source unavailable; absence of headlines is not evidence of no catalyst.")
     retrieved = clock()
     seen = set()
-    for article in articles[:MAX_HEADLINES]:
+    # Diversify the larger sample: catalyst stories first, at most two per saved symbol.
+    per_symbol = {}
+    for article in catalyst_first(articles):
+        if len(seen) >= MAX_HEADLINES:
+            break
         if not isinstance(article, dict):
             continue
         observed = stamp(article.get("created_at"))
@@ -141,16 +218,19 @@ def collect_market(symbols, cutoff, *, snapshots_reader=None, news_reader=None, 
                 continue
         except ValueError:
             continue
-        if url in seen:
+        relevant = [s for s in selected if s in tickers and per_symbol.get(s, 0) < 2]
+        if url in seen or not relevant:
             continue
+        for symbol in relevant:
+            per_symbol[symbol] = per_symbol.get(symbol, 0) + 1
         seen.add(url)
         rows.append(dict(id=f"headline-{len(seen)}", kind="fact", observed_at=observed, retrieved_at=retrieved,
             source="Alpaca / Benzinga headline; article claims are not independently verified",
             text=f"{', '.join(s for s in selected if s in tickers)} — {title.strip()[:500]}\n{url[:1200]}"))
-    gaps.append(f"Headlines are a bounded 36-hour sample for {', '.join(selected)} (at most {MAX_HEADLINES}); not complete news coverage.")
+    gaps.append(f"Headlines are a bounded 36-hour sample for {', '.join(selected)} (at most {MAX_HEADLINES}, two per symbol, catalyst headlines first from up to 50); not complete news coverage.")
     if not seen:
         gaps.append("No eligible headlines returned; do not infer that there are no catalysts.")
-    rows.extend(market_headlines(cutoff, news_reader, clock, gaps, seen))
+    rows.extend(market_headlines(cutoff, lambda *_: broad, clock, gaps, seen))
     return rows, gaps
 
 
@@ -158,7 +238,7 @@ def valid_price(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0
 
 
-def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monotonic):
+def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monotonic, now=None):
     """Today's last extended-hours minute per symbol, else the regular-session last trade.
 
     One batched quote read plus one cached 1-minute timesales read per symbol (the same
@@ -171,7 +251,8 @@ def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monoton
         from app.engine.chart_feed import chart_feed
         read = chart_feed.read
     found = (quotes or tradier.get_quotes_once)(tickers)
-    today = datetime.now(ET).date()
+    now = now or datetime.now(ET)
+    today = now.astimezone(ET).date()
     deadline = monotonic() + MINUTES_BUDGET_SECONDS
     result = {}
     for symbol in tickers:
@@ -180,10 +261,10 @@ def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monoton
                    if quote.trade_date else None} if quote else None
         # "regular": minutes were read and today has none; "unverified": they could not be read.
         session = "unverified"
-        bar = None
+        bar, premarket = None, None
         if monotonic() < deadline:
             try:
-                bar = last_minute(read, symbol, today)
+                bar, premarket = session_minutes(read, symbol, today, now=now)
                 session = "regular"
             except Exception:
                 pass
@@ -191,19 +272,28 @@ def tradier_snapshots(tickers, *, quotes=None, read=None, monotonic=time.monoton
         if bar:
             snap = {"latestTrade": {"p": bar["close"], "t": datetime.fromtimestamp(bar["time"], UTC).isoformat()},
                     "session": "extended", "reference": regular}
+            if premarket:
+                snap["premarket"] = premarket
         if snap:
             result[symbol] = snap
     return result
 
 
-def last_minute(read, symbol, day):
+def session_minutes(read, symbol, day, *, now=None):
     from app.engine.chart_math import normalize_bars
     data, _, _ = read("/v1/markets/timesales", {"symbol": symbol, "interval": "1min", "session_filter": "all",
         "start": day.strftime("%Y-%m-%d 04:00"), "end": day.strftime("%Y-%m-%d 20:00")}, 15)
     series = (data or {}).get("series") or {}
     found = series.get("data") if isinstance(series, dict) else None
     bars = normalize_bars(found if isinstance(found, list) else [found] if isinstance(found, dict) else [])
-    return bars[-1] if bars and datetime.fromtimestamp(bars[-1]["time"], ET).date() == day else None
+    now = (now or datetime.now(UTC)).timestamp()
+    bars = [b for b in bars if b["time"] + 60 <= now and datetime.fromtimestamp(b["time"], ET).date() == day]
+    premarket = [b for b in bars if 240 <= (datetime.fromtimestamp(b["time"], ET).hour * 60
+                 + datetime.fromtimestamp(b["time"], ET).minute) < 570]
+    stats = dict(observed_at=datetime.fromtimestamp(premarket[-1]["time"], UTC).isoformat(),
+                 low=min(b["low"] for b in premarket), high=max(b["high"] for b in premarket),
+                 volume=sum(b["volume"] for b in premarket), bars=len(premarket)) if premarket else None
+    return (bars[-1] if bars else None), stats
 
 
 def market_headlines(cutoff, news_reader, clock, gaps, seen=None):

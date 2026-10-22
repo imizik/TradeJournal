@@ -34,7 +34,7 @@ export type SplitRecord = { ex_date: string; ratio: number; label: string };
  * available, so prices are as the provider supplied them and `warnings` says so.
  */
 export type PriceAdjustment = {
-  basis: "split_adjusted"; status: "ok" | "stale" | "unknown"; source: string; as_of: number | null;
+  basis: "split_adjusted" | "index_native"; status: "ok" | "stale" | "unknown"; source: string; as_of: number | null;
   splits: SplitRecord[]; daily: Record<string, "provider_adjusted" | "adjusted_here" | "unverified">;
   dividends: "unsupported"; dividends_note: string; warnings: string[];
 };
@@ -156,12 +156,14 @@ export type HistoryPage = {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
   bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
   continuation: string | null; warmup: "ready" | "pending" | "insufficient";
-  source: "alpaca_sip" | "tradier"; price_basis: "split_adjusted"; adjustment: PriceAdjustment; fills_truncated: boolean;
+  source: "alpaca_sip" | "tradier"; price_basis: "split_adjusted" | "index_native"; adjustment: PriceAdjustment; fills_truncated: boolean;
   /** Daily and weekly pages: the date of the earliest bar Tradier holds (not the listing date). */
   history_start?: string | null;
   issue: { code: string; message: string; retry_at: number } | null;
   /** Set when a shown session was resampled with clock hours because the calendar was unavailable. */
   calendar_note?: string | null;
+  /** Each shown session's relative-volume baseline by New York date (C2.6); absent from a backend older than C2.6. */
+  rvol?: Record<string, RvolBaseline>;
 };
 /** Today's session windows from the backend's market calendar (UTC seconds), the same ones resampling uses. */
 export type MarketDay = {
@@ -172,11 +174,15 @@ export type ChartQuote = {
   symbol: string; name: string; instrument_type?: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null;
   /** Tradier's explicit current regular-session close; null until it is known. */
+  unit?: "index_points" | "percent"; provider_symbol?: string; change_bps?: number | null;
   regular_close?: number | null; trade_time: number | null;
   day_high?: number | null; day_low?: number | null; week_52_high?: number | null; week_52_low?: number | null;
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
+  market?: MarketDay;
+  instrument?: { kind: "index"; unit: "index_points" | "percent"; provider_symbol: string; name: string; scale: number };
+  history_note?: string;
   panels: Partial<Record<Interval, ChartPanelData>>; fetched_at: Record<string, number>;
   intraday_as_of: number | null; issues: string[];
   /** Fill markers stop at the newest 1,000 in the window; the chart says so. */
@@ -196,7 +202,7 @@ export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
   refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
   history_note: string; fills: FillMarker[]; fills_truncated: boolean;
-  market?: MarketDay;
+  equity_market?: MarketDay;
   /** Symbols that panels hold on their own (C7.1), without quotes. */
   extras?: Record<string, SymbolPanels>;
   /** Every level alert (C5.1); absent from a backend older than C5.1. */
@@ -315,15 +321,16 @@ export const SMALL_SHARES: Record<SmallChartSize, number> = { compact: 0.275, no
 const EQUAL_COLUMNS = [0.25, 0.25, 0.25, 0.25];
 /** New setups start with the compact lower row, so the main chart gets about 72% of the grid; saved settings keep their own size. */
 export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.compact, columns: EQUAL_COLUMNS };
-/** The two built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
+/** The built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
 export const LAYOUT_PRESETS = [
   { id: "active", name: "Active", detail: "Main chart large, lower row compact, side dock closed", smallSize: "compact", dock: false },
+  { id: "macro", name: "Macro", detail: "SPY · QQQ · IWM · VIX · US10Y, 4h; keeps a return to Tech", smallSize: "normal", dock: false },
   { id: "research", name: "Research", detail: "Balanced rows, side dock open", smallSize: "normal", dock: true },
 ] as const satisfies readonly { id: string; name: string; detail: string; smallSize: SmallChartSize; dock: boolean }[];
 export type LayoutPreset = (typeof LAYOUT_PRESETS)[number];
-/** A preset arranges the five charts and sets the desktop split; intervals, held symbols, linked ranges and a phone's chart height stay as they are. */
+/** Macro sets its explicit instruments/4h intervals; other presets only change the split. A phone's chart height stays as it is. */
 export const applyPreset = (settings: ChartSettings, preset: LayoutPreset): ChartSettings =>
-  ({ ...settings, layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
+  ({ ...settings, ...(preset.id === "macro" ? { symbol: "SPY", intervals: ["4h", "4h", "4h", "4h", "4h"] as Interval[], panelSymbols: [null, "QQQ", "IWM", "VIX", "US10Y"], linkRange: false } : {}), layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
 const thousandths = (value: number) => Math.round(value * 1000) / 1000;
 /**
  * Proportions from outside this code, kept to what the dividers can make: the
@@ -408,14 +415,18 @@ export type ChartSettings = {
   autoLevelsHidden: boolean;
   /** The options levels layer (C4.4): off until asked for, and its filters. */
   optionsLayer: OptionsLayer;
-  /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
+  /** Expected-move levels (C2.7), off until shown. Kept separate from VWAP bands. */
   rangeBandsHidden: boolean;
+  /** RTH VWAP ±1σ/±2σ; top-level so older tabs preserve this independent choice. */
+  vwapBandsHidden: boolean;
   /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
   newsHidden: boolean;
   /** Which fills the main chart writes a text label beside (Journal layer): none, the newest candle's, or all; off by default. A field of its own like `newsHidden`. */
   fillLabels: FillLabels;
   /** News markers on the smaller charts too; off by default (the main chart's layer, News markers). A field of its own like `newsHidden`. */
   newsOnSmall: boolean;
+  /** Candle width follows volume, like TradingView's volume candles; off by default. A field of its own like `newsHidden`. */
+  volumeCandles: boolean;
   /** Each smaller chart's own studies, aligned with `intervals`; null follows the workspace's (slimmed while compact). A field of its own like `newsHidden`. */
   panelStudies: (PanelStudies | null)[];
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
@@ -469,15 +480,15 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, vwapBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, volumeCandles: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
   proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
-/** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
-export const MAX_HELD_SYMBOLS = 2;
+/** Panels may hold four symbols besides the main one: each costs its own chart-feed reads. */
+export const MAX_HELD_SYMBOLS = 4;
 export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
 /** The most layouts this page lets you save. */
 export const MAX_LAYOUTS = 12;
@@ -522,9 +533,13 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       autoLevelsHidden: value.autoLevelsHidden === true,
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
+      // Before the controls split, Range bands showed both. Preserve that choice
+      // only when the independent setting is absent; explicit off always wins.
+      vwapBandsHidden: typeof value.vwapBandsHidden === "boolean" ? value.vwapBandsHidden : value.rangeBandsHidden !== false,
       newsHidden: value.newsHidden === true,
       fillLabels: cleanFillLabels(value.fillLabels),
       newsOnSmall: value.newsOnSmall === true,
+      volumeCandles: value.volumeCandles === true,
       panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
@@ -649,8 +664,9 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
   [intervals[0], intervals[index]] = [intervals[index], intervals[0]];
   const held = settings.panelSymbols[index];
   if (!held || held === settings.symbol) return { ...settings, intervals };
-  return { ...settings, intervals, symbol: held,
-    panelSymbols: settings.panelSymbols.map((other, i) => i === index ? settings.symbol : other === held ? null : other),
+  const panelSymbols = settings.panelSymbols.map((other, i) => i === index ? settings.symbol : other === held ? null : other);
+  return { ...settings, intervals: intervals.map((v, i) => supportedIntervals(panelSymbols[i] || held).includes(v) ? v : "4h"), symbol: held,
+    panelSymbols,
     recent: [settings.symbol, ...settings.recent.filter((r) => r !== settings.symbol && r !== held)].slice(0, 8) };
 }
 
@@ -825,10 +841,12 @@ export function rvolCoverage(baseline: RvolBaseline): string {
 /** "2.6×", with two decimals under 0.1× so a quiet candle never reads 0.0×. */
 export const rvolText = (rvol: number) => `${rvol.toFixed(rvol < 0.1 ? 2 : 1)}×`;
 
-export const price = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-export const etTime = (stamp: number, daily = false) => new Date(stamp * 1000).toLocaleString("en-US", {
-  timeZone: "America/New_York", ...(daily ? { month: "short", day: "numeric", year: "numeric" } : { hour: "numeric", minute: "2-digit" }),
-});
+// Shared formatters: `toLocaleString` builds a new one per call, and the crosshair asks on every move.
+const priceFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const etDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric" });
+const etClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+export const price = (value: number | null | undefined) => value == null ? "—" : priceFormat.format(value);
+export const etTime = (stamp: number, daily = false) => (daily ? etDay : etClock).format(new Date(stamp * 1000));
 export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
   let low = 0, high = bars.length;
   while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= time) low = mid + 1; else high = mid; }
@@ -873,6 +891,8 @@ export const gapSeconds = (interval: Interval) => (interval === "1W" ? 21 : inte
 
 const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+/** A moment's New York date, "2026-10-21": the key of a session's RVol baseline. */
+export const nyDay = (stamp: number) => nyDate.format(stamp * 1000);
 export type SessionWindow = MarketDay["sessions"][number];
 /**
  * The session windows that apply at `now`: the backend's calendar day when it
@@ -1003,4 +1023,29 @@ export function createChartCommands() {
     /** The panel as drawn now: candles, studies and the lines drawn on its canvas. Null when it is not on screen. */
     snapshot(panel: string): HTMLCanvasElement | null { try { return pictures.get(panel)?.() ?? null; } catch { return null; } },
   };
+}
+
+/** Index capabilities are applied at render/request time; saved stock studies stay untouched. */
+export const isMacroSymbol = (symbol: string) => symbol === "VIX" || symbol === "US10Y";
+export const macroIndicators = (value: Indicators): Indicators => ({ ...value, volume: false, vwap: false, fills: false });
+export const instrumentPrice = (value: number | null | undefined, symbol: string) => value == null ? "—" : symbol === "US10Y" ? `${value.toFixed(3)}%` : symbol === "VIX" ? `${value.toFixed(2)} pts` : price(value);
+export const supportedIntervals = (symbol: string): readonly Interval[] => isMacroSymbol(symbol) ? ["4h", "1D"] : INTERVALS;
+export type TechReturn = Arrangement & { symbol: string; active: boolean };
+export const TECH_RETURN_KEY = "tradejournal.charts.techReturn.v1";
+export function readTechReturn(value: string | null): TechReturn | null {
+  try {
+    const row = JSON.parse(value ?? "null");
+    if (!row || typeof row.symbol !== "string" || !validSymbol(row.symbol)) return null;
+    const arrangement = savedArrangement(row);
+    return arrangement ? { ...arrangement, symbol: row.symbol, active: row.active !== false, proportions: cleanProportions(row.proportions) } : null;
+  } catch { return null; }
+}
+export const macroArrangement = (s: ChartSettings) => s.symbol === "SPY" && s.panelSymbols.join(",") === ",QQQ,IWM,VIX,US10Y";
+
+export const instrumentTime = (stamp: number) => `${etTime(stamp, true)} ${etTime(stamp)} ET`;
+
+/** Effective capabilities cover restored, URL-linked and named layouts without rewriting saved arrangements. */
+export function instrumentSettings(settings: ChartSettings): ChartSettings {
+  const intervals = settings.intervals.map((value, index) => supportedIntervals((index && settings.panelSymbols[index]) || settings.symbol).includes(value) ? value : "4h");
+  return intervals.every((value, index) => value === settings.intervals[index]) ? settings : { ...settings, intervals };
 }

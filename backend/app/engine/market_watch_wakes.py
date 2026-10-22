@@ -877,7 +877,8 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                                  "attempts": sum(a["result"] == "sending" for a in results),
                                  "delivery": final["result"] if final else ("failed_pending" if results else "pending" if d["decision"] == "send" else "not_sent"),
                                  "transport_receipt_id": final.get("transport_receipt_id") if final else None,
-                                 "error_code": final.get("error_code") if final else None})
+                                 "error_code": final.get("error_code") if final else None,
+                                 "decided_at": d["created_at"], "settled_at": final["occurred_at"] if final else None})
         session_reads = [rid for rid, _ in sorted(read_times.items(), key=lambda kv: kv[1])]
         read_outcomes = [o for o in outcomes if o["read_id"] in read_times]
         status_counts: dict[str, int] = {}
@@ -930,6 +931,13 @@ def session_report(store: MarketWatchWakeStore, outcome_store=None) -> dict:
                   "without an imported export the session close is unknown, so slots after an early close show no_read_seen",
                        "independence-unverified: reads are advice to Isaac and never feed Shadow Isaac or S1",
                        "message delivery is ntfy acceptance, not proof Isaac saw it; ratings are owner-reported"]}
+
+
+def _read_text(read: dict | None) -> dict | None:
+    """Jo's own words for a read as Check saved them; None when only an export without the text is known."""
+    if not read or not isinstance(read.get("main_text"), str):
+        return None
+    return {k: read.get(k) for k in ("view", "main_text", "alternative_text", "invalidation_text", "change_summary", "is_correction")}
 
 
 def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: str | Path | None, days: list[date], *,
@@ -1014,7 +1022,7 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
             slot_rows.append({"slot": slot, "scheduled_at": _iso(at), "expected": expected, "not_expected_reason": reason,
                               "operation_id": f"{WAKE_POLICY['jo_scheduled_operation_prefix']}:{session}:{slot}",
                               "packet": packet, "status": status, "read_id": read_id, "attribution": link,
-                              "received_at": received,
+                              "received_at": received, "read": _read_text(read),
                               "receipt_delay_seconds": round((parse_time(received) - at).total_seconds()) if received else None,
                               "deadline": _iso(deadline) if expected is not False else None, "delivery": delivery,
                               "late_by_seconds": max(0, round((parse_time(received) - deadline).total_seconds())) if delivery == "late" else None,
@@ -1022,11 +1030,13 @@ def reliability_report(store: MarketWatchWakeStore | None, receipt_directory: st
                                                         if read and packet["snapshot_id"] else None)})
         credited = {r["read_id"] for r in slot_rows if r["read_id"]}
         wake_reads = {w["read_id"]: w["wake_id"] for w in report.get("wakes", []) if w["read_id"]}
-        others = sorted(({"read_id": rid, "received_at": r["received_at"], "event_wake_id": wake_reads.get(rid)}
+        others = sorted(({"read_id": rid, "received_at": r["received_at"], "event_wake_id": wake_reads.get(rid), "read": _read_text(r)}
                          for rid, r in reads.items() if rid not in credited), key=lambda r: r["received_at"])
         sessions.append({"session_date": session,
                          "hours": ({"status": row["status"], "open": row.get("open"), "close": row.get("close")} if known else None),
                          "slots": slot_rows, "reads_not_credited_to_a_slot": others,
+                         # Jo's notify reads pushed to the phone; "accepted" is ntfy taking it, not the phone showing it.
+                         "messages": report.get("messages", []),
                          "summary": {k: sum(r["status"] == k for r in slot_rows)
                                      for k in ("read_seen", "no_read_seen", "upcoming", "not_expected", "unknown")},
                          "delivery_summary": {k: sum(r["delivery"] == k for r in slot_rows)

@@ -96,6 +96,10 @@ so the external dependency link is supported by the bundler.
   `document.querySelectorAll('[data-testid="canvas-main"] canvas').length`
   until it is non-zero. The app runs as `next dev`; for performance numbers
   compare like with like, and confirm what matters on the production build.
+  In this dev server a sidebar or tab click can sit on "Rendering" forever
+  from some pages (seen from `/morning` and `/trades`; the production build
+  navigates normally). Open the target URL directly or use a production
+  build (`next build` + `next start` with the same env) before calling it a bug.
 - Settings persist in the sandbox file across sessions and agents. To judge
   the shipped defaults, delete `backend/data/ux_sandbox/` before starting
   and compare against `DEFAULT_SETTINGS` in `frontend/lib/charts.ts`.
@@ -108,6 +112,18 @@ so the external dependency link is supported by the bundler.
   setup drives a different computer and cannot reach this Mac's localhost.
 - Ctrl+C (or stopping the background task) stops both servers. Delete
   `backend/data/ux_sandbox/` to start over.
+
+### A whole Jo day, step by step
+
+`bash scripts/ux_sandbox.sh --jo-day` (needs `UX_BACKEND_PYTHON` /
+`UX_FRONTEND_NODE_MODULES_DIR` as above in a bare worktree) starts a fresh
+sandbox whose backend runs on a fake clock for today's date. `curl -s -X POST
+127.0.0.1:8098/__sim/next` advances one step (08:30 → 16:05: briefing,
+reads, an MU watch that triggers, a missing and a late read); `GET /__sim` is
+the ground truth to compare the Daily Review's Jo's day against. It only moves
+forward: restart the script to replay. Prices are invented and phone pushes
+are recorded, never sent; the Check sign-in layer and the real Jo are not
+involved.
 
 ## Safety outside the sandbox
 

@@ -1,9 +1,10 @@
 """Bounded personal-memory/briefing schemas; no database, provider or application imports."""
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 # Cover the whole string: connector schema validators may full-match patterns.
 # [\s\S] also preserves multiline text without requiring regex flags.
@@ -91,6 +92,14 @@ class BriefingItem(Strict):
     evidence_ids: list[str] = Field(min_length=1, max_length=10)
 
 
+class OpportunityItem(BriefingItem):
+    symbol: Symbol
+    status: Literal["conditional", "research_only"]
+    entry_trigger: Text
+    invalidation: Text
+    timeframe: Text
+
+
 class BriefingSave(Strict):
     operation_id: Operation
     packet_id: UUID
@@ -100,6 +109,44 @@ class BriefingSave(Strict):
     summary: Text
     summary_evidence_ids: list[str] = Field(max_length=10)
     items: list[BriefingItem] = Field(max_length=3)
+    opportunities: list[OpportunityItem] = Field(default_factory=list, max_length=3)
+    urgent_positions: list[BriefingItem] = Field(default_factory=list, max_length=2)
     limitations: list[Text] = Field(max_length=20)
     supersedes_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def separate_formats(self):
+        if self.items and (self.prompt_version == "jo-morning-v4" or self.opportunities or self.urgent_positions):
+            raise ValueError("Use opportunities and urgent_positions, or legacy items, not both")
+        if len({item.symbol for item in self.opportunities}) != len(self.opportunities):
+            raise ValueError("Rank distinct opportunity symbols")
+        return self
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_retries(self, handler):
+        data = handler(self)
+        # Old saved operation hashes must still match identical pre-upgrade retries.
+        for key in ("opportunities", "urgent_positions"):
+            if not data[key]:
+                del data[key]
+        return data
+
+
+def validate_opportunity_evidence(briefing, packet):
+    """Both owner saves and Check submissions enforce the same discovery/freshness floor."""
+    evidence = {e["id"]: e for e in packet["body"]["evidence"]}
+    for item in briefing.opportunities:
+        if f"discovery-{item.symbol}" not in item.evidence_ids:
+            raise ValueError("New opportunities must cite their broad-market discovery evidence")
+        if item.status == "research_only":
+            continue
+        for key in (f"market-{item.symbol}", f"setup-{item.symbol}"):
+            row = evidence.get(key)
+            if not row or key not in item.evidence_ids or not row["source"].startswith("Tradier") or not row["observed_at"]:
+                raise ValueError("Conditional setups need cited Tradier price and premarket range evidence")
+            observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            retrieved = datetime.fromisoformat(row["retrieved_at"].replace("Z", "+00:00"))
+            if (not timedelta(0) <= retrieved - observed <= timedelta(minutes=10)
+                    or observed.astimezone(ZoneInfo("America/New_York")).date().isoformat() != packet["day"]):
+                raise ValueError("Stale or prior-day setup evidence requires research_only")
 

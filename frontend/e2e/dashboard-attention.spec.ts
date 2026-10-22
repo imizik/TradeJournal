@@ -127,8 +127,10 @@ with Session(engine) as db:
     await expect(alert).toHaveAttribute("href", "/charts?symbol=SPY");
     // Seeded positions have no dated earnings source offline; the panel says so rather than staying silent.
     await expect(panel).toContainText("Could not check: Earnings dates for AAPL");
-    const bounds = await Promise.all([page.getByRole("region", { name: "Today's Session" }).boundingBox(), panel.boundingBox()]);
-    expect(Math.abs(bounds[0]!.y - bounds[1]!.y)).toBeLessThan(2); // side by side on wide screens
+    const bounds = await Promise.all([page.getByLabel("Market and discovery", { exact: true }).boundingBox(), panel.boundingBox(),
+      page.getByRole("region", { name: "Active Options" }).boundingBox()]);
+    expect(Math.abs(bounds[0]!.y - bounds[1]!.y)).toBeLessThan(2); // Attention beside market context on wide screens.
+    expect(bounds[1]!.y + bounds[1]!.height).toBeLessThan(bounds[2]!.y); // Warnings before positions and stats.
     await panel.screenshot({ path: test.info().outputPath("dashboard-attention-desktop.png"), animations: "disabled" });
     await page.screenshot({ path: test.info().outputPath("dashboard-attention-page-desktop.png"), animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });

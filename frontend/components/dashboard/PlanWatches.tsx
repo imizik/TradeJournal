@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { getPlans, type PlanDelivery, type PlansView, type PlanState, type PlanView } from "@/lib/conditionalPlans";
+import { getPlans, refusalRule, refusalWords, type PlanDelivery, type PlanRefusal, type PlansView, type PlanState, type PlanView } from "@/lib/conditionalPlans";
 
 const zone = "America/New_York";
 const clock = (value: string | number) => new Date(typeof value === "number" ? value * 1000 : value).toLocaleTimeString("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
@@ -92,6 +92,8 @@ function Rule({ p }: { p: PlanView }) {
 function Plan({ p }: { p: PlanView }) {
   const [label, tone] = badge(p);
   const reason = p.reason && reasons[p.reason];
+  // The close that moved the watch to its current state: the first thing to check after an alert.
+  const decisive = [...p.events].reverse().find((e) => e.state === p.state)?.bar ?? null;
   return <li data-testid="plan-card" data-state={p.state} className="min-w-0 space-y-3 rounded-lg border bg-card p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-semibold">{p.symbol} · {p.direction === "long" ? "Long" : "Short"} watch</h2>
@@ -101,26 +103,40 @@ function Plan({ p }: { p: PlanView }) {
     {p.state === "triggered" && <p className="text-sm text-amber-200">Triggered means the price condition was met. It does not mean you entered, and no order was placed. Invalidation is still checked until expiry.</p>}
     {p.state === "unavailable" && <p className="text-sm text-amber-200">The price condition is unknown; this is not a trade invalidation. A failed watch does not resume. Ask Jo for a new one if you still want it.</p>}
     {p.state === "pending_activation" && <p className="text-sm text-amber-200">{p.accepted_by_monitor ? "The monitor has the plan but has not yet accepted fresh price evidence." : "Jo saved this, but the app monitor has not picked it up."} Do not rely on it until it reads Watching.</p>}
-    {reason && <p className="text-sm text-muted-foreground">{reason}{p.state_at ? ` ${clock(p.state_at)}.` : ""}</p>}
+    {reason && <p className="text-sm text-muted-foreground" data-testid="plan-reason">{reason}{p.state_at ? ` ${clock(p.state_at)}.` : ""}{decisive ? ` Close ${decisive.close}.` : ""}</p>}
     {p.cancel_requested && p.state !== "cancelled" && <p className="text-sm text-muted-foreground">Cancellation requested; waiting for the monitor to confirm it.</p>}
     <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[9rem_1fr]">
       <dt className="text-muted-foreground">Monitoring</dt>
       <dd data-testid="plan-monitoring">{p.monitoring ? `Active · heartbeat ${clock(p.heartbeat_at!)}` : current(p) ? `Not active${p.heartbeat_at ? ` · last heartbeat ${clock(p.heartbeat_at)}` : ""}` : "Stopped"}</dd>
       <dt className="text-muted-foreground">Last evaluated bar</dt>
-      <dd>{p.last_bar ? `${minute(p.last_bar.time)}–${minute(p.last_bar.end_time)} close ${p.last_bar.close} · ${p.last_bar.consecutive} of ${p.confirm_bars} confirming · checked ${clock(p.last_evaluated_at!)}` : "None yet"}</dd>
+      <dd>{p.last_bar ? `${minute(p.last_bar.time)}–${minute(p.last_bar.end_time)} close ${p.last_bar.close} · ${Math.min(p.last_bar.consecutive, p.confirm_bars)} of ${p.confirm_bars} confirming · checked ${clock(p.last_evaluated_at!)}` : "None yet"}</dd>
       <dt className="text-muted-foreground">Phone alerts</dt>
       <dd>{p.deliveries.length ? <ul className="space-y-1">{p.deliveries.map((d, i) => <li key={i}>{d.event_state ? stateName[d.event_state] : "Alert"} alert, attempt {d.attempt}: {outcome[d.outcome]}{d.error_code ? ` (${d.error_code})` : ""} · {clock(d.occurred_at)}</li>)}</ul> : "None sent yet"}</dd>
       <dt className="text-muted-foreground">Based on</dt>
-      <dd>{p.source.kind === "check" ? "Jo's pre-trade check" : "Stock alert"} · price {p.source.price} observed {clock(p.source.observed_at)} · <code className="break-all text-xs">{p.source.id}</code></dd>
+      <dd>{p.source.kind === "check" ? "Jo's pre-trade check" : "Stock alert"} · price {p.source.price} observed {clock(p.source.observed_at)}</dd>
       <dt className="text-muted-foreground">Jo&apos;s reason</dt>
       <dd className="whitespace-pre-wrap">{p.rationale}</dd>
       <dt className="text-muted-foreground">Saved</dt>
-      <dd>{new Date(p.created_at).toLocaleDateString("en-US", { timeZone: zone, month: "short", day: "numeric" })} {clock(p.created_at)} · <code className="break-all text-xs">{p.plan_id}</code></dd>
+      <dd>{new Date(p.created_at).toLocaleDateString("en-US", { timeZone: zone, month: "short", day: "numeric" })} {clock(p.created_at)}</dd>
     </dl>
     {!!p.events.length && <details className="rounded-md border px-3">
       <summary className="min-h-11 cursor-pointer py-3 text-sm">History ({p.events.length})</summary>
-      <ol className="space-y-1 pb-3 text-sm text-muted-foreground">{p.events.map((e) => <li key={e.state}>{clock(e.occurred_at)} · {stateName[e.state]} · {reasons[e.reason] ?? e.reason}{e.bar ? ` Close ${e.bar.close}.` : ""}</li>)}</ol>
+      <ol className="space-y-1 pb-3 text-sm text-muted-foreground">{p.events.map((e) => <li key={e.state}>{clock(e.occurred_at)} · {stateName[e.state]} · {reasons[e.reason] ?? e.reason}{e.bar ? ` Close ${e.bar.close}.` : ""}</li>)}
+        <li className="pt-1 text-xs">Record IDs: <code className="break-all">{p.plan_id}</code> · <code className="break-all">{p.source.id}</code></li></ol>
     </details>}
+  </li>;
+}
+
+function Refusal({ r, max }: { r: PlanRefusal; max: number }) {
+  const rule = refusalRule(r);
+  return <li data-testid="plan-refusal" className="min-w-0 space-y-1 rounded-lg border bg-card p-4 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="font-semibold">{r.symbol ?? "Unknown ticker"}{r.direction ? ` · ${r.direction === "long" ? "Long" : "Short"} watch` : ""}</h3>
+      <span className={`rounded-full border px-2 py-0.5 text-xs ${warn}`}>Refused · not saved</span>
+    </div>
+    <p>Jo couldn&apos;t watch this: {refusalWords(r, max)}.</p>
+    {rule && <p className="text-muted-foreground">Asked for: {rule}{r.expires_at ? ` · until ${clock(r.expires_at)}` : ""}</p>}
+    <p className="text-muted-foreground">{new Date(r.created_at).toLocaleDateString("en-US", { timeZone: zone, month: "short", day: "numeric" })} {clock(r.created_at)} · reason given to Jo: {r.reason}</p>
   </li>;
 }
 
@@ -165,7 +181,7 @@ export default function PlanWatches() {
         <p className="font-medium">Monitoring status unknown</p>
         <p className="text-sm">This screen could not refresh, so it cannot confirm anything is being watched. Pull to reload or tap Refresh.</p>
       </section> : <Banner v={data} />}
-      <p className="text-sm text-muted-foreground">Alerts go to your phone as an ntfy push.{data.delivery.configured ? " ntfy accepting a push does not prove your phone showed it." : " ntfy is not configured on this server, so no phone alert can be sent."} When Jo can&apos;t accept a watch it is told why and should tell you; refused requests are not saved here.</p>
+      <p className="text-sm text-muted-foreground">Alerts go to your phone as an ntfy push.{data.delivery.configured ? " ntfy accepting a push does not prove your phone showed it." : " ntfy is not configured on this server, so no phone alert can be sent."} When Jo can&apos;t accept a watch it is told why, and the refused request is listed below; nothing is watched for it.</p>
       <section aria-label="Active watches" className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current ({active.length})</h2>
         {active.length ? <ul className="space-y-3">{active.map((p) => <Plan key={p.plan_id} p={p} />)}</ul> : <p className="text-sm text-muted-foreground">No current watches. Nothing is being monitored for you.</p>}
@@ -173,6 +189,10 @@ export default function PlanWatches() {
       {!!ended.length && <section aria-label="Ended watches" className="space-y-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Ended ({ended.length})</h2>
         <ul className="space-y-3">{ended.map((p) => <Plan key={p.plan_id} p={p} />)}</ul>
+      </section>}
+      {!!data.refusals?.length && <section aria-label="Refused requests" className="space-y-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Refused requests ({data.refusals.length})</h2>
+        <ul className="space-y-3">{data.refusals.map((r) => <Refusal key={r.refusal_id} r={r} max={data.max_daily_plans} />)}</ul>
       </section>}
       <p className="text-xs text-muted-foreground">Checked {clock(data.checked_at)} · latest {data.limit} watches</p>
     </>}

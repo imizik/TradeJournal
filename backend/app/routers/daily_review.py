@@ -1,6 +1,6 @@
 import uuid
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -76,7 +76,7 @@ async def list_daily_reviews(request: Request, session: Session = Depends(get_se
             "trade_count": len(trade_ids_by_day.get(review_day, set())),
             "closed_pnl": float(round(closed_pnl_by_day[review_day], 2)) if review_day in closed_pnl_by_day else None,
             "saved": _review_visible(review_day, owner, records_by_day, records_by_day_json),
-            "generated_at": records_by_day[review_day].updated_at if _review_visible(review_day, owner, records_by_day, records_by_day_json) else None,
+            "generated_at": _utc(records_by_day[review_day].updated_at) if _review_visible(review_day, owner, records_by_day, records_by_day_json) else None,
             "source_data_stale": bool(records_by_day_json.get(review_day, {}).get("source_data_stale")) if _review_visible(review_day, owner, records_by_day, records_by_day_json) else False,
         }
         for review_day in sorted(review_days, reverse=True)
@@ -107,7 +107,7 @@ async def get_daily_review(review_day: date, request: Request, session: Session 
     return {
         "day": record.day.isoformat(),
         "review": review,
-        "generated_at": record.updated_at,
+        "generated_at": _utc(record.updated_at),
         "trade_count": record.trade_count,
     }
 
@@ -139,9 +139,14 @@ def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get
     return {
         "day": record.day.isoformat(),
         "review": review,
-        "generated_at": record.updated_at,
+        "generated_at": _utc(record.updated_at),
         "trade_count": record.trade_count,
     }
+
+
+def _utc(value: datetime) -> datetime:
+    # Stored as naive UTC; without a zone browsers read it as local time.
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _parse_day(value: str) -> date:

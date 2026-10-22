@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { beginHistoryLoad, type OlderPanel, type OlderState } from "../lib/chartHistory";
+import { beginHistoryLoad, mergePastRvol, type OlderPanel, type OlderState } from "../lib/chartHistory";
+import type { ChartBar, HistoryPage, RvolBaseline } from "../lib/charts";
 
 test("a queued history response survives the next request from an older render", () => {
   const initial: OlderState = { key: "extended", panels: {} };
@@ -29,4 +30,19 @@ test("a queued history response survives the next request from an older render",
 test("a stale history request cannot resurrect a frame after its session changes", () => {
   const state: OlderState = { key: "regular", panels: {} };
   expect(beginHistoryLoad(state, "extended", "NVDA|5m")).toBe(state);
+});
+
+test("a session split between two history pages keeps its first RVol answer, so its candles and baseline agree (C2.6)", () => {
+  const bar = (time: number, rvol: number | null): ChartBar => ({ time, end_time: time + 300, source: "alpaca_sip", open: 1, high: 1, low: 1, close: 1,
+    volume: 1, ema9: null, ema20: null, ema50: null, ema200: null, vwap: null, rsi: null, extended: false, rvol });
+  const baseline = (day: string, state: RvolBaseline["state"]): RvolBaseline => ({ state, day, sessions: [], traded: 0, missing: [], message: null });
+  // 2026-09-15 09:30 and 2026-09-14 15:55 New York.
+  const sep15 = Date.parse("2026-09-15T13:30:00Z") / 1000, sep14 = Date.parse("2026-09-14T19:55:00Z") / 1000;
+  const page = { bars: [bar(sep14, 0.8), bar(sep15, 1.4)], rvol: { "2026-09-14": baseline("2026-09-14", "ready"), "2026-09-15": baseline("2026-09-15", "ready") } } as unknown as HistoryPage;
+  // The first page saw Sep 15 still building: the later page's Sep 15 candle drops its value, and Sep 14 is new.
+  const merged = mergePastRvol({ "2026-09-15": baseline("2026-09-15", "building") }, page);
+  expect(merged.bars.map((b) => b.rvol)).toEqual([0.8, null]);
+  expect(Object.fromEntries(Object.entries(merged.rvol).map(([day, b]) => [day, b.state]))).toEqual({ "2026-09-14": "ready", "2026-09-15": "building" });
+  // The first page takes the page as it is.
+  expect(mergePastRvol(undefined, page)).toEqual({ bars: page.bars, rvol: page.rvol });
 });

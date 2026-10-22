@@ -3,6 +3,7 @@
 import { useAppAccess } from "@/components/AccessProvider";
 import { useState } from "react";
 import { api, DailyReview, PlanCheck, RuleCheck } from "@/lib/api";
+import { timestampET } from "@/lib/dayJournal";
 
 type Status = "idle" | "loading" | "done" | "error";
 
@@ -44,8 +45,10 @@ export default function DailyAiPanel({
       setGeneratedAt(response.generated_at);
       setReviewedContextRevision(requestedContextRevision);
       setStatus("done");
-    } catch {
-      setError("The daily review could not be generated. Please retry.");
+    } catch (err) {
+      // 503 means the review is not set up here; retrying cannot help, so show the server's reason.
+      const setup = err instanceof Error ? /-> 503: (.+)$/.exec(err.message)?.[1] : undefined;
+      setError(setup ?? "The daily review could not be generated. Please retry.");
       setStatus("error");
     }
   }
@@ -106,7 +109,7 @@ function DailyReviewResult({ review, generatedAt }: { review: DailyReview; gener
           <span className="text-xs uppercase tracking-wide text-muted-foreground">Daily Review</span>
           {generatedAt && (
             <span className="text-xs text-muted-foreground">
-              Saved {new Date(generatedAt).toLocaleString()}
+              Saved {timestampET(generatedAt)}
             </span>
           )}
         </div>

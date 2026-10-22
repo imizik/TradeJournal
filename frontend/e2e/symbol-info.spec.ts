@@ -110,7 +110,9 @@ test("You renders seeded completed results, account-separated open trades and an
   const tradeLink = info.getByRole("link").first();
   await expect(tradeLink).toHaveAttribute("href", /\/trades\/[0-9a-f-]+$/);
   await expect(info).toContainText("No open positions");
-  expect(reads).toHaveLength(1);
+  // Each settled symbol: its journal, and one overview read for the price card's 30-day average volume.
+  await expect.poll(() => reads.length).toBe(2);
+  expect(reads.filter((url) => url.endsWith("/overview"))).toHaveLength(1);
   // Dense journal content scrolls inside the dock, preserving C7.3's shell.
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -120,13 +122,13 @@ test("You renders seeded completed results, account-separated open trades and an
   await expect(info).toContainText("8267");
   await expect(info).toContainText("1113");
   await expect(info.locator("dl")).not.toContainText("$400.00"); // partial exit excluded from completed P&L
-  expect(reads).toHaveLength(2);
+  await expect.poll(() => reads.length).toBe(4);
   await choose(page, "TSLA");
   await expect(info.locator("dl")).toContainText("-$300.00");
   await expect(info.locator("dl")).toContainText("0.0%");
   await choose(page, "SPY");
   await expect(info).toContainText("No trades on this symbol");
-  expect(reads).toHaveLength(4);
+  await expect.poll(() => reads.length).toBe(8);
 });
 
 test("Overview persists per device and rapid symbol steps fetch only the settled symbol", async ({ page }) => {
@@ -156,8 +158,9 @@ test("Overview persists per device and rapid symbol steps fetch only the settled
   await choose(page, "AMD");
   await page.clock.runFor(301);
   await expect(info).toContainText("No trades on this symbol");
-  expect(reads).toHaveLength(4);
-  expect(reads[3]).toContain("/AMD/you");
+  // The price card and the Overview tab share one overview read; SPY, stepped past, reads nothing.
+  await expect.poll(() => reads.length).toBe(5);
+  expect(reads.slice(3).map((url) => url.split("/").slice(-2).join("/")).sort()).toEqual(["AMD/overview", "AMD/you"]);
 });
 
 test("a failed journal request retries without replacing charts", async ({ page }) => {
@@ -752,7 +755,7 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   await expect(info.getByRole("group", { name: "Peers" }).getByRole("button", { name: "Peer WDC" })).toBeVisible();
   // Every block has its own edged header; Peers is the last block, after Ownership, above the one source line.
   const order = await info.getByRole("tabpanel").evaluate((tab) => [...tab.querySelectorAll("section[aria-label]")].map((section) => section.getAttribute("aria-label")));
-  expect(order).toEqual(["Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
+  expect(order).toEqual(["Holding context", "Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
   const peersBox = (await info.getByRole("region", { name: "Peers" }).boundingBox())!;
   expect(peersBox.y).toBeGreaterThan((await info.getByRole("region", { name: "Ownership" }).boundingBox())!.y);
   expect(peersBox.y).toBeLessThan((await info.locator("[data-source-footer]").boundingBox())!.y);
