@@ -115,6 +115,16 @@ def test_none_found_and_unavailable_stay_distinct(store):
     assert malformed["status"] == "unavailable" and malformed["headlines"] == []
 
 
+def test_a_refused_provider_is_unavailable_not_none_found(store, monkeypatch):
+    from app.engine import news
+    store.append_event(_event())
+    monkeypatch.setattr(news, "_alpaca_get_fast", lambda path, params: {})  # what a 403/404 returns
+    radar_news.enrich(store, "2026-10-20", _after(1))
+    monkeypatch.setattr(news, "_alpaca_get_fast", lambda path, params: {"news": []})
+    radar_news.enrich(store, "2026-10-20", _after(17))
+    assert [c["status"] for c in store.news_checks("rad_test_1")] == ["unavailable", "none_found"]
+
+
 def test_original_event_is_unchanged_and_news_rows_are_immutable(store):
     store.append_event(FIXTURE["event"])
     store.append_revision(FIXTURE["revisions"][0])

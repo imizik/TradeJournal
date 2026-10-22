@@ -31,8 +31,9 @@ NewsReader = Callable[[list[str], datetime, datetime], list[dict]]
 
 
 def fetch(symbols: list[str], start: datetime, end: datetime) -> list[dict]:
-    # One page on a short budget with no retry, so a slow provider cannot stall the minute's pass.
-    return news.fetch_news(symbols=symbols, start=start, end=end, limit=50, fast=True)
+    # One page on a short budget with no retry, so a slow provider cannot stall the minute's pass;
+    # strict, so a refused key (403/404) is "unavailable", never "none found".
+    return news.fetch_news(symbols=symbols, start=start, end=end, limit=50, fast=True, strict=True)
 
 
 def _iso(value: datetime) -> str:
