@@ -410,8 +410,10 @@ export type ChartSettings = {
   autoLevelsHidden: boolean;
   /** The options levels layer (C4.4): off until asked for, and its filters. */
   optionsLayer: OptionsLayer;
-  /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
+  /** Expected-move levels (C2.7), off until shown. Kept separate from VWAP bands. */
   rangeBandsHidden: boolean;
+  /** RTH VWAP ±1σ/±2σ; top-level so older tabs preserve this independent choice. */
+  vwapBandsHidden: boolean;
   /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
   newsHidden: boolean;
   /** Which fills the main chart writes a text label beside (Journal layer): none, the newest candle's, or all; off by default. A field of its own like `newsHidden`. */
@@ -471,7 +473,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, vwapBandsHidden: true, newsHidden: false, fillLabels: "off", newsOnSmall: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
   proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
@@ -524,6 +526,9 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       autoLevelsHidden: value.autoLevelsHidden === true,
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
+      // Before the controls split, Range bands showed both. Preserve that choice
+      // only when the independent setting is absent; explicit off always wins.
+      vwapBandsHidden: typeof value.vwapBandsHidden === "boolean" ? value.vwapBandsHidden : value.rangeBandsHidden !== false,
       newsHidden: value.newsHidden === true,
       fillLabels: cleanFillLabels(value.fillLabels),
       newsOnSmall: value.newsOnSmall === true,
