@@ -138,6 +138,13 @@ it is not a prerequisite to the control fix or a claim of established parity.
 
 ## Release 1: market-first Dashboard
 
+**October 21 continuation authorized:** after the VWAP/roadmap PR merged, Isaac
+selected this next bounded presentation slice. Reuse the saved briefing and
+GET-only Radar feed; keep Attention/data failures visible and calculations,
+auth, recording activation and providers unchanged. The PR's final-head checks
+own implementation proof. Live usefulness and production rollout remain
+separate acceptance; this does not authorize releases 2–5.
+
 Outcome: opening the app answers "What matters and what should I inspect?"
 
 Proposed content order:
