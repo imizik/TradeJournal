@@ -340,6 +340,10 @@ test("a laptop keeps the toolbar to one row, and the drawing rail can be put awa
   await expect(page.getByRole("group", { name: "Drawing tools" })).toHaveCount(0);
   await page.getByRole("button", { name: "Show drawing tools" }).click();
   await expect(page.getByRole("group", { name: "Drawing tools" })).toBeVisible();
+  // TradingView's watchlist columns and the price card above the symbol info.
+  const watchlist = page.getByRole("region", { name: "Watchlist" });
+  await expect(watchlist).toContainText(/Last.*Chg%.*Vol/);
+  await expect(page.getByRole("region", { name: "MRVL price" })).toContainText(/Volume .*Avg 30D/);
 });
 
 /** The main chart's candle room: the pixel span from the highest visible high to the lowest visible low, and the pane it sits in. */
