@@ -434,6 +434,10 @@ test("opportunity brief leads with market context and new setups, then short urg
   await compact.getByText("Conditions & evidence", { exact: true }).click();
   await expect(compact).toContainText(setup.entry_trigger);
   await expect(compact).toContainText(setup.invalidation);
+  const ideaDetails = compact.getByTestId("brief-idea-details").first();
+  await expect(ideaDetails).toContainText("Invented setup-NEW: premarket range $40–$43.");
+  await expect(ideaDetails).toContainText("Exact saved evidence; it has not been refreshed.");
+  await expect(ideaDetails.locator('time[datetime="'+day+'T12:44:00Z"]').first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await compact.screenshot({ path: test.info().outputPath("dashboard-setup-evidence-phone.png") });
   await compact.getByRole("link", { name: "Open NEW chart" }).click();
@@ -450,6 +454,12 @@ test("opportunity brief leads with market context and new setups, then short urg
   await expect(compact.getByRole("heading", { name: "Saved priorities", exact: true })).toBeVisible();
   await expect(compact.getByRole("heading", { name: "Things worth investigating", exact: true })).toHaveCount(0);
   await expect(compact.getByRole("link", { name: "Open MU chart" })).toHaveAttribute("href", "/charts?symbol=MU");
+  await expect(compact).toContainText("Earlier briefing format");
+  const legacy = compact.getByTestId("brief-idea-details").first();
+  await legacy.locator("summary").click();
+  await expect(legacy).toContainText(body.items[0].what_matters);
+  await expect(legacy).toContainText(body.items[0].watch_out);
+  await expect(legacy).toContainText("Exact saved evidence");
   view = { ...view, state: "redacted", packet: { ...view.packet, redacted_at: `${day}T14:00:00Z` } };
   await page.reload();
   await expect(compact).toContainText("This briefing or its evidence was removed");

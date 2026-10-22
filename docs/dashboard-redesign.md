@@ -184,3 +184,22 @@ deterministic. Run the UI gate, full verification and native reviews (financial
 aggregation plus sensitive root route warrants tier 2). Local assistant tests
 are regression evidence, not Jo's cloud acceptance. Screenshots and final
 review/checkpoint links will be recorded in the PR.
+
+## Market-first saved-context follow-up
+
+The current owner opening flow is the saved morning brief and bounded Radar
+preview before journal/performance details (see the
+[workflow roadmap](workflow-consolidation-roadmap.md#release-1-market-first-dashboard)).
+Compact briefing ideas expand to full text, conditions/counterpoints and exact
+cited evidence with kind/source/timestamps; missing citations stay explicit.
+Earlier-format briefs keep their priorities and disclose the missing separate
+new-opportunities section.
+
+Radar preview shows existing saved news state and nearby headlines, with the
+full move and all saved headlines in a disclosure. Preserve source, before/after
+timing and news-check time, and distinguish nearby news from confirmed causes.
+No fresh news fetch, generation, task activation, visit/feedback mutation or
+accounting change occurs. Existing charts and full Radar/briefing remain the
+investigation destinations. Dashboard and morning-briefing browser fixtures
+cover desktop/390px, news found/none/unavailable/unchecked, stale reads and
+legacy/redacted briefing states. Fixture proof is not live usefulness.

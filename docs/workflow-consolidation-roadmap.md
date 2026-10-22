@@ -158,6 +158,15 @@ detail expandable. Make the compact brief's exact cited context and coverage
 gaps readable in place, with saved source/timestamps and missing evidence explicit.
 No new live market/news feed or brief-generation change is part of this slice.
 
+**Opening-screen evidence follow-up:** compact opportunities and legacy priorities
+expand to their full saved text, conditions and exact cited evidence with source,
+kind, observation/retrieval times and explicit missing citations. Earlier-format
+briefs name the missing separate discovery section. Radar previews reuse their
+saved news records, before/after timing and check time, with a full-text
+disclosure; nearby headlines are not confirmed causes. This adds no fetch,
+provider, task change, recording activation or notification. Live Jo task-format
+alignment and real-morning usefulness remain separate work.
+
 Outcome: opening the app answers "What matters and what should I inspect?"
 
 Proposed content order:

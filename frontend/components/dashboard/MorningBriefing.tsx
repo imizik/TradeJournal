@@ -217,6 +217,19 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     {(lateNote || data?.stale) && <p role="status" className="text-sm text-amber-300">{lateNote ? "Arrived after the deadline. " : ""}{data?.stale ? "Evidence is at least four hours old; verify current conditions." : ""}</p>}
     {body && <p className="text-xs text-muted-foreground">{!compact && packet?.body.scope ? `Scope: ${packet.body.scope.split(";")[0].trim()} · ` : ""}Frozen briefing, not a live price feed. Journal holdings are not broker-verified.</p>}
   </>;
+  const savedEvidence = (ids: string[]) => !packet || packet.redacted_at
+    ? <p className="text-xs text-amber-300">Saved evidence unavailable.</p>
+    : !ids.length ? <p className="text-xs text-muted-foreground">No evidence was cited for this idea.</p>
+    : <ul className="space-y-3 pb-3">{[...new Set(ids)].map((key) => {
+        const item = evidence.get(key);
+        return <li key={key} className="border-t pt-3 text-xs">
+          {item ? <>
+            <p className="font-medium">{sourceLabel(item)} · {kindLabel(item.kind)}</p>
+            <p className="mt-1 whitespace-pre-wrap leading-relaxed">{item.text}</p>
+            <p className="mt-2 text-muted-foreground">{item.source} · {item.observed_at ? <>Observed <time dateTime={item.observed_at}>{time(item.observed_at)}</time></> : "Observation time unavailable"} · Retrieved <time dateTime={item.retrieved_at}>{time(item.retrieved_at)}</time></p>
+          </> : <p className="text-amber-300">Cited evidence unavailable: {key}</p>}
+        </li>;
+      })}</ul>;
   const longSummary = (body?.summary?.length ?? 0) > 360;
   const focus = body?.summary && <section aria-label="Today’s focus" className="space-y-2">
     <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Market context" : "Today’s focus"}</h2>
@@ -226,16 +239,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     {compact && packet && !packet.redacted_at && !!body.summary_evidence_ids?.length && <details className="rounded-md border px-3" data-testid="brief-cited-context">
       <summary className="min-h-11 cursor-pointer py-3 text-xs text-primary">Read cited context ({new Set(body.summary_evidence_ids).size})</summary>
       <p className="mb-3 text-xs text-muted-foreground">Exact saved evidence behind this summary; it has not been refreshed.</p>
-      <ul className="space-y-3 pb-3">{[...new Set(body.summary_evidence_ids)].map((key) => {
-        const item = evidence.get(key);
-        return <li key={key} className="border-t pt-3 text-xs">
-          {item ? <>
-            <p className="font-medium">{sourceLabel(item)} · {kindLabel(item.kind)}</p>
-            <p className="mt-1 whitespace-pre-wrap leading-relaxed">{item.text}</p>
-            <p className="mt-2 text-muted-foreground">{item.source} · {item.observed_at ? <>Observed <time dateTime={item.observed_at}>{time(item.observed_at)}</time></> : "Observation time unavailable"} · Retrieved <time dateTime={item.retrieved_at}>{time(item.retrieved_at)}</time></p>
-          </> : <p className="text-amber-300">Cited evidence unavailable: {key}</p>}
-        </li>;
-      })}</ul>
+      {savedEvidence(body.summary_evidence_ids)}
     </details>}
     {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
   </section>;
@@ -249,6 +253,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {focus}
       {body && <section aria-label="Things worth investigating" className="space-y-2 border-t pt-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Things worth investigating" : "Saved priorities"}</h2>
+        {!opportunityFirst && <p className="text-xs text-amber-300">Earlier briefing format · separate new-opportunities section unavailable.</p>}
         {(opportunityFirst ? opportunities : body.items ?? []).slice(0, 3).map((item, index) => {
           const setup = opportunityFirst ? opportunities[index] : null;
           return <article key={index} className="space-y-1.5 rounded-md border p-3">
@@ -258,13 +263,15 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
             </div>
             {setup && <p className="text-xs text-amber-300">{setup.status === "research_only" ? "Research only · confirmation missing" : "Conditional setup · wait for trigger"}</p>}
             <p className="line-clamp-2 text-sm leading-relaxed">{item.what_matters}</p>
-            {setup && <details className="text-xs">
-              <summary className="min-h-11 cursor-pointer py-2 text-primary sm:min-h-0 sm:py-1">Conditions &amp; evidence</summary>
+            <details className="text-xs" data-testid="brief-idea-details">
+              <summary className="min-h-11 cursor-pointer py-2 text-primary sm:min-h-0 sm:py-1">{setup ? "Conditions & evidence" : "Full priority & evidence"}</summary>
+              <p className="whitespace-pre-wrap py-2 text-sm">{item.what_matters}</p>
               <dl className="space-y-2 py-2">
-                {[["Entry condition", setup.entry_trigger], ["Invalidation", setup.invalidation], ["Timeframe", setup.timeframe], ["Before acting", setup.watch_out], ["Counterpoint", setup.contrary_evidence]].map(([label, value]) => value?.trim() && <div key={label}><dt className="font-medium text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-wrap">{value}</dd></div>)}
+                {(setup ? [["Entry condition", setup.entry_trigger], ["Invalidation", setup.invalidation], ["Timeframe", setup.timeframe], ["Before acting", setup.watch_out], ["Counterpoint", setup.contrary_evidence]] : [["Before acting", item.watch_out], ["What changed", item.what_changed], ["Counterpoint", item.contrary_evidence]]).map(([label, value]) => value?.trim() && <div key={label}><dt className="font-medium text-muted-foreground">{label}</dt><dd className="mt-0.5 whitespace-pre-wrap">{value}</dd></div>)}
               </dl>
-              {sources(setup.evidence_ids)}
-            </details>}
+              <p className="py-2 text-muted-foreground">Exact saved evidence; it has not been refreshed.</p>
+              {savedEvidence(item.evidence_ids)}
+            </details>
           </article>;
         })}
         {!(opportunityFirst ? opportunities : body.items ?? []).length && <p className="text-sm text-muted-foreground">{opportunityFirst ? "No supported new setup in this packet. Review the briefing’s discovery coverage and missing evidence." : "No supported priority in this saved briefing."}</p>}
