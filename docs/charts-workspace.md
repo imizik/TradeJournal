@@ -203,9 +203,12 @@ shares, institutional ownership, average volume and the valuation ratios) have
 a dotted label: a tap shows what the number means and what it is usually
 compared with, as general context rather than a verdict on the symbol.
 
-The owner-only **Group movement · 15 min** section inside Peers compares the
+The owner-only **Group movement** section inside Peers compares the
 selected stock, a selectable Radar group, QQQ and SPY using two shared recorded
-passes. Day-change chips stay labeled separately. Window/date, unavailable rows,
+passes. The **15 min** / **Session** toggle compares the recent move with the
+move since the first usable recorded sample of the same session. Session starts
+at its displayed timestamp, not necessarily market open; it is not recovery
+from the low or a sustained-trend verdict. Day-change chips stay labeled separately. Window/date, unavailable rows,
 recording gaps and per-row observation times stay visible; no data is presented
 as a buy signal. Group choice carries across member navigation. The comparison
 uses the existing Overview refresh lifecycle and makes no quote/history reads.

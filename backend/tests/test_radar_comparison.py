@@ -165,3 +165,74 @@ def test_calendar_unavailable_cannot_claim_current_session(store, monkeypatch):
         result = client.get("/radar/groups/compare?symbol=NVDA").json()
         assert result["state"] == "insufficient" and "calendar" in result["reason"]
         assert not result["rows"]
+
+
+def test_session_context_distinguishes_short_bounce_from_session_decline(store):
+    first = seed(store, NOW - 2700)
+    seed(store, NOW - 900, {s: 90 for s in ("NVDA", "AMD", "MU", "QQQ", "SPY")})
+    seed(store, NOW, {s: 95 for s in ("NVDA", "AMD", "MU", "QQQ", "SPY")})
+    before = store.path.read_bytes()
+    result = read(RadarStore(store.path, read_only=True))
+    session = result["session_context"]
+    assert result["coverage"]["peers_up"] == 2
+    assert session["coverage"]["peers_down"] == 2
+    assert session["window"]["start_pass_id"] == first
+    assert session["window"]["end_pass_id"] == result["window"]["end_pass_id"]
+    assert session["rows"][0]["change_pct"] == pytest.approx(-5)
+    assert session["window_minutes"] == 45
+    assert session["coverage"]["recorded_minutes"] == 3
+    assert session["coverage"]["expected_minutes"] == 46
+    assert session["state"] == "partial"
+    assert store.path.read_bytes() == before
+
+
+def test_session_late_start_and_one_sample_do_not_fabricate_open(store):
+    first = seed(store, NOW - 120)
+    assert read(store)["session_context"]["window"] is None
+    seed(store, NOW)
+    result = read(store)
+    assert result["window"] is None  # short session does not shorten 15-minute window
+    assert result["session_context"]["window"]["start_pass_id"] == first
+    assert result["session_context"]["window_minutes"] == 2
+
+
+def test_session_keeps_first_pass_even_when_member_missing_or_version_old(store):
+    first = seed(store, NOW - 2700, {"NVDA": 100, "QQQ": 100, "SPY": 100}, status="partial")
+    seed(store, NOW - 900)
+    seed(store, NOW)
+    session = read(store)["session_context"]
+    assert session["window"]["start_pass_id"] == first
+    assert session["coverage"]["missing"] == ["AMD", "MU"]
+    assert session["rows"][1]["change_pct"] is None
+    seed(store, NOW - 3000, version="old")
+    result = read(store)
+    assert result["window"] is not None
+    assert result["session_context"]["window"] is None
+    assert "version" in result["session_context"]["reason"]
+
+
+def test_session_stale_future_closed_and_no_overnight_carry(store):
+    seed(store, NOW - 2700)
+    seed(store, NOW)
+    seed(store, NOW + 600)
+    assert read(store, NOW + 181)["session_context"]["state"] == "stale"
+    assert read(store)["session_context"]["window"]["end"] == iso(NOW)
+    closed = read(store, NOW + 86400, live=False, today="2026-10-21")["session_context"]
+    assert closed["session"] == "2026-10-20" and not closed["live"]
+    assert read(store, NOW + 86400, today="2026-10-21")["session_context"]["window"] is None
+
+
+def test_session_first_pass_is_not_lost_after_600_records(store):
+    first = seed(store, NOW - 18000)
+    for offset in range(600):
+        seed(store, NOW - (599 - offset) * 30)
+    assert read(store)["session_context"]["window"]["start_pass_id"] == first
+
+
+def test_session_does_not_replace_ineligible_endpoint_trade(store):
+    seed(store, NOW - 2700, edits={"AMD": {"trade_time_ms": (NOW - 2821) * 1000}})
+    seed(store, NOW - 900)
+    seed(store, NOW)
+    session = read(store)["session_context"]
+    assert session["rows"][1]["change_pct"] is None
+    assert session["rows"][1]["reason"] == "Stale or future trade time"

@@ -52,8 +52,18 @@ def _endpoint(quote: dict | None, record: dict) -> tuple[dict | None, str | None
 
 def compare_group(store: RadarStore, result: dict, *, today: str, now: float, live: bool) -> dict:
     """No future rows, per-symbol endpoint substitution, overnight carry or gap filling."""
-    result["live"] = live
     passes = store.comparison_passes(today, iso(now), current_session=live)
+    session_result = empty_comparison(result["symbol"], result["group"]["name"],
+                                      {"groups": result["groups"], "version": result["universe_version"]}, now)
+    session_result["window_minutes"] = None
+    result = _compare_window(store, result, passes, now=now, live=live, session_window=False)
+    result["session_context"] = _compare_window(store, session_result, passes, now=now, live=live, session_window=True)
+    return result
+
+
+def _compare_window(store: RadarStore, result: dict, passes: list[dict], *, now: float,
+                    live: bool, session_window: bool) -> dict:
+    result["live"] = live
     if not passes:
         result["reason"] = "Waiting for this session's recorded observations." if live else "No recorded session yet."
         return result
@@ -65,11 +75,20 @@ def compare_group(store: RadarStore, result: dict, *, today: str, now: float, li
     end = usable[0]
     end_time = epoch(end["started_at"])
     stale = live and now - end_time > STALE_SECONDS
-    target = end_time - WINDOW_SECONDS
-    start = next((p for p in usable if epoch(p["started_at"]) <= target), None)
-    if start is None or target - epoch(start["started_at"]) > PASS_TOLERANCE_SECONDS:
-        result.update(state="stale" if stale else "insufficient", reason="A complete 15-minute observation window is unavailable.")
-        return result
+    if session_window:
+        # Never move the baseline forward to find a more convenient price/version.
+        start = usable[-1]
+        if end_time - epoch(start["started_at"]) < 60:
+            result.update(state="stale" if stale else "insufficient",
+                          reason="Session context needs two recorded passes at least one minute apart.")
+            return result
+        result["window_minutes"] = (end_time - epoch(start["started_at"])) / 60
+    else:
+        target = end_time - WINDOW_SECONDS
+        start = next((p for p in usable if epoch(p["started_at"]) <= target), None)
+        if start is None or target - epoch(start["started_at"]) > PASS_TOLERANCE_SECONDS:
+            result.update(state="stale" if stale else "insufficient", reason="A complete 15-minute observation window is unavailable.")
+            return result
     # Historical membership is not persisted: fail visibly instead of applying today's list to an old version.
     if any(p["universe_version"] != result["universe_version"] for p in (start, end)):
         result["reason"] = "Recorded group version differs from the current membership."

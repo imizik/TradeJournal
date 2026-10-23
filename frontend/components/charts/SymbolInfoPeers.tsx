@@ -76,12 +76,22 @@ export default function SymbolInfoPeers({ symbol, result, onSelect, movement, on
 
 
 function GroupMovement({ result, onGroup, onSelect }: { result: MovementResult; onGroup(group: RadarGroup): void; onSelect(symbol: string): void }) {
-  const data = result?.data;
+  const [period, setPeriod] = useState<"recent" | "session">("recent");
+  const response = result?.data;
+  const data = period === "session" ? response?.session_context : response;
   return <div role="group" aria-label="Group movement" className="mt-3 border-t border-slate-700/60 pt-2 text-xs">
-    <p className="font-medium text-slate-200">Group movement · 15 min</p>
+    <p className="font-medium text-slate-200">Group movement</p>
+    <div className="my-2 flex gap-1" aria-label="Movement window">
+      {(["recent", "session"] as const).map((value) => <button key={value} aria-pressed={period === value}
+        onClick={() => setPeriod(value)} className={`min-h-11 rounded border px-2 py-1 lg:min-h-8 ${period === value ? "border-sky-400 text-sky-300" : "border-slate-700 text-slate-400"}`}>
+        {value === "recent" ? "15 min" : "Session"}
+      </button>)}
+    </div>
+    {period === "session" && <p className="mb-2 text-[11px] text-slate-400">Since the first usable recorded sample, not market open or the session low. A late start misses earlier moves; this does not establish a sustained recovery.</p>}
     {!result ? <p role="status" className="mt-1 text-slate-500">Loading recorded movement…</p>
       : result.error ? <p className="mt-1 text-amber-300">Group movement unavailable. Previous values hidden until a fresh read succeeds.</p>
-      : data && <>
+      : !data ? <p className="mt-1 text-slate-400">{response?.reason ?? "Session context unavailable in this response."}</p>
+      : <>
         {data.group && <label className="mt-2 block text-slate-400">Compare group
           <select aria-label="Comparison group" value={data.group.name} onChange={(event) => {
             const group = data.groups.find((g) => g.name === event.target.value); if (group) onGroup(group);

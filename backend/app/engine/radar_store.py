@@ -247,7 +247,7 @@ class RadarStore:
             return [dict(row) for row in db.execute(
                 "SELECT id,session_date,started_at,finished_at,universe_version,status FROM pass "
                 "WHERE session_date=? AND finished_at<=? AND started_at<=? "
-                "ORDER BY started_at DESC,id DESC LIMIT 600", (session, before, before))]
+                "ORDER BY started_at DESC,id DESC", (session, before, before))]
 
     def quotes(self, pass_id: int | None = None, session_date: str | None = None) -> list[dict]:
         sql, args = "SELECT * FROM quote WHERE 1=1", []

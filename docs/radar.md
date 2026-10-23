@@ -77,7 +77,7 @@ here; until step 2 writes events it shows the empty state with coverage.
 ## Charts group movement
 
 The owner approved a read-only peer comparison on October 22, 2026. Charts
-Overview → Peers adds **Group movement · 15 min**. It uses recorded observations,
+Overview → Peers adds **Group movement**, with **15 min** and **Session** views. It uses recorded observations,
 independently of the still-unbuilt event detector. This implementation does not
 activate recording or establish live usefulness.
 
@@ -88,7 +88,7 @@ source/version, session, shared window/pass IDs, selected-stock/peer/QQQ/SPY
 rows and coverage. With no group parameter it selects the first valid group;
 an explicit unrelated group is rejected. An ungrouped symbol is disclosed.
 
-The comparison uses the latest completed usable pass and the pass at or before
+The 15-minute comparison uses the latest completed usable pass and the pass at or before
 15 minutes earlier (at most 90 seconds earlier). Both endpoints use the same
 pass IDs for every row, in one session and the current universe version. Older
 membership is not archived, so a version mismatch is refused rather than
@@ -101,6 +101,17 @@ There is no interpolation, per-symbol substitution, shortened lookback, overnigh
 carry, synthesized candle or probability score. Actual trade/retrieval times
 are available per row because batches and trades do not occur simultaneously.
 
+The same response includes `session_context`, independently evaluated from the
+first usable (`ok` or `partial`) pass in that session to the same latest pass.
+It requires at least one minute between endpoints. The baseline never advances
+to replace a missing member or an incompatible universe version. All endpoint
+eligibility rules above apply. A late recording start is shown by its actual
+time: this is **since first recorded sample**, not market-open return, previous
+close return, recovery from the low or evidence of a sustained trend. There is
+no 600-pass truncation that could silently advance this baseline. Failed passes
+remain gaps. Either window can be unavailable while the other is available.
+The Session toggle uses the same response, without another request.
+
 Coverage counts eligible peers (excluding the selected stock and benchmarks),
 up/down peers, missing symbols and recorded minute buckets in the window.
 Two endpoint returns do not demonstrate a continuous or sustained recovery.
@@ -111,8 +122,8 @@ Outside regular hours the latest recorded session is labeled explicitly.
 An unavailable calendar prevents a claim about the current session.
 
 The API opens only an existing, app-ID-checked Radar file in SQLite read-only
-mode: no schema initialization, visits, feedback or event writes. It reads at
-most 600 pass records from one session and two passes' quote rows. It makes no
+mode: no schema initialization, visits, feedback or event writes. It reads
+pass metadata from one session and the endpoint passes' quote rows. It makes no
 quote/history/news requests; the shared market calendar may refresh its existing
 monthly cache. Charts adds the read to its existing visible Overview peer refresh
 cycle (60 seconds), aborts obsolete symbol/group requests, and hides old values

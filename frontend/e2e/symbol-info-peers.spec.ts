@@ -76,13 +76,18 @@ function comparison(symbol = "NVDA", group = "Chips", state = "partial") {
   const selected = groups.find((g) => g.name === group)!;
   const start = "2026-10-20T14:00:00.000Z", end = "2026-10-20T14:15:00.000Z";
   const point = (at: string) => ({ price: 100, retrieved_at: at, trade_at: at });
-  return { symbol, state, reason: state === "stale" ? "Recording is stale; these are older observations." : "Some observations are missing or ineligible.",
+  const recent = { symbol, state, reason: state === "stale" ? "Recording is stale; these are older observations." : "Some observations are missing or ineligible.",
     groups, group: selected, universe_version: "fixture-v1", source: "Radar curated groups · Tradier sampled trades", methodology: "sampled_last_trade_observation",
     window_minutes: 15, session: "2026-10-20", live: true, generated_at: end, window: { start, end, start_pass_id: 1, end_pass_id: 16 },
     rows: [...selected.members, "QQQ", "SPY"].map((ticker) => ({ symbol: ticker, role: ticker === symbol ? "selected" : ["SPY", "QQQ"].includes(ticker) ? "benchmark" : "peer",
       change_pct: ticker === "MU" ? null : ticker === "QQQ" ? -0.3 : 1.2, reason: ticker === "MU" ? "Stale or future trade time" : null,
       start: point(start), end: ticker === "MU" ? null : point(end) })),
     coverage: { recorded_minutes: 16, expected_minutes: 16, peers_total: selected.members.length - 1, peers_available: 1, peers_up: 1, peers_down: 0, missing: group === "Chips" ? ["MU"] : [] } };
+  const baseline = "2026-10-20T13:35:00.000Z";
+  return { ...recent, session_context: { ...recent, window_minutes: 40,
+    window: { ...recent.window, start: baseline, start_pass_id: 0 },
+    coverage: { ...recent.coverage, peers_up: 0, peers_down: 1, recorded_minutes: 38, expected_minutes: 41 },
+    rows: recent.rows.map((row) => ({ ...row, start: point(baseline), change_pct: row.change_pct == null ? null : -2.5 })) } };
 }
 
 for (const phone of [false, true]) test(`Group movement preserves group on peer navigation ${phone ? "phone" : "desktop"}`, async ({ page }) => {
@@ -111,6 +116,19 @@ for (const phone of [false, true]) test(`Group movement preserves group on peer 
   await movement.scrollIntoViewIfNeeded();
   expect(await movement.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await movement.screenshot({ path: test.info().outputPath(`group-movement-partial-${phone ? "phone" : "desktop"}.png`) });
+  const readsBeforeToggle = reads.length;
+  await movement.getByRole("button", { name: "Session", exact: true }).click();
+  await expect(movement).toContainText("9:35 AM–10:15 AM ET");
+  await expect(movement).toContainText("0 up · 1 down · 1 of 2 peers available");
+  await expect(movement).toContainText("38 of 41 minutes recorded");
+  await expect(movement).toContainText("not market open or the session low");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA", exact: true })).toContainText("-2.50%");
+  expect(reads.length).toBe(readsBeforeToggle);
+  expect(await movement.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await movement.screenshot({ path: test.info().outputPath(`group-movement-session-${phone ? "phone" : "desktop"}.png`) });
+  await movement.getByRole("button", { name: "15 min", exact: true }).click();
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA", exact: true })).toContainText("+1.20%");
+  await movement.getByRole("button", { name: "Session", exact: true }).click();
   await movement.getByRole("combobox", { name: "Comparison group" }).selectOption("AI compute");
   await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
   await movement.getByRole("button", { name: "Compare chart AMD", exact: true }).click();
@@ -135,6 +153,8 @@ test("Group movement hides old values after a failed refresh", async ({ page }) 
   await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
   const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
   await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toBeVisible();
+  await movement.getByRole("button", { name: "Session", exact: true }).click();
+  await expect(movement).toContainText("9:35 AM–10:15 AM ET");
   fail = true;
   await page.clock.fastForward(60_000);
   await expect(movement).toContainText("Group movement unavailable");
@@ -145,7 +165,7 @@ test("Group movement discloses stale and off states", async ({ page }) => {
   let off = false;
   await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
   await page.route("**/api/backend/radar/groups/compare?**", (route) => route.fulfill({ json: off
-    ? { ...comparison(), state: "off", reason: "Radar recording is not switched on.", rows: [], coverage: null, window: null }
+    ? { ...comparison(), state: "off", reason: "Radar recording is not switched on.", rows: [], coverage: null, window: null, session_context: undefined }
     : comparison("NVDA", "Chips", "stale") }));
   await page.goto("/charts");
   await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
@@ -180,4 +200,24 @@ test("a superseded group request cannot restore values after a newer failure", a
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(movement).toContainText("Group movement unavailable");
   await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
+});
+
+
+test("Session context remains unavailable independently of a valid recent window", async ({ page }) => {
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const data = comparison();
+    return route.fulfill({ json: { ...data, session_context: { ...data.session_context,
+      state: "insufficient", reason: "Recorded group version differs from the current membership.",
+      rows: [], window: null, coverage: null } } });
+  });
+  await page.goto("/charts");
+  await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toContainText("+1.20%");
+  await movement.getByRole("button", { name: "Session", exact: true }).click();
+  await expect(movement).toContainText("Recorded group version differs");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
+  await movement.getByRole("button", { name: "15 min", exact: true }).click();
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toContainText("+1.20%");
 });

@@ -114,9 +114,10 @@ export function coverageLine(feed: RadarFeed): string {
 export type RadarGroup = { name: string; members: string[] };
 export type GroupEndpoint = { price: number; retrieved_at: string; trade_at: string };
 export type GroupComparison = {
+  session_context?: GroupComparison;
   symbol: string; state: "off" | "ungrouped" | "insufficient" | "partial" | "stale" | "ready";
   reason: string | null; groups: RadarGroup[]; group: RadarGroup | null; universe_version: string;
-  source: string; methodology: string; window_minutes: number; session: string | null; live: boolean; generated_at: string;
+  source: string; methodology: string; window_minutes: number | null; session: string | null; live: boolean; generated_at: string;
   window: { start: string; end: string; start_pass_id: number; end_pass_id: number } | null;
   rows: { symbol: string; role: "selected" | "peer" | "benchmark"; change_pct: number | null;
     reason: string | null; start: GroupEndpoint | null; end: GroupEndpoint | null }[];
