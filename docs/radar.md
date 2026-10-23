@@ -237,3 +237,35 @@ original entry from the journal and reads only recorded Radar observations.
 The selected holding disclosure refreshes while open; it does not add alerts
 or a background recorder. See [the Charts contract](charts-workspace.md#same-session-since-entry-holding-context)
 for timing, eligibility, missing-data behavior and tests.
+
+### Since-entry context on existing holding alerts
+
+Already-qualified holding alerts can append the same recorded entry comparison.
+`backend/app/engine/radar_entry.py` shares the original-entry resolver with Charts;
+`backend/app/engine/position_alert_context.py` reads at the alert detection cutoff,
+using the alert monitor's already-read regular hours and the existing first curated
+group for the symbol. The group is named; it is not an inferred owner preference.
+No new trigger, flag, quote/news/model call, recorder or notification is added.
+
+After duplicate/supersession checks, a new `PositionAlert.context_snapshot_json`
+freezes the versioned result, entry and baseline times, group/version, Radar pass
+IDs, returns and coverage. Account and first-entry source identity must match.
+A rebuilt/missing trade that cannot be verified gets unavailable context. Adds
+and partial exits retain the original entry. Later observations are excluded;
+pending delivery retries never refresh the snapshot. Legacy rows remain null.
+The additive nullable text column is migration `7c3e0a5b2d84`; no backfill occurs.
+
+The phone keeps its existing reason/details first, then at most four context
+lines: underlying window/returns, QQQ/SPY, named peer participation and sampling
+limits. Missing rows stay unavailable, partial coverage is explicit, stale
+numbers are withheld, and overnight entries stay unavailable. These are sampled
+underlying endpoint movements, not option P&L, continuous trend or a sell signal.
+This slice retains the trade-detail click target and adds no app screen.
+
+Optional reads use their own journal session and a read-only Radar store with a
+100 ms shared SQLite deadline (lock waits plus query progress checks). There are
+no extra calendar reads. Missing, foreign, locked or unreadable storage produces
+an unavailable snapshot; the original alert still proceeds. Alert thresholds,
+dedupe, expiry, priorities and pending/sent/unknown behavior remain unchanged.
+`sent` proves ntfy acceptance, not actual phone display. Tests cover recorded
+fixtures and delivery mocks; production/phone usefulness is separate.

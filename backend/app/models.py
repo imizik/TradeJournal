@@ -572,6 +572,8 @@ class PositionAlert(SQLModel, table=True):
     peak_gain_pct: Optional[float] = None
     quoted_at: Optional[datetime] = None  # UTC, Tradier's bid time
     detected_at: datetime = Field(default_factory=datetime.utcnow)
+    # Frozen optional Radar context at detection; legacy alerts remain null.
+    context_snapshot_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
