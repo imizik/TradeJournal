@@ -7,6 +7,10 @@ source of truth; fix relevant documentation when behavior changes.
 
 ## Current product priority
 
+On October 22, 2026 the owner set [TradeJournal's end goal](docs/product-roadmap.md#end-goal--october-22-2026):
+first prove that position alerts and Radar help, then connect the loop. Weigh
+new work against it.
+
 The owner selected **Dots functionality first on October 11, 2026**. Before
 selecting new roadmap work, read [the shared priorities](docs/product-roadmap.md#selected-priorities--october-11-2026)
 and [Dots delivery board](docs/agent/dots-integration.md#current-delivery-board);
