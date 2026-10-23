@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET, session_windows
 from app.engine.radar_comparison import compare_group, empty_comparison
+from app.engine.radar_movers import build_movers, earlier_pass
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
 
@@ -180,6 +181,49 @@ def _read_feed(store: RadarStore, session: str | None, since: str | None, now: f
     return {"state": _state(coverage, passes_total, now), "reason": None, "session": session, "sessions": sessions[:30],
             "events": events, "since_last_visit": new, "last_visit_at": last_visit, "coverage": coverage,
             "generated_at": _iso(now)}
+
+
+@router.get("/movers")
+def movers(session: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """A plain ranking from the latest recorded pass; no thresholds, events or provider calls."""
+    now = _now()
+    if session:
+        try:
+            date.fromisoformat(session)
+        except ValueError:
+            raise HTTPException(422, "session must be a real date")
+    empty = {"session": session, "generated_at": _iso(now), "pass_at": None, "earlier_pass_at": None, "header": None,
+             "leaders": [], "laggards": [], "groups": [], "missing": []}
+    store, reason = _store(read_only=True)
+    if store is None:
+        return {**empty, "state": "off", "reason": reason}
+    try:
+        return _read_movers(store, session, now, empty)
+    except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
+        log.warning("radar movers unreadable: %s", exc)
+        return {**empty, "state": "off", "reason": "The Radar file could not be read right now."}
+
+
+def _read_movers(store: RadarStore, session: str | None, now: float, empty: dict) -> dict:
+    sessions = store.sessions()
+    today = datetime.fromtimestamp(now, ET).date().isoformat()
+    session = session or (today if today in sessions else (sessions[0] if sessions else today))
+    empty = {**empty, "session": session}
+    coverage = _coverage(store, session, now)
+    passes = store.passes(session)
+    recorded = [p for p in passes if p["status"] in ("ok", "partial")]
+    if not recorded:
+        return {**empty, "state": "no_data", "reason": "Nothing has been recorded for this session yet."}
+    latest = recorded[-1]
+    earlier = earlier_pass(recorded, latest)
+    result = build_movers(load_universe(), store.quotes(pass_id=latest["id"]),
+                          store.quotes(pass_id=earlier["id"]) if earlier else None)
+    base = {**empty, **result, "pass_at": latest["started_at"], "earlier_pass_at": earlier["started_at"] if earlier else None}
+    if result["header"] is None:
+        return {**base, "state": "no_data", "reason": "The latest pass has no usable SPY quote, so nothing can be ranked."}
+    stale = coverage["live"] and now - _parse(latest["started_at"]) > STALE_SECONDS  # the pass shown, ok or partial
+    return {**base, "state": "stale" if stale else "ok",
+            "reason": "Recording has fallen behind; these numbers are from the last pass shown." if stale else None}
 
 
 @router.get("/events/{event_id}")

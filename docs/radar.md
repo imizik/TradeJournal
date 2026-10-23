@@ -74,6 +74,25 @@ earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
 here; until step 2 writes events it shows the empty state with coverage.
 
+## Movers now
+
+`GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) and the first
+section of the screen are a plain ranking of the latest ok or partial pass of the
+session. It is not an alert and has no threshold, event or provider call; it is
+also the "plain movers list" the pilot compares alerts against. Per stock it
+gives `day_pct` (versus prev close), `from_open_pct` (versus today's open, so a
+gap shows apart from an intraday move), `vs_spy`, `vs_sector` (against the stock's
+`sector` ETF, a field added in `radar-universe-v2`) and `last_15m_pct` (versus the
+pass closest to 15 minutes earlier, within 2 minutes of that target, else null).
+Leaders and laggards are the top and bottom 10 stocks by `vs_spy`; each curated
+group reports members with data, how many are ahead of or behind SPY, the median
+`vs_spy` and the member with the largest move, sorted by absolute median. A symbol
+with a missing or non-positive last or prev close is counted as missing, never
+shown as 0%. `state` is `off`, `no_data` (also when SPY has no usable quote),
+`ok`, or `stale` (during regular hours, no ok pass for over 3 minutes). The screen
+tags a "gap" when `|from_open_pct| < |day_pct| / 3`, a plain label and not a rule,
+and refreshes every 60 seconds while the tab is visible.
+
 ## Charts group movement
 
 The owner approved a read-only peer comparison on October 22, 2026. Charts

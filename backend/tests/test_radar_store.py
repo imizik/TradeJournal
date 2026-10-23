@@ -92,7 +92,7 @@ def test_prune_keeps_the_newest_sessions_and_every_event(tmp_path):
 def test_tracked_universe_is_valid_and_keeps_the_benchmarks():
     universe = load_universe()
     symbols = {row["symbol"]: row for row in universe["symbols"]}
-    assert universe["version"] == "radar-universe-v1" and len(symbols) == 169
+    assert universe["version"] == "radar-universe-v2" and len(symbols) == 169
     benchmarks = {"SPY", "QQQ", "IWM", "RSP", "SMH", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE",
                   "XLU", "XLV", "XLY"}
     assert {s for s, row in symbols.items() if row["benchmark"]} == benchmarks
