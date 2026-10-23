@@ -146,3 +146,10 @@ def test_owner_only(boundary, tmp_path):  # noqa: F811
     boundary.patch.setenv("RADAR_STORE", str(tmp_path / "radar.sqlite"))
     assert boundary.owner.get("/radar/movers").status_code == 200
     assert boundary.public.get("/radar/movers").status_code == 401
+
+
+def test_partial_latest_pass_is_not_stale(api):
+    api.store.append_pass(_pass("14:19"), _quotes())
+    api.store.append_pass(_pass("14:34", "partial"), _quotes())
+    body = api.client.get("/radar/movers").json()
+    assert body["state"] == "ok" and body["pass_at"] == _stamp("14:34")

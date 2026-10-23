@@ -221,7 +221,7 @@ def _read_movers(store: RadarStore, session: str | None, now: float, empty: dict
     base = {**empty, **result, "pass_at": latest["started_at"], "earlier_pass_at": earlier["started_at"] if earlier else None}
     if result["header"] is None:
         return {**base, "state": "no_data", "reason": "The latest pass has no usable SPY quote, so nothing can be ranked."}
-    stale = coverage["live"] and (coverage["last_ok_pass_at"] is None or now - _parse(coverage["last_ok_pass_at"]) > STALE_SECONDS)
+    stale = coverage["live"] and now - _parse(latest["started_at"]) > STALE_SECONDS  # the pass shown, ok or partial
     return {**base, "state": "stale" if stale else "ok",
             "reason": "Recording has fallen behind; these numbers are from the last pass shown." if stale else None}
 

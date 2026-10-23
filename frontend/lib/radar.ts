@@ -164,8 +164,9 @@ export const isGap = (m: RadarMover) => m.from_open_pct != null && Math.abs(m.fr
 /** "AI networking · 5 of 6 behind SPY · median −9.9 · most: COHR" */
 export function groupLine(g: RadarMoverGroup): string {
   if (g.members_with_data === 0 || g.median_vs_spy == null) return `${g.name} · no data`;
-  const behind = g.median_vs_spy < 0;
-  const median = `${g.median_vs_spy > 0 ? "+" : g.median_vs_spy < 0 ? "−" : ""}${Math.abs(g.median_vs_spy).toFixed(1)}`;
+  const rounded = Number(g.median_vs_spy.toFixed(1));
+  const median = `${rounded > 0 ? "+" : rounded < 0 ? "−" : ""}${Math.abs(rounded).toFixed(1)}`;
+  const side = rounded === 0 ? `${g.ahead} ahead, ${g.behind} behind SPY` : rounded < 0 ? `${g.behind} of ${g.members_with_data} behind SPY` : `${g.ahead} of ${g.members_with_data} ahead of SPY`;
   const partial = g.members_with_data < g.members_total ? ` (${g.members_with_data} of ${g.members_total} with data)` : "";
-  return `${g.name} · ${behind ? g.behind : g.ahead} of ${g.members_with_data} ${behind ? "behind" : "ahead of"} SPY${partial} · median ${median} · most: ${g.most?.symbol}`;
+  return `${g.name} · ${side}${partial} · median ${median} · most: ${g.most?.symbol}`;
 }

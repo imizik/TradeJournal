@@ -44,14 +44,16 @@ function Table({ title, rows }: { title: string; rows: RadarMover[] }) {
 }
 
 export default function RadarMovers({ session }: { session: string | undefined }) {
-  const [movers, setMovers] = useState<RadarMovers | null>(null);
+  // Keyed by the session it was read for, so a switch never shows the previous session's numbers.
+  const [read, setRead] = useState<{ session: string | undefined; movers: RadarMovers } | null>(null);
+  const movers = read && read.session === session ? read.movers : null;
   const [error, setError] = useState(false);
   const [allGroups, setAllGroups] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     const load = () => getMovers(session, controller.signal).then(
-      (next) => { setMovers(next); setError(false); },
+      (next) => { setRead({ session, movers: next }); setError(false); },
       (e) => { if ((e as Error).name !== "AbortError") setError(true); });
     void load();
     const timer = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 60_000);
