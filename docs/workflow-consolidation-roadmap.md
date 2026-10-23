@@ -64,12 +64,12 @@ rules, justify averaging down with them, or derive a probability of profit.
 ## Baseline and evidence boundaries
 
 Initial review: main `99db02f3` and local VWAP `fcb729ea`.
-Current implementation reconciliation (October 22): main `28dd525a` includes
+Current implementation reconciliation (October 22): main `b310155b` includes
 VWAP #396/#401, market-first Dashboard #397/#401/#406, Macro/Tech #399,
 peer comparison #400 plus Session context #408, read-only holding context #403,
-chart-latency instrumentation #405 and Radar Movers #407. These are merged code,
-not evidence of production deployment or live usefulness. The Movers-to-Charts
-handoff below is the newly selected slice in this PR; exact-head CI/merge
+chart-latency instrumentation #405, Radar Movers #407 and its Charts handoff #409. These are merged code,
+not evidence of production deployment or live usefulness. Recovery-from-low peer context
+below is the newly selected slice in this PR; exact-head CI/merge
 receipts own its delivery status.
 GitHub metadata checked October 21: morning-opportunities PR
 [#388](https://github.com/imizik/TradeJournal/pull/388) is merged. No live deployment audit was performed. The later Macro feasibility probes
@@ -82,7 +82,7 @@ not the health of every current service.
 | Owner dashboard | `frontend/components/dashboard/OwnerDashboard.tsx` already has Jo status, compact briefing, journal summary, session/Attention, active options, collapsed stocks, exposure and performance. Reuse those sections; a new dashboard engine is unnecessary. |
 | Opportunity-first briefing | #388 adds bounded news-led outside candidates and separates setups from position concerns. Merged code is not proof the Check catalog/task was upgraded or a natural morning delivered useful content. Preserve legacy briefs. |
 | Radar | [Radar contract](radar.md): recorder, durable store, feed/detail/feedback, saved news and plain Movers ranking (#407) are built. This roadmap does not establish activation or live coverage. Calibrated detection remains unbuilt; Movers is not an alert feed. |
-| Groups and chart handoff | Curated groups, Movers group summaries and read-only 15-minute/Session comparison APIs are built (#400/#407/#408). This PR selects a Movers-to-Charts group/origin/return handoff. Historical event-time replay and calibrated detection remain unbuilt. |
+| Groups and chart handoff | Curated groups, Movers group summaries and read-only 15-minute/Session comparison APIs are built (#400/#407/#408). The group/origin/return handoff is merged (#409). This PR adds sampled-low context. Historical event-time replay and calibrated detection remain unbuilt. |
 | VWAP | `backend/app/engine/chart_math.py` computes RTH minute-HLC3 VWAP and volume-weighted dispersion. `backend/tests/test_charts.py` pins weighting, resets, extended-hour exclusion and interval carry-through. Merged #396 separates controls; formulas are unchanged. |
 | Other VWAP contexts | `metric_reference.py` uses fill-cutoff minute history; `scanner_rules.py` uses completed scanner bars; `packets.py` can use provider VWAP. Source, session, bar size and cutoff must match before declaring a discrepancy a defect. |
 | Charts | [Workspace](charts-workspace.md) and [roadmap](charts-roadmap.md): five panels, saved arrangements, levels, news, peers, captures and trade review. Merged #399 raises distinct symbols from three to five and adds explicit VIX/TNX yield routing. Crypto and futures chart support remain unverified. |
@@ -114,7 +114,8 @@ collector, and no implicit activation.
 | 0 | VWAP clarity | Merged #396/#401, ±1σ display only; live parity remains unverified | Implemented |
 | 1 | Market-first Dashboard | Merged #397/#401/#406; saved evidence/news drilldowns included; morning-use acceptance remains open | Implemented |
 | 2 | Peer confirmation in Charts | Merged #400/#408: 15-minute and recorded-session comparison; live coverage/usefulness separate | Implemented |
-| Next selected | Movers → Charts handoff | This PR: group selection, dated origin, fresh Session comparison and return to the selected Radar session/group list | Implementation; checks/merge receipt separate |
+| 2a | Movers → Charts handoff | Merged #409: group selection, dated origin, fresh Session comparison and return to the selected Radar session/group list | Implemented; production acceptance separate |
+| Next selected | Recovery-from-low peer context | This PR: selected-stock sampled-low anchor, shared peer/benchmark window and low-search coverage | Implementation; checks/merge receipt separate |
 | Parallel planning | Macro checklist and data feasibility | Five instruments selected; Tradier probes passed; no provider purchase | Complete for the selected slice |
 | 3 | Agreed macro layout | Merged #399: SPY/QQQ/IWM/VIX/US10Y and Tech return; production acceptance separate | Implemented |
 | 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; since-entry comparison and new alerts deferred | Implemented; usefulness open |
@@ -230,9 +231,9 @@ beside 15 min shows returns and participation since the first usable recorded
 sample, with actual start/end, missing-minute coverage and independently
 unavailable states. It reuses the same stored observations and refresh; late
 recording cannot be labeled a market-open return. Historical event-context
-handoff, recovery-from-low and sustained-trend detection remain follow-ups.
+handoff and sustained-trend detection remain follow-ups; sampled-low context is selected below.
 
-**Next selected: Movers → Charts handoff.** Movers group links carry the chosen
+**Merged #409: Movers → Charts handoff.** Movers group links carry the chosen
 group, originating stock, recorded session and pass time into Charts. Charts
 opens Overview/Peers on Session, validates membership through the existing API,
 and labels the origin separately from the newly read comparison. It does not
@@ -241,6 +242,20 @@ Return navigation restores the selected Radar date, expanded group list and
 group location. Plain leader/laggard links carry origin without inventing group
 membership. Invalid origin parameters are ignored; an unavailable group is not
 silently replaced. This slice adds no detector, provider or activation.
+
+**Next selected: recovery-from-low peer context.** Add **From low** beside
+15 min/Session in the existing Group movement panel. Use the selected stock's
+lowest eligible recorded `last` as one shared anchor for peers and QQQ/SPY;
+never compare different per-stock low times as if they were simultaneous.
+Show sampled price/time, search coverage (including gaps before the low),
+common window and missing rows. An ineligible latest selected-stock price
+prevents the comparison; a newest low waits for a one-minute rebound window.
+A return to an earlier equal low explicitly says no net rebound. Changing stocks
+recalculates the anchor. No new provider, alert, collector or AI call; existing
+Radar samples and visible-panel refresh only. Desktop/phone interaction and
+backend anchor, gaps, stale, version, missing-price and no-rebound cases are the
+acceptance checks. Production coverage and daily usefulness remain unverified;
+sustained-trend detection is still deferred.
 
 Primary question: **"Are these names rebounding or weakening together over the
 same interval as the stock I am investigating?"** This is the first major

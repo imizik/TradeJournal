@@ -2,15 +2,16 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
-// Open-trade phone alerts for this position: give-back after a gain, and last-day expiry. Alerts only; nothing trades.
-type Sent = { kind: "giveback" | "expiry_first" | "expiry_final"; detected_at: number; contracts: number; mark: number | null;
+// Open-trade phone alerts for this position: give-back after a gain, held an hour, and last-day expiry. Alerts only; nothing trades.
+type Sent = { kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour"; detected_at: number; contracts: number; mark: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown"; error: string | null; delivered_at: number | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
 // The optional field keeps older API responses on the original +$50 rule.
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
 
-const KIND: Record<Sent["kind"], string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "30 minutes to the close" };
+const KIND: Record<Sent["kind"], string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "30 minutes to the close",
+  hold_hour: "Open an hour: re-decide" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "sent to your phone",
   expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent" };
 

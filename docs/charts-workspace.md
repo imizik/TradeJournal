@@ -205,10 +205,16 @@ compared with, as general context rather than a verdict on the symbol.
 
 The owner-only **Group movement** section inside Peers compares the
 selected stock, a selectable Radar group, QQQ and SPY using two shared recorded
-passes. The **15 min** / **Session** toggle compares the recent move with the
+passes. The **15 min** / **Session** / **From low** toggle compares the recent move with the
 move since the first usable recorded sample of the same session. Session starts
 at its displayed timestamp, not necessarily market open; it is not recovery
-from the low or a sustained-trend verdict. Day-change chips stay labeled separately. Window/date, unavailable rows,
+from the low or a sustained-trend verdict. **From low** instead anchors all rows
+to the selected stock's lowest eligible sampled price in that recorded session.
+It shows the sampled-low price/time, full search coverage and common endpoint
+window; switching stocks recalculates the anchor. Peers do not use their own
+separate lows. A newly recorded low has no rebound window yet; returning to an
+earlier equal low says no net rebound. Gaps and between-sample lows prevent any
+claim to the true session low or sustained recovery. Day-change chips stay labeled separately. Window/date, unavailable rows,
 recording gaps and per-row observation times stay visible; no data is presented
 as a buy signal. Group choice carries across member navigation. The comparison
 uses the existing Overview refresh lifecycle and makes no quote/history reads.
