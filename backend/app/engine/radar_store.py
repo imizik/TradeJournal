@@ -252,12 +252,15 @@ class RadarStore:
                 "WHERE session_date=? AND finished_at<=? AND started_at<=? "
                 "ORDER BY started_at DESC,id DESC", (session, before, before))]
 
-    def quotes(self, pass_id: int | None = None, session_date: str | None = None) -> list[dict]:
+    def quotes(self, pass_id: int | None = None, session_date: str | None = None,
+               symbol: str | None = None) -> list[dict]:
         sql, args = "SELECT * FROM quote WHERE 1=1", []
         if pass_id is not None:
             sql, args = sql + " AND pass_id=?", args + [pass_id]
         if session_date:
             sql, args = sql + " AND session_date=?", args + [session_date]
+        if symbol:
+            sql, args = sql + " AND symbol=?", args + [symbol]
         with self._db() as db:
             return [dict(row) for row in db.execute(sql + " ORDER BY pass_id, symbol", args)]
 

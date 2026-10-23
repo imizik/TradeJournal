@@ -115,6 +115,10 @@ export type RadarGroup = { name: string; members: string[] };
 export type GroupEndpoint = { price: number; retrieved_at: string; trade_at: string };
 export type GroupComparison = {
   session_context?: GroupComparison;
+  recovery_context?: GroupComparison;
+  low_anchor?: GroupEndpoint & { symbol: string; pass_id: number; pass_at: string };
+  low_search?: { start: string; end: string; eligible_samples: number; omitted_samples: number; eligible_minutes: number; expected_minutes: number };
+  at_recorded_low?: boolean;
   symbol: string; state: "off" | "ungrouped" | "insufficient" | "partial" | "stale" | "ready";
   reason: string | null; groups: RadarGroup[]; group: RadarGroup | null; universe_version: string;
   source: string; methodology: string; window_minutes: number | null; session: string | null; live: boolean; generated_at: string;

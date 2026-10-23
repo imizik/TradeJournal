@@ -2,14 +2,16 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
-// Open-trade phone alerts for this position: give-back after a gain, and last-day expiry. Alerts only; nothing trades.
-type Sent = { kind: "giveback" | "expiry_first" | "expiry_final"; detected_at: number; contracts: number; mark: number | null;
+// Open-trade phone alerts for this position: give-back after a gain, held an hour, and last-day expiry. Alerts only; nothing trades.
+type Sent = { kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour"; detected_at: number; contracts: number; mark: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown"; error: string | null; delivered_at: number | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
-type Body = { enabled: boolean; alerts: Sent[]; watch: Watch | null };
+// The optional field keeps older API responses on the original +$50 rule.
+type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
 
-const KIND: Record<Sent["kind"], string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "30 minutes to the close" };
+const KIND: Record<Sent["kind"], string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "30 minutes to the close",
+  hold_hour: "Open an hour: re-decide" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "sent to your phone",
   expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent" };
 
@@ -35,7 +37,7 @@ export default function TradePhoneAlerts({ tradeId }: { tradeId: string }) {
         ? <>A give-back alert fired for this position (its delivery is listed below). It arms again only if the cost changes, for example when you buy more.</>
         : body.watch.armed
         ? <>Watching for a give-back: best so far {money(body.watch.peak_gain)} ({pct(body.watch.peak_gain_pct)}). An alert goes out if the gain falls to +3%.</>
-        : <>Not armed yet: arms once it is up 10% and $50{body.watch.peak_gain != null && <> (best so far {money(body.watch.peak_gain)}, {pct(body.watch.peak_gain_pct)})</>}.</>}
+        : <>Not armed yet: arms once it is up 10%{body.giveback_dollar_floor_applies !== false && " and $50"}{body.watch.peak_gain != null && <> (best so far {money(body.watch.peak_gain)}, {pct(body.watch.peak_gain_pct)})</>}.</>}
     </p>}
     {body.alerts.length > 0 && <ul className="mt-1 divide-y">{body.alerts.map(a => <li key={`${a.kind}-${a.detected_at}`} className="py-2">
       <span className="font-medium">{KIND[a.kind]}</span>

@@ -545,7 +545,7 @@ class PositionWatch(SQLModel, table=True):
 
 
 class PositionAlert(SQLModel, table=True):
-    """One open-trade phone alert (give-back or last-day expiry), written once:
+    """One open-trade phone alert (give-back, held an hour, or last-day expiry), written once:
     the unique (position, kind, generation) keeps a restart or a second process
     from recording it twice. Delivery is an outbox on the same row; a send that
     may have reached ntfy is recorded ``unknown`` and never resent."""
@@ -558,8 +558,8 @@ class PositionAlert(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID
     source_key: str = Field(index=True)
-    kind: str  # giveback | expiry_first | expiry_final
-    generation: int  # the give-back arming; 0 for expiry alerts
+    kind: str  # giveback | expiry_first | expiry_final | hold_hour
+    generation: int  # the give-back arming (hold_hour: the one current when it fired); 0 for expiry alerts
     trade_id: uuid.UUID  # the trade when it fired, for the notification's link (trades are rebuilt; read by source_key)
     contract: str  # e.g. "SNDK 9/18/26 230C"
     contracts: float

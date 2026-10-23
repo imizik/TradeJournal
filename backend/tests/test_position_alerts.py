@@ -67,9 +67,9 @@ class Quotes:
         return {s: TradierQuote(symbol=s, bid=self.bid, ask=self.ask, bid_date=bid_at, ask_date=ask_at) for s in symbols}
 
 
-def fill(db, side, qty, price, when, expiration=FRI):
+def fill(db, side, qty, price, when, expiration=FRI, account_id=ROTH):
     i = next(n)
-    db.add(Fill(id=UUID(int=i), account_id=ROTH, ticker="SNDK", instrument_type="option", side=side, contracts=qty, price=price,
+    db.add(Fill(id=UUID(int=i), account_id=account_id, ticker="SNDK", instrument_type="option", side=side, contracts=qty, price=price,
                 executed_at=datetime.fromisoformat(when), raw_email_id=f"gmail:{i}", option_type="call", strike=230,
                 expiration=expiration))
     db.commit()
@@ -149,6 +149,13 @@ def test_a_small_position_never_arms_on_percent_alone(engine, world):
     quotes.set(0.95)
     step(clock, watcher)
     assert alerts(engine) == []
+
+
+def test_floorless_exception_and_position_alerts_are_off_by_default(monkeypatch):
+    monkeypatch.delenv("POSITION_ALERTS_ENABLED", raising=False)
+    monkeypatch.delenv("POSITION_ALERTS_FLOORLESS_ACCOUNT_ID", raising=False)
+    assert position_alerts.enabled() is False
+    assert position_alerts.floorless_giveback({"account_id": ROTH, "trade": None}) is False
 
 
 def test_buying_more_re_arms_and_selling_part_keeps_it_armed(engine, world):
@@ -356,8 +363,25 @@ def test_the_trade_page_reads_this_positions_alerts(engine, world, monkeypatch):
         body = TestClient(app).get(f"/trades/{trade_id}/phone-alerts").json()
         assert db.exec(select(PositionWatch)).one().armed_at is not None
     assert body["enabled"] is True
+    assert body["giveback_dollar_floor_applies"] is True
     assert [(a["kind"], a["gain"], a["peak_gain"], a["delivery"]) for a in body["alerts"]] == [("giveback", 4.0, 124.0, "pending")]
     assert body["watch"] == {"peak_gain": 124.0, "peak_gain_pct": 0.155, "armed": True, "fired": True, "peak_at": body["watch"]["peak_at"]}
+
+
+def test_trade_page_reports_floorless_exception_for_configured_spy_account(engine, world, monkeypatch):
+    fired(engine, world)
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    monkeypatch.setenv("POSITION_ALERTS_FLOORLESS_ACCOUNT_ID", str(ROTH))
+    app = FastAPI()
+    app.include_router(position_alerts_router.router, prefix="/trades")
+    with Session(engine) as db:
+        trade = db.exec(select(Trade)).one()
+        trade.ticker = "SPY"
+        db.add(trade)
+        db.commit()
+        app.dependency_overrides[get_session] = lambda: db
+        body = TestClient(app).get(f"/trades/{trade.id}/phone-alerts").json()
+    assert body["giveback_dollar_floor_applies"] is False
 
 
 def test_a_trim_that_changes_the_cost_basis_re_arms_instead_of_alerting(engine, world):
@@ -429,3 +453,199 @@ def test_the_anchor_breaks_same_minute_ties_on_the_source_id_not_the_fill_uuid()
     a = SimpleNamespace(executed_at=when, raw_email_id="gmail:A", id=UUID(int=9))
     b = SimpleNamespace(executed_at=when, raw_email_id="gmail:B", id=UUID(int=1))
     assert position_alerts.anchor([a, b]) == position_alerts.anchor([b, a]) == "gmail:A"
+
+@pytest.mark.parametrize('symbol,account,configured,expected', [
+    ('SPY', ROTH, str(ROTH), True),
+    ('QQQ', ROTH, str(ROTH), True),
+    ('SPY', UUID(int=2), str(ROTH), False),
+    ('SNDK', ROTH, str(ROTH), False),
+    ('SPY', ROTH, '', False),
+    ('SPY', ROTH, 'invalid', False),
+])
+def test_floorless_account_and_symbol_scope(monkeypatch, symbol, account, configured, expected):
+    from types import SimpleNamespace
+    monkeypatch.setenv('POSITION_ALERTS_FLOORLESS_ACCOUNT_ID', configured)
+    position = {'account_id': account, 'trade': SimpleNamespace(ticker=symbol, instrument_type='option')}
+    assert position_alerts.floorless_giveback(position) is expected
+    position['trade'].instrument_type = 'stock'
+    assert position_alerts.floorless_giveback(position) is False
+
+@pytest.mark.parametrize('symbol,account,configured,should_fire', [
+    ('SPY', ROTH, str(ROTH), True),
+    ('QQQ', ROTH, str(ROTH), True),
+    ('SPY', UUID(int=2), str(ROTH), False),
+    ('SPY', ROTH, '', False),
+    ('SNDK', ROTH, str(ROTH), False),
+])
+def test_small_position_floor_exception_lifecycle(engine, world, monkeypatch, symbol, account, configured, should_fire):
+    monkeypatch.setenv('POSITION_ALERTS_FLOORLESS_ACCOUNT_ID', configured)
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        if account != ROTH:
+            db.add(Account(id=account, name="Other", type="taxable", last4="0000", broker="robinhood"))
+            db.commit()
+        fill(db, 'buy_to_open', 1, 100, '2026-10-21T09:45', account_id=account)
+        trade = db.exec(select(Trade)).one()
+        trade.ticker = symbol
+        db.add(trade)
+        db.commit()
+    quotes.set(1.07)  # midpoint +9% does not arm
+    step(clock, watcher)
+    with Session(engine) as db:
+        assert db.exec(select(PositionWatch)).one().armed_at is None
+    quotes.set(1.08)  # midpoint +10%, only $10 gain
+    step(clock, watcher)
+    quotes.set(1.02)  # midpoint +4%, does not fire
+    step(clock, watcher)
+    assert alerts(engine) == []
+    quotes.set(1.01)  # midpoint +3%
+    step(clock, watcher)
+    assert len(alerts(engine)) == int(should_fire)
+
+
+
+# ---------------------------------------------------------------- held an hour
+
+
+@pytest.fixture
+def hold_on(monkeypatch):
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    monkeypatch.setenv("POSITION_HOLD_ALERTS", "true")
+
+
+def run_at(clock, watcher, day, *times):
+    for hhmm in times:
+        clock.now = at(day, hhmm)
+        watcher.run()
+
+
+def kinds(engine):
+    return [a.kind for a in alerts(engine)]
+
+
+def test_a_position_held_sixty_minutes_gets_one_re_decide_alert(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.46)  # mid $4.48: +12%, +$48 -- under $50, so give-back never arms
+    run_at(clock, watcher, WED, "10:30")
+    quotes.set(3.74)  # mid $3.76: -6%
+    run_at(clock, watcher, WED, "10:59")
+    assert alerts(engine) == []
+    run_at(clock, watcher, WED, "11:00", "11:01", "11:10")
+    found = alerts(engine)
+    assert kinds(engine) == ["hold_hour"]
+    title, body, _ = position_alerts.message(found[0])
+    assert title == "SNDK 10/23/26 230C: open an hour, re-decide"
+    assert body == ("Open 60 min, now -$24 (-6%) at a $3.76 mid, bid $3.74, best seen by the alert watch +$48 (+12%). "
+                    "1 contract open. Re-decide: close, trim, or set your exit.")
+
+
+def test_an_entry_before_the_open_counts_from_nine_thirty(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T08:15")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "09:45", "10:29")
+    assert alerts(engine) == []
+    run_at(clock, watcher, WED, "10:30")
+    assert kinds(engine) == ["hold_hour"]
+
+
+def test_a_half_day_close_before_the_hour_skips_it_and_moves_nothing_else(engine, world, hold_on):
+    clock, quotes, watcher = world
+    watcher.calendar = Calendar(close=780)  # a 1:00 PM close
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T11:30")
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T12:10", expiration=date(2026, 10, 30))
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "12:30", "12:59")
+    assert [a.contract for a in alerts(engine)] == ["SNDK 10/23/26 230C"]  # the 11:30 entry's hour lands before the close
+
+
+def test_once_per_position_whether_it_is_added_to_before_or_after_the_alert(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "10:20")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 300, "2026-10-21T10:25")  # a new basis within the hour: the clock is the first entry's
+    run_at(clock, watcher, WED, "10:30", "11:00", "11:01")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 500, "2026-10-21T11:02")  # a new basis inside the alert's window
+    run_at(clock, watcher, WED, "11:03", "11:10", "12:03")
+    assert [(a.kind, a.generation) for a in alerts(engine)] == [("hold_hour", 1)]
+
+
+def test_a_hold_alert_more_than_fifteen_minutes_late_is_skipped(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "11:15", "11:30")  # the server was down at 11:00
+    assert alerts(engine) == []
+
+
+def test_an_expiry_alert_due_within_fifteen_minutes_wins(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, "2026-10-21T13:25", expiration=WED)  # an hour lands at 14:25, the first expiry at 14:30
+    quotes.set(1.50)
+    run_at(clock, watcher, WED, "14:25", "14:30", "14:35")
+    assert kinds(engine) == ["expiry_first"]
+    regular = ("regular", 570, 960)
+
+    def due(hhmm, expires):
+        return position_alerts.hold_due(datetime.fromisoformat(f"2026-10-21T{hhmm}"), WED, regular, expires)
+    assert (due("12:00", True), due("13:15", True), due("14:20", True), due("14:40", True)) == (780, 855, None, None)
+    assert (due("13:25", False), due("15:00", False)) == (865, None)
+    assert position_alerts.hold_due(datetime(2026, 10, 20, 15, 30), WED, regular, False) is None  # opened another day
+
+
+@pytest.mark.parametrize("flags", [{"POSITION_ALERTS_ENABLED": "true"}, {"POSITION_HOLD_ALERTS": "true"}])
+def test_the_hold_alert_is_off_without_both_switches(engine, world, monkeypatch, flags):
+    clock, quotes, watcher = world
+    monkeypatch.delenv("POSITION_ALERTS_ENABLED", raising=False)
+    monkeypatch.delenv("POSITION_HOLD_ALERTS", raising=False)
+    for name, value in flags.items():
+        monkeypatch.setenv(name, value)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "11:00")
+    assert alerts(engine) == []
+
+
+def test_a_quote_that_cannot_be_judged_still_sends_saying_so(engine, world, hold_on):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(2.00, 6.00)  # a spread of 100% of the midpoint
+    run_at(clock, watcher, WED, "11:00")
+    found = alerts(engine)
+    assert (found[0].kind, found[0].mark, found[0].bid) == ("hold_hour", None, 200)
+    assert position_alerts.message(found[0])[1] == ("Open 60 min, no reliable quote, bid $2.00. 1 contract open. "
+                                                    "Re-decide: close, trim, or set your exit.")
+    found[0].bid = None
+    assert position_alerts.message(found[0])[1].startswith("Open 60 min, no reliable quote. 1 contract open.")
+
+
+def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch):
+    clock, quotes, watcher = world
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(4.00)
+    run_at(clock, watcher, WED, "11:00")
+    alert = alerts(engine)[0]
+    sent = []
+    sent_to(monkeypatch, sent)
+    watcher.deliver()
+    watcher.deliver()
+    assert sent == [("SNDK 10/23/26 230C: open an hour, re-decide", f"/trades/{alert.trade_id}")]
+    with Session(engine) as db:
+        row = db.get(PositionAlert, alert.id)
+        row.delivery, row.claimed_at = "sending", datetime.fromtimestamp(clock.now - 200, UTC).replace(tzinfo=None)
+        db.commit()
+    watcher.deliver()
+    assert len(sent) == 1 and alerts(engine)[0].delivery == "unknown"

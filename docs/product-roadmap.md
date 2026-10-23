@@ -10,6 +10,59 @@ moomoo metric-source evaluation added 2026-10-10. This document records future d
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
+## End goal — October 22, 2026
+
+Isaac's statement of where TradeJournal is going. It sits above the dated
+priorities below: when they conflict, this wins.
+
+Build a personalized AI-powered trading companion that helps Isaac discover
+opportunities, make better decisions, manage positions, and continuously
+improve as a trader, with minimal manual effort.
+
+1. **Discover — Market Radar.** Proactively detect unusual activity, emerging
+   momentum, sector rotations and potential opportunities, even in stocks he is
+   not already watching. Send timely, factual alerts without waiting for AI
+   analysis.
+2. **Understand — AI research and Jo.** Help him understand what is happening,
+   why it matters, what might happen next, and which opportunities deserve
+   further investigation. Jo provides background monitoring and deeper analysis.
+3. **Decide — interactive copilot.** Bounce ideas off AI, challenge theses,
+   compare scenarios and develop a clear plan. Save the reasoning, entry
+   conditions, invalidation and decisions.
+4. **Execute and monitor — position follow-through.** Track plans and existing
+   positions, alert him when meaningful conditions change, and help manage risk
+   without constant screen time. He remains in control of trades.
+5. **Review and improve — personal trading intelligence.** Automatically connect
+   market observations, original plans, actual trades and outcomes. Identify
+   recurring strengths, mistakes and behaviors worth practicing. Use historical
+   research and prospective evidence to test what actually works.
+
+What makes it different: it knows his trading history, strategies, beliefs,
+positions and past decisions, and uses that context across one continuous loop,
+**Discover → Investigate → Plan → Monitor → Review → Improve**, rather than five
+disconnected tools. The goal is not more features, more AI activity or
+automated trading.
+
+**What comes next: prove two things first.**
+
+- Position alerts help him notice and reconsider important changes while
+  holding trades. Measured by the alert follow-up tracker and exit-habits
+  scorecard (what he did after each alert; give-back, held-past-an-hour,
+  expired and opened-while-green counts against the pre-alert baseline from the
+  [October 21 behavior audit](../backend/reports/behavior_audit_2026-10-21.md)).
+- [Radar](radar.md) identifies opportunities he otherwise might have missed,
+  early enough to investigate. Measured by the Radar pilot: his ratings, and
+  comparison with the Movers ranking and the morning brief.
+
+Then connect the successful workflows through a natural conversational
+experience, reusing the infrastructure already built. The conversational
+copilot (step 3) waits for both proofs.
+
+**Success measure:** TradeJournal becomes something he genuinely relies on
+because it helps him notice better opportunities, make deliberate decisions,
+avoid repeatable mistakes and learn what improves his trading, not simply
+because he built it.
+
 ## October 21 workflow consolidation — planning only
 
 The owner walkthrough established the daily routine: understand the market,
@@ -419,3 +472,13 @@ Track capture/review coverage only over known eligible journal records, with
 missing data disclosed. If a feature is repeatedly skipped or yields no useful
 action, simplify it or pause its expansion. Usage establishes usefulness;
 profitability and a repeatable trading edge require separate evidence.
+
+### October 22 SPY/QQQ routine — selected bounded implementation
+
+Isaac selected a Morning prep block with 2–3 scenarios total across SPY and QQQ,
+reusing Charts levels and the day journal for plans and freeze notes. It supports
+the Dots morning-usefulness outcome without new scanner rules or data grants.
+He also selected the Roth IRA SPY/QQQ-only give-back dollar-floor exception,
+retaining +10% arming and +3% notification. That exception remains disabled until
+separate owner activation approval. This selection does not change Radar's scope
+or reopen other adjacent features. Implementation is not live acceptance.

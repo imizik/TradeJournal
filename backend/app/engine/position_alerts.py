@@ -1,9 +1,10 @@
-"""Open-trade phone alerts: a long option that was up gives its gain back, or
-one is still open on its expiration day.
+"""Open-trade phone alerts: a long option that was up gives its gain back, one
+has been held an hour, or one is still open on its expiration day.
 
 From the October 21, 2026 behavior audit (``backend/reports/behavior_audit_2026-10-21.md``):
-trades that were green and were ridden back into losses, and options left to
-expire, are where the journal's money goes. These alerts only tell the phone;
+trades that were green and were ridden back into losses, trades held from an
+hour to the close, and options left to expire, are where the journal's money
+goes. These alerts only tell the phone;
 nothing here places, changes or suggests an order.
 
 Off unless ``POSITION_ALERTS_ENABLED=true``. It runs on the level alert
@@ -11,9 +12,11 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
 
 - **Give-back.** One Tradier quote request for every open long option. A
   position arms once its gain at the bid/ask midpoint reaches ``ARM_PCT`` of
-  cost and ``ARM_DOLLARS``; once armed, a gain at or under ``FIRE_PCT`` sends
-  one alert. A new cost basis (buying more, or a first-in-first-out sale that
-  leaves differently priced lots) starts a new arming with a fresh peak; a sale
+  cost and ``ARM_DOLLARS``; the explicitly configured account gets a
+  SPY/QQQ-only exception to the dollar floor. Once armed, a gain at or under
+  ``FIRE_PCT`` sends one alert. A new cost basis (buying more, or a
+  first-in-first-out sale that leaves differently priced lots) starts a new
+  arming with a fresh peak; a sale
   that leaves the basis unchanged keeps it armed. Regular hours only. Tradier is read directly,
   never the dashboard's yfinance fallback, whose option prices are delayed;
   a quote whose bid or ask is older than ``MAX_QUOTE_AGE``, or wider than
@@ -25,6 +28,19 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   ``FIRST_GRACE_MINUTES`` late is skipped, and none is sent after the close;
   the last one states the minutes actually left. A contract too thin to price
   shows its bid rather than "no quote".
+- **Held an hour.** Also off unless ``POSITION_HOLD_ALERTS=true``. Trades the
+  audit found held from an hour to the same-day close lost $17,558, and 53 of
+  those losers had been up 10% within their first hour; its suggestion was to
+  re-decide any position still open after an hour. One alert when a position
+  opened today reaches ``HOLD_MINUTES`` of the regular session, counted from
+  its first entry fill (an entry before the open counts from the open). None
+  when that lands at or after the close, when an expiry alert is due within
+  ``FIRST_GRACE_MINUTES`` of it (expiry wins), or when it is more than
+  ``FIRST_GRACE_MINUTES`` late. The clock is the first entry's, so it is one
+  alert per position: it is recorded with the give-back generation current
+  when it fired, and adding to the position (a new generation) neither restarts
+  the clock nor sends another. A quote that cannot be judged still sends, saying so;
+  the peak shown is what this loop saw.
 
 Positions are anchored in their first entry fill's source identity (account
 plus ``raw_email_id``), as saved-advice links are, so a trade rebuild does not
@@ -66,11 +82,36 @@ RUN_SECONDS = 30
 CLAIM_SECONDS = 120
 EXPIRE_SECONDS = 15 * 60
 BACKOFF = (30, 60, 120, 300)
-KINDS = ("giveback", "expiry_first", "expiry_final")
+HOLD_MINUTES = 60
+KINDS = ("giveback", "expiry_first", "expiry_final", "hold_hour")
 
 
 def enabled() -> bool:
     return os.environ.get("POSITION_ALERTS_ENABLED", "").lower() == "true"
+
+
+def floorless_giveback(position: dict) -> bool:
+    """Whether this position has the explicitly scoped SPY/QQQ arming exception.
+
+    The account UUID must be configured explicitly. Account names/labels are
+    intentionally not used because they are mutable and can be duplicated.
+    """
+    configured = os.environ.get("POSITION_ALERTS_FLOORLESS_ACCOUNT_ID", "").strip()
+    if not configured:
+        return False
+    try:
+        account_id = uuid.UUID(configured)
+    except (ValueError, AttributeError):
+        return False
+    trade = position.get("trade")
+    return (position.get("account_id") == account_id
+            and trade is not None
+            and trade.instrument_type == "option"
+            and trade.ticker in {"SPY", "QQQ"})
+
+
+def hold_enabled() -> bool:
+    return enabled() and os.environ.get("POSITION_HOLD_ALERTS", "").lower() == "true"
 
 
 def _utc(stamp: float) -> datetime:
@@ -106,6 +147,21 @@ def anchor(entries) -> str:
     return first.raw_email_id or str(first.id)
 
 
+def hold_due(opened_at: datetime, today: date, regular, expires_today: bool) -> int | None:
+    """The minute (ET) a position opened today has been held ``HOLD_MINUTES`` regular-session minutes, or None:
+    opened another day, due at or after the close, or an expiry alert is due within ``FIRST_GRACE_MINUTES`` of it."""
+    if opened_at.date() != today:
+        return None
+    due = max(opened_at.hour * 60 + opened_at.minute, regular[1]) + HOLD_MINUTES
+    if due >= regular[2]:
+        return None
+    if expires_today:
+        close = regular[2]
+        if due >= close - FINAL_MINUTES or any(abs(due - at) < FIRST_GRACE_MINUTES for at in (close - FIRST_MINUTES, close - FINAL_MINUTES)):
+            return None
+    return due
+
+
 def open_positions(db: Session) -> list[dict]:
     """Every open long option with what is still held, anchored in its first entry fill."""
     trades = db.exec(select(Trade).where(Trade.status == "open", Trade.instrument_type == "option",
@@ -127,7 +183,7 @@ def open_positions(db: Session) -> list[dict]:
         if not entries or not lots["open"] or lots["avg_cost"] is None or lots["direction"] != "long":
             continue  # nothing held, or a short: these alerts judge long premium only
         out.append({
-            "trade": trade, "account_id": trade.account_id, "source_key": anchor(entries),
+            "trade": trade, "account_id": trade.account_id, "source_key": anchor(entries), "opened_at": entries[0].executed_at,
             "contract": contract_label(trade.ticker, "option", trade.option_type, trade.strike, trade.expiration),
             "occ": occ_symbol(trade.ticker, trade.expiration, trade.option_type or "", float(trade.strike)),
             "contracts": lots["open"], "avg_cost": lots["avg_cost"], "expiration": trade.expiration,
@@ -162,6 +218,13 @@ def message(alert: PositionAlert, close_label: str | None = None, minutes_left: 
         now_part = f"bid {_premium(alert.bid)}, too thin to price at a midpoint"
     else:
         now_part = "no live quote right now"
+    if alert.kind == "hold_hour":
+        if alert.mark is None:
+            now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
+        peak = "" if alert.peak_gain is None else f", best seen by the alert watch {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)})"
+        return (f"{alert.contract}: open an hour, re-decide",
+                f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
+                f"Re-decide: close, trim, or set your exit.", 4)
     if alert.kind == "giveback":
         return (f"{alert.contract}: gave back its gain",
                 f"Was up {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), {now_part}. "
@@ -253,7 +316,7 @@ class PositionAlerts:
             if watch.peak_mark is None or price > watch.peak_mark:
                 watch.peak_mark, watch.peak_at = price, _utc(now)
             if watch.armed_at is None:
-                if gain_pct >= ARM_PCT and gain >= ARM_DOLLARS:
+                if gain_pct >= ARM_PCT and (floorless_giveback(position) or gain >= ARM_DOLLARS):
                     watch.armed_at = _utc(now)
             elif gain_pct <= FIRE_PCT:
                 found.append(self._alert(position, "giveback", watch.generation, mark, gain, gain_pct, watch, now))
@@ -264,6 +327,10 @@ class PositionAlerts:
                     else "expiry_first" if first <= minute < first + FIRST_GRACE_MINUTES else None)
             if kind is not None:
                 found.append(self._alert(position, kind, 0, mark, gain, gain_pct, None, now))
+        if hold_enabled():
+            due = hold_due(position["opened_at"], today, regular, position["expiration"] == today)
+            if due is not None and due <= minute < due + FIRST_GRACE_MINUTES:
+                found.append(self._alert(position, "hold_hour", watch.generation, mark, gain, gain_pct, watch, now))
         return found
 
     def _alert(self, position: dict, kind: str, generation: int, mark: dict | None, gain, gain_pct, watch, now: float) -> PositionAlert:
@@ -285,11 +352,13 @@ class PositionAlerts:
                 PositionAlert.kind == alert.kind, PositionAlert.generation == alert.generation)).first()
             if exists is not None:
                 return
-            if alert.kind == "expiry_first":
-                final = db.exec(select(PositionAlert.id).where(
+            if alert.kind in ("expiry_first", "hold_hour"):
+                # A last-day alert already sent makes the first one moot; a held-an-hour alert is once per position.
+                later = "expiry_final" if alert.kind == "expiry_first" else "hold_hour"
+                other = db.exec(select(PositionAlert.id).where(
                     PositionAlert.account_id == alert.account_id, PositionAlert.source_key == alert.source_key,
-                    PositionAlert.kind == "expiry_final")).first()
-                if final is not None:
+                    PositionAlert.kind == later)).first()
+                if other is not None:
                     return
             db.add(alert)
             try:
@@ -366,16 +435,18 @@ class PositionAlerts:
 
 def for_trade(db: Session, trade: Trade) -> dict:
     """The trade page's view: alerts sent for this position and, while it is open, what is being watched."""
+    floor_applies = not floorless_giveback({"account_id": trade.account_id, "trade": trade})
     entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
                       .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
     if not entries or trade.instrument_type != "option":
-        return {"enabled": enabled(), "alerts": [], "watch": None}
+        return {"enabled": enabled(), "giveback_dollar_floor_applies": floor_applies, "alerts": [], "watch": None}
     key = anchor(entries)
     alerts = db.exec(select(PositionAlert).where(PositionAlert.account_id == trade.account_id, PositionAlert.source_key == key)
                      .order_by(PositionAlert.detected_at)).all()
     watch = db.exec(select(PositionWatch).where(PositionWatch.account_id == trade.account_id, PositionWatch.source_key == key)).first()
     return {
         "enabled": enabled(),
+        "giveback_dollar_floor_applies": floor_applies,
         "alerts": [{
             "kind": a.kind, "detected_at": int(_epoch(a.detected_at)), "contracts": a.contracts, "mark": a.mark, "bid": a.bid,
             "gain": a.gain, "gain_pct": a.gain_pct, "peak_gain": a.peak_gain, "peak_gain_pct": a.peak_gain_pct,

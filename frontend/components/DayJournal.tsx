@@ -86,6 +86,12 @@ export default function DayJournal({ day, review = false, initialData, onEntrySa
     } finally { saveLock.current = false; setSaving(false); }
   };
 
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    window.addEventListener("day-journal-saved", refresh);
+    return () => window.removeEventListener("day-journal-saved", refresh);
+  }, [load]);
+
   const entries = useMemo(() => journal?.entries ?? [], [journal]);
   const plans = journal?.trade_plans;
   const hasPlans = !!plans && (Object.values(plans.by_trade ?? {}).some((items) => items.length) || !!plans.not_traded?.length);
