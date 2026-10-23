@@ -96,7 +96,7 @@ and refreshes every 60 seconds while the tab is visible.
 ## Charts group movement
 
 The owner approved a read-only peer comparison on October 22, 2026. Charts
-Overview → Peers adds **Group movement**, with **15 min** and **Session** views. It uses recorded observations,
+Overview → Peers adds **Group movement**, with **15 min**, **Session** and **From low** views. It uses recorded observations,
 independently of the still-unbuilt event detector. This implementation does not
 activate recording or establish live usefulness.
 
@@ -131,6 +131,28 @@ no 600-pass truncation that could silently advance this baseline. Failed passes
 remain gaps. Either window can be unavailable while the other is available.
 The Session toggle uses the same response, without another request.
 
+The response also includes `recovery_context` for **From low**. It finds the
+selected stock's lowest eligible sampled `last` in that recorded session, then
+compares every peer and QQQ/SPY from that exact pass to the latest usable pass.
+It does not compare each peer from its own low. Equal minima use the earliest
+pass (pass ID breaks equal-time ties). Selecting another stock recalculates the
+anchor. This is not the true tick/candle/session low or the provider's day-low
+field: recording can start late and miss lower prices between samples.
+
+The low search uses the same positive-price, trade-age, retrieval and pass-duration
+eligibility rules. A universe-version change anywhere among usable session passes
+refuses recovery context. `low_anchor` carries price, pass ID/time and actual
+trade/retrieval times. `low_search` carries the search interval, eligible samples,
+omitted samples and eligible/expected minute buckets, including gaps before the
+anchor. Missing or ineligible search observations make a comparison partial.
+The latest pass must have an eligible selected-stock price; no earlier latest
+price is substituted. At least two eligible samples and one minute after the
+anchor are required. A newly recorded low has no rebound window yet; a return
+to an earlier equal low displays zero and **no net rebound**. Missing peer
+endpoints stay null. This describes endpoint participation, not a sustained
+recovery, bottom confirmation or future profit probability. The toggle uses the
+same response and refresh as the other two views.
+
 Coverage counts eligible peers (excluding the selected stock and benchmarks),
 up/down peers, missing symbols and recorded minute buckets in the window.
 Two endpoint returns do not demonstrate a continuous or sustained recovery.
@@ -142,7 +164,8 @@ An unavailable calendar prevents a claim about the current session.
 
 The API opens only an existing, app-ID-checked Radar file in SQLite read-only
 mode: no schema initialization, visits, feedback or event writes. It reads
-pass metadata from one session and the endpoint passes' quote rows. It makes no
+pass metadata from one session, the endpoint passes' quote rows, and an indexed
+selected-symbol/session quote read for the sampled-low search. It makes no
 quote/history/news requests; the shared market calendar may refresh its existing
 monthly cache. Charts adds the read to its existing visible Overview peer refresh
 cycle (60 seconds), aborts obsolete symbol/group requests, and hides old values

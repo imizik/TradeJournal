@@ -56,13 +56,56 @@ def compare_group(store: RadarStore, result: dict, *, today: str, now: float, li
     session_result = empty_comparison(result["symbol"], result["group"]["name"],
                                       {"groups": result["groups"], "version": result["universe_version"]}, now)
     session_result["window_minutes"] = None
-    result = _compare_window(store, result, passes, now=now, live=live, session_window=False)
-    result["session_context"] = _compare_window(store, session_result, passes, now=now, live=live, session_window=True)
+    recovery_result = {**session_result, "rows": []}
+    result = _compare_window(store, result, passes, now=now, live=live, mode="recent")
+    result["session_context"] = _compare_window(store, session_result, passes, now=now, live=live, mode="session")
+    result["recovery_context"] = _compare_window(store, recovery_result, passes, now=now, live=live, mode="recovery")
     return result
 
 
+def _recovery_anchor(store: RadarStore, result: dict, passes: list[dict], usable: list[dict]) -> dict | None:
+    """Selected-stock sampled minimum; every peer later uses this exact pass."""
+    end = usable[0]
+    end_time = epoch(end["started_at"])
+    if any(p["universe_version"] != result["universe_version"] for p in usable):
+        result["reason"] = "Recorded group version changed during the session; sampled-low context is unavailable."
+        return None
+    # One indexed symbol/session read, not a full universe read for every minute.
+    quotes = {q["pass_id"]: q for q in store.quotes(session_date=result["session"], symbol=result["symbol"])}
+    eligible = []
+    for record in usable:
+        if not 0 <= epoch(record["finished_at"]) - epoch(record["started_at"]) <= PASS_TOLERANCE_SECONDS:
+            continue
+        point, _ = _endpoint(quotes.get(record["id"]), record)
+        if point:
+            eligible.append((record, point))
+    searched = [p for p in passes if epoch(p["started_at"]) <= end_time]
+    search_start = min(epoch(p["started_at"]) for p in searched)
+    result["low_search"] = {"start": iso(search_start), "end": end["started_at"],
+                            "eligible_samples": len(eligible), "omitted_samples": len(searched) - len(eligible),
+                            "eligible_minutes": len({int(epoch(p["started_at"]) // 60) for p, _ in eligible}),
+                            "expected_minutes": int(end_time // 60 - search_start // 60) + 1}
+    if not eligible:
+        result["reason"] = "No eligible selected-stock samples to locate a recorded low."
+        return None
+    # Repeated equal lows use the earliest observation, with pass ID breaking time ties.
+    start, low = min(eligible, key=lambda item: (item[1]["price"], epoch(item[0]["started_at"]), item[0]["id"]))
+    result["low_anchor"] = {"symbol": result["symbol"], "pass_id": start["id"], "pass_at": start["started_at"], **low}
+    if not any(p["id"] == end["id"] for p, _ in eligible):
+        result["reason"] = "Selected stock has no eligible latest sample; rebound context is unavailable."
+        return None
+    if len(eligible) < 2:
+        result["reason"] = "At least two eligible selected-stock samples are needed for rebound context."
+        return None
+    if end_time - epoch(start["started_at"]) < 60:
+        result["reason"] = "The recorded low is too recent: no rebound window of at least one minute yet."
+        return None
+    result["window_minutes"] = (end_time - epoch(start["started_at"])) / 60
+    return start
+
+
 def _compare_window(store: RadarStore, result: dict, passes: list[dict], *, now: float,
-                    live: bool, session_window: bool) -> dict:
+                    live: bool, mode: str) -> dict:
     result["live"] = live
     if not passes:
         result["reason"] = "Waiting for this session's recorded observations." if live else "No recorded session yet."
@@ -75,7 +118,15 @@ def _compare_window(store: RadarStore, result: dict, passes: list[dict], *, now:
     end = usable[0]
     end_time = epoch(end["started_at"])
     stale = live and now - end_time > STALE_SECONDS
-    if session_window:
+    if mode == "recovery":
+        if stale:
+            result["state"] = "stale"
+        start = _recovery_anchor(store, result, passes, usable)
+        if start is None:
+            if stale:
+                result["reason"] = "Recording is stale. " + result["reason"]
+            return result
+    elif mode == "session":
         # Never move the baseline forward to find a more convenient price/version.
         start = usable[-1]
         if end_time - epoch(start["started_at"]) < 60:
@@ -120,7 +171,12 @@ def _compare_window(store: RadarStore, result: dict, passes: list[dict], *, now:
                           "peers_up": sum(r["change_pct"] > 0 for r in valid),
                           "peers_down": sum(r["change_pct"] < 0 for r in valid), "missing": missing,
                           "recorded_minutes": recorded, "expected_minutes": expected}
-    partial = bool(missing) or recorded < expected
+    search = result.get("low_search")
+    partial_search = bool(search and (search["eligible_minutes"] < search["expected_minutes"] or search["omitted_samples"]))
+    partial = bool(missing) or recorded < expected or partial_search
     result["state"] = "stale" if stale else "partial" if partial else "ready"
     result["reason"] = "Recording is stale; these are older observations." if stale else "Some observations are missing or ineligible." if partial else None
+    if mode == "recovery":
+        selected = next(row for row in result["rows"] if row["role"] == "selected")
+        result["at_recorded_low"] = selected["change_pct"] == 0
     return result
