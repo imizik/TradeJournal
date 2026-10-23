@@ -82,7 +82,7 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   const jo = page.getByTestId("jo-day");
   await expect(page.getByTestId("jo-day-headline")).toHaveText(/^Briefing on time · 1 of 4 market reads in · 1 extra read · MU triggered 10:54 AM · next: 11:00 market read$/);
   await expect(page.getByTestId("jo-day-headline")).toHaveAttribute("data-trouble", "false");
-  await expect(jo.getByText("Morning data sent to Jo")).toBeVisible();
+  await expect(jo.getByText("Morning data ready", { exact: true })).toBeVisible();
   await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
   const first = jo.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" });
   await expect(first).toContainText("On time · data had gaps");
@@ -114,6 +114,61 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("jo-day-today-phone.png") });
   expect(errors).toEqual([]);
+});
+
+test("morning publication and the first recorded read keep their own times", async ({ page }) => {
+  await stub(page, today, midday);
+  const body = morning(today, midday);
+  body.delivery!.context_read = "recorded";
+  body.delivery!.context_read_at = iso(today, "09:03");
+  body.delivery!.submitted_at = iso(today, "09:05");
+  body.delivery!.available_at = iso(today, "09:05");
+  body.briefing!.received_at = iso(today, "09:05");
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: body }));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`/daily/${today}`);
+    const jo = page.getByTestId("jo-day");
+    const ready = jo.getByTestId("jo-day-item").filter({ hasText: "Morning data ready" });
+    const read = jo.getByTestId("jo-day-item").filter({ hasText: "Morning data read", hasNotText: "Morning data ready" });
+    const brief = jo.getByTestId("jo-day-item").filter({ hasText: "Morning briefing:" });
+    await expect(ready).toContainText("8:45 AM");
+    await expect(read).toContainText("9:03 AM");
+    await expect(brief).toContainText("9:05 AM");
+    await expect(brief).toContainText("On time");
+    await expect(read.locator("summary")).toContainText("run start time unknown");
+    await ready.locator("summary").click();
+    await expect(ready).toContainText("It does not mean Jo's run had started.");
+    await read.locator("summary").click();
+    await expect(read).toContainText("not when the task woke up");
+    await expect(jo).not.toContainText("Morning data sent to Jo");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await ready.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath(`jo-morning-timing-${width === 390 ? "phone" : "desktop"}.png`) });
+    if (width === 390) {
+      await read.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath("jo-morning-timing-phone-read.png") });
+    }
+  }
+});
+
+test("missing or unknown read markers never manufacture a morning read", async ({ page }) => {
+  await stub(page, today, midday);
+  const body = morning(today, midday);
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: body }));
+  for (const marker of [
+    { context_read: "not_recorded" as const, context_read_at: null },
+    { context_read: "unknown" as const, context_read_at: iso(today, "09:03") },
+    { context_read: "recorded" as const, context_read_at: null },
+    { context_read: undefined, context_read_at: undefined },
+  ]) {
+    Object.assign(body.delivery!, marker);
+    await page.goto(`/daily/${today}`);
+    const jo = page.getByTestId("jo-day");
+    await expect(jo.getByText("Morning data ready", { exact: true })).toBeVisible();
+    await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Morning data read", hasNotText: "Morning data ready" })).toHaveCount(0);
+    await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
+  }
 });
 
 test("read attribution stays distinct for schedule references, time matches and unknown links", async ({ page }) => {

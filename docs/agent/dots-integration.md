@@ -302,6 +302,13 @@ files without blocking publication. Disable the configuration to stop both
 publication and import; stop/cancel the Jo task separately. Existing exported
 copies remain subject to their expiry and the explicit cleanup procedure.
 
+The Daily Review's Jo timeline labels publication **Morning data ready** and
+shows **Morning data read** separately only when both a recorded marker and its
+timestamp exist. Publication does not wake Jo; the read does not establish the
+task's start time or origin. Missing/unknown markers and older responses without
+these fields never manufacture a read from the publication or briefing time.
+The external task schedule is not measured by the gap between these two rows.
+
 **Installed Jo task instructions (October 19):** On approved exchange mornings
 after publication, call `jo_morning_context`. If unavailable, report the gap; never
 substitute yesterday's brief or invent positions. Use the returned frozen packet
