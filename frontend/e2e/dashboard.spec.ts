@@ -97,6 +97,48 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   expect(errors).toEqual([]);
 });
 
+test("exit habits card shows each alert's follow-up and the four habits against baseline", async ({ page, request }) => {
+  expect((await request.post(`${API}/__test/exit-habits-seed`)).ok()).toBe(true);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto("/");
+  const card = page.getByTestId("exit-habits");
+  // Every seeded trade closed long before the alerts went live: nothing to compare yet, and no trend language.
+  await expect(card).toContainText("0 since phone alerts went live on Oct 21, against 2 before");
+  await expect(card).toContainText("Too few trades yet to read a change");
+  await expect(card).not.toContainText(/improv|grade|score/i);
+  const expired = card.getByTestId("habit-expired_worthless");
+  await expect(expired).toContainText("Since Oct 21 (0 of 30 so far)");
+  await expect(expired).toContainText("no trades");
+  await expect(expired).toContainText("1 of 2 · 50% · -$300");
+  await expect(card.getByTestId("habit-green_to_red")).toContainText("2 trades, no data"); // no path metrics in the seed
+  const alerts = card.getByTestId("exit-habits-alert");
+  await expect(alerts).toHaveCount(3);
+  const nvda = alerts.filter({ hasText: "NVDA" });
+  await expect(nvda).toContainText("Gave back its gain");
+  await expect(nvda).toContainText("Closed within 15 min");
+  await expect(nvda).toContainText("You came out $250 better than closing at the alert."); // 5 sold at $700 vs a $650 mark
+  const tsla = alerts.filter({ hasText: "TSLA" });
+  await expect(tsla).toContainText("Held an hour");
+  await expect(tsla).toContainText("Let it expire");
+  await expect(tsla).toContainText("Closing at the alert would have been $240 better.");
+  const aapl = alerts.filter({ hasText: "AAPL" });
+  await expect(aapl).toContainText("Trimmed within 15 min");
+  await expect(aapl).toContainText("Still open, so there is no result yet.");
+  const link = nvda.getByRole("link");
+  await expect(link).toHaveAttribute("href", /^\/trades\/[0-9a-f-]{36}$/);
+  await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-desktop.png") });
+  await page.screenshot({ path: test.info().outputPath("dashboard-exit-habits-page-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await card.scrollIntoViewIfNeeded();
+  await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-phone.png") });
+  await link.click();
+  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]{36}$/);
+  expect(errors).toEqual([]);
+});
+
 test("dashboard Radar preview reads a bounded dated feed without changing visits or feedback", async ({ page, request }) => {
   expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBe(true);
   const base = await (await request.get(`${API}/radar/feed`)).json();

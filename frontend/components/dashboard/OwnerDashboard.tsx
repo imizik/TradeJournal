@@ -12,6 +12,7 @@ import MorningBriefing from "./MorningBriefing";
 import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
 import JoTodayLine from "./JoTodayLine";
 import RadarPreview from "./RadarPreview";
+import ExitHabits from "./ExitHabits";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -72,6 +73,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
             scope={[params.account && params.account !== "all" ? accountOptions.find((a) => a.type === params.account)?.name ?? params.account : null,
               params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />
         </Suspense>
+        <ExitHabits />
         <DataFreshness />
       </aside>
     </div>

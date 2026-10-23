@@ -80,6 +80,36 @@ def radar_seed(news: str = "found"):
     return {"seeded": True}
 
 
+@core_app.post("/__test/exit-habits-seed", include_in_schema=False)
+def exit_habits_seed():
+    """Phone alerts on the seeded Roth trades: NVDA closed within 15 minutes, TSLA left to expire (under a later
+    alert kind), AAPL trimmed with no mark. Each is anchored like the live alerts, in its first entry fill."""
+    from datetime import UTC, timedelta
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.engine.chart_journal import contract_label
+    from app.engine.chart_math import ET
+    from app.models import Account, Fill, PositionAlert, Trade
+
+    with Session(engine) as db:
+        if db.exec(select(PositionAlert)).first():
+            return {"seeded": False}
+        roth = db.exec(select(Account.id).where(Account.type == "roth_ira")).one()
+        for ticker, kind, minutes, mark, delivery in (("NVDA", "giveback", -5, 650.0, "sent"), ("TSLA", "hold_hour", 5, 120.0, "unknown"),
+                                                      ("AAPL", "expiry_first", -10, None, "sent")):
+            fills = db.exec(select(Fill).where(Fill.ticker == ticker, Fill.account_id == roth).order_by(Fill.executed_at)).all()
+            entries = [f for f in fills if f.side == "buy_to_open"]
+            exits = [f for f in fills if f.side == "sell_to_close"]
+            at = (exits[0].executed_at if exits else entries[-1].executed_at) + timedelta(minutes=minutes)
+            trade = db.exec(select(Trade).where(Trade.ticker == ticker, Trade.account_id == roth)).one()
+            db.add(PositionAlert(account_id=roth, source_key=entries[0].raw_email_id, kind=kind, generation=0, trade_id=trade.id,
+                                 contract=contract_label(ticker, "option", trade.option_type, trade.strike, trade.expiration),
+                                 contracts=sum(float(f.contracts) for f in entries), avg_cost=float(trade.avg_entry_premium), mark=mark,
+                                 detected_at=at.replace(tzinfo=ET).astimezone(UTC).replace(tzinfo=None), delivery=delivery))
+        db.commit()
+    return {"seeded": True}
+
+
 @core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state
