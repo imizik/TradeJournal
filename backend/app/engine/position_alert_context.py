@@ -88,5 +88,5 @@ def phone_text(snapshot: str | None) -> str:
                 f"Samples start +{math.ceil(entry['baseline_delay_seconds'])}s after entry; "
                 f"{coverage['recorded_minutes']}/{coverage['expected_minutes']} min recorded"
                 + (" · partial coverage" if state == "partial" else ""))
-    except (ValueError, TypeError, KeyError, OverflowError):
+    except (ValueError, TypeError, KeyError, OverflowError, AttributeError):
         return unavailable

@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.engine import ntfy, position_alert_context as context, position_alerts
 from app.engine.radar_store import RadarStore
-from app.models import Trade, Fill, TradeFill
+from app.models import Trade, Fill, TradeFill, PositionAlert
 from tests import test_position_alerts as fixtures
 from tests.test_position_alerts import WED, at, fill, step, alerts, sent_to
 
@@ -183,6 +183,26 @@ def test_context_is_additive_to_every_existing_kind(engine, world, market, kind)
 @pytest.mark.parametrize("raw", [None, "bad-json", "null", "{}", '{"version": 2}', '{"version": 1, "comparison": {"state": "ready"}}'])
 def test_invalid_snapshot_cannot_break_formatter(raw):
     assert context.phone_text(raw) == ("" if raw is None else "Since-entry context unavailable.")
+
+
+def test_malformed_saved_context_still_delivers_original_alert_once(engine, world, monkeypatch):
+    alert = fire(engine, world)
+    with Session(engine) as db:
+        saved = db.get(PositionAlert, alert.id)
+        saved.context_snapshot_json = json.dumps({"version": 1, "comparison": {
+            "state": "ready", "window": {"start": 0, "end": "2026-10-21T14:00:00Z"},
+            "coverage": {}, "entry": {},
+        }})
+        db.commit()
+    attempts = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kwargs: attempts.append((title, body, kwargs)))
+    world[2].deliver()
+    world[2].deliver()
+    assert len(attempts) == 1 and alerts(engine)[0].delivery == "sent"
+    assert attempts[0][1].endswith("\n\nSince-entry context unavailable.")
+    assert attempts[0][1].startswith(position_alerts._base_message(alert, "4:00 PM", 20)[1])
+    assert attempts[0][2]["path"] == f"/trades/{alert.trade_id}"
 
 
 def test_ambiguous_send_retains_context_and_is_never_resent(engine, world, market, monkeypatch):

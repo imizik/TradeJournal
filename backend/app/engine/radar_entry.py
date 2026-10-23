@@ -16,10 +16,10 @@ def resolve_entry(db: Session, trade: Trade, result: dict, now: float, *, source
     if trade.status != "open" or trade.instrument_type != "option":
         result["reason"] = "Since-entry context requires a recorded open option trade."
         return False
-    first = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(
+    first = db.exec(select(Fill.executed_at, Fill.raw_email_id, Fill.id).join(TradeFill, TradeFill.fill_id == Fill.id).where(
         TradeFill.trade_id == trade.id, TradeFill.role == "entry",
         Fill.account_id == trade.account_id, Fill.ticker == trade.ticker,
-    ).order_by(Fill.executed_at, func.coalesce(Fill.raw_email_id, ""), Fill.id)).first()
+    ).order_by(Fill.executed_at, func.coalesce(Fill.raw_email_id, ""), Fill.id).limit(1)).first()
     recorded_at = stamp(trade.opened_at)
     if first is None or stamp(first.executed_at) != recorded_at:
         result["reason"] = "The first recorded entry could not be verified from this trade's fills."
