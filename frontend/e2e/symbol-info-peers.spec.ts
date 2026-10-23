@@ -290,3 +290,34 @@ test("invalid Radar origin is ignored and a removed group never falls back silen
   await expect(page.getByRole("region", { name: "Radar origin" })).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has("radar_at")).toBe(false);
 });
+
+
+test("Radar origin does not force its group onto unrelated watchlist symbols", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    const symbol = q.get("symbol")!;
+    reads.push(`${symbol}|${q.get("group") ?? ""}`);
+    if (symbol === "AAPL" && q.has("group")) return route.fulfill({ status: 422, body: "Group does not contain this symbol" });
+    if (symbol === "AAPL") {
+      const data = comparison("NVDA", "AI compute");
+      const group = { name: "Consumer tech", members: ["AAPL", "MSFT"] };
+      const remap = (row: typeof data.rows[number]) => ({ ...row, symbol: row.symbol === "NVDA" ? "AAPL" : row.symbol === "AMD" ? "MSFT" : row.symbol });
+      return route.fulfill({ json: { ...data, symbol, group, groups: [group], rows: data.rows.map(remap),
+        session_context: { ...data.session_context, symbol, group, groups: [group], rows: data.session_context.rows.map(remap) } } });
+    }
+    return route.fulfill({ json: comparison(symbol, q.get("group") ?? "Chips") });
+  });
+  const query = new URLSearchParams({ symbol: "NVDA", radar_symbol: "NVDA", radar_session: "2026-10-20", radar_at: "2026-10-20T14:00:00Z", radar_group: "AI compute" });
+  await page.goto(`/charts?${query}`);
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  await page.getByRole("button", { name: "Chart AAPL", exact: true }).click();
+  await expect(movement.getByRole("combobox")).toHaveValue("Consumer tech");
+  expect(reads.at(-1)).toBe("AAPL|");
+  await expect(page.getByRole("region", { name: "Radar origin" })).toContainText("NVDA · AI compute");
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  expect(reads.at(-1)).toBe("NVDA|AI compute");
+});

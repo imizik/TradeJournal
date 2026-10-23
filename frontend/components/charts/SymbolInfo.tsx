@@ -143,7 +143,8 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     : result?.key === `${view.tab}|${symbol}` ? result : null;
   const [localGroup, setLocalGroup] = useState<RadarGroup | null>(null);
   const chosenGroup = comparisonGroup ?? localGroup;
-  const group = chosenGroup ? (chosenGroup.members.includes(symbol) ? chosenGroup.name : undefined) : radarGroup || undefined;
+  const group = chosenGroup ? (chosenGroup.members.includes(symbol) ? chosenGroup.name : undefined)
+    : radarOrigin?.symbol === symbol ? radarGroup || undefined : undefined;
   const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
   const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={movement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
