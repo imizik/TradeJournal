@@ -833,7 +833,9 @@ higher-timeframe levels, and 2–3 scenarios total across both symbols. Each has
 family, level, trigger, invalidation and time stop. Saving appends an owner outlook
 to the existing day journal; it does not activate monitoring, change a chart
 setting, publish new Jo evidence or place an order. Original receipt times remain
-visible. An uncertain save retains its operation ID and payload for safe retry.
+visible. Editable prep is recovered from a date-keyed local draft after chart
+navigation or reload; it is not journal-saved until the server confirms. An
+uncertain save retains its operation ID and payload for safe retry.
 A freeze records the saved plan ID, scenario number and owner-reported trigger
 time as an untraded idea, separately from a deliberate pass or invalidated setup.
 Daily Review reads these existing journal entries. No new schema or grants.

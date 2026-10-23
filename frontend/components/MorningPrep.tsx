@@ -32,23 +32,41 @@ export default function MorningPrep({ day, onSaved }: { day: string; onSaved: ()
   const [freezeTime, setFreezeTime] = useState("");
   const [freezeNote, setFreezeNote] = useState("");
   const key = `tradejournal:morning-prep:pending:${day}`;
+  const draftKey = `tradejournal:morning-prep:draft:${day}`;
+  const [draftReady, setDraftReady] = useState(false);
 
   useEffect(() => {
     let live = true;
     api.dayJournal(day).then((data) => { if (live) setSaved(data.entries.filter((e) => e.text.startsWith(PREFIX))); })
       .catch(() => { if (live) setMessage("Saved prep could not be loaded. Reload before making another plan."); });
     try {
+      const draft = JSON.parse(localStorage.getItem(draftKey) ?? "null");
+      if (draft && [draft.macro, draft.contract, draft.higher].every((v) => typeof v === "string")
+          && Array.isArray(draft.scenarios) && draft.scenarios.length >= 2 && draft.scenarios.length <= 3
+          && draft.scenarios.every((v: Scenario) => ["SPY", "QQQ"].includes(v.symbol) && [v.family, v.level, v.trigger, v.invalidation, v.timeStop].every((x) => typeof x === "string"))) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setMacro(draft.macro); setContract(draft.contract); setHigher(draft.higher); setScenarios(draft.scenarios);
+      }
       const raw = localStorage.getItem(key);
       if (raw) {
         const value = JSON.parse(raw) as DayJournalWrite;
         if (typeof value.operation_id === "string" && typeof value.text === "string") {
-          // eslint-disable-next-line react-hooks/set-state-in-effect
           setPending(value); setOpen(true);
         }
       }
     } catch { setMessage("Local recovery is unavailable; keep this page open until saving is confirmed."); }
+    setDraftReady(true);
     return () => { live = false; };
-  }, [day, key]);
+  }, [day, key, draftKey]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ macro, contract, higher, scenarios })); }
+    catch {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMessage("Draft recovery is unavailable. Keep this page open until saving is confirmed.");
+    }
+  }, [draftReady, draftKey, macro, contract, higher, scenarios]);
 
   useEffect(() => {
     if (!open || day !== newYorkToday()) return;
@@ -68,6 +86,7 @@ export default function MorningPrep({ day, onSaved }: { day: string; onSaved: ()
       const entry = await api.addDayJournalEntry(day, write);
       if (entry.text.startsWith(PREFIX)) setSaved((old) => [...old.filter((e) => e.id !== entry.id), entry]);
       setPending(null);
+      if (write.kind === "outlook") { setMacro(""); setContract(""); setHigher(""); setScenarios([blank(), { ...blank(), symbol: "QQQ", family: "Rebound / reclaim" }]); }
       if (write.kind === "idea") { setFreezeTime(""); setFreezeNote(""); }
       try { localStorage.removeItem(key); } catch { /* An exact retry remains idempotent. */ }
       setMessage("Saved to your day journal. Reopen it below or in Daily Review."); onSaved();

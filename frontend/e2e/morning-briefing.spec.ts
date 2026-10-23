@@ -491,6 +491,12 @@ test("SPY QQQ prep saves two or three scenarios, reopens, and logs a freeze", as
     await prep.getByLabel(`Scenario ${i} invalidation`, { exact: true }).fill("Completed minute below 599");
     await prep.getByLabel(`Scenario ${i} time stop`, { exact: true }).fill("Exit after ten minutes without progress");
   }
+  // A chart visit or full navigation must not lose an unfinished plan.
+  await page.goto(`/morning?day=${today}&draft-reopen=1`);
+  await prep.getByRole("button", { name: /SPY \/ QQQ prep/ }).click();
+  if ((await editor.getAttribute("open")) === null) await editor.locator("summary").click();
+  await expect(prep.getByLabel("One-sentence macro read")).toHaveValue(new RegExp(marker));
+  await expect(prep.getByLabel("Scenario 2 trigger", { exact: true })).toHaveValue("One completed minute above 600");
   await prep.getByRole("button", { name: "Add third scenario" }).click();
   await expect(prep.getByLabel("Scenario 3 family")).toHaveValue("Rejection / fade");
   await expect(prep.getByRole("button", { name: "Save morning prep" })).toBeDisabled();
@@ -512,6 +518,7 @@ test("SPY QQQ prep saves two or three scenarios, reopens, and logs a freeze", as
   expect(entries).toHaveLength(1);
   expect(entries[0].text).toContain("Scenario 2: QQQ");
   expect(entries[0].text).not.toContain("Scenario 3:");
+  await page.setViewportSize({ width: 390, height: 844 });
   await prep.getByLabel("Saved plan", { exact: true }).selectOption(entries[0].id);
   await prep.getByLabel("Trigger time (ET)").fill("09:47");
   await prep.getByLabel("What happened").fill("The planned close confirmed; I hesitated and did not enter.");
