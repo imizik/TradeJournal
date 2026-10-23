@@ -84,7 +84,14 @@ function comparison(symbol = "NVDA", group = "Chips", state = "partial") {
       start: point(start), end: ticker === "MU" ? null : point(end) })),
     coverage: { recorded_minutes: 16, expected_minutes: 16, peers_total: selected.members.length - 1, peers_available: 1, peers_up: 1, peers_down: 0, missing: group === "Chips" ? ["MU"] : [] } };
   const baseline = "2026-10-20T13:35:00.000Z";
-  return { ...recent, session_context: { ...recent, window_minutes: 40,
+  return { ...recent, recovery_context: { ...recent, window_minutes: 5,
+    window: { ...recent.window, start: "2026-10-20T14:10:00.000Z", start_pass_id: 11 },
+    low_anchor: { ...point("2026-10-20T14:10:00.000Z"), price: 90, symbol, pass_id: 11, pass_at: "2026-10-20T14:10:00.000Z" },
+    low_search: { start: baseline, end, eligible_samples: 38, omitted_samples: 1, eligible_minutes: 38, expected_minutes: 41 },
+    at_recorded_low: false,
+    rows: recent.rows.map((row) => ({ ...row, start: point("2026-10-20T14:10:00.000Z"), change_pct: row.change_pct == null ? null : row.symbol === symbol ? 3 : -1 })),
+    coverage: { ...recent.coverage, peers_up: 0, peers_down: 1, recorded_minutes: 6, expected_minutes: 6 },
+  }, session_context: { ...recent, window_minutes: 40,
     window: { ...recent.window, start: baseline, start_pass_id: 0 },
     coverage: { ...recent.coverage, peers_up: 0, peers_down: 1, recorded_minutes: 38, expected_minutes: 41 },
     rows: recent.rows.map((row) => ({ ...row, start: point(baseline), change_pct: row.change_pct == null ? null : -2.5 })) } };
@@ -126,6 +133,16 @@ for (const phone of [false, true]) test(`Group movement preserves group on peer 
   expect(reads.length).toBe(readsBeforeToggle);
   expect(await movement.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await movement.screenshot({ path: test.info().outputPath(`group-movement-session-${phone ? "phone" : "desktop"}.png`) });
+  await movement.getByRole("button", { name: "From low", exact: true }).click();
+  await expect(movement).toContainText("NVDA sampled low $90.00 · 10:10 AM ET");
+  await expect(movement).toContainText("38 of 41 minutes with eligible NVDA samples; 1 samples omitted");
+  await expect(movement).toContainText("not each peer’s own low");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA", exact: true })).toContainText("+3.00%");
+  await expect(movement.getByRole("button", { name: "Compare chart AMD", exact: true })).toContainText("-1.00%");
+  expect(reads.length).toBe(readsBeforeToggle);
+  expect(await movement.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await movement.screenshot({ path: test.info().outputPath(`group-movement-recovery-${phone ? "phone" : "desktop"}.png`) });
+  await page.screenshot({ path: test.info().outputPath(`recovery-page-${phone ? "phone" : "desktop"}.png`) });
   await movement.getByRole("button", { name: "15 min", exact: true }).click();
   await expect(movement.getByRole("button", { name: "Compare chart NVDA", exact: true })).toContainText("+1.20%");
   await movement.getByRole("button", { name: "Session", exact: true }).click();
@@ -139,6 +156,9 @@ for (const phone of [false, true]) test(`Group movement preserves group on peer 
   }
   await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
   await expect.poll(() => reads.at(-1)).toBe("AMD|AI compute");
+  await movement.getByRole("button", { name: "From low", exact: true }).click();
+  await expect(movement).toContainText("AMD sampled low $90.00");
+  await expect(movement).not.toContainText("NVDA sampled low");
   await info.getByRole("tab", { name: "News", exact: true }).click();
   await expect(movement).toHaveCount(0);
 });
@@ -155,6 +175,8 @@ test("Group movement hides old values after a failed refresh", async ({ page }) 
   await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toBeVisible();
   await movement.getByRole("button", { name: "Session", exact: true }).click();
   await expect(movement).toContainText("9:35 AM–10:15 AM ET");
+  await movement.getByRole("button", { name: "From low", exact: true }).click();
+  await expect(movement).toContainText("NVDA sampled low");
   fail = true;
   await page.clock.fastForward(60_000);
   await expect(movement).toContainText("Group movement unavailable");
@@ -165,7 +187,7 @@ test("Group movement discloses stale and off states", async ({ page }) => {
   let off = false;
   await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
   await page.route("**/api/backend/radar/groups/compare?**", (route) => route.fulfill({ json: off
-    ? { ...comparison(), state: "off", reason: "Radar recording is not switched on.", rows: [], coverage: null, window: null, session_context: undefined }
+    ? { ...comparison(), state: "off", reason: "Radar recording is not switched on.", rows: [], coverage: null, window: null, session_context: undefined, recovery_context: undefined }
     : comparison("NVDA", "Chips", "stale") }));
   await page.goto("/charts");
   await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
@@ -328,4 +350,35 @@ test("Radar origin does not force its group onto unrelated watchlist symbols", a
   await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
   await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
   expect(reads.at(-1)).toBe("NVDA|AI compute");
+});
+
+
+test("From low distinguishes no net rebound from an unavailable rebound window", async ({ page }) => {
+  let unavailable = false;
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const data = comparison();
+    return route.fulfill({ json: { ...data, recovery_context: { ...data.recovery_context,
+      at_recorded_low: !unavailable,
+      rows: unavailable ? [] : data.recovery_context.rows.map((row) => ({ ...row, change_pct: row.role === "selected" ? 0 : row.change_pct })),
+      window: unavailable ? null : data.recovery_context.window,
+      coverage: unavailable ? null : data.recovery_context.coverage,
+      reason: unavailable ? "The recorded low is too recent: no rebound window of at least one minute yet." : null,
+    } } });
+  });
+  await page.goto("/charts");
+  await panel(page).getByRole("tab", { name: "Overview", exact: true }).click();
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(panel(page).getByRole("button", { name: "Price and range", exact: true })).toBeVisible();
+  await movement.getByRole("button", { name: "From low", exact: true }).click();
+  await expect(movement).toContainText("Still at the recorded low — no net rebound.");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toContainText("0.00%");
+  unavailable = true;
+  await page.reload();
+  await expect(panel(page).getByRole("button", { name: "Price and range", exact: true })).toBeVisible();
+  await movement.getByRole("button", { name: "From low", exact: true }).click();
+  await expect(movement).toContainText("no rebound window");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
+  await movement.getByRole("button", { name: "15 min", exact: true }).click();
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toContainText("+1.20%");
 });

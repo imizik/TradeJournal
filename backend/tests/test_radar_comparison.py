@@ -236,3 +236,119 @@ def test_session_does_not_replace_ineligible_endpoint_trade(store):
     session = read(store)["session_context"]
     assert session["rows"][1]["change_pct"] is None
     assert session["rows"][1]["reason"] == "Stale or future trade time"
+
+
+def test_recovery_uses_selected_low_pass_not_peers_own_lows(store):
+    seed(store, NOW - 180, {"NVDA": 100, "AMD": 50, "MU": 110, "QQQ": 100, "SPY": 100})
+    low = seed(store, NOW - 120, {"NVDA": 90, "AMD": 100, "MU": 100, "QQQ": 100, "SPY": 100})
+    seed(store, NOW - 60, {"NVDA": 94, "AMD": 90, "MU": 80, "QQQ": 100, "SPY": 100})
+    end = seed(store, NOW, {"NVDA": 99, "AMD": 95, "MU": 90, "QQQ": 101, "SPY": 100})
+    before = store.path.read_bytes()
+    result = read(RadarStore(store.path, read_only=True))["recovery_context"]
+    assert result["state"] == "ready"
+    assert result["window"]["start_pass_id"] == low
+    assert result["window"]["end_pass_id"] == end
+    assert result["low_anchor"]["price"] == 90
+    assert [r["change_pct"] for r in result["rows"]] == pytest.approx([10, -5, -10, 1, 0])
+    assert result["coverage"]["peers_down"] == 2
+    assert result["low_search"]["eligible_minutes"] == 4
+    assert result["coverage"]["recorded_minutes"] == 3
+    assert not result["at_recorded_low"]
+    assert store.path.read_bytes() == before
+    # Changing the selected symbol deliberately selects a different common anchor.
+    amd = compare_group(store, empty_comparison("AMD", "Chips", UNIVERSE, NOW),
+                        today="2026-10-20", now=NOW, live=True)["recovery_context"]
+    assert amd["low_anchor"]["price"] == 50
+    assert amd["window"]["start"] == iso(NOW - 180)
+
+
+def test_recovery_ties_choose_earliest_and_disclose_no_rebound(store):
+    first = seed(store, NOW - 120)
+    seed(store, NOW - 60)
+    seed(store, NOW)
+    result = read(store)["recovery_context"]
+    assert result["low_anchor"]["pass_id"] == first
+    assert result["at_recorded_low"] and result["rows"][0]["change_pct"] == 0
+
+
+def test_recovery_new_low_or_only_sample_has_no_rebound_window(store):
+    seed(store, NOW - 120)
+    assert "two eligible" in read(store, NOW - 120)["recovery_context"]["reason"]
+    low = seed(store, NOW, {"NVDA": 90})
+    result = read(store)["recovery_context"]
+    assert result["low_anchor"]["pass_id"] == low
+    assert result["window"] is None and not result["rows"]
+    assert "too recent" in result["reason"]
+
+
+@pytest.mark.parametrize("edits", [
+    {"last": None}, {"last": 0}, {"last": float("inf")},
+    {"trade_time_ms": None}, {"trade_time_ms": (NOW - 241) * 1000},
+    {"trade_time_ms": (NOW - 119) * 1000}, {"retrieved_at": iso(NOW - 119)},
+])
+def test_recovery_invalid_low_samples_are_omitted_and_disclosed(store, edits):
+    first = seed(store, NOW - 180)
+    seed(store, NOW - 120, {"NVDA": 1}, edits={"NVDA": edits})
+    seed(store, NOW - 60)
+    seed(store, NOW, {"NVDA": 105, "AMD": 100, "MU": 100, "QQQ": 100, "SPY": 100})
+    result = read(store)["recovery_context"]
+    assert result["low_anchor"]["pass_id"] == first
+    assert result["low_search"]["omitted_samples"] == 1
+    assert result["state"] == "partial"
+
+
+def test_recovery_requires_eligible_latest_selected_sample(store):
+    seed(store, NOW - 120)
+    seed(store, NOW, {"AMD": 110})
+    result = read(store)["recovery_context"]
+    assert "no eligible latest" in result["reason"]
+    assert not result["rows"] and result["window"] is None
+
+
+def test_recovery_search_gaps_before_anchor_and_missing_peer_are_visible(store):
+    seed(store, NOW - 600, status="failed")
+    low = seed(store, NOW - 60, {"NVDA": 90, "QQQ": 100, "SPY": 100}, status="partial")
+    seed(store, NOW)
+    result = read(store)["recovery_context"]
+    assert result["window"]["start_pass_id"] == low
+    assert result["low_search"]["eligible_minutes"] == 2
+    assert result["low_search"]["expected_minutes"] == 11
+    assert result["low_search"]["omitted_samples"] == 1
+    assert result["coverage"]["recorded_minutes"] == result["coverage"]["expected_minutes"] == 2
+    assert result["coverage"]["missing"] == ["AMD", "MU"]
+    assert result["state"] == "partial"
+
+
+def test_recovery_long_pass_omitted_and_version_change_anywhere_refused(store):
+    first = seed(store, NOW - 240)
+    seed(store, NOW - 180, {"NVDA": 1}, duration=91)
+    seed(store, NOW)
+    result = read(store)["recovery_context"]
+    assert result["low_anchor"]["pass_id"] == first
+    assert result["low_search"]["omitted_samples"] == 1
+    seed(store, NOW - 120, version="old")
+    result = read(store)["recovery_context"]
+    assert "version changed" in result["reason"] and not result["rows"]
+
+
+def test_recovery_stale_future_closed_and_no_overnight_carry(store):
+    seed(store, NOW - 60)
+    seed(store, NOW)
+    seed(store, NOW + 60, {"NVDA": 1})
+    result = read(store)["recovery_context"]
+    assert result["window"]["end"] == iso(NOW)
+    assert result["low_anchor"]["price"] == 100
+    assert read(store, NOW + 241)["recovery_context"]["state"] == "stale"
+    closed = read(store, NOW + 86400, live=False, today="2026-10-21")["recovery_context"]
+    assert closed["session"] == "2026-10-20" and not closed["live"]
+    assert read(store, NOW + 86400, today="2026-10-21")["recovery_context"]["window"] is None
+
+
+def test_recovery_no_eligible_samples_and_symbol_scoped_history(store):
+    seed(store, NOW - 60, {"AMD": 100})
+    seed(store, NOW, {"AMD": 101})
+    result = read(store)["recovery_context"]
+    assert "No eligible selected-stock" in result["reason"]
+    assert result["low_search"]["omitted_samples"] == 2
+    assert not store.quotes(session_date="2026-10-20", symbol="NVDA")
+    assert len(store.quotes(session_date="2026-10-20", symbol="AMD")) == 2

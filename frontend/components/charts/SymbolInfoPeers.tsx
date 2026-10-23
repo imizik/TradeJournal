@@ -76,21 +76,22 @@ export default function SymbolInfoPeers({ symbol, result, onSelect, movement, on
 
 
 function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFirst: boolean; result: MovementResult; onGroup(group: RadarGroup): void; onSelect(symbol: string): void }) {
-  const [period, setPeriod] = useState<"recent" | "session">(sessionFirst ? "session" : "recent");
+  const [period, setPeriod] = useState<"recent" | "session" | "recovery">(sessionFirst ? "session" : "recent");
   const response = result?.data;
-  const data = period === "session" ? response?.session_context : response;
+  const data = period === "recovery" ? response?.recovery_context : period === "session" ? response?.session_context : response;
   return <div role="group" aria-label="Group movement" className="mt-3 border-t border-slate-700/60 pt-2 text-xs">
     <p className="font-medium text-slate-200">Group movement</p>
     <div className="my-2 flex gap-1" aria-label="Movement window">
-      {(["recent", "session"] as const).map((value) => <button key={value} aria-pressed={period === value}
+      {(["recent", "session", "recovery"] as const).map((value) => <button key={value} aria-pressed={period === value}
         onClick={() => setPeriod(value)} className={`min-h-11 rounded border px-2 py-1 lg:min-h-8 ${period === value ? "border-sky-400 text-sky-300" : "border-slate-700 text-slate-400"}`}>
-        {value === "recent" ? "15 min" : "Session"}
+        {value === "recent" ? "15 min" : value === "session" ? "Session" : "From low"}
       </button>)}
     </div>
     {period === "session" && <p className="mb-2 text-[11px] text-slate-400">Since the first usable recorded sample, not market open or the session low. A late start misses earlier moves; this does not establish a sustained recovery.</p>}
+    {period === "recovery" && <p className="mb-2 text-[11px] text-slate-400">All rows use the selected stock’s recorded-low pass, not each peer’s own low. This does not establish a sustained recovery.</p>}
     {!result ? <p role="status" className="mt-1 text-slate-500">Loading recorded movement…</p>
       : result.error ? <p className="mt-1 text-amber-300">Group movement unavailable. Previous values hidden until a fresh read succeeds.</p>
-      : !data ? <p className="mt-1 text-slate-400">{response?.reason ?? "Session context unavailable in this response."}</p>
+      : !data ? <p className="mt-1 text-slate-400">{response?.reason ?? "This comparison window is unavailable."}</p>
       : <>
         {data.group && <label className="mt-2 block text-slate-400">Compare group
           <select aria-label="Comparison group" value={data.group.name} onChange={(event) => {
@@ -100,6 +101,12 @@ function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFir
           </select>
         </label>}
         {data.reason && <p className={`mt-2 ${data.state === "stale" || data.state === "partial" ? "text-amber-300" : "text-slate-400"}`}>{data.reason}</p>}
+        {period === "recovery" && data.low_anchor && <p className="my-2 text-slate-200">{data.low_anchor.symbol} sampled low ${data.low_anchor.price.toFixed(2)} · {nyTime(data.low_anchor.pass_at)} ET</p>}
+        {period === "recovery" && data.at_recorded_low && <p className="my-2 text-amber-300">Still at the recorded low — no net rebound.</p>}
+        {period === "recovery" && data.low_search && <div className="my-2 text-[10px] text-slate-400">
+          <p>Low search: {data.session} · {nyTime(data.low_search.start)}–{nyTime(data.low_search.end)} ET. {data.low_search.eligible_minutes} of {data.low_search.expected_minutes} minutes with eligible {data.symbol} samples; {data.low_search.omitted_samples} samples omitted.</p>
+          <p>Recording may start late or miss lower prices between samples. Selecting another stock recalculates the anchor.</p>
+        </div>}
         {data.window && <p className="my-2 text-[11px] text-slate-400">{data.live ? "Recorded" : "Last recorded session"} {data.session}<br />{nyTime(data.window.start)}–{nyTime(data.window.end)} ET</p>}
         {data.coverage && <p className="mb-2 text-slate-300">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available} of {data.coverage.peers_total} peers available</p>}
         {data.coverage && <p className="mb-2 text-[10px] text-slate-500">{data.coverage.recorded_minutes} of {data.coverage.expected_minutes} minutes recorded. Returns use the two endpoint passes.</p>}
