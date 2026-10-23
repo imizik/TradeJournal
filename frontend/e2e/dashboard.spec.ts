@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import type { RadarFeed } from "../lib/radar";
 import type { Trade } from "../lib/api";
 import { closedInPeriod, recentCloses, weekStart } from "../lib/dashboardSummary";
 
@@ -100,7 +101,12 @@ test("dashboard Radar preview reads a bounded dated feed without changing visits
   expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBe(true);
   const base = await (await request.get(`${API}/radar/feed`)).json();
   expect(base.events.length).toBeGreaterThan(0);
-  let view = { ...base, state: "recording", events: Array.from({ length: 4 }, (_, i) => ({ ...base.events[0], event_id: `preview-${i}`, summary: `Saved discovery ${i}` })) };
+  let view: RadarFeed = { ...base, state: "recording", events: Array.from({ length: 4 }, (_, i) => ({ ...base.events[0], event_id: `preview-${i}`, summary: `Saved discovery ${i}`, news: i === 0 ? {
+    status: "found", checked_at: "2026-10-20T15:15:00Z", headlines: [
+      { headline: "Invented memory demand headline", source: "Fixture Wire", published_at: "2026-10-20T15:00:00Z", url: "https://example.com/before", symbols: ["MU"], timing: "before" },
+      { headline: "Invented later follow-up", source: "Fixture Wire", published_at: "2026-10-20T15:14:00Z", url: "https://example.com/after", symbols: ["MU"], timing: "after" },
+    ],
+  } : i === 1 ? { status: "none_found", checked_at: "2026-10-20T15:15:00Z", headlines: [] } : null })) };
   let fail = false;
   const writes: string[] = [];
   page.on("request", (req) => { if (req.url().includes("/radar/") && req.method() !== "GET") writes.push(req.url()); });
@@ -111,6 +117,17 @@ test("dashboard Radar preview reads a bounded dated feed without changing visits
   await expect(preview).toContainText(`${base.session} ET`);
   await expect(preview.locator("li")).toHaveCount(3);
   await expect(preview.getByRole("link").first()).toHaveAttribute("href", `/charts?symbol=${base.events[0].chart.symbol}`);
+  await expect(preview).toContainText("News nearby: Invented memory demand headline");
+  await expect(preview).toContainText("No news found — cause unknown");
+  await expect(preview).toContainText("News not checked yet");
+  const context = preview.getByTestId("radar-preview-context").first();
+  await context.locator("summary").click();
+  await expect(context).toContainText("not a confirmed cause");
+  await expect(context).toContainText("Invented later follow-up");
+  await expect(context).toContainText("before the move");
+  await expect(context).toContainText("after the move");
+  await expect(context.locator("time")).toHaveAttribute("datetime", "2026-10-20T15:15:00Z");
+  await expect(context.getByRole("link", { name: "Inspect saved evidence in Radar" })).toHaveAttribute("href", "/radar");
   await preview.screenshot({ path: test.info().outputPath("dashboard-radar-recorded-desktop.png") });
   view = { ...view, state: "stale" };
   await preview.getByRole("button", { name: "Refresh Radar" }).click();
@@ -121,6 +138,11 @@ test("dashboard Radar preview reads a bounded dated feed without changing visits
   await preview.getByRole("button", { name: "Refresh Radar" }).click();
   await expect(preview).toContainText("Showing the previous snapshot; current status is unknown");
   fail = false;
+  view = { ...view, events: view.events.map((event) => ({ ...event, news: { status: "unavailable", checked_at: "2026-10-20T15:20:00Z", headlines: [] } })) };
+  await preview.getByRole("button", { name: "Refresh Radar" }).click();
+  await expect(preview).toContainText("News unavailable — cause unknown");
+  await expect(preview).not.toContainText("Invented memory demand headline");
+  expect(await preview.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   view = { ...view, state: "no_data", events: [], coverage: null };
   await preview.getByRole("button", { name: "Refresh Radar" }).click();
   await expect(preview).toContainText("No recorded session yet");

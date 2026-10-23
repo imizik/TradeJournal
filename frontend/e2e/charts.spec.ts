@@ -2935,6 +2935,9 @@ test("undo replays onto levels another device changed meanwhile", async ({ page,
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   await addLevel(page, "Mine", "256.00");
   await expect.poll(() => server.revision).toBe(1);
+  // The server can accept the PUT before the client finishes saving. Focus
+  // refresh deliberately skips in-flight saves, so wait for its acknowledgement.
+  await expect(syncStatus(page)).toHaveText("Saved");
   // Another device adds a level; this page picks it up when it regains focus.
   const data = server.data as { levels: Record<string, unknown[]> };
   server.data = { ...data, levels: { MRVL: [...data.levels.MRVL, { id: "phone", price: 254, label: "From phone" }] } };
