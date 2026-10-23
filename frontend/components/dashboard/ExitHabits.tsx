@@ -9,7 +9,7 @@ import { DashboardCard, dashboardLink } from "./DashboardCard";
 // Counts only: no grades, and no trend language while there are fewer than 30 trades. See backend/app/engine/exit_habits.py.
 type Group = { n: number; trades: number; excluded: number; pct: number | null; pnl: number };
 type Habit = { key: string; label: string; recent: Group; baseline: Group };
-type Alert = { id: string; kind: string; contract: string; contracts: number; detected_at: number; trade_id: string;
+type Alert = { id: string; kind: string; contract: string; contracts: number; detected_at: number; trade_id: string | null;
   response: string | null; vs_alert: number | null; note: string | null };
 type ExitHabitsBody = { go_live: string; window: number; since_go_live: number; recent_trades: number; baseline_trades: number;
   habits: Habit[]; alerts: Alert[] };
@@ -57,7 +57,8 @@ function ExitHabitsView({ body }: { body: ExitHabitsBody }) {
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent alerts</h3>
       {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, ALERTS_SHOWN).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-          <a href={`/trades/${a.trade_id}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</a>
+          {a.trade_id ? <a href={`/trades/${a.trade_id}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</a>
+            : <span className="text-sm font-medium">{a.contract}</span>}
           <span className="text-xs text-muted-foreground">{kindLabel(a.kind)} · {time(a.detected_at)} ET</span>
         </div>
         <p className="text-xs">{a.response ? RESPONSE[a.response] ?? a.response.replace(/_/g, " ") : "Not matched to fills"}</p>

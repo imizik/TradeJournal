@@ -252,7 +252,8 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         listed.append({
             "id": str(a.id), "kind": a.kind, "contract": a.contract, "contracts": float(a.contracts),
             "detected_at": _epoch(a.detected_at), "delivery": a.delivery, "mark": _num(a.mark),
-            "trade_id": str(trade_id or a.trade_id), **{k: v for k, v in result.items() if k != "closed_at"},
+            # Unmatched: no link, since the stored trade id may predate a rebuild.
+            "trade_id": str(trade_id) if trade_id else None, **{k: v for k, v in result.items() if k != "closed_at"},
             "closed_at": _et_epoch(result["closed_at"]),
         })
     out["alerts"] = listed

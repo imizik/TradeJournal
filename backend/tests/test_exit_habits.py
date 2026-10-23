@@ -230,7 +230,7 @@ def test_the_endpoint_reads_alerts_by_source_identity_and_habits(engine):
     assert [(a["kind"], a["response"], a["vs_alert"]) for a in body["alerts"]] == [
         ("hold_hour", "expired", -90.0), ("giveback", "closed_15m", -40.0), ("giveback", None, None)]
     assert sndk_trade != str(UUID(int=0))  # linked to the rebuilt trade, not the stale id
-    assert "could not be found" in body["alerts"][2]["note"]
+    assert "could not be found" in body["alerts"][2]["note"] and body["alerts"][2]["trade_id"] is None  # no dead link
     assert (body["since_go_live"], body["recent_trades"], body["baseline_trades"]) == (2, 2, 1)
     habits = {h["key"]: h for h in body["habits"]}
     assert habits["expired_worthless"]["recent"] == {"n": 1, "trades": 2, "excluded": 0, "pct": 0.5, "pnl": -100.0}
