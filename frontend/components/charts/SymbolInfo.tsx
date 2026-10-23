@@ -6,7 +6,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import type { SymbolEvents, SymbolFinancials, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview, SymbolShort } from "@/lib/symbolInfo";
-import type { RadarGroup } from "@/lib/radar";
+import type { RadarGroup, RadarChartContext } from "@/lib/radar";
 import type { ChartQuote } from "@/lib/charts";
 import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
@@ -38,7 +38,7 @@ const REFRESH_MS = 60_000;
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 /** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup }: { symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
+export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup, radarOrigin }: { symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; radarOrigin?: RadarChartContext | null; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -58,6 +58,18 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     const expanded = window.matchMedia("(min-width: 1024px)").matches;
     queueMicrotask(() => setView((current) => focused.current ? { ...current, ready: true } : { ready: true, expanded, tab }));
   }, []);
+  const radarGroup = owner && radarOrigin?.group;
+  useEffect(() => {
+    if (!radarGroup) return;
+    focused.current = true;
+    queueMicrotask(() => setView((current) => ({ ...current, expanded: true, tab: "Overview" })));
+  }, [radarGroup]);
+  const radarScrolled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!radarGroup || !view.expanded || view.tab !== "Overview" || radarScrolled.current === radarGroup) return;
+    const element = document.getElementById(`${id}-peers`);
+    if (element) { element.scrollIntoView({ block: "start" }); radarScrolled.current = radarGroup; }
+  }, [radarGroup, view.expanded, view.tab, id]);
   const focusN = focus?.symbol === symbol ? focus.n : 0;
   useEffect(() => {
     if (!focusN) return;
@@ -131,9 +143,19 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     : result?.key === `${view.tab}|${symbol}` ? result : null;
   const [localGroup, setLocalGroup] = useState<RadarGroup | null>(null);
   const chosenGroup = comparisonGroup ?? localGroup;
-  const group = chosenGroup?.members.includes(symbol) ? chosenGroup.name : undefined;
+  const group = chosenGroup ? (chosenGroup.members.includes(symbol) ? chosenGroup.name : undefined)
+    : radarOrigin?.symbol === symbol ? radarGroup || undefined : undefined;
   const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
-  const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers symbol={symbol} result={peersResult} movement={movement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
+  // Adopt only server-validated membership, so every navigation path (not just
+  // comparison-row clicks) retains the group for members and releases nonmembers.
+  const handoffGroup = !chosenGroup && radarGroup ? movement?.data?.groups.find((candidate) => candidate.name === radarGroup) : undefined;
+  useEffect(() => {
+    if (handoffGroup) (onComparisonGroup ?? setLocalGroup)(handoffGroup);
+  }, [handoffGroup, onComparisonGroup]);
+  // On a reload at a different member, resolve membership before showing a
+  // default group's values as though they belonged to the handed-off group.
+  const shownMovement = handoffGroup && movement?.data?.group?.name !== handoffGroup.name ? null : movement;
+  const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={shownMovement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -148,11 +170,12 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
           }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-sky-400 bg-sky-400/5 text-sky-300" : "border-transparent text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
+        {radarGroup && view.tab === "Overview" && peers}
         {owner && view.tab === "Overview" && <HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" })} />}
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
               peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}
-              peerGroup={peersResult?.symbol === symbol && peersResult.data?.source.provider === "curated" ? peersResult.data.source.label.replace(/^Peer group: /, "") : undefined}>{peers}</SymbolInfoOverview>
+              peerGroup={peersResult?.symbol === symbol && peersResult.data?.source.provider === "curated" ? peersResult.data.source.label.replace(/^Peer group: /, "") : undefined}>{radarGroup ? null : peers}</SymbolInfoOverview>
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />
             : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={lit?.symbol === symbol ? lit : null} />
@@ -161,7 +184,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
           : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
           : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
         {/* Peers are Overview's last block; while Overview loads or fails they still show below. */}
-        {view.tab === "Overview" && !shown?.data && peers && <div className="mt-3">{peers}</div>}
+        {!radarGroup && view.tab === "Overview" && !shown?.data && peers && <div className="mt-3">{peers}</div>}
       </div>
     </div>}
   </section>;

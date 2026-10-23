@@ -221,3 +221,111 @@ test("Session context remains unavailable independently of a valid recent window
   await movement.getByRole("button", { name: "15 min", exact: true }).click();
   await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toContainText("+1.20%");
 });
+
+
+for (const phone of [false, true]) test(`Radar group handoff and return preserve context ${phone ? "phone" : "desktop"}`, async ({ page, request }) => {
+  await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  const api = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
+  expect((await request.post(`${api}/__test/radar-seed`)).ok()).toBeTruthy();
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    reads.push(`${q.get("symbol")}|${q.get("group")}`);
+    return route.fulfill({ json: comparison(q.get("symbol")!, q.get("group") ?? "Chips") });
+  });
+  await page.route("**/api/backend/radar/movers?**", (route) => route.fulfill({ json: {
+    state: "ok", reason: null, session: "2026-10-20", pass_at: "2026-10-20T14:00:00Z", earlier_pass_at: null,
+    generated_at: "2026-10-20T14:00:00Z", header: { spy_day_pct: 1, qqq_day_pct: 2, symbols_with_data: 5, symbols_tracked: 5, has_earlier_pass: false },
+    leaders: [], laggards: [], missing: [], groups: Array.from({ length: 11 }, (_, i) => ({
+      name: i === 10 ? "AI compute" : `Group ${i}`, members_total: 2, members_with_data: 2, ahead: 2, behind: 0,
+      median_vs_spy: 1, most: { symbol: "NVDA", vs_spy: 2 },
+    })),
+  } }));
+  // A previously collapsed Peers block and a different saved tab must not hide the handoff.
+  await page.addInitScript(() => {
+    localStorage.setItem("tradejournal.charts.info.peers.open.v1", "0");
+    localStorage.setItem("tradejournal.charts.symbol-info.tab.v1", "News");
+  });
+  await page.goto("/radar?session=2026-10-20");
+  await page.getByRole("button", { name: "Show all 11 groups" }).click();
+  await page.getByRole("link", { name: "Compare AI compute in Charts with NVDA", exact: true }).click();
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(movement.getByRole("combobox", { name: "Comparison group" })).toHaveValue("AI compute");
+  await expect(movement.getByRole("button", { name: "Session", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(movement).toContainText("9:35 AM–10:15 AM ET");
+  await expect.poll(() => reads.at(-1)).toBe("NVDA|AI compute");
+  expect(new URL(page.url()).searchParams.has("from")).toBe(false);
+  await movement.scrollIntoViewIfNeeded();
+  expect(await movement.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await movement.screenshot({ path: test.info().outputPath(`radar-handoff-peers-${phone ? "phone" : "desktop"}.png`) });
+  if (phone) await page.keyboard.press("Escape");
+  const origin = page.getByRole("region", { name: "Radar origin" });
+  await expect(origin).toContainText("NVDA · AI compute · 2026-10-20 10:00 AM ET");
+  await expect(origin).toContainText("not a replay");
+  await origin.scrollIntoViewIfNeeded();
+  await origin.screenshot({ path: test.info().outputPath(`radar-handoff-origin-${phone ? "phone" : "desktop"}.png`) });
+  await page.reload();
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  if (phone) await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Back to Radar", exact: true }).click();
+  await expect(page.getByLabel("Session", { exact: true })).toHaveValue("2026-10-20");
+  await expect(page.getByRole("button", { name: "Show fewer groups" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Compare AI compute in Charts with NVDA", exact: true })).toBeInViewport();
+  expect(new URL(page.url()).searchParams.get("groups")).toBe("all");
+});
+
+test("invalid Radar origin is ignored and a removed group never falls back silently", async ({ page }) => {
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => route.fulfill({ status: 422, body: "Group does not contain this symbol" }));
+  await page.goto("/charts?symbol=NVDA&radar_symbol=NVDA&radar_session=2026-02-30&radar_at=bad");
+  await expect(page.getByRole("textbox", { name: "Chart symbol" })).toHaveAttribute("placeholder", "NVDA");
+  await expect(page.getByRole("region", { name: "Radar origin" })).toHaveCount(0);
+  const query = new URLSearchParams({ symbol: "NVDA", radar_symbol: "NVDA", radar_session: "2026-10-20", radar_at: "2026-10-20T14:00:00Z", radar_group: "Removed group" });
+  await page.goto(`/charts?${query}`);
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(movement).toContainText("Group movement unavailable");
+  await expect(movement.getByRole("button", { name: "Compare chart NVDA" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Dismiss Radar context" }).click();
+  await expect(page.getByRole("region", { name: "Radar origin" })).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("radar_at")).toBe(false);
+});
+
+
+test("Radar origin does not force its group onto unrelated watchlist symbols", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: peers("NVDA") }));
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    const symbol = q.get("symbol")!;
+    reads.push(`${symbol}|${q.get("group") ?? ""}`);
+    if (symbol === "AAPL" && q.has("group")) return route.fulfill({ status: 422, body: "Group does not contain this symbol" });
+    if (symbol === "AAPL") {
+      const data = comparison("NVDA", "AI compute");
+      const group = { name: "Consumer tech", members: ["AAPL", "MSFT"] };
+      const remap = (row: typeof data.rows[number]) => ({ ...row, symbol: row.symbol === "NVDA" ? "AAPL" : row.symbol === "AMD" ? "MSFT" : row.symbol });
+      return route.fulfill({ json: { ...data, symbol, group, groups: [group], rows: data.rows.map(remap),
+        session_context: { ...data.session_context, symbol, group, groups: [group], rows: data.session_context.rows.map(remap) } } });
+    }
+    return route.fulfill({ json: comparison(symbol, q.get("group") ?? "Chips") });
+  });
+  const query = new URLSearchParams({ symbol: "NVDA", radar_symbol: "NVDA", radar_session: "2026-10-20", radar_at: "2026-10-20T14:00:00Z", radar_group: "AI compute" });
+  await page.goto(`/charts?${query}`);
+  const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  // AMD belongs to both groups. Its day-change chip must retain AI, not default Chips.
+  await panel(page).getByRole("button", { name: "Peer AMD", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Chart symbol" })).toHaveAttribute("placeholder", "AMD");
+  await expect.poll(() => reads.at(-1)).toBe("AMD|AI compute");
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  await page.reload();
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  await expect.poll(() => reads.at(-1)).toBe("AMD|AI compute");
+  await page.getByRole("button", { name: "Chart AAPL", exact: true }).click();
+  await expect(movement.getByRole("combobox")).toHaveValue("Consumer tech");
+  expect(reads.at(-1)).toBe("AAPL|");
+  await expect(page.getByRole("region", { name: "Radar origin" })).toContainText("NVDA · AI compute");
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  expect(reads.at(-1)).toBe("NVDA|AI compute");
+});

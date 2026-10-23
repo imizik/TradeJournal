@@ -64,9 +64,13 @@ rules, justify averaging down with them, or derive a probability of profit.
 ## Baseline and evidence boundaries
 
 Initial review: main `99db02f3` and local VWAP `fcb729ea`.
-October 21 reconciliation: main `0a3ed004` includes VWAP #396 and Dashboard
-#397; VIX/US10Y Macro support is implemented in the current PR, pending its
-final checks and merge.
+Current implementation reconciliation (October 22): main `28dd525a` includes
+VWAP #396/#401, market-first Dashboard #397/#401/#406, Macro/Tech #399,
+peer comparison #400 plus Session context #408, read-only holding context #403,
+chart-latency instrumentation #405 and Radar Movers #407. These are merged code,
+not evidence of production deployment or live usefulness. The Movers-to-Charts
+handoff below is the newly selected slice in this PR; exact-head CI/merge
+receipts own its delivery status.
 GitHub metadata checked October 21: morning-opportunities PR
 [#388](https://github.com/imizik/TradeJournal/pull/388) is merged. No live deployment audit was performed. The later Macro feasibility probes
 verified the configured Tradier index entitlement; see Release 3.
@@ -77,11 +81,11 @@ not the health of every current service.
 |---|---|
 | Owner dashboard | `frontend/components/dashboard/OwnerDashboard.tsx` already has Jo status, compact briefing, journal summary, session/Attention, active options, collapsed stocks, exposure and performance. Reuse those sections; a new dashboard engine is unnecessary. |
 | Opportunity-first briefing | #388 adds bounded news-led outside candidates and separates setups from position concerns. Merged code is not proof the Check catalog/task was upgraded or a natural morning delivered useful content. Preserve legacy briefs. |
-| Radar | [Radar contract](radar.md): recorder, durable store, owner feed/detail/feedback UI and nearby-news enrichment are built; recording is off until separately approved. Detection/calibration remains next. No phone delivery is part of its current contract. |
-| Groups and chart handoff | `backend/app/data/radar_universe.json` contains curated groups; `radar_store.py` supports `group_move`. There is no group-summary endpoint or calibrated detector. `RadarFeedView.tsx` currently opens the primary symbol, without restoring event-time peer context. |
+| Radar | [Radar contract](radar.md): recorder, durable store, feed/detail/feedback, saved news and plain Movers ranking (#407) are built. This roadmap does not establish activation or live coverage. Calibrated detection remains unbuilt; Movers is not an alert feed. |
+| Groups and chart handoff | Curated groups, Movers group summaries and read-only 15-minute/Session comparison APIs are built (#400/#407/#408). This PR selects a Movers-to-Charts group/origin/return handoff. Historical event-time replay and calibrated detection remain unbuilt. |
 | VWAP | `backend/app/engine/chart_math.py` computes RTH minute-HLC3 VWAP and volume-weighted dispersion. `backend/tests/test_charts.py` pins weighting, resets, extended-hour exclusion and interval carry-through. Merged #396 separates controls; formulas are unchanged. |
 | Other VWAP contexts | `metric_reference.py` uses fill-cutoff minute history; `scanner_rules.py` uses completed scanner bars; `packets.py` can use provider VWAP. Source, session, bar size and cutoff must match before declaring a discrepancy a defect. |
-| Charts | [Workspace](charts-workspace.md) and [roadmap](charts-roadmap.md): five panels, saved arrangements, levels, news, peers, captures and trade review. The current Macro PR raises distinct symbols from three to five and adds explicit VIX/TNX yield routing. Crypto and futures chart support remain unverified. |
+| Charts | [Workspace](charts-workspace.md) and [roadmap](charts-roadmap.md): five panels, saved arrangements, levels, news, peers, captures and trade review. Merged #399 raises distinct symbols from three to five and adds explicit VIX/TNX yield routing. Crypto and futures chart support remain unverified. |
 | Existing position alerts | `backend/app/engine/position_alerts.py`: give-back after an armed gain and last-day expiry reminders. Give-back requires a fresh, sufficiently tight Tradier midpoint; calendar-timed expiry reminders can report missing/thin quotes. Dedupe and restart state exist. Does not monitor every losing position or a sector thesis. |
 | Conditional watches | [Scanner contract](agent/setup-scanner-contract.md): explicitly saved numeric triggers/invalidation on eligible selected symbols, with expiry and visible refusal. A promise by Jo is not a saved watch. |
 | Position freshness | Journal positions derive from imported Robinhood execution emails and reconstructed fills, not a live broker holdings feed. Fresh market quotes cannot establish that position quantities are current. |
@@ -107,12 +111,13 @@ collector, and no implicit activation.
 
 | Order | Release | Owner / dependency | Rough effort |
 |---|---|---|---|
-| 0 | Finish VWAP clarity | Merged #396; live parity remains unverified | Implemented |
-| 1 | Market-first Dashboard | Merged #397; owner morning-use acceptance remains open | Implemented |
-| 2 | Peer confirmation in Charts | Radar owns derived observations; Charts owns presentation; valid recorded coverage and detector/observational contract required | 3–6 days after source contract |
+| 0 | VWAP clarity | Merged #396/#401, ±1σ display only; live parity remains unverified | Implemented |
+| 1 | Market-first Dashboard | Merged #397/#401/#406; saved evidence/news drilldowns included; morning-use acceptance remains open | Implemented |
+| 2 | Peer confirmation in Charts | Merged #400/#408: 15-minute and recorded-session comparison; live coverage/usefulness separate | Implemented |
+| Next selected | Movers → Charts handoff | This PR: group selection, dated origin, fresh Session comparison and return to the selected Radar session/group list | Implementation; checks/merge receipt separate |
 | Parallel planning | Macro checklist and data feasibility | Five instruments selected; Tradier probes passed; no provider purchase | Complete for the selected slice |
-| 3 | Implement agreed macro layout | Current PR: five slots, VIX/US10Y units, local Tech return; checks/merge and production acceptance separate | In branch |
-| 4 | Test position-context usefulness | Reuse alerts/watches; verify position freshness and specific owner scenario | 1–2 days assessment; implementation estimated only if selected |
+| 3 | Agreed macro layout | Merged #399: SPY/QQQ/IWM/VIX/US10Y and Tech return; production acceptance separate | Implemented |
+| 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; since-entry comparison and new alerts deferred | Implemented; usefulness open |
 | 5 | Navigation and optional review continuity | Consolidation; actual remaining friction after releases 1–3 | 1–3 days if justified |
 | Later experiment | Narrative/attention sources | Radar; identify incremental value and source access first | Time-box assessment to 1–2 days; build not selected |
 
@@ -227,6 +232,16 @@ unavailable states. It reuses the same stored observations and refresh; late
 recording cannot be labeled a market-open return. Historical event-context
 handoff, recovery-from-low and sustained-trend detection remain follow-ups.
 
+**Next selected: Movers → Charts handoff.** Movers group links carry the chosen
+group, originating stock, recorded session and pass time into Charts. Charts
+opens Overview/Peers on Session, validates membership through the existing API,
+and labels the origin separately from the newly read comparison. It does not
+replay that timestamp, restore event-time peer values or change candle ranges.
+Return navigation restores the selected Radar date, expanded group list and
+group location. Plain leader/laggard links carry origin without inventing group
+membership. Invalid origin parameters are ignored; an unavailable group is not
+silently replaced. This slice adds no detector, provider or activation.
+
 Primary question: **"Are these names rebounding or weakening together over the
 same interval as the stock I am investigating?"** This is the first major
 Charts benefit from Radar, ahead of feed decoration or another summary screen.
@@ -244,12 +259,12 @@ bar confirmations. The Radar owner defines window synchronization, warm-up,
 missing/stale exclusions and the derived read model. A calibrated group event
 and an observational comparison are different outputs; label which is shown.
 
-Current APIs do not supply this view. Extend the Radar contract/read model once,
-not a Charts-owned background polling universe. No co-movement claim while the
+The existing Radar comparison API supplies this view. Extend that read model
+for any approved future windows, not a Charts-owned background polling universe. No co-movement claim while the
 source is off, insufficient, stale or sample-only. No probability-of-profit
 score. A stock chart opening must not trigger broad RVol history prefetch.
 
-Event handoff: preserve event ID, symbol/group, observation window and as-of
+**Deferred historical event handoff:** preserve event ID, symbol/group, observation window and as-of
 context when opening Charts; display detection then versus current values
 explicitly. Reuse existing symbol/from/to chart navigation and add event/group
 context only as needed; never fabricate a trade or fill ID. Existing chart deep
@@ -271,7 +286,7 @@ the peer-confirmation question without cycling through several charts.
 with the existing five slots showing SPY/QQQ/IWM/VIX/US10Y at 4h and a local
 Tech return. Exact units, hours, paging and costs are in the
 [Charts contract](charts-workspace.md#macro-layout-vix-and-10-year-yield).
-Implemented in the current PR. Identifier and read-only entitlement probes passed; production deployment and
+Merged in #399. Identifier and read-only entitlement probes passed; production deployment and
 owner use remain unverified. The draft below records the broader wish list;
 Bitcoin and oil are deferred, not part of this implementation.
 
@@ -281,8 +296,8 @@ Historical wish list from the screenshot, before the selected slice was settled:
 |---|---|---|
 | SPY and QQQ | Direction, structure, major moving averages and nearby lows/highs | Existing equity/ETF charts; selected default is 4h |
 | IWM | Is participation broader than large tech? | Existing ETF path; included in the five-symbol Macro preset |
-| VIX | Is volatility rising/falling? | Current PR adds explicit Tradier index 4h/1D history; finite intraday retention |
-| US10Y | What is the 10-year Treasury yield doing? | Current PR uses TNX:CGI ÷ 10; yield percent, observed timestamps, 4h/1D |
+| VIX | Is volatility rising/falling? | Merged #399 adds explicit Tradier index 4h/1D history; finite intraday retention |
+| US10Y | What is the 10-year Treasury yield doing? | Merged #399 uses TNX:CGI ÷ 10; yield percent, observed timestamps, 4h/1D |
 | Bitcoin | What is crypto doing alongside equities? | Explicit crypto chart data path unverified |
 | Oil exposure | What is oil doing? | Choose actual oil futures/spot versus a named fund such as USO; do not substitute silently |
 
@@ -295,7 +310,7 @@ permissions, real-time/delay, history, session/calendar, precision, limits/cost
 and whether volume-based studies are meaningful. Bond ETF price is not yield;
 USO is not oil futures; SPY is not SPX. New costs/access require approval.
 
-The current PR retains five slots and raises the distinct-symbol cap to five,
+Merged #399 retains five slots and raises the distinct-symbol cap to five,
 with compatibility, request-budget and interaction coverage. Existing named
 layouts and stock study choices are preserved. No giant chart rewrite.
 
@@ -307,7 +322,7 @@ approved instruments and viewports.
 
 ## Release 4: position context, only if useful
 
-The owner approved a read-only Charts slice on October 22: Overview → Holding
+Merged #403 implements the owner-approved read-only Charts slice: Overview → Holding
 context reuses recorded option positions and the selected chart trade card,
 with remaining entry premium, expiration, linked plans and a jump to existing
 peer movement. Import completeness, live value and intent remain explicit gaps.

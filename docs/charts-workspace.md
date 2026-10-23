@@ -216,6 +216,14 @@ See [Radar group movement](radar.md#charts-group-movement) for eligibility,
 version, session and activation boundaries. This view is independent of chart
 interval/crosshair and historical event context.
 
+Radar Movers group links open Overview/Peers on Session with the chosen group.
+A dismissible Radar-origin note preserves the originating ticker, date and pass
+time; candles and peer values remain fresh reads, not a replay of that pass.
+The selected group is validated by the existing comparison API, with unavailable
+groups shown as unavailable. Back to Radar restores its selected date, expanded
+group list and group location. Plain Movers ticker links carry origin without
+assuming a group. Ordinary chart and historical trade links keep their behavior.
+
 A **Peers** block (T3.4) is the last block of the **Overview** tab: the
 active symbol's peers as chips, each with today's percent change, from
 `GET /charts/symbol/{symbol}/peers`. A symbol in a hand-picked group

@@ -27,7 +27,7 @@ import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
-import type { RadarGroup } from "@/lib/radar";
+import { radarChartContext, radarReturnHref, nyTime, type RadarChartContext, type RadarGroup } from "@/lib/radar";
 import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
@@ -852,6 +852,22 @@ export default function ChartWorkspace() {
   const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? (supportedIntervals((index && s.panelSymbols[index]) || s.symbol).includes(value) ? value : "4h") : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const [comparisonGroup, setComparisonGroup] = useState<RadarGroup | null>(null);
+  const [radarOrigin, setRadarOrigin] = useState<RadarChartContext | null>(null);
+  const radarOpened = useRef(false);
+  useEffect(() => {
+    if (!ready || !owner || radarOpened.current) return;
+    radarOpened.current = true;
+    const origin = radarChartContext(new URLSearchParams(window.location.search));
+    if (!origin) return;
+    setRadarOrigin(origin);
+    if (origin.group) { setDock({ open: true, tab: "watchlist" }); setSheet(true); }
+  }, [ready, owner]);
+  const dismissRadar = () => {
+    setRadarOrigin(null);
+    const url = new URL(window.location.href);
+    for (const key of ["radar_symbol", "radar_session", "radar_at", "radar_group", "radar_groups"]) url.searchParams.delete(key);
+    window.history.replaceState(window.history.state, "", url);
+  };
   const chooseSymbol = (symbol: string) => {
     if (settings.symbol !== symbol) startSymbolTiming(symbol);
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, intervals: s.intervals.map((v, i) => ((!i || !s.panelSymbols[i]) && !supportedIntervals(symbol).includes(v)) ? "4h" : v), recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
@@ -1651,7 +1667,7 @@ export default function ChartWorkspace() {
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
     {!isMacroSymbol(settings.symbol) && <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />}
-    {!isMacroSymbol(settings.symbol) && <SymbolInfo positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
+    {!isMacroSymbol(settings.symbol) && <SymbolInfo radarOrigin={radarOrigin} positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
     {!isMacroSymbol(settings.symbol) && <><DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
 
       info="Save support, resistance, or a price you’re watching."
@@ -1800,6 +1816,14 @@ export default function ChartWorkspace() {
     <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={`text-slate-300 ${immersive
       ? "fixed inset-0 z-[70] flex flex-col bg-[#0b1017] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       : fill ? "flex min-h-0 flex-1 flex-col bg-[#0b1017]" : "space-y-2"}`}>
+      {radarOrigin && <section aria-label="Radar origin" className="shrink-0 space-y-1 border-b border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs">
+        <p className="break-words text-sky-200">Opened from Radar: {radarOrigin.symbol}{radarOrigin.group ? ` · ${radarOrigin.group}` : ""} · {radarOrigin.session} {nyTime(radarOrigin.observedAt)} ET</p>
+        <p className="text-slate-400">Charts and peer comparisons refresh independently. This is not a replay of that observation.</p>
+        <div className="flex flex-wrap gap-3">
+          <Link href={radarReturnHref(radarOrigin)} className="inline-flex min-h-9 items-center text-sky-300 underline">Back to Radar</Link>
+          <button onClick={dismissRadar} className="min-h-9 text-slate-400">Dismiss Radar context</button>
+        </div>
+      </section>}
       <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 ${fill ? "shrink-0 border-b border-slate-700/50 bg-[#0e131b] px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
         <h1 className="sr-only">Charts</h1>
         <form onSubmit={submitSymbol} className={`relative flex shrink-0 items-center rounded-md border border-slate-700 bg-[#10151e] ${narrow ? "h-11" : "h-8"}`}>

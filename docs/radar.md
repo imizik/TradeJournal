@@ -184,3 +184,22 @@ caused the move.
 Merging builds the recorder; it stays off. Recording 3–5 sessions for step 2
 starts only after Isaac's separate OK, by setting both variables in the VPS
 `backend.env`. Nothing here sends alerts.
+
+
+### Movers to Charts navigation
+
+Movers stock links carry their originating symbol, recorded session and pass
+time. Group rows add **Compare in Charts**, passing the actual selected group
+and its `most` stock; generic leader/laggard links do not invent membership.
+Charts labels this dated navigation origin separately from current candles and
+freshly read peer comparisons. A group link opens Overview → Peers on Session;
+the existing comparison API validates current group membership. Unavailable or
+changed groups do not silently fall back to a different group. No timestamp
+replay, historical peer lookup, event detector or new market read is implied.
+
+**Back to Radar** restores the selected session, expanded group list and group
+location using an internal link. Origin parameters are validated, displayed as
+plain text, and can be dismissed without affecting chart ranges or trade links.
+The origin remains explicitly tied to its original ticker when another chart
+symbol is selected. Existing event-detail links remain unchanged; historical
+event-context handoff is deferred.

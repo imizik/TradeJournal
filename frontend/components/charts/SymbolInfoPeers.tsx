@@ -44,13 +44,13 @@ export function usePeers(symbol: string, enabled: boolean, owner: boolean, group
 }
 
 /** The Peers block: chips with today's move; a chip click goes through the same handler a watchlist row uses. */
-export default function SymbolInfoPeers({ symbol, result, onSelect, movement, onGroup }: { symbol: string; result: PeersResult; onSelect(symbol: string): void; movement?: MovementResult; onGroup?(group: RadarGroup): void }) {
+export default function SymbolInfoPeers({ symbol, result, onSelect, movement, onGroup, sessionFirst = false }: { symbol: string; result: PeersResult; onSelect(symbol: string): void; movement?: MovementResult; sessionFirst?: boolean; onGroup?(group: RadarGroup): void }) {
   const shown = result?.symbol === symbol ? result : null;
   const data = shown?.data;
   const source = data ? `${data.source.label}${data.source.age_seconds != null ? `, read ${Math.round(data.source.age_seconds / 3600)} h ago` : ""}` : "";
   // A failed read or a stale list opens the block whatever was saved.
   const problem = !!shown?.error || (!!data && (data.source.state === "stale" || (data.state === "ready" && data.quotes.state !== "ok") || (data.state !== "ready" && data.state !== "none")));
-  return <Block name="peers" title="Peers" forceOpen={problem}><div role="group" aria-label="Peers">
+  return <Block name="peers" title="Peers" forceOpen={problem || sessionFirst}><div role="group" aria-label="Peers">
     {!shown ? <p role="status" className="text-xs text-slate-500">Loading peers…</p>
       : shown.error ? <p className="text-xs text-slate-500">Peers unavailable.</p>
       : data && data.state === "ready" ? <>
@@ -71,12 +71,12 @@ export default function SymbolInfoPeers({ symbol, result, onSelect, movement, on
       </>
       : data && data.state === "none" ? <p className="text-xs text-slate-500">No related companies listed for {symbol} (funds and ETFs have none).</p>
       : <p className="text-xs text-slate-500">{data?.source.message ?? "Peers unavailable."}</p>}
-  </div>{onGroup && <GroupMovement result={movement ?? null} onGroup={onGroup} onSelect={onSelect} />}</Block>;
+  </div>{onGroup && <GroupMovement sessionFirst={sessionFirst} result={movement ?? null} onGroup={onGroup} onSelect={onSelect} />}</Block>;
 }
 
 
-function GroupMovement({ result, onGroup, onSelect }: { result: MovementResult; onGroup(group: RadarGroup): void; onSelect(symbol: string): void }) {
-  const [period, setPeriod] = useState<"recent" | "session">("recent");
+function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFirst: boolean; result: MovementResult; onGroup(group: RadarGroup): void; onSelect(symbol: string): void }) {
+  const [period, setPeriod] = useState<"recent" | "session">(sessionFirst ? "session" : "recent");
   const response = result?.data;
   const data = period === "session" ? response?.session_context : response;
   return <div role="group" aria-label="Group movement" className="mt-3 border-t border-slate-700/60 pt-2 text-xs">

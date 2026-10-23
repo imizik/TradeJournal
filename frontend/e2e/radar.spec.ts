@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { radarChartContext, radarReturnHref, radarSession } from "../lib/radar";
 
 const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 const EVENT = "rad_sample_mu_20261020_1";
@@ -70,7 +71,11 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     await expect(spot).toContainText("+10.6%");
     await expect(spot).toContainText("+12.0%"); // versus SPY
     await expect(spot).toContainText("gap"); // opened at the gap: from open +0.5%, under a third of the day move
-    await expect(spot.getByRole("link", { name: "SPOT" })).toHaveAttribute("href", "/charts?symbol=SPOT");
+    const target = new URL((await spot.getByRole("link", { name: "SPOT" }).getAttribute("href"))!, "http://fixture");
+    expect(target.searchParams.get("symbol")).toBe("SPOT");
+    expect(target.searchParams.get("radar_session")).toBe("2026-10-20");
+    expect(target.searchParams.get("radar_group")).toBeNull();
+    expect(radarChartContext(target.searchParams)?.symbol).toBe("SPOT");
     const cohr = laggards.getByTestId("radar-mover").first();
     await expect(cohr).toContainText("COHR");
     await expect(cohr).toContainText("−13.3%");
@@ -104,3 +109,19 @@ for (const [status, line] of [["none_found", "No news found — cause unknown"],
     if (status === "none_found") await page.screenshot({ path: test.info().outputPath("radar-no-news-phone.png"), fullPage: true });
   });
 }
+
+
+test("Radar navigation context rejects invalid dates and keeps return links internal", () => {
+  const query = new URLSearchParams({ radar_symbol: "NVDA", radar_session: "2026-10-20",
+    radar_at: "2026-10-20T15:12:00Z", radar_group: "AI & compute", radar_groups: "all", return: "https://example.com" });
+  const context = radarChartContext(query)!;
+  expect(context.group).toBe("AI & compute");
+  expect(radarReturnHref(context)).toBe("/radar?session=2026-10-20&groups=all#radar-group-AI%20%26%20compute");
+  for (const [key, value] of [["radar_symbol", "../bad"], ["radar_session", "2026-02-30"],
+    ["radar_at", "bad"], ["radar_at", "2026-10-21T15:12:00Z"], ["radar_at", "2026-10-20T15:12:00"], ["radar_group", " "]]) {
+    const invalid = new URLSearchParams(query); invalid.set(key, value);
+    expect(radarChartContext(invalid)).toBeNull();
+  }
+  expect(radarSession("2026-02-30")).toBeUndefined();
+  expect(radarSession("../../")).toBeUndefined();
+});

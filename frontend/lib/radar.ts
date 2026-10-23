@@ -171,3 +171,36 @@ export function groupLine(g: RadarMoverGroup): string {
   const partial = g.members_with_data < g.members_total ? ` (${g.members_with_data} of ${g.members_total} with data)` : "";
   return `${g.name} · ${side}${partial} · median ${median} · most: ${g.most?.symbol}`;
 }
+
+/** Navigation provenance only. Never interpreted as a historical chart/replay window. */
+export type RadarChartContext = { symbol: string; session: string; observedAt: string; group?: string; allGroups: boolean };
+export function radarSession(value: string | null): string | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : undefined;
+}
+export function radarChartContext(query: URLSearchParams): RadarChartContext | null {
+  const symbol = query.get("radar_symbol"), session = radarSession(query.get("radar_session"));
+  const observedAt = query.get("radar_at"), group = query.get("radar_group") ?? undefined;
+  if (!symbol || !/^[A-Z0-9.\-]{1,16}$/.test(symbol) || !session || !observedAt ||
+    !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(observedAt) || !Number.isFinite(Date.parse(observedAt)) ||
+    new Intl.DateTimeFormat("en-CA", { timeZone: NY }).format(new Date(observedAt)) !== session ||
+    (group !== undefined && (!group.trim() || group.length > 120))) return null;
+  return { symbol, session, observedAt, group, allGroups: query.get("radar_groups") === "all" };
+}
+export function radarChartHref(symbol: string, movers: RadarMovers, group?: string, allGroups = false): string {
+  const query = new URLSearchParams({ symbol });
+  if (movers.session && movers.pass_at) {
+    query.set("radar_symbol", symbol);
+    query.set("radar_session", movers.session);
+    query.set("radar_at", movers.pass_at);
+    if (group) query.set("radar_group", group);
+    if (allGroups) query.set("radar_groups", "all");
+  }
+  return `/charts?${query}`;
+}
+export function radarReturnHref(context: RadarChartContext): string {
+  const query = new URLSearchParams({ session: context.session });
+  if (context.allGroups) query.set("groups", "all");
+  return `/radar?${query}#${encodeURIComponent(context.group ? `radar-group-${context.group}` : "radar-movers")}`;
+}
