@@ -136,8 +136,14 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
   const done: Item[] = [], watching: Item[] = [], next: Item[] = [];
   const m = data.morning, d = m?.delivery;
   if (d?.publication === "published" && d.published_at) {
-    done.push({ key: "packet", at: d.published_at, icon: "done", label: "Morning data sent to Jo",
-      badge: !m?.briefing && d.deadline ? [`Briefing due ${time(d.deadline)}`, muted] : undefined });
+    done.push({ key: "packet", at: d.published_at, icon: "done", label: "Morning data ready",
+      badge: !m?.briefing && d.deadline ? [`Briefing due ${time(d.deadline)}`, muted] : undefined,
+      detail: <p className="text-sm text-muted-foreground">This is when TradeJournal made the morning data available. It does not mean Jo&apos;s run had started.</p> });
+  }
+  if (d?.context_read === "recorded" && d.context_read_at) {
+    done.push({ key: "morning-read", at: d.context_read_at, icon: "done", label: "Morning data read",
+      sub: "First recorded read · run start time unknown",
+      detail: <p className="text-sm text-muted-foreground">This records access to the morning data, not when the task woke up. The app cannot verify who started the run.</p> });
   }
   if (m?.briefing && !m.briefing.redacted_at) {
     const body = m.briefing.body;
