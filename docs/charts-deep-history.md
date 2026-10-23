@@ -129,7 +129,10 @@ bounds; no session in that range is published until all provider pages validate.
 Stored files retain individual New York session bounds. Range planning stops
 before an existing file, and a file completed by another panel during a paused
 range is validated and preserved. Missing dates in a range are not cached as
-empty sessions. The single-session RVol job keeps its existing request size.
+empty sessions. If the requested endpoint is absent, a single-session request
+verifies it under the same work budget: confirmed empty results advance, while
+no-data and provider failures retain their existing explicit states. The
+single-session RVol job keeps its existing request size.
 
 Loading the workspace must not eagerly backfill 1,200 candles plus years of
 warmup for all five intervals. Render available current data first, prioritize

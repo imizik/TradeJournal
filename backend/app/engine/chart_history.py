@@ -278,7 +278,11 @@ class ChartHistory:
                 if day not in days:
                     if work.batch_start != day:
                         work.candidate, work.token, work.batch_start = [], None, None
-                        raise HistoryError(f"Alpaca has no minute bars for {symbol} on {day}.", "no_data")
+                        # A missing endpoint in a range is not a single-session
+                        # answer. Verify it under the same attempt/deadline budget:
+                        # a successful [] advances; no_data/errors stay explicit.
+                        work.batch_sessions = 1
+                        return self._session(symbol, day, work, deadline, attempts)
                     self._publish(symbol, day, [])
                 work.candidate = []
                 work.batch_start = None

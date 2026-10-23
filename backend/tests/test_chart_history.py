@@ -598,3 +598,40 @@ def test_batch_does_not_invent_empty_sessions(history, monkeypatch):
     monkeypatch.setattr(module.httpx, "get", get)
     assert len(history._session("SPY", day, work, module.time.monotonic() + 10, [0])) == 16
     assert history._cached("SPY", friday) is None
+
+
+@pytest.mark.parametrize("empty_kind", ["empty", "no_data"])
+@pytest.mark.parametrize("pause_before_verification", [False, True])
+def test_missing_batch_endpoint_uses_single_session_semantics(history, monkeypatch, empty_kind, pause_before_verification):
+    monkeypatch.setattr(module, "WARMUP", 0)
+    day = date(2026, 3, 9)
+    before = int(datetime.combine(day, wall_time(20), ET).timestamp())
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        if pause_before_verification and len(calls) < 8:
+            return httpx.Response(200, json={"bars": [], "next_page_token": str(len(calls))})
+        start = datetime.fromisoformat(params["start"]).astimezone(ET).date()
+        end = datetime.fromisoformat(params["end"]).astimezone(ET).date()
+        if start == end == day:
+            return httpx.Response(200, json={"symbol": "SPY", "bars": [] if empty_kind == "empty" else None, "next_page_token": None})
+        return httpx.Response(200, json={"bars": [r for r in range_rows(params)
+            if datetime.fromisoformat(r["t"]).astimezone(ET).date() != day], "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    page = history.page("SPY", "1h", "extended", before, 65)
+    if pause_before_verification:
+        assert page["issue"]["code"] == "pending" and len(calls) == 8
+        assert history._cached("SPY", day) is None
+        page = history.page("SPY", "1h", "extended", before, 65, page["continuation"])
+    if empty_kind == "empty":
+        assert page["warmup"] == "ready" and len(page["bars"]) == 65
+        assert page["issue"] is None and history._cached("SPY", day) == []
+    else:
+        assert page["issue"]["code"] == "no_data"
+        assert history._cached("SPY", day) is None
+    # The missing endpoint is explicitly checked, without widening the range or budget.
+    verification = calls[8 if pause_before_verification else 1]
+    assert verification["start"] == history._bounds(day)[0].isoformat()
+    assert verification["end"] == history._bounds(day)[1].isoformat()

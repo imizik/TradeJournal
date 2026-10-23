@@ -33,6 +33,10 @@ completed during a paused batch. The final cold run starts with another empty
 cache and includes that guard. Raw JSON files next to this report retain timing,
 response and completion data; every run had zero browser page errors.
 
+Review subsequently added bounded single-session verification when a batch's
+newest date is missing. The recorded SPY runs did not take that path; regression
+tests cover both a confirmed empty response and an explicit no-data refusal.
+
 ## Interpretation and limits
 
 These are premarket runs, 08:45–08:57 ET. We compare **history readiness**, not
