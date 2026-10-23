@@ -604,6 +604,21 @@ saved workflow, explicit SLOT and weekday ET times, first due October 15. The
 existing setup task's bounded exception was saved and verified after reload;
 its original source/expiry guards and shadow-first sequence remain intact.
 
+October 23 scheduled-read Gmail boundary: all four live scheduled prompts were
+read back and matched apart from SLOT. They contained the template's pending
+shadow ordering rule, with no explicit Gmail prerequisite. The live setup-email
+task separately required inbox refreshes and deferred non-shadow work when its
+delivered queue could not be read. Jo's reported Gmail-blocked scheduled reads
+are consistent with applying that email-workflow guard outside its scope; no
+cloud execution trace establishes the model's internal cause. The
+[scheduled template](../../deploy/market-watch/jo-task.md) now explicitly omits
+inbox discovery for standalone scheduled reads while preserving known pending
+shadow work, failure/expiry rules and no interleaving. Email-triggered workflows
+keep their own guards. Unknown/unseen setups can still affect the server's
+`clean_order`; this clarification neither guarantees nor repairs that flag.
+Template verification is not proof the live tasks were updated or that a
+natural scheduled run succeeded.
+
 October 15 first-session diagnosis: the 09:49 publisher packet was available
 and the 09:50 native task reached both market tools, but its submission listed
 13 supporting references against the existing maximum of 10 per list. The
