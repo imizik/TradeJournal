@@ -135,14 +135,14 @@ kind/direction and each event's first-seen time, summary and later revisions.
 the replay produce identical events and revisions on the same passes.
 
 v0 was set on **two recorded sessions** (October 22, full; October 23, to
-13:10 ET) from a read-only copy of the VPS file. It is provisional: two
+13:27 ET) from a read-only copy of the VPS file. It is provisional: two
 sessions say nothing about usefulness, and v1 is due after the October 26 close
 with three sessions and Isaac's ratings.
 
 | Session | Passes | Events | vs SPY up/down | vs sector | Group up/down | Revisions |
 | --- | --- | --- | --- | --- | --- | --- |
 | Oct 22 (SPY −1.4%) | 390 | 7 | 1 / 1 | 0 | 1 / 4 | 14 |
-| Oct 23 (to 13:10 ET) | 221 | 9 | 3 / 2 | 0 | 1 / 3 | 10 |
+| Oct 23 (to 13:27 ET) | 238 | 9 | 3 / 2 | 0 | 1 / 3 | 10 |
 
 Checked against October 22's known moves: SPOT (+10.6% on the day) and most of
 COHR's, AAOI's and ALAB's declines came at or before the open or ground lower
