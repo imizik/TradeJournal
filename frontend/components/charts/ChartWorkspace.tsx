@@ -309,6 +309,7 @@ export default function ChartWorkspace() {
   const [dock, setDock] = useState<{ open: boolean; tab: DockTab }>({ open: true, tab: "watchlist" });
   // A phone's dock: a sheet over the charts, closed until asked for.
   const [sheet, setSheet] = useState(false);
+  const [contextFocus, setContextFocus] = useState<{ symbol: string; target: "peers" | "holding"; n: number } | null>(null);
   // A short message after a menu action ("Copied 256.12"), cleared after a moment.
   const [notice, setNotice] = useState("");
   // Level alerts (C5.1) as an alert change returned them, until a workspace refresh newer than that change arrives.
@@ -1671,7 +1672,7 @@ export default function ChartWorkspace() {
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
     {!isMacroSymbol(settings.symbol) && <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />}
-    {!isMacroSymbol(settings.symbol) && <SymbolInfo radarOrigin={radarOrigin} positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
+    {!isMacroSymbol(settings.symbol) && <SymbolInfo onPeers={() => setContextFocus({ symbol: settings.symbol, target: "peers", n: Date.now() })} contextFocus={contextFocus} onContextHandled={() => setContextFocus(null)} radarOrigin={radarOrigin} positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
     {!isMacroSymbol(settings.symbol) && <><DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
 
       info="Save support, resistance, or a price you’re watching."
@@ -1889,6 +1890,10 @@ export default function ChartWorkspace() {
           {!narrow && <>{sep}{dockTabs}</>}
         </div>
         {narrow && (drawOpen || tool) && <div role="toolbar" aria-label="Drawing" className="flex basis-full flex-wrap items-center">{tools}</div>}
+      {owner && !isMacroSymbol(settings.symbol) && <div role="group" aria-label="Chart context shortcuts" className="flex flex-wrap items-center gap-1">
+          <button type="button" onClick={() => { setContextFocus({ symbol: settings.symbol, target: "peers", n: Date.now() }); showDock("watchlist"); }} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>Peers</button>
+          {feedFor(settings.symbol)?.positions?.some((position) => position.instrument === "option") && <button type="button" onClick={() => { setContextFocus({ symbol: settings.symbol, target: "holding", n: Date.now() }); showDock("watchlist"); }} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>Holding context</button>}
+        </div>}
       </header>
 
       {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}

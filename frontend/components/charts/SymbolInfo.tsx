@@ -38,7 +38,7 @@ const REFRESH_MS = 60_000;
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 /** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup, radarOrigin }: { symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; radarOrigin?: RadarChartContext | null; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
+export default function SymbolInfo({ symbol, positions, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled, comparisonGroup, onComparisonGroup, radarOrigin, contextFocus, onContextHandled, onPeers }: { onPeers?(): void; contextFocus?: { symbol: string; target: "peers" | "holding"; n: number } | null; onContextHandled?(): void; symbol: string; positions?: ChartPosition[]; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void; radarOrigin?: RadarChartContext | null; comparisonGroup?: RadarGroup | null; onComparisonGroup?(group: RadarGroup): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -58,6 +58,35 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     const expanded = window.matchMedia("(min-width: 1024px)").matches;
     queueMicrotask(() => setView((current) => focused.current ? { ...current, ready: true } : { ready: true, expanded, tab }));
   }, []);
+  const contextN = owner && contextFocus?.symbol === symbol ? contextFocus.n : 0;
+  useEffect(() => {
+    if (!contextN) return;
+    try {
+      localStorage.setItem(TAB_KEY, "Overview");
+      if (contextFocus?.target === "peers") localStorage.setItem("tradejournal.charts.info.peers.open.v1", "1");
+    } catch { /* device storage is optional */ }
+    focused.current = true;
+    queueMicrotask(() => setView((current) => ({ ...current, expanded: true, tab: "Overview" })));
+  }, [contextN, contextFocus?.target]);
+  useEffect(() => {
+    if (!contextN || !view.ready || !view.expanded || view.tab !== "Overview") return;
+    // Overview moves Peers from its loading fallback into the loaded blocks.
+    // Wait for that transition so the requested focus does not immediately disappear.
+    if (contextFocus?.target === "peers" && result?.key !== `Overview|${symbol}`) return;
+    let settledFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      const section = document.getElementById(`${id}-${contextFocus?.target}`);
+      const button = section?.querySelector<HTMLButtonElement>("button[aria-expanded]");
+      if (!section || !button) return;
+      if (button.getAttribute("aria-expanded") === "false") button.click();
+      settledFrame = requestAnimationFrame(() => {
+        button.focus({ preventScroll: true });
+        section.scrollIntoView({ block: "start" });
+        onContextHandled?.();
+      });
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(settledFrame); };
+  }, [contextN, contextFocus?.target, view.ready, view.expanded, view.tab, result, symbol, id, onContextHandled]);
   const radarGroup = owner && radarOrigin?.group;
   useEffect(() => {
     if (!radarGroup) return;
@@ -171,7 +200,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
         {radarGroup && view.tab === "Overview" && peers}
-        {owner && view.tab === "Overview" && <HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" })} />}
+        {owner && view.tab === "Overview" && <div id={`${id}-holding`}><HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={onPeers ?? (() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" }))} /></div>}
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
               peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}
