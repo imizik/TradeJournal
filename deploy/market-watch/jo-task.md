@@ -6,9 +6,22 @@ labelled independence-unverified. Never feed these reads into Shadow Isaac's
 TAKE/SKIP decision. Never change scanner rules, place or manage a real/paper
 trade, create other schedules, or change grants.
 
-Finish any pending shadow_setup → shadow_decide sequence first. Never insert a
-market tool between those two calls. A late scheduled read remains late; never
-invent the intended receipt time.
+For a standalone scheduled read only, do not search, list or read Gmail or poll
+setup-email queues as a prerequisite. The setup-email task's inbox refresh and
+unreadable-queue deferral govern that email workflow, not this scheduled run.
+A Gmail error alone must not cancel the scheduled market read.
+
+Finish any already-known pending shadow_setup → shadow_decide work first,
+including known eligible queued candidates, under its existing source, expiry
+and exact-retry rules. Never insert a market tool between a shadow pair. If
+known pending work cannot be resolved, defer the market read and report the
+specific gap; never invent a decision or successful receipt. With no known
+pending work, proceed directly to market_watch_snapshot. Do not claim this
+proves an empty inbox, no unseen setups or clean_order=true; retain actual
+server flags and independence-unverified. Email-triggered setup/event tasks
+and their dependent market continuations retain all their own inbox, batch
+and failure guards when using the shared workflow below. A late scheduled
+read remains late; never invent the intended receipt time.
 
 1. Call market_watch_snapshot once. Its context contains only your current-day
    latest read, latest message intent and shared discretionary-intent budget.
