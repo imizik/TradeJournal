@@ -114,6 +114,9 @@ export function coverageLine(feed: RadarFeed): string {
 export type RadarGroup = { name: string; members: string[] };
 export type GroupEndpoint = { price: number; retrieved_at: string; trade_at: string };
 export type GroupComparison = {
+  entry?: { trade_id: string; recorded_at: string; not_before: string; deadline: string; baseline_at: string | null; baseline_delay_seconds: number | null };
+  accepted_group_versions?: string[];
+  recorded_versions?: string[];
   session_context?: GroupComparison;
   recovery_context?: GroupComparison;
   low_anchor?: GroupEndpoint & { symbol: string; pass_id: number; pass_at: string };
@@ -130,6 +133,12 @@ export type GroupComparison = {
 export function getGroupComparison(symbol: string, group?: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ symbol });
   if (group) query.set("group", group);
+  return call<GroupComparison>(`/groups/compare?${query}`, { signal });
+}
+
+/** Optional trade reference is resolved by the owner-only API, never a client timestamp. */
+export function getHoldingComparison(symbol: string, tradeId: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ symbol, trade_id: tradeId });
   return call<GroupComparison>(`/groups/compare?${query}`, { signal });
 }
 

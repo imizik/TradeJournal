@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { chartLink, fetchTradeCard, type ChartPosition, type TradeCardData } from "@/lib/chartJournal";
 import { captureTime } from "@/lib/captures";
+import HoldingEntryContext from "./HoldingEntryContext";
 import PlanSummary from "./PlanSummary";
 
 const money = (n: number | null | undefined) => n == null || !Number.isFinite(n) ? "Unavailable" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -31,7 +32,7 @@ export default function HoldingContext({ symbol, positions, onPeers }: { symbol:
         {chosen && <HoldingDetails key={`${symbol}:${chosen.trade_id}`} symbol={symbol} id={chosen.trade_id} />}
       </>}
       <button type="button" onClick={onPeers} className="min-h-11 text-left text-sky-300 underline">Compare stock, group & market</button>
-      <p className="text-slate-400">Peers shows its latest 15-minute window, not change since entry or the selected chart interval.</p>
+      <p className="text-slate-400">Peers has separate 15 min, Session and From low views; its window is independent of this holding.</p>
     </div>}
   </section>;
 }
@@ -68,6 +69,7 @@ function HoldingDetails({ symbol, id }: { symbol: string; id: string }) {
         <Link href={`/trades/${id}`} className="py-2 underline">Trade details</Link>
         <Link href={chartLink({ symbol, from: trade.opened_at, trade: id })} className="py-2 underline">Entry on chart</Link>
       </div>
+      {position && <HoldingEntryContext symbol={symbol} tradeId={id} />}
       <details className="rounded border border-slate-700 p-2">
         <summary className="cursor-pointer py-1 text-slate-200">Saved plan & reference</summary>
         <div className="mt-2 space-y-3">

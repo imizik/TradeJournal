@@ -191,6 +191,7 @@ def test_owner_only(boundary, tmp_path):  # noqa: F811
     assert boundary.owner.post("/radar/visits").status_code == 200
     assert boundary.owner.post(f"/radar/events/{EVENT_ID}/feedback", json={"rating": "useful"}, headers={"x-tj-csrf": "wrong"}).status_code == 403
     assert signin(boundary).status_code == 200
-    for method, path in [("GET", "/radar/feed"), ("GET", "/radar/groups/compare?symbol=NVDA"), ("GET", f"/radar/events/{EVENT_ID}"), ("POST", "/radar/visits"),
+    for method, path in [("GET", "/radar/feed"), ("GET", "/radar/groups/compare?symbol=NVDA"),
+                         ("GET", "/radar/groups/compare?symbol=NVDA&trade_id=00000000-0000-0000-0000-000000000001"), ("GET", f"/radar/events/{EVENT_ID}"), ("POST", "/radar/visits"),
                          ("POST", f"/radar/events/{EVENT_ID}/feedback")]:
         assert boundary.public.request(method, path, json={"rating": "useful"} if method == "POST" else None).status_code == 403

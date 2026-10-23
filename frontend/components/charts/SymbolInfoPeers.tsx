@@ -110,9 +110,18 @@ function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFir
         {data.window && <p className="my-2 text-[11px] text-slate-400">{data.live ? "Recorded" : "Last recorded session"} {data.session}<br />{nyTime(data.window.start)}–{nyTime(data.window.end)} ET</p>}
         {data.coverage && <p className="mb-2 text-slate-300">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available} of {data.coverage.peers_total} peers available</p>}
         {data.coverage && <p className="mb-2 text-[10px] text-slate-500">{data.coverage.recorded_minutes} of {data.coverage.expected_minutes} minutes recorded. Returns use the two endpoint passes.</p>}
-        <ul className="space-y-1" aria-label="Same-window movements">
+        <ComparisonRows data={data} onSelect={onSelect} onGroup={onGroup} />
+        <p className="mt-2 break-words text-[10px] text-slate-500">{data.source} · {data.universe_version}. Sampled price changes, not candle confirmation or a trade signal.</p>
+      </>}
+  </div>;
+}
+
+
+/** Shared endpoint rows; holding context is read-only and does not change charts. */
+export function ComparisonRows({ data, onSelect, onGroup }: { data: GroupComparison; onSelect?(symbol: string): void; onGroup?(group: RadarGroup): void }) {
+  return <ul className="space-y-1" aria-label="Same-window movements">
           {data.rows.map((row) => <li key={row.symbol} className="border-b border-slate-800 pb-1">
-            <button onClick={() => { if (data.group) onGroup(data.group); onSelect(row.symbol); }} aria-label={`Compare chart ${row.symbol}`}
+            <button disabled={!onSelect} onClick={() => { if (data.group) onGroup?.(data.group); onSelect?.(row.symbol); }} aria-label={`Compare chart ${row.symbol}`}
               className="flex min-h-11 w-full items-center justify-between gap-2 text-left lg:min-h-7">
               <span className="text-slate-200">{row.symbol}<span className="ml-1 text-[10px] text-slate-500">{row.role === "selected" ? "selected" : row.role === "benchmark" ? "benchmark" : ""}</span></span>
               <span className={row.change_pct == null ? "text-slate-500" : row.change_pct > 0 ? "text-emerald-300" : row.change_pct < 0 ? "text-rose-300" : "text-slate-400"}>{row.change_pct == null ? "—" : `${row.change_pct > 0 ? "+" : ""}${row.change_pct.toFixed(2)}%`}</span>
@@ -123,8 +132,5 @@ function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFir
               <p>Read: {nyTime(row.start.retrieved_at, true)} → {nyTime(row.end.retrieved_at, true)} ET</p>
             </details>}
           </li>)}
-        </ul>
-        <p className="mt-2 break-words text-[10px] text-slate-500">{data.source} · {data.universe_version}. Sampled price changes, not candle confirmation or a trade signal.</p>
-      </>}
-  </div>;
+        </ul>;
 }
