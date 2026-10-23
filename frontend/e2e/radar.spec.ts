@@ -52,6 +52,43 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
   });
 }
 
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]] as const) {
+  test(`radar movers panel is a plain ranking on ${size}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.setViewportSize({ width, height });
+    await page.goto("/radar");
+    const panel = page.getByTestId("radar-movers");
+    await expect(panel.getByTestId("radar-movers-header")).toHaveText("SPY −1.4% · QQQ −1.9% · 168 of 169 symbols · 11:12");
+    await expect(panel).toContainText("not alerts");
+    const leaders = panel.getByRole("region", { name: "Leaders" });
+    const laggards = panel.getByRole("region", { name: "Laggards" });
+    await expect(leaders.getByTestId("radar-mover")).toHaveCount(10);
+    await expect(laggards.getByTestId("radar-mover")).toHaveCount(10);
+    const spot = leaders.getByTestId("radar-mover").first();
+    await expect(spot).toContainText("SPOT");
+    await expect(spot).toContainText("+10.6%");
+    await expect(spot).toContainText("+12.0%"); // versus SPY
+    await expect(spot).toContainText("gap"); // opened at the gap: from open +0.5%, under a third of the day move
+    await expect(spot.getByRole("link", { name: "SPOT" })).toHaveAttribute("href", "/charts?symbol=SPOT");
+    const cohr = laggards.getByTestId("radar-mover").first();
+    await expect(cohr).toContainText("COHR");
+    await expect(cohr).toContainText("−13.3%");
+    await expect(cohr).not.toContainText("gap");
+    await expect(cohr).toContainText("−0.2%"); // last 15 min, from the earlier seeded pass
+    await expect(panel.getByTestId("radar-mover-group").first()).toContainText("median");
+    await expect(panel.getByTestId("radar-mover-group").first()).toContainText("most:");
+    if (size === "phone") {
+      const a = await leaders.boundingBox();
+      const b = await laggards.boundingBox();
+      expect(b!.y).toBeGreaterThan(a!.y + a!.height - 1); // stacked
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await panel.screenshot({ path: test.info().outputPath(`radar-movers-${size}.png`) });
+    expect(errors).toEqual([]);
+  });
+}
+
 for (const [status, line] of [["none_found", "No news found — cause unknown"], ["unavailable", "News unavailable — cause unknown"]] as const) {
   test(`radar says the cause is unknown when news is ${status}`, async ({ page, request }) => {
     expect((await request.post(`${API}/__test/radar-seed?news=${status}`)).ok()).toBeTruthy();

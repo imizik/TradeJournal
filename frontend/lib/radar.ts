@@ -127,3 +127,45 @@ export function getGroupComparison(symbol: string, group?: string, signal?: Abor
   if (group) query.set("group", group);
   return call<GroupComparison>(`/groups/compare?${query}`, { signal });
 }
+
+export type RadarMover = {
+  symbol: string; kind: "stock" | "etf"; last: number; day_pct: number; from_open_pct: number | null; vs_spy: number;
+  sector: string | null; vs_sector: number | null; last_15m_pct: number | null;
+};
+export type RadarMoverGroup = {
+  name: string; members_total: number; members_with_data: number; ahead: number; behind: number;
+  median_vs_spy: number | null; most: { symbol: string; vs_spy: number } | null;
+};
+export type RadarMovers = {
+  state: "off" | "no_data" | "ok" | "stale"; reason: string | null; session: string | null; generated_at: string;
+  pass_at: string | null; earlier_pass_at: string | null;
+  header: { spy_day_pct: number; qqq_day_pct: number | null; symbols_with_data: number; symbols_tracked: number; has_earlier_pass: boolean } | null;
+  leaders: RadarMover[]; laggards: RadarMover[]; groups: RadarMoverGroup[]; missing: string[];
+};
+export function getMovers(session?: string, signal?: AbortSignal) {
+  return call<RadarMovers>(`/movers${session ? `?${new URLSearchParams({ session })}` : ""}`, { signal });
+}
+
+/** Signed percent with a true minus sign, or a dash when there is no number. */
+export const pctText = (value: number | null | undefined, digits = 1) =>
+  value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
+
+/** "SPY −1.4% · QQQ −1.9% · 169 of 169 symbols · 14:34" */
+export function moversHeader(movers: RadarMovers): string {
+  const h = movers.header;
+  if (!h || !movers.pass_at) return "";
+  const time = new Date(movers.pass_at).toLocaleTimeString("en-GB", { timeZone: NY, hour: "2-digit", minute: "2-digit" });
+  return `SPY ${pctText(h.spy_day_pct)} · QQQ ${pctText(h.qqq_day_pct)} · ${h.symbols_with_data} of ${h.symbols_tracked} symbols · ${time}`;
+}
+
+/** A gap day: the move since the open is under a third of the move since the previous close. */
+export const isGap = (m: RadarMover) => m.from_open_pct != null && Math.abs(m.from_open_pct) < Math.abs(m.day_pct) / 3;
+
+/** "AI networking · 5 of 6 behind SPY · median −9.9 · most: COHR" */
+export function groupLine(g: RadarMoverGroup): string {
+  if (g.members_with_data === 0 || g.median_vs_spy == null) return `${g.name} · no data`;
+  const behind = g.median_vs_spy < 0;
+  const median = `${g.median_vs_spy > 0 ? "+" : g.median_vs_spy < 0 ? "−" : ""}${Math.abs(g.median_vs_spy).toFixed(1)}`;
+  const partial = g.members_with_data < g.members_total ? ` (${g.members_with_data} of ${g.members_total} with data)` : "";
+  return `${g.name} · ${behind ? g.behind : g.ahead} of ${g.members_with_data} ${behind ? "behind" : "ahead of"} SPY${partial} · median ${median} · most: ${g.most?.symbol}`;
+}

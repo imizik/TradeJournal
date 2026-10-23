@@ -6,6 +6,7 @@ import {
   MEASURE_LABELS, RATINGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
   recordVisit, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
+import RadarMovers from "@/components/RadarMovers";
 import { cn } from "@/lib/utils";
 
 const NEVER_VISITED = "1970-01-01T00:00:00Z";
@@ -247,6 +248,8 @@ export default function RadarFeedView() {
         )}
       </div>
       {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
+
+      {feed.state !== "off" && <RadarMovers session={session} />}
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">

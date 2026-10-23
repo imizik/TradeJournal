@@ -176,6 +176,9 @@ def load_universe(path: Path = UNIVERSE_PATH) -> dict:
         raise ValueError("radar universe kinds are etf or stock")
     if any(m not in set(symbols) for group in data["groups"] for m in group["members"]):
         raise ValueError("radar group member missing from the symbol list")
+    benchmarks = {row["symbol"] for row in data["symbols"] if row["benchmark"]}
+    if any(row.get("sector") is not None and (row["kind"] != "stock" or row["sector"] not in benchmarks) for row in data["symbols"]):
+        raise ValueError("radar sector must be a listed benchmark on a stock")
     return data
 
 

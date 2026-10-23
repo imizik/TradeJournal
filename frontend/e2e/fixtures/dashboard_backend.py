@@ -57,11 +57,20 @@ def radar_seed(news: str = "found"):
     path.unlink(missing_ok=True)
     store = RadarStore(path)
     sample = json.loads((Path(__file__).resolve().parents[3] / "backend/tests/fixtures/radar/sample_event.json").read_text())
-    for minute in ("15:10", "15:11", "15:12"):
+    from app.engine.radar_store import load_universe
+
+    # Quotes for every tracked symbol but one (so one is missing); the 14:57 pass is the "15 minutes earlier" reading.
+    symbols = [row["symbol"] for row in load_universe()["symbols"] if row["symbol"] != "WULF"]
+    day = {"SPY": -1.4, "QQQ": -1.9, "SMH": -4.0, "COHR": -13.3, "AAOI": -13.1, "ALAB": -11.3, "SPOT": 10.6, "LCID": 7.3}
+    for minute in ("14:57", "15:10", "15:11", "15:12"):
         stamp = f"2026-10-20T{minute}:00.000Z"
-        store.append_pass({"session_date": "2026-10-20", "started_at": stamp, "finished_at": stamp, "universe_version": "radar-universe-v1",
-                           "status": "ok", "symbols_requested": 169, "symbols_returned": 168, "unmatched": ["ZZZ"], "requests_used": 4,
-                           "error": None, "skip_reason": None})
+        pass_id = store.append_pass(
+            {"session_date": "2026-10-20", "started_at": stamp, "finished_at": stamp, "universe_version": "radar-universe-v2",
+             "status": "ok", "symbols_requested": 169, "symbols_returned": 168, "unmatched": ["ZZZ"], "requests_used": 4,
+             "error": None, "skip_reason": None},
+            [{"symbol": s, "last": round(100 * (1 + (day.get(s, ((i * 7) % 21 - 10) / 10)) / 100) * (1.002 if minute == "14:57" else 1), 4),
+              "prev_close": 100.0, "open": 110.0 if s == "SPOT" else 100.0, "high": None, "low": None, "volume": 1000, "bid": None,
+              "ask": None, "trade_time_ms": None, "retrieved_at": stamp} for i, s in enumerate(symbols)] if minute == "15:12" or minute == "14:57" else [])
     store.append_event(sample["event"])
     store.append_revision(sample["revisions"][0])
     checks = sample["news_checks"] if news == "found" else [
