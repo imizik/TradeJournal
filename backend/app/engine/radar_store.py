@@ -7,8 +7,8 @@ file, separate from the journal Postgres (no Alembic migration) and from every
 other store. Pass, event and revision rows are never updated or deleted; quote
 rows are never updated and are pruned only past ``RETENTION_SESSIONS``.
 
-This PR defines the event and revision shape that the detection PR will write;
-nothing here detects anything.
+This file defines the event and revision shape; ``radar_rules`` detects and the
+runner appends them.
 """
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ import json
 from pathlib import Path
 import sqlite3
 import time
-from typing import Literal, TypedDict
+from typing import Iterable, Literal, TypedDict
 
 APPLICATION_ID = 0x52414431  # RAD1: the isolated Radar recorder file; foreign files are never adopted.
-RETENTION_SESSIONS = 60
+RETENTION_SESSIONS = 20
 UNIVERSE_PATH = Path(__file__).resolve().parent.parent / "data" / "radar_universe.json"
 
 TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback", "event_news"}
@@ -272,6 +272,16 @@ class RadarStore:
             sql, args = sql + " AND symbol=?", args + [symbol]
         with self._db() as db:
             return [dict(row) for row in db.execute(sql + " ORDER BY pass_id, symbol", args)]
+
+    def pass_quotes(self, pass_ids: Iterable[int]) -> dict[int, dict[str, dict]]:
+        """Quote rows of just these passes, as {pass id: {symbol: row}}."""
+        ids = sorted(set(pass_ids))
+        out: dict[int, dict[str, dict]] = {i: {} for i in ids}
+        if ids:
+            with self._db() as db:
+                for row in db.execute(f"SELECT * FROM quote WHERE pass_id IN ({','.join('?' * len(ids))})", ids):
+                    out[row["pass_id"]][row["symbol"]] = dict(row)
+        return out
 
     def append_event(self, event: RadarEvent) -> None:
         if set(event) != _EVENT_FIELDS:

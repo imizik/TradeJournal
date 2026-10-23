@@ -21,6 +21,7 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     const card = newSection.getByTestId("radar-event");
     await expect(card).toContainText("MU up 4.1% while SMH is up 0.6%");
     await expect(card).toContainText("Now: Extended");
+    await expect(card.getByTestId("radar-rules-tag")).toHaveCount(0);  // only radar-rules-v0 events carry the provisional tag
     // The latest news check: catalyst headline first, marked against the move, never called its cause.
     await expect(card.getByTestId("radar-news-line")).toHaveText(
       "News nearby: Micron raises quarterly revenue forecast on AI memory demand · benzinga · 10:41 AM (before the move)");
