@@ -2294,8 +2294,9 @@ and frozen chart-image links. Chart reference prices retain their saved source,
 time and stale flag. No linked plan means unknown rationale; chart interval and
 annotations are not inferred holding intent or invalidation. No structured
 horizon is added. **Compare stock, group & market** jumps to the existing Peers
-block, whose 15-minute window remains independent of entry time and chart
-interval. There is no since-entry baseline, profit probability or thesis verdict.
+block, whose 15-minute, Session and From low windows remain independent of entry
+time and chart interval. The separate same-session since-entry disclosure is
+described below; neither view supplies profit probability or a thesis verdict.
 Tests: `frontend/e2e/chart-journal.spec.ts` (desktop and 390px phone).
 
 ### Initial chart-load diagnostics
@@ -2324,3 +2325,34 @@ existing retry delays and rate-limit cooldowns.
 
 The reproducible isolated runner and the first measured comparison are in
 [the October 22 benchmark](benchmarks/chart-load-2026-10-22/README.md).
+
+### Same-session since-entry holding context
+
+The selected open option holding has a collapsed **Since first recorded entry**
+section. The owner-only Radar comparison route resolves `trade_id` against the
+recorded trade and earliest linked entry fill; it never accepts a client entry
+time. Adds and partial exits preserve that original trade-cycle anchor.
+
+Only today's confirmed regular-session entries qualify. Search starts at the
+next full minute after the recorded entry, because execution timestamps can be
+minute-level. The first eligible selected-stock quote in a pass beginning within
+90 seconds of that boundary becomes the baseline; its trade timestamp must be
+after the boundary. There is no later fallback or price-based selection.
+Peers and SPY/QQQ use the same pass pair, with pre-entry peer quotes unavailable.
+At least 60 seconds between passes is required. The panel shows the actual
+baseline delay, excluded initial movement, observation times and coverage gaps.
+
+This is underlying movement, not option P&L, a thesis verdict or a sell signal.
+Overnight entries and closed trades are unavailable; after hours, only today's
+regular-session snapshot can appear. Fill import time remains unknown. Reads
+refresh every 60 seconds while the disclosure and document are visible, or
+manually. Failed reads hide previous values; changing contracts clears the view.
+No new alerts, marks, provider requests, jobs or stored anchors are introduced.
+
+Radar v1/v2 group comparisons are compatible only when the complete current
+group-membership fingerprint matches the pinned equivalent definitions. v2
+added sector annotations without changing those groups. Unknown versions or
+changed membership fail closed; this does not change Movers sector rules.
+
+Verification: `backend/tests/test_radar_entry.py` and the since-entry cases in
+`frontend/e2e/chart-journal.spec.ts`. Fixture acceptance is not production proof.

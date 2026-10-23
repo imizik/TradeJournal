@@ -118,7 +118,7 @@ collector, and no implicit activation.
 | Next selected | Recovery-from-low peer context | This PR: selected-stock sampled-low anchor, shared peer/benchmark window and low-search coverage | Implementation; checks/merge receipt separate |
 | Parallel planning | Macro checklist and data feasibility | Five instruments selected; Tradier probes passed; no provider purchase | Complete for the selected slice |
 | 3 | Agreed macro layout | Merged #399: SPY/QQQ/IWM/VIX/US10Y and Tech return; production acceptance separate | Implemented |
-| 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; since-entry comparison and new alerts deferred | Implemented; usefulness open |
+| 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; same-session since-entry comparison implemented in the current slice; new alerts deferred | Implemented; usefulness open |
 | 5 | Navigation and optional review continuity | Consolidation; actual remaining friction after releases 1–3 | 1–3 days if justified |
 | Later experiment | Narrative/attention sources | Radar; identify incremental value and source access first | Time-box assessment to 1–2 days; build not selected |
 
@@ -342,7 +342,7 @@ context reuses recorded option positions and the selected chart trade card,
 with remaining entry premium, expiration, linked plans and a jump to existing
 peer movement. Import completeness, live value and intent remain explicit gaps.
 Desktop/phone fixture acceptance does not prove live usefulness. New alerts,
-structured intent writes and since-entry baselines remain deferred. See
+structured intent writes remain deferred. The approved same-session since-entry slice is implemented; deployment and live usefulness remain unverified. See
 [the holding contract](charts-workspace.md#holding-context-read-only).
 
 Reuse before adding anything:

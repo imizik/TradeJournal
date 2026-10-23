@@ -560,3 +560,62 @@ test("holding context keeps linked plan timing and saved source, and ignores a l
   await holding.getByRole("button", { name: "Compare stock, group & market" }).click();
   await expect(info.getByRole("group", { name: "Peers", exact: true })).toBeInViewport();
 });
+
+for (const phone of [false, true]) test(`since-entry holding context ${phone ? 'phone' : 'desktop'} refreshes safely and stays scoped to selected contract`, async ({ page }) => {
+  if (phone) await page.setViewportSize({ width: 390, height: 844 });
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now, { positions: POSITIONS }) }));
+  await page.route("**/api/backend/charts/journal/trades/*", (route) => route.fulfill({ json: { ...CARD, trade: { ...CARD.trade!, id: route.request().url().split('/').pop() }, plans: [] } }));
+  let fail = false, closed = false;
+  const reads: string[] = [];
+  await page.route("**/api/backend/radar/groups/compare?**", (route) => {
+    const id = new URL(route.request().url()).searchParams.get('trade_id');
+    if (!id) return route.fulfill({ json: { symbol: 'MRVL', state: 'off', rows: [], groups: [], reason: 'No peer feed' } });
+    reads.push(id);
+    if (fail) return route.fulfill({ status: 503 });
+    return route.fulfill({ json: {
+      symbol: 'MRVL', state: closed ? 'insufficient' : 'partial', reason: closed ? 'Since-entry context requires a recorded open option trade.' : 'One peer is missing.',
+      group: { name: 'Semiconductors', members: ['MRVL', 'NVDA', 'AMD'] }, groups: [], live: true,
+      source: 'Recorded quotes', universe_version: 'radar-universe-v2', recorded_versions: ['radar-universe-v1'],
+      entry: { trade_id: id, recorded_at: '2026-10-22T14:00:00Z', baseline_at: closed ? null : '2026-10-22T14:01:00Z', baseline_delay_seconds: 60 },
+      window: closed ? null : { start: '2026-10-22T14:01:00Z', end: '2026-10-22T14:10:00Z' },
+      coverage: closed ? null : { peers_up: 0, peers_down: 1, peers_available: 1, peers_total: 2, recorded_minutes: 9, expected_minutes: 10 },
+      rows: closed ? [] : ['MRVL', 'QQQ', 'SPY', 'NVDA', 'AMD'].map((symbol, i) => ({ symbol, role: i === 0 ? 'selected' : i < 3 ? 'benchmark' : 'peer', change_pct: i === 4 ? null : -2.34, reason: i === 4 ? 'No eligible baseline' : null, start: null, end: null })),
+    } });
+  });
+  await page.goto('/charts?symbol=MRVL');
+  if (phone) {
+    await page.getByRole('button', { name: 'Watchlist', exact: true }).click();
+    await page.getByRole('button', { name: 'MRVL symbol info' }).click();
+  }
+  const info = page.getByRole('region', { name: 'Symbol info', exact: true });
+  await info.getByRole('tab', { name: 'Overview', exact: true }).click();
+  const holding = info.getByRole('region', { name: 'Holding context', exact: true });
+  await holding.getByRole('button', { name: /Holding context/ }).click();
+  await holding.getByRole('combobox').selectOption('o1');
+  const entry = holding.getByRole('region', { name: 'Since first recorded entry', exact: true });
+  await expect(entry).toBeVisible();
+  expect(reads).toEqual([]);
+  await entry.getByRole('button', { name: 'Since first recorded entry' }).click();
+  await expect(entry).toContainText('−2.34%');
+  await expect(entry).toContainText('1/2 peers available');
+  await expect(entry).toContainText('60s after recorded entry');
+  await entry.getByText('Peer changes & observation times').click();
+  await expect(entry).toContainText('No eligible baseline');
+  expect(await entry.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await entry.getByRole('button', { name: 'Since first recorded entry' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath(`since-entry-${phone ? 'phone' : 'desktop'}.png`) });
+  fail = true;
+  await entry.getByRole('button', { name: 'Refresh since-entry context' }).click();
+  await expect(entry.getByRole('alert')).toContainText('Previous values hidden');
+  await expect(entry).not.toContainText('−2.34%');
+  fail = false; closed = true;
+  await entry.getByRole('button', { name: 'Refresh since-entry context' }).click();
+  await expect(entry).toContainText('requires a recorded open option');
+  await expect(entry).not.toContainText('−2.34%');
+  await holding.getByRole('combobox').selectOption('o2');
+  await expect(entry.getByRole('button', { name: 'Since first recorded entry' })).toHaveAttribute('aria-expanded', 'false');
+  expect(reads.every(id => id === 'o1')).toBe(true);
+  await entry.getByRole('button', { name: 'Since first recorded entry' }).click();
+  await expect.poll(() => reads.at(-1)).toBe('o2');
+});

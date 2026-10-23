@@ -11,13 +11,18 @@ import os
 import sqlite3
 import time
 from typing import Literal
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, select
 from pydantic import BaseModel
 
+from app.database import get_session
+from app.models import Fill, Trade, TradeFill
+from app.engine.chart_journal import stamp
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET, session_windows
-from app.engine.radar_comparison import compare_group, empty_comparison
+from app.engine.radar_comparison import compare_entry, compare_group, empty_comparison
 from app.engine.radar_movers import build_movers, earlier_pass
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
@@ -261,12 +266,39 @@ def event_feedback(event_id: str, body: FeedbackBody):
 
 @router.get("/groups/compare")
 def group_comparison(symbol: str = Query(..., pattern=r"^[A-Za-z0-9.\-]{1,16}$"),
-                     group: str | None = Query(None, max_length=120)):
+                     group: str | None = Query(None, max_length=120),
+                     trade_id: UUID | None = None, db: Session = Depends(get_session)):
     """Read-only sampled group movement, independent of event detection and feed visits."""
     now = _now()
     result = empty_comparison(symbol.upper(), group, load_universe(), now)
     if group and not any(g["name"] == group for g in result["groups"]):
         raise HTTPException(422, "Group does not contain this symbol")
+    if trade_id is not None:
+        trade = db.get(Trade, trade_id)
+        if trade is None:
+            raise HTTPException(404, "That trade is no longer in the journal.")
+        if trade.ticker.upper() != symbol.upper():
+            raise HTTPException(422, "Trade does not match this chart symbol.")
+        result["window_minutes"] = None
+        if trade.status != "open" or trade.instrument_type != "option":
+            return {**result, "reason": "Since-entry context requires a recorded open option trade."}
+        # Resolve the original trade-cycle entry, not the remaining FIFO lot or latest add.
+        first = db.exec(select(Fill.executed_at).join(TradeFill, TradeFill.fill_id == Fill.id).where(
+            TradeFill.trade_id == trade_id, TradeFill.role == "entry",
+            Fill.account_id == trade.account_id, Fill.ticker == trade.ticker,
+        ).order_by(Fill.executed_at)).first()
+        recorded_at = stamp(trade.opened_at)
+        if first is None or stamp(first) != recorded_at:
+            return {**result, "reason": "The first recorded entry could not be verified from this trade's fills."}
+        entry_clock = datetime.fromtimestamp(recorded_at, ET)
+        boundary = (recorded_at // 60 + 1) * 60
+        result["entry"] = {"trade_id": str(trade_id), "recorded_at": _iso(recorded_at),
+                           "not_before": _iso(boundary), "deadline": _iso(boundary + 90),
+                           "baseline_at": None, "baseline_delay_seconds": None}
+        if entry_clock.date() != datetime.fromtimestamp(now, ET).date():
+            return {**result, "reason": "Only entries from today's regular session are supported; overnight positions are unavailable."}
+        if recorded_at > now:
+            return {**result, "reason": "Recorded entry is in the future; context is unavailable."}
     if result["group"] is None:
         return result
     store, reason = _store(read_only=True)
@@ -281,9 +313,18 @@ def group_comparison(symbol: str = Query(..., pattern=r"^[A-Za-z0-9.\-]{1,16}$")
         return {**result, "reason": "Market calendar unavailable; cannot identify the current recording session."}
     window = next((w[1:] for w in session_windows(clock.date(), hours) if w[0] == "regular"), None)
     live = bool(window and window[0] <= clock.hour * 60 + clock.minute < window[1])
+    if trade_id is not None:
+        entry_minute = entry_clock.hour * 60 + entry_clock.minute
+        if not window or not window[0] <= entry_minute < window[1]:
+            return {**result, "reason": "Entry is outside a confirmed regular session; context is unavailable."}
+        midnight = clock.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     try:
+        if trade_id is not None:
+            return compare_entry(store, result, today=clock.date().isoformat(), now=now, live=live,
+                                 regular_start=midnight + window[0] * 60, regular_end=midnight + window[1] * 60)
         return compare_group(store, result, today=clock.date().isoformat(), now=now, live=live)
     except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
         log.warning("radar comparison unreadable: %s", exc)
         return {**empty_comparison(symbol.upper(), group, load_universe(), now),
+                **({"entry": result["entry"]} if "entry" in result else {}),
                 "state": "off", "reason": "Recorded group observations could not be read right now."}
