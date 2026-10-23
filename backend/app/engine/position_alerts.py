@@ -12,9 +12,11 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
 
 - **Give-back.** One Tradier quote request for every open long option. A
   position arms once its gain at the bid/ask midpoint reaches ``ARM_PCT`` of
-  cost and ``ARM_DOLLARS``; once armed, a gain at or under ``FIRE_PCT`` sends
-  one alert. A new cost basis (buying more, or a first-in-first-out sale that
-  leaves differently priced lots) starts a new arming with a fresh peak; a sale
+  cost and ``ARM_DOLLARS``; the explicitly configured account gets a
+  SPY/QQQ-only exception to the dollar floor. Once armed, a gain at or under
+  ``FIRE_PCT`` sends one alert. A new cost basis (buying more, or a
+  first-in-first-out sale that leaves differently priced lots) starts a new
+  arming with a fresh peak; a sale
   that leaves the basis unchanged keeps it armed. Regular hours only. Tradier is read directly,
   never the dashboard's yfinance fallback, whose option prices are delayed;
   a quote whose bid or ask is older than ``MAX_QUOTE_AGE``, or wider than
@@ -86,6 +88,26 @@ KINDS = ("giveback", "expiry_first", "expiry_final", "hold_hour")
 
 def enabled() -> bool:
     return os.environ.get("POSITION_ALERTS_ENABLED", "").lower() == "true"
+
+
+def floorless_giveback(position: dict) -> bool:
+    """Whether this position has the explicitly scoped SPY/QQQ arming exception.
+
+    The account UUID must be configured explicitly. Account names/labels are
+    intentionally not used because they are mutable and can be duplicated.
+    """
+    configured = os.environ.get("POSITION_ALERTS_FLOORLESS_ACCOUNT_ID", "").strip()
+    if not configured:
+        return False
+    try:
+        account_id = uuid.UUID(configured)
+    except (ValueError, AttributeError):
+        return False
+    trade = position.get("trade")
+    return (position.get("account_id") == account_id
+            and trade is not None
+            and trade.instrument_type == "option"
+            and trade.ticker in {"SPY", "QQQ"})
 
 
 def hold_enabled() -> bool:
@@ -294,7 +316,7 @@ class PositionAlerts:
             if watch.peak_mark is None or price > watch.peak_mark:
                 watch.peak_mark, watch.peak_at = price, _utc(now)
             if watch.armed_at is None:
-                if gain_pct >= ARM_PCT and gain >= ARM_DOLLARS:
+                if gain_pct >= ARM_PCT and (floorless_giveback(position) or gain >= ARM_DOLLARS):
                     watch.armed_at = _utc(now)
             elif gain_pct <= FIRE_PCT:
                 found.append(self._alert(position, "giveback", watch.generation, mark, gain, gain_pct, watch, now))
@@ -413,16 +435,18 @@ class PositionAlerts:
 
 def for_trade(db: Session, trade: Trade) -> dict:
     """The trade page's view: alerts sent for this position and, while it is open, what is being watched."""
+    floor_applies = not floorless_giveback({"account_id": trade.account_id, "trade": trade})
     entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
                       .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
     if not entries or trade.instrument_type != "option":
-        return {"enabled": enabled(), "alerts": [], "watch": None}
+        return {"enabled": enabled(), "giveback_dollar_floor_applies": floor_applies, "alerts": [], "watch": None}
     key = anchor(entries)
     alerts = db.exec(select(PositionAlert).where(PositionAlert.account_id == trade.account_id, PositionAlert.source_key == key)
                      .order_by(PositionAlert.detected_at)).all()
     watch = db.exec(select(PositionWatch).where(PositionWatch.account_id == trade.account_id, PositionWatch.source_key == key)).first()
     return {
         "enabled": enabled(),
+        "giveback_dollar_floor_applies": floor_applies,
         "alerts": [{
             "kind": a.kind, "detected_at": int(_epoch(a.detected_at)), "contracts": a.contracts, "mark": a.mark, "bid": a.bid,
             "gain": a.gain, "gain_pct": a.gain_pct, "peak_gain": a.peak_gain, "peak_gain_pct": a.peak_gain_pct,

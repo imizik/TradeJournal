@@ -17,7 +17,7 @@ test("switched off with nothing sent: the trade page shows no phone alerts secti
   const trade = await openAapl(page);
   const read = page.waitForResponse(r => r.url().includes(`/trades/${trade.id}/phone-alerts`));
   await page.goto(`/trades/${trade.id}`);
-  expect(await (await read).json()).toEqual({ enabled: false, alerts: [], watch: null });
+  expect(await (await read).json()).toEqual({ enabled: false, giveback_dollar_floor_applies: true, alerts: [], watch: null });
   await expect(page.getByRole("heading", { name: "Trade Summary" })).toBeVisible();
   await expect(page.getByTestId("trade-phone-alerts")).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -49,4 +49,31 @@ test("switched on: the watch state and each alert's delivery read plainly at pho
   await expect(section).toContainText("no live quote, 6 open");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await section.screenshot({ path: test.info().outputPath("trade-phone-alerts-phone.png") });
+});
+
+test("the configured account's SPY exception does not show the $50 arming floor", async ({ page }) => {
+  const trade = await openAapl(page);
+  const at = Date.parse("2026-10-21T15:02:00Z") / 1000;
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+    enabled: true,
+    giveback_dollar_floor_applies: false,
+    watch: { peak_gain: 10, peak_gain_pct: 0.1, armed: false, fired: false, peak_at: at },
+    alerts: [],
+  } }));
+  await page.goto(`/trades/${trade.id}`);
+  const section = page.getByTestId("trade-phone-alerts");
+  await expect(section).toContainText("Not armed yet: arms once it is up 10% (best so far +$10, +10%).");
+  await expect(section).not.toContainText("$50");
+});
+
+test("older API responses keep the original $50 arming text", async ({ page }) => {
+  const trade = await openAapl(page);
+  const at = Date.parse("2026-10-21T15:02:00Z") / 1000;
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+    enabled: true,
+    watch: { peak_gain: 10, peak_gain_pct: 0.1, armed: false, fired: false, peak_at: at },
+    alerts: [],
+  } }));
+  await page.goto(`/trades/${trade.id}`);
+  await expect(page.getByTestId("trade-phone-alerts")).toContainText("Not armed yet: arms once it is up 10% and $50");
 });

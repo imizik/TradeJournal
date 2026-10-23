@@ -4,6 +4,7 @@ import { copyText } from "@/lib/clipboard";
 import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefOpportunity, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 import DayJournal from "@/components/DayJournal";
+import MorningPrep from "@/components/MorningPrep";
 
 const zone = "America/New_York";
 function time(value: string) {
@@ -347,6 +348,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         {asking === "brief" && joPanel(null, 0)}
       </div>
     </section>}
+    <MorningPrep key={`prep-${day}`} day={day} onSaved={() => window.dispatchEvent(new Event("day-journal-saved"))} />
     <DayJournal key={day} day={day} />
     {body && <section aria-label="Briefing feedback"><p className="mb-2 text-sm">Was this brief useful?</p><div className="flex flex-wrap gap-2" role="group" aria-label="Briefing feedback">
       {([["useful", "Useful"], ["meh", "Meh"], ["missed", "Missed something"]] as const).map(([value, label]) => <button key={value} type="button" disabled={saving} aria-pressed={data?.feedback.rating === value} className={`${button} ${data?.feedback.rating === value ? "bg-secondary" : ""}`} onClick={() => void rate(value)}>{label}</button>)}

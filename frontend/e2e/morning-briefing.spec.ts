@@ -465,3 +465,71 @@ test("opportunity brief leads with market context and new setups, then short urg
   await expect(compact).toContainText("This briefing or its evidence was removed");
   await expect(compact.getByTestId("brief-cited-context")).toHaveCount(0);
 });
+
+test("SPY QQQ prep saves two or three scenarios, reopens, and logs a freeze", async ({ page }) => {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const marker = crypto.randomUUID();
+  const stamp = Math.floor(Date.now() / 1000);
+  const levels = { day: today, as_of: stamp, atr: null, band: null, missing: { overnight: "Previous-session minutes unavailable" }, zones: [{ id: "pdh", low: 600, high: 600, label: "PDH", score: 1, members: [
+    { kind: "prior_day_high", label: "PDH", price: 600, evidence: "observed", source: "tradier", timeframe: "1D", developing: false },
+    { kind: "premarket_high", label: "PMH", price: 599, evidence: "calculated", source: "tradier", timeframe: "1m", developing: true },
+  ] }] };
+  await page.route("**/charts/workspace?**", (route) => route.fulfill({ json: { symbol: "SPY", auto_levels: levels, issues: [], extras: { QQQ: { auto_levels: levels, issues: [] } } } }));
+  await page.goto(`/morning?day=${today}`);
+  const prep = page.getByRole("region", { name: "SPY and QQQ morning prep" });
+  await prep.getByRole("button", { name: /SPY \/ QQQ prep/ }).click();
+  await expect(prep.getByText("599 · developing")).toHaveCount(2);
+  await expect(prep.getByText("overnight: Previous-session minutes unavailable")).toHaveCount(2);
+  const editor = prep.locator("details").filter({ hasText: "One-sentence macro read" });
+  if ((await editor.getAttribute("open")) === null) await editor.locator("summary").click();
+  await prep.getByLabel("One-sentence macro read").fill(`Fixture macro: wait for the release. ${marker}`);
+  await prep.getByLabel("Contract / smallest-size convention").fill("Fixture: one contract, fixed expiration convention.");
+  await prep.getByLabel("1–2 higher-timeframe levels").fill("SPY prior week high 605.");
+  for (const i of [1, 2]) {
+    await prep.getByLabel(`Scenario ${i} level`, { exact: true }).fill("PDH 600");
+    await prep.getByLabel(`Scenario ${i} trigger`, { exact: true }).fill("One completed minute above 600");
+    await prep.getByLabel(`Scenario ${i} invalidation`, { exact: true }).fill("Completed minute below 599");
+    await prep.getByLabel(`Scenario ${i} time stop`, { exact: true }).fill("Exit after ten minutes without progress");
+  }
+  // A chart visit or full navigation must not lose an unfinished plan.
+  await page.goto(`/morning?day=${today}&draft-reopen=1`);
+  await prep.getByRole("button", { name: /SPY \/ QQQ prep/ }).click();
+  if ((await editor.getAttribute("open")) === null) await editor.locator("summary").click();
+  await expect(prep.getByLabel("One-sentence macro read")).toHaveValue(new RegExp(marker));
+  await expect(prep.getByLabel("Scenario 2 trigger", { exact: true })).toHaveValue("One completed minute above 600");
+  await prep.getByRole("button", { name: "Add third scenario" }).click();
+  await expect(prep.getByLabel("Scenario 3 family")).toHaveValue("Rejection / fade");
+  await expect(prep.getByRole("button", { name: "Save morning prep" })).toBeDisabled();
+  await prep.getByRole("button", { name: "Remove third scenario" }).click();
+  // Lose the acknowledgement after the real server commits; retry must recover the same entry.
+  let lost = false;
+  await page.route(`**/day-journal/${today}/entries`, async (route) => {
+    if (!lost) { lost = true; await route.fetch(); await route.abort(); }
+    else await route.continue();
+  });
+  await prep.getByRole("button", { name: "Save morning prep" }).click();
+  await expect(prep.getByText(/Save not confirmed/)).toBeVisible();
+  await page.reload();
+  await expect(prep.getByRole("button", { name: "Retry unchanged save" })).toBeVisible();
+  await prep.getByRole("button", { name: "Retry unchanged save" }).click();
+  await expect(prep.getByText(/Saved to your day journal/)).toBeVisible();
+  const journal = await (await page.request.get(`/api/backend/day-journal/${today}`)).json();
+  const entries = journal.entries.filter((e: { text: string }) => e.text.startsWith("SPY/QQQ morning prep") && e.text.includes(marker));
+  expect(entries).toHaveLength(1);
+  expect(entries[0].text).toContain("Scenario 2: QQQ");
+  expect(entries[0].text).not.toContain("Scenario 3:");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prep.getByLabel("Saved plan", { exact: true }).selectOption(entries[0].id);
+  await prep.getByLabel("Trigger time (ET)").fill("09:47");
+  await prep.getByLabel("What happened").fill("The planned close confirmed; I hesitated and did not enter.");
+  await prep.getByRole("button", { name: "Save freeze" }).click();
+  await expect(page.getByTestId("day-journal-entry").filter({ hasText: entries[0].id })).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await prep.screenshot({ path: test.info().outputPath("spy-qqq-prep-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prep.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await prep.screenshot({ path: test.info().outputPath("spy-qqq-prep-phone.png") });
+  await page.reload();
+  await expect(page.getByTestId("day-journal-entry").filter({ hasText: entries[0].id })).toBeVisible();
+});

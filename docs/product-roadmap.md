@@ -472,3 +472,13 @@ Track capture/review coverage only over known eligible journal records, with
 missing data disclosed. If a feature is repeatedly skipped or yields no useful
 action, simplify it or pause its expansion. Usage establishes usefulness;
 profitability and a repeatable trading edge require separate evidence.
+
+### October 22 SPY/QQQ routine — selected bounded implementation
+
+Isaac selected a Morning prep block with 2–3 scenarios total across SPY and QQQ,
+reusing Charts levels and the day journal for plans and freeze notes. It supports
+the Dots morning-usefulness outcome without new scanner rules or data grants.
+He also selected the Roth IRA SPY/QQQ-only give-back dollar-floor exception,
+retaining +10% arming and +3% notification. That exception remains disabled until
+separate owner activation approval. This selection does not change Radar's scope
+or reopen other adjacent features. Implementation is not live acceptance.
