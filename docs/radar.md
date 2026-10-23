@@ -156,11 +156,11 @@ against a flat sector ETF).
 
 ## Movers now
 
-`GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) and the first
-section of the screen are a plain ranking of the latest ok or partial pass of the
+`GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) supplies the
+ranking below saved developments on the screen. It is a plain ranking of the latest ok or partial pass of the
 session. It is not an alert and has no threshold, event or provider call; it is
 also the "plain movers list" the pilot compares alerts against. Per stock it
-gives `day_pct` (versus prev close), `from_open_pct` (versus today's open, so a
+gives `open_gap_pct` (open versus previous close), `day_pct` (versus prev close), `from_open_pct` (versus today's open, so a
 gap shows apart from an intraday move), `vs_spy`, `vs_sector` (against the stock's
 `sector` ETF, a field added in `radar-universe-v2`) and `last_15m_pct` (versus the
 pass closest to 15 minutes earlier, within 2 minutes of that target, else null).
@@ -169,9 +169,14 @@ group reports members with data, how many are ahead of or behind SPY, the median
 `vs_spy` and the member with the largest move, sorted by absolute median. A symbol
 with a missing or non-positive last or prev close is counted as missing, never
 shown as 0%. `state` is `off`, `no_data` (also when SPY has no usable quote),
-`ok`, or `stale` (during regular hours, no ok pass for over 3 minutes). The screen
-tags a "gap" when `|from_open_pct| < |day_pct| / 3`, a plain label and not a rule,
-and refreshes every 60 seconds while the tab is visible.
+`ok`, or `stale` (during regular hours, no ok pass for over 3 minutes). The screen shows opening gap and since-open returns separately from day and 15-minute returns;
+these returns are not additive. Each latest and earlier quote must pass the existing
+peer-comparison endpoint checks: finite positive last, retrieval inside its own
+pass, and trade time 0–120 seconds before retrieval. Historical sessions use
+recorded time, not today's clock. Ineligible latest quotes are omitted from
+rankings, benchmarks and group counts; an ineligible earlier quote leaves 15 min
+blank. Saved developments appear first, including their existing revisions,
+news and feedback. Movers refresh every 60 seconds while the tab is visible.
 
 ## Charts group movement
 

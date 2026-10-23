@@ -222,7 +222,7 @@ def _read_movers(store: RadarStore, session: str | None, now: float, empty: dict
     latest = recorded[-1]
     earlier = earlier_pass(recorded, latest)
     result = build_movers(load_universe(), store.quotes(pass_id=latest["id"]),
-                          store.quotes(pass_id=earlier["id"]) if earlier else None)
+                          store.quotes(pass_id=earlier["id"]) if earlier else None, latest=latest, earlier=earlier)
     base = {**empty, **result, "pass_at": latest["started_at"], "earlier_pass_at": earlier["started_at"] if earlier else None}
     if result["header"] is None:
         return {**base, "state": "no_data", "reason": "The latest pass has no usable SPY quote, so nothing can be ranked."}

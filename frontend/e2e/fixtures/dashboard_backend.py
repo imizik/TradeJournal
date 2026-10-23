@@ -1,5 +1,6 @@
 """Offline quotes for the existing seeded browser harness, never the real app."""
 from pathlib import Path
+from datetime import datetime
 import asyncio
 import os
 
@@ -70,7 +71,7 @@ def radar_seed(news: str = "found"):
              "error": None, "skip_reason": None},
             [{"symbol": s, "last": round(100 * (1 + (day.get(s, ((i * 7) % 21 - 10) / 10)) / 100) * (1.002 if minute == "14:57" else 1), 4),
               "prev_close": 100.0, "open": 110.0 if s == "SPOT" else 100.0, "high": None, "low": None, "volume": 1000, "bid": None,
-              "ask": None, "trade_time_ms": None, "retrieved_at": stamp} for i, s in enumerate(symbols)] if minute == "15:12" or minute == "14:57" else [])
+              "ask": None, "trade_time_ms": datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000, "retrieved_at": stamp} for i, s in enumerate(symbols)] if minute == "15:12" or minute == "14:57" else [])
     store.append_event(sample["event"])
     store.append_revision(sample["revisions"][0])
     checks = sample["news_checks"] if news == "found" else [

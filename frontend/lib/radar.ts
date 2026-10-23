@@ -151,7 +151,7 @@ export function getHoldingComparison(symbol: string, tradeId: string, signal?: A
 }
 
 export type RadarMover = {
-  symbol: string; kind: "stock" | "etf"; last: number; day_pct: number; from_open_pct: number | null; vs_spy: number;
+  symbol: string; kind: "stock" | "etf"; last: number; day_pct: number; from_open_pct: number | null; open_gap_pct: number | null; vs_spy: number;
   sector: string | null; vs_sector: number | null; last_15m_pct: number | null;
 };
 export type RadarMoverGroup = {
