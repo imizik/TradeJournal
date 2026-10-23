@@ -63,6 +63,15 @@ because it helps him notice better opportunities, make deliberate decisions,
 avoid repeatable mistakes and learn what improves his trading, not simply
 because he built it.
 
+## October 23 selected work — personal Jo follow-through
+
+Isaac explicitly selected implementation of conversational follow-ups using the
+existing Jo infrastructure: discuss a real interest once, save the responsibility,
+and have Jo return with relevant developments. This advances that part of the
+conversational loop from the earlier deferred position. The [Dots delivery board](agent/dots-integration.md#personal-follow-through--october-23-2026)
+records the implementation and remaining rollout/live-use gates. It does not
+authorize broker actions or reopen unrelated roadmap work.
+
 ## October 21 workflow consolidation — planning only
 
 The owner walkthrough established the daily routine: understand the market,

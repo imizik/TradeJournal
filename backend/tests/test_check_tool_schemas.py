@@ -114,6 +114,13 @@ PAYLOADS = {
         read(message_intent="correction", correction_of_read_id=ids("mwr_"), model_id=None),
         read(phone_summary=PROSE), read(phone_summary=None), read(phone_summary=" " * 701),
         read(phone_summary={"unexpected": "cosmetic failure must reach the ledger fallback"})],
+    "followup_create": [{"followup": {"operation_id": "nbis-followup", "title": "NBIS bounce",
+        "original_request": PROSE, "why_it_matters": "An idea we discussed", "review_question": "Does the bounce hold?",
+        "symbols": ["NBIS"], "next_review_at": "2026-10-23T16:00:00Z", "expires_at": "2026-10-23T20:00:00Z"}}],
+    "followup_list": [{}], "followup_due": [{}], "followup_cancel": [{"followup_id": ids("fup_")}],
+    "followup_review": [{"review": {"input_id": "fui_example", "outcome": "unchanged", "summary": PROSE,
+        "what_changed": "No material change", "why_it_matters": "Still waiting", "next_step": "Review again",
+        "next_review_at": "2026-10-23T17:00:00Z"}}],
     "conditional_plan_create": [
         {"operation_id": "jo-plan:2026-10-20:nbis", "source_kind": "check", "source_id": ids("chk_"),
             "direction": "long", "trigger_price": 112.5, "invalidation_price": 108, "confirm_bars": 2,
@@ -134,7 +141,7 @@ def catalog(harness, tmp_path):  # noqa: F811
     snapshots.mkdir()
     outbox.mkdir()
     # Every optional Jo tool group the Check connector can register.
-    harness.configure(jo_briefing_enabled=True, conditional_plan_enabled=True,
+    harness.configure(jo_briefing_enabled=True, conditional_plan_enabled=True, followup_enabled=True,
         market_watch_snapshots_dir=str(snapshots), market_watch_outbox_dir=str(outbox))
     with TestClient(harness.server().streamable_http_app()) as client:
         tools = rpc(client, "", {}, harness.token(scope=SCOPES), "tools/list").json()["result"]["tools"]

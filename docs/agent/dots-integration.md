@@ -47,6 +47,30 @@ slice's stated exit criteria were met. None implies trading edge.
 | Saved advice → journal links ([contract](advisor-pretrade-check-contract.md#saved-advice-links-to-later-journal-activity--october-20-2026)) | Built (#363, #364) | Read-only journal reader enabled Oct 20 with owner authorization | Live list/detail/grades and peer/write refusals passed; existing units/configs preserved; UI list visible; structured-condition detail crash fix merged in #365; fixture link/unlink only | No | Explicit owner link/unlink plus "Later activity — review needed" possible matches; no grading, notifications, assumed links, reassessment or new Jo access |
 | Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged; briefing layout, memory-revision display, saved-memories screen and delivery watchdog through #356 | Roth-only publisher/importer and existing Jo task, Oct 19. `JO_MORNING_ALERTS=true` and `HEALTHCHECK_PING_URL` in the VPS `alerts.env` (read-only check Oct 21) | Packet/UI observed; instructed afternoon Jo save receipt-confirmed Oct 19 15:31 ET; first natural scheduled run Oct 20 failed connector validation, manual recovery saved 09:26:56 (late). **Oct 21, first scored morning on time:** packet 08:45:18, Jo read recorded 08:55:45, Check receipt 08:56:43, in the journal 08:56:52 (9 s import lag); watchdog on, no notices (correct) | No | Five-morning acceptance so far: delivery 1/5, watchdog 1/5; no phone push exercised yet. The owner judged Oct 21's content weak (no macro context); the [market backdrop](#market-backdrop--october-21) (#377) is merged, and its Check upgrade (scheduled after 16:15 ET Oct 21) was pending at the last check. Existing Jo/auth reused; shared-context limitation accepted; [delivery honesty and the morning watchdog](#delivery-honesty-and-the-morning-watchdog); ten-morning owner ratings tracked below |
 
+### Personal follow-through — October 23, 2026
+
+The owner selected conversational follow-through: keep the original question,
+personal relevance, next review and expiry; bring useful developments back without
+repeated requests. The implementation uses the existing Check ledger, market-watch
+worker/exchange, selected-stock evidence, conditional plans and phone delivery.
+It adds five actor-owned `followup_*` tools and a separate personal review workflow;
+SPY forecast predicates and its three-message budget do not govern these updates.
+
+Up to five active responsibilities (25 new saves/day) last at most seven days.
+Reviews run during verified regular exchange sessions, with at least 30 minutes
+between planned reviews; existing stock events and linked price-plan transitions
+can make work due earlier. Public news research is performed by hosted Jo when
+needed and is stored as Jo-reported source findings. No continuous news/pattern
+monitor, account access, new provider calls or paid model worker is introduced.
+Missing evidence is explicit, unchanged reviews stay quiet, and cancellation,
+expiry, late/missing reviews and delivery outcomes remain visible in the ledger.
+
+The [conversation, sweep, event-task and rollout instructions](../../deploy/market-watch/jo-followups.md)
+are prepared. The app flag and separate Check flag default off. Merge, app/Check
+deployment, live task installation and a natural owner-question → review → phone
+observation are separate gates; this implementation does not establish activation
+or live usefulness. Conditional price watches keep their separate lifecycle.
+
 ### Functionality sequence
 
 These are product outcomes, not authorization to implement every row at once.
