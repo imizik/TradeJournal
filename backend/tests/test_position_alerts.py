@@ -522,7 +522,9 @@ def test_an_expiry_alert_due_within_fifteen_minutes_wins(engine, world, hold_on)
     run_at(clock, watcher, WED, "14:25", "14:30", "14:35")
     assert kinds(engine) == ["expiry_first"]
     regular = ("regular", 570, 960)
-    due = lambda hhmm, expires: position_alerts.hold_due(datetime.fromisoformat(f"2026-10-21T{hhmm}"), WED, regular, expires)
+
+    def due(hhmm, expires):
+        return position_alerts.hold_due(datetime.fromisoformat(f"2026-10-21T{hhmm}"), WED, regular, expires)
     assert (due("12:00", True), due("13:15", True), due("14:20", True), due("14:40", True)) == (780, 855, None, None)
     assert (due("13:25", False), due("15:00", False)) == (865, None)
     assert position_alerts.hold_due(datetime(2026, 10, 20, 15, 30), WED, regular, False) is None  # opened another day
