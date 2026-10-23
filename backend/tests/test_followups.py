@@ -509,3 +509,18 @@ def test_due_distinguishes_missing_stale_and_pending_work_from_no_due(env):
     s.worker.run_once()
     result = s.followups.due(ACTOR, s.public, s.now)
     assert result["inputs"] and not result["gaps"]
+
+
+def test_multiday_overdue_warning_is_deduplicated_across_sessions(env):
+    s = env
+    r = create(s, expires_at=stamp(s.now + timedelta(days=5)))
+    s.now += timedelta(minutes=16)
+    s.worker.run_once()
+    assert len(s.pushes) == 1 and "no saved response" in s.pushes[0][1]
+    # Friday's unanswered review is still active on Monday; session-adjusted
+    # eligibility must not give the same operational notice another send key.
+    s.now = NOW + timedelta(days=3)
+    s.now = s.now.replace(hour=13, minute=46)
+    s.worker.run_once()
+    assert read_work(s.public, r["followup_id"], s.now)["overdue"]
+    assert len(s.pushes) == 1

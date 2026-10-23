@@ -286,7 +286,7 @@ class FollowupRunner:
                 self.push(
                     "overdue:" + p["parent_id"],
                     request,
-                    effective_due + timedelta(minutes=15),
+                    parse_time(p["next_review_at"]) + timedelta(minutes=15),
                     "Jo follow-up needs attention: " + request["body"]["title"],
                     "The planned review has no saved response. The idea has not been reassessed; do not assume Jo is following it successfully.",
                     operational=True,
