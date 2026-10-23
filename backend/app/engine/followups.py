@@ -141,14 +141,16 @@ class FollowupRunner:
                 evidence["limitations"].append("Linked price-plan status unavailable")
         return evidence, digest(sorted(events))
 
-    def push(self, ident, request, created, title, text):
+    def push(self, ident, request, created, title, text, *, operational=False):
+        # Operational conditions are rechecked on this pass and can be reported after
+        # downtime. Keep the original session/id for dedup, never freshen market advice.
         self.runner._deliver(
             "followup_push",
             self.clock(),
             created.date().isoformat(),
             "notice_id",
             ident,
-            created,
+            self.clock() if operational else created,
             10,
             POLICY,
             "push",
@@ -241,6 +243,25 @@ class FollowupRunner:
                     "Jo follow-up: " + request["body"]["title"],
                     review["body"]["summary"],
                 )
+                attempts = [
+                    a
+                    for a in self.store.records("followup_push")
+                    if a.get("notice_id") == review["record_id"]
+                ]
+                if attempts and attempts[-1]["result"] == "expired":
+                    self.push(
+                        "undelivered:" + review["record_id"],
+                        request,
+                        parse_time(review["created_at"]),
+                        "Jo follow-up delivery gap: " + request["body"]["title"],
+                        "A saved review could not be delivered while fresh. Its explanation is retained in your follow-up history; "
+                        + (
+                            "this responsibility is closed."
+                            if p["state"] == "resolved"
+                            else "a later review is still scheduled."
+                        ),
+                        operational=True,
+                    )
             if p["state"] == "expired":
                 self.push(
                     "expiry:" + followup_id,
@@ -253,6 +274,7 @@ class FollowupRunner:
                         if p["latest_review"]
                         else "No Jo review was saved."
                     ),
+                    operational=True,
                 )
             effective_due = (
                 max(parse_time(p["next_review_at"]), bounds[0])
@@ -267,6 +289,7 @@ class FollowupRunner:
                     effective_due + timedelta(minutes=15),
                     "Jo follow-up needs attention: " + request["body"]["title"],
                     "The planned review has no saved response. The idea has not been reassessed; do not assume Jo is following it successfully.",
+                    operational=True,
                 )
             delivery = [
                 a

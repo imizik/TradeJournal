@@ -48,7 +48,11 @@ market-summary task. Do not create per-symbol schedules or extra reminders.
    Do not search, list or read Gmail as a prerequisite. An unrelated Gmail error
    does not cancel a standalone sweep. Retain actual independence/clean-order
    flags; no inbox check is not proof an inbox is empty.
-2. Call `followup_due` once. Empty inputs mean finish quietly. Unavailable tools
+2. Call `followup_due` once. Finish quietly only when both `inputs` and `gaps`
+   are empty. Nonempty `gaps` mean accepted responsibilities lack current worker
+   evidence: record those as incomplete coverage, even if the global heartbeat is
+   healthy. Process any available inputs without claiming the gaps were reviewed.
+   Unavailable tools
    or worker status mean record a failed run, not a successful quiet review.
 3. For each input, recover the original question, personal relevance, latest
    review, last notification intent, delivery state and new evidence. Reassess

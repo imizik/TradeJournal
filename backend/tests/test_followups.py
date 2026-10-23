@@ -429,3 +429,83 @@ def test_linked_plan_trigger_reassesses_without_changing_price_plan(env):
     from conditional_plan_common import read_json
 
     assert read_json(s.public / f"conditional-plan-status-{plan_id}.json") == value
+
+
+def test_restart_reports_overdue_and_expiry_even_after_transport_freshness(env):
+    s = env
+    r = create(s)
+    s.now += timedelta(minutes=40)
+    s.worker = FollowupRunner(s.runner)
+    s.worker.run_once()
+    assert len(s.pushes) == 1 and "no saved response" in s.pushes[0][1]
+    s.worker.run_once()
+    assert len(s.pushes) == 1
+    s.now = NOW + timedelta(hours=5)
+    s.worker = FollowupRunner(s.runner)
+    s.worker.run_once()
+    assert len(s.pushes) == 2 and "follow-up period ended" in s.pushes[-1][1]
+    s.now += timedelta(days=1)
+    s.worker.run_once()
+    assert len(s.pushes) == 2
+    assert read_work(s.public, r["followup_id"], s.now)["state"] == "expired"
+
+
+def test_stale_saved_update_reports_delivery_gap_without_replaying_advice(env):
+    s = env
+    create(s)
+    stock(s)
+    (inp,) = due(s)
+    saved = s.followups.review(ACTOR, review(s, inp), s.now)
+    export(s.outbox, saved)
+    s.now += timedelta(minutes=11)
+    s.worker = FollowupRunner(s.runner)
+    s.worker.run_once()
+    assert len(s.pushes) == 1
+    assert "could not be delivered while fresh" in s.pushes[0][1]
+    assert "bounce is holding" not in s.pushes[0][1]
+    s.worker.run_once()
+    assert len(s.pushes) == 1
+    assert any(
+        a["result"] == "expired" and a["notice_id"] == saved["record_id"]
+        for a in s.store.records("followup_push")
+    )
+
+
+def test_due_distinguishes_missing_stale_and_pending_work_from_no_due(env):
+    from conditional_plan_common import publish
+    from market_watch_common import seal
+
+    s = env
+    r = create(s)
+    result = s.followups.due(ACTOR, s.public, s.now)
+    assert not result["inputs"] and result["gaps"][0]["followup_id"] == r["followup_id"]
+    (inp,) = due(s)
+    work = inp["work"]
+    s.now += timedelta(minutes=2)
+    publish(
+        s.public,
+        "followup-readiness.json",
+        seal(
+            {
+                "format": "jo-followup-readiness-v1",
+                "enabled": True,
+                "created_at": stamp(s.now),
+            }
+        ),
+    )
+    result = s.followups.due(ACTOR, s.public, s.now)
+    assert (
+        not result["inputs"]
+        and result["gaps"][0]["reason"] == "worker_projection_unavailable"
+    )
+    changed = {**work, "created_at": stamp(s.now), "parent_id": "old-parent"}
+    changed.pop("content_sha256")
+    publish(s.public, f"followup-work-{r['followup_id']}.json", seal(changed))
+    result = s.followups.due(ACTOR, s.public, s.now)
+    assert (
+        not result["inputs"]
+        and result["gaps"][0]["reason"] == "worker_handoff_pending_or_mismatched"
+    )
+    s.worker.run_once()
+    result = s.followups.due(ACTOR, s.public, s.now)
+    assert result["inputs"] and not result["gaps"]

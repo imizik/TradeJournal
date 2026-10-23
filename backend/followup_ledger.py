@@ -182,7 +182,7 @@ class FollowupLedger:
 
     def due(self, actor, directory, now):
         readiness = ready(directory, now)
-        result = []
+        result, gaps = [], []
         db = self.ledger._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
@@ -191,14 +191,29 @@ class FollowupLedger:
                     continue
                 try:
                     work = read_work(directory, p["request"]["followup_id"], now)
-                except (FileNotFoundError, ValueError):
+                except (OSError, ValueError, KeyError):
+                    gaps.append(
+                        {
+                            "followup_id": p["request"]["followup_id"],
+                            "title": p["request"]["body"]["title"],
+                            "reason": "worker_projection_unavailable",
+                        }
+                    )
                     continue
                 if (
-                    not work["due"]
-                    or work["actor"] != actor
+                    work["actor"] != actor
                     or work["parent_id"] != p["parent_id"]
                     or work["request_sha256"] != p["request"]["content_sha256"]
                 ):
+                    gaps.append(
+                        {
+                            "followup_id": p["request"]["followup_id"],
+                            "title": p["request"]["body"]["title"],
+                            "reason": "worker_handoff_pending_or_mismatched",
+                        }
+                    )
+                    continue
+                if not work["due"]:
                     continue
                 # One frozen input per responsibility/reason/ten-minute window. Lost responses recover it.
                 input_id = (
@@ -248,6 +263,7 @@ class FollowupLedger:
             db.commit()
             return {
                 "inputs": result,
+                "gaps": gaps,
                 "worker": readiness,
                 "limits": "Periodic research reviews, not continuous thesis/news monitoring. Missing evidence stays missing.",
             }
