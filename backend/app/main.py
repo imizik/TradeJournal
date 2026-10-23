@@ -20,6 +20,7 @@ from app.routers import level_alerts as level_alerts_router
 from app.routers import captures as captures_router
 from app.routers import check_links as check_links_router
 from app.routers import position_alerts as position_alerts_router
+from app.routers import exit_habits as exit_habits_router
 from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
@@ -382,6 +383,7 @@ if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":
 app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(check_links_router.router, prefix="/jo/check-links", tags=["personal Jo"])
 app.include_router(position_alerts_router.router, prefix="/trades", tags=["position alerts"])
+app.include_router(exit_habits_router.router, prefix="/analytics", tags=["exit habits"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(day_journal.router, prefix="/day-journal", tags=["day-journal"])
 if os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true":

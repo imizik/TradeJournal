@@ -110,6 +110,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /research/workspaces/{slug}',
     'GET /stats',
     'GET /stats/analytics',
+    'GET /analytics/exit-habits',
     'GET /strategy-lab/runs',
     'GET /strategy-lab/runs/{run_id}',
     'GET /strategy-lab/runs/{run_id}/metrics',
