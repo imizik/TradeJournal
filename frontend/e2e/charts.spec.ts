@@ -1144,6 +1144,9 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
     // 04:18 New York: today has four 5m candles so far.
     for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][])
       if (intradayOnly(interval)) panel.bars = panel.bars.slice(-4).map((bar) => ({ ...bar, source: "tradier" }));
+      // Keep the unrelated daily panel outside its scroll-prefetch threshold.
+      // currentFixture's 100-bar daily tail can legitimately request a full page.
+      else panel.bars = fixture(route.request().url()).panels[interval]!.bars;
     return route.fulfill({ json: data });
   });
   await page.route("**/api/backend/charts/history?**", async (route) => {
