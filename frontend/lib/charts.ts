@@ -700,11 +700,12 @@ export async function fetchOptionsLadder({ symbol, scope, signed, spot }: { symb
   return response.json();
 }
 
-export async function fetchChartHistory({ symbol, interval, session, before, continuation, signal }: {
+export async function fetchChartHistory({ symbol, interval, session, before, limit, continuation, signal }: {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number;
-  continuation?: string | null; signal: AbortSignal;
+  limit?: number; continuation?: string | null; signal: AbortSignal;
 }): Promise<HistoryPage> {
   const query = new URLSearchParams({ symbol, interval, session, before: String(before) });
+  if (limit !== undefined) query.set("limit", String(limit));
   if (continuation) query.set("continuation", continuation);
   const response = await fetch(apiUrl(`/charts/history?${query}`), { cache: "no-store", signal });
   const body = await response.json();

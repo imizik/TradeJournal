@@ -431,7 +431,7 @@ test("realistic candles render on every chart for desktop and phone pictures", a
   await expect(aboutText).toBeHidden();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("canvas-main")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-realistic-phone.png"), animations: "disabled" });
   expect(errors).toEqual([]);
 });
@@ -1136,6 +1136,7 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
   await registerCharts(page);
   const older = sixMonthBars(1);
   const base = Math.floor(Date.now() / 1000);
+  const requests: { interval: string | null; before: number; limit: number }[] = [];
   let release = () => {};
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/backend/charts/workspace?**", (route) => {
@@ -1149,20 +1150,77 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
     await held;
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
-    const pageBars = older.filter((bar) => bar.time < before).slice(-1200);
+    const limit = Number(query.get("limit"));
+    requests.push({ interval: query.get("interval"), before, limit });
+    const pageBars = older.filter((bar) => bar.time < before).slice(-limit);
     return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"), before,
-      limit: 1200, bars: pageBars, markers: [], older_cursor: pageBars[0]?.time ?? null, exhausted: false, continuation: null,
+      limit, bars: pageBars, markers: [], older_cursor: pageBars[0]?.time ?? null, exhausted: false, continuation: null,
       warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "4");
   release();
-  await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(1000);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "214");
   const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
   // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one, 40 on a compact one (as here).
   await expect.poll(() => width("main")).toBe(114);
   await expect(page.locator("section", { has: page.getByTestId("canvas-Panel 2") })).toHaveAttribute("data-compact", "true");
   await expect.poll(() => width("Panel 2")).toBe(44);
+  expect(requests.find((r) => r.interval === "5m")?.limit).toBe(210);
+  expect(requests.filter((r) => r.interval !== "5m").every((r) => r.limit === 165)).toBe(true);
+  await page.waitForTimeout(300); // No automatic full-page cascade at the new left edge.
+  expect(requests).toHaveLength(4);
+  await page.screenshot({ path: test.info().outputPath("bounded-opening-desktop.png") });
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10.25, to: 60.25 }));
+  await expect.poll(() => requests.length).toBe(5);
+  expect(requests[4].limit).toBe(1200);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "1414");
+  await expect.poll(() => width("main")).toBe(50);
+  await page.getByRole("button", { name: "Latest candles main" }).click();
+  await expect.poll(() => width("main")).toBe(114);
+});
+
+for (const failure of ["http", "page"] as const) test(`empty opening history preserves its bounded window through continuation and ${failure} retry`, async ({ page, context }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fakeChartSettings(context, { revision: 1, data: { layout: "single" } });
+  await page.addInitScript(() => localStorage.setItem("tj:chart-performance", "1"));
+  const older = sixMonthBars(1);
+  const base = Math.floor(Date.now() / 1000);
+  const requests: { before: number; limit: number; continuation: string | null }[] = [];
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = currentFixture(route.request().url(), base);
+    for (const panel of Object.values(data.panels)) if (panel) panel.bars = [];
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const request = { before: Number(query.get("before")), limit: Number(query.get("limit")), continuation: query.get("continuation") };
+    requests.push(request);
+    if (requests.length === 2 && failure === "http") return route.fulfill({ status: 503, json: { detail: { message: "History fixture unavailable" } } });
+    const pending = requests.length === 1;
+    const failed = requests.length === 2;
+    const bars = older.filter((bar) => bar.time < request.before).slice(-(pending || failed ? 20 : request.limit));
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"), ...request,
+      bars: pending || failed ? bars.map((bar) => ({ ...bar, ema9: null, ema20: null, ema50: null, ema200: null, rsi: null })) : bars,
+      markers: [], older_cursor: bars[0].time, exhausted: false, continuation: pending || failed ? "opening" : null,
+      warmup: pending || failed ? "pending" : "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED,
+      fills_truncated: false, issue: pending ? { code: "pending", message: "Loading", retry_at: 0 }
+        : failed ? { code: "history_unavailable", message: "History fixture unavailable" } : null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "20");
+  expect(await page.evaluate(() => window.__tjChartPerformance?.samples.initial_panel_history ?? [])).toHaveLength(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toEqual({ before: base, limit: 210, continuation: null });
+  expect(requests[1]).toEqual({ ...requests[0], continuation: "opening" });
+  await page.getByRole("button", { name: "Retry history" }).click();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "210");
+  await expect(page.getByRole("button", { name: "Retry history" })).toHaveCount(0);
+  expect(requests[2]).toEqual(requests[0]); // Do not move before the partial page or expand to 1,200.
+  await expect.poll(() => page.evaluate(() => window.__tjChartPerformance?.samples.initial_panel_history?.length ?? 0)).toBe(1);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath(`bounded-opening-${failure}-retry-phone.png`) });
 });
 
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {

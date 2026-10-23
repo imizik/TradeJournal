@@ -122,6 +122,15 @@ fetching history or sleeping for Alpaca. Today must remain usable while cold
 history or higher-interval warmup loads. Test the independent paths with a
 blocked historical provider, not just by counting requests.
 
+Cold page reads group up to five missing sessions within seven calendar days
+per provider range, sized to the remaining candle demand. Each range retains
+the same SIP/raw feed and per-attempt budget. Pagination resumes with fixed
+bounds; no session in that range is published until all provider pages validate.
+Stored files retain individual New York session bounds. Range planning stops
+before an existing file, and a file completed by another panel during a paused
+range is validated and preserved. Missing dates in a range are not cached as
+empty sessions. The single-session RVol job keeps its existing request size.
+
 Loading the workspace must not eagerly backfill 1,200 candles plus years of
 warmup for all five intervals. Render available current data first, prioritize
 the panel the user is navigating, and fetch older pages on demand. Coarser

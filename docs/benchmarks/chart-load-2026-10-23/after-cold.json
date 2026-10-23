@@ -1,0 +1,201 @@
+{
+  "started": "2026-10-23T12:54:21.992Z",
+  "layout": "multi",
+  "settings": {
+    "symbol": "SPY",
+    "layout": "multi",
+    "intervals": [
+      "5m",
+      "15m",
+      "1h",
+      "1D",
+      "1m"
+    ],
+    "session": "extended",
+    "watchlist": [
+      "SPY"
+    ],
+    "newsHidden": true
+  },
+  "completionMetric": "initial_panel_history",
+  "completed": true,
+  "errors": [],
+  "samples": {
+    "initial_panel_candles": [
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 1928.8999998569489
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 1928.8999998569489
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 1928.8999998569489
+      },
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 1929
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 1929
+      }
+    ],
+    "initial_panel_history": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 1929
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 1929
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 2537.399999856949
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 3636
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 7820.399999856949
+      }
+    ],
+    "initial_panel_studies": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 1929
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 1929
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 2537.399999856949
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 3636
+      }
+    ]
+  },
+  "requests": [
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 1942.3999998569489,
+      "timing": "tradier_queue;dur=0.004, tradier_provider;dur=1384.125, total;dur=1487.379",
+      "request": {
+        "startTime": 1792760062266.559,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 44.514,
+        "responseStart": 1572.483,
+        "responseEnd": 1576.881
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "5m",
+      "status": 200,
+      "receivedMs": 2529.5999999046326,
+      "timing": "history_queue;dur=0.001, history_cache;dur=16.160, history_provider;dur=472.772, history_resample;dur=22.603, history_indicators;dur=1.619, total;dur=615.309",
+      "request": {
+        "startTime": 1792760063883.797,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.215,
+        "responseStart": 624.1,
+        "responseEnd": 630.67
+      },
+      "bars": 210,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 3608.2000000476837,
+      "timing": "history_queue;dur=551.909, history_cache;dur=67.624, history_resample;dur=56.750, history_provider;dur=850.776, history_indicators;dur=1.616, total;dur=1701.453",
+      "request": {
+        "startTime": 1792760063883.82,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.208,
+        "responseStart": 1710.129,
+        "responseEnd": 1716.745
+      },
+      "bars": 165,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 6029.299999952316,
+      "timing": "history_queue;dur=1593.568, history_cache;dur=169.999, history_resample;dur=145.343, history_provider;dur=2032.629, total;dur=4124.620",
+      "request": {
+        "startTime": 1792760063884.105,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.083,
+        "responseStart": 4133.581,
+        "responseEnd": 4140.348
+      },
+      "bars": 165,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792760068
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 7791.399999856949,
+      "timing": "history_queue;dur=0.001, history_cache;dur=50.579, history_provider;dur=1258.171, history_resample;dur=66.128, history_indicators;dur=1.819, total;dur=1499.051",
+      "request": {
+        "startTime": 1792760068270.6233,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.134,
+        "responseStart": 1506.695,
+        "responseEnd": 1508.028
+      },
+      "bars": 165,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    }
+  ]
+}

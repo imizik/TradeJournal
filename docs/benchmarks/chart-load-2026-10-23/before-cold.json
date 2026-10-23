@@ -1,0 +1,1277 @@
+{
+  "started": "2026-10-23T12:45:52.391Z",
+  "layout": "multi",
+  "settings": {
+    "symbol": "SPY",
+    "layout": "multi",
+    "intervals": [
+      "5m",
+      "15m",
+      "1h",
+      "1D",
+      "1m"
+    ],
+    "session": "extended",
+    "watchlist": [
+      "SPY"
+    ],
+    "newsHidden": true
+  },
+  "completionMetric": "initial_panel_history",
+  "completed": true,
+  "errors": [],
+  "samples": {
+    "initial_panel_candles": [
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 2383.4000000953674
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 2383.5
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 2383.5
+      },
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 2383.5
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 2383.600000143051
+      }
+    ],
+    "initial_panel_history": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 2383.600000143051
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 2383.600000143051
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 7072.700000047684
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 66639
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 306170.5
+      }
+    ],
+    "initial_panel_studies": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 2383.600000143051
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 2383.600000143051
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 7072.700000047684
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 66639
+      }
+    ]
+  },
+  "requests": [
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 2371.800000190735,
+      "timing": "tradier_queue;dur=0.008, tradier_provider;dur=1577.661, total;dur=1871.097",
+      "request": {
+        "startTime": 1792759552693.9648,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 58.846,
+        "responseStart": 1976.864,
+        "responseEnd": 1981.506
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "5m",
+      "status": 200,
+      "receivedMs": 3818.600000143051,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.669, history_provider;dur=1272.686, history_resample;dur=29.882, total;dur=1442.440",
+      "request": {
+        "startTime": 1792759554720.3037,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.185,
+        "responseStart": 1471.186,
+        "responseEnd": 1480.474
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759557
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 5420,
+      "timing": "history_queue;dur=1363.028, history_cache;dur=40.303, history_resample;dur=51.832, history_provider;dur=1436.623, total;dur=3048.566",
+      "request": {
+        "startTime": 1792759554727.33,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.243,
+        "responseStart": 3073.083,
+        "responseEnd": 3089.294
+      },
+      "bars": 1024,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759558
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "5m",
+      "status": 200,
+      "receivedMs": 7045,
+      "timing": "history_queue;dur=2267.634, history_cache;dur=20.405, history_resample;dur=15.421, history_indicators;dur=5.101, total;dur=2384.390",
+      "request": {
+        "startTime": 1792759557005.446,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.361,
+        "responseStart": 2413.964,
+        "responseEnd": 2417.854
+      },
+      "bars": 1200,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 7053.5,
+      "timing": "history_queue;dur=2955.761, history_cache;dur=79.459, history_resample;dur=71.259, history_provider;dur=1369.761, total;dur=4683.405",
+      "request": {
+        "startTime": 1792759554727.4019,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.353,
+        "responseStart": 4703.886,
+        "responseEnd": 4719.67
+      },
+      "bars": 408,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759560
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 8750,
+      "timing": "history_queue;dur=1265.692, history_cache;dur=47.119, history_resample;dur=37.733, history_provider;dur=1581.560, total;dur=3045.665",
+      "request": {
+        "startTime": 1792759558056.196,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.267,
+        "responseStart": 3071.228,
+        "responseEnd": 3073.968
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759614
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 8762,
+      "timing": "history_queue;dur=1012.097, history_cache;dur=41.199, history_resample;dur=18.624, total;dur=1102.217",
+      "request": {
+        "startTime": 1792759560003.059,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.219,
+        "responseStart": 1139.182,
+        "responseEnd": 1141.776
+      },
+      "bars": 510,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759614
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 15452.400000095367,
+      "timing": "tradier_queue;dur=0.003, total;dur=82.717",
+      "request": {
+        "startTime": 1792759567699.858,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.258,
+        "responseStart": 126.215,
+        "responseEnd": 135.214
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 30818.300000190735,
+      "timing": "tradier_queue;dur=0.006, tradier_provider;dur=371.497, total;dur=438.061",
+      "request": {
+        "startTime": 1792759582698.3762,
+        "domainLookupStart": 0.191,
+        "domainLookupEnd": 0.303,
+        "connectStart": 0.303,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.471,
+        "requestStart": 0.515,
+        "responseStart": 496.757,
+        "responseEnd": 503.974
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 45487,
+      "timing": "tradier_queue;dur=0.006, total;dur=78.929",
+      "request": {
+        "startTime": 1792759597694.4658,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.244,
+        "responseStart": 141.018,
+        "responseEnd": 146.76
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 60781.800000190735,
+      "timing": "tradier_queue;dur=0.004, tradier_provider;dur=328.300, total;dur=398.729",
+      "request": {
+        "startTime": 1792759612697.11,
+        "domainLookupStart": 0.245,
+        "domainLookupEnd": 0.435,
+        "connectStart": 0.435,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.671,
+        "requestStart": 0.832,
+        "responseStart": 447.467,
+        "responseEnd": 454.419
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 61678.60000014305,
+      "timing": "history_queue;dur=2.083, history_cache;dur=0.146, total;dur=13.413",
+      "request": {
+        "startTime": 1792759614007.3901,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.652,
+        "responseStart": 55.368,
+        "responseEnd": 59.925
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759615
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 61688.200000047684,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.153, total;dur=41.894",
+      "request": {
+        "startTime": 1792759614007.2607,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.504,
+        "responseStart": 67.625,
+        "responseEnd": 72.033
+      },
+      "bars": 510,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759615
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 64040.40000009537,
+      "timing": "history_queue;dur=0.002, history_cache;dur=1.184, history_provider;dur=1026.067, history_resample;dur=44.376, total;dur=1309.730",
+      "request": {
+        "startTime": 1792759615007.4292,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.954,
+        "responseStart": 1398.901,
+        "responseEnd": 1412.312
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759617
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 66613.10000014305,
+      "timing": "history_queue;dur=1932.868, history_cache;dur=7.759, history_resample;dur=7.181, history_indicators;dur=3.055, total;dur=1958.961",
+      "request": {
+        "startTime": 1792759617003.9639,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.314,
+        "responseStart": 1986.926,
+        "responseEnd": 1990.282
+      },
+      "bars": 1200,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 66670,
+      "timing": "history_queue;dur=1171.225, history_cache;dur=107.419, history_resample;dur=152.124, history_provider;dur=2414.909, total;dur=4011.314",
+      "request": {
+        "startTime": 1792759615007.7231,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.86,
+        "responseStart": 4042.296,
+        "responseEnd": 4047.727
+      },
+      "bars": 782,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759619
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 68517.90000009537,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.457, history_provider;dur=1454.546, history_resample;dur=17.649, total;dur=1550.102",
+      "request": {
+        "startTime": 1792759619304.6611,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.233,
+        "responseStart": 1578.038,
+        "responseEnd": 1582.648
+      },
+      "bars": 918,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759621
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 70130.30000019073,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.698, history_provider;dur=1218.458, history_resample;dur=25.840, total;dur=1341.823",
+      "request": {
+        "startTime": 1792759621141.4048,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.13,
+        "responseStart": 1365.476,
+        "responseEnd": 1367.418
+      },
+      "bars": 1020,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759675
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 75560.30000019073,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=144.212, total;dur=209.236",
+      "request": {
+        "startTime": 1792759627693.6907,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.218,
+        "responseStart": 239.241,
+        "responseEnd": 242.201
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 90737.80000019073,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=281.172, total;dur=362.468",
+      "request": {
+        "startTime": 1792759642695.14,
+        "domainLookupStart": 0.172,
+        "domainLookupEnd": 0.246,
+        "connectStart": 0.246,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.417,
+        "requestStart": 0.466,
+        "responseStart": 409.946,
+        "responseEnd": 413.657
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 105444.20000004768,
+      "timing": "tradier_queue;dur=0.003, total;dur=77.778",
+      "request": {
+        "startTime": 1792759657694.3901,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.289,
+        "responseStart": 123.861,
+        "responseEnd": 127.725
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 120763.80000019073,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=312.959, total;dur=387.097",
+      "request": {
+        "startTime": 1792759672697.036,
+        "domainLookupStart": 0.122,
+        "domainLookupEnd": 0.179,
+        "connectStart": 0.179,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.259,
+        "requestStart": 0.291,
+        "responseStart": 432.559,
+        "responseEnd": 438.269
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 122644.30000019073,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.043, total;dur=5.846",
+      "request": {
+        "startTime": 1792759675003.309,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.214,
+        "responseStart": 26.869,
+        "responseEnd": 29.136
+      },
+      "bars": 1020,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759676
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 125180.40000009537,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.303, history_provider;dur=1216.740, history_resample;dur=18.085, tradier_queue;dur=0.001, tradier_provider;dur=131.467, total;dur=1441.076",
+      "request": {
+        "startTime": 1792759676022.6882,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 1.424,
+        "responseStart": 1536.643,
+        "responseEnd": 1558.889
+      },
+      "bars": 1156,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759678
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 126978.5,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.666, history_provider;dur=1200.045, history_resample;dur=27.755, total;dur=1327.330",
+      "request": {
+        "startTime": 1792759678003.332,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.144,
+        "responseStart": 1351.791,
+        "responseEnd": 1353.602
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759680
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 129076.20000004768,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.847, history_provider;dur=1265.381, history_resample;dur=34.657, total;dur=1428.628",
+      "request": {
+        "startTime": 1792759680003.3638,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.217,
+        "responseStart": 1453.289,
+        "responseEnd": 1454.913
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759682
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 130699,
+      "timing": "history_queue;dur=0.002, history_cache;dur=1.010, history_provider;dur=906.962, history_resample;dur=28.710, total;dur=1038.059",
+      "request": {
+        "startTime": 1792759682006.9001,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.611,
+        "responseStart": 1071.472,
+        "responseEnd": 1076.41
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759736
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 135613.70000004768,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=166.267, total;dur=242.712",
+      "request": {
+        "startTime": 1792759687694.256,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.26,
+        "responseStart": 288.739,
+        "responseEnd": 292.383
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 150772.90000009537,
+      "timing": "tradier_queue;dur=0.002, tradier_provider;dur=299.589, total;dur=370.158",
+      "request": {
+        "startTime": 1792759702695.655,
+        "domainLookupStart": 0.188,
+        "domainLookupEnd": 0.334,
+        "connectStart": 0.334,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.521,
+        "requestStart": 0.577,
+        "responseStart": 439.539,
+        "responseEnd": 445.209
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 165480.40000009537,
+      "timing": "tradier_queue;dur=0.003, total;dur=88.411",
+      "request": {
+        "startTime": 1792759717695.919,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.365,
+        "responseStart": 161.189,
+        "responseEnd": 165.824
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 180762.90000009537,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=318.397, total;dur=398.688",
+      "request": {
+        "startTime": 1792759732696.513,
+        "domainLookupStart": 0.168,
+        "domainLookupEnd": 0.249,
+        "connectStart": 0.249,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.4,
+        "requestStart": 0.527,
+        "responseStart": 437.174,
+        "responseEnd": 443.379
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 183649.30000019073,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.050, total;dur=4.019",
+      "request": {
+        "startTime": 1792759736003.619,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.153,
+        "responseStart": 29.281,
+        "responseEnd": 31.793
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759737
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 185947.5,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.472, history_provider;dur=1232.343, history_resample;dur=18.524, total;dur=1294.476",
+      "request": {
+        "startTime": 1792759737004.0288,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.194,
+        "responseStart": 1318.062,
+        "responseEnd": 1320.058
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759739
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 188196.70000004768,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.552, history_provider;dur=1315.837, history_resample;dur=21.790, tradier_queue;dur=0.001, tradier_provider;dur=147.888, total;dur=1548.295",
+      "request": {
+        "startTime": 1792759739003.299,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.168,
+        "responseStart": 1572.606,
+        "responseEnd": 1574.595
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759741
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 190563.40000009537,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.844, history_provider;dur=1674.684, history_resample;dur=25.921, total;dur=1914.590",
+      "request": {
+        "startTime": 1792759741006.1309,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.154,
+        "responseStart": 1941.94,
+        "responseEnd": 1947.191
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759743
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 191892.5,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.796, history_provider;dur=927.833, history_resample;dur=26.081, total;dur=1030.761",
+      "request": {
+        "startTime": 1792759743208.4683,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.36,
+        "responseStart": 1064.808,
+        "responseEnd": 1070.163
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759797
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 195428.20000004768,
+      "timing": "tradier_queue;dur=0.003, total;dur=70.485",
+      "request": {
+        "startTime": 1792759747694.782,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.229,
+        "responseStart": 104.828,
+        "responseEnd": 108.91
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 210901.10000014305,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=448.691, total;dur=518.099",
+      "request": {
+        "startTime": 1792759762696.072,
+        "domainLookupStart": 0.256,
+        "domainLookupEnd": 0.4,
+        "connectStart": 0.4,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.592,
+        "requestStart": 0.648,
+        "responseStart": 576.144,
+        "responseEnd": 581.3
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 225428.20000004768,
+      "timing": "tradier_queue;dur=0.002, total;dur=70.776",
+      "request": {
+        "startTime": 1792759777694.3328,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.159,
+        "responseStart": 106.542,
+        "responseEnd": 109.873
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 240696,
+      "timing": "tradier_queue;dur=0.002, tradier_provider;dur=286.312, total;dur=346.978",
+      "request": {
+        "startTime": 1792759792694.2393,
+        "domainLookupStart": 0.122,
+        "domainLookupEnd": 0.198,
+        "connectStart": 0.198,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.324,
+        "requestStart": 0.357,
+        "responseStart": 379.253,
+        "responseEnd": 382.487
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 246103.60000014305,
+      "timing": "history_queue;dur=0.002, history_cache;dur=1.204, history_provider;dur=1173.698, history_resample;dur=37.352, tradier_queue;dur=0.002, tradier_provider;dur=119.235, total;dur=1443.303",
+      "request": {
+        "startTime": 1792759797005.899,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.592,
+        "responseStart": 1481.903,
+        "responseEnd": 1486.277
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759799
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 246974.10000014305,
+      "timing": "history_queue;dur=0.001, history_cache;dur=0.261, history_provider;dur=285.607, history_resample;dur=7.209, total;dur=315.660",
+      "request": {
+        "startTime": 1792759799006.405,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.666,
+        "responseStart": 352.402,
+        "responseEnd": 356.662
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759800
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 248856.40000009537,
+      "timing": "history_queue;dur=0.002, history_cache;dur=1.003, history_provider;dur=1066.921, history_resample;dur=32.733, total;dur=1191.778",
+      "request": {
+        "startTime": 1792759800009.208,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 1.046,
+        "responseStart": 1231.634,
+        "responseEnd": 1239.47
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759802
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 251146,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.984, history_provider;dur=1174.842, history_resample;dur=39.125, tradier_queue;dur=0.001, tradier_provider;dur=153.245, total;dur=1487.457",
+      "request": {
+        "startTime": 1792759802005.569,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.42,
+        "responseStart": 1521.822,
+        "responseEnd": 1526.635
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "pending",
+        "message": "History is still loading.",
+        "retry_at": 1792759804
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 252543.70000004768,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.814, history_provider;dur=777.296, history_resample;dur=26.491, total;dur=889.582",
+      "request": {
+        "startTime": 1792759804004.89,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.312,
+        "responseStart": 919.893,
+        "responseEnd": 922.912
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759857
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 255545.20000004768,
+      "timing": "tradier_queue;dur=0.004, total;dur=199.381",
+      "request": {
+        "startTime": 1792759807694.46,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.117,
+        "responseStart": 229.541,
+        "responseEnd": 231.799
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 270793.60000014305,
+      "timing": "tradier_queue;dur=0.002, tradier_provider;dur=375.092, total;dur=431.439",
+      "request": {
+        "startTime": 1792759822693.1492,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.111,
+        "responseStart": 463.149,
+        "responseEnd": 465.382
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 286201.7000000477,
+      "timing": "tradier_queue;dur=0.004, tradier_provider;dur=750.667, total;dur=821.999",
+      "request": {
+        "startTime": 1792759837694.907,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.4,
+        "responseStart": 876.888,
+        "responseEnd": 880.235
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 300431.90000009537,
+      "timing": "tradier_queue;dur=0.003, total;dur=68.008",
+      "request": {
+        "startTime": 1792759852694.8591,
+        "domainLookupStart": 0.128,
+        "domainLookupEnd": 0.22,
+        "connectStart": 0.22,
+        "secureConnectionStart": -1,
+        "connectEnd": 0.365,
+        "requestStart": 0.402,
+        "responseStart": 106.442,
+        "responseEnd": 110.283
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 304675.40000009537,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.250, total;dur=11.755",
+      "request": {
+        "startTime": 1792759857005.5188,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.485,
+        "responseStart": 51.117,
+        "responseEnd": 55.388
+      },
+      "bars": 1200,
+      "warmup": "pending",
+      "issue": {
+        "code": "rate_limited",
+        "message": "Alpaca chart history is cooling down.",
+        "retry_at": 1792759858
+      },
+      "continuation": true
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 306143.7000000477,
+      "timing": "history_queue;dur=0.002, history_cache;dur=0.326, history_provider;dur=413.940, history_resample;dur=15.388, history_indicators;dur=7.153, total;dur=478.178",
+      "request": {
+        "startTime": 1792759858006.763,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.624,
+        "responseStart": 517.166,
+        "responseEnd": 522.683
+      },
+      "bars": 1200,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    }
+  ]
+}

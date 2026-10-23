@@ -805,9 +805,18 @@ cd backend
   chart, 65 on a smaller one, compact or not) — none before 04:00, on weekends and holidays; a
   few early in the day; and always on 15m and coarser, whose whole session is
   64 candles or fewer — the panel loads the latest completed SIP sessions at
-  once instead of waiting for a pan. Completed sessions come from the disk cache,
-  so only a symbol's first cold read costs Alpaca requests (a 1h or 4h first
-  page spans months of sessions because of the 1,400-candle warmup). A chart
+  once instead of waiting for a pan. Opening requests return 210 candles on the
+  main chart or 165 on a smaller one: the opening range plus the 100-candle
+  scroll-prefetch margin. They retain the full 1,400 preceding candles for
+  indicator warmup; scroll-back and historical-trade navigation still request
+  1,200-candle pages. Continuations and manual retries keep the original window
+  and limit, including after a partial page or failed request.
+  Completed sessions come from the disk cache,
+  so only missing sessions cost Alpaca requests. Cold page reads group up to
+  five sessions within seven calendar days per request; validated sessions are
+  still stored individually, with the same provider budget, source and split
+  adjustment. A 1h or 4h first page still spans months of sessions because of
+  the 1,400-candle warmup. A chart
   always opens at that width even before older candles arrive, so a few
   premarket candles sit at the right instead of stretching across the chart; a
   series that is genuinely shorter (a recent listing) stays right-aligned with
