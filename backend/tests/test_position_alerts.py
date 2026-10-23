@@ -25,6 +25,7 @@ WED = date(2026, 10, 21)
 FRI = date(2026, 10, 23)
 OCC = "SNDK261023C00230000"
 n = iter(range(100, 10_000))
+OFF_CONTEXT = "\n\nSince-entry context unavailable: Radar recording is off."
 
 
 def at(day: date, hhmm: str) -> float:
@@ -87,6 +88,7 @@ class _Wednesday(date):
 def on_wednesday(monkeypatch):
     """Trade rebuilds expire contracts past the machine's own date; these trades are held on WED, whatever today is."""
     monkeypatch.setattr(reconstructor, "date", _Wednesday)
+    monkeypatch.setenv("RADAR_ENABLED", "false")
 
 
 @pytest.fixture
@@ -137,7 +139,7 @@ def test_a_gain_given_back_sends_one_alert(engine, world):
     assert (a.contracts, a.avg_cost, a.mark, a.bid, a.gain, a.peak_gain) == (2, 400, 412, 410, 24, 204)
     title, body, _ = position_alerts.message(a)
     assert title == "SNDK 10/23/26 230C: gave back its gain"
-    assert body == "Was up +$204 (+26%), now +$24 (+3%) at a $4.12 mid, bid $4.10. 2 contracts open. Close it or decide."
+    assert body == "Was up +$204 (+26%), now +$24 (+3%) at a $4.12 mid, bid $4.10. 2 contracts open. Close it or decide." + OFF_CONTEXT
 
 
 def test_a_small_position_never_arms_on_percent_alone(engine, world):
@@ -254,7 +256,7 @@ def test_last_day_alerts_at_ninety_and_thirty_minutes_before_the_close(engine, w
     assert [datetime.fromtimestamp(a.detected_at.replace(tzinfo=UTC).timestamp(), ET).strftime("%H:%M") for a in found] == ["14:30", "15:30"]
     title, body, priority = position_alerts.message(found[1], "4:00 PM", 30)
     assert title == "SNDK 10/21/26 230C: 30 minutes left, expires today"
-    assert body == "Still open: 3 contracts, now -$324 (-72%) at a $0.42 mid, bid $0.40. The market closes at 4:00 PM."
+    assert body == "Still open: 3 contracts, now -$324 (-72%) at a $0.42 mid, bid $0.40. The market closes at 4:00 PM." + OFF_CONTEXT
     assert priority == 5
 
 
@@ -425,7 +427,7 @@ def test_a_contract_too_thin_to_price_shows_its_bid_not_no_quote(engine, world):
     watcher.run()
     alert = alerts(engine)[0]
     assert (alert.mark, alert.bid) == (None, 5)
-    assert position_alerts.message(alert, "4:00 PM")[1] == "3 contracts open, bid $0.05, too thin to price at a midpoint. The market closes at 4:00 PM."
+    assert position_alerts.message(alert, "4:00 PM")[1] == "3 contracts open, bid $0.05, too thin to price at a midpoint. The market closes at 4:00 PM." + OFF_CONTEXT
 
 
 def test_an_expiry_alert_is_never_sent_after_the_close_and_states_the_minutes_left(engine, world, monkeypatch):
@@ -538,7 +540,7 @@ def test_a_position_held_sixty_minutes_gets_one_re_decide_alert(engine, world, h
     title, body, _ = position_alerts.message(found[0])
     assert title == "SNDK 10/23/26 230C: open an hour, re-decide"
     assert body == ("Open 60 min, now -$24 (-6%) at a $3.76 mid, bid $3.74, best seen by the alert watch +$48 (+12%). "
-                    "1 contract open. Re-decide: close, trim, or set your exit.")
+                    "1 contract open. Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
 
 
 def test_an_entry_before_the_open_counts_from_nine_thirty(engine, world, hold_on):
@@ -626,7 +628,7 @@ def test_a_quote_that_cannot_be_judged_still_sends_saying_so(engine, world, hold
     found = alerts(engine)
     assert (found[0].kind, found[0].mark, found[0].bid) == ("hold_hour", None, 200)
     assert position_alerts.message(found[0])[1] == ("Open 60 min, no reliable quote, bid $2.00. 1 contract open. "
-                                                    "Re-decide: close, trim, or set your exit.")
+                                                    "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
     found[0].bid = None
     assert position_alerts.message(found[0])[1].startswith("Open 60 min, no reliable quote. 1 contract open.")
 

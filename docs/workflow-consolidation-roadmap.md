@@ -337,6 +337,13 @@ approved instruments and viewports.
 
 ## Release 4: position context, only if useful
 
+**October 23 approved follow-up:** enrich existing holding alerts with frozen
+same-session since-entry peer/QQQ/SPY observations, using the same comparison as
+Charts. No new triggers or activation. Missing/stale/overnight context leaves the
+original alert intact. Snapshot persistence requires an additive migration and
+the consequential review path. Implementation/PR checks, deployment and actual
+phone usefulness remain separate; see [the context contract](radar.md#since-entry-context-on-existing-holding-alerts).
+
 Merged #403 implements the owner-approved read-only Charts slice: Overview → Holding
 context reuses recorded option positions and the selected chart trade card,
 with remaining entry premium, expiration, linked plans and a jump to existing

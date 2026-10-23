@@ -333,6 +333,28 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             run("groupdel", account, check=False)
 
 
+def table_addition_bundle(bundle, target, run):
+    """Migration-only fixture; never start this older-schema runtime."""
+    from alembic.script import ScriptDirectory
+
+    shutil.copytree(bundle, target)
+    head = "6b2f9d4a1c73"  # day_journal_entry creates a table without altering existing ones.
+    url = "sqlite:///" + str(target / "state/fixture.db")
+    run(str(control.ROOT / "backend/.venv/bin/python"), "-B", "-m", "alembic", "downgrade", head,
+        cwd=target / "backend", env={"PATH": old.ADMIN_PATH, "PYTHON_DOTENV_DISABLED": "1",
+            "PYTHONDONTWRITEBYTECODE": "1", "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url})
+    keep = control.migration_ancestors(target, [head])
+    for script in list(ScriptDirectory(str(target / "backend/alembic")).walk_revisions()):
+        if script.revision not in keep:
+            Path(script.path).unlink()
+    for path in target.rglob("*"):
+        path.chmod(0o600 if path.is_file() else 0o700)
+    manifest = json.loads((target / "manifest.json").read_text())
+    manifest["inventory"] = staging.inventory(target)
+    (target / "manifest.json").write_text(json.dumps(manifest))
+    return target, staging.digest(target / "manifest.json")
+
+
 def upgraded_runtime(archive, scratch, run):
     """Actual runtime-only upgrade and downgrade on the disposable install."""
     run("systemctl", "stop", trial.FRONTEND)
@@ -352,11 +374,13 @@ def upgraded_runtime(archive, scratch, run):
     restored = control.downgrade()
     assert restored["runtime_inventory"] == first["runtime_inventory"] and restored["manifest_sha256"] == first["manifest_sha256"]
     assert {path: staging.digest(path) for path in kept} == before
-    # An older ledger (like #251's) upgrades, then migrates separately and additively.
+    # Pin the successful migration to a table addition: latest is not necessarily
+    # accepted by the trial's deliberately strict existing-table preservation guard.
+    additive, additive_approved = table_addition_bundle(bundle, scratch / "trial-table-addition", run)
     ledger = control.STATE / "fixture.db"
-    control.run_alembic("downgrade", "-1")
+    control.run_alembic("downgrade", "d4f1a7c3e9b2")
     older, content = control.ledger_revision(ledger), control.ledger_content(ledger)
-    assert control.upgrade(bundle, approved)["schema_revision"] != older
+    assert control.upgrade(additive, additive_approved)["schema_revision"] != older
     migrated = control.migrate_ledger()
     assert control.ledger_revision(ledger) == migrated["schema_revision"]
     assert all(control.ledger_content(ledger)["rows"][name] == digest for name, digest in content["rows"].items())
@@ -366,7 +390,22 @@ def upgraded_runtime(archive, scratch, run):
         assert "migrated past" in str(error)
     else:
         raise AssertionError("Downgrade accepted a ledger migrated past the retained runtime")
-    print("Trial runtime upgrade native passed: stopped swap to a newer reviewed bundle and back with config, ledger, units and drop-in unchanged, older-ledger upgrade with separate additive migration and refused downgrade, nothing started")
+    phase("table-addition migration preserved receipts")
+    # Restore the current runtime, then prove its column alteration is refused.
+    # Both fixtures remain stopped; changing the guard is not part of this proof.
+    assert control.upgrade(bundle, approved)["manifest_sha256"] == approved
+    ledger_bytes, record_bytes = ledger.read_bytes(), control.RECORD.read_bytes()
+    try:
+        control.migrate_ledger()
+    except ValueError as error:
+        assert "changed existing ledger content" in str(error)
+    else:
+        raise AssertionError("Column alteration accepted by the strict trial migration guard")
+    assert ledger.read_bytes() == ledger_bytes and control.RECORD.read_bytes() == record_bytes
+    control.installed()
+    assert all(staging.digest(path) == digest for path, digest in before.items() if path != ledger)
+    assert all(run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0 for unit in (*control.UNITS, trial.FRONTEND))
+    print("Trial runtime upgrade native passed: stopped swap to a newer reviewed bundle and back with config, ledger, units and drop-in unchanged, pinned table-addition migration preserving receipts and refused downgrade, current column alteration refused with exact ledger/record restoration, nothing started")
 
 
 def interrupted_install(bundle, run):
