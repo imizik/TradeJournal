@@ -556,21 +556,23 @@ export default function ChartWorkspace() {
     setOlder((state) => ({ ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => !stale.has(key))) }));
   }, [feedBasis, older.panels, slots]);
 
-  const loadOlder = useCallback(async (frame: Frame, beforeOverride?: number, retry = false) => {
+  const loadOlder = useCallback(async (frame: Frame, beforeOverride?: number, retry = false, limit = 1200) => {
     const key = frameKey(frame);
     const feed = feedFor(frame.symbol);
     if (historyFlights.current.has(key) || !feed) return;
     const past = currentOlder[key];
     if ((past?.exhausted || past?.issue || failedHistory.current.has(key)) && !retry && beforeOverride === undefined) return;
     failedHistory.current.delete(key);
-    const before = beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
+    const before = (retry ? past?.request?.before : undefined) ?? beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
+    if (retry && past?.request) limit = past.request.limit;
+    const request = { before, limit };
     const controller = new AbortController();
     historyFlights.current.set(key, controller);
-    setOlder((state) => beginHistoryLoad(state, session, key));
+    setOlder((state) => beginHistoryLoad(state, session, key, request));
     let continuation: string | null = null;
     try {
       while (!controller.signal.aborted) {
-        const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, continuation, signal: controller.signal });
+        const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, limit, continuation, signal: controller.signal });
         if (controller.signal.aborted) return;
         if (splitsKey(page.adjustment) !== splitsKey(feed.adjustment)) {
           // The page and the candles on screen disagree about splits; accepting it would mix two price bases.
@@ -591,7 +593,7 @@ export default function ChartWorkspace() {
             issue: "Visible candles fill the 12,000-candle limit. Zoom in before loading more.", loading: false } } };
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
-          return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers,
+          return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers, request,
             calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment, rvol: past.rvol, historyStart: page.history_start ?? prior?.historyStart ?? null,
             // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
             adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
@@ -610,7 +612,7 @@ export default function ChartWorkspace() {
       if (!controller.signal.aborted) {
         failedHistory.current.add(key);
         setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels,
-        [key]: { bars: state.panels[key]?.bars ?? [], markers: state.panels[key]?.markers ?? [],
+        [key]: { ...state.panels[key], request, bars: state.panels[key]?.bars ?? [], markers: state.panels[key]?.markers ?? [],
           exhausted: false, warmup: state.panels[key]?.warmup ?? "pending",
           issue: err instanceof Error ? err.message : "Older candles could not load.", loading: false } } }));
       }
@@ -629,7 +631,9 @@ export default function ChartWorkspace() {
     for (const slot of slots) {
       const tail = (slot.symbol === data.symbol ? data : data.extras?.[slot.symbol])?.panels[slot.interval];
       if (!intradayInterval(slot.interval) || !tail || tail.bars.length >= (slot.index ? PANEL_OPENING_BARS : OPENING_BARS) || currentOlder[frameKey(slot)]) continue;
-      void loadOlder(slot, data.checked_at);
+      // Fill the opening view plus the 100-candle scroll prefetch margin. Keep the
+      // backend's full indicator warmup; 1,200-candle pages are for navigation.
+      void loadOlder(slot, data.checked_at, false, (slot.index ? PANEL_OPENING_BARS : OPENING_BARS) + 100);
     }
   }, [data, slots, currentOlder, loadOlder]);
   useEffect(() => {

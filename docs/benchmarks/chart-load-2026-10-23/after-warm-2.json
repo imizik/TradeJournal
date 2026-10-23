@@ -1,0 +1,175 @@
+{
+  "started": "2026-10-23T12:57:03.648Z",
+  "layout": "multi",
+  "settings": {
+    "symbol": "SPY",
+    "layout": "multi",
+    "intervals": [
+      "5m",
+      "15m",
+      "1h",
+      "1D",
+      "1m"
+    ],
+    "session": "extended",
+    "watchlist": [
+      "SPY"
+    ],
+    "newsHidden": true
+  },
+  "completionMetric": "initial_panel_history",
+  "completed": true,
+  "errors": [],
+  "samples": {
+    "initial_panel_candles": [
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 721.3999998569489
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 721.3999998569489
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 721.3999998569489
+      },
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 721.5
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 721.5
+      }
+    ],
+    "initial_panel_history": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 721.5
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 721.5
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 780.1999998092651
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 913
+      },
+      {
+        "symbol": "Panel 3|SPY|1h|extended",
+        "ms": 1379.6999998092651
+      }
+    ],
+    "initial_panel_studies": [
+      {
+        "symbol": "Panel 4|SPY|1D|extended",
+        "ms": 721.5
+      },
+      {
+        "symbol": "Panel 5|SPY|1m|extended",
+        "ms": 721.5
+      },
+      {
+        "symbol": "main|SPY|5m|extended",
+        "ms": 780.1999998092651
+      },
+      {
+        "symbol": "Panel 2|SPY|15m|extended",
+        "ms": 913
+      }
+    ]
+  },
+  "requests": [
+    {
+      "path": "/api/backend/charts/workspace",
+      "interval": null,
+      "status": 200,
+      "receivedMs": 732.0999999046326,
+      "timing": "tradier_queue;dur=0.003, tradier_provider;dur=323.918, total;dur=391.039",
+      "request": {
+        "startTime": 1792760223849.3828,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 7.815,
+        "responseStart": 431.817,
+        "responseEnd": 437.14
+      },
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "5m",
+      "status": 200,
+      "receivedMs": 763.6999998092651,
+      "timing": "history_queue;dur=0.002, history_cache;dur=28.784, history_resample;dur=28.818, history_indicators;dur=1.713, total;dur=63.892",
+      "request": {
+        "startTime": 1792760224329.932,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.235,
+        "responseStart": 75.599,
+        "responseEnd": 82.186
+      },
+      "bars": 210,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "15m",
+      "status": 200,
+      "receivedMs": 895.2999999523163,
+      "timing": "history_queue;dur=63.304, history_cache;dur=67.404, history_resample;dur=60.681, history_indicators;dur=1.624, total;dur=197.766",
+      "request": {
+        "startTime": 1792760224330.625,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.202,
+        "responseStart": 208.505,
+        "responseEnd": 215.442
+      },
+      "bars": 165,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    },
+    {
+      "path": "/api/backend/charts/history",
+      "interval": "1h",
+      "status": 200,
+      "receivedMs": 1370.0999999046326,
+      "timing": "history_queue;dur=191.755, history_cache;dur=234.722, history_resample;dur=215.420, history_indicators;dur=1.746, total;dur=657.983",
+      "request": {
+        "startTime": 1792760224330.698,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.178,
+        "responseStart": 674.605,
+        "responseEnd": 681.653
+      },
+      "bars": 165,
+      "warmup": "ready",
+      "issue": null,
+      "continuation": false
+    }
+  ]
+}

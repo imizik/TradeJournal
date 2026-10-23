@@ -376,3 +376,262 @@ def test_sessions_resampled_without_the_calendar_are_disclosed(history, monkeypa
     assert page["bars"] and page["calendar_note"] == CLOCK_NOTE
     history.calendar = Calendar({day: open_day(day)})
     assert history.page("SPY", "1m", "regular", before, limit=1)["calendar_note"] is None
+
+
+@pytest.mark.parametrize("interval", ["15m", "1h"])
+@pytest.mark.parametrize("session", ["regular", "extended"])
+def test_opening_page_saves_sessions_without_shortening_indicator_warmup(history, monkeypatch, interval, session):
+    """The smaller opening window keeps the same 1,400-bar numerical contract."""
+    last = previous_weekday()
+    before = completed_session_cursor(last)
+    sessions = {}
+    for offset in range(900):
+        day = last - timedelta(days=offset)
+        if day.weekday() < 5:
+            sessions[day] = [normalized(day, hour, 30, 100 + offset * .03 + (hour % 5) * .2)
+                             for hour in range(4, 20)]
+    reads = []
+
+    def read(symbol, day, work, deadline, attempts):
+        reads.append(day)
+        return sessions.get(day, [])
+
+    monkeypatch.setattr(history, "_session", read)
+    large = history.page("SPY", interval, session, before, limit=1200)
+    large_reads = len(reads)
+    assert large["warmup"] == "ready"
+    for limit in (165, 210):
+        reads.clear()
+        small = history.page("SPY", interval, session, before, limit=limit)
+        assert small["warmup"] == "ready" and small["continuation"] is None
+        assert len(small["bars"]) == limit
+        assert len(reads) < large_reads * .65
+        for actual, expected in zip(small["bars"], large["bars"][-limit:], strict=True):
+            for key in ("time", "end_time", "source", "open", "high", "low", "close", "volume", "vwap"):
+                assert actual[key] == expected[key]
+            for key in ("ema9", "ema20", "ema50", "ema200"):
+                assert actual[key] == pytest.approx(expected[key], abs=expected["close"] * 1e-6)
+            assert actual["rsi"] == pytest.approx(expected["rsi"], abs=.001)
+        # Scrolling still fetches a normal page ending exactly at the opening page.
+        older = history.page("SPY", interval, session, small["older_cursor"], limit=1200)
+        assert older["warmup"] == "ready" and len(older["bars"]) == 1200
+        joined = older["bars"] + small["bars"]
+        expected_times = [b["time"] for b in chart_bars(
+            [bar for day in sorted(sessions) for bar in sessions[day]], [], interval, session)
+            if b["time"] < before][-(1200 + limit):]
+        assert [b["time"] for b in joined] == expected_times
+
+
+def range_rows(params):
+    start = datetime.fromisoformat(params["start"]).astimezone(ET).date()
+    end = datetime.fromisoformat(params["end"]).astimezone(ET).date()
+    rows = []
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            rows.extend(raw(day, hour, 30, 100 + (day.toordinal() % 31) * .2 + hour * .01)
+                        for hour in range(4, 20))
+        day += timedelta(days=1)
+    return rows
+
+
+def test_batched_page_matches_single_session_prices_and_studies(history, monkeypatch, tmp_path):
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    before = completed_session_cursor(previous_weekday())
+
+    def finish(store):
+        page = store.page("SPY", "1h", "extended", before, 165)
+        while page["continuation"]:
+            assert page["issue"]["code"] in ("pending", "rate_limited")
+            store._calls.clear()  # Simulate the next allowed batch; wall time is benchmarked separately.
+            page = store.page("SPY", "1h", "extended", before, 165, page["continuation"])
+        return page
+
+    batched = finish(history)
+    batch_calls = len(calls)
+    assert batch_calls < 25
+    assert all(p["feed"] == "sip" and p["adjustment"] == "raw" for p in calls)
+    assert all(datetime.fromisoformat(p["end"]) - datetime.fromisoformat(p["start"]) <= timedelta(days=7) for p in calls)
+    single = ChartHistory(tmp_path / "single")
+    original = single._session
+
+    def one(symbol, day, work, deadline, attempts):
+        work.batch_sessions = 1
+        return original(symbol, day, work, deadline, attempts)
+
+    monkeypatch.setattr(single, "_session", one)
+    calls.clear()
+    reference = finish(single)
+    assert len(calls) > batch_calls * 4
+    assert batched["bars"] == reference["bars"]
+    assert batched["warmup"] == reference["warmup"] == "ready"
+    calls.clear()
+    assert finish(ChartHistory(history.root))["bars"] == batched["bars"]
+    assert calls == []
+
+
+def test_batched_pagination_keeps_bounds_and_publishes_only_complete_sessions(history, monkeypatch):
+    # A Monday after the DST change: each stored session must keep its own UTC bounds.
+    day = date(2026, 3, 9)
+    work = Work(("SPY", "1h", "extended", 1, 65), day, batch_sessions=5)
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        number = int(params.get("page_token", "0")) + 1
+        rows = range_rows(params) if number == 10 else []
+        if number == 10:
+            rows += [raw(day - timedelta(days=3), 20, 0), raw(day, 3, 59), raw(day, 20, 0)]
+        return httpx.Response(200, json={"bars": rows, "next_page_token": str(number) if number < 10 else None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    with pytest.raises(HistoryError, match="still loading"):
+        history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    assert len(calls) == 8 and list(history.root.rglob("*.json")) == []
+    rows = history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    assert len(rows) == 16 and len(list(history.root.rglob("*.json"))) == 5
+    assert len({(p["start"], p["end"]) for p in calls}) == 1
+    assert work.batch_start is None and not work.candidate and work.token is None
+    for offset in (0, 3, 4, 5, 6):
+        stored_day = day - timedelta(days=offset)
+        stored = ChartHistory(history.root)._cached("SPY", stored_day)
+        assert len(stored) == 16
+        assert all(datetime.fromtimestamp(b["time"], ET).date() == stored_day for b in stored)
+
+
+@pytest.mark.parametrize("failure", ["rate_limited", "access_denied", "malformed"])
+def test_failed_batch_cannot_publish_or_reuse_partial_sessions(history, monkeypatch, failure):
+    monkeypatch.setattr(module, "WARMUP", 0)
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        if len(calls) == 1:
+            rows = range_rows(params)[:1]
+            rows[0]["o"] = rows[0]["c"] = 1
+            rows[0]["h"], rows[0]["l"] = 2, .5
+            return httpx.Response(200, json={"bars": rows, "next_page_token": "next"})
+        if len(calls) == 2:
+            if failure == "malformed":
+                return httpx.Response(200, json={"bars": [{"t": "bad"}], "next_page_token": None})
+            return httpx.Response(429 if failure == "rate_limited" else 403, json={}, headers={"Retry-After": "1"})
+        return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    before = completed_session_cursor(previous_weekday())
+    first = history.page("SPY", "1h", "extended", before, 65)
+    assert first["issue"]["code"] == failure
+    assert list(history.root.rglob("*.json")) == []
+    work = history._work[first["continuation"]]
+    assert not work.candidate and work.token is None and work.batch_start is None
+    history._cooldown = 0
+    second = history.page("SPY", "1h", "extended", before, 65, first["continuation"])
+    assert second["warmup"] == "ready" and len(second["bars"]) == 65
+    assert calls[2].get("page_token") is None
+    assert all(b["close"] > 99 for b in second["bars"])
+
+
+def test_batch_stops_before_existing_cache_and_discards_superseded_partial_work(history, monkeypatch):
+    day = date(2026, 3, 9)
+    friday = day - timedelta(days=3)
+    history._publish("SPY", friday, [normalized(friday, 9, 30, 123)])
+    original = history._path("SPY", friday).read_bytes()
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    work = Work(("SPY", "1h", "extended", 1, 65), day, batch_sessions=5)
+    history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    assert datetime.fromisoformat(calls[0]["start"]).astimezone(ET).date() == day
+    assert history._path("SPY", friday).read_bytes() == original
+    # Another panel completed this session while this request was paused.
+    work.candidate, work.token, work.batch_start = [normalized(friday, 9, 30, 2)], "stale", friday
+    assert history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    assert not work.candidate and work.token is None and work.batch_start is None
+    assert len(calls) == 1
+    history._path("SPY", friday).write_text("corrupt")
+    with pytest.raises(HistoryError) as error:
+        history._session("SPY", friday, work, module.time.monotonic() + 10, [0])
+    assert error.value.code == "cache_invalid"
+
+
+def test_batch_preserves_an_older_session_completed_between_provider_pages(history, monkeypatch):
+    day = date(2026, 3, 9)
+    friday = day - timedelta(days=3)
+    work = Work(("SPY", "1h", "extended", 1, 65), day, batch_sessions=5)
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        number = int(params.get("page_token", "0")) + 1
+        return httpx.Response(200, json={"bars": range_rows(params) if number == 9 else [],
+                                        "next_page_token": str(number) if number < 9 else None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    with pytest.raises(HistoryError, match="still loading"):
+        history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    history._publish("SPY", friday, [normalized(friday, 9, 30, 123)])
+    original = history._path("SPY", friday).read_bytes()
+    history._session("SPY", day, work, module.time.monotonic() + 10, [0])
+    assert history._path("SPY", friday).read_bytes() == original
+    assert len(history._cached("SPY", day)) == 16
+
+
+def test_batch_does_not_invent_empty_sessions(history, monkeypatch):
+    day = date(2026, 3, 9)
+    friday = day - timedelta(days=3)
+    work = Work(("SPY", "1h", "extended", 1, 65), day, batch_sessions=5)
+
+    def get(url, *, params, **kw):
+        return httpx.Response(200, json={"bars": [r for r in range_rows(params)
+            if datetime.fromisoformat(r["t"]).astimezone(ET).date() != friday], "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    assert len(history._session("SPY", day, work, module.time.monotonic() + 10, [0])) == 16
+    assert history._cached("SPY", friday) is None
+
+
+@pytest.mark.parametrize("empty_kind", ["empty", "no_data"])
+@pytest.mark.parametrize("pause_before_verification", [False, True])
+def test_missing_batch_endpoint_uses_single_session_semantics(history, monkeypatch, empty_kind, pause_before_verification):
+    monkeypatch.setattr(module, "WARMUP", 0)
+    day = date(2026, 3, 9)
+    before = int(datetime.combine(day, wall_time(20), ET).timestamp())
+    calls = []
+
+    def get(url, *, params, **kw):
+        calls.append(dict(params))
+        if pause_before_verification and len(calls) < 8:
+            return httpx.Response(200, json={"bars": [], "next_page_token": str(len(calls))})
+        start = datetime.fromisoformat(params["start"]).astimezone(ET).date()
+        end = datetime.fromisoformat(params["end"]).astimezone(ET).date()
+        if start == end == day:
+            return httpx.Response(200, json={"symbol": "SPY", "bars": [] if empty_kind == "empty" else None, "next_page_token": None})
+        return httpx.Response(200, json={"bars": [r for r in range_rows(params)
+            if datetime.fromisoformat(r["t"]).astimezone(ET).date() != day], "next_page_token": None})
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    page = history.page("SPY", "1h", "extended", before, 65)
+    if pause_before_verification:
+        assert page["issue"]["code"] == "pending" and len(calls) == 8
+        assert history._cached("SPY", day) is None
+        page = history.page("SPY", "1h", "extended", before, 65, page["continuation"])
+    if empty_kind == "empty":
+        assert page["warmup"] == "ready" and len(page["bars"]) == 65
+        assert page["issue"] is None and history._cached("SPY", day) == []
+    else:
+        assert page["issue"]["code"] == "no_data"
+        assert history._cached("SPY", day) is None
+    # The missing endpoint is explicitly checked, without widening the range or budget.
+    verification = calls[8 if pause_before_verification else 1]
+    assert verification["start"] == history._bounds(day)[0].isoformat()
+    assert verification["end"] == history._bounds(day)[1].isoformat()

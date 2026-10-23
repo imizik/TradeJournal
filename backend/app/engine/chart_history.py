@@ -9,6 +9,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 import json
+import math
 from pathlib import Path
 import re
 import threading
@@ -49,6 +50,8 @@ class Work:
     candidate: list[dict] = field(default_factory=list)
     touched: float = field(default_factory=time.monotonic)
     clock_days: set[date] = field(default_factory=set)  # sessions resampled without the calendar
+    batch_sessions: int = 1
+    batch_start: date | None = None  # fixed across provider pagination/continuations
 
 
 class ChartHistory:
@@ -154,7 +157,8 @@ class ChartHistory:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _attempt(self, symbol: str, day: date, token: str | None, deadline: float, attempts: list[int]) -> dict:
+    def _attempt(self, symbol: str, day: date, token: str | None, deadline: float, attempts: list[int],
+                 start_day: date | None = None) -> dict:
         now = time.monotonic()
         while self._calls and self._calls[0] <= now - 60:
             self._calls.popleft()
@@ -165,7 +169,8 @@ class ChartHistory:
             raise HistoryError("History is still loading.", "pending", int(time.time() + 1))
         if not alpaca.ALPACA_API_KEY or not alpaca.ALPACA_API_SECRET:
             raise HistoryError("Alpaca historical SIP credentials are not configured.", "not_configured")
-        start, end = self._bounds(day)
+        start, _ = self._bounds(start_day or day)
+        _, end = self._bounds(day)
         # Even at NY midnight, never ask for the restricted latest 15 minutes.
         if day >= datetime.now(ET).date():
             raise HistoryError("Only completed New York sessions are historical.", "invalid_request")
@@ -215,10 +220,26 @@ class ChartHistory:
         with measured("history_cache"):
             cached = self._cached(symbol, day)
         if cached is not None:
+            work.candidate, work.token, work.batch_start = [], None, None
             return cached
-        start, end = self._bounds(day)
+        if work.batch_start is None:
+            first, count = day, 1
+            # At most five sessions / seven calendar days in one provider range.
+            # Stop before any existing file: immutable caches are never refreshed,
+            # and a corrupt file must still fail when the page reaches it.
+            for offset in range(1, 7):
+                earlier = day - timedelta(days=offset)
+                if count >= work.batch_sessions or earlier < FLOOR or self._path(symbol, earlier).exists():
+                    break
+                hours = self.calendar.hours(earlier) if self.calendar and earlier.weekday() < 5 else None
+                if earlier.weekday() < 5 and (hours is None or hours["status"] != "closed"):
+                    first = earlier
+                    count += 1
+            work.batch_start = first
+        start, _ = self._bounds(work.batch_start)
+        _, end = self._bounds(day)
         while True:
-            body = self._attempt(symbol, day, work.token, deadline, attempts)
+            body = self._attempt(symbol, day, work.token, deadline, attempts, work.batch_start)
             rows = []
             for raw in body["bars"]:
                 if not isinstance(raw, dict):
@@ -228,7 +249,8 @@ class ChartHistory:
                     row = {"timestamp": stamp, "open": raw["o"], "high": raw["h"], "low": raw["l"], "close": raw["c"], "volume": raw["v"]}
                 except (KeyError, TypeError, ValueError, OverflowError) as exc:
                     raise HistoryError("Alpaca returned malformed history data.", "malformed") from exc
-                if start.timestamp() <= stamp < end.timestamp():
+                local = datetime.fromtimestamp(stamp, ET)
+                if start.timestamp() <= stamp < end.timestamp() and wall_time(4) <= local.time() < wall_time(20):
                     rows.append(row)
             normalized = normalize_bars(rows, source="alpaca_sip")
             if len(normalized) != len(rows):
@@ -240,9 +262,31 @@ class ChartHistory:
             work.token = next_token
             if not next_token:
                 minutes = sorted({b["time"]: b for b in work.candidate}.values(), key=lambda b: b["time"])
-                self._publish(symbol, day, minutes)
+                days: dict[date, list[dict]] = {}
+                for bar in minutes:
+                    days.setdefault(datetime.fromtimestamp(bar["time"], ET).date(), []).append(bar)
+                # Publish only after every provider page has validated. Empty days
+                # inside a multi-session range are not evidence of a complete session.
+                for stored_day, bars in days.items():
+                    existing = self._cached(symbol, stored_day)
+                    if existing is None:
+                        self._publish(symbol, stored_day, bars)
+                    else:
+                        # Another panel may have filled an older day between this
+                        # batch's continuations. Its completed snapshot wins.
+                        days[stored_day] = existing
+                if day not in days:
+                    if work.batch_start != day:
+                        work.candidate, work.token, work.batch_start = [], None, None
+                        # A missing endpoint in a range is not a single-session
+                        # answer. Verify it under the same attempt/deadline budget:
+                        # a successful [] advances; no_data/errors stay explicit.
+                        work.batch_sessions = 1
+                        return self._session(symbol, day, work, deadline, attempts)
+                    self._publish(symbol, day, [])
                 work.candidate = []
-                return minutes
+                work.batch_start = None
+                return days.get(day, [])
 
     def page(self, symbol: str, interval: str, session: str, before: int, limit: int = PAGE,
              continuation: str | None = None) -> dict:
@@ -280,6 +324,9 @@ class ChartHistory:
                         continue
                     if hours is None:
                         work.clock_days.add(work.day)
+                    minutes_per_bar = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240}[interval]
+                    bars_per_session = math.ceil((390 if session == "regular" else 960) / minutes_per_bar)
+                    work.batch_sessions = min(5, math.ceil((limit + WARMUP - len(work.bars)) / bars_per_session))
                     # The cache stays raw; the display basis is applied to a copy.
                     minutes = adjust_minutes(self._session(symbol, work.day, work, deadline, attempts), work.day, info["splits"])
                     # Each session resamples with its own date's hours (half days end at 13:00).
@@ -295,7 +342,7 @@ class ChartHistory:
                     raise
                 if exc.code != "pending":
                     # Failed candidates never become complete files or reusable work.
-                    work.candidate, work.token = [], None
+                    work.candidate, work.token, work.batch_start = [], None, None
                 issue = {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at or int(time.time() + 15)}
             exhausted = work.day < FLOOR
             eligible = [b for b in work.bars if b["time"] < before]
