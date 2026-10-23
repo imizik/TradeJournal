@@ -870,7 +870,12 @@ reads never reach Shadow Isaac.
   seen. Equally, a manual or setup-context read inside the window is
   credited to the slot, since the route cannot see its operation ID. `reliability_report(..., outcome_store=...)` links exactly by operation
   ID when an export is imported. A receipt time is not when Jo started, and a
-  slot with no read has no cause the app can see. Tests:
+  slot with no read has no cause the app can see. The Daily Review shows
+  `Matched by time`, `Schedule reference matched` or `Match unknown` before
+  opening a read; both owner views explain that a time match does not verify
+  the scheduled run. Even a matching schedule reference does not establish
+  who started it. An extra read's market-alert link stays unverified because
+  this response does not expose its attribution method. Tests:
   `backend/tests/test_market_watch_reliability.py`.
 - **Missed-read phone alert (opt-in).** `deploy/alerts.py` reads
   `GET /jo/market-reads` every two minutes when `JO_MARKET_READ_ALERTS=true` in

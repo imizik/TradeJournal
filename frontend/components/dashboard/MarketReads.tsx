@@ -62,7 +62,9 @@ function Slot({ s, close, window }: { s: MarketReadSlot; close: number | null; w
       Received {clock(s.received_at)} · <strong>{delay(s.receipt_delay_seconds!)}</strong></p>}
     {s.read && <div data-testid="slot-read" className="rounded-md bg-secondary/30 p-3"><ReadText read={s.read} /></div>}
     {s.read_id && <p className="text-xs text-muted-foreground">
-      {s.attribution === "operation_id" ? "Linked by its scheduled operation ID." : `Linked by time: the first read within ${window} min of the slot.`}
+      {s.attribution === "operation_id" ? "Schedule reference matched. The app cannot verify who started the run."
+        : s.attribution === "time_window" ? `Matched by time: the first read within ${window} min of the slot. A manual or setup read can count; the scheduled run is unverified.`
+          : "The read's link to this scheduled slot is unknown."}
       {s.read_used_slot_packet === true ? " Used this slot's packet." : s.read_used_slot_packet === false ? " Used a different packet." : ""}</p>}
     {s.status === "no_read_seen" && s.delivery === "missing" && <p className="text-sm text-muted-foreground">No read was seen in TradeJournal by {short(s.deadline!)}. The cause is not visible to the app.</p>}
     {s.status === "no_read_seen" && s.delivery === "unknown" && <p className="text-sm text-muted-foreground">No read seen, but the app hasn’t checked for reads since the {short(s.deadline!)} deadline, so one may still arrive.</p>}
@@ -101,7 +103,7 @@ function Session({ s, window, today }: { s: MarketReadSession; window: number; t
     {!!s.reads_not_credited_to_a_slot.length && <details className="mt-2 rounded-md border px-3">
       <summary className="min-h-11 cursor-pointer py-3 text-sm">Extra reads outside the schedule ({s.reads_not_credited_to_a_slot.length})</summary>
       <ul className="space-y-1 pb-3 text-sm text-muted-foreground">{s.reads_not_credited_to_a_slot.map((r) =>
-        <li key={r.read_id} className="space-y-1" data-testid="extra-read"><p>{clock(r.received_at)}{r.event_wake_id ? " · answered a market alert" : ""}</p>
+        <li key={r.read_id} className="space-y-1" data-testid="extra-read"><p>{clock(r.received_at)}{r.event_wake_id ? " · market-alert link unverified" : ""}</p>
           {r.read ? <div className="rounded-md bg-secondary/30 p-3 text-foreground"><ReadText read={r.read} /></div> : <p>Jo&apos;s words for this read weren&apos;t saved in the app.</p>}</li>)}</ul>
     </details>}
     {s.hours?.status !== "closed" && <Watchdog w={s.watchdog} kept={(Date.parse(today) - Date.parse(s.session_date)) / 86400000 < 7} />}

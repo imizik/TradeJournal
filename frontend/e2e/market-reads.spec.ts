@@ -63,7 +63,7 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
     read(monday, "11:00", 17 * 60 + 30, "operation_id"),
     slot(monday, "12:30", { packet: packet("12:30", { status: "started", snapshot_id: null }) }),
     slot(monday, "14:00", { packet: packet("14:00", { status: "failed", error_code: "snapshot_collection_failed", snapshot_id: null, attempts: 2 }) }),
-  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: null, read: { view: "up", main_text: "Correction: SPY reclaimed VWAP; the weak-tape worry no longer holds.",
+  ], { reads_not_credited_to_a_slot: [{ read_id: "mwr_after_window", received_at: at(monday, "18:45"), event_wake_id: "wake-fixture", read: { view: "up", main_text: "Correction: SPY reclaimed VWAP; the weak-tape worry no longer holds.",
     alternative_text: "Could stall at 771.", invalidation_text: "Loses VWAP again.", change_summary: "Corrects the 9:50 read.", is_correction: true } }] })]));
   const slots = page.getByTestId("read-slot");
   await expect(page.getByTestId("session-summary")).toHaveText("2 of 4 due slots with a read");
@@ -71,20 +71,30 @@ test("measured delays, on-time/late/missing delivery and publisher outcomes", as
   await expect(slots.nth(0).getByTestId("slot-badge")).toHaveText("On time");
   await expect(slots.nth(1).getByTestId("slot-badge")).toHaveText("Late · 3 min past due");
   await expect(slots.nth(0).getByTestId("slot-delay")).toContainText("2 min 10 s after the slot");
-  await expect(slots.nth(0)).toContainText("Linked by time: the first read within 30 min of the slot. Used this slot's packet.");
+  await expect(slots.nth(0)).toContainText("Matched by time: the first read within 30 min of the slot. A manual or setup read can count; the scheduled run is unverified. Used this slot's packet.");
   await expect(slots.nth(1).getByTestId("slot-delay")).toContainText("17 min 30 s after the slot");
-  await expect(slots.nth(1)).toContainText("Linked by its scheduled operation ID.");
+  await expect(slots.nth(1)).toContainText("Schedule reference matched. The app cannot verify who started the run.");
   await expect(slots.nth(2).getByTestId("slot-badge")).toHaveText("Missing");
   await expect(slots.nth(2)).toContainText("No read was seen in TradeJournal by 12:45 PM ET. The cause is not visible to the app.");
   await expect(slots.nth(2).getByTestId("slot-packet")).toHaveText("Packet 12:29: started, outcome unknown");
   await expect(slots.nth(3).getByTestId("slot-packet")).toHaveText("Packet 13:59: failed (snapshot_collection_failed) · attempt 2");
   await page.getByText("Extra reads outside the schedule (1)").click();
-  await expect(page.getByText("2:45:00 PM ET")).toBeVisible();
+  await expect(page.getByTestId("extra-read")).toContainText("2:45:00 PM ET · market-alert link unverified");
   // What Jo said, not just when: the extra read's own words show, with no raw record ID.
   await expect(page.getByTestId("extra-read")).toContainText("the weak-tape worry no longer holds");
   await expect(page.getByTestId("extra-read")).not.toContainText("mwr_after_window");
   await expect(page.getByTestId("session-watchdog")).toHaveText("Phone watchdog: off, so no phone alert is sent for a missing read.");
   await fitsPhone(page, "measured");
+});
+
+test("a saved read with unknown attribution is not presented as a time match", async ({ page }) => {
+  await open(page, view([session(monday, [
+    { ...read(monday, "09:50", 130), attribution: null },
+  ])]));
+  const slot = page.getByTestId("read-slot");
+  await expect(slot).toContainText("The read's link to this scheduled slot is unknown.");
+  await expect(slot).not.toContainText("Matched by time");
+  await expect(slot).not.toContainText("Schedule reference matched");
 });
 
 test("holiday, early close and skipped packets are not expected", async ({ page }) => {
