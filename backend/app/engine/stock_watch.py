@@ -280,6 +280,12 @@ class StockWatcher:
                     if session.open_at <= b["time"]
                     and b["end_time"] <= min(now.timestamp(), observed)
                 ]
+                from app.engine.followups import enabled as followups_enabled, publish_stock
+                if followups_enabled():
+                    try:
+                        publish_stock(self.directory, symbol, completed, observed, now)
+                    except Exception:
+                        log.exception("Could not publish personal follow-up evidence for %s", symbol)
                 observation.update(
                     source_observed_at=observed,
                     bar_end=completed[-1]["end_time"] if completed else None,

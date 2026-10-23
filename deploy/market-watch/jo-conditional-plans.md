@@ -4,6 +4,11 @@ Prepared October 17, 2026. Apply only after the reviewed implementation is
 deployed and the owner authorizes activation. This is an addendum to the existing
 personal Jo workflow, not a new task or independent shadow role.
 
+When the separate personal follow-up feature is enabled, broader questions
+(news, relative strength, or an idea to revisit) use [personal follow-through](jo-followups.md).
+Do not force a discretionary question into a fixed-price approximation. An exact
+price watch can be linked to that responsibility; the two lifecycles stay separate.
+
 ## Jo workflow
 
 ### Every "track" or "watch" request ends in a saved watch or a plain no

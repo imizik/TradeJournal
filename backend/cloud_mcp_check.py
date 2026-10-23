@@ -62,6 +62,11 @@ TOOL_ARGUMENTS = {
     "jo_memory_propose": ({"packet_id", "memory"}, set()),
     "jo_briefing_submit": ({"briefing"}, set()),
     "jo_receipt": ({"operation_id"}, set()),
+    "followup_create": ({"followup"}, set()),
+    "followup_list": (set(), {"followup_id"}),
+    "followup_due": (set(), set()),
+    "followup_review": ({"review"}, set()),
+    "followup_cancel": ({"followup_id"}, set()),
     "conditional_plan_create": ({"operation_id", "source_kind", "source_id", "direction", "trigger_price", "invalidation_price", "confirm_bars", "expires_at", "rationale"}, set()),
     "conditional_plan_status": ({"plan_id"}, set()),
     "conditional_plan_list": (set(), set()),
@@ -93,6 +98,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name.startswith("followup_"):
+        return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("followup_create", "followup_review", "followup_cancel") else [])
     if name.startswith("jo_"):
         return [READ_SCOPE, JO_READ_SCOPE] + ([JO_SUBMIT_SCOPE] if name in ("jo_memory_propose", "jo_briefing_submit") else [])
     if name.startswith("conditional_plan_"):
@@ -436,6 +443,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         "is unrecorded. Promise monitoring only through a mechanism TradeJournal can see"
         + (": a saved conditional plan that conditional_plan_status reports as monitoring. "
         if config.conditional_plan_enabled else
+        ". Only periodic personal follow-up reviews are available; no continuous price monitor is active. "
+        if config.followup_enabled else
         ". None is active on this connection, so say \"I can't monitor this\" instead of offering checks later. ")
         + "ChatGPT tasks or reminders you create are invisible to TradeJournal and are not monitoring. "
         + ("Conditional price-plan follow-through is enabled: when the owner requests tracking, turn "
@@ -443,7 +452,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         "Report pending until conditional_plan_status confirms monitoring. Use the saved timeline for "
         "follow-up and cancel on request; never say you are watching solely because you described a plan. "
         "This does not alter S1; all pending shadow commits must precede conditional-plan calls."
-        if config.conditional_plan_enabled else ""),
+        if config.conditional_plan_enabled else "")
+        + (" Personal follow-ups are enabled: save continuing questions with followup_create, recover "
+        "responsibilities with followup_list, and reassess due inputs with followup_due/followup_review. "
+        "These are periodic evidence reviews, not continuous discretionary monitoring. Known pending "
+        "shadow work still comes first; no Gmail search is a prerequisite for standalone follow-up reviews. "
+        "Never promise a follow-up without a saved receipt and acknowledged worker status."
+        if config.followup_enabled else ""),
         token_verifier=verifier, auth=AuthSettings(issuer_url=AnyHttpUrl(config.issuer_url),
             resource_server_url=AnyHttpUrl(config.resource_url), required_scopes=[READ_SCOPE]),
         transport_security=TransportSecuritySettings(allowed_hosts=["127.0.0.1:*", "localhost:*", resource.netloc],
@@ -467,6 +482,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         from jo_briefing_tools import register as register_jo
         register_jo(server, config, authenticated, scopes, clock)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
+    if config.followup_enabled:
+        from followup_tools import register as register_followups
+        register_followups(server, config, ledger, authenticated, scopes, clock)
     if config.conditional_plan_enabled:
         from conditional_plan_tools import register as register_plans
         register_plans(server, config, ledger, authenticated, scopes, clock)

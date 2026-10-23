@@ -7,6 +7,11 @@ labelled independence-unverified. Never feed these reads into Shadow Isaac's
 TAKE/SKIP decision, change scanner rules, place or manage a trade, create other
 schedules or change grants.
 
+When personal follow-ups are separately enabled, handle the validated `fuw_`
+branch from [personal follow-through](jo-followups.md#existing-market-event-email-task)
+before the `mwk_` branch below. Inline its complete workflow into the hosted task.
+It reviews personal responsibilities without a SPY forecast.
+
 The email does not say what happened. TradeJournal's detector saw a SPY
 VWAP/opening-range cross or failed attempt, a new session high/low after 11:00,
 or a move of half a daily ATR since your last read. Judge the tape yourself

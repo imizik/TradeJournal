@@ -89,7 +89,7 @@ MESSAGE_POLICY = {
     "cautions": ["puts in the first 15 minutes", "chasing extended moves", "late-day holds"],
 }
 POLICY_SHA256 = digest({"detector": DETECTOR, "wakes": WAKE_POLICY, "messages": MESSAGE_POLICY})
-KINDS = ("plan", "plan_cancel", "plan_event", "plan_observation", "plan_push_attempt",
+KINDS = ("followup_record", "followup_push", "followup_wake", "plan", "plan_cancel", "plan_event", "plan_observation", "plan_push_attempt",
          "event", "wake", "wake_attempt", "read_notice", "notice_refusal", "message_decision", "message_attempt",
          "stock_alert", "stock_mail_attempt", "stock_review_notice", "stock_push_attempt", "stock_status", "stock_observation")
 NO_WAKE_EVENTS = ("minute_gap",)  # recorded so a blind spot is visible, never a reason to wake Jo
@@ -553,7 +553,8 @@ class MarketWatchRunner:
 
     def run_once(self) -> None:
         day = self.clock().astimezone(ET).date()
-        for step in (self.ingest_notices, lambda n: self.pass_session(n, day), self.deliver_messages):
+        from app.engine.followups import FollowupRunner
+        for step in (self.ingest_notices, lambda n: self.pass_session(n, day), self.deliver_messages, lambda n: FollowupRunner(self).run_once()):
             try:
                 step(self.clock())  # freshness is judged when each step starts, not when the pass began
             except Exception:
