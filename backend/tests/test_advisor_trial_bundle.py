@@ -532,6 +532,51 @@ def test_column_migration_is_refused_and_restores_existing_ledger(prepared, tmp_
     assert "ledger_migrations" not in control.installed()
 
 
+def test_native_smoke_upgrade_path_preserves_guard_and_receipts(prepared, tmp_path, monkeypatch):
+    """Exercise the real smoke migration branch on disposable ledgers."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("trial_smoke_fixture", base.REPO / "deploy/cloud-mcp-advisor/trial_smoke.py")
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    monkeypatch.setattr(smoke, "control", control)
+    monkeypatch.setattr(smoke, "old", old)
+    monkeypatch.setattr(smoke, "trial", trial)
+    monkeypatch.setattr(smoke, "staging", stage)
+    bundle, calls = host(tmp_path, monkeypatch, prepared)
+    control.install(bundle, stage.digest(bundle / "manifest.json"))
+    live_values()
+    monkeypatch.setattr(control, "run_alembic", alembic)
+    scratch = tmp_path / "smoke"
+    scratch.mkdir()
+    # Keep the installed fixture's unit paths while supplying a distinct runtime.
+    def prepare(target, **kwargs):
+        staged, _ = newer_bundle(bundle)
+        staged.rename(target)
+    monkeypatch.setattr(trial, "prepare", prepare)
+    calls.clear()
+
+    def run(*args, **kwargs):
+        if args[1:4] == ("-B", "-m", "alembic"):
+            target = Path(kwargs["cwd"]).parent
+            assert target == scratch / "trial-table-addition"
+            return alembic(*args[4:], bundle=target, database=target / "state/fixture.db")
+        assert args[0] == "systemctl"
+        result = old.run(*args, **kwargs)
+        if args[1] == "is-active":
+            result.returncode = 3
+        return result
+
+    smoke.upgraded_runtime(prepared.parent / "release.tar.gz", scratch, run)
+    record = control.installed()
+    assert record["schema_revision"] == ["7c3e0a5b2d84"]
+    assert control.ledger_revision(control.STATE / "fixture.db") == ["6b2f9d4a1c73"]
+    assert len(record["ledger_migrations"]) == 1  # Refusal never records success.
+    with sqlite3.connect(control.STATE / "fixture.db") as db:
+        assert db.execute("SELECT receipt FROM saved_receipt_fixture").fetchall() == [("e98582d6",)]
+    assert not any(word in command for command in calls for word in ("start", "restart", "enable"))
+
+
 def test_partial_earlier_migration_is_refused_not_recorded(prepared, tmp_path, monkeypatch):
     """A killed run can leave the new table without its index; a rerun must not accept that."""
     # This interrupted-migration fixture specifically predates market_context_item.
