@@ -619,3 +619,42 @@ for (const phone of [false, true]) test(`since-entry holding context ${phone ? '
   await entry.getByRole('button', { name: 'Since first recorded entry' }).click();
   await expect.poll(() => reads.at(-1)).toBe('o2');
 });
+
+for (const phone of [false, true]) test(`context shortcuts preserve holding selection ${phone ? "phone" : "desktop"}`, async ({ page }) => {
+  if (phone) await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem("tradejournal.charts.symbol-info.tab.v1", "News"));
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", route => route.fulfill({ json: workspace(route.request().url(), now, { positions: POSITIONS }) }));
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/journal/trades/*", route => {
+    reads.push(route.request().url());
+    return route.fulfill({ json: { ...CARD, trade: { ...CARD.trade!, id: "o1" }, plans: [] } });
+  });
+  await page.goto("/charts?symbol=MRVL");
+  const shortcuts = page.getByRole("group", { name: "Chart context shortcuts" });
+  const jump = shortcuts.getByRole("button", { name: "Holding context", exact: true });
+  await expect(jump).toBeInViewport();
+  if (!phone) await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await jump.click();
+  const holding = page.getByRole("region", { name: "Holding context", exact: true });
+  await expect(holding.getByRole("button", { name: /Holding context/ })).toBeFocused();
+  await expect(holding.getByRole("combobox")).toHaveValue("");
+  expect(reads).toEqual([]);
+  await holding.getByRole("combobox").selectOption("o1");
+  await expect(holding).toContainText("Remaining premium paid$310.00");
+  await page.screenshot({ path: test.info().outputPath(`context-shortcuts-${phone ? "phone" : "desktop"}.png`) });
+  if (!phone) {
+    await shortcuts.getByRole("button", { name: "Peers", exact: true }).click();
+    await expect(page.getByRole("group", { name: "Peers", exact: true })).toBeInViewport();
+    await jump.click();
+    await expect(holding.getByRole("combobox")).toHaveValue("o1");
+    expect(reads).toHaveLength(1);
+  }
+  if (phone) {
+    await holding.getByRole("button", { name: "Compare stock, group & market" }).click();
+    await expect(page.getByRole("group", { name: "Peers", exact: true })).toBeInViewport();
+    await page.getByRole("button", { name: "Close watchlist" }).click();
+  }
+  await expect(shortcuts).toBeInViewport();
+  await page.screenshot({ path: test.info().outputPath(`context-shortcuts-toolbar-${phone ? "phone" : "desktop"}.png`) });
+});

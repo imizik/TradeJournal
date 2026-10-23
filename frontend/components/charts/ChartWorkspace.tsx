@@ -309,6 +309,7 @@ export default function ChartWorkspace() {
   const [dock, setDock] = useState<{ open: boolean; tab: DockTab }>({ open: true, tab: "watchlist" });
   // A phone's dock: a sheet over the charts, closed until asked for.
   const [sheet, setSheet] = useState(false);
+  const [contextFocus, setContextFocus] = useState<{ symbol: string; target: "peers" | "holding"; n: number } | null>(null);
   // A short message after a menu action ("Copied 256.12"), cleared after a moment.
   const [notice, setNotice] = useState("");
   // Level alerts (C5.1) as an alert change returned them, until a workspace refresh newer than that change arrives.
@@ -1671,7 +1672,7 @@ export default function ChartWorkspace() {
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
     {!isMacroSymbol(settings.symbol) && <QuoteCard live={live} quote={selected} candle={latestCandle} market={market} average={averageVolume?.symbol === settings.symbol ? averageVolume.value : null} />}
-    {!isMacroSymbol(settings.symbol) && <SymbolInfo radarOrigin={radarOrigin} positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
+    {!isMacroSymbol(settings.symbol) && <SymbolInfo onPeers={() => setContextFocus({ symbol: settings.symbol, target: "peers", n: Date.now() })} contextFocus={contextFocus} onContextHandled={() => setContextFocus(null)} radarOrigin={radarOrigin} positions={feedFor(settings.symbol)?.positions} comparisonGroup={comparisonGroup} onComparisonGroup={setComparisonGroup} symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />}
     {!isMacroSymbol(settings.symbol) && <><DockSection name="levels" ariaLabel="Saved price levels" title={`${settings.symbol} levels`} count={`${levels.length}/30`} defaultOpen={levels.length > 0} forceOpen={!!levelError} narrow={narrow}
 
       info="Save support, resistance, or a price you’re watching."
@@ -1841,7 +1842,7 @@ export default function ChartWorkspace() {
           {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`${plain(settings.intervals[0] === interval)} ${control} text-[11px]`}>{interval}</button>)}
         </div>
         {/* A toggle that looks like one: lit while premarket and after-hours candles show. */}
-        <button aria-pressed={settings.session === "extended"} title={settings.session === "extended" ? "Showing premarket and after-hours candles. Click for the regular session only." : "Showing the regular session only. Click to add premarket and after-hours candles."} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(settings.session === "extended")} ${control} gap-1 whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? <Check size={12} aria-hidden /> : <Square size={11} aria-hidden />}{!narrow && <span aria-hidden className="min-[1800px]:hidden">ETH</span>}<span className={narrow ? "" : named}>Extended hours</span></button>
+        <button aria-pressed={settings.session === "extended"} title={settings.session === "extended" ? "Showing premarket and after-hours candles. Click for the regular session only." : "Showing the regular session only. Click to add premarket and after-hours candles."} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(settings.session === "extended")} ${control} gap-1 whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? <Check size={12} aria-hidden /> : <Square size={11} aria-hidden />}<span aria-hidden className="min-[1800px]:hidden">ETH</span><span className={narrow ? "sr-only" : named}>Extended hours</span></button>
         {!narrow && sep}
         <ToolbarMenu label="Chart indicators" title="Studies and fill arrows on every chart" className={`${plain(false)} ${control} text-[11px]`}
           content={() => <div className="flex w-56 flex-col">
@@ -1876,6 +1877,10 @@ export default function ChartWorkspace() {
           : <button aria-label={railOut ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={railOut} title={railOut ? "Hide the drawing tools for a wider chart (remembered on this device)" : "Drawing tools, undo and redo"}
             onClick={toggleRail} className={`${plain(railOut, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={13} aria-hidden /></button>}
         {!narrow && secondary}
+        {owner && !isMacroSymbol(settings.symbol) && <div role="group" aria-label="Chart context shortcuts" className="flex flex-wrap items-center gap-1">
+          <button type="button" onClick={() => { setContextFocus({ symbol: settings.symbol, target: "peers", n: Date.now() }); showDock("watchlist"); }} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>Peers</button>
+          {feedFor(settings.symbol)?.positions?.some((position) => position.instrument === "option") && <button type="button" onClick={() => { setContextFocus({ symbol: settings.symbol, target: "holding", n: Date.now() }); showDock("watchlist"); }} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>Holding context</button>}
+        </div>}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {narrow
             // A phone keeps one row of controls: the rest wait in a menu.
@@ -1889,6 +1894,7 @@ export default function ChartWorkspace() {
           {!narrow && <>{sep}{dockTabs}</>}
         </div>
         {narrow && (drawOpen || tool) && <div role="toolbar" aria-label="Drawing" className="flex basis-full flex-wrap items-center">{tools}</div>}
+
       </header>
 
       {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}

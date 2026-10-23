@@ -345,7 +345,14 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   // Programmatic range changes (data resets, applying a linked range) must not
   // be re-broadcast; only user pans and zooms drive the other charts.
   const quietUntil = useRef(0);
-  const quiet = () => { quietUntil.current = performance.now() + 60; };
+  const rangeTimer = useRef<number | undefined>(undefined);
+  const quiet = () => {
+    quietUntil.current = performance.now() + 60;
+    // A queued prefetch belongs to the old logical range. History arriving or
+    // a programmatic move must not let it fetch again after the view resets.
+    window.clearTimeout(rangeTimer.current);
+    rangeTimer.current = undefined;
+  };
   const requestedGaps = useRef(new Set<number>());
   const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, onUserMove, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
   // The fill chevron under the pointer: its fills, listed (C3.1). A tap, or a click on several, pins the list so a fill can be picked from it.
@@ -782,12 +789,12 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       if (typeof range.from === "number" && typeof range.to === "number") rangeLink.emit({ from: range.from, to: range.to }, id);
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
-    let rangeTimer: number | undefined;
     const onLogical = (range: { from: number; to: number } | null) => {
       // A frame waiting for its next candles never asks for older ones.
       if (!range || performance.now() < quietUntil.current || !barsRef.current.length || actions.current.pending) return;
-      if (rangeTimer) window.clearTimeout(rangeTimer);
-      rangeTimer = window.setTimeout(() => {
+      window.clearTimeout(rangeTimer.current);
+      rangeTimer.current = window.setTimeout(() => {
+        rangeTimer.current = undefined;
         const scale = chart.timeScale();
         const times = scale.getVisibleRange();
         if (times && typeof times.from === "number" && typeof times.to === "number")
@@ -887,7 +894,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       disposed = true;
       for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
       scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
-      stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.delete(id); layers?.delete(id); autoLayers?.delete(id);
+      stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); window.clearTimeout(rangeTimer.current); registry?.delete(id); (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
       element.removeEventListener("pointerleave", releasePointer);
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);

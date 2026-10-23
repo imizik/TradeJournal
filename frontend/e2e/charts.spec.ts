@@ -1162,6 +1162,14 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "4");
+  // Queue a range prefetch while only the live tail is drawn. The opening
+  // history must invalidate that old range before its debounce can fetch again.
+  await page.waitForTimeout(100);
+  await page.evaluate(async () => {
+    const chart = (window as unknown as { __tjCharts: Registry }).__tjCharts.get("Panel 2")!;
+    chart.timeScale().setVisibleLogicalRange({ from: -37, to: 7 });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
   release();
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "214");
   const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
@@ -2762,6 +2770,12 @@ test("Space and Shift+Space step through the watchlist; a button reached by keyb
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
   await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Tab");
+  // The labeled context shortcuts precede Plan trade in visual and keyboard order.
+  const shortcuts = page.getByRole("group", { name: "Chart context shortcuts" });
+  for (const shortcut of await shortcuts.getByRole("button").all()) {
+    await expect(shortcut).toBeFocused();
+    await page.keyboard.press("Tab");
+  }
   await expect(page.getByRole("button", { name: "Plan trade" })).toBeFocused();
   await page.keyboard.press("Tab");
   const pause = page.getByRole("button", { name: "Pause chart updates" });

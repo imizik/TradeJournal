@@ -810,7 +810,9 @@ cd backend
   scroll-prefetch margin. They retain the full 1,400 preceding candles for
   indicator warmup; scroll-back and historical-trade navigation still request
   1,200-candle pages. Continuations and manual retries keep the original window
-  and limit, including after a partial page or failed request.
+  and limit, including after a partial page or failed request. When opening
+  history redraws the chart, pending scroll-prefetch work for the old view is
+  canceled so it cannot immediately trigger another full page.
   Completed sessions come from the disk cache,
   so only missing sessions cost Alpaca requests. Cold page reads group up to
   five sessions within seven calendar days per request; validated sessions are
@@ -2275,7 +2277,12 @@ cluster and small-chart checks and the pictures.
 
 ## Holding context (read-only)
 
-Owners can open **Overview → Holding context** above the existing symbol facts.
+Owners can use labeled **Peers** and **Holding context** toolbar shortcuts to
+reveal the existing dock/phone sheet, Overview and target section. Holding
+context is offered only for a symbol with recorded open option positions and
+never chooses a contract. Navigation preserves mounted contract/comparison
+state and focuses the section disclosure. The original **Overview → Holding
+context** route remains above the existing symbol facts.
 The list reuses the workspace's recorded option positions, independently of
 whether fill overlays are visible. An explicit contract/account selection reads
 one existing chart trade card; no option quote, AI call, alert or write is made.

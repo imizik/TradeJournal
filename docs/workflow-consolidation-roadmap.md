@@ -115,10 +115,10 @@ collector, and no implicit activation.
 | 1 | Market-first Dashboard | Merged #397/#401/#406; saved evidence/news drilldowns included; morning-use acceptance remains open | Implemented |
 | 2 | Peer confirmation in Charts | Merged #400/#408: 15-minute and recorded-session comparison; live coverage/usefulness separate | Implemented |
 | 2a | Movers → Charts handoff | Merged #409: group selection, dated origin, fresh Session comparison and return to the selected Radar session/group list | Implemented; production acceptance separate |
-| Next selected | Recovery-from-low peer context | This PR: selected-stock sampled-low anchor, shared peer/benchmark window and low-search coverage | Implementation; checks/merge receipt separate |
+| 2b | Recovery-from-low peer context | Merged #412: selected-stock sampled-low anchor, shared peer/benchmark window and low-search coverage | Implemented; live usefulness separate |
 | Parallel planning | Macro checklist and data feasibility | Five instruments selected; Tradier probes passed; no provider purchase | Complete for the selected slice |
 | 3 | Agreed macro layout | Merged #399: SPY/QQQ/IWM/VIX/US10Y and Tech return; production acceptance separate | Implemented |
-| 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; same-session since-entry comparison implemented in the current slice; new alerts deferred | Implemented; usefulness open |
+| 4 | Read-only holding context | Merged #403: recorded option exposure, expiration and linked plans; same-session since-entry comparison merged #417; new alerts deferred | Implemented; usefulness open |
 | 5 | Navigation and optional review continuity | Consolidation; actual remaining friction after releases 1–3 | 1–3 days if justified |
 | Later experiment | Narrative/attention sources | Radar; identify incremental value and source access first | Time-box assessment to 1–2 days; build not selected |
 
@@ -375,6 +375,12 @@ decision. Otherwise keep this as chart context and defer alerts. No validated
 probability model exists; do not display a made-up chance of profit.
 
 ## Release 5 and later: simplify navigation and test optional learning
+
+Selected slice: labeled Peers and Holding context shortcuts in Charts reveal
+the existing dock/phone sheet and Overview section, including collapsed sections.
+Holding selection stays explicit; navigation within mounted Overview preserves
+the chosen contract and comparison group/mode. No new screen, calculations or
+alerts. The original routes remain available; deployment/usefulness are separate.
 
 Use the existing destinations: Today for orientation, Radar for discovery,
 Charts for investigation, Review for later questions, and current Trades/

@@ -106,14 +106,15 @@ for (const phone of [false, true]) test(`Group movement preserves group on peer 
     reads.push(`${q.get("symbol")}|${q.get("group") ?? ""}`);
     return route.fulfill({ json: comparison(q.get("symbol")!, q.get("group") ?? "Chips") });
   });
+  await page.addInitScript(() => {
+    localStorage.setItem("tradejournal.charts.info.peers.open.v1", "0");
+    localStorage.setItem("tradejournal.charts.symbol-info.tab.v1", "News");
+  });
   await page.goto("/charts");
   const info = panel(page);
-  if (phone) {
-    await page.getByRole("button", { name: "Watchlist", exact: true }).click();
-    await info.getByRole("button", { name: "NVDA symbol info" }).click();
-  }
-  expect(reads).toEqual([]);
-  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  const shortcut = page.getByRole("group", { name: "Chart context shortcuts" }).getByRole("button", { name: "Peers", exact: true });
+  await expect(shortcut).toBeInViewport();
+  await shortcut.click();
   const movement = info.getByRole("group", { name: "Group movement", exact: true });
   await expect(movement).toContainText("1 up · 0 down · 1 of 2 peers available");
   await expect(movement).toContainText("10:00 AM–10:15 AM ET");
@@ -148,6 +149,11 @@ for (const phone of [false, true]) test(`Group movement preserves group on peer 
   await movement.getByRole("button", { name: "Session", exact: true }).click();
   await movement.getByRole("combobox", { name: "Comparison group" }).selectOption("AI compute");
   await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  if (!phone) {
+    await shortcut.click();
+    await expect(movement.getByRole("button", { name: "Session", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  }
   await movement.getByRole("button", { name: "Compare chart AMD", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Chart symbol" })).toHaveAttribute("placeholder", "AMD");
   if (phone) {
