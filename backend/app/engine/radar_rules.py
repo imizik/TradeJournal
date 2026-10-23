@@ -369,7 +369,7 @@ def _track(state: _State, passes, end: int, quotes, t: Thresholds) -> RadarEvent
     if r <= -threshold:
         status, note = "reversed", f"Reversed: {what} now {_pct(relative)} since the move began ({minutes} min ago)."
     elif r < level / 2:
-        status, note = "faded", f"Faded: {what} back to {_pct(relative)} from a peak of {_pct(level * sign)}."
+        status, note = "faded", f"Faded: {what} back to {_pct(relative)}, under half its highest reading of {_pct(level * sign)}."
     elif r >= level + step:
         status, note = "extended", f"Extended: {what} now {_pct(relative)} since the move began (was {_pct(level * sign)})."
     else:
@@ -422,7 +422,7 @@ def detect(universe: dict, passes: list[dict], end: int, quotes: dict[int, dict[
                                              or found[key].detail["spy_relative"] * found[key].relative > 0
                                              and abs(found[key].detail["spy_relative"]) >= t.spy_relative_pct):
             continue  # the stock is moving against SPY just as much: an SPY event says this, not a sector one
-        own = {k[1] for k in states if k[0] == "relative_to_spy"}  # members with their own SPY event this session
+        own = {k[1] for k in states if k[0] == "relative_to_spy" and k[2] == direction and active(k)}  # same-way SPY events open now
         event = _build_event(found[key], len(chain) + 1, passes[end]["universe_version"], passes, quotes, own)
         states.setdefault(key, []).append(_State(event, []))
         events.append(event)

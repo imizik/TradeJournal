@@ -78,6 +78,7 @@ export const MEASURE_LABELS: Record<string, string> = {
 export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules" };
 export function measureText(key: string, value: number) {
   if (key === "volume_ratio") return `${value.toFixed(1)}×`;
+  if (key.endsWith("_share_pct")) return `${value.toFixed(0)}%`;
   if (key.endsWith("_pct")) return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}%`;
   return String(value);
 }

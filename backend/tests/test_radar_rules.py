@@ -123,6 +123,16 @@ def test_group_move_reports_coverage_dominance_and_member_alerts():
     assert group["chart"]["symbol"] == "AAA"
 
 
+def test_group_lists_only_members_with_an_open_same_direction_alert():
+    # AAA falls alone and its event fades; later the whole group, AAA included, falls 2-3%
+    paths = {"AAA": steps((35, 94.0), (45, 101.0), (80, 98.0)), "BBB": steps((80, 97.0)), "CCC": steps((80, 97.0)),
+             "DDD": steps((80, 97.0)), "EEE": steps((80, 97.0))}
+    saved = run(paths, minutes=90)
+    assert ("relative_to_spy", "AAA", "down") in kinds(saved)
+    group = next(e for e, _ in saved if e["kind"] == "group_move")
+    assert "AAA" in group["symbols"] and "Own alerts" not in group["summary"]  # AAA's own event closed earlier
+
+
 def test_group_needs_four_members_with_data_and_agreement():
     falling = {s: steps((35, 97.0)) for s in ["AAA", "BBB", "CCC"]}
     assert kinds(run({**falling, "DDD": lambda i: None, "EEE": lambda i: None})) == []
