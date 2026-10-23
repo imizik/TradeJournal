@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MEASURE_LABELS, RATINGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
-  recordVisit, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
+  recordVisit, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import RadarMovers from "@/components/RadarMovers";
 import { cn } from "@/lib/utils";
@@ -179,6 +179,8 @@ export default function RadarFeedView() {
   const [feed, setFeed] = useState<RadarFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<string | undefined>();
+  const [sessionReady, setSessionReady] = useState(false);
+  useEffect(() => { queueMicrotask(() => { setSession(radarSession(new URLSearchParams(window.location.search).get("session"))); setSessionReady(true); }); }, []);
   const [open, setOpen] = useState<string | null>(null);
   // The last visit as it was when this page opened; opening the page records a new one.
   const baseline = useRef<string | null>(null);
@@ -202,11 +204,12 @@ export default function RadarFeedView() {
   }, []);
 
   useEffect(() => {
+    if (!sessionReady) return;
     const controller = new AbortController();
     wanted.current = session;
     void load(session, controller.signal);
     return () => controller.abort();
-  }, [load, session]);
+  }, [load, session, sessionReady]);
 
   const live = feed?.coverage?.live;
   useEffect(() => {
@@ -236,7 +239,9 @@ export default function RadarFeedView() {
         {feed.session && feed.state !== "off" && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <label htmlFor="radar-session">Session</label>
-            <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value); }}
+            <select id="radar-session" value={feed.session} onChange={(e) => { setOpen(null); setSession(e.target.value);
+              const url = new URL(window.location.href); url.searchParams.set("session", e.target.value);
+              window.history.replaceState(window.history.state, "", url); }}
               className="h-9 rounded-md border bg-background px-2 text-xs text-foreground">
               {Array.from(new Set([feed.session, ...(feed.sessions ?? [])])).sort().reverse().map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -249,7 +254,7 @@ export default function RadarFeedView() {
       </div>
       {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
 
-      {feed.state !== "off" && <RadarMovers session={session} />}
+      {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
