@@ -157,3 +157,31 @@ def test_migrated_schema_enforces_the_dedupe_and_identity_keys(tmp_path):
             f"{table}.{column} is not unique on a migrated database. "
             "Fill import dedupe and account identity both depend on it."
         )
+
+
+def test_position_alert_context_upgrade_and_downgrade_preserve_existing_alert(tmp_path):
+    from sqlalchemy import text
+
+    path = tmp_path / "position-context.sqlite"
+    _alembic(path, "upgrade", "6b2f9d4a1c73")
+    db_engine = sa_create_engine(f"sqlite:///{path}")
+    with db_engine.begin() as db:
+        db.execute(text("""INSERT INTO position_alert
+            (id, account_id, source_key, kind, generation, trade_id, contract,
+             contracts, avg_cost, detected_at, delivery, attempts)
+            VALUES ('00000000000000000000000000000001', '00000000000000000000000000000002',
+                    'fixture-fill', 'giveback', 0, '00000000000000000000000000000003',
+                    'SNDK call', 2, 400, '2026-10-21 14:00:00', 'pending', 0)"""))
+    _alembic(path, "upgrade", "7c3e0a5b2d84")
+    with db_engine.begin() as db:
+        row = db.execute(text("SELECT source_key, delivery, context_snapshot_json FROM position_alert")).one()
+        assert tuple(row) == ("fixture-fill", "pending", None)
+        db.execute(text("UPDATE position_alert SET context_snapshot_json = :payload"), {"payload": '{"version":1}'})
+    _alembic(path, "downgrade", "6b2f9d4a1c73")
+    with db_engine.connect() as db:
+        assert tuple(db.execute(text("SELECT source_key, delivery FROM position_alert")).one()) == ("fixture-fill", "pending")
+    assert "context_snapshot_json" not in {c["name"] for c in inspect(db_engine).get_columns("position_alert")}
+    _alembic(path, "upgrade", "7c3e0a5b2d84")
+    with db_engine.connect() as db:
+        assert db.execute(text("SELECT context_snapshot_json FROM position_alert")).scalar() is None
+    db_engine.dispose()

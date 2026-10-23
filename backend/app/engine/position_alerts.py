@@ -42,6 +42,10 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   the clock nor sends another. A quote that cannot be judged still sends, saying so;
   the peak shown is what this loop saw.
 
+An already-qualified alert also freezes optional same-session Radar entry context.
+This does not participate in judging or delivery eligibility. Missing/stale context
+never suppresses an alert; retries reuse the saved observations, not newer data.
+
 Positions are anchored in their first entry fill's source identity (account
 plus ``raw_email_id``), as saved-advice links are, so a trade rebuild does not
 re-send anything. Delivery is at-most-once: a send that may have reached ntfy
@@ -61,7 +65,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import ntfy
+from app.engine import ntfy, position_alert_context
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -210,7 +214,7 @@ def _count(contracts: float) -> str:
     return f"{n} contract{'' if contracts == 1 else 's'}"
 
 
-def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None) -> tuple[str, str, int]:
+def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None) -> tuple[str, str, int]:
     """Title, body and ntfy priority for one alert."""
     if alert.mark is not None:
         now_part = f"now {_money(alert.gain)} ({_pct(alert.gain_pct)}) at a {_premium(alert.mark)} mid, bid {_premium(alert.bid)}"
@@ -236,6 +240,12 @@ def message(alert: PositionAlert, close_label: str | None = None, minutes_left: 
     left = f"{minutes_left} minute{'' if minutes_left == 1 else 's'}" if minutes_left is not None else "Under 30 minutes"
     return (f"{alert.contract}: {left} left, expires today",
             f"Still open: {_count(alert.contracts)}, {now_part}.{when}", 5)
+
+
+def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None) -> tuple[str, str, int]:
+    title, body, priority = _base_message(alert, close_label, minutes_left)
+    context = position_alert_context.phone_text(alert.context_snapshot_json)
+    return title, body + ("\n\n" + context if context else ""), priority
 
 
 def _minute_of(stamp: float) -> int:
@@ -285,7 +295,7 @@ class PositionAlerts:
                 found.extend(self._judge(db, position, mark, today, minute, regular, now))
             db.commit()
         for alert in found:
-            self._record(alert)
+            self._record(alert, regular=regular)
 
     def _marks(self, positions: list[dict], now: float) -> dict:
         try:
@@ -344,7 +354,7 @@ class PositionAlerts:
             peak_gain_pct=None if peak is None else (peak - cost) / cost,
             quoted_at=_utc(mark["quoted_at"]) if mark else None, detected_at=_utc(now))
 
-    def _record(self, alert: PositionAlert) -> None:
+    def _record(self, alert: PositionAlert, *, regular=None) -> None:
         """Write one firing; a firing already written (this pass's retry, another process) is skipped."""
         with Session(self.engine) as db:
             exists = db.exec(select(PositionAlert.id).where(
@@ -360,6 +370,7 @@ class PositionAlerts:
                     PositionAlert.kind == later)).first()
                 if other is not None:
                     return
+            alert.context_snapshot_json = position_alert_context.capture(self.engine, alert, _epoch(alert.detected_at), regular)
             db.add(alert)
             try:
                 db.commit()

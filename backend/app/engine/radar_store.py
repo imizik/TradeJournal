@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import json
 from pathlib import Path
 import sqlite3
+import time
 from typing import Literal, TypedDict
 
 APPLICATION_ID = 0x52414431  # RAD1: the isolated Radar recorder file; foreign files are never adopted.
@@ -185,9 +186,12 @@ def load_universe(path: Path = UNIVERSE_PATH) -> dict:
 class RadarStore:
     """Explicit owner-selected SQLite file for Radar's quote passes and events."""
 
-    def __init__(self, path: str | Path, *, read_only: bool = False):
+    def __init__(self, path: str | Path, *, read_only: bool = False, read_deadline: float | None = None):
         self.path = Path(path)
         self.read_only = read_only
+        self.read_deadline = read_deadline
+        if read_deadline is not None and not read_only:
+            raise ValueError("a read deadline requires a read-only Radar store")
         if not self.path.is_absolute():
             raise ValueError("radar store path must be absolute")
         if self.path.is_symlink():
@@ -206,10 +210,15 @@ class RadarStore:
 
     @contextmanager
     def _db(self):
+        remaining = 10 if self.read_deadline is None else self.read_deadline - time.monotonic()
+        if remaining <= 0:
+            raise sqlite3.OperationalError("Radar read deadline exceeded")
         db = sqlite3.connect(self.path.as_uri() + "?mode=ro" if self.read_only else self.path,
-                             uri=self.read_only, timeout=10, isolation_level="IMMEDIATE")
+                             uri=self.read_only, timeout=min(10, remaining), isolation_level="IMMEDIATE")
         db.row_factory = sqlite3.Row
         try:
+            if self.read_deadline is not None:
+                db.set_progress_handler(lambda: int(time.monotonic() >= self.read_deadline), 1000)
             with db:
                 yield db
         finally:
