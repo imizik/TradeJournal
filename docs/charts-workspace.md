@@ -810,7 +810,9 @@ cd backend
   scroll-prefetch margin. They retain the full 1,400 preceding candles for
   indicator warmup; scroll-back and historical-trade navigation still request
   1,200-candle pages. Continuations and manual retries keep the original window
-  and limit, including after a partial page or failed request.
+  and limit, including after a partial page or failed request. When opening
+  history redraws the chart, pending scroll-prefetch work for the old view is
+  canceled so it cannot immediately trigger another full page.
   Completed sessions come from the disk cache,
   so only missing sessions cost Alpaca requests. Cold page reads group up to
   five sessions within seven calendar days per request; validated sessions are
