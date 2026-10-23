@@ -220,8 +220,12 @@ Acceptance:
 Radar's shared stored passes. It does not require a calibrated event detector.
 The [Radar contract](radar.md#charts-group-movement) defines the implemented
 eligibility and coverage rules. Recording activation and live owner acceptance
-remain separate. Historical event-context handoff and alternate windows are
-follow-ups, not claimed by this first slice.
+remain separate. The owner subsequently selected **Session context**: a toggle
+beside 15 min shows returns and participation since the first usable recorded
+sample, with actual start/end, missing-minute coverage and independently
+unavailable states. It reuses the same stored observations and refresh; late
+recording cannot be labeled a market-open return. Historical event-context
+handoff, recovery-from-low and sustained-trend detection remain follow-ups.
 
 Primary question: **"Are these names rebounding or weakening together over the
 same interval as the stock I am investigating?"** This is the first major
