@@ -2762,6 +2762,12 @@ test("Space and Shift+Space step through the watchlist; a button reached by keyb
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
   await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Tab");
+  // The labeled context shortcuts precede Plan trade in visual and keyboard order.
+  const shortcuts = page.getByRole("group", { name: "Chart context shortcuts" });
+  for (const shortcut of await shortcuts.getByRole("button").all()) {
+    await expect(shortcut).toBeFocused();
+    await page.keyboard.press("Tab");
+  }
   await expect(page.getByRole("button", { name: "Plan trade" })).toBeFocused();
   await page.keyboard.press("Tab");
   const pause = page.getByRole("button", { name: "Pause chart updates" });
