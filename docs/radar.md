@@ -109,9 +109,11 @@ an explicit unrelated group is rejected. An ungrouped symbol is disclosed.
 
 The 15-minute comparison uses the latest completed usable pass and the pass at or before
 15 minutes earlier (at most 90 seconds earlier). Both endpoints use the same
-pass IDs for every row, in one session and the current universe version. Older
-membership is not archived, so a version mismatch is refused rather than
-reinterpreted. Passes taking over 90 seconds are refused. Each price must be
+pass IDs for every row, in one session and a compatible universe version. Older
+membership is not archived. The sole historical compatibility exception is
+v1/v2 when the complete group-membership fingerprint matches the pinned equal
+definitions; v2 added sector annotations only. Other version mismatches are
+refused rather than reinterpreted. Passes taking over 90 seconds are refused. Each price must be
 finite and positive; its retrieval must fall within its pass, and its provider
 trade timestamp must be present, no later than retrieval and at most 120 seconds
 old. These are initial observation eligibility limits, not calibrated trading
@@ -140,7 +142,7 @@ anchor. This is not the true tick/candle/session low or the provider's day-low
 field: recording can start late and miss lower prices between samples.
 
 The low search uses the same positive-price, trade-age, retrieval and pass-duration
-eligibility rules. A universe-version change anywhere among usable session passes
+eligibility rules. An incompatible universe version anywhere among usable session passes
 refuses recovery context. `low_anchor` carries price, pass ID/time and actual
 trade/retrieval times. `low_search` carries the search interval, eligible samples,
 omitted samples and eligible/expected minute buckets, including gaps before the
@@ -226,3 +228,12 @@ plain text, and can be dismissed without affecting chart ranges or trade links.
 The origin remains explicitly tied to its original ticker when another chart
 symbol is selected. Existing event-detail links remain unchanged; historical
 event-context handoff is deferred.
+
+### Selected holding since entry
+
+The same owner-only comparison endpoint accepts an optional `trade_id` and
+returns one independently evaluated same-session entry window. It resolves the
+original entry from the journal and reads only recorded Radar observations.
+The selected holding disclosure refreshes while open; it does not add alerts
+or a background recorder. See [the Charts contract](charts-workspace.md#same-session-since-entry-holding-context)
+for timing, eligibility, missing-data behavior and tests.
