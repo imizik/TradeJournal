@@ -6,7 +6,7 @@ import pytest
 
 from app.engine.chart_math import ET
 from app.engine.radar_movers import build_movers
-from app.engine.radar_store import RadarStore, load_universe
+from app.engine.radar_store import RadarStore
 from app.main import app
 from app.routers import radar
 from tests.test_browser_access import boundary  # noqa: F401  (the shared access fixture)
