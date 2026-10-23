@@ -313,6 +313,14 @@ test("Radar origin does not force its group onto unrelated watchlist symbols", a
   await page.goto(`/charts?${query}`);
   const movement = panel(page).getByRole("group", { name: "Group movement", exact: true });
   await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  // AMD belongs to both groups. Its day-change chip must retain AI, not default Chips.
+  await panel(page).getByRole("button", { name: "Peer AMD", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Chart symbol" })).toHaveAttribute("placeholder", "AMD");
+  await expect.poll(() => reads.at(-1)).toBe("AMD|AI compute");
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  await page.reload();
+  await expect(movement.getByRole("combobox")).toHaveValue("AI compute");
+  await expect.poll(() => reads.at(-1)).toBe("AMD|AI compute");
   await page.getByRole("button", { name: "Chart AAPL", exact: true }).click();
   await expect(movement.getByRole("combobox")).toHaveValue("Consumer tech");
   expect(reads.at(-1)).toBe("AAPL|");

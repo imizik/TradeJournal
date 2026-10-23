@@ -146,7 +146,16 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   const group = chosenGroup ? (chosenGroup.members.includes(symbol) ? chosenGroup.name : undefined)
     : radarOrigin?.symbol === symbol ? radarGroup || undefined : undefined;
   const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
-  const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={movement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
+  // Adopt only server-validated membership, so every navigation path (not just
+  // comparison-row clicks) retains the group for members and releases nonmembers.
+  const handoffGroup = !chosenGroup && radarGroup ? movement?.data?.groups.find((candidate) => candidate.name === radarGroup) : undefined;
+  useEffect(() => {
+    if (handoffGroup) (onComparisonGroup ?? setLocalGroup)(handoffGroup);
+  }, [handoffGroup, onComparisonGroup]);
+  // On a reload at a different member, resolve membership before showing a
+  // default group's values as though they belonged to the handed-off group.
+  const shownMovement = handoffGroup && movement?.data?.group?.name !== handoffGroup.name ? null : movement;
+  const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={shownMovement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
