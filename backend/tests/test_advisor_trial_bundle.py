@@ -434,11 +434,30 @@ def test_downgrade_refuses_changed_retained_runtime(prepared, tmp_path, monkeypa
     control.installed()
 
 
-def alembic(*args):
-    """The repository's real migrations against only the disposable v2 ledger."""
-    url = "sqlite:///" + str(control.STATE / "fixture.db")
-    subprocess.run([sys.executable, "-B", "-m", "alembic", *args], cwd=base.REPO / "backend", check=True, capture_output=True,
+def alembic(*args, bundle=None, database=None):
+    """The installed runtime's real migrations against only a disposable ledger."""
+    url = "sqlite:///" + str(database or control.STATE / "fixture.db")
+    subprocess.run([sys.executable, "-B", "-m", "alembic", *args], cwd=(bundle or control.ROOT) / "backend", check=True, capture_output=True,
         env={"PATH": os.environ["PATH"], "PYTHON_DOTENV_DISABLED": "1", "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url})
+
+
+def table_addition_bundle(bundle):
+    """Pin successful preservation tests to day_journal_entry's table addition.
+
+    The trial guard deliberately rejects alterations of existing tables, so the
+    latest application migration is not necessarily an allowed trial migration.
+    """
+    from alembic.script import ScriptDirectory
+
+    def pin(target):
+        head = "6b2f9d4a1c73"
+        alembic("downgrade", head, bundle=target, database=target / "state/fixture.db")
+        keep = control.migration_ancestors(target, [head])
+        scripts = list(ScriptDirectory(str(target / "backend/alembic")).walk_revisions())
+        for script in scripts:
+            if script.revision not in keep:
+                Path(script.path).unlink()
+    return newer_bundle(bundle, edit=pin)
 
 
 def behind_ledger(prepared, tmp_path, monkeypatch, revision="-1"):
@@ -452,10 +471,10 @@ def behind_ledger(prepared, tmp_path, monkeypatch, revision="-1"):
 
 
 def test_upgrade_accepts_older_ledger_and_separate_migration_keeps_receipts(prepared, tmp_path, monkeypatch):
-    bundle, calls = behind_ledger(prepared, tmp_path, monkeypatch)
+    bundle, calls = behind_ledger(prepared, tmp_path, monkeypatch, revision="d4f1a7c3e9b2")
     ledger = control.STATE / "fixture.db"
     old_revision = control.ledger_revision(ledger)
-    newer, approved = newer_bundle(bundle)
+    newer, approved = table_addition_bundle(bundle)
     head = control.ledger_revision(newer / "state/fixture.db")
     assert old_revision != head
     record = control.upgrade(newer, approved)
@@ -480,8 +499,8 @@ def test_upgrade_accepts_older_ledger_and_separate_migration_keeps_receipts(prep
 
 
 def test_failed_or_destructive_migration_restores_ledger_bytes(prepared, tmp_path, monkeypatch):
-    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch)
-    newer, approved = newer_bundle(bundle)
+    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch, revision="d4f1a7c3e9b2")
+    newer, approved = table_addition_bundle(bundle)
     control.upgrade(newer, approved)
     ledger = control.STATE / "fixture.db"
     original = ledger.read_bytes()
@@ -499,6 +518,18 @@ def test_failed_or_destructive_migration_restores_ledger_bytes(prepared, tmp_pat
     assert "ledger_migrations" not in record
     monkeypatch.setattr(control, "run_alembic", alembic)
     assert control.migrate_ledger()["ledger_migrations"][-1]["to"] == record["schema_revision"]
+
+
+def test_column_migration_is_refused_and_restores_existing_ledger(prepared, tmp_path, monkeypatch):
+    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch, revision="6b2f9d4a1c73")
+    newer, approved = newer_bundle(bundle)
+    control.upgrade(newer, approved)
+    ledger = control.STATE / "fixture.db"
+    before, record = ledger.read_bytes(), control.RECORD.read_bytes()
+    with pytest.raises(ValueError, match="changed existing ledger content"):
+        control.migrate_ledger()
+    assert ledger.read_bytes() == before and control.RECORD.read_bytes() == record
+    assert "ledger_migrations" not in control.installed()
 
 
 def test_partial_earlier_migration_is_refused_not_recorded(prepared, tmp_path, monkeypatch):
