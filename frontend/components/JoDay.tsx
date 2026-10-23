@@ -167,9 +167,19 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
   for (const s of data.reads?.slots ?? []) {
     if (s.expected === false) continue;
     if (s.received_at) {
-      done.push({ key: `slot-${s.slot}`, at: s.received_at, icon: s.delivery === "late" ? "warn" : "done", ...readLabel(`${slotTime(s.slot)} read`, s.read),
+      const text = readLabel(`${slotTime(s.slot)} read`, s.read);
+      const match = s.attribution === "operation_id" ? "Schedule reference matched" : s.attribution === "time_window" ? "Matched by time" : "Match unknown";
+      done.push({ key: `slot-${s.slot}`, at: s.received_at, icon: s.delivery === "late" ? "warn" : "done", ...text,
+        sub: `${match}${text.sub ? ` · ${text.sub}` : ""}`,
         badge: s.delivery === "late" ? [`Late · ${minutesAfter(s.received_at, s.scheduled_at)} min after ${slotTime(s.slot)}`, warn] : s.packet.status === "published_partial" ? ["On time · data had gaps", warn] : ["On time", ok],
-        detail: s.read ? <ReadText read={s.read} /> : <p className="text-sm text-muted-foreground">Jo&apos;s words for this read weren&apos;t saved in the app; only its timing is known.</p> });
+        detail: <div className="space-y-2 text-sm">
+          <p className="text-muted-foreground">{s.attribution === "operation_id"
+            ? "This read carries the slot's schedule reference. The app cannot verify who started the run."
+            : s.attribution === "time_window"
+              ? "Matched by time only. A manual or setup read near this slot can count; this does not verify the scheduled run."
+              : "The read's link to this scheduled slot is unknown."}</p>
+          {s.read ? <ReadText read={s.read} /> : <p className="text-muted-foreground">Jo&apos;s words for this read weren&apos;t saved in the app; only its timing is known.</p>}
+        </div> });
     } else if (s.delivery === "pending" || s.status === "upcoming") {
       if (live) next.push({ key: `slot-${s.slot}`, at: s.scheduled_at, icon: "next", label: `${slotTime(s.slot)} market read`, badge: ["Upcoming", muted] });
     } else if (s.delivery === "missing") {
@@ -180,7 +190,7 @@ export function joItems(data: JoDayData, day: string, live: boolean) {
     }
   }
   for (const r of data.reads?.reads_not_credited_to_a_slot ?? []) {
-    done.push({ key: r.read_id, at: r.received_at, icon: "done", ...readLabel(`Extra read${r.event_wake_id ? " · answered a market alert" : ""}`, r.read),
+    done.push({ key: r.read_id, at: r.received_at, icon: "done", ...readLabel(`Extra read${r.event_wake_id ? " · market-alert link unverified" : ""}`, r.read),
       badge: ["Unscheduled", muted], detail: r.read ? <ReadText read={r.read} /> : undefined });
   }
 

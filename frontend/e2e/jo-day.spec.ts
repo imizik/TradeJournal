@@ -23,7 +23,7 @@ function slot(day: string, name: string, extra: Partial<MarketReadSlot> = {}): M
 type Mode = { live: boolean; now: string; watchOff?: boolean };
 
 function reads(day: string, { live, now, watchOff }: Mode): MarketReadsView {
-  const first = slot(day, "09:50", { status: "read_seen", read_id: "mwr_1", received_at: iso(day, "09:50"), delivery: "on_time",
+  const first = slot(day, "09:50", { status: "read_seen", read_id: "mwr_1", attribution: "time_window", received_at: iso(day, "09:50"), delivery: "on_time",
     packet: { slot: "09-49", status: "published_partial", attempts: 1, recorded_at: null, snapshot_id: "mws_a", error_code: null, quality_flags: ["gap:headlines"] },
     read: text("SPY is holding its opening range; no clean break yet.") });
   const rest = live ? ["11:00", "12:30", "14:00"].map((name) => slot(day, name)) : [
@@ -86,8 +86,10 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   await expect(jo.getByText("Morning briefing: APLD, NBIS")).toBeVisible();
   const first = jo.getByTestId("jo-day-item").filter({ hasText: "9:50 read · mixed" });
   await expect(first).toContainText("On time · data had gaps");
+  await expect(first.locator("summary")).toContainText("Matched by time");
   await expect(first).toContainText("SPY is holding its opening range"); // first sentence, before opening
   await first.locator("summary").click();
+  await expect(first).toContainText("this does not verify the scheduled run");
   await expect(first).toContainText("SPY is holding its opening range");
   await expect(first).toContainText("Wrong if:");
   await expect(jo.getByText("Extra read · mixed · correction")).toBeVisible();
@@ -112,6 +114,39 @@ test("today's Daily Review shows what Jo did, is watching and will do, with Jo's
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("jo-day-today-phone.png") });
   expect(errors).toEqual([]);
+});
+
+test("read attribution stays distinct for schedule references, time matches and unknown links", async ({ page }) => {
+  await stub(page, today, midday);
+  const body = reads(today, midday);
+  body.sessions[0].slots = [
+    slot(today, "09:50", { status: "read_seen", read_id: "timed", attribution: "time_window", received_at: iso(today, "09:52"), delivery: "on_time" }),
+    slot(today, "11:00", { status: "read_seen", read_id: "linked", attribution: "operation_id", received_at: iso(today, "11:03"), delivery: "on_time" }),
+    slot(today, "12:30", { status: "read_seen", read_id: "unknown", attribution: null, received_at: iso(today, "12:33"), delivery: "on_time" }),
+  ];
+  body.sessions[0].reads_not_credited_to_a_slot[0].event_wake_id = "wake-fixture";
+  await page.route("**/jo/market-reads?**", (route) => route.fulfill({ json: body }));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`/daily/${today}`);
+    const jo = page.getByTestId("jo-day");
+    const timed = jo.getByTestId("jo-day-item").filter({ hasText: "9:50 read" });
+    const linked = jo.getByTestId("jo-day-item").filter({ hasText: "11:00 read" });
+    const unknown = jo.getByTestId("jo-day-item").filter({ hasText: "12:30 read" });
+    await expect(timed.locator("summary")).toContainText("Matched by time");
+    await expect(linked.locator("summary")).toContainText("Schedule reference matched");
+    await expect(unknown.locator("summary")).toContainText("Match unknown");
+    await timed.locator("summary").click();
+    await expect(timed).toContainText("A manual or setup read near this slot can count");
+    await linked.locator("summary").click();
+    await expect(linked).toContainText("cannot verify who started the run");
+    await unknown.locator("summary").click();
+    await expect(unknown).toContainText("link to this scheduled slot is unknown");
+    await expect(jo).toContainText("Extra read · market-alert link unverified");
+    await expect(jo).not.toContainText("answered a market alert");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await jo.screenshot({ path: test.info().outputPath(`jo-read-attribution-${width === 390 ? "phone" : "desktop"}.png`) });
+  }
 });
 
 test("a past day is a record: problems are named, lateness counts from the slot, nothing is upcoming", async ({ page }) => {
