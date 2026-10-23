@@ -819,3 +819,25 @@ opportunities and urgent_positions; recover jo_receipt until saved or rejected.�
 Retain the current account grant, weekday schedule, expiry, authentication and
 Shadow ordering. Production activation and a natural morning's provider/Jo
 acceptance are separate from fixture checks; neither is claimed by this change.
+
+### SPY/QQQ morning prep — October 22 owner-selected slice
+
+The Morning page has a collapsible SPY/QQQ prep block. It reuses the Charts
+workspace's automatic levels (including developing and missing-source labels),
+with selected-day chart links for setting existing price alerts. Opening today's
+block fetches one bounded SPY/QQQ workspace request; historical days do not fetch
+live levels. Refresh is explicit, and the map's own session date must match.
+
+The owner records one macro sentence, a contract/size convention, 1–2 selected
+higher-timeframe levels, and 2–3 scenarios total across both symbols. Each has
+family, level, trigger, invalidation and time stop. Saving appends an owner outlook
+to the existing day journal; it does not activate monitoring, change a chart
+setting, publish new Jo evidence or place an order. Original receipt times remain
+visible. An uncertain save retains its operation ID and payload for safe retry.
+A freeze records the saved plan ID, scenario number and owner-reported trigger
+time as an untraded idea, separately from a deliberate pass or invalidated setup.
+Daily Review reads these existing journal entries. No new schema or grants.
+
+This is the owner's bounded exception to new-feature ordering, supporting Dots
+morning usefulness. Production activation and the owner's under-ten-minute
+morning acceptance remain pending; browser fixtures prove the mechanics only.

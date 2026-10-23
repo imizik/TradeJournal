@@ -513,6 +513,21 @@ Level alerts set on the charts (Charts C5.1) go to the same topic: the API
 service reads `alerts.env` too (optional, as above) and sends each firing
 itself, with the symbol, the level, the price and the time.
 
+Open-position phone alerts are separate and remain off unless
+`POSITION_ALERTS_ENABLED=true` is configured. The new exception is separately
+disabled when `POSITION_ALERTS_FLOORLESS_ACCOUNT_ID` is empty. Only after owner
+approval, verify the running database with `GET /health`, inspect `GET /accounts`,
+and copy the intended Roth IRA UUID into that setting.
+That optional exception removes the +$50 arming floor only for SPY and QQQ long
+options in that exact account; the +10% arming and +3% firing thresholds and
+quote freshness/spread checks still apply. Other accounts and symbols retain
+the +$50 floor. Keep the account UUID only in the private root-owned
+`/etc/tradejournal/alerts.env`; do not add it to the example or repository.
+After an explicitly approved activation, restart `tradejournal-api.service`.
+Clearing this setting restores the dollar floor for future arming; already-armed
+watches retain their normal give-back coverage. Existing position-alert enablement
+and delivery settings must be preserved when applying this optional setting.
+
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
 long random topic such as `tradejournal-` followed by `openssl rand -hex 16`.
