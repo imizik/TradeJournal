@@ -7,9 +7,11 @@ the calendar is unavailable during clock hours the pass is recorded as skipped
 rather than guessed. Symbols go out in requests of at most ``BATCH_SIZE``
 through ``tradier.get_quotes_once``, at most ``MAX_REQUESTS`` per pass. A rate
 limit or transport failure ends the pass at once (recorded failed or partial);
-the next minute tries again. Nothing is retried within a pass, detected, sent
-or traded here. After a regular-hours pass, ``radar_news.enrich`` checks
-headlines near recent events (PR 5); its failures never affect the pass.
+the next minute tries again. Nothing is retried within a pass, sent or traded
+here. After an ok or partial pass, ``radar_rules.detect`` appends new events and
+revisions (step 2), then ``radar_news.enrich`` checks headlines near recent
+events (PR 5), so a new event gets its news the same minute. Neither one's
+failure affects the recorded pass.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ import os
 import time
 from typing import Callable
 
-from app.engine import radar_news, tradier
+from app.engine import radar_news, radar_rules, tradier
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
 from app.engine.radar_store import RadarPass, RadarQuote, RadarStore, load_universe
 
@@ -84,12 +86,42 @@ class RadarRunner:
             rows = self._collect(record)
         record["finished_at"] = _iso(datetime.fromtimestamp(self.clock(), ET))
         pass_id = self.store.append_pass(record, rows)
+        if inside and record["status"] in radar_rules.USABLE:
+            try:
+                self.detect(record["session_date"], pass_id)
+            except Exception:  # detection is extra; the recorded pass stands either way
+                log.exception("Radar detection failed")
         if inside:
             try:
                 radar_news.enrich(self.store, record["session_date"], datetime.fromtimestamp(self.clock(), UTC), self.news)
             except Exception:  # news is extra context; the recorded pass stands either way
                 log.exception("Radar news enrichment failed")
         return pass_id
+
+    def detect(self, session_date: str, pass_id: int) -> tuple[int, int]:
+        """Append the rules' new events and revisions for one recorded pass; returns how many of each.
+
+        Reads the session's pass list, the quotes of only the passes the windows need, and the session's saved
+        events of this rule version. Rows already saved (same ids) are skipped, so a restart writes nothing twice.
+        """
+        passes = radar_rules.session_passes(self.store.passes(session_date), session_date)
+        end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
+        if end is None:
+            return 0, 0
+        quotes = self.store.pass_quotes(radar_rules.needed_pass_ids(passes, end))
+        saved = [(e, self.store.revisions(e["event_id"])) for e in self.store.events(session_date)
+                 if e["rule_version"] == radar_rules.RULE_VERSION]
+        events, revisions = radar_rules.detect(self.universe, passes, end, quotes, saved)
+        written = [0, 0]
+        for event in events:
+            if self.store.event(event["event_id"]) is None:
+                self.store.append_event(event)
+                written[0] += 1
+        for revision in revisions:
+            if len(self.store.revisions(revision["event_id"])) < revision["revision"]:
+                self.store.append_revision(revision)
+                written[1] += 1
+        return written[0], written[1]
 
     def _collect(self, record: RadarPass) -> list[RadarQuote]:
         batches = [self.symbols[i:i + BATCH_SIZE] for i in range(0, len(self.symbols), BATCH_SIZE)]

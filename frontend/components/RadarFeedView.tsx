@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MEASURE_LABELS, RATINGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
+  MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
   recordVisit, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import RadarMovers from "@/components/RadarMovers";
@@ -107,7 +107,8 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
         <p className="text-xs text-muted-foreground">
           Recording then: {detail.event.coverage.passes_recorded} of {detail.event.coverage.passes_expected} passes
           {detail.event.coverage.symbols_missing.length ? ` · missing ${detail.event.coverage.symbols_missing.join(", ")}` : ""}
-          {" "}· {detail.event.rule_version} · {detail.event.universe_version}
+          {" "}· {detail.event.rule_version}{RULE_TAGS[detail.event.rule_version] ? ` (${RULE_TAGS[detail.event.rule_version]})` : ""}
+          {" "}· {detail.event.universe_version}
         </p>
       </section>
       <News news={detail.news} checks={detail.news_checks} sessionDate={detail.event.session_date} />
@@ -160,6 +161,11 @@ function EventCard({ event, fresh, open, onToggle, onRated }: {
           <span className="text-sm font-semibold text-foreground">{event.symbols.join(", ")}</span>
           <span className="text-xs text-muted-foreground">{KIND[event.kind]} · {against}</span>
           {fresh && <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">New</span>}
+          {RULE_TAGS[event.rule_version] && (
+            <span className="rounded border border-amber-500/30 px-1.5 py-0.5 text-[11px] text-amber-300" data-testid="radar-rules-tag">
+              {RULE_TAGS[event.rule_version]}
+            </span>
+          )}
         </div>
         <p className="mt-1.5 text-sm text-foreground">{event.summary}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

@@ -68,7 +68,14 @@ export const nyTime = (iso: string, seconds = false) =>
 
 export const MEASURE_LABELS: Record<string, string> = {
   change_pct: "Change", benchmark_change_pct: "Benchmark change", relative_pct: "Ahead / behind", volume_ratio: "Volume vs usual",
+  day_change_pct: "Day", window_minutes: "Window (min)", spy_relative_pct: "vs SPY", median_relative_pct: "Median vs SPY",
+  members_same_direction: "Members moving", members_with_data: "Members with data", members_total: "Members listed",
+  top_member_relative_pct: "Biggest member", top_member_share_pct: "Biggest member's share", spy_change_pct: "SPY",
+  minutes_since_start: "Minutes since start",
 };
+
+/** A small tag for rules that are still rough, from the event's own rule_version. */
+export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules" };
 export function measureText(key: string, value: number) {
   if (key === "volume_ratio") return `${value.toFixed(1)}×`;
   if (key.endsWith("_pct")) return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}%`;

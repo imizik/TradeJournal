@@ -16,10 +16,12 @@ involve Jo.
    buckets/groups, benchmarks and the curated groups) and a once-a-minute
    Tradier quote pass, `backend/app/engine/radar_runner.py`, writing to its own
    append-only SQLite file, `backend/app/engine/radar_store.py`.
-2. **Detection rules,** calibrated on recorded sessions, then frozen and
-   versioned. They write the event and revision rows whose shape PR 1 defines
+2. **Detection rules (built, provisional `radar-rules-v0`):**
+   `backend/app/engine/radar_rules.py`, run by the recorder after each pass.
+   They write the event and revision rows whose shape PR 1 defines
    (`RadarEvent`, `RadarEventRevision`; sample in
-   `backend/tests/fixtures/radar/sample_event.json`).
+   `backend/tests/fixtures/radar/sample_event.json`). See
+   [Alert rules](#alert-rules-radar-rules-v0-provisional).
 3. **Owner-only API (built):** `backend/app/routers/radar.py` — feed, event
    detail, coverage, since-last-visit, visits and feedback. See
    [Feed API](#feed-api-and-screen).
@@ -43,7 +45,7 @@ The file holds one row per pass (times, universe version, symbols requested,
 returned and unmatched, requests used, error or skip reason) and one row per
 symbol per pass (last, previous close, open, high, low, cumulative volume,
 bid, ask, Tradier's trade time and our retrieval time). Quote rows older than
-the newest 60 recorded sessions are pruned; passes and events are kept. When
+the newest 20 recorded sessions are pruned (disk); passes and events are kept. When
 the calendar is unavailable during clock hours the pass is recorded as skipped
 rather than guessed.
 
@@ -72,7 +74,85 @@ file (older files gain them when opened).
 The screen shows one coverage line, then "New since your last visit" and the
 earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
-here; until step 2 writes events it shows the empty state with coverage.
+here; with no events it shows the empty state with coverage. Events whose
+`rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag.
+
+## Alert rules (radar-rules-v0, provisional)
+
+`backend/app/engine/radar_rules.py` is pure arithmetic over recorded passes. After
+each ok or partial pass the recorder runs it, appends any new events and
+revisions, then runs the news check, so a new event gets news the same minute.
+It reads the session's pass list, the quotes of only the passes its windows need
+(at most six) and the session's saved `radar-rules-v0` events. A detection error
+is logged and never affects the pass. Event ids are derived from the session,
+kind, symbol or group, direction and a per-key count
+(`rv0-2026-10-22-group-ai-networking-and-connectivity-down-1`), and rows already
+saved are skipped, so replaying the same passes, or a restart, writes the same
+rows once.
+
+Each rule compares a 30-minute window: the pass nearest 30 minutes earlier
+(within 90 seconds, same session and universe version) to the current pass. The
+window never starts at the previous close or the open, so an opening gap alone
+never qualifies. A quote counts only with a positive last and prev close and a
+trade no more than 120 seconds older than its retrieval; otherwise that symbol
+has no reading (no event, nothing filled in).
+
+- **Stock vs SPY (`relative_to_spy`):** the stock's window return minus SPY's is
+  at least **4.5 points** and the stock itself moved at least **2.0%**.
+- **Stock vs sector (`relative_to_sector`):** the same against the stock's
+  `sector` ETF (4.5 points, 2.0% floor), skipped while the stock has an active
+  same-direction SPY event or its SPY reading also qualifies. It therefore only
+  fires when the sector ETF itself moved, e.g. a stock holding up while its
+  sector falls; on the calibration sessions it never fired.
+- **Group (`group_move`):** a curated group with at least **4** members with data,
+  a median member-vs-SPY of at least **2.0 points**, and at least **60%** of
+  members on the median's side. The event lists the members moving that way
+  (largest first), the member and median measures, members missing in
+  `coverage.symbols_missing`, "mostly X" when one member is over half the
+  same-direction move, and "Own alerts: …" for members that have their own SPY
+  event. Members' own events still fire.
+- **Persistence:** a reading must hold on **3** consecutive passes (no gap over
+  150 seconds) on the same window.
+
+One event per (session, kind, symbol or group, direction) is active at a time.
+Later passes measure the move since the event's own window start and append a
+revision: `extended` when it grows by **1.5 points** past the highest reported
+reading (**1.0** for groups), `faded` when it falls below half of that, and
+`reversed` when it is past the threshold the other way. A faded or reversed
+event is closed; the same key can start a new event (`…-2`) only **30 minutes**
+after it closed. The opposite direction is a separate key.
+
+The numbers are module constants in `radar_rules.V0`; changing them means a new
+`RULE_VERSION`. They change at most every few days, never mid-session.
+
+### Calibration and replay
+
+`backend/scripts/radar_replay.py /abs/path/radar.sqlite [--session D] [--set name=value] [--quiet]`
+opens a store read-only, replays each session's passes through the rules (using
+the current tracked list for kinds, sectors and groups) and prints counts by
+kind/direction and each event's first-seen time, summary and later revisions.
+`--set` overrides one threshold for that run only. The live recorder path and
+the replay produce identical events and revisions on the same passes.
+
+v0 was set on **two recorded sessions** (October 22, full; October 23, to
+13:10 ET) from a read-only copy of the VPS file. It is provisional: two
+sessions say nothing about usefulness, and v1 is due after the October 26 close
+with three sessions and Isaac's ratings.
+
+| Session | Passes | Events | vs SPY up/down | vs sector | Group up/down | Revisions |
+| --- | --- | --- | --- | --- | --- | --- |
+| Oct 22 (SPY −1.4%) | 390 | 7 | 1 / 1 | 0 | 1 / 4 | 14 |
+| Oct 23 (to 13:10 ET) | 221 | 9 | 3 / 2 | 0 | 1 / 3 | 10 |
+
+Checked against October 22's known moves: SPOT (+10.6% on the day) and most of
+COHR's, AAOI's and ALAB's declines came at or before the open or ground lower
+over hours, so none qualifies on its own under v0 (Movers still ranks them);
+the AI-networking selloff surfaces as a group event at 10:33 ET (6 of 6 behind
+SPY, biggest COHR), extended at 10:51, 11:31 and 14:02. Dropped during
+calibration: a 15-minute window (two extra events a session, about 15 minutes
+earlier, one of which faded within 8 minutes) and a lower sector threshold
+(3.0–4.0 added 1–13 sector events a session that mostly repeated the SPY story
+against a flat sector ETF).
 
 ## Movers now
 
@@ -206,9 +286,10 @@ caused the move.
 
 ## Activation boundary
 
-Merging builds the recorder; it stays off. Recording 3–5 sessions for step 2
-starts only after Isaac's separate OK, by setting both variables in the VPS
-`backend.env`. Nothing here sends alerts.
+The recorder is off unless both variables are set in the VPS `backend.env`
+(set since October 22 with Isaac's OK). The v0 rules have no flag of their own:
+wherever the recorder runs, detection runs with it and writes events to the
+screen. Nothing here sends phone alerts; those wait for a pilot.
 
 
 ### Movers to Charts navigation
