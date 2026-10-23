@@ -479,14 +479,15 @@ def test_an_entry_before_the_open_counts_from_nine_thirty(engine, world, hold_on
     assert kinds(engine) == ["hold_hour"]
 
 
-def test_a_half_day_close_before_the_hour_skips_it(engine, world, hold_on):
+def test_a_half_day_close_before_the_hour_skips_it_and_moves_nothing_else(engine, world, hold_on):
     clock, quotes, watcher = world
     watcher.calendar = Calendar(close=780)  # a 1:00 PM close
     with Session(engine) as db:
-        fill(db, "buy_to_open", 1, 400, "2026-10-21T12:10")
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T11:30")
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T12:10", expiration=date(2026, 10, 30))
     quotes.set(4.00)
     run_at(clock, watcher, WED, "12:30", "12:59")
-    assert alerts(engine) == []
+    assert [a.contract for a in alerts(engine)] == ["SNDK 10/23/26 230C"]  # the 11:30 entry's hour lands before the close
 
 
 def test_once_per_position_whether_it_is_added_to_before_or_after_the_alert(engine, world, hold_on):

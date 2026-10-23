@@ -3,7 +3,8 @@ has been held an hour, or one is still open on its expiration day.
 
 From the October 21, 2026 behavior audit (``backend/reports/behavior_audit_2026-10-21.md``):
 trades that were green and were ridden back into losses, trades held from an
-hour to the close, and options left to expire, are where the journal's money goes. These alerts only tell the phone;
+hour to the close, and options left to expire, are where the journal's money
+goes. These alerts only tell the phone;
 nothing here places, changes or suggests an order.
 
 Off unless ``POSITION_ALERTS_ENABLED=true``. It runs on the level alert
