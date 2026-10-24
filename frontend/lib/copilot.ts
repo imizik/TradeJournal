@@ -139,3 +139,24 @@ export function fromSaved(saved: Investigation): LabMessage[] {
     provenance: { source: "saved reference (re-read to see the data)", kind: e.kind ?? "cached", as_of: e.as_of ?? null },
   })) }));
 }
+
+// --------------------------------------------------------------------------- deep link
+
+export const CONTEXT_MAX = 300;
+const SYMBOL_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
+
+/** `/copilot-lab?symbol=X&context=...`: opens a new investigation prefilled, never sent on its own. */
+export function copilotLabHref(symbol: string, context?: string) {
+  const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
+  if (context?.trim()) query.set("context", context.trim().slice(0, CONTEXT_MAX));
+  return `/copilot-lab?${query}`;
+}
+
+/** The deep link's values, or null when there is none; an invalid symbol is dropped. */
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[] }) {
+  const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
+  const symbol = one(params.symbol).trim().toUpperCase();
+  const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
+  if (!symbol && !context) return null;
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context };
+}
