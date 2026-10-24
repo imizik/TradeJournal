@@ -1,0 +1,65 @@
+name: Supervised overnight fixture trial
+
+# Branch-only operational rehearsal. Never merge this trigger into main.
+# No cron, manual dispatch registration, secrets, or application deployment.
+on:
+  push:
+    branches: [codex/supervised-overnight-trial]
+    paths: [.github/workflows/overnight-trial-once.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supervised-overnight-fixture
+  cancel-in-progress: false
+
+jobs:
+  fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare runtime (package downloads only)
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/overnight-build"
+          cat > "$RUNNER_TEMP/overnight-build/Dockerfile" <<'DOCKER'
+          FROM python:3.12-slim
+          RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+          RUN pip install --no-cache-dir numpy==2.5.4
+          DOCKER
+          docker build -t tj-overnight-fixture "$RUNNER_TEMP/overnight-build"
+          mkdir -m 700 "$RUNNER_TEMP/overnight-evidence"
+          cp "$RUNNER_TEMP/overnight-build/Dockerfile" "$RUNNER_TEMP/overnight-evidence/Dockerfile"
+          docker image inspect tj-overnight-fixture --format '{{.Id}}' > "$RUNNER_TEMP/overnight-evidence/image-id.txt"
+      - name: Run offline fixture and process-recovery proof
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f tj-overnight-fixture-run >/dev/null 2>&1 || true' EXIT
+          timeout --signal=TERM --kill-after=10s 600s docker run --name tj-overnight-fixture-run --init \
+            --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --cpus 1 --memory 1g --memory-swap 1g --pids-limit 128 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 \
+            --user "$(id -u):$(id -g)" --workdir /repo \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/overnight-evidence,target=/out" \
+            --env HOME=/tmp --env PYTHONDONTWRITEBYTECODE=1 --env OPENBLAS_NUM_THREADS=1 \
+            --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+            tj-overnight-fixture python scripts/overnight_supervised_once.py --output /out --require-isolation
+      - name: Publish report in run summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/overnight-evidence/report.md" ]; then
+            cat "$RUNNER_TEMP/overnight-evidence/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'Trial did not produce a report. Inspect the failed step; no success is claimed.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: supervised-overnight-fixture-${{ github.run_id }}
+          path: ${{ runner.temp }}/overnight-evidence/
+          if-no-files-found: error
+          retention-days: 14
