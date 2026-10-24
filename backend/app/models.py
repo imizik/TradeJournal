@@ -1606,3 +1606,27 @@ class MarketContextItem(SQLModel, table=True):
     observed_at: Optional[datetime] = None   # vix: provider trade time (UTC)
     fetched_at: datetime                     # UTC, when the provider data was read (a cached calendar keeps its age)
     source: str
+
+
+class CopilotInvestigation(SQLModel, table=True):
+    """A saved Copilot Lab conversation or background research result
+    (docs/copilot-lab.md; app/engine/copilot_investigations.py). Text only: the
+    transcript holds role/content pairs, the evidence list holds references
+    (tool name, as-of time, provenance kind, which answer used it), never the
+    data, and findings hold a research job's cited summary. Links to
+    follow-ups, plans or decisions are deliberately absent."""
+
+    __tablename__ = "copilot_investigation"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    source: str = Field(default="copilot", index=True)  # "copilot" | "research_job"
+    title: str
+    symbol: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="open")      # "open" | "closed"
+    conclusion: Optional[str] = None         # optional one line
+    transcript_json: str = Field(sa_column=Column(Text, nullable=False))
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    findings_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # validated Findings
+    revision: int = Field(default=1)         # bumped on every save; a stale save is refused
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
