@@ -224,7 +224,7 @@ No separate runner, new identity or Auth0 application is selected.
 | 2. Save and reopen | Versioned memory, frozen packets and immutable briefing revisions in existing storage; private owner reads | Fixture save → reload → reopen returns identical evidence and revision IDs; correction/retirement and duplicate/conflicting writes behave explicitly |
 | 3. Connect existing Jo | Bounded context, memory and briefing operations over the current connection; reuse receipt/recovery patterns | Ownership/scope refusals, proposed versus accepted memory, payload limits and uncertain-save recovery pass; no broad private API access or paid fallback |
 | 4. Morning experience | Scheduled-task instructions, Dashboard brief, Charts/context links and Useful / Meh / Missed something feedback | Phone/desktop walkthrough covers fresh, partial, stale, late, missing and duplicate results; evidence is accessible and chart settings preserved |
-| 5. Activate and observe | After owner merge and separately approved grants/deployment/task activation, verify actual Jo delivery | Scheduled packet → Jo → saved receipt → app visibility → reopen observed; cancellation verified; distinguish receipt, app availability and any notification delivery |
+| 5. Activate and observe | After merge and separately approved grants/deployment/task activation, verify actual Jo delivery | Scheduled packet → Jo → saved receipt → app visibility → reopen observed; cancellation verified; distinguish receipt, app availability and any notification delivery |
 | 6. Decide whether to keep | Ten scheduled mornings of delivery and owner feedback | Report every expected morning, lateness/gaps, opens and ratings; owner judges five-minute usefulness and omissions, including no-trade days; keep, simplify or stop before expanding |
 
 **First implementation slice (merged PR #342):** private owner save/read APIs under
@@ -643,7 +643,8 @@ scheduling is either reliable or broken.
 Use small PRs under the existing [review policy](pr-review.md): migrations,
 financial semantics, sensitive-data authorization and activation/deployment are
 tier 2; a cross-surface UI integration is tier 1 unless it changes those boundaries.
-Complete applicable review/CI and UI checks; the owner merges. Fixture proof,
+Complete applicable review/CI and UI checks; merging follows the
+[PR completion rules](pr-review.md#automatic-repair-and-merge). Fixture proof,
 installed state, natural scheduled execution and usefulness are separate evidence.
 Later evaluation keeps market forecasts, plan adherence and long-term thesis
 changes distinct; clicks/ratings alone establish neither trading edge nor returns.

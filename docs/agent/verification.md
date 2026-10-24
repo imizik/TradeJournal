@@ -37,9 +37,10 @@ assertions, ignore a known failure or relabel fixture evidence as live acceptanc
 
 ## CI-backed verification
 
-CI remains enabled for every PR. Ordinary work stays with its owner through
-focused checks, CI, bounded repairs and automatic merge under
-[PR completion rules](pr-review.md#automatic-repair-and-merge). Pending CI is not
+CI remains enabled for every PR. Work stays with its owner through focused
+checks, CI, bounded repairs and automatic merge under
+[PR completion rules](pr-review.md#automatic-repair-and-merge), except
+[user-gated changes](pr-review.md#user-gated-changes). Pending CI is not
 merge-ready; interruptions and blockers must be reported honestly. For broad
 work, cover relevant integration paths; for tier 2, retain full applicable checks.
 Full CI can supply that coverage without also running the full suite locally.

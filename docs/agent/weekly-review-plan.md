@@ -152,7 +152,7 @@ adding anything. Whether give-backs and expiries actually fall is tracked over
 the next ~30 trades and reported as an observation, not proof of an edge.
 
 **Review tier:** the migration makes this consequential (tier 2) under
-`CLAUDE.md`; Isaac merges.
+[review policy](pr-review.md); who merges follows its user-gated list.
 
 ## Out of scope
 
