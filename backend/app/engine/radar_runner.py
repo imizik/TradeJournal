@@ -11,7 +11,9 @@ the next minute tries again. Nothing is retried within a pass, sent or traded
 here. After an ok or partial pass, ``radar_rules.detect`` appends new events and
 revisions (step 2), then ``radar_news.enrich`` checks headlines near recent
 events (PR 5), so a new event gets its news the same minute. Neither one's
-failure affects the recorded pass.
+failure affects the recorded pass. Outside the regular session an optional
+``radar_premarket`` scanner (off unless ``RADAR_PREMARKET_ENABLED``) records its
+own pre-open lists in a separate file.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ import os
 import time
 from typing import Callable
 
-from app.engine import radar_news, radar_rules, tradier
+from app.engine import radar_news, radar_premarket, radar_rules, tradier
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
 from app.engine.radar_store import RadarPass, RadarQuote, RadarStore, load_universe
 
@@ -47,7 +49,8 @@ def _raw_float(raw: dict | None, key: str) -> float | None:
 class RadarRunner:
     def __init__(self, store: RadarStore, calendar, *, universe: dict | None = None,
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
-                 clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch):
+                 clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
+                 premarket: radar_premarket.PremarketScanner | None = None):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
@@ -55,6 +58,7 @@ class RadarRunner:
         self.quotes = quotes
         self.clock = clock
         self.news = news
+        self.premarket = premarket
         self._pruned_for: date | None = None
 
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
@@ -73,6 +77,11 @@ class RadarRunner:
         today, minute = started.date(), started.hour * 60 + started.minute
         inside, skip = self._regular(today, minute)
         if not inside and skip is None:
+            if self.premarket is not None:
+                try:
+                    self.premarket.run_once()
+                except Exception:  # the pilot is extra; it never stops the recorder
+                    log.exception("Radar premarket scan failed")
             return None
         record: RadarPass = {"session_date": today.isoformat(), "started_at": _iso(started), "finished_at": "",
                              "universe_version": self.universe["version"], "status": "skipped",
@@ -173,4 +182,6 @@ def runner_from_env() -> RadarRunner | None:
         log.error("RADAR_ENABLED needs TRADIER_API_KEY; Radar stays off")
         return None
     from app.engine.chart_calendar import chart_calendar
-    return RadarRunner(RadarStore(store), chart_calendar)
+    universe = load_universe()
+    return RadarRunner(RadarStore(store), chart_calendar, universe=universe,
+                       premarket=radar_premarket.scanner_from_env(store, chart_calendar, universe))
