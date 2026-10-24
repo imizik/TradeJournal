@@ -5,6 +5,8 @@ import {
   asOfText, createInvestigation, fromSaved, getCopilotStatus, getInvestigation, listInvestigations, streamTurn, toSaved,
   updateInvestigation, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
 } from "@/lib/copilot";
+import LinkedActivity from "@/components/copilot/LinkedActivity";
+import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +26,7 @@ const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
-  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research",
+  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal",
 };
 
 function inline(text: string) {
@@ -157,13 +159,13 @@ function StatusLine({ status, error }: { status: CopilotStatus | null; error: st
       )}
       {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
       {status.backend === "plan" && !status.plan_configured && <span className="text-rose-300">Plan token or Agent SDK not set up</span>}
-      <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; no plans, watches or alerts</span>
+      <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed watch or revisit exists only once you confirm it</span>
     </p>
   );
 }
 
 /** ``link`` comes from `/copilot-lab?symbol=X&context=...`: a new investigation, prefilled and not sent. */
-export default function CopilotLab({ link = null }: { link?: { symbol: string; context: string } | null }) {
+export default function CopilotLab({ link = null }: { link?: { symbol: string; context: string; investigation: string | null } | null }) {
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState(link?.symbol || "NBIS");
@@ -176,6 +178,7 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
   const [recent, setRecent] = useState<InvestigationSummary[]>([]);
   const [saveState, setSaveState] = useState<{ state: "saving" | "saved" | "error"; message?: string } | null>(null);
   const [conclusion, setConclusion] = useState("");
+  const [linkedKey, setLinkedKey] = useState(0);
   const unsaved = useRef(false);
 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
@@ -204,7 +207,9 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
       void refreshRecent();
       let id: string | null = null;
       try { id = window.localStorage.getItem(CURRENT_KEY); } catch { /* start fresh */ }
-      if (link) remember(null); // a deep link starts fresh rather than reopening the last investigation
+      if (link?.investigation) id = link.investigation; // ?investigation=<id> opens that one
+      else if (link) id = null; // a symbol or context link starts fresh rather than reopening the last investigation
+      if (link && !link.investigation) remember(null);
       else if (id) getInvestigation(id).then(saved => { if (!controller.signal.aborted) open(saved); }).catch(() => remember(null));
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
@@ -270,6 +275,7 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
       await streamTurn(history, symbol.trim().toUpperCase() || null, event => {
         if (event.type === "text") update(last => ({ ...last, content: last.content + event.delta }));
         else if (event.type === "progress") update(last => ({ ...last, progress: event.text }));
+        else if (event.type === "proposal") update(last => ({ ...last, proposals: [...(last.proposals ?? []), event] }));
         else if (event.type === "tool") update(last => {
           const tools = last.tools ?? [];
           const at = tools.findIndex(t => t.id === event.id);
@@ -363,8 +369,10 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
             className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">{current.status === "open" ? "Close" : "Reopen"}</button>
         </div>
       )}
-      {current && <ResearchDeeper key={current.id} investigationId={current.id} symbol={symbol} topic={topic}
+      {current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
         onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />}
+
+      {current && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
 
@@ -382,6 +390,10 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
+            {message.proposals?.map(proposal => (
+              <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}
+                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+            ))}
             <Evidence tools={message.tools ?? []} />
             {message.metrics && <Metrics metrics={message.metrics} />}
           </div>

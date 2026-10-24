@@ -396,6 +396,34 @@ def test_malformed_numbers_fall_back_instead_of_crashing(monkeypatch):
     assert cfg.daily_budget_usd == 2.0 and cfg.reassess_after_hours == 0
 
 
+def test_the_owner_can_revisit_an_investigation_later_through_the_route(monkeypatch):
+    saved = inv.create(inv.InvestigationFields(title="NBIS bounce", symbol="NBIS"))
+    clock = {"now": datetime(2026, 10, 24, 15, 0)}
+    monkeypatch.setattr(q, "_utcnow", lambda: clock["now"])
+    with TestClient(app) as client:
+        made = client.post("/copilot/research-jobs/reassess", json={"investigation_id": saved["id"], "question": "Still lagging?", "after_days": 2})
+        assert made.status_code == 201 and made.json()["created"]
+        job = made.json()["job"]
+        assert job["kind"] == "reassess" and job["input"] == {"investigation_id": saved["id"], "question": "Still lagging?",
+                                                              "requested_by": "owner", "from_investigation": saved["id"]}
+        assert [j["id"] for j in client.get(f"/copilot/research-jobs?from_investigation={saved['id']}").json()["jobs"]] == [job["id"]]
+        assert job["next_attempt_at"] == "2026-10-26T15:00:00"
+        again = client.post("/copilot/research-jobs/reassess", json={"investigation_id": saved["id"], "question": "Still lagging?", "after_days": 2})
+        assert again.json()["created"] is False  # once a day per investigation and due date
+        assert client.post("/copilot/research-jobs/reassess", json={"investigation_id": str(uuid.uuid4()), "question": "q"}).status_code == 404
+        for bad in ({"investigation_id": saved["id"], "question": ""}, {"investigation_id": saved["id"], "question": "q", "after_days": 31},
+                    {"investigation_id": "nope", "question": "q"}):
+            assert client.post("/copilot/research-jobs/reassess", json=bad).status_code == 422
+    # Not due before then, and its assignment carries the owner's question.
+    assert _claim() is None
+    clock["now"] = datetime(2026, 10, 26, 15, 1)
+    claimed = _claim()
+    assert claimed["id"] == job["id"]
+    question, symbols, title = q.assignment(claimed)
+    assert question.endswith("The owner asked to revisit this question in particular: Still lagging?")
+    assert symbols == ["NBIS"] and title == "Reassess: NBIS bounce"
+
+
 def test_a_question_is_its_own_job_per_investigation_and_can_be_asked_again_after_it_fails():
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
     job_a, _ = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)

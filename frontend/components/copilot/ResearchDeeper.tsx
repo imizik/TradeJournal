@@ -26,7 +26,8 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
   const active = useRef(new Set<string>());
 
   const apply = useCallback((result: ResearchJobs) => {
-    const mine = result.jobs.filter(job => job.input.from_investigation === investigationId);
+    // Only "Research deeper" jobs: an owner revisit (shown under Linked) may wait for days and must not hide the button.
+    const mine = result.jobs.filter(job => job.kind === "question" && job.input.from_investigation === investigationId);
     // A job that was waiting or running and has now finished puts its result under Recent.
     if (mine.some(job => active.current.has(job.id) && !ACTIVE_JOB.has(job.status))) onFinished();
     active.current = new Set(mine.filter(job => ACTIVE_JOB.has(job.status)).map(job => job.id));

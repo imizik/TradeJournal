@@ -9,6 +9,7 @@ services. Tool inputs come from the model and are validated here; outputs
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import UTC, datetime
 from typing import Any, Callable
@@ -67,6 +68,24 @@ TOOLS: list[dict] = [
                          "properties": {"symbol": _SYMBOL_SCHEMA,
                                         "limit": {"type": "integer", "description": "1-5, default 3"}}},
     },
+    {
+        "name": "propose_plan",
+        "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
+                       "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
+                       "alert on `symbol` at `price` (condition touches, crosses or closes_beyond; closes_beyond needs "
+                       "`interval` 1m-4h), with a short `label` (at most 60 characters) and `why` (at most 300). "
+                       "kind=revisit: research this investigation again after `horizon_days` (1-30), focused on "
+                       "`question` (at most 500 characters).",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["kind"],
+                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit"]},
+                                        "symbol": _SYMBOL_SCHEMA,
+                                        "condition": {"type": "string", "enum": ["touches", "crosses", "closes_beyond"]},
+                                        "price": {"type": "number", "description": "The level, positive"},
+                                        "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"},
+                                        "label": {"type": "string"}, "why": {"type": "string"},
+                                        "question": {"type": "string"},
+                                        "horizon_days": {"type": "integer", "description": "1-30, default 1"}}},
+    },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
 
@@ -81,6 +100,43 @@ def _symbol(value: Any) -> str:
     return value.strip().upper()
 
 
+def _text(args: dict, key: str, most: int) -> str:
+    value = args.get(key)
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > most:
+        raise ToolInputError(f"{key} must be 1-{most} characters")
+    return " ".join(value.split())
+
+
+def _proposal(args: dict) -> dict:
+    from app.engine import level_alerts
+    kind = args.get("kind")
+    keys = {"watch": {"kind", "symbol", "condition", "price", "interval", "label", "why"},
+            "revisit": {"kind", "question", "horizon_days"}}.get(kind)
+    if keys is None:
+        raise ToolInputError("kind must be watch or revisit")
+    if set(args) - keys:
+        raise ToolInputError(f"unexpected arguments for {kind}: {sorted(set(args) - keys)}")
+    if kind == "revisit":
+        days = args.get("horizon_days", 1)
+        if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
+            raise ToolInputError("horizon_days must be 1-30")
+        return {"kind": "revisit", "question": _text(args, "question", 500), "horizon_days": days}
+    condition = args.get("condition")
+    if condition not in level_alerts.CONDITIONS:
+        raise ToolInputError("condition must be touches, crosses or closes_beyond")
+    price = args.get("price")
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or not 0 < price < 1_000_000:
+        raise ToolInputError("price must be a positive number")
+    interval = args.get("interval")
+    if condition == "closes_beyond":
+        if interval not in level_alerts.CLOSE_INTERVALS:
+            raise ToolInputError("closes_beyond needs interval 1m, 3m, 5m, 15m, 30m, 1h or 4h")
+    elif interval is not None:
+        raise ToolInputError("interval is only for closes_beyond")
+    return {"kind": "watch", "symbol": _symbol(args.get("symbol")), "condition": condition, "price": round(float(price), 4),
+            "interval": interval, "label": _text(args, "label", level_alerts.LABEL_MAX), "why": _text(args, "why", 300)}
+
+
 def validate(name: str, args: Any) -> dict:
     """The tool's arguments, normalized, or ToolInputError. Unknown keys are refused."""
     if name not in TOOL_NAMES:
@@ -90,6 +146,8 @@ def validate(name: str, args: Any) -> dict:
     allowed = {t["name"]: set(t["input_schema"]["properties"]) for t in TOOLS}[name]
     if set(args) - allowed:
         raise ToolInputError(f"unexpected arguments: {sorted(set(args) - allowed)}")
+    if name == "propose_plan":
+        return _proposal(args)
     if name == "get_quotes":
         symbols = args.get("symbols")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= MAX_SYMBOLS:
@@ -262,6 +320,7 @@ PROVENANCE = {
     "get_symbol_events": ("Tradier fundamentals calendar (cached)", "cached"),
     "get_quotes": ("Tradier / Alpaca quotes (60 s cache)", "fetched"),
     "get_saved_research": ("Saved investigations and research results (TradeJournal)", "saved"),
+    "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 
 
@@ -282,6 +341,21 @@ def bounded(data: dict) -> str:
     return text
 
 
+def propose(evidence, proposal: dict) -> dict:
+    """A validated proposal, shown to the owner as a card; nothing is written. A watch needs a current price for its
+    symbol from this turn's evidence, so a made-up ticker is refused, and the card can show which side it waits on."""
+    if proposal["kind"] == "watch":
+        quote = evidence.get_quotes([proposal["symbol"]])
+        last = (quote.get("prices") or {}).get(proposal["symbol"])
+        if not isinstance(last, (int, float)) or last <= 0:
+            raise ToolInputError(f"no current price for {proposal['symbol']}, so it cannot be watched")
+        proposal = {**proposal, "last": last, "as_of": quote.get("fetched_at")}
+    return {"state": "ok", "proposal": proposal,
+            "note": "Shown to the owner as a card to confirm or dismiss. Nothing is saved or active until they confirm."}
+
+
 def call(evidence, name: str, args: dict) -> dict:
+    if name == "propose_plan":
+        return propose(evidence, args)
     method: Callable[..., dict] = getattr(evidence, name)
     return method(**args)

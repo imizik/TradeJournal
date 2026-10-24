@@ -131,8 +131,10 @@ def view(job: ResearchJob) -> dict:
 
 # --------------------------------------------------------------------------- enqueue / list / cancel
 
-def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None = None) -> tuple[dict, bool]:
-    """Queue a job unless one with the same dedupe key exists. Returns (job, created)."""
+def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None = None,
+            due: datetime | None = None) -> tuple[dict, bool]:
+    """Queue a job unless one with the same dedupe key exists. Returns (job, created). ``due`` (naive UTC) holds the
+    first attempt until then."""
     if kind not in KINDS:
         raise QueueError("bad_input", f"unknown job kind {kind!r}")
     with _session(session) as db:
@@ -141,7 +143,7 @@ def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None =
             return view(existing), False
         now = _utcnow()
         job = ResearchJob(kind=kind, input_json=json.dumps(payload), dedupe_key=dedupe_key, created_at=now,
-                          next_attempt_at=now)
+                          next_attempt_at=max(now, due) if due else now)
         db.add(job)
         try:
             db.commit()
@@ -175,6 +177,27 @@ def enqueue_question(question: str, symbols: list[str], session: Session | None 
     key = f"question:{_today()}:{_digest(*parts)}"
     _retire_finished(key, session)  # owner-asked only: a trigger's failed job must not be queued again every pass
     return enqueue("question", payload, key, session)
+
+
+def enqueue_revisit(investigation_id: str, question: str, after_days: int = 0,
+                    session: Session | None = None) -> tuple[dict, bool]:
+    """The owner's "revisit this question": one reassess job for a saved investigation, due ``after_days`` from now,
+    at most once a day per investigation and due date."""
+    from app.engine import copilot_investigations as inv
+    question = " ".join(question.split())
+    if not question or len(question) > 500:
+        raise QueueError("bad_input", "question must be 1-500 characters")
+    if not 0 <= after_days <= 30:
+        raise QueueError("bad_input", "after_days must be 0-30")
+    try:
+        saved = inv.get(investigation_id, session=session)
+    except inv.InvestigationError as exc:
+        raise QueueError("not_found", str(exc)) from exc
+    due = _utcnow() + timedelta(days=after_days)
+    # from_investigation too: the lab reads one investigation's jobs with GET /copilot/research-jobs?from_investigation=.
+    return enqueue("reassess", {"investigation_id": saved["id"], "question": question, "requested_by": "owner",
+                                "from_investigation": saved["id"]},
+                   f"reassess:{saved['id']}:owner:{_today()}:{after_days}", session, due=due)
 
 
 def list_jobs(status: str | None = None, limit: int = 50, session: Session | None = None,
@@ -392,6 +415,8 @@ def assignment(job: dict) -> tuple[str, list[str], str]:
     question = (f"Reassess a saved investigation, '{saved['title']}', last updated {saved.get('updated_at')}. "
                 f"Earlier assessment: {earlier} Earlier key findings: {points or 'none saved'}. "
                 "Check whether it still holds with current evidence and news, say what changed since, and cite new sources.")
+    if data.get("question"):
+        question += f" The owner asked to revisit this question in particular: {data['question']}"
     return question, [saved["symbol"]] if saved.get("symbol") else [], f"Reassess: {saved['title']}"[:120]
 
 

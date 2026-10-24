@@ -21,6 +21,12 @@ class QuestionJob(BaseModel):
     investigation_id: uuid.UUID | None = None  # the saved investigation it was asked from (shown there, not read)
 
 
+class RevisitJob(BaseModel):
+    investigation_id: uuid.UUID
+    question: str = Field(min_length=1, max_length=500)
+    after_days: int = Field(0, ge=0, le=30)
+
+
 def _http(exc: research_queue.QueueError) -> HTTPException:
     return HTTPException(404 if exc.code == "not_found" else 422, str(exc))
 
@@ -34,6 +40,16 @@ def enqueue_question(body: QuestionJob, session: Session = Depends(get_session))
             from_investigation=str(body.investigation_id) if body.investigation_id else None)
     except copilot_tools.ToolInputError as exc:
         raise HTTPException(422, str(exc))
+    except research_queue.QueueError as exc:
+        raise _http(exc)
+    return {"job": job, "created": created, "queue_enabled": research_queue.settings().enabled}
+
+
+@router.post("/reassess", status_code=201)
+def enqueue_revisit(body: RevisitJob, session: Session = Depends(get_session)):
+    """The owner confirmed "revisit this question" for a saved investigation."""
+    try:
+        job, created = research_queue.enqueue_revisit(str(body.investigation_id), body.question, body.after_days, session=session)
     except research_queue.QueueError as exc:
         raise _http(exc)
     return {"job": job, "created": created, "queue_enabled": research_queue.settings().enabled}
