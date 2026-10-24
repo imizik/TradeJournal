@@ -165,7 +165,7 @@ export default function ManualFillForm({
         ? ` ${result.anomalies.length} anomaly/anomalies logged.`
         : "";
 
-      setMsg(`${actionLabel}. Rebuilt ${result.trades_rebuilt} trade(s).${anomalySuffix}`);
+      setMsg(`${actionLabel}. Rebuilt ${result.trades_rebuilt} trade${result.trades_rebuilt === 1 ? "" : "s"}.${anomalySuffix}`);
       setStatus("done");
 
       if (mode === "create") {

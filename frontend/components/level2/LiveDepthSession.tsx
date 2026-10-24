@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { KINDS, useDepthSession } from "./useDepthSession";
 import type { DepthSession, LiveBook } from "./useDepthSession";
+import { timeET } from "@/lib/format";
 
 function displayTime(value: number | null): string {
   if (value === null || value === 0) return "Unavailable";
@@ -105,7 +106,7 @@ export default function LiveDepthSession({ compact = false, session, symbol = "N
       <span role="status" aria-live="polite" className="text-sm text-muted-foreground">{message}</span>
     </div>
     {mine && <>
-    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}{refreshedAt ? ` · sign-in refreshed ${new Date(refreshedAt).toLocaleTimeString()}` : ""}</p>}
+    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}{refreshedAt ? ` · sign-in refreshed ${timeET(refreshedAt)}` : ""}</p>}
     {protocolError && <p role="status" className="text-xs text-amber-200">An invalid or oversized protocol line was ignored.</p>}
     {compact && bookBlock}
     {diagBlocks}

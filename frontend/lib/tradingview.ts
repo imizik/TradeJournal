@@ -1,16 +1,8 @@
 import type { TradingViewSnapshotValue, TradingViewVerdict } from "@/lib/api";
-
-/**
- * Backend datetimes are UTC-naive by repository convention, so they carry no
- * offset and `new Date(...)` would read them as local time.
- */
-export function parseUtcNaive(value: string): Date {
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
-  return new Date(hasZone ? value : `${value}Z`);
-}
+import { timeET } from "@/lib/format";
 
 export function fmtAlertTime(value: string): string {
-  return parseUtcNaive(value).toLocaleString();
+  return timeET(value, { year: true, seconds: true });
 }
 
 export function verdictLabel(verdict: TradingViewVerdict | null): string {

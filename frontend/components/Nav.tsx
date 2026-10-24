@@ -5,7 +5,7 @@ import Link, { useLinkStatus } from "next/link";
 import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bot, LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Telescope, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -23,7 +23,8 @@ function Pending({ corner = false }: { corner?: boolean }) {
 /** Whether the charts page shows the full sidebar instead of the icon rail, on this device only (C7.3). */
 const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
-const navItems = [
+/** The sidebar's pages; ``heading`` starts a new group (everyday pages come first, without one). */
+const navItems: { href: string; label: string; icon: typeof Bot; heading?: string }[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
@@ -31,12 +32,12 @@ const navItems = [
   { href: "/trades", label: "Trades", icon: FileText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/fills", label: "Fills", icon: Activity },
-  { href: "/signals", label: "Signals", icon: Radio },
+  { href: "/signals", label: "Signals", icon: Radio, heading: "Signals & practice" },
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/radar", label: "Radar", icon: Telescope },
-  { href: "/practice", label: "Daily Practice", icon: ClipboardList },
-  { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
-  { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
+  { href: "/practice", label: "Daily Practice", icon: Target },
+  { href: "/advisor-review", label: "Advisor review", icon: Scale },
+  { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch, heading: "Labs" },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
   { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
@@ -110,7 +111,7 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
 const TABS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
-  { href: "/daily", label: "Daily", icon: ClipboardList },
+  { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
 ];
 
@@ -147,7 +148,7 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
   const journal = owner || !!grants.journal_read;
   return (
     <ul className="space-y-1">
-      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write)).map(({ href, label, icon: Icon }) => {
+      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write)).map(({ href, label, icon: Icon, heading }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
         const link = (
             <Link
@@ -172,10 +173,9 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
             </Link>
         );
         return <li key={href}>
-          {/* Everyday pages first; research and experiments under their own heading. */}
-          {href === "/strategy-lab" && (rail
-            ? <div role="separator" aria-label="Labs" className="my-2 border-t" />
-            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">Labs</h2>)}
+          {heading && (rail
+            ? <div role="separator" aria-label={heading} className="my-2 border-t" />
+            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">{heading}</h2>)}
           {rail ? <NavHint label={label}>{link}</NavHint> : link}
         </li>;
       })}

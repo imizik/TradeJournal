@@ -61,7 +61,7 @@ export default function DailyAiPanel({
             AI Analysis
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Full-day Claude review, on your Claude plan, for {dayLabel}. Inputs include {tradeCount} journal trade(s){hasDayContext ? " and your saved day thoughts and plans" : ""}.
+            Full-day Claude review, on your Claude plan, for {dayLabel}. Inputs include {tradeCount} journal trade{tradeCount === 1 ? "" : "s"}{hasDayContext ? " and your saved day thoughts and plans" : ""}.
           </p>
         </div>
         <button

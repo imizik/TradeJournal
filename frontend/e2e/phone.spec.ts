@@ -66,7 +66,7 @@ test("a tab bar at the bottom reaches the main pages in one tap and never covers
   await page.goto("/");
   const tabs = page.getByRole("navigation", { name: "Main tabs" });
   await expect(tabs).toBeInViewport();
-  for (const name of ["Dashboard", "Charts", "Daily", "Trades", "More"]) {
+  for (const name of ["Dashboard", "Charts", "Daily Review", "Trades", "More"]) {
     const target = name === "More" ? tabs.getByRole("button", { name: "Open menu" }) : tabs.getByRole("link", { name });
     expect(Math.min(...Object.values((await target.boundingBox())!).slice(2)), name).toBeGreaterThanOrEqual(44);
   }
