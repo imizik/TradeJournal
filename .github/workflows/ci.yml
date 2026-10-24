@@ -54,8 +54,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # test_docs_freshness.py counts commits since documentation was last
-          # reconciled. The default shallow fetch has no history to count, and
-          # the check would skip itself silently rather than fail.
+          # reconciled (a warning, not a failure). The default shallow fetch
+          # has no history to count, and the marker check would skip silently.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -94,22 +94,13 @@ jobs:
       # models-vs-migrations drift check, so no separate migration step is
       # needed here.
       #
-      # On a push to main the docs-freshness tripwire is left out: a green CI
-      # run on main is what publishes a release, and overdue documentation must
-      # not hold a working fix off the server. Pull requests still run it.
-      #
       # Four workers match the runner's four cores; tests/conftest.py gives
       # each worker its own database and scratch directories. Durations are
       # very uneven (a few factory tests take 10-20 s each), so worksteal
       # rebalances instead of leaving one worker with the long tail.
       - name: Tests
         working-directory: backend
-        run: |
-          if [ "${{ github.event_name }}" = push ]; then
-            pytest -q -n 4 --dist worksteal --deselect tests/test_docs_freshness.py::test_the_drift_pass_is_not_overdue
-          else
-            pytest -q -n 4 --dist worksteal
-          fi
+        run: pytest -q -n 4 --dist worksteal
 
   frontend:
     name: Frontend

@@ -108,6 +108,7 @@ schema work. Preserve its backup, migration and market-hours safeguards.
 - Keep `docs/agent/` true when scope changes materially.
   `backend/tests/test_docs_links.py` fails when a document names a file or a
   heading that no longer exists, and `backend/tests/test_docs_freshness.py`
-  fails when the drift pass is overdue. Neither can see a sentence that is
-  merely no longer true — that pass is `.claude/skills/docs-drift/SKILL.md`,
-  and running it is what clears the freshness test.
+  warns (does not fail) when the drift pass is overdue. Neither can see a
+  sentence that is merely no longer true — that pass is
+  `.claude/skills/docs-drift/SKILL.md`. A daily cloud routine runs it and opens
+  a pull request, so do not stop other work to run it.

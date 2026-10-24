@@ -15,14 +15,13 @@ fails when a document names a file or a heading that no longer exists. Do not
 re-do it by hand; run it and move on. What it cannot see is a sentence that is
 still well-formed and no longer true, and that is everything below.
 
-**What sends you here is usually the other test.**
-`backend/tests/test_docs_freshness.py` fails when more than 30 code commits
-have landed since `docs/agent/last-reconciled.json` (in CI, on pull requests
-only; it never blocks a release from `main`), and its failure message
-carries the commit range to reconcile. Use that range as `<since>` below; if
-you arrived some other way, the marker file still says where to start. Every
-Saturday a Claude Code routine in the cloud runs this pass unattended once 20
-code commits have landed, and opens a pull request with the result.
+**Usually a routine sends you here, not a person.** Every day a Claude Code
+routine in the cloud runs this pass unattended once 20 code commits have
+landed since `docs/agent/last-reconciled.json`, and opens a pull request with
+the result. `backend/tests/test_docs_freshness.py` only warns past 30 code
+commits (it never fails CI), and its warning carries the commit range to
+reconcile. Use that range as `<since>` below; if you arrived some other way,
+the marker file still says where to start.
 
 ## The method
 
@@ -91,7 +90,7 @@ new test modules in `feature-map.md`'s Proof column.
 bash scripts/verify.sh --fast
 ```
 
-Then record what you reconciled to, which is what clears the freshness test:
+Then record what you reconciled to, which is what clears the freshness warning:
 
 ```json
 {"commit": "<the full 40-character sha you read up to>", "date": "<YYYY-MM-DD>", "note": "..."}

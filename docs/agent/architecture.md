@@ -114,9 +114,9 @@ first is started by launchd on the development Mac):
   on the Claude plan token, never API credits, and writes only to that
   branch, which is never merged (`docs/strategy-factory.md`). The direct
   Anthropic API call remains only behind an explicit `--use-api`.
-- The weekly documentation drift pass, a Claude Code routine in Anthropic's
-  cloud on the Claude plan (claude.ai/code/routines, "Weekly docs drift
-  pass"), started every Saturday from a fresh clone of `main`. Once 20 code
+- The daily documentation drift pass, a Claude Code routine in Anthropic's
+  cloud on the Claude plan (claude.ai/code/routines, "Daily docs drift
+  pass"), started every day at 13:00 UTC from a fresh clone of `main`. Once 20 code
   commits have landed since the docs were reconciled, it runs the
   `docs-drift` skill, editing only documentation, runs the docs tests and
   opens a pull request on `claude/docs-drift-<date>` for review. It never
