@@ -266,8 +266,6 @@ class _Recorder:
         elif name == "WebFetch":
             self.fetches += 1
             reason = "The web fetch budget for this job is used up." if self.fetches > self.lim.max_fetches else None
-            if not reason:
-                self.seen_urls.add(str((data.get("tool_input") or {}).get("url", "")))
         if reason:
             self.denied += 1
             self.denied_tools.append(name)
@@ -277,6 +275,11 @@ class _Recorder:
 
     async def post_search(self, data: dict, tool_use_id, context) -> dict:
         self.seen_urls.update(re.findall(URL, json.dumps(data.get("tool_response"), default=str)))
+        return {}
+
+    async def post_fetch(self, data: dict, tool_use_id, context) -> dict:
+        # Only a fetch that succeeded was read: a failed one (404, blocked, guessed link) runs no PostToolUse hook.
+        self.seen_urls.add(str((data.get("tool_input") or {}).get("url", "")))
         return {}
 
 
@@ -308,7 +311,8 @@ def options(sdk, binary: str, env: dict, model: str, lim: JobLimits, server, rec
         max_budget_usd=lim.budget_usd, verbatim_prompts=True, cli_path=binary, cwd=env["CLAUDE_CONFIG_DIR"], env=env,
         output_format={"type": "json_schema", "schema": ASSESSMENT_SCHEMA},
         hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[rec.pre_tool])],
-               "PostToolUse": [sdk.HookMatcher(matcher="WebSearch", hooks=[rec.post_search])]},
+               "PostToolUse": [sdk.HookMatcher(matcher="WebSearch", hooks=[rec.post_search]),
+                               sdk.HookMatcher(matcher="WebFetch", hooks=[rec.post_fetch])]},
         extra_args={"restricted": None, "no-session-persistence": None, "disable-slash-commands": None,
                     "permission-prompts": "none"},
     )
