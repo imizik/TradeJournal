@@ -59,7 +59,12 @@ def _encoded(route):
     encoder. Opt-in Server-Timing set on the injected response is kept."""
     @functools.wraps(route)
     def wrapped(*args, **kwargs):
-        body = json.dumps(route(*args, **kwargs), default=jsonable_encoder, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        data = route(*args, **kwargs)
+        options = {"ensure_ascii": False, "allow_nan": False, "separators": (",", ":")}
+        try:
+            body = json.dumps(data, default=jsonable_encoder, **options)
+        except TypeError:  # a key json cannot write (a UUID or date): FastAPI's encoder names it as before
+            body = json.dumps(jsonable_encoder(data), **options)
         timing = kwargs["response"].headers.get("server-timing")
         return Response(body, media_type="application/json", headers={"Server-Timing": timing} if timing else None)
     return wrapped

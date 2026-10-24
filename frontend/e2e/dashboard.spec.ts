@@ -333,10 +333,11 @@ test("attention does not wait for journal statistics, and a slow page answers th
     await page.goto("/", { waitUntil: "commit" });
     await expect(page.getByRole("complementary", { name: "Attention and data status" }).getByLabel(/^\d+ items?$/)).toBeVisible();
     await expect(page.getByRole("status", { name: "Loading workspace" })).toBeVisible(); // the journal still waits for statistics
-    await expect(page.getByLabel("Journal summary", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Loading workspace" })).toHaveCount(0);
     await state("slow");
     await page.getByRole("link", { name: "Trades", exact: true }).click();
     await expect(page.getByTestId("nav-pending")).toBeVisible(); // before the slow journal answers
+    await page.screenshot({ path: test.info().outputPath("nav-pending-desktop.png"), clip: { x: 0, y: 0, width: 300, height: 420 } });
     await expect(page.getByRole("heading", { name: "Trades", exact: true })).toBeVisible();
     await expect(page.getByTestId("nav-pending")).toHaveCount(0);
   } finally { await state("ready"); }

@@ -387,6 +387,8 @@ def test_workspace_json_matches_fastapi_encoding_and_keeps_opt_in_timing(route_c
     assert response.json()["odd"] == {"id": str(UUID(int=7)), "at": "2026-09-29T09:30:00", "pair": [1.5, None], "name": "Café"}
     assert response.json()["panels"]["5m"]["bars"] == json.loads(json.dumps(bars))
     assert "server-timing" not in route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular").headers
+    monkeypatch.setattr(charts.chart_feed, "workspace", lambda *_, **__: {"panels": {"5m": {"bars": bars, "markers": []}}, "odd": {UUID(int=8): 1}})
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular").json()["odd"] == {str(UUID(int=8)): 1}
 
 
 def test_history_route_identifies_window_and_returns_bounded_old_markers(route_client, monkeypatch):
