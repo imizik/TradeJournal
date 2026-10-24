@@ -300,11 +300,14 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 
 - **Owner-only routes** (in no assistant grant):
   - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
-    job; the same question and symbols are queued at most once a day. An
-    optional `investigation_id` is kept in the job's input as
+    job. An optional `investigation_id` is kept in the job's input as
     `from_investigation`, so the lab can show the job on the investigation it
-    came from; the job does not read it.
-  - `GET /copilot/research-jobs` lists jobs with the day's spend.
+    came from; the job does not read it. The same question and symbols from
+    the same investigation are queued at most once a day. A failed or
+    cancelled one can be asked again: its row keeps its outcome under a
+    retired key. Jobs queued by the triggers are never re-queued this way.
+  - `GET /copilot/research-jobs` lists jobs with the day's spend;
+    `?from_investigation=<id>` keeps one investigation's jobs.
   - `POST /copilot/research-jobs/{id}/cancel` cancels a queued job, or stops a
     running one.
 - **In the lab** (`frontend/components/copilot/ResearchDeeper.tsx`): an open
@@ -312,6 +315,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   /copilot/research-jobs` reports `queue_enabled`.
   - It opens a form prefilled with the investigation's symbol and its latest
     question; the owner edits it and queues a linked job.
+  - The button is hidden while a job for the investigation is queued or
+    running.
   - The job's status, cost and error show under the investigation. The list
     is re-read every 10 s while a job is queued or running, and no longer
     after that.

@@ -24,7 +24,7 @@ const job = (status: string, over: Record<string, unknown> = {}) => ({
   created_at: "2026-10-24T14:10:00Z", finished_at: null, ...over,
 });
 
-type Queue = { enabled: boolean; jobs: ReturnType<typeof job>[]; reads: number; posted: unknown[] };
+type Queue = { enabled: boolean; jobs: ReturnType<typeof job>[]; reads: number; posted: unknown[]; urls?: string[] };
 
 async function lab(page: Page, queue: Queue, withResult = () => false) {
   await page.clock.install({ time: new Date("2026-10-24T14:10:00Z") });
@@ -41,6 +41,7 @@ async function lab(page: Page, queue: Queue, withResult = () => false) {
       return route.fulfill({ status: 201, json: { job: queue.jobs[0], created: true, queue_enabled: queue.enabled } });
     }
     queue.reads += 1;
+    (queue.urls ??= []).push(route.request().url());
     return route.fulfill({ json: { jobs: queue.jobs, queue_enabled: queue.enabled, daily_budget_usd: 2, spent_today_usd: 0 } });
   });
   await page.goto("/copilot-lab");
@@ -66,15 +67,21 @@ test("Research deeper queues a linked job, follows it to done, then offers its r
   await page.getByRole("button", { name: "Queue research" }).click();
   await expect(page.getByText("Research · queued")).toBeVisible();
   expect(queue.posted).toEqual([{ question: "Why is NBIS lagging CRWV?", symbols: ["NBIS"], investigation_id: SOURCE }]);
+  // One job at a time per investigation: no second request while this one waits or runs.
+  await expect(page.getByRole("button", { name: "Research deeper" })).toHaveCount(0);
+  // Only this investigation's jobs are read, so newer jobs elsewhere cannot push it off the page.
+  expect(queue.urls!.every((url) => new URL(url).searchParams.get("from_investigation") === SOURCE)).toBe(true);
 
   queue.jobs = [job("running")];
   await page.clock.runFor(10_000);
   await expect(page.getByText("Research · running")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Research deeper" })).toHaveCount(0);
 
   queue.jobs = [job("done", { cost_usd: 0.42, investigation_id: RESULT, finished_at: "2026-10-24T14:20:00Z" })];
   finished = true;
   await page.clock.runFor(10_000);
   await expect(page.getByText("Research · done")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Research deeper" })).toBeVisible(); // free to ask again
   await expect(page.getByRole("list", { name: "Research jobs" })).toContainText("$0.42");
   await expect(page.getByRole("navigation", { name: "Recent investigations" })).toContainText("research · Is the neocloud group confirming?");
   await page.screenshot({ path: test.info().outputPath("research-deeper-done.png") });

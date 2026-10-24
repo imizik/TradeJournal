@@ -152,23 +152,40 @@ def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None =
         return view(job), True
 
 
+def _retire_finished(dedupe_key: str, session: Session | None = None) -> None:
+    """Free a failed or cancelled job's key so the same work can be asked for again. The old row keeps its outcome
+    and spend under a retired key; a queued, running or done job still dedupes."""
+    with _session(session) as db:
+        job = db.exec(select(ResearchJob).where(ResearchJob.dedupe_key == dedupe_key)).first()
+        if job is not None and job.status in ("failed", "cancelled"):
+            job.dedupe_key = f"{dedupe_key}#retired:{job.id}"
+            db.commit()
+
+
 def enqueue_question(question: str, symbols: list[str], session: Session | None = None,
                      from_investigation: str | None = None) -> tuple[dict, bool]:
-    """The same question and symbols are queued at most once per day. ``from_investigation`` only records the saved
-    investigation the owner asked from, so the lab can show the job there; the job does not read it."""
+    """The same question and symbols from the same place are queued at most once per day, unless that job failed or
+    was cancelled. ``from_investigation`` records the saved investigation the owner asked from, so the lab shows the
+    job there (and another investigation's identical question is its own job); the job does not read it."""
     question = question.strip()
     if not question:
         raise QueueError("bad_input", "question is empty")
     payload = {"question": question, "symbols": symbols, **({"from_investigation": from_investigation} if from_investigation else {})}
-    return enqueue("question", payload,
-                   f"question:{_today()}:{_digest(question, ','.join(symbols))}", session)
+    parts = (question, ",".join(symbols), *((from_investigation,) if from_investigation else ()))
+    key = f"question:{_today()}:{_digest(*parts)}"
+    _retire_finished(key, session)  # owner-asked only: a trigger's failed job must not be queued again every pass
+    return enqueue("question", payload, key, session)
 
 
-def list_jobs(status: str | None = None, limit: int = 50, session: Session | None = None) -> list[dict]:
+def list_jobs(status: str | None = None, limit: int = 50, session: Session | None = None,
+              from_investigation: str | None = None) -> list[dict]:
+    """Newest first. ``from_investigation`` (a UUID) keeps the jobs asked from that saved investigation."""
     with _session(session) as db:
         query = select(ResearchJob).order_by(col(ResearchJob.created_at).desc()).limit(max(1, min(limit, 200)))
         if status:
             query = query.where(ResearchJob.status == status)
+        if from_investigation:
+            query = query.where(col(ResearchJob.input_json).contains(json.dumps({"from_investigation": str(uuid.UUID(from_investigation))})[1:-1]))
         return [view(job) for job in db.exec(query)]
 
 
