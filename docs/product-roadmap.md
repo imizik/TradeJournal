@@ -56,7 +56,8 @@ automated trading.
 
 Then connect the successful workflows through a natural conversational
 experience, reusing the infrastructure already built. The conversational
-copilot (step 3) waits for both proofs.
+copilot (step 3) waits for both proofs. The owner-only, off-by-default
+[Copilot Lab](copilot-lab.md) is an experiment toward it, not the activated step.
 
 **Success measure:** TradeJournal becomes something he genuinely relies on
 because it helps him notice better opportunities, make deliberate decisions,
