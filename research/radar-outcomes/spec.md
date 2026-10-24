@@ -1,6 +1,6 @@
 # Radar outcome scorer: spec
 
-Approved 2026-10-24 and built as `backend/scripts/radar_outcomes.py` with `backend/tests/test_radar_outcomes.py`. Not scheduled: running it on the VPS, by hand or by a timer, is a separate approval.
+Approved 2026-10-24 and built as `backend/scripts/radar_outcomes.py` with `backend/tests/test_radar_outcomes.py`. Scheduled the same day, with the owner's approval: a weekly Friday timer on the VPS runs the scorer and the review ([Radar, Outcome scoring](../../docs/radar.md#outcome-scoring)).
 
 ## The question
 

@@ -171,7 +171,7 @@ call. Question, comparisons and decision: [spec](../research/radar-outcomes/spec
 plan only (never an API key), what set the furthest continuations apart from the furthest reversals;
 it is hindsight input for a later rule version.
 
-On the VPS, run both by hand as the API's user with its settings (no timer is installed):
+On the VPS, either step can be run by hand as the API's user with its settings:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradejournal \
@@ -191,6 +191,65 @@ The review calls the research job directly, so `RESEARCH_BUDGET_USD` caps it but
 the scorer opened the live store read-only and scored 0 (no rule-written events yet); the review,
 on that day's replayed in-sample events, ran on the plan in 56 s ($0.14 API-equivalent, 13 citations,
 server checks clean).
+
+**Weekly timer (owner-approved October 24, 2026).** `tradejournal-radar-outcomes.timer` runs both every
+Friday at 18:30 New York: the scorer, then the review of that week's sessions (Saturday on), skipped
+when nothing was scored. Reviews land in `/var/lib/tradejournal/radar/review-<date>.json`. The units
+were installed by hand in `/etc/systemd/system/` and are not part of `deploy/systemd`, so a deploy
+neither changes nor removes them. Its first run, on install, scored 0 and skipped the review.
+
+```bash
+systemctl list-timers tradejournal-radar-outcomes.timer          # next run
+sudo journalctl -u tradejournal-radar-outcomes.service -n 20      # last run
+sudo systemctl disable --now tradejournal-radar-outcomes.timer   # stop it
+```
+
+The installed units, verbatim:
+
+```ini
+[Unit]
+Description=Weekly Radar outcome scoring, then the plan-only research review (docs/radar.md, Outcome scoring)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/backend
+EnvironmentFile=/etc/tradejournal/backend.env
+EnvironmentFile=/etc/tradejournal/claude-plan.env
+Environment=TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude
+Environment=TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude
+Environment=HOME=/var/lib/tradejournal/claude
+Environment=PYTHONUNBUFFERED=1
+# Read-only on the Radar store; appends newly scored events. No model call.
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m scripts.radar_outcomes /var/lib/tradejournal/radar/radar.sqlite --out /var/lib/tradejournal/radar/outcomes.jsonl
+# The week's sessions (Saturday on), reviewed on the Claude plan only; skipped when nothing was scored.
+ExecStart=/bin/sh -c 'f=/var/lib/tradejournal/radar/outcomes.jsonl; since=$$(date -d "6 days ago" +%%F); out=/var/lib/tradejournal/radar/review-$$(date +%%F).json; py=/opt/tradejournal/current/backend/.venv/bin/python; if "$$py" scripts/radar_outcomes_review.py "$$f" --since "$$since" --dry-run >/dev/null 2>&1; then "$$py" scripts/radar_outcomes_review.py "$$f" --since "$$since" --out "$$out" >/dev/null && echo "Review written to $$out"; else echo "No scored events since $$since: no review this week."; fi'
+TimeoutStartSec=20min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal
+```
+
+```ini
+[Unit]
+Description=Weekly Radar outcome scoring and review, Fridays 18:30 New York
+
+[Timer]
+# After the close and the recorder's last pass; quotes are kept 20 sessions, so weekly is well inside that.
+OnCalendar=Fri *-*-* 18:30:00 America/New_York
+RandomizedDelaySec=120
+Persistent=true
+Unit=tradejournal-radar-outcomes.service
+
+[Install]
+WantedBy=timers.target
+```
 
 ## Movers now
 
