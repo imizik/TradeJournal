@@ -26,6 +26,7 @@ MAX_LEVELS_EACH_SIDE = 3
 MAX_POSITIONS = 15
 MAX_TRADES = 10
 MAX_MEMORIES = 10
+MAX_TAGS, MAX_TAG_CHARS = 4, 24  # so ten trades at every cap still fit MAX_RESULT_CHARS
 
 
 def _iso(value) -> str | None:
@@ -39,6 +40,14 @@ def _iso(value) -> str | None:
     return str(value)
 
 
+def _journal_time(value: datetime | None) -> str | None:
+    """A journal time is a naive New York wall clock (chart_journal.stamp): attach New York and keep the offset."""
+    from app.engine.chart_math import ET
+    if value is None:
+        return None
+    return (value.replace(tzinfo=ET) if value.tzinfo is None else value.astimezone(ET)).isoformat(timespec="seconds")
+
+
 def _round(value, places: int = 2):
     if not isinstance(value, (int, float)):
         return None
@@ -47,7 +56,7 @@ def _round(value, places: int = 2):
 
 def _label(name: str | None) -> str:
     """An account's name with any digit run removed, so no account number can leak through a label."""
-    return " ".join(re.sub(r"\d{2,}", "", name or "").split())[:40] or "account"
+    return " ".join(re.sub(r"\d{2,}", "", name or "").split())[:20] or "account"
 
 
 def _et(stamp) -> str | None:
@@ -146,6 +155,17 @@ def _mark(trade, quotes: dict) -> tuple[float | None, str | None]:
     return (None if price is None else float(price)), None
 
 
+def _warm_option_quotes(trades: list) -> None:
+    """One batched option-quote read, so the per-contract marks after it come from the 60-second cache, not one
+    provider call each (fifteen options must not reach the tool timeout)."""
+    from app.engine.quotes import OptionQuoteRequest, get_option_quotes
+    wanted = [OptionQuoteRequest(ticker=t.ticker, expiration=t.expiration.isoformat(), strike=float(t.strike),
+                                 option_type=t.option_type or "")
+              for t in trades if t.instrument_type == "option" and t.expiration and t.strike is not None]
+    if wanted:
+        get_option_quotes(wanted)
+
+
 def positions(session=None) -> dict:
     from sqlmodel import Session, select
     from app.database import engine
@@ -158,6 +178,8 @@ def positions(session=None) -> dict:
         tickers = sorted({t.ticker for t in trades.values()})
         held = [p for ticker in tickers for p in chart_journal.positions(db, ticker) if p["trade_id"] in trades]
     quotes = get_stock_quotes(sorted({trades[p["trade_id"]].ticker for p in held if trades[p["trade_id"]].instrument_type == "stock"})) if held else {}
+    _warm_option_quotes([trades[p["trade_id"]] for p in held[:MAX_POSITIONS]])
+    from app.engine.chart_math import ET
     now = datetime.now(UTC)
     rows = []
     for p in held[:MAX_POSITIONS]:
@@ -166,18 +188,19 @@ def positions(session=None) -> dict:
         cost, quantity = p.get("avg_cost"), p.get("open") or 0
         sign = -1 if p.get("direction") == "short" else 1
         gain = None if mark is None or cost is None else round(sign * (mark - cost) * quantity, 2)
-        opened = trade.opened_at if trade.opened_at.tzinfo else trade.opened_at.replace(tzinfo=UTC)
+        opened = trade.opened_at.replace(tzinfo=ET) if trade.opened_at.tzinfo is None else trade.opened_at  # New York wall clock
         rows.append({
             "symbol": trade.ticker, "account": _label(p.get("account")), "instrument": trade.instrument_type,
             **({"option": {"side": trade.option_type, "strike": _round(float(trade.strike)), "expiry": trade.expiration.isoformat()}}
                if trade.instrument_type == "option" else {}),
             "direction": p.get("direction"), "quantity": quantity, "avg_entry": _round(cost),
-            "mark": _round(mark), "mark_as_of": quoted_at, "unrealized_usd": gain,
+            "mark": _round(mark), **({"mark_as_of": quoted_at} if quoted_at else {}), "unrealized_usd": gain,
             "unrealized_pct": None if gain is None or not cost else round(100 * sign * (mark - cost) / cost, 1),
-            "days_held": (now - opened).days,
+            "opened_at": _journal_time(trade.opened_at), "days_held": (now - opened).days,
         })
     return {"state": "ok", "as_of": _iso(now), "count": len(held), "shown": len(rows), "positions": rows,
-            "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share.",
+            "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share. "
+                     "opened_at is New York time.",
             "excluded": "Webull accounts (dormant)"}
 
 
@@ -194,20 +217,20 @@ def trades(symbol: str, limit: int = 5, session=None) -> dict:
         if ids:
             for trade_id, name in db.exec(select(TradeTag.trade_id, Tag.name).join(Tag, Tag.id == TradeTag.tag_id)
                                           .where(col(TradeTag.trade_id).in_(ids))).all():
-                tags.setdefault(trade_id, []).append(str(name)[:40])
+                tags.setdefault(trade_id, []).append(str(name)[:MAX_TAG_CHARS])
     rows = [{
         "account": _label(name), "instrument": t.instrument_type,
         **({"option": {"side": t.option_type, "strike": _round(float(t.strike)), "expiry": t.expiration.isoformat()}}
            if t.instrument_type == "option" and t.strike is not None and t.expiration else {}),
-        "quantity": float(t.contracts), "entry_time": _iso(t.opened_at), "exit_time": _iso(t.closed_at),
+        "quantity": float(t.contracts), "entry_time": _journal_time(t.opened_at), "exit_time": _journal_time(t.closed_at),
         "entry_price": _round(float(t.avg_entry_premium)),
         "exit_price": None if t.avg_exit_premium is None else _round(float(t.avg_exit_premium)),
         "pnl_usd": None if t.realized_pnl is None else round(float(t.realized_pnl), 2),
         "pnl_pct": None if t.pnl_pct is None else round(float(t.pnl_pct), 2), "hold_minutes": t.hold_duration_mins,
-        "status": t.status, "expired_worthless": bool(t.expired_worthless), "tags": sorted(tags.get(t.id, []))[:6],
+        "status": t.status, "expired_worthless": bool(t.expired_worthless), "tags": sorted(tags.get(t.id, []))[:MAX_TAGS],
     } for t, name in found]
     return {"symbol": symbol, "state": "ok", "as_of": _now(), "trades": rows,
-            "units": "Option prices are per contract as the journal stores them; stock prices per share."}
+            "units": "Option prices are per contract as the journal stores them; stock prices per share. Times are New York."}
 
 
 def memories(limit: int = 5, session=None) -> dict:

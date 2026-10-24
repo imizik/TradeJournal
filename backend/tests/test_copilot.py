@@ -810,7 +810,7 @@ def test_investigation_changes_are_bounded_linked_and_need_a_saved_investigation
     assert fired["fired"]["price"] == 92.4 and fired["fired"]["at"].endswith("Z")
     assert len(out["research_jobs"]) == copilot_tools.CHANGE_JOBS and out["research_jobs"][0]["status"] == "done"
     assert out["research_jobs"][0]["since_last_update"] is True and out["research_jobs"][0]["cost_usd"] == 0.31
-    assert out["results"][0]["title"] == "Deeper on NBIS" and len(out["results"][0]["summary"]) == 200
+    assert out["results"][0]["title"] == "Deeper on NBIS" and len(out["results"][0]["summary"]) == 160
     assert len(json.dumps(out)) < copilot_tools.MAX_RESULT_CHARS  # bounded before the 6,000-character cut
     assert copilot_tools.provenance("get_investigation_changes", out, "live")["kind"] == "saved"
 
@@ -853,14 +853,16 @@ def test_investigation_changes_fit_whole_at_every_cap():
     from app.models import LevelAlertEvent, ResearchJob
     import time as clock
     saved = _changes_world()
-    tools = [t["name"] for t in copilot_tools.TOOLS]
+    # Every tool that can carry an as_of (propose_plan has none), on the longest symbol a ticker can be.
+    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan"]
+    symbol = "ABCDEFGHIJ"
     inv.update(saved["id"], inv.InvestigationFields(
-        title="T" * 120, symbol="NBIS", conclusion="C" * 280, findings={"summary": "S" * 2000},
+        title="T" * 120, symbol=symbol, conclusion="C" * 280, findings={"summary": "S" * 2000},
         evidence=[{"tool": t, "as_of": "2026-10-23T15:59:59.999999+00:00", "kind": "recorded", "message": 1} for t in tools]), 1)
     now = clock.time()
     with Session(engine) as db:
         for i, price in enumerate((10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5)):
-            alert = create_alert(db, symbol="NBIS", price=price, reference=price - 1, condition="closes_beyond", interval="15m",
+            alert = create_alert(db, symbol=symbol, price=price, reference=price - 1, condition="closes_beyond", interval="15m",
                                  session="extended", source_kind="copilot", source_id=saved["id"], label="L" * 60, now=now)
             db.add(LevelAlertEvent(alert_id=alert.id, generation=alert.generation, level=price, price=price + 0.123456,
                                    source="closed_bar", event_at=datetime.utcfromtimestamp(now + 1)))
@@ -877,7 +879,8 @@ def test_investigation_changes_fit_whole_at_every_cap():
         copilot_tools.CHANGE_ALERTS, copilot_tools.CHANGE_JOBS, copilot_tools.CHANGE_RESULTS)
     assert len(out["evidence_as_of"]) == len(tools) <= copilot_tools.CHANGE_EVIDENCE
     text = copilot_tools.bounded(out)
-    assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
+    assert len(text) <= copilot_tools.MAX_RESULT_CHARS - 200, len(text)  # headroom for longer ids or times
+    assert json.loads(text) == json.loads(json.dumps(out, default=str))
 
 
 def test_replay_hides_whatever_happened_to_an_investigation_after_its_moment():

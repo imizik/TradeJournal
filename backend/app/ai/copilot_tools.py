@@ -83,8 +83,8 @@ TOOLS: list[dict] = [
     {
         "name": "get_chart_context",
         "description": "What the owner's chart shows for a symbol on one timeframe (1m, 5m, 15m, 1h or 1D), from the "
-                       "same feed as the Charts page: the last ~40 bars (UTC time, OHLC, volume, relative volume, "
-                       "extended-hours flag), the nearest automatic level zones each side with their tested/broken "
+                       "same feed as the Charts page: the last ~40 bars (New York time MM-DD HH:MM, OHLC, volume, "
+                       "relative volume, extended-hours flag), the nearest automatic level zones each side with their tested/broken "
                        "state, VWAP and its 1-sigma band, relative volume, and the session open/high/low with the prior "
                        "close. Read through as_of; a quote is not a fill.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "timeframe"],
@@ -403,7 +403,8 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
             continue
         finished = job.finished_at.isoformat() + "Z" if job.finished_at and not after_cutoff(job.finished_at.isoformat()) else None
         linked.append({"kind": job.kind, "status": job.status if finished or job.status not in ("done", "failed") else "running",
-                       "question": (data.get("question") or "")[:80], "finished_at": finished, "cost_usd": job.cost_usd,
+                       "question": (data.get("question") or "")[:60], "finished_at": finished,
+                       "cost_usd": None if job.cost_usd is None else round(job.cost_usd, 4),
                        "since_last_update": bool(finished and since and finished > since)})
         if job.investigation_id and finished:
             result_ids.append((str(job.investigation_id), linked[-1]["since_last_update"]))
@@ -419,7 +420,7 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
             continue
         results.append({"id": saved["id"], "title": saved["title"][:80], "created_at": saved["created_at"],
                         "conclusion": (saved["conclusion"] or "")[:120],
-                        "summary": ((saved["findings"] or {}).get("summary") or "")[:200], "since_last_update": fresh})
+                        "summary": ((saved["findings"] or {}).get("summary") or "")[:160], "since_last_update": fresh})
     findings = record["findings"] or {}
     investigation = {"title": record["title"][:120], "symbol": record["symbol"], "source": record["source"],
                      "created_at": record["created_at"]}

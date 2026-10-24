@@ -48,7 +48,12 @@ untouched.
     quantity, average entry and mark (options per contract, i.e. premium ×
     100), unrealized $ and %, and days held. At most 15 are shown.
   - `get_trades(symbol, limit ≤ 10)` lists recent closed trades in one symbol,
-    newest first: entry and exit time and price, P&L, hold time and tags.
+    newest first: entry and exit time and price, P&L, hold time and up to 4
+    tags of at most 24 characters.
+  - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
+    emitted with their offset (for example `-04:00` in summer, `-05:00` in
+    winter), never as UTC. Days held count from that moment. Option marks
+    are read in one batched quote call before the per-contract cache reads.
   - `get_memories(limit ≤ 10)` lists the owner's approved (active, not
     redacted) Jo memories, read through `jo_briefing.memories`; it never
     writes Codex's store.

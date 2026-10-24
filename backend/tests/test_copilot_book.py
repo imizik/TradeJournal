@@ -227,3 +227,77 @@ def test_a_scripted_turn_reads_the_book_and_the_chart():
 
 def test_the_system_prompt_guards_account_identifiers():
     assert "get_positions" in copilot.SYSTEM_PROMPT and "Never reveal or guess account numbers" in copilot.SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------- review fixes: New York times, worst cases, one batch
+
+def test_journal_times_are_new_york_with_their_offset_across_dst(db, marks):
+    """Journal times are naive New York wall clocks: never emitted as UTC, and days held count from that moment."""
+    from app.engine.chart_math import ET
+    db.add_all([fill(20, "AMD", "buy", 1, 150, "2026-11-30T09:30:15"), fill(21, "AMD", "sell", 1, 155, "2026-11-30T10:30:15")])
+    db.commit()
+    _rebuild_trades(db, "test")
+    [summer] = copilot_book.trades("CRWV", 10, session=db)["trades"]
+    assert (summer["entry_time"], summer["exit_time"]) == ("2026-10-01T10:00:00-04:00", "2026-10-01T15:00:00-04:00")
+    [winter] = copilot_book.trades("AMD", 10, session=db)["trades"]
+    assert (winter["entry_time"], winter["exit_time"]) == ("2026-11-30T09:30:15-05:00", "2026-11-30T10:30:15-05:00")
+    nbis = next(r for r in copilot_book.positions(session=db)["positions"] if r["symbol"] == "NBIS")
+    assert nbis["opened_at"] == "2026-10-20T09:42:00-04:00"
+    assert nbis["days_held"] == (datetime.now(ET) - datetime(2026, 10, 20, 9, 42, tzinfo=ET)).days
+
+
+def _worst_book():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(Account(id=ROTH, name="Individual Brokerage Account With A Long Name Here 1234", type="individual",
+                        last4="1234", broker="robinhood"))
+    session.commit()
+    return session
+
+
+def test_trades_at_every_cap_fit_with_headroom():
+    db = _worst_book()
+    tags = [Tag(name=f"T{k}" + "x" * 60, source="manual") for k in range(8)]
+    db.add_all(tags)
+    db.add_all([fill(5000 + 2 * i + j, "ABCDEFGHIJ", side, 99999.5, 123456.78 if j == 0 else 0.01, f"2020-01-{1 + i:02d}T{9 + 6 * j:02d}:30:15",
+                     option_type="put", strike=12345.67, expiration=date(2020, 1, 31))
+                for i in range(12) for j, side in enumerate(("buy_to_open", "sell_to_close"))])
+    db.commit()
+    _rebuild_trades(db, "test")
+    from sqlmodel import select
+    from app.models import Trade
+    db.add_all([TradeTag(trade_id=t.id, tag_id=g.id) for t in db.exec(select(Trade)).all() for g in tags])
+    db.commit()
+    out = copilot_book.trades("ABCDEFGHIJ", 10, session=db)
+    text = copilot_tools.bounded(out)
+    assert len(out["trades"]) == 10 and len(out["trades"][0]["tags"]) == copilot_book.MAX_TAGS
+    assert all(len(tag) <= copilot_book.MAX_TAG_CHARS for tag in out["trades"][0]["tags"])
+    assert len(text) <= copilot_tools.MAX_RESULT_CHARS - 200, len(text)
+
+
+def test_positions_at_every_cap_fit(monkeypatch):
+    monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: 987654.321 for s in symbols})
+    monkeypatch.setattr(quotes, "get_option_quotes", lambda requests: [OptionQuoteResult(mid=9876.5432)] * len(requests))
+    monkeypatch.setattr(quotes, "option_mark", lambda req: (OptionQuoteResult(mid=9876.5432), 1792768320.123))
+    db = _worst_book()
+    db.add_all([fill(1000 + i, f"ABCDEFGH{i:02d}", "sell_to_open", 99999.5, 123456.78, "2020-01-01T09:30",
+                     option_type="call", strike=12345.67, expiration=date(2099, 12, 31)) for i in range(20)])
+    db.commit()
+    _rebuild_trades(db, "test")
+    out = copilot_book.positions(session=db)
+    text = copilot_tools.bounded(out)
+    assert out["shown"] == copilot_book.MAX_POSITIONS and len(text) <= copilot_tools.MAX_RESULT_CHARS, len(text)
+    assert out["positions"][0]["account"] == "Individual Brokerage"
+
+
+def test_option_marks_come_from_one_batched_read(db, monkeypatch):
+    batches = []
+    monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: 131.2 for s in symbols})
+    monkeypatch.setattr(quotes, "get_option_quotes", lambda requests: batches.append(len(requests)) or [OptionQuoteResult(mid=4.0)] * len(requests))
+    monkeypatch.setattr(quotes, "option_mark", lambda req: (OptionQuoteResult(mid=4.0), 1792768320.0))
+    db.add(fill(30, "NBIS", "buy_to_open", 1, 200, "2026-10-21T10:00", option_type="put", strike=90, expiration=LATER))
+    db.commit()
+    _rebuild_trades(db, "test")
+    copilot_book.positions(session=db)
+    assert batches == [2]  # both open options in one provider read; the marks after it read the cache
