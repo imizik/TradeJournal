@@ -175,19 +175,19 @@ binary, env = research_job.prepare("api_key")  # Claude Code itself reports the 
 assert binary == os.environ["TJ_CLAUDE_BIN"], binary
 assert env["ANTHROPIC_API_KEY"] == os.environ["ANTHROPIC_API_KEY"] and env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
 assert env["CLAUDE_CONFIG_DIR"] == os.environ["TJ_CLAUDE_CONFIG_DIR"] + "/research-api"
-try:
-    research_job.prepare("plan")
-except research_job.ResearchError as exc:
-    assert exc.code == "plan_local_only", exc.code
-else:
-    raise AssertionError("plan auth must be refused on Postgres")
+# Plan auth on Postgres (the owner's decision, docs/copilot-lab.md). The env above holds an API key too: Claude Code
+# reports oauth_token with no API key source only if that key never reaches it, so this passes only without a leak.
+binary, env = research_job.prepare("plan")
+assert binary == os.environ["TJ_CLAUDE_BIN"], binary
+assert env["CLAUDE_CODE_OAUTH_TOKEN"] == os.environ["CLAUDE_CODE_OAUTH_TOKEN"] and env["ANTHROPIC_API_KEY"] == ""
+assert env["CLAUDE_CONFIG_DIR"] == os.environ["TJ_CLAUDE_CONFIG_DIR"] + "/research-plan"
 print("research job ready", claude_agent_sdk.__version__)
 """
 
 
 def assert_research_job_ready(release):
-    """The release runs research jobs with RESEARCH_AUTH=api_key on its own bin/claude. No model call: the key is a
-    dummy, and Claude Code's sign-in report is local."""
+    """The release runs research jobs on its own bin/claude with either RESEARCH_AUTH. No model call: the key and the
+    token are dummies, and Claude Code's sign-in report is local."""
     pinned = json.loads((release / "release.json").read_text())["claude_code"]
     version = control.run(release / "bin/claude", "--version", capture_output=True, text=True).stdout.strip()
     assert version.startswith(f"{pinned} "), version

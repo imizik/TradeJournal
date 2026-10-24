@@ -129,6 +129,15 @@ credits.
   database is local (`app.environment.describe().is_local`, as replay does).
   Production uses `anthropic` with an API key, or written approval from
   Anthropic first.
+- **Owner's decision for research jobs (2026-10-24).** The owner chose the
+  plan for background research jobs on the VPS, in their words: "use my
+  Claude subscription (plan token) for VPS research jobs. It's my own
+  single-user app and I accept the terms risk."
+  - `RESEARCH_AUTH=plan` is therefore allowed on any database
+    (§ Research job).
+  - This chat backend (`COPILOT_BACKEND=plan`) stays local-only.
+  - The quotes above still describe Anthropic's guidance; the owner accepted
+    that risk knowingly.
 - **Authentication.** Run `claude setup-token` and put the value in
   `CLAUDE_CODE_OAUTH_TOKEN` in the private backend environment. Claude Code
   gets the environment from `plan_runner` (a short allowlist plus the token);
@@ -241,10 +250,15 @@ It has no scheduler, Radar wake-up or notification yet.
   settings, other MCP servers and sessions are off, as for the plan backend.
   Pages are untrusted data, and the job has no tool that could act on an
   injected instruction.
-- **Auth (`RESEARCH_AUTH`).** `plan` (default) uses the plan token, with the
-  same environment scrubbing and local-database-only refusal as the plan
-  backend. `api_key` passes only `ANTHROPIC_API_KEY`, and Claude Code must
-  report that key as its sign-in. A server uses `api_key`.
+- **Auth (`RESEARCH_AUTH`).**
+  - `plan` (default) passes only `CLAUDE_CODE_OAUTH_TOKEN`. It runs on the VPS
+    too, by the owner's 2026-10-24 decision (§ Plan backend).
+  - `api_key` passes only `ANTHROPIC_API_KEY`.
+  - Either way, every other credential variable (API key, auth token, base
+    URL, cloud providers) is set empty for Claude Code.
+  - Claude Code must report the one credential as its sign-in before a job
+    runs. In plan mode that is `oauth_token` with no API key source; a leaked
+    key would show up as one and is refused.
 - **Output.** A structured assessment (`output_format` JSON schema): summary,
   key findings with citation and evidence indexes, counterpoints, what would
   change the view, citations (URL, publisher, publish time, title) and
@@ -292,7 +306,7 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `RESEARCH_QUEUE_ENABLED` | unset (off) | `true` starts the runner in the API process. Jobs can be queued while it is off; they wait. |
-| `RESEARCH_AUTH` | `plan` | On a server, set `api_key` and `ANTHROPIC_API_KEY`. `plan` is refused unless the database is local. |
+| `RESEARCH_AUTH` | `plan` | `plan`: the owner's Claude plan token, on any database (the VPS included). `api_key`: `ANTHROPIC_API_KEY` (API credits). |
 | `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
 | `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC (API-equivalent on the plan). It is checked before every attempt. At the cap, queued jobs wait for the next day. |
 | `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
@@ -352,16 +366,22 @@ Jobs run the release's own `bin/claude`, the version
 `deploy/claude-code/package.json` pins, which needs to be 2.1.257 or later
 for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
 
-- **Auth.** `RESEARCH_AUTH=api_key` with `ANTHROPIC_API_KEY` in
-  `/etc/tradejournal/backend.env`. The job passes only that key: the plan
-  token from `claude-plan.env` and everything else is blanked. Claude Code
-  must report `authMethod=api_key` and `apiKeySource=ANTHROPIC_API_KEY`
-  before a job runs. Its state goes under
-  `/var/lib/tradejournal/claude/research-api`, apart from the plan reviews'
-  state. Plan auth is refused there, because the database is Postgres.
-- **Turning it on, conservatively.** Add `RESEARCH_QUEUE_ENABLED=true`,
-  `RESEARCH_AUTH=api_key`, a small `RESEARCH_BUDGET_USD` and
-  `RESEARCH_DAILY_BUDGET_USD`, and leave the two trigger settings unset. Then
+- **Auth.** Both modes work on the VPS; `plan` is the default.
+  - **`plan`** uses the token in `/etc/tradejournal/claude-plan.env`, and the
+    job passes only that token. The valid `ANTHROPIC_API_KEY` in the same
+    service env is set empty for Claude Code, which must report `oauth_token`
+    with no API key source. State goes in
+    `/var/lib/tradejournal/claude/research-plan`.
+  - **`api_key`** uses `ANTHROPIC_API_KEY` from `backend.env`, and the job
+    passes only that key. Claude Code must report `authMethod=api_key` and
+    `apiKeySource=ANTHROPIC_API_KEY`. State goes in
+    `/var/lib/tradejournal/claude/research-api`.
+  - Both state directories are kept apart from the nightly plan reviews'.
+- **Turning it on, conservatively.** Add `RESEARCH_QUEUE_ENABLED=true`, a
+  small `RESEARCH_BUDGET_USD` and `RESEARCH_DAILY_BUDGET_USD`, and leave the
+  two trigger settings unset. `RESEARCH_AUTH` can stay unset (plan); set
+  `api_key` to bill API credits instead. The budgets are an API-price
+  equivalent on the plan. Then
   run `sudo systemctl restart tradejournal-api`. Queue one question with
   `POST /copilot/research-jobs` and watch it with `GET /copilot/research-jobs`.
   Turning the queue off again (unset, then restart) leaves queued jobs
@@ -371,7 +391,9 @@ for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
   - `bin/claude --version` matches the pin;
   - `claude_agent_sdk` imports from the release venv without a bundled CLI;
   - the API-key preflight passes as the `tradejournal` user with a dummy key;
-  - plan auth is refused on Postgres.
+  - the plan preflight passes on Postgres with a dummy token, while a dummy
+    API key is also in the env, which proves the key never reaches Claude
+    Code.
 
 ## Before a live API test
 

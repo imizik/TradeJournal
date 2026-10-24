@@ -10,7 +10,7 @@ import pytest
 
 from app.ai import copilot_tools, plan_runner, research_job
 from app.ai.copilot_fixture import FixtureEvidence
-from tests.test_copilot_plan import FakeSDK, ResultMessage, plan_env  # noqa: F401  (shared stub and fixture)
+from tests.test_copilot_plan import REAL_PREFLIGHT, FakeSDK, ResultMessage, plan_env  # noqa: F401  (shared stub and fixture)
 
 NOW = datetime(2026, 10, 23, 11, 12)
 ARTICLE = "https://www.reuters.com/technology/neocloud-financing-2026-10-22/"
@@ -141,13 +141,34 @@ def test_timeout(plan_env, saved):  # noqa: F811
     assert record["error"]["code"] == "timeout"
 
 
-def test_plan_auth_is_local_only_and_api_key_mode_carries_only_the_key(plan_env, monkeypatch):  # noqa: F811
+def test_plan_auth_runs_on_a_server_with_only_the_plan_token(plan_env, monkeypatch, tmp_path):  # noqa: F811
+    """The owner's decision (2026-10-24): research jobs may use the plan on the VPS. The service env there also holds a
+    valid API key, which must never reach Claude Code in plan mode, or it would bill API credits."""
     from app import environment
     hosted = environment.Environment(name="production", backend="postgresql", identity="h/db", is_local=False)
     monkeypatch.setattr(environment, "describe", lambda: hosted)
-    with pytest.raises(research_job.ResearchError) as refused:
+    for name, value in {"ANTHROPIC_API_KEY": "sk-live", "ANTHROPIC_AUTH_TOKEN": "auth", "ANTHROPIC_BASE_URL": "https://x.example",
+                        "CLAUDE_CODE_USE_BEDROCK": "1"}.items():
+        monkeypatch.setenv(name, value)
+    binary, env = research_job.prepare("plan")
+    [checked] = plan_env  # the plan preflight saw exactly this env, merged as the SDK merges it
+    for e in (env, checked):
+        assert e["CLAUDE_CODE_OAUTH_TOKEN"] == "plan-token-value"
+        assert e["ANTHROPIC_API_KEY"] == e["ANTHROPIC_AUTH_TOKEN"] == e["ANTHROPIC_BASE_URL"] == e["CLAUDE_CODE_USE_BEDROCK"] == ""
+    assert "sk-live" not in checked.values() and env["CLAUDE_CONFIG_DIR"].endswith("/claude/research-plan")
+    assert research_job.child_env("api_key")["CLAUDE_CONFIG_DIR"].endswith("/claude/research-api")
+
+    # Were the key to reach Claude Code anyway, it reports an API key source next to the token: refused, never billed.
+    monkeypatch.setattr(plan_runner, "_preflight", REAL_PREFLIGHT)
+    plan_runner._checked.clear()
+    monkeypatch.setattr(plan_runner.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=json.dumps(
+        {"authMethod": "oauth_token", "apiProvider": "firstParty", "apiKeySource": "ANTHROPIC_API_KEY"})))
+    with pytest.raises(research_job.ResearchError) as leaked:
         research_job.prepare("plan")
-    assert refused.value.code == "plan_local_only"
+    assert leaked.value.code == "plan_auth_source"
+
+
+def test_api_key_mode_needs_the_key_and_carries_only_it(plan_env, monkeypatch):  # noqa: F811
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(research_job.ResearchError) as missing:
