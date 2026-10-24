@@ -304,7 +304,7 @@ the screen.
 With `RADAR_PREMARKET_ENABLED=true` inside an enabled recorder, each open
 session day gets one scan at 08:50 and one at 09:20 New York. A scan makes one
 batched quote read (previous closes, 4 requests), then one 1-minute timesales
-read per tracked symbol through the shared chart feed, at 40 a minute (about
+read per tracked symbol through the shared chart feed (uncached), at 40 a minute (about
 4.3 minutes for 169 symbols), stopping 7½ minutes after the checkpoint so the
 09:20 scan ends before the open. Only minutes completed by the checkpoint
 count. Tradier quotes' `last` stays at the regular close outside the session,
@@ -318,7 +318,9 @@ scan and every symbol's reading (previous close, last, bar count, volume,
 dollar volume, change, change against SPY, flag, read error) are written once
 to `<RADAR_STORE stem>-premarket.sqlite`, a separate append-only file; the
 Radar store, its rules and its screen are unchanged. A failed scan is recorded
-and not retried. The same back-test, at these two times, gave median lists of
+and not retried, and a setup error in the pilot file leaves the recorder
+running without it. Deploys hold from 09:25, so one at 08:50–09:25 can cut a
+scan short. The same back-test, at these two times, gave median lists of
 15 and 23 stocks with 74–75% becoming 5-point moves.
 
 Scoring after 10 sessions (read-only):
@@ -327,7 +329,8 @@ Scoring after 10 sessions (read-only):
 cd backend && PYTHONPATH=. .venv/bin/python scripts/radar_premarket_eval.py /abs/radar.sqlite
 ```
 
-The 09:20 list passes when all four hold: scans recorded on at least 9 of 10
+The 09:20 list passes when all four hold (every Radar session from the first
+scan counts; a morning with no scan is a failed one): scans recorded on at least 9 of 10
 sessions with at least 95% of reads succeeding; a median of 8–35 names a
 session; at least 50% of names become moves of 5 points or more against SPY
 after the open (from Radar's own passes); and at least 60% of the important

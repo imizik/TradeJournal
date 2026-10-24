@@ -183,5 +183,9 @@ def runner_from_env() -> RadarRunner | None:
         return None
     from app.engine.chart_calendar import chart_calendar
     universe = load_universe()
-    return RadarRunner(RadarStore(store), chart_calendar, universe=universe,
-                       premarket=radar_premarket.scanner_from_env(store, chart_calendar, universe))
+    runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe)
+    try:
+        runner.premarket = radar_premarket.scanner_from_env(store, chart_calendar, universe)
+    except Exception:  # an unusable pilot file must not turn the recorder off
+        log.exception("Radar premarket pilot could not start; it stays off")
+    return runner

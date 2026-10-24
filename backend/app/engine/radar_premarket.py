@@ -2,7 +2,7 @@
 
 Off unless ``RADAR_PREMARKET_ENABLED`` is true; it only runs inside an enabled Radar recorder. On an open
 session day it scans once at each ``CHECKPOINTS`` time (08:50 and 09:20 New York): one batched Tradier quote
-read for previous closes, then one 1-minute timesales read per tracked symbol through the shared chart feed,
+read for previous closes, then one 1-minute timesales read per tracked symbol through the shared chart feed (uncached),
 paced to ``READS_PER_MINUTE`` and stopped at ``DEADLINE_MINUTES`` so the 09:20 scan ends before the regular
 session. Only bars completed by the checkpoint count, so a slow scan reads the same minutes as a fast one.
 
@@ -61,7 +61,7 @@ CREATE TRIGGER IF NOT EXISTS premarket_reading_no_update BEFORE UPDATE ON premar
 CREATE TRIGGER IF NOT EXISTS premarket_reading_no_delete BEFORE DELETE ON premarket_reading BEGIN SELECT RAISE(ABORT,'premarket readings are immutable'); END;
 """
 
-Read = Callable[[str, dict, int], tuple]
+Read = Callable[..., tuple]  # chart_feed.read(path, params, ttl, keep=...)
 Quotes = Callable[[list[str]], dict]
 
 
@@ -246,10 +246,11 @@ class PremarketScanner:
             scan["requests_used"] += 1
             started = self.clock()
             try:
-                # The same request key as the chart workspace's intraday read, so the two share one cached answer.
+                # Uncached (keep=False): 169 reads would push every chart out of the feed's cache, and a stale
+                # cached answer must not pass as a fresh read.
                 data = self.read("/v1/markets/timesales", {"symbol": symbol, "interval": "1min", "session_filter": "all",
                                                            "start": day.strftime("%Y-%m-%d 04:00"),
-                                                           "end": day.strftime("%Y-%m-%d 20:00")}, 15)[0]
+                                                           "end": day.strftime("%Y-%m-%d 20:00")}, 15, keep=False)[0]
                 series = (data or {}).get("series") or {}
                 raw = series.get("data") if isinstance(series, dict) else None
                 bars = normalize_bars(raw if isinstance(raw, list) else [raw] if isinstance(raw, dict) else [])

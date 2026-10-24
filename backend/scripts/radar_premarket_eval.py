@@ -2,8 +2,9 @@
 
 Read-only: opens the Radar store and its ``-premarket.sqlite`` sibling in SQLite read-only mode and writes
 nothing. A stock's outcome is its largest regular-session move against SPY over Radar's own usable passes; an
-"important" move is at least ``IMPORTANT_PCT`` points either way. Prints per-session lists and the pilot's
-pass/fail checks from ``docs/radar.md``.
+"important" move is at least ``IMPORTANT_PCT`` points either way. Every Radar session from the first scan on is
+scored, so a morning with no scan counts against coverage. Prints per-session lists and the pilot's pass/fail
+checks from ``docs/radar.md``.
 
     python scripts/radar_premarket_eval.py /abs/path/radar.sqlite [--checkpoint 09:20] [--quiet]
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from app.engine import radar_premarket, radar_rules
 from app.engine.chart_math import ET
-from app.engine.radar_store import RadarStore
+from app.engine.radar_store import RadarStore, load_universe
 
 IMPORTANT_PCT = 5.0
 SEEN_PCT = 3.0  # an important move already this far from SPY at the checkpoint counts toward recall
@@ -34,7 +35,7 @@ def outcomes(store: RadarStore, session: str) -> dict[str, float]:
         for symbol, q in quotes.items():
             if symbol != "SPY" and radar_rules.usable(q):
                 excess = (q["last"] / q["prev_close"] - 1) * 100 - spy_move
-                if abs(excess) > abs(best.get(symbol, 0.0)):
+                if symbol not in best or abs(excess) > abs(best[symbol]):
                     best[symbol] = excess
     return best
 
@@ -57,17 +58,23 @@ def main():
     radar = RadarStore(args.store.resolve(), read_only=True)
     pre = radar_premarket.PremarketStore(radar_premarket.store_path(args.store.resolve()), read_only=True)
     scans = pre.scans()
-    sessions = sorted({s["session_date"] for s in scans})
+    stocks = {row["symbol"] for row in load_universe()["symbols"] if row["kind"] == "stock" and not row.get("benchmark")}
+    start = min((s["session_date"] for s in scans), default=None)
+    sessions = sorted({s["session_date"] for s in scans} | {d for d in radar.sessions() if start and d >= start})
     totals = defaultdict(int)
     sizes = []
     for session in sessions:
         best = outcomes(radar, session)
         events = first_events(radar, session)
+        if best and not any(s["session_date"] == session and s["checkpoint"] == args.checkpoint for s in scans):
+            print(f"\n{session} {args.checkpoint}: no scan recorded")
+            totals["sessions"] += 1
+            sizes.append(0)
         for scan in (s for s in scans if s["session_date"] == session):
             rows = pre.readings(scan["id"])
             flagged = [r for r in rows if r["flagged"]]
             hits = [r for r in flagged if abs(best.get(r["symbol"], 0.0)) >= IMPORTANT_PCT]
-            seen = [r for r in rows if r["excess_pct"] is not None and abs(r["excess_pct"]) >= SEEN_PCT
+            seen = [r for r in rows if r["symbol"] in stocks and r["excess_pct"] is not None and abs(r["excess_pct"]) >= SEEN_PCT
                     and abs(best.get(r["symbol"], 0.0)) >= IMPORTANT_PCT]
             print(f"\n{session} {scan['checkpoint']} {scan['status']}: read {scan['symbols_read']}/{scan['symbols_requested']}"
                   f" ({scan['symbols_with_bars']} with premarket trades), flagged {len(flagged)},"

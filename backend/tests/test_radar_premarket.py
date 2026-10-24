@@ -71,8 +71,8 @@ class Feed:
     def __init__(self, fail=()):
         self.calls, self.fail = [], set(fail)
 
-    def __call__(self, path, params, ttl):
-        self.calls.append((path, dict(params), ttl))
+    def __call__(self, path, params, ttl, keep=True):
+        self.calls.append((path, dict(params), ttl, keep))
         if params["symbol"] in self.fail:
             raise RuntimeError("cooling down")
         return {"series": {"data": BARS.get(params["symbol"], [])}}, 0.0, None
@@ -140,7 +140,7 @@ def test_scan_records_one_frozen_list_per_checkpoint(tmp_path):
     assert rows["UPP"]["last"] == 107.0 and rows["UPP"]["excess_pct"] == 6.0  # the 08:52 bar is after the checkpoint
     assert {s for s, r in rows.items() if r["flagged"]} == {"UPP", "DWN"}
     assert feed.calls[0] == ("/v1/markets/timesales", {"symbol": "SPY", "interval": "1min", "session_filter": "all",
-                                                       "start": "2026-10-26 04:00", "end": "2026-10-26 20:00"}, 15)
+                                                       "start": "2026-10-26 04:00", "end": "2026-10-26 20:00"}, 15, False)
     assert clock.now - _ts(8, 50) >= 6 * 60 / radar_premarket.READS_PER_MINUTE * 0.99  # paced reads
     assert scanner.run_once() is None and len(feed.calls) == 7  # never twice
     with pytest.raises(sqlite3.DatabaseError):
@@ -227,6 +227,14 @@ def test_runner_from_env_builds_the_scanner_only_when_enabled(tmp_path, monkeypa
     monkeypatch.setenv("RADAR_PREMARKET_ENABLED", "true")
     monkeypatch.setattr(radar_premarket, "PremarketScanner", lambda store, calendar, universe: ("scanner", store.path))
     assert radar_runner.runner_from_env().premarket == ("scanner", tmp_path / "radar-premarket.sqlite")
+    (tmp_path / "radar-premarket.sqlite").write_bytes(b"not sqlite")  # a broken pilot file leaves the recorder on
+    monkeypatch.undo()
+    monkeypatch.setenv("RADAR_ENABLED", "true")
+    monkeypatch.setenv("RADAR_STORE", str(tmp_path / "radar.sqlite"))
+    monkeypatch.setenv("RADAR_PREMARKET_ENABLED", "true")
+    monkeypatch.setattr(radar_runner.tradier, "tradier_configured", lambda: True)
+    runner = radar_runner.runner_from_env()
+    assert runner is not None and runner.premarket is None
 
 
 def test_eval_scores_the_list_against_radar_passes(tmp_path, monkeypatch, capsys):
@@ -244,9 +252,22 @@ def test_eval_scores_the_list_against_radar_passes(tmp_path, monkeypatch, capsys
                            "error": None, "skip_reason": None}, rows)
     sys.path.insert(0, str(radar_premarket.Path(__file__).resolve().parent.parent / "scripts"))
     import radar_premarket_eval
+    monkeypatch.setattr(radar_premarket_eval, "load_universe", lambda: UNIVERSE)
     monkeypatch.setattr(sys, "argv", ["radar_premarket_eval.py", str(radar.path), "--checkpoint", "08:50"])
     radar_premarket_eval.main()
     out = capsys.readouterr().out
     assert "UPP    premarket +6.0 vs SPY" in out and "after the open +7.0" in out
     assert "precision: 1/2 = 50%  -> pass" in out and "recall: 1/1 = 100%  -> pass" in out
-    assert "list size: median 2 a session  -> FAIL" in out
+    assert "list size: median 2 a session  -> FAIL" in out and "coverage: scans recorded 1/1" in out
+    # A later Radar session with no scan counts against coverage.
+    at = datetime(2026, 10, 27, 9, 31, 5, tzinfo=ET)
+    stamp = at.astimezone().isoformat()
+    radar.append_pass({"session_date": "2026-10-27", "started_at": stamp, "finished_at": stamp, "universe_version": "v",
+                       "status": "ok", "symbols_requested": 2, "symbols_returned": 2, "unmatched": [], "requests_used": 1,
+                       "error": None, "skip_reason": None},
+                      [{"symbol": s, "last": 101.0, "prev_close": 100.0, "open": None, "high": None, "low": None, "volume": 1,
+                        "bid": None, "ask": None, "trade_time_ms": int(at.timestamp() * 1000) - 1000, "retrieved_at": stamp}
+                       for s in ("SPY", "UPP")])
+    radar_premarket_eval.main()
+    out = capsys.readouterr().out
+    assert "2026-10-27 08:50: no scan recorded" in out and "coverage: scans recorded 1/2" in out
