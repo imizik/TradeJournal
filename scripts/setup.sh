@@ -49,7 +49,9 @@ if command -v npm >/dev/null 2>&1; then
   # sandbox has one preinstalled that verify.sh finds on its own; anywhere else
   # download it once (a no-op when already present). Not fatal: every other
   # check still runs without it.
-  if ! ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome >/dev/null 2>&1; then
+  if ! { [ -f /opt/pw-browsers/chromium ] && [ -x /opt/pw-browsers/chromium ]; } \
+    && ! ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome \
+      /opt/pw-browsers/chromium-*/chrome-linux64/chrome >/dev/null 2>&1; then
     echo "==> Browser for the browser tests"
     (cd "$ROOT/frontend" && npx --no-install playwright install --only-shell chromium) \
       || echo "    could not download Chromium - browser tests will fail until 'npx playwright install chromium' succeeds in frontend/."
