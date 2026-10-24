@@ -105,3 +105,21 @@ def test_fixed_ipv4_network_failure_keeps_existing_error_contract(sender, alerts
     else:
         with pytest.raises(URLError, match="ConnectError"):
             alerts.publish(config, "Test", "Test")
+
+
+@pytest.mark.parametrize("app_url", ["https://fixture.invalid/", ""])
+def test_position_alert_tap_and_button_share_exact_event_url(monkeypatch, app_url):
+    payloads = []
+    def post(url, *, json, **kwargs):
+        payloads.append(json)
+        return httpx.Response(200, json={"id": "fixture-receipt"})
+    monkeypatch.setattr(httpx, "post", post)
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.invalid/fixture-topic")
+    monkeypatch.setenv("NTFY_IPV4_ONLY", "false")
+    monkeypatch.setenv("ALERT_APP_URL", app_url)
+    ntfy.publish("Position alert", "Fixture", path="/trades/trade-id?alert=event-id", direct_click=True)
+    if app_url:
+        assert payloads[0]["click"] == "https://fixture.invalid/trades/trade-id?alert=event-id"
+        assert payloads[0]["actions"][0]["url"] == payloads[0]["click"]
+    else:
+        assert "click" not in payloads[0] and "actions" not in payloads[0]

@@ -52,11 +52,12 @@ function tradeTitle(trade: Trade) {
 /** Trade times in New York time, labelled, whatever the viewing device's zone. */
 const etTime = (value: string) => `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} ET`;
 
-export default function TradeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string }> }) {
+export default function TradeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string; alert?: string }> }) {
   const { id } = use(params);
   // Back returns to the page that opened the trade (e.g. a Daily Review day); only same-site paths are followed.
-  const { returnTo: from } = use(searchParams);
+  const { returnTo: from, alert } = use(searchParams);
   const back = from && from.startsWith("/") && !from.startsWith("//") ? { href: from, label: from.startsWith("/daily") ? "Back to Daily Review" : "Back" } : { href: "/trades", label: "Back to Trades" };
+  const [tradeError, setTradeError] = useState(false);
   const [trade, setTrade] = useState<Trade | null>(null);
   const [fills, setFills] = useState<Fill[] | null>(null);
   const [alpacaContexts, setAlpacaContexts] = useState<Record<string, FillMarketContext>>({});
@@ -87,8 +88,11 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
       .catch(() => {
         setTrade(null);
         setFills(null);
+        setTradeError(true);
       });
   }, [id]);
+
+  if (tradeError) return <div role="alert" className="space-y-3"><p>This position could not be loaded. It may no longer be in the journal.</p><Link href="/trades" className="underline">Back to Trades</Link><p>Reload the page to try again.</p></div>;
 
   if (!trade || !fills) {
     return <div className="text-center text-muted-foreground">Loading...</div>;
@@ -133,6 +137,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
       </div>
 
+      {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} symbol={trade.ticker} status={trade.status} />}
+
       <div className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Trade Summary
@@ -164,7 +170,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
       </section>}
 
-      <TradePhoneAlerts tradeId={id} />
+      {!alert && <TradePhoneAlerts key={id} tradeId={id} symbol={trade.ticker} status={trade.status} />}
 
       <TradeAdvice tradeId={id} />
 
