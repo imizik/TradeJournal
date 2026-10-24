@@ -1,0 +1,56 @@
+{
+  "protocol_id": "size-cap-20261024-v1",
+  "registered": "2026-10-24",
+  "registered_before": "any outcome of this rule was computed; the October 21 behavior audit's observation (the same mistakes cost more per trade after July 7 because sizes grew) was already known and motivated the rule, and the October 24 exit study had already read the same extract",
+  "question": "Had each trade's entry premium been capped at a multiple of the trailing 20-trade median premium, would the October 2025-26 long option trades have kept more money, and is the saving more than trading smaller across the board by the same premium would give?",
+  "population": {
+    "trades": "every trade in the exit-counterfactual-20261024-v1 extract (closed or expired long option trades opened 2025-07-10 to 2026-10-19), including those held longer than 10 days; no option bars are needed",
+    "extract": "the same file the exit study read, produced by `python -m scripts.exit_counterfactual_study extract`; registered bytes sha256 023e0e11302cdc685f789dfd452d103feeb36d87385232c819fc8eedb1878eda. A run on any other file reports extract_is_registered false and must say so",
+    "excluded_and_counted": [
+      "a fill side other than buy_to_open or sell_to_close",
+      "fills that do not allocate first-in-first-out"
+    ]
+  },
+  "position_accounting": "each trade's P&L and entry premium come from its actual fills replayed first in first out (exit study Position); what is left open at the end expired worthless",
+  "cap": {
+    "reference": "the median of the entry premium already paid, as of this trade's first entry, by the 20 population trades whose first entry is earlier (ordered by first entry, then trade id); both accounts together. Actual premiums, never capped ones",
+    "warmup": "the first 20 population trades have no reference and are uncapped (difference 0)",
+    "scaling": "when a trade's total entry premium P exceeds the cap C, every fill is scaled by C / P, so its P&L is scaled by C / P (fractional contracts allowed); its return on premium is unchanged"
+  },
+  "rules": {
+    "cap_1_5x": "cap at 1.5 times the reference",
+    "cap_2x": "cap at 2 times the reference"
+  },
+  "tests": 2,
+  "outcomes": {
+    "primary": "total dollar difference, capped minus actual, over every trade in the population",
+    "secondary": [
+      "aggregate return on premium, capped minus actual, in percentage points (total P&L / total entry premium)",
+      "benchmark, trading smaller across the board by the same premium: every trade scaled by (capped total premium / actual total premium); selection value = cap difference minus that flat cut's difference",
+      "descriptive only: capped trades' mean return on premium against the uncapped trades', the largest single-trade loss and the worst day, actual and capped"
+    ],
+    "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261024), each trade keeping its scale factor; Bonferroni across the 2 multiples: 97.5% two-sided intervals for primary decisions"
+  },
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the audit that motivated the rule read both. Every result is exploratory; a positive check half is consistency, not confirmation"
+  },
+  "decisions": {
+    "supported_saving": "primary 97.5% interval above 0, and in each period: at least one trade capped, dollar difference above 0 and aggregate return-on-premium difference above 0",
+    "selection_informative": "supported_saving and the selection value's 97.5% interval above 0",
+    "outcomes": {
+      "supported_saving and selection_informative": "eligible for prospective testing as a size cap",
+      "supported_saving only": "investigate further: the saving is trading smaller overall, not capping the large trades",
+      "interval includes 0 or periods disagree": "reject as a demonstrated saving; a cap may still limit the worst days, which this does not decide",
+      "primary interval below 0": "reject: the cap would have cost money"
+    }
+  },
+  "limits": [
+    "proportional scaling assumes the same fills at a smaller size: no whole-contract rounding, no change in fill prices, no change in how the trade was managed",
+    "a smaller position might have been exited differently; the counterfactual keeps every decision",
+    "the trailing median moves with the owner's sizing, so a cap relative to it does not stop gradual growth",
+    "stock trades and positions open at extract time are not in the extract"
+  ],
+  "prospective": "not registered here; a forward test needs its own protocol id after this run"
+}
