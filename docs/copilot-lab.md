@@ -26,9 +26,10 @@ untouched.
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call six read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
-  comparison, peer moves, symbol news, earnings dates, quotes and saved research
-  (below), plus `propose_plan`, which writes nothing (see Confirm a plan). Each tool
+  call seven read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  comparison, peer moves, symbol news, earnings dates, quotes, saved research
+  and investigation changes (below). It can also call `propose_plan`, which
+  writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
@@ -49,6 +50,38 @@ untouched.
   text), first text, longest wait between visible events, total latency, tool
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
+
+## What changed?
+
+A reopened investigation, from Recent or from an alert's
+`?investigation=<id>` link, offers **What changed?**. One tap sends one
+turn with a fixed prompt that names the investigation's id. Opening never
+sends it, because a turn costs money. From an alert's link, the same prompt
+waits in the message box, unsent. The prompt asks the model to call:
+
+- `get_investigation_changes(investigation_id)` (read-only, provenance
+  `saved`). It returns:
+  - the saved title, symbol, status, conclusion, summary and last-updated time;
+  - each tool's newest evidence as-of time;
+  - the level alerts confirmed from the investigation: armed, or fired with
+    time and price;
+  - its research jobs (questions and revisits), each saying whether it
+    finished since the last update;
+  - up to two of their results.
+
+  It is capped at 8 evidence tools, 6 alerts, 5 jobs and 2 results, with text
+  trimmed, so the largest answer still fits whole within a tool result's
+  6,000 characters. Linked jobs are found in SQL by the investigation's id. An
+  unknown id is refused. Replay leaves out anything after the frozen moment:
+  alerts armed or fired later, jobs queued or finished later, and evidence
+  dated later. If the investigation was edited after the moment, its later
+  status, conclusion and messages are hidden. Fixture mode reads nothing.
+- Then fresh comparison, peer, news and quote reads, so it can say what moved
+  against the saved as-of times and whether the conclusion still holds.
+
+Background research jobs get neither this tool nor `propose_plan`. They read
+untrusted pages and can fetch URLs, so injected text must not make them read
+another investigation by id.
 
 ## Confirm a plan
 
@@ -184,8 +217,7 @@ credits.
   run under that exact environment must report the plan token as the sign-in.
   Otherwise the chat returns 503 and asks for `claude setup-token`. It never
   falls back to an API key.
-- **Same limits.** Only the seven lab tools (background research jobs get the six read-only ones, never
-  `propose_plan`), as in-process SDK MCP tools that
+- **Same limits.** Only the eight lab tools, as in-process SDK MCP tools that
   call `copilot_tools.validate()` and the same timed, bounded runner; the same
   8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
   120 s per turn and the spend cap above.
@@ -347,6 +379,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 | `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
 | `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC (API-equivalent on the plan). It is checked before every attempt. At the cap, queued jobs wait for the next day. |
 | `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
+| `RESEARCH_NOTIFY_ENABLED` | unset (off) | `true`: a job with a material result about an open investigation sends one phone ping (below). |
+| `RESEARCH_NOTIFY_DAILY_MAX` | `3` | Phone pings per New York day, all jobs together. |
 | `RESEARCH_REASSESS_AFTER_HOURS` | `0` (off) | N: each original open investigation that has been neither updated nor reassessed for N hours, and has no job waiting, gets one `reassess` job, at most one a day. A reassessment's own output is never reassessed. |
 
 - **Owner-only routes** (in no assistant grant):
@@ -403,8 +437,36 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   - A finished job links to its saved investigation (`source="research_job"`).
   - A Radar job is titled `Radar: …`, and a reassessment is saved as a new
     investigation titled `Reassess: …`.
-- **Not included:** notifications, ntfy and phone alerts. To try it locally,
-  set `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
+- **Phone pings for material results** (`RESEARCH_NOTIFY_ENABLED`, off by
+  default):
+  - Every assessment carries `material_change`, false by default, and a
+    `material_reason` of at most 140 characters. It is true only when the
+    linked conclusion should change or a new catalyst or risk appeared;
+    routine confirmation is never material.
+  - A finished job sends one ntfy push through `app.engine.ntfy.publish`,
+    using the API's existing `alerts.env` (`NTFY_URL`, `NTFY_TOKEN`). The title
+    is "Research: SYMBOL – reason", and a tap opens the linked investigation
+    in the lab (`/copilot-lab?investigation=…`).
+  - It only sends when every check passes:
+    - the flag is on, and the result is material with a reason;
+    - the job is linked to an investigation that is still open (a
+      reassessment's, or the one "Research deeper" ran from);
+    - it cites at least one source, and the server checks are clean: no
+      unseen citation, no evidence reference to a tool the job never called,
+      and no source after the evidence time;
+    - there has been no ping yet for that job, none today (ET) for that
+      investigation, and fewer than `RESEARCH_NOTIFY_DAILY_MAX` today. A
+      failed ping counts toward both limits, since ntfy may still have
+      delivered it.
+  - Control and bidirectional characters are stripped from the reason, and
+    the link is built from the investigation record's own id.
+  - The ping is recorded as `sending` before it goes out, so a crash never
+    sends it twice.
+  - The job records `sent`, `failed` (never retried, and the job stays done)
+    or `skipped` with the reason. The lab shows the materiality and that
+    status on each finished job.
+- **Not included:** other notifications. To try the queue locally, set
+  `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
   question with the POST route, and read the result in the lab's saved
   investigations.
 

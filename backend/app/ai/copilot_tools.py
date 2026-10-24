@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any, Callable
 
@@ -67,6 +68,17 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
                          "properties": {"symbol": _SYMBOL_SCHEMA,
                                         "limit": {"type": "integer", "description": "1-5, default 3"}}},
+    },
+    {
+        "name": "get_investigation_changes",
+        "description": "What a saved investigation said and what has happened to it since: its saved conclusion, "
+                       "last-updated time and the as-of times of the evidence it used, the level alerts confirmed from "
+                       "it (armed, or fired with time and price), and its research jobs, with results finished since "
+                       "the last update. Saved records, not market data: compare them with fresh comparison, peer, news "
+                       "and quote reads to say what changed.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["investigation_id"],
+                         "properties": {"investigation_id": {"type": "string",
+                                                             "description": "The saved investigation's id (a UUID)"}}},
     },
     {
         "name": "propose_plan",
@@ -153,6 +165,11 @@ def validate(name: str, args: Any) -> dict:
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= MAX_SYMBOLS:
             raise ToolInputError(f"symbols must list 1-{MAX_SYMBOLS} tickers")
         return {"symbols": list(dict.fromkeys(_symbol(s) for s in symbols))}
+    if name == "get_investigation_changes":
+        try:
+            return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
+        except ValueError:
+            raise ToolInputError("investigation_id must be a saved investigation's id (a UUID)") from None
     out = {"symbol": _symbol(args.get("symbol"))}
     if name == "get_group_comparison" and args.get("group") is not None:
         if not isinstance(args["group"], str) or not 0 < len(args["group"]) <= 120:
@@ -276,6 +293,112 @@ def saved_research(symbol: str, limit: int = 3, before: datetime | None = None) 
             "note": "Saved earlier by the owner's copilot or a research job; text, not market data."}
 
 
+def _iso(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return str(value)
+
+
+# Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
+CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 8, 6, 5, 2
+
+
+def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
+    """A saved investigation's last state and what happened to it since, bounded. With ``before`` (aware, a replay's
+    frozen moment) nothing later is shown: alert firings, jobs and results after it are left out."""
+    from sqlalchemy import and_, or_
+    from sqlmodel import Session, col, select
+    from app.database import engine
+    from app.engine import copilot_investigations
+    from app.engine.level_alert_monitor import alert_rows
+    from app.models import ResearchJob
+    try:
+        record = copilot_investigations.get(investigation_id)
+    except copilot_investigations.InvestigationError:
+        raise ToolInputError("no saved investigation has that id") from None
+    cutoff = before.timestamp() if before else None
+
+    def after_cutoff(at) -> bool:
+        if cutoff is None or at is None:
+            return False
+        if isinstance(at, (int, float)):
+            return at > cutoff
+        moment = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        return (moment if moment.tzinfo else moment.replace(tzinfo=UTC)).timestamp() > cutoff
+
+    if after_cutoff(record["created_at"]):
+        return {"investigation_id": investigation_id, "state": "unavailable",
+                "reason": "This investigation was saved after the replay moment, so it is not shown."}
+    # Updated after a replay's moment: its later conclusion and messages would be hindsight.
+    later = after_cutoff(record["updated_at"])
+    latest: dict[str, Any] = {}  # each tool's newest as-of time among the saved evidence references
+    for ref in record["evidence"]:
+        if ref.get("as_of") is None or after_cutoff(ref["as_of"]):
+            continue
+        if str(ref["as_of"]) > str(latest.get(ref["tool"], {}).get("as_of", "")):
+            latest[ref["tool"]] = {"tool": ref["tool"], "as_of": ref["as_of"], "kind": ref.get("kind")}
+    since = None if later else record["updated_at"]
+    asked_from = json.dumps({"from_investigation": investigation_id})[1:-1]
+    reassessing = json.dumps({"investigation_id": investigation_id})[1:-1]
+    with Session(engine) as db:
+        alerts = [a for a in alert_rows(db, limit=200) if a["source_kind"] == "copilot" and a["source_id"] == investigation_id
+                  and not after_cutoff(a["armed_at"])]
+        jobs = db.exec(select(ResearchJob).where(or_(
+            col(ResearchJob.input_json).contains(asked_from),
+            and_(ResearchJob.kind == "reassess", col(ResearchJob.input_json).contains(reassessing)),
+        )).order_by(col(ResearchJob.created_at).desc()).limit(50)).all()
+    linked: list[dict] = []
+    result_ids: list[tuple[str, bool]] = []  # each finished job's saved result, newest first
+    for job in jobs:
+        data = json.loads(job.input_json)
+        if data.get("from_investigation") != investigation_id and not (job.kind == "reassess" and data.get("investigation_id") == investigation_id):
+            continue
+        if after_cutoff(job.created_at.isoformat()):
+            continue
+        finished = job.finished_at.isoformat() + "Z" if job.finished_at and not after_cutoff(job.finished_at.isoformat()) else None
+        linked.append({"kind": job.kind, "status": job.status if finished or job.status not in ("done", "failed") else "running",
+                       "question": (data.get("question") or "")[:80], "finished_at": finished, "cost_usd": job.cost_usd,
+                       "since_last_update": bool(finished and since and finished > since)})
+        if job.investigation_id and finished:
+            result_ids.append((str(job.investigation_id), linked[-1]["since_last_update"]))
+        if len(linked) == CHANGE_JOBS:
+            break
+    results = []
+    for result_id, fresh in result_ids:
+        if len(results) == CHANGE_RESULTS:
+            break
+        try:
+            saved = copilot_investigations.get(result_id)
+        except copilot_investigations.InvestigationError:
+            continue
+        results.append({"id": saved["id"], "title": saved["title"][:80], "created_at": saved["created_at"],
+                        "conclusion": (saved["conclusion"] or "")[:120],
+                        "summary": ((saved["findings"] or {}).get("summary") or "")[:200], "since_last_update": fresh})
+    findings = record["findings"] or {}
+    investigation = {"title": record["title"][:120], "symbol": record["symbol"], "source": record["source"],
+                     "created_at": record["created_at"]}
+    if later:
+        investigation["later_state"] = "Updated after the replay moment: its later status, conclusion and messages are hidden."
+    else:
+        investigation.update(status=record["status"], conclusion=record["conclusion"], updated_at=record["updated_at"],
+                             messages=record["message_count"], **({"summary": findings["summary"][:300]} if findings.get("summary") else {}))
+    return {
+        "investigation_id": investigation_id, "state": "ok", "as_of": _now(),
+        "note": "Saved records: compare updated_at and the evidence as-of times with fresh reads to say what changed.",
+        "investigation": investigation,
+        "evidence_as_of": list(latest.values())[:CHANGE_EVIDENCE],
+        "alerts": [{"symbol": a["symbol"], "condition": a["condition"], "interval": a["interval"], "price": a["price"],
+                    "direction": a["direction"], "label": a["label"], "armed_at": _iso(a["armed_at"]),
+                    "fired": None if not a["event"] or after_cutoff(a["event"]["event_at"]) else
+                    {"at": _iso(a["event"]["event_at"]), "price": a["event"]["price"]}}
+                   for a in alerts[:CHANGE_ALERTS]],
+        "results": results,
+        "research_jobs": linked,
+    }
+
+
 class LiveEvidence:
     """Existing TradeJournal services, read in-process. Same data the Charts and Radar tabs show."""
     label = "live"
@@ -308,6 +431,9 @@ class LiveEvidence:
     def get_saved_research(self, symbol: str, limit: int = 3) -> dict:
         return saved_research(symbol, limit)
 
+    def get_investigation_changes(self, investigation_id: str) -> dict:
+        return investigation_changes(investigation_id)
+
     def get_quotes(self, symbols: list[str]) -> dict:
         from app.engine.quotes import get_stock_quotes
         return {"fetched_at": _now(), "prices": get_stock_quotes(symbols)}
@@ -320,6 +446,7 @@ PROVENANCE = {
     "get_symbol_events": ("Tradier fundamentals calendar (cached)", "cached"),
     "get_quotes": ("Tradier / Alpaca quotes (60 s cache)", "fetched"),
     "get_saved_research": ("Saved investigations and research results (TradeJournal)", "saved"),
+    "get_investigation_changes": ("Saved investigation, its alerts and research jobs (TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

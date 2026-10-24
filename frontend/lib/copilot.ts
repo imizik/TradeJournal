@@ -157,6 +157,10 @@ export const CONTEXT_MAX = 300;
 const SYMBOL_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 
 /** `/copilot-lab?symbol=X&context=...`: opens a new investigation prefilled, never sent on its own. */
+/** The "What changed?" turn for a reopened investigation: the id goes in the text, so every backend can act on it. */
+export const whatChangedPrompt = (investigationId: string) =>
+  `What changed? Use get_investigation_changes for investigation ${investigationId}, then compare it with fresh group, peer, news and quote reads, and say whether the saved conclusion still holds.`;
+
 export function copilotLabHref(symbol: string, context?: string) {
   const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
   if (context?.trim()) query.set("context", context.trim().slice(0, CONTEXT_MAX));
@@ -184,6 +188,9 @@ export type ResearchJob = {
   input: { question?: string; symbols?: string[]; from_investigation?: string; investigation_id?: string };
   attempts: number; error: string | null; cost_usd: number | null; investigation_id: string | null;
   created_at: string; next_attempt_at?: string; finished_at: string | null;
+  /** Set when a job finishes done: was it material, and what happened to its phone ping. */
+  notify?: { material_change: boolean; material_reason: string; status: "sent" | "sending" | "skipped" | "failed";
+    reason?: string; error?: string } | null;
 };
 export type ResearchJobs = { jobs: ResearchJob[]; queue_enabled: boolean; daily_budget_usd: number; spent_today_usd: number };
 export const ACTIVE_JOB = new Set<ResearchJob["status"]>(["queued", "running"]);

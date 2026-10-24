@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   asOfText, createInvestigation, fromSaved, getCopilotStatus, getInvestigation, listInvestigations, streamTurn, toSaved,
-  updateInvestigation, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
+  updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
 } from "@/lib/copilot";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
@@ -26,7 +26,7 @@ const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
-  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal",
+  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", get_investigation_changes: "What changed",
 };
 
 function inline(text: string) {
@@ -210,7 +210,12 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
       if (link?.investigation) id = link.investigation; // ?investigation=<id> opens that one
       else if (link) id = null; // a symbol or context link starts fresh rather than reopening the last investigation
       if (link && !link.investigation) remember(null);
-      else if (id) getInvestigation(id).then(saved => { if (!controller.signal.aborted) open(saved); }).catch(() => remember(null));
+      else if (id) getInvestigation(id).then(saved => {
+        if (controller.signal.aborted) return;
+        open(saved);
+        // From an alert's link: the question is ready, but a turn costs money, so it is not sent.
+        if (link?.investigation) setDraft(whatChangedPrompt(saved.id));
+      }).catch(() => remember(null));
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
     });
@@ -367,6 +372,11 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
             className="min-w-[12rem] flex-1 rounded border bg-background px-2 py-1 text-base text-foreground sm:text-xs" />
           <button type="button" disabled={busy} onClick={() => void persist({ status: current.status === "open" ? "closed" : "open" })}
             className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">{current.status === "open" ? "Close" : "Reopen"}</button>
+          {messages.length > 0 && (
+            <button type="button" disabled={busy || !enabled} onClick={() => void send(whatChangedPrompt(current.id))}
+              title="One copilot turn: what changed since this investigation was last discussed"
+              className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">What changed?</button>
+          )}
         </div>
       )}
       {current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}

@@ -1651,6 +1651,9 @@ class ResearchJob(SQLModel, table=True):
     # One entry per attempt, {at, usd, estimated}: the attempt's budget is charged when it starts and replaced by the
     # real cost once known, so the daily cap counts retries, timeouts, cancels and restarts.
     spend_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    # Set when a job finishes done: {material_change, material_reason, status: sent|sending|skipped|failed, reason,
+    # investigation_id, day (ET), at, message_id}. At most one phone ping per job (app/engine/research_queue.py).
+    notify_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     investigation_id: Optional[uuid.UUID] = None  # the saved result
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     next_attempt_at: datetime = Field(default_factory=datetime.utcnow)
