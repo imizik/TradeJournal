@@ -152,12 +152,15 @@ def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None =
         return view(job), True
 
 
-def enqueue_question(question: str, symbols: list[str], session: Session | None = None) -> tuple[dict, bool]:
-    """The same question and symbols are queued at most once per day."""
+def enqueue_question(question: str, symbols: list[str], session: Session | None = None,
+                     from_investigation: str | None = None) -> tuple[dict, bool]:
+    """The same question and symbols are queued at most once per day. ``from_investigation`` only records the saved
+    investigation the owner asked from, so the lab can show the job there; the job does not read it."""
     question = question.strip()
     if not question:
         raise QueueError("bad_input", "question is empty")
-    return enqueue("question", {"question": question, "symbols": symbols},
+    payload = {"question": question, "symbols": symbols, **({"from_investigation": from_investigation} if from_investigation else {})}
+    return enqueue("question", payload,
                    f"question:{_today()}:{_digest(question, ','.join(symbols))}", session)
 
 

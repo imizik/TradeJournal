@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   asOfText, createInvestigation, fromSaved, getCopilotStatus, getInvestigation, listInvestigations, streamTurn, toSaved,
   updateInvestigation, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
 } from "@/lib/copilot";
+import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -177,7 +178,7 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
   const [conclusion, setConclusion] = useState("");
   const unsaved = useRef(false);
 
-  const refreshRecent = () => listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ });
+  const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
   function open(saved: Investigation) {
     setMessages(fromSaved(saved));
@@ -298,6 +299,23 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
     remember(null);
   }
 
+  /** A new conversation about a finished research result: its symbol, and the result as the opening context. */
+  async function discuss(id: string) {
+    if (busy) return;
+    try {
+      const result = await getInvestigation(id);
+      startNew();
+      if (result.symbol) setSymbol(result.symbol);
+      const gist = result.conclusion || result.findings?.summary || "";
+      setDraft(`Context: background research "${result.title}" (saved ${shortTime(result.created_at)} ET)${gist ? `: ${gist}` : ""}`.slice(0, 600) + "\n\n");
+    } catch (error) {
+      setSaveState({ state: "error", message: error instanceof Error ? error.message : "Could not open that result." });
+    }
+  }
+
+  // The question a deeper job starts from: the latest one asked here, without its pasted context line.
+  const topic = (messages.filter(m => m.role === "user").at(-1)?.content.replace(/^Context: [^\n]*\n+/, "").trim() || current?.title || "").slice(0, 500);
+
   const enabled = status?.enabled === true;
   return (
     <div className="space-y-3">
@@ -345,6 +363,8 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
             className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">{current.status === "open" ? "Close" : "Reopen"}</button>
         </div>
       )}
+      {current && <ResearchDeeper key={current.id} investigationId={current.id} symbol={symbol} topic={topic}
+        onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
 

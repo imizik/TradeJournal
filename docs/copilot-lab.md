@@ -300,10 +300,25 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 
 - **Owner-only routes** (in no assistant grant):
   - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
-    job; the same question and symbols are queued at most once a day.
+    job; the same question and symbols are queued at most once a day. An
+    optional `investigation_id` is kept in the job's input as
+    `from_investigation`, so the lab can show the job on the investigation it
+    came from; the job does not read it.
   - `GET /copilot/research-jobs` lists jobs with the day's spend.
   - `POST /copilot/research-jobs/{id}/cancel` cancels a queued job, or stops a
     running one.
+- **In the lab** (`frontend/components/copilot/ResearchDeeper.tsx`): an open
+  saved investigation offers "Research deeper" only while `GET
+  /copilot/research-jobs` reports `queue_enabled`.
+  - It opens a form prefilled with the investigation's symbol and its latest
+    question; the owner edits it and queues a linked job.
+  - The job's status, cost and error show under the investigation. The list
+    is re-read every 10 s while a job is queued or running, and no longer
+    after that.
+  - A finished job's result appears under Recent, with "Open result" and
+    "Discuss this result". Discuss starts a new conversation on the result's
+    symbol, with the result as its opening context. It is not sent.
+  - Browser proof: `frontend/e2e/copilot-research.spec.ts`.
 - **How a job runs:**
   - One job at a time, through the research job above, with live evidence.
   - Each attempt's budget is capped by what is left of the day. That budget is
