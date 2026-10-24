@@ -30,6 +30,7 @@ const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
   get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", get_investigation_changes: "What changed",
+  get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
 };
 
 function inline(text: string) {
