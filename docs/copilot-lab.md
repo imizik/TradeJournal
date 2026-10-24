@@ -67,11 +67,15 @@ waits in the message box, unsent. The prompt asks the model to call:
     time and price;
   - its research jobs (questions and revisits), each saying whether it
     finished since the last update;
-  - up to three of their results.
+  - up to two of their results.
 
-  It is capped at 12 evidence tools, 10 alerts, 10 jobs and 3 results. An
-  unknown id is refused. Replay leaves out anything after the frozen moment,
-  and fixture mode reads nothing.
+  It is capped at 8 evidence tools, 6 alerts, 5 jobs and 2 results, with text
+  trimmed, so the largest answer still fits whole within a tool result's
+  6,000 characters. Linked jobs are found in SQL by the investigation's id. An
+  unknown id is refused. Replay leaves out anything after the frozen moment:
+  alerts armed or fired later, jobs queued or finished later, and evidence
+  dated later. If the investigation was edited after the moment, its later
+  status, conclusion and messages are hidden. Fixture mode reads nothing.
 - Then fresh comparison, peer, news and quote reads, so it can say what moved
   against the saved as-of times and whether the conclusion still holds.
 

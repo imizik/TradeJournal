@@ -263,3 +263,11 @@ def test_api_key_mode_uses_its_own_config_dir_and_needs_claude_code_to_report_th
     assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude" / "research-api") and Path(env["CLAUDE_CONFIG_DIR"]).is_dir()
     assert seen["env"]["ANTHROPIC_API_KEY"] == "sk-test" and seen["env"][plan_runner.TOKEN_ENV] == ""
     assert seen["env"]["CLAUDE_CONFIG_DIR"] == env["CLAUDE_CONFIG_DIR"]
+
+
+def test_the_job_hook_denies_the_lab_only_tools_by_name():
+    rec = research_job._Recorder(research_job.JobLimits())
+    for name in ("mcp__tradejournal__get_investigation_changes", "mcp__tradejournal__propose_plan"):
+        decision = asyncio.run(rec.pre_tool({"tool_name": name, "tool_input": {}}, "t1", None))
+        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert asyncio.run(rec.pre_tool({"tool_name": "mcp__tradejournal__get_quotes", "tool_input": {}}, "t2", None)) == {}

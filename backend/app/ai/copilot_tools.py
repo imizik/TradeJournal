@@ -301,10 +301,15 @@ def _iso(value) -> str | None:
     return str(value)
 
 
+# Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
+CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 8, 6, 5, 2
+
+
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
     """A saved investigation's last state and what happened to it since, bounded. With ``before`` (aware, a replay's
     frozen moment) nothing later is shown: alert firings, jobs and results after it are left out."""
-    from sqlmodel import Session, select
+    from sqlalchemy import and_, or_
+    from sqlmodel import Session, col, select
     from app.database import engine
     from app.engine import copilot_investigations
     from app.engine.level_alert_monitor import alert_rows
@@ -326,54 +331,71 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
     if after_cutoff(record["created_at"]):
         return {"investigation_id": investigation_id, "state": "unavailable",
                 "reason": "This investigation was saved after the replay moment, so it is not shown."}
+    # Updated after a replay's moment: its later conclusion and messages would be hindsight.
+    later = after_cutoff(record["updated_at"])
     latest: dict[str, Any] = {}  # each tool's newest as-of time among the saved evidence references
     for ref in record["evidence"]:
-        if ref.get("as_of") is not None and str(ref["as_of"]) > str(latest.get(ref["tool"], {}).get("as_of", "")):
+        if ref.get("as_of") is None or after_cutoff(ref["as_of"]):
+            continue
+        if str(ref["as_of"]) > str(latest.get(ref["tool"], {}).get("as_of", "")):
             latest[ref["tool"]] = {"tool": ref["tool"], "as_of": ref["as_of"], "kind": ref.get("kind")}
+    since = None if later else record["updated_at"]
+    asked_from = json.dumps({"from_investigation": investigation_id})[1:-1]
+    reassessing = json.dumps({"investigation_id": investigation_id})[1:-1]
     with Session(engine) as db:
-        alerts = [a for a in alert_rows(db, limit=200) if a["source_kind"] == "copilot" and a["source_id"] == investigation_id]
-        jobs = [j for j in db.exec(select(ResearchJob).order_by(ResearchJob.created_at.desc()).limit(200))]
-    linked = []
+        alerts = [a for a in alert_rows(db, limit=200) if a["source_kind"] == "copilot" and a["source_id"] == investigation_id
+                  and not after_cutoff(a["armed_at"])]
+        jobs = db.exec(select(ResearchJob).where(or_(
+            col(ResearchJob.input_json).contains(asked_from),
+            and_(ResearchJob.kind == "reassess", col(ResearchJob.input_json).contains(reassessing)),
+        )).order_by(col(ResearchJob.created_at).desc()).limit(50)).all()
+    linked: list[dict] = []
+    result_ids: list[tuple[str, bool]] = []  # each finished job's saved result, newest first
     for job in jobs:
         data = json.loads(job.input_json)
         if data.get("from_investigation") != investigation_id and not (job.kind == "reassess" and data.get("investigation_id") == investigation_id):
             continue
         if after_cutoff(job.created_at.isoformat()):
             continue
-        finished = job.finished_at.isoformat() if job.finished_at and not after_cutoff(job.finished_at.isoformat()) else None
+        finished = job.finished_at.isoformat() + "Z" if job.finished_at and not after_cutoff(job.finished_at.isoformat()) else None
         linked.append({"kind": job.kind, "status": job.status if finished or job.status not in ("done", "failed") else "running",
-                       "question": (data.get("question") or "")[:200], "created_at": job.created_at.isoformat() + "Z",
-                       "finished_at": finished and finished + "Z", "cost_usd": job.cost_usd,
-                       "result_id": str(job.investigation_id) if job.investigation_id and finished else None,
-                       "since_last_update": bool(finished and finished + "Z" > record["updated_at"])})
-        if len(linked) == 10:
+                       "question": (data.get("question") or "")[:80], "finished_at": finished, "cost_usd": job.cost_usd,
+                       "since_last_update": bool(finished and since and finished > since)})
+        if job.investigation_id and finished:
+            result_ids.append((str(job.investigation_id), linked[-1]["since_last_update"]))
+        if len(linked) == CHANGE_JOBS:
             break
     results = []
-    for job in linked:
-        if job["result_id"] and len(results) < 3:
-            try:
-                saved = copilot_investigations.get(job["result_id"])
-            except copilot_investigations.InvestigationError:
-                continue
-            results.append({"id": saved["id"], "title": saved["title"], "created_at": saved["created_at"],
-                            "conclusion": saved["conclusion"], "summary": ((saved["findings"] or {}).get("summary") or "")[:400],
-                            "since_last_update": job["since_last_update"]})
+    for result_id, fresh in result_ids:
+        if len(results) == CHANGE_RESULTS:
+            break
+        try:
+            saved = copilot_investigations.get(result_id)
+        except copilot_investigations.InvestigationError:
+            continue
+        results.append({"id": saved["id"], "title": saved["title"][:80], "created_at": saved["created_at"],
+                        "conclusion": (saved["conclusion"] or "")[:120],
+                        "summary": ((saved["findings"] or {}).get("summary") or "")[:200], "since_last_update": fresh})
     findings = record["findings"] or {}
+    investigation = {"title": record["title"][:120], "symbol": record["symbol"], "source": record["source"],
+                     "created_at": record["created_at"]}
+    if later:
+        investigation["later_state"] = "Updated after the replay moment: its later status, conclusion and messages are hidden."
+    else:
+        investigation.update(status=record["status"], conclusion=record["conclusion"], updated_at=record["updated_at"],
+                             messages=record["message_count"], **({"summary": findings["summary"][:300]} if findings.get("summary") else {}))
     return {
         "investigation_id": investigation_id, "state": "ok", "as_of": _now(),
-        "investigation": {"title": record["title"], "symbol": record["symbol"], "status": record["status"], "source": record["source"],
-                          "conclusion": record["conclusion"], "created_at": record["created_at"], "updated_at": record["updated_at"],
-                          "messages": record["message_count"], **({"summary": findings["summary"][:400]} if findings.get("summary") else {})},
-        "evidence_as_of": list(latest.values())[:12],
+        "note": "Saved records: compare updated_at and the evidence as-of times with fresh reads to say what changed.",
+        "investigation": investigation,
+        "evidence_as_of": list(latest.values())[:CHANGE_EVIDENCE],
         "alerts": [{"symbol": a["symbol"], "condition": a["condition"], "interval": a["interval"], "price": a["price"],
                     "direction": a["direction"], "label": a["label"], "armed_at": _iso(a["armed_at"]),
-                    "state": "fired" if a["event"] and not after_cutoff(a["event"]["event_at"]) else "armed",
                     "fired": None if not a["event"] or after_cutoff(a["event"]["event_at"]) else
-                    {"at": _iso(a["event"]["event_at"]), "price": a["event"]["price"], "level": a["event"]["level"]}}
-                   for a in alerts[:10]],
-        "research_jobs": linked,
+                    {"at": _iso(a["event"]["event_at"]), "price": a["event"]["price"]}}
+                   for a in alerts[:CHANGE_ALERTS]],
         "results": results,
-        "note": "Saved records: compare updated_at and the evidence as-of times with fresh reads to say what changed.",
+        "research_jobs": linked,
     }
 
 
