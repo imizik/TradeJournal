@@ -118,30 +118,40 @@ def _interval(by_session: dict[str, list[float]]) -> list[float] | None:
     return [round(draws[int(0.025 * BOOTSTRAP)], 4), round(draws[int(0.975 * BOOTSTRAP) - 1], 4)]
 
 
+def _horizons(rows: list[dict]) -> dict:
+    out = {}
+    for name, _ in HORIZONS:
+        scored = [r for r in rows if name in r["horizons"]]
+        paired = [r for r in scored if r["horizons"][name]["movers"] is not None]
+        diffs: dict[str, list[float]] = {}
+        for r in paired:
+            diffs.setdefault(r["session_date"], []).append(r["horizons"][name]["event"] - r["horizons"][name]["movers"])
+        out[name] = {
+            "events": len(scored), "excluded": len(rows) - len(scored),
+            "kept_going": round(sum(r["horizons"][name]["event"] > 0 for r in scored) / len(scored), 3) if scored else None,
+            "event_mean": _mean(r["horizons"][name]["event"] for r in scored),
+            "movers_mean": _mean(r["horizons"][name]["movers"] for r in paired),
+            "random_mean": _mean(r["horizons"][name]["random"] for r in scored),
+            "radar_minus_movers": _mean(v for values in diffs.values() for v in values),
+            "radar_minus_movers_95": _interval(diffs),
+        }
+    return out
+
+
 def summarize(rows: list[dict]) -> dict:
     out = {}
     for version in sorted({r["rule_version"] for r in rows}):
         calibration = CALIBRATION.get(version, set())
         mine = [r for r in rows if r["rule_version"] == version]
         own = [r for r in mine if r["session_date"] not in calibration]
+        in_sample = [r for r in mine if r["session_date"] in calibration]
         report = {"sessions": len({r["session_date"] for r in own}), "review_at_sessions": REVIEW_SESSIONS,
-                  "events": len(own), "in_sample_events": len(mine) - len(own), "horizons": {}}
-        for name, _ in HORIZONS:
-            scored = [r for r in own if name in r["horizons"]]
-            paired = [r for r in scored if r["horizons"][name]["movers"] is not None]
-            diffs: dict[str, list[float]] = {}
-            for r in paired:
-                diffs.setdefault(r["session_date"], []).append(r["horizons"][name]["event"] - r["horizons"][name]["movers"])
-            report["horizons"][name] = {
-                "events": len(scored), "excluded": len(own) - len(scored),
-                "kept_going": round(sum(r["horizons"][name]["event"] > 0 for r in scored) / len(scored), 3) if scored else None,
-                "event_mean": _mean(r["horizons"][name]["event"] for r in scored),
-                "movers_mean": _mean(r["horizons"][name]["movers"] for r in paired),
-                "random_mean": _mean(r["horizons"][name]["random"] for r in scored),
-                "radar_minus_movers": _mean(v for values in diffs.values() for v in values),
-                "radar_minus_movers_95": _interval(diffs),
-            }
+                  "events": len(own), "horizons": _horizons(own)}
         report["decision"] = decide(report)
+        if in_sample:
+            report["in_sample"] = {"note": "sessions the rules were set on; never part of the decision",
+                                   "sessions": sorted({r["session_date"] for r in in_sample}),
+                                   "events": len(in_sample), "horizons": _horizons(in_sample)}
         out[version] = report
     return out
 

@@ -141,8 +141,10 @@ def test_the_read_out_is_per_rule_version_and_keeps_calibration_sessions_out():
             row("c", "radar-rules-v1", "2026-10-27", -1.0, 1.0)]
     out = ro.summarize(rows)
     v0, v1 = out["radar-rules-v0"], out["radar-rules-v1"]
-    assert (v0["events"], v0["in_sample_events"], v0["sessions"]) == (1, 1, 1)
+    assert (v0["events"], v0["sessions"]) == (1, 1)
     assert v0["horizons"]["60m"]["event_mean"] == 1.0  # the calibration session's +5 is not in it
+    assert v0["in_sample"]["sessions"] == ["2026-10-22"] and v0["in_sample"]["horizons"]["60m"]["event_mean"] == 5.0
+    assert "in_sample" not in v1
     assert v1["horizons"]["60m"]["radar_minus_movers"] == -2.0
     assert v1["decision"] == "not reviewed: 1 of 20 sessions"
 
