@@ -243,7 +243,7 @@ def _watches(db, symbol: str | None, investigation_ids: set[str]) -> dict:
             continue
         linked = data.get("investigation_id") or data.get("from_investigation")
         if symbol is None or symbol in (data.get("symbols") or []) or (linked and str(linked) in investigation_ids):
-            symbols = [str(s) for s in data.get("symbols") or [] if isinstance(s, str)][:4] if symbol is None else None
+            symbols = [s[:12] for s in data.get("symbols") or [] if isinstance(s, str)][:4] if symbol is None else None
             rows.append({k: v for k, v in {"watch": f"research job ({job.kind})", "status": job.status, "symbols": symbols,
                                            "question": _trim(data.get("question"), SHORT),
                                            "due": copilot_book._iso(job.next_attempt_at)}.items() if v})
@@ -252,10 +252,11 @@ def _watches(db, symbol: str | None, investigation_ids: set[str]) -> dict:
 
 # --------------------------------------------------------------------------- the pack
 
-def owner_context(symbol: str | None, session=None, now: datetime | None = None) -> dict:
+def owner_context(symbol: str | None, session=None, now: datetime | None = None, bounded: bool = True) -> dict:
     """The pack for one turn. ``symbol`` orders positions and selects history, memories, investigations and watches.
     With no symbol there is no history; investigations are the open ones and watches the armed alerts and waiting jobs
-    across every symbol (the lab's Open threads, ``GET /copilot/threads``)."""
+    across every symbol (the lab's Open threads, ``GET /copilot/threads``). ``bounded=False`` skips the turn's size cap
+    (``shed``) for that page read; each section keeps its own row caps."""
     from sqlmodel import Session
     from app.database import engine
     now_et = _et_now(now)
@@ -271,7 +272,7 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None)
         pack["investigations"] = _section("investigations", lambda: _investigations(db, symbol))
         ids = {r["id"] for r in pack["investigations"].get("investigations", [])}
         pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
-    return shed(pack)
+    return shed(pack) if bounded else pack
 
 
 def _shed_steps(pack: dict):

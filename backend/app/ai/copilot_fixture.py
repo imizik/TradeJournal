@@ -119,7 +119,7 @@ class FixtureEvidence:
             rows = [m for m in rows if m["symbol"] == symbol] + [m for m in rows if m["symbol"] is None]
         return {"state": "ok", "as_of": AT, "simulated": True, **({"symbol": symbol} if symbol else {}), "memories": rows[:limit]}
 
-    def owner_context(self, symbol: str | None) -> dict:
+    def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
         """SIMULATED: shaped like ``copilot_context.owner_context`` for the demo book above."""
         from app.ai.copilot_context import PROVENANCE
         book = self.get_positions()["positions"]

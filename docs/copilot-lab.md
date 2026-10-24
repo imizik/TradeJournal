@@ -47,9 +47,9 @@ untouched.
     characters) in the message box.
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check) and `frontend/e2e/copilot-panel.spec.ts`.
-- **Open threads**, the lab page's home. While the lab is on and no
-  investigation is open, the page (not the panel beside Charts or Radar)
-  shows what is live above the conversation:
+- **Open threads**, the lab page's home. While the lab is on, no
+  investigation is open and nothing has been sent, the page (not the panel
+  beside Charts or Radar) shows what is live above the conversation:
   - positions: symbol, instrument, unrealized %, give-back state, and days to
     expiry (options) or time held (stocks);
   - armed alerts: symbol, condition, price, label;
@@ -61,9 +61,10 @@ untouched.
   watches, as_of}` from the no-symbol owner context pack (Owner context,
   below). A position is cut to the fields above: no account, entry, mark or
   captured plan. Memories and habits are never returned, and the only ids are
-  investigations'. A section the server could not read says so. A section the
-  pack shed to stay under its cap says it was left out. Fixture mode serves
-  the simulated pack. Replay says it is unavailable.
+  investigations'. It is a page read, not a turn, so the pack's size cap does
+  not apply (`owner_context(None, bounded=False)`); each section keeps its row
+  caps. A section the server could not read says so. Fixture mode serves the
+  simulated pack. Replay says it is unavailable.
 
   Opening reads, never sends: a turn costs money, as with What changed?. One
   button, **What matters right now?**, starts a new conversation with no

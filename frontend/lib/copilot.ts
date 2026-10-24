@@ -225,8 +225,8 @@ export const enqueueResearch = (question: string, symbols: string[], investigati
 
 // --------------------------------------------------------------------------- open threads (the lab's home)
 
-/** A section the server could not read, or one shed to keep a turn's pack under its size cap. */
-type Missing = { state: "unavailable" | "trimmed" };
+/** A section the server could not read. */
+type Missing = { state: "unavailable" };
 export type ThreadPosition = {
   symbol: string; instrument: "stock" | "option"; option?: { side: string; strike: number; expiry: string }; direction?: string;
   quantity?: number; unrealized_pct?: number | null; giveback?: "not armed" | "armed" | "fired"; peak_gain_pct?: number | null;

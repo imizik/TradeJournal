@@ -548,10 +548,10 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.memories(limit, symbol)
 
-    def owner_context(self, symbol: str | None) -> dict:
-        """The pack prepended to every turn (docs/copilot-lab.md § Owner context)."""
+    def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
+        """The pack prepended to every turn (docs/copilot-lab.md § Owner context); unbounded for the lab's Open threads."""
         from app.ai import copilot_context
-        return copilot_context.owner_context(symbol)
+        return copilot_context.owner_context(symbol, bounded=bounded)
 
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)

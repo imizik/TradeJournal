@@ -95,10 +95,11 @@ THREAD_POSITION_FIELDS = ("symbol", "instrument", "option", "direction", "quanti
 def threads():
     """The lab's Open threads: the no-symbol owner context pack's positions, open investigations and watches (armed
     level alerts and waiting research jobs). Never memories or habits; the only ids are investigations'. Fixture mode
-    serves the simulated pack and replay says it is unavailable, as for a turn."""
+    serves the simulated pack and replay says it is unavailable, as for a turn. A page read, not a turn, so the pack's
+    size cap does not apply (``bounded=False``); its sections keep their row caps."""
     _enabled()
     try:
-        pack = copilot.evidence_for(copilot.settings()).owner_context(None)
+        pack = copilot.evidence_for(copilot.settings()).owner_context(None, bounded=False)
     except copilot.CopilotError as exc:
         raise HTTPException(503, exc.message) from None
 
@@ -106,9 +107,7 @@ def threads():
         part = pack.get(name)
         if not isinstance(part, dict) or part.get("state") != "ok":
             return {"state": "unavailable"}
-        if name not in part:  # shed to keep a turn's pack under its cap
-            return {"state": "trimmed"}
-        return {"state": "ok", name: part[name]}
+        return {"state": "ok", name: part.get(name, [])}
 
     held, investigations_, watches = section("positions"), section("investigations"), section("watches")
     if held["state"] == "ok":

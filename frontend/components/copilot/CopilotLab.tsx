@@ -22,9 +22,7 @@ function clock(p: ThreadPosition) {
   return p.days_held !== undefined ? `held ${p.days_held} day${p.days_held === 1 ? "" : "s"}` : null;
 }
 
-function Missing({ state }: { state: string }) {
-  return <p className="text-muted-foreground">{state === "trimmed" ? "Left out to keep the context short." : "Unavailable right now."}</p>;
-}
+const Missing = () => <p className="text-muted-foreground">Unavailable right now.</p>;
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -73,7 +71,7 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
         : !threads ? <p className="text-muted-foreground">Reading what is open…</p> : (
           <div className="grid gap-3 sm:grid-cols-2">
             <Group title="Positions">
-              {threads.positions.state !== "ok" ? <Missing state={threads.positions.state} />
+              {threads.positions.state !== "ok" ? <Missing />
                 : !threads.positions.positions.length ? <None text="No open positions." /> : (
                   <ul className="space-y-1">
                     {threads.positions.positions.map((p, i) => (
@@ -91,7 +89,7 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
                 )}
             </Group>
             <Group title="Armed alerts">
-              {threads.watches.state !== "ok" ? <Missing state={threads.watches.state} />
+              {threads.watches.state !== "ok" ? <Missing />
                 : !alerts.length ? <None text="No armed alerts." /> : (
                   <ul className="space-y-1">
                     {alerts.map((a, i) => (
@@ -104,7 +102,7 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
                 )}
             </Group>
             <Group title="Open investigations">
-              {threads.investigations.state !== "ok" ? <Missing state={threads.investigations.state} />
+              {threads.investigations.state !== "ok" ? <Missing />
                 : !threads.investigations.investigations.length ? <None text="No open investigations." /> : (
                   <ul className="space-y-1.5">
                     {threads.investigations.investigations.map(item => (
@@ -121,7 +119,7 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
                 )}
             </Group>
             <Group title="Waiting research">
-              {threads.watches.state !== "ok" ? <Missing state={threads.watches.state} />
+              {threads.watches.state !== "ok" ? <Missing />
                 : !jobs.length ? <None text="No research waiting." /> : (
                   <ul className="space-y-1">
                     {jobs.map((job, i) => (

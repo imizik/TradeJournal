@@ -240,6 +240,9 @@ def test_a_full_no_symbol_pack_stays_under_the_cap_and_keeps_its_watches(db):
     assert len(pack["watches"]["watches"]) == copilot_context.MAX_WATCHES + copilot_context.MAX_WAITING_JOBS
     assert pack["positions"]["positions"] and pack["habits"]["state"] == "ok"
     assert pack["trimmed"] is True and "entries" not in pack["today"]  # shed in the usual order; watches are never shed
+    page = copilot_context.owner_context(None, session=db, now=NOW, bounded=False)  # the Open threads read keeps every section
+    assert "trimmed" not in page and len(page["investigations"]["investigations"]) == copilot_context.MAX_INVESTIGATIONS
+    assert page["positions"]["shown"] == copilot_context.MAX_POSITIONS
 
 
 def test_one_failing_source_leaves_the_rest_standing(db, monkeypatch):
@@ -360,7 +363,7 @@ def test_get_owner_context_is_validated_routed_and_never_a_job_tool(monkeypatch)
     assert copilot_tools.validate("get_owner_context", {"symbol": "crwv"}) == {"symbol": "CRWV"}
     with pytest.raises(copilot_tools.ToolInputError):
         copilot_tools.validate("get_owner_context", {"symbol": "../etc"})
-    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None: {"state": "ok", "symbol": symbol})
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True: {"state": "ok", "symbol": symbol})
     assert copilot_tools.LiveEvidence().get_owner_context("CRWV") == {"state": "ok", "symbol": "CRWV"}
     assert copilot_tools.provenance("get_owner_context", {"state": "ok"}, "live")["kind"] == "saved"
     assert "get_owner_context" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_owner_context" not in research_job.LAB_TOOLS
@@ -384,15 +387,15 @@ def test_the_threads_route_serves_the_no_symbol_pack_without_memories_habits_or_
     saved = _seed_world(db)
     real = copilot_context.owner_context
     asked = []
-    monkeypatch.setattr(copilot_context, "owner_context",
-                        lambda symbol, session=None, now=None: asked.append(symbol) or real(symbol, session=db, now=NOW))
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True:
+                        asked.append((symbol, bounded)) or real(symbol, session=db, now=NOW, bounded=bounded))
     monkeypatch.delenv("COPILOT_ENABLED", raising=False)
     with TestClient(app) as client:
         assert client.get("/copilot/threads").status_code == 503  # off unless the lab is on
         monkeypatch.setenv("COPILOT_ENABLED", "true")
         monkeypatch.setenv("COPILOT_EVIDENCE", "live")
         body = client.get("/copilot/threads").json()
-        assert asked == [None] and set(body) == {"positions", "investigations", "watches", "as_of"}
+        assert asked == [(None, False)] and set(body) == {"positions", "investigations", "watches", "as_of"}
         text = _secret_free(body)
         assert "memories" not in text and "habits" not in text and "Group recovery" not in text and "account" not in text
         call = next(p for p in body["positions"]["positions"] if p["symbol"] == "NBIS")
@@ -409,15 +412,15 @@ def test_the_threads_route_serves_the_no_symbol_pack_without_memories_habits_or_
         assert "conclusion" not in simulated["investigations"]["investigations"][1]
 
 
-def test_the_threads_route_reports_a_failed_or_trimmed_section_honestly(monkeypatch):
+def test_the_threads_route_reports_a_failed_section_honestly(monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     monkeypatch.setenv("COPILOT_EVIDENCE", "live")
-    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None: {
-        "state": "ok", "as_of": "t", "positions": {"state": "unavailable"}, "investigations": {"state": "ok", "note": "n"},
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True: {
+        "state": "ok", "as_of": "t", "positions": {"state": "unavailable"}, "investigations": {"state": "ok", "investigations": []},
         "watches": {"state": "ok", "watches": []}, "memories": {"state": "ok", "memories": [{"text": "secret"}]}})
     with TestClient(app) as client:
         body = client.get("/copilot/threads").json()
-    assert body == {"positions": {"state": "unavailable"}, "investigations": {"state": "trimmed"},
+    assert body == {"positions": {"state": "unavailable"}, "investigations": {"state": "ok", "investigations": []},
                     "watches": {"state": "ok", "watches": []}, "as_of": "t"}

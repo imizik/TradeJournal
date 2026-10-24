@@ -78,7 +78,7 @@ class ReplayEvidence:
     def get_memories(self, limit: int = 5, symbol: str | None = None) -> dict:
         return {"state": "unavailable", "reason": "The owner's memories are unavailable in replay."}
 
-    def owner_context(self, symbol: str | None) -> dict:
+    def owner_context(self, symbol: str | None, bounded: bool = True) -> dict:
         return {"state": "unavailable", "reason": "The owner's book, memories and notes are unavailable in replay "
                                                   "(they would show today's holdings, not the frozen moment's)."}
 
