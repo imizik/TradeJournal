@@ -32,11 +32,16 @@ untouched.
     - When the chart's symbol changes, an empty panel follows. A
       conversation is never retargeted: the panel offers "Switch to <symbol>"
       or "Keep <symbol>" (Switch waits for a turn in progress).
+    - A follow still loading when the owner sends is dropped, and a draft
+      the owner typed is never replaced.
+    - Closing a panel mid-turn (the dock tab, the sheet, Radar's drawer, or
+      leaving the page) stops the turn and saves what had arrived.
     - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
       the lab.
   - **Radar:** "Ask copilot" in an event's detail opens the same panel in
     place, as a right-hand drawer (full screen on a phone), on the event
-    symbol, with its one-line summary as the context.
+    symbol, with its one-line summary as the context. Escape or the backdrop
+    closes it, and focus returns to the button.
   - **Deep link:** `/copilot-lab?symbol=X&context=<short text>` opens a new
     investigation with the symbol set and `Context: <text>` (at most 300
     characters) in the message box.
