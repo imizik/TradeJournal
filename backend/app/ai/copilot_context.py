@@ -13,10 +13,12 @@ already exist, so the model spends no tool rounds rediscovering the owner:
   30 trades against the baseline (``exit_habits.scorecard``), cached briefly.
 - ``memories``: approved memories for the symbol, then general ones.
 - ``today``: the owner's day-journal entries for today (New York).
-- ``investigations``: saved investigations and research results for the symbol.
+- ``investigations``: saved investigations and research results for the symbol;
+  with no symbol, the open ones across every symbol.
 - ``watches``: armed level alerts for the symbol, and queued or running research
   jobs that name it (question jobs) or are linked to one of its investigations
   (reassessments); Radar event jobs name an event, not a symbol, so they are not matched.
+  With no symbol, armed level alerts across every symbol and every waiting job.
 
 Every section carries a provenance label the system prompt explains: ``owner said``
 (their own words), ``measured`` (journal facts) or ``saved`` (earlier conclusions,
@@ -44,6 +46,7 @@ MAX_MEMORIES = 8
 MAX_TODAY = 6
 MAX_INVESTIGATIONS = 4
 MAX_WATCHES = 6
+MAX_WAITING_JOBS = 3  # no-symbol pack: jobs listed after up to MAX_WATCHES alerts
 TEXT = 240
 SHORT = 120
 HABITS_TTL_S = 600
@@ -187,13 +190,23 @@ def _today(db, now_et: datetime) -> dict:
                            "at": copilot_book._iso(e.created_at), "text": _trim(e.text)}.items() if v} for e in entries]}
 
 
-def _investigations(db, symbol: str) -> dict:
+def _investigations(db, symbol: str | None) -> dict:
+    """The symbol's saved records, open first; with no symbol, the open records across every symbol, newest first."""
+    from sqlmodel import col, select
     from app.engine import copilot_investigations
-    found = copilot_investigations.list_investigations(symbol=symbol, limit=MAX_INVESTIGATIONS * 2, session=db)
-    found = sorted(found, key=lambda r: r["status"] != "open")  # open first; each group stays newest first
+    from app.models import CopilotInvestigation
+    if symbol:
+        found = copilot_investigations.list_investigations(symbol=symbol, limit=MAX_INVESTIGATIONS * 2, session=db)
+        found = sorted(found, key=lambda r: r["status"] != "open")  # open first; each group stays newest first
+    else:
+        found = [copilot_investigations.summary(r) for r in db.exec(
+            select(CopilotInvestigation).where(CopilotInvestigation.status == "open")
+            .order_by(col(CopilotInvestigation.updated_at).desc()).limit(MAX_INVESTIGATIONS)).all()]
     rows = []
     for r in found[:MAX_INVESTIGATIONS]:
         row = {"id": r["id"], "source": r["source"], "title": _trim(r["title"], 100), "status": r["status"], "updated_at": r["updated_at"]}
+        if not symbol and r.get("symbol"):
+            row["symbol"] = r["symbol"]
         # A research job's conclusion was written by a model that read untrusted web pages. It stays a tool result
         # (get_saved_research), never text in the owner's turn; only the owner's own conversations bring theirs here.
         if r["source"] == "copilot" and r.get("conclusion"):
@@ -203,17 +216,25 @@ def _investigations(db, symbol: str) -> dict:
             "note": "research_job records show title and status only; read their findings with get_saved_research"}
 
 
-def _watches(db, symbol: str, investigation_ids: set[str]) -> dict:
+def _watches(db, symbol: str | None, investigation_ids: set[str]) -> dict:
+    """Armed level alerts and waiting research jobs for the symbol (at most MAX_WATCHES in all). With no symbol, up to
+    MAX_WATCHES armed alerts across every symbol, then up to MAX_WAITING_JOBS waiting jobs of any kind."""
     from sqlmodel import col, select
     from app.models import LevelAlert, ResearchJob
-    alerts = db.exec(select(LevelAlert).where(LevelAlert.symbol == symbol, LevelAlert.state == "active")
-                     .order_by(col(LevelAlert.armed_at).desc()).limit(MAX_WATCHES)).all()
-    rows = [{k: v for k, v in {"watch": "level alert", "price": a.price, "condition": a.condition, "interval": a.interval,
-                               "label": _trim(a.label, 60), "source": a.source_kind,
-                               "armed_at": copilot_book._iso(a.armed_at)}.items() if v is not None and v != ""} for a in alerts]
+    query = select(LevelAlert).where(LevelAlert.state == "active")
+    if symbol:
+        query = query.where(LevelAlert.symbol == symbol)
+    alerts = db.exec(query.order_by(col(LevelAlert.armed_at).desc()).limit(MAX_WATCHES)).all()
+    rows = [{k: v for k, v in {"watch": "level alert", "symbol": None if symbol else a.symbol, "price": a.price,
+                               "condition": a.condition, "interval": a.interval, "label": _trim(a.label, 60),
+                               "source": a.source_kind, "armed_at": copilot_book._iso(a.armed_at)}.items()
+             if v is not None and v != ""} for a in alerts]
+    limit = MAX_WATCHES if symbol else len(rows) + MAX_WAITING_JOBS
     jobs = db.exec(select(ResearchJob).where(col(ResearchJob.status).in_(("queued", "running")))
                    .order_by(col(ResearchJob.created_at).desc()).limit(50)).all()
     for job in jobs:
+        if len(rows) >= limit:
+            break
         try:
             data = json.loads(job.input_json)
         except ValueError:
@@ -221,19 +242,20 @@ def _watches(db, symbol: str, investigation_ids: set[str]) -> dict:
         if not isinstance(data, dict):
             continue
         linked = data.get("investigation_id") or data.get("from_investigation")
-        if symbol in (data.get("symbols") or []) or (linked and str(linked) in investigation_ids):
-            rows.append({k: v for k, v in {"watch": f"research job ({job.kind})", "status": job.status,
+        if symbol is None or symbol in (data.get("symbols") or []) or (linked and str(linked) in investigation_ids):
+            symbols = [str(s) for s in data.get("symbols") or [] if isinstance(s, str)][:4] if symbol is None else None
+            rows.append({k: v for k, v in {"watch": f"research job ({job.kind})", "status": job.status, "symbols": symbols,
                                            "question": _trim(data.get("question"), SHORT),
                                            "due": copilot_book._iso(job.next_attempt_at)}.items() if v})
-        if len(rows) >= MAX_WATCHES:
-            break
-    return {"state": "ok", "watches": rows[:MAX_WATCHES]}
+    return {"state": "ok", "watches": rows[:limit]}
 
 
 # --------------------------------------------------------------------------- the pack
 
 def owner_context(symbol: str | None, session=None, now: datetime | None = None) -> dict:
-    """The pack for one turn. ``symbol`` orders positions and selects history, memories, investigations and watches."""
+    """The pack for one turn. ``symbol`` orders positions and selects history, memories, investigations and watches.
+    With no symbol there is no history; investigations are the open ones and watches the armed alerts and waiting jobs
+    across every symbol (the lab's Open threads, ``GET /copilot/threads``)."""
     from sqlmodel import Session
     from app.database import engine
     now_et = _et_now(now)
@@ -246,9 +268,9 @@ def owner_context(symbol: str | None, session=None, now: datetime | None = None)
                       "today": _section("today", lambda: _today(db, now_et))}
         if symbol:
             pack["history"] = _section("history", lambda: _history(db, symbol))
-            pack["investigations"] = _section("investigations", lambda: _investigations(db, symbol))
-            ids = {r["id"] for r in pack["investigations"].get("investigations", [])}
-            pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
+        pack["investigations"] = _section("investigations", lambda: _investigations(db, symbol))
+        ids = {r["id"] for r in pack["investigations"].get("investigations", [])}
+        pack["watches"] = _section("watches", lambda: _watches(db, symbol, ids))
     return shed(pack)
 
 

@@ -152,6 +152,21 @@ class FixtureEvidence:
             pack["watches"] = {"state": "ok", "watches": [
                 {"watch": "level alert", "price": 92.5, "condition": "crosses", "label": f"{symbol} loses the bounce low", "source": "copilot",
                  "armed_at": "2026-10-22T19:06:00Z"}]}
+        else:  # across every symbol: the open investigations, armed alerts and waiting jobs
+            pack["investigations"] = {"state": "ok", "investigations": [
+                {"id": "11111111-1111-4111-8111-111111111111", "source": "copilot", "symbol": "NBIS", "title": "Simulated: is the NBIS recovery real?",
+                 "status": "open", "conclusion": "Group is confirming; the symbol lags. Wait for it to lead a 15-minute window.",
+                 "updated_at": "2026-10-22T19:05:00Z"},
+                {"id": "22222222-2222-4222-8222-222222222222", "source": "research_job", "symbol": "CRWV", "title": "Simulated: CRWV capacity deal terms",
+                 "status": "open", "updated_at": "2026-10-22T16:30:00Z"}],
+                "note": "research_job records show title and status only; read their findings with get_saved_research"}
+            pack["watches"] = {"state": "ok", "watches": [
+                {"watch": "level alert", "symbol": "NBIS", "price": 92.5, "condition": "crosses", "label": "NBIS loses the bounce low",
+                 "source": "copilot", "armed_at": "2026-10-22T19:06:00Z"},
+                {"watch": "level alert", "symbol": "CRWV", "price": 135.0, "condition": "closes_beyond", "interval": "15m",
+                 "label": "CRWV clears the gap", "source": "level", "armed_at": "2026-10-21T14:10:00Z"},
+                {"watch": "research job (reassess)", "status": "queued", "symbols": ["NBIS"],
+                 "question": "Simulated: has the financing overhang cleared?", "due": "2026-10-27T13:30:00Z"}]}
         return pack
 
     def get_owner_context(self, symbol: str) -> dict:

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, listInvestigations, streamTurn, toSaved,
   updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
@@ -170,6 +170,8 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
 }
 
 export type PanelLink = { symbol: string; context: string; investigation: string | null };
+/** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
+export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
@@ -185,9 +187,11 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``pageSymbol``, resumes that symbol's latest open investigation, opens with ``pageContext`` as its context
  * line, offers (never forces) a switch when the page's symbol changes, and renders nothing unless the owner has
  * the lab on. ``link`` (a deep link, or Radar's drawer) starts a new investigation, prefilled and not sent.
+ * ``home`` (page only) renders above an empty conversation while the lab is on and no investigation is open.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
+  home?: (actions: HomeActions) => ReactNode;
 }) {
   const panel = variant === "panel";
   const { owner } = useAppAccess();
@@ -345,7 +349,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const update = (fn: (last: LabMessage) => LabMessage) =>
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
 
-  async function send(text: string) {
+  /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
+  async function send(text: string, about = symbol) {
     const content = text.trim();
     if (!content || busy || !status?.enabled) return;
     // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
@@ -378,7 +383,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const controller = new AbortController();
     abort.current = controller;
     try {
-      await streamTurn(history, symbol.trim().toUpperCase() || null, event => {
+      await streamTurn(history, about.trim().toUpperCase() || null, event => {
         if (event.type === "text") update(last => ({ ...last, content: last.content + event.delta }));
         else if (event.type === "progress") update(last => ({ ...last, progress: event.text }));
         else if (event.type === "proposal") update(last => ({ ...last, proposals: [...(last.proposals ?? []), event] }));
@@ -513,6 +518,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {current && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
+
+      {!panel && home && enabled && !current && !messages.length && home({
+        // Across everything: no symbol, so the saved conversation has none either.
+        ask: prompt => { if (!busy) { setSymbol(""); void send(prompt, ""); } },
+        open: id => void resume(id),
+      })}
 
       <div className={panel ? "min-h-[8rem] space-y-3 rounded border bg-card/40 p-2" : "min-h-[10rem] space-y-4 rounded border bg-card/40 p-3 sm:min-h-[16rem]"} aria-live="polite">
         {!messages.length && !current?.findings && (

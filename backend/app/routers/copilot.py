@@ -1,5 +1,5 @@
-"""Owner-only Copilot Lab (docs/copilot-lab.md): status, one streamed, read-only conversation turn, and saved
-investigations.
+"""Owner-only Copilot Lab (docs/copilot-lab.md): status, open threads, one streamed, read-only conversation turn, and
+saved investigations.
 
 Off unless ``COPILOT_ENABLED=true``. Owner-only through the access middleware
 (no route is in an assistant grant) and the frontend proxy. Prompts and answers
@@ -84,6 +84,37 @@ def quote(symbol: str = Query(..., pattern=r"^[A-Z][A-Z0-9.\-]{0,9}$")):
     fresh = isinstance(last, (int, float)) and last > 0 and age is not None and age <= QUOTE_FRESH_S and not issue
     return {"symbol": symbol, "last": last, "trade_time": row.get("trade_time"), "fetched_at": fetched_at,
             "age_s": None if age is None else round(age, 1), "issue": issue, "fresh": fresh}
+
+
+# What the lab's home shows of a position: no account, no plan wording, no entry/mark detail.
+THREAD_POSITION_FIELDS = ("symbol", "instrument", "option", "direction", "quantity", "unrealized_pct", "giveback",
+                          "peak_gain_pct", "days_to_expiry", "expires_today", "days_held", "held_minutes")
+
+
+@router.get("/threads")
+def threads():
+    """The lab's Open threads: the no-symbol owner context pack's positions, open investigations and watches (armed
+    level alerts and waiting research jobs). Never memories or habits; the only ids are investigations'. Fixture mode
+    serves the simulated pack and replay says it is unavailable, as for a turn."""
+    _enabled()
+    try:
+        pack = copilot.evidence_for(copilot.settings()).owner_context(None)
+    except copilot.CopilotError as exc:
+        raise HTTPException(503, exc.message) from None
+
+    def section(name: str) -> dict:
+        part = pack.get(name)
+        if not isinstance(part, dict) or part.get("state") != "ok":
+            return {"state": "unavailable"}
+        if name not in part:  # shed to keep a turn's pack under its cap
+            return {"state": "trimmed"}
+        return {"state": "ok", name: part[name]}
+
+    held, investigations_, watches = section("positions"), section("investigations"), section("watches")
+    if held["state"] == "ok":
+        held.update(count=pack["positions"].get("count", 0),
+                    positions=[{k: row[k] for k in THREAD_POSITION_FIELDS if k in row} for row in held["positions"]])
+    return {"positions": held, "investigations": investigations_, "watches": watches, "as_of": pack.get("as_of")}
 
 
 @router.post("/chat")

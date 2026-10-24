@@ -413,6 +413,8 @@ def test_assistant_sessions_cannot_reach_the_lab(boundary):  # noqa: F811
     assert boundary.owner.get("/copilot/status").status_code == 200
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/status").status_code == 403
+    assert boundary.owner.get("/copilot/threads").status_code == 200
+    assert boundary.public.get("/copilot/threads").status_code == 403
     assert boundary.public.post("/copilot/chat", json={"messages": [{"role": "user", "content": "NBIS?"}], "symbol": "NBIS"}).status_code == 403
     what_changed = "What changed? Use get_investigation_changes for investigation 33333333-3333-4333-8333-333333333333."
     assert boundary.public.post("/copilot/chat", json={"messages": [{"role": "user", "content": what_changed}]}).status_code == 403

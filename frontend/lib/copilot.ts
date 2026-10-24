@@ -223,6 +223,31 @@ export const enqueueResearch = (question: string, symbols: string[], investigati
   queueRequest<{ job: ResearchJob; created: boolean; queue_enabled: boolean }>("", { method: "POST",
     body: JSON.stringify({ question, symbols, investigation_id: investigationId }) });
 
+// --------------------------------------------------------------------------- open threads (the lab's home)
+
+/** A section the server could not read, or one shed to keep a turn's pack under its size cap. */
+type Missing = { state: "unavailable" | "trimmed" };
+export type ThreadPosition = {
+  symbol: string; instrument: "stock" | "option"; option?: { side: string; strike: number; expiry: string }; direction?: string;
+  quantity?: number; unrealized_pct?: number | null; giveback?: "not armed" | "armed" | "fired"; peak_gain_pct?: number | null;
+  days_to_expiry?: number; expires_today?: boolean; days_held?: number; held_minutes?: number;
+};
+export type ThreadInvestigation = { id: string; source: "copilot" | "research_job"; symbol?: string; title: string; status: string; conclusion?: string; updated_at: string };
+/** An armed level alert ("level alert") or a waiting research job ("research job (<kind>)"). */
+export type ThreadWatch = {
+  watch: string; symbol?: string; price?: number; condition?: string; interval?: string; label?: string; armed_at?: string;
+  status?: string; symbols?: string[]; question?: string; due?: string;
+};
+export type OpenThreads = {
+  positions: { state: "ok"; count: number; positions: ThreadPosition[] } | Missing;
+  investigations: { state: "ok"; investigations: ThreadInvestigation[] } | Missing;
+  watches: { state: "ok"; watches: ThreadWatch[] } | Missing;
+  as_of: string | null;
+};
+export const getOpenThreads = (signal?: AbortSignal) => request<OpenThreads>("/copilot/threads", { signal });
+/** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
+export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
+
 // --------------------------------------------------------------------------- confirming a proposal
 
 export type FreshQuote = { symbol: string; last: number | null; trade_time: number | null; fetched_at: number | null; age_s: number | null; issue: string | null; fresh: boolean };
