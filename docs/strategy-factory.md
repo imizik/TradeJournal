@@ -468,6 +468,9 @@ Decided with the user on 2026-10-02.
   hand-picked), a cost model that scales with the spread, and a check that a
   few multi-symbol Tradier quote calls can rank opening volume live. It is a
   person's decision, like any new building block.
+- **Before a restart, read [the October 2026 evidence review](../research/notes/evidence-review-2026-10.md).**
+  It covers which published short-horizon effects survive costs in large caps, what
+  this data can test, and at most three ideas worth candidates.
 - **Lead: option positioning.** The options recorder has kept end-of-day open
   interest by strike for these 18 names since 2026-10-02
   (`docs/charts-workspace.md`), but the factory's history starts in July 2023.

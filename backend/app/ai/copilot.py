@@ -53,7 +53,10 @@ Confirm and Dismiss. Always end a plan by stating clearly that nothing is saved 
 a card: you cannot create alerts or research jobs yourself.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
-- You cannot place orders or read accounts, and you cannot save plans or set alerts yourself: propose_plan only \
+- When the owner asks about their own holdings or history, use get_positions and get_trades (and get_memories for \
+what they have told Jo); get_chart_context shows what their chart shows. Never reveal or guess account numbers or \
+identifiers; refer to an account only by the label the tools give.
+- You cannot place orders or change accounts, and you cannot save plans or set alerts yourself: propose_plan only \
 proposes. Say so if asked.
 - Keep answers short and conversational: a few tight paragraphs or bullets, no diagnostics dumps."""
 
@@ -282,6 +285,12 @@ class FakeAdapter:
                        for i, (n, a) in enumerate(calls)]
             yield "final", Round(content, "tool_use", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("my position", "holding", "my book")):
+            calls = [("get_positions", {}), ("get_chart_context", {"symbol": symbol, "timeframe": "5m"})]
+            content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
+                       for i, (n, a) in enumerate(calls)]
+            yield "final", Round(content, "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and "plan" not in lower:
             if any(w in lower for w in ("but ", "discount", "you're", "you are", "wrong", "disagree")):
                 calls = [("get_group_comparison", {"symbol": symbol}), ("get_peer_moves", {"symbol": symbol})]
@@ -329,6 +338,14 @@ class FakeAdapter:
     @staticmethod
     def _write(symbol: str, lower: str, results: dict) -> str:
         head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if "get_positions" in results:
+            book = results["get_positions"].get("positions") or []
+            held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
+                             f"({p['unrealized_usd']:+,.0f} $)" for p in book if p.get("mark") is not None) or "nothing open"
+            chart = results.get("get_chart_context") or {}
+            return head + (f"**Your open positions:** {held}.\n\n"
+                           f"{symbol} on the {chart.get('timeframe', '5m')} chart last traded {chart.get('last')} "
+                           f"(VWAP {(chart.get('vwap') or {}).get('vwap')}). Positions are from your journal; marks are quotes, not fills.")
         if "plan" in lower:
             return head + (f"**Proposed plan for {symbol} (draft only)**\n\n"
                            f"- Thesis: {symbol} recovery confirmed only if it keeps pace with its group, not just the tape.\n"

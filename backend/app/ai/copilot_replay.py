@@ -64,6 +64,20 @@ class ReplayEvidence:
                 "prices": {s: rows[s]["last"] if s in rows else None for s in symbols},
                 "not_recorded": [s for s in symbols if s not in rows]}
 
+    def get_chart_context(self, symbol: str, timeframe: str) -> dict:
+        return {"symbol": symbol, "timeframe": timeframe, "state": "unavailable",
+                "reason": "Chart bars are not in the Radar snapshot, so the chart is unavailable in replay. "
+                          "Use get_group_comparison and get_quotes for recorded moves."}
+
+    def get_positions(self) -> dict:
+        return {"state": "unavailable", "reason": "The owner's book is unavailable in replay (it would show today's holdings)."}
+
+    def get_trades(self, symbol: str, limit: int = 5) -> dict:
+        return {"symbol": symbol, "state": "unavailable", "reason": "The owner's trades are unavailable in replay."}
+
+    def get_memories(self, limit: int = 5) -> dict:
+        return {"state": "unavailable", "reason": "The owner's memories are unavailable in replay."}
+
     def get_peer_moves(self, symbol: str) -> dict:
         return {"symbol": symbol, "state": "unavailable",
                 "reason": "Peer moves read today's quotes, so they are off in replay. Use get_group_comparison for recorded peer returns."}

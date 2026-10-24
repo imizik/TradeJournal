@@ -10,7 +10,7 @@ untouched.
 
 - `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
-  (`frontend/components/copilot/CopilotLab.tsx`). It is not in the nav.
+  (`frontend/components/copilot/CopilotLab.tsx`). It is in the nav ("Copilot") only for the owner while the lab is on.
 - One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
   It is the full page (`variant="page"`, `CopilotLab.tsx`: Recent, symbol,
   history, deep links) and the panel beside other pages (`variant="panel"`).
@@ -53,12 +53,46 @@ untouched.
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call seven read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
-  comparison, peer moves, symbol news, earnings dates, quotes, saved research
-  and investigation changes (below). It can also call `propose_plan`, which
-  writes nothing (see Confirm a plan). Each tool
+  call eleven read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  comparison, peer moves, symbol news, earnings dates, quotes, saved research,
+  investigation changes (below), and the chart and book tools below. It can
+  also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
+- **Chart and book tools** (`backend/app/ai/copilot_book.py`):
+  - `get_chart_context(symbol, timeframe 1m/5m/15m/1h/1D)` reads the same
+    `chart_feed.workspace` as the Charts page. It returns:
+    - the last 40 bars (New York times; OHLC, volume, relative volume,
+      extended-hours flag);
+    - the nearest three automatic level zones each side, with their
+      tested, broken or reclaimed state;
+    - the latest bar's VWAP and its 1σ band;
+    - the relative-volume baseline;
+    - the quote row: session open, high and low, and the previous close.
+  - `get_positions()` lists open journal positions through
+    `chart_journal.positions`, marked by the dashboard's quote engine: option
+    mid, or the stock price. Each has stock or option (side, strike, expiry),
+    quantity, average entry and mark (options per contract, i.e. premium ×
+    100), unrealized $ and %, and days held. At most 15 are shown.
+  - `get_trades(symbol, limit ≤ 10)` lists recent closed trades in one symbol,
+    newest first: entry and exit time and price, P&L, hold time and up to 4
+    tags of at most 24 characters.
+  - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
+    emitted with their offset (for example `-04:00` in summer, `-05:00` in
+    winter), never as UTC. Days held count from that moment. Option marks
+    are read in one batched quote call before the per-contract cache reads.
+  - `get_memories(limit ≤ 10)` lists the owner's approved (active, not
+    redacted) Jo memories, read through `jo_briefing.memories`; it never
+    writes Codex's store.
+  - No account number, account id, broker id, trade id or fill id is ever
+    returned. An account appears only by its name, with digit runs removed.
+    Webull is left out (dormant).
+  - The fixture serves simulated versions. In replay, the chart is
+    unavailable (the snapshot has no bars) and so is the book.
+  - Research jobs never get `get_positions`, `get_trades` or `get_memories`:
+    a job reads untrusted pages and can fetch URLs, which could carry the
+    book out. Those three aren't even registered for a job;
+    `get_chart_context` is allowed.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
   validated (ticker pattern, at most 8 symbols, no extra keys).
@@ -338,8 +372,10 @@ Trigger it by hand only, with `backend/scripts/run_research_job.py "question"
 --symbols NBIS,CRWV --evidence fixture|live|replay [--out job.json] [--no-save]`.
 It has no scheduler, Radar wake-up or notification yet.
 
-- **Tools.** The lab tools (in-process, same validation, timeout and size
-  bound) plus the built-in `WebSearch` and `WebFetch`, and nothing else. A
+- **Tools.** The lab tools except `propose_plan`, `get_investigation_changes`
+  and the book tools (`get_positions`, `get_trades`, `get_memories`), all
+  in-process with the same validation, timeout and size bound, plus the
+  built-in `WebSearch` and `WebFetch`, and nothing else. A
   PreToolUse hook denies any other tool and caps a job at 8 searches, 10
   fetches and 12 lab-tool calls. Other limits: 24 turns, 600 s, and
   `max_budget_usd` from `RESEARCH_BUDGET_USD` (default $0.50). Built-in tools,
