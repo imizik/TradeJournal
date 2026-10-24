@@ -369,7 +369,11 @@ class LevelAlertMonitor:
                  "bar_time": event.bar_time, "detected_at": _epoch(event.detected_at)})
             event.attempts += 1
             try:
-                ntfy.publish(title, body, path="/charts")
+                if alert.source_kind == "copilot" and _uuid(alert.source_id):
+                    # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
+                    ntfy.publish(title, body, path=f"/copilot-lab?investigation={_uuid(alert.source_id)}", direct_click=True)
+                else:
+                    ntfy.publish(title, body, path="/charts")
             except ntfy.NtfyError as exc:
                 event.delivery = "pending"
                 event.next_attempt_at = _utc(now + BACKOFF[min(event.attempts, len(BACKOFF)) - 1])
@@ -379,6 +383,14 @@ class LevelAlertMonitor:
                 return
             event.delivery, event.delivered_at, event.last_error = "sent", _utc(self.clock()), None
             db.commit()
+
+
+def _uuid(value: str | None) -> str | None:
+    """The canonical id when ``value`` is a UUID, else None: nothing else is put into a notification's link."""
+    try:
+        return str(uuid.UUID(value or ""))
+    except ValueError:
+        return None
 
 
 def alert_rows(db: Session, limit: int = 50) -> list[dict]:

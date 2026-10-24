@@ -454,3 +454,47 @@ def test_active_alerts_list_first_and_fired_ones_newest_first(engine):
                     monitor._event(by_price[101.0], 101.1, TEN + 250, "stream", None)])
     with Session(engine) as db:
         assert [row["price"] for row in alert_rows(db)] == [102.0, 101.0, 100.0]
+
+
+def test_an_alert_confirmed_in_the_copilot_lab_opens_its_investigation_on_tap(engine, monkeypatch):
+    calls = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
+    investigation = "33333333-3333-4333-8333-333333333333"
+    with Session(engine) as db:
+        create_alert(db, symbol="SPY", price=100.0, reference=99.0, condition="crosses", interval=None, session="regular",
+                     source_kind="copilot", source_id=investigation, label="Copilot watch", now=TEN)
+    fire(engine, [TEN + 60]).deliver()
+    assert calls == [{"path": f"/copilot-lab?investigation={investigation}", "direct_click": True}]
+    assert events(engine)[0].delivery == "sent"
+
+    # Every other alert keeps opening Charts from the notification's button.
+    calls.clear()
+    other = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(other)
+    make(other)
+    fire(other, [TEN + 60]).deliver()
+    assert calls == [{"path": "/charts"}]
+    other.dispose()
+
+
+def test_the_route_accepts_copilot_alerts_and_still_refuses_unknown_sources(client):
+    http, _ = client
+    made = http.post("/charts/alerts", json=body(source_kind="copilot", source_id="33333333-3333-4333-8333-333333333333", label="Copilot watch"))
+    assert made.status_code == 200
+    assert [(a["source_kind"], a["source_id"]) for a in made.json()["alerts"]] == [("copilot", "33333333-3333-4333-8333-333333333333")]
+    assert http.post("/charts/alerts", json=body(source_kind="jo", price=590.0)).status_code == 422
+    # Only an investigation's id can be a Copilot alert's source: it becomes the notification's link.
+    for bad in ("x/../charts", "lvl-1", None):
+        assert http.post("/charts/alerts", json=body(source_kind="copilot", source_id=bad, price=591.0)).status_code == 422
+
+
+def test_a_copilot_alert_without_a_real_investigation_id_still_links_to_charts(engine, monkeypatch):
+    calls = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
+    with Session(engine) as db:  # a row the route would refuse, written some other way
+        create_alert(db, symbol="SPY", price=100.0, reference=99.0, condition="crosses", interval=None, session="regular",
+                     source_kind="copilot", source_id="../trades?x=1", label="Odd", now=TEN)
+    fire(engine, [TEN + 60]).deliver()
+    assert calls == [{"path": "/charts"}]
