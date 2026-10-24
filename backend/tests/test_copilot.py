@@ -696,14 +696,18 @@ def test_a_proposal_is_validated_needs_a_real_price_and_writes_nothing():
 def test_status_says_whether_alerts_from_the_lab_are_accepted(monkeypatch):
     from app.routers import level_alerts
     monkeypatch.setenv("COPILOT_ENABLED", "true")
-    with TestClient(app) as client:
-        # The alerts route's own model decides: today it refuses source_kind="copilot".
-        assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": False}
+    # The alerts route's own request model decides, so the answer follows that route whether or not it accepts copilot yet.
+    from pydantic import Field
 
-        class Open(level_alerts.AlertCreate):
-            source_kind: str  # as once the alerts route accepts copilot
-        monkeypatch.setattr(level_alerts, "AlertCreate", Open)
-        assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": True}
+    class Refuses(level_alerts.AlertCreate):
+        source_kind: str = Field(pattern="^(level|drawing|auto)$")
+
+    class Accepts(level_alerts.AlertCreate):
+        source_kind: str = Field(pattern="^(level|drawing|auto|copilot)$")
+    with TestClient(app) as client:
+        for model, expected in ((Refuses, False), (Accepts, True)):
+            monkeypatch.setattr(level_alerts, "AlertCreate", model)
+            assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": expected}
 
 
 def test_quote_for_confirming_is_fresh_only_when_recent_and_priced(monkeypatch):
