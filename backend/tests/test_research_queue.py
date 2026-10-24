@@ -217,3 +217,10 @@ def test_assistant_sessions_cannot_reach_the_queue(boundary):  # noqa: F811
     assert boundary.public.get("/copilot/research-jobs").status_code == 403
     assert boundary.public.post("/copilot/research-jobs", json={"question": "NBIS?"}).status_code == 403
     assert boundary.public.post("/copilot/research-jobs/x/cancel").status_code == 403
+
+
+def test_the_runner_starts_only_when_enabled(monkeypatch):
+    monkeypatch.setenv("RESEARCH_QUEUE_ENABLED", "true")
+    monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "0")  # started, but nothing may run
+    with TestClient(app):
+        assert isinstance(app.state.research_queue, q.QueueRunner) and app.state.research_queue.cfg.daily_budget_usd == 0
