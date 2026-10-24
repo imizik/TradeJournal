@@ -14,7 +14,9 @@ already exist, so the model spends no tool rounds rediscovering the owner:
 - ``memories``: approved memories for the symbol, then general ones.
 - ``today``: the owner's day-journal entries for today (New York).
 - ``investigations``: saved investigations and research results for the symbol.
-- ``watches``: armed level alerts for the symbol and research jobs waiting on it.
+- ``watches``: armed level alerts for the symbol, and queued or running research
+  jobs that name it (question jobs) or are linked to one of its investigations
+  (reassessments); Radar event jobs name an event, not a symbol, so they are not matched.
 
 Every section carries a provenance label the system prompt explains: ``owner said``
 (their own words), ``measured`` (journal facts) or ``saved`` (earlier conclusions,
@@ -83,8 +85,7 @@ def _section(name: str, build):
 
 def _positions(db, symbol: str | None, now_et: datetime) -> dict:
     from app.engine import capture_links, position_alerts
-    pairs, total = copilot_book.position_rows(db, limit=copilot_book.MAX_POSITIONS)
-    pairs.sort(key=lambda pair: (pair[0].ticker != symbol, pair[0].ticker))
+    pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol)
     today = now_et.date()
     rows = []
     for trade, row in pairs[:MAX_POSITIONS]:
@@ -190,10 +191,16 @@ def _investigations(db, symbol: str) -> dict:
     from app.engine import copilot_investigations
     found = copilot_investigations.list_investigations(symbol=symbol, limit=MAX_INVESTIGATIONS * 2, session=db)
     found = sorted(found, key=lambda r: r["status"] != "open")  # open first; each group stays newest first
-    rows = [{k: v for k, v in {"id": r["id"], "source": r["source"], "title": _trim(r["title"], 100), "status": r["status"],
-                               "conclusion": _trim(r.get("conclusion"), 200), "updated_at": r["updated_at"]}.items() if v}
-            for r in found[:MAX_INVESTIGATIONS]]
-    return {"state": "ok", "investigations": rows}
+    rows = []
+    for r in found[:MAX_INVESTIGATIONS]:
+        row = {"id": r["id"], "source": r["source"], "title": _trim(r["title"], 100), "status": r["status"], "updated_at": r["updated_at"]}
+        # A research job's conclusion was written by a model that read untrusted web pages. It stays a tool result
+        # (get_saved_research), never text in the owner's turn; only the owner's own conversations bring theirs here.
+        if r["source"] == "copilot" and r.get("conclusion"):
+            row["conclusion"] = _trim(r["conclusion"], 200)
+        rows.append(row)
+    return {"state": "ok", "investigations": rows,
+            "note": "research_job records show title and status only; read their findings with get_saved_research"}
 
 
 def _watches(db, symbol: str, investigation_ids: set[str]) -> dict:
@@ -210,6 +217,8 @@ def _watches(db, symbol: str, investigation_ids: set[str]) -> dict:
         try:
             data = json.loads(job.input_json)
         except ValueError:
+            continue
+        if not isinstance(data, dict):
             continue
         linked = data.get("investigation_id") or data.get("from_investigation")
         if symbol in (data.get("symbols") or []) or (linked and str(linked) in investigation_ids):
@@ -248,7 +257,8 @@ def _shed_steps(pack: dict):
     yield lambda: pack.get("today", {}).pop("entries", None)
     yield lambda: pack.get("investigations", {}).pop("investigations", None)
     yield lambda: pack.get("memories", {}).pop("memories", None)
-    yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3], shown=3)
+    yield lambda: pack.get("positions", {}).update(positions=pack["positions"].get("positions", [])[:3],
+                                                   shown=min(3, len(pack["positions"].get("positions", []))))
     yield lambda: pack.pop("provenance", None)
 
 

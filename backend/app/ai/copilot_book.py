@@ -166,9 +166,11 @@ def _warm_option_quotes(trades: list) -> None:
         get_option_quotes(wanted)
 
 
-def position_rows(db, limit: int = MAX_POSITIONS) -> tuple[list[tuple], int]:
+def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None) -> tuple[list[tuple], int]:
     """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
-    look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position."""
+    look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position.
+    ``first`` puts that symbol's positions ahead of the alphabetical rest before the ``limit`` cut, so the symbol a
+    turn is about is never the one dropped from a large book."""
     from sqlmodel import select
     from app.engine import chart_journal
     from app.engine.quotes import get_stock_quotes
@@ -177,6 +179,8 @@ def position_rows(db, limit: int = MAX_POSITIONS) -> tuple[list[tuple], int]:
                                             .where(Trade.status == "open").where(_not_webull())).all()}
     tickers = sorted({t.ticker for t in trades.values()})
     held = [p for ticker in tickers for p in chart_journal.positions(db, ticker) if p["trade_id"] in trades]
+    if first:
+        held.sort(key=lambda p: trades[p["trade_id"]].ticker != first)  # stable: the alphabetical order holds within each part
     quotes = get_stock_quotes(sorted({trades[p["trade_id"]].ticker for p in held if trades[p["trade_id"]].instrument_type == "stock"})) if held else {}
     _warm_option_quotes([trades[p["trade_id"]] for p in held[:limit]])
     from app.engine.chart_math import ET

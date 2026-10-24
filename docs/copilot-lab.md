@@ -128,8 +128,8 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
 - **Sections**, each with a provenance label the system prompt explains
   (`owner said` = their own words; `measured` = journal facts; `saved` = earlier
   conclusions and watches, possibly stale):
-  - `positions` (measured): `get_positions`' rows, the turn's symbol first and at
-    most 8, each with its minutes held when opened today, days to expiry and
+  - `positions` (measured): `get_positions`' rows, the turn's symbol first (put
+    ahead before any cut, so a large book never drops it) and at most 8, each with its minutes held when opened today, days to expiry and
     expires-today flag, the give-back watch (`not armed`, `armed` or `fired`,
     with the peak gain) and the last three phone alerts `position_alerts` keeps
     for it, and the plan captured before it (`capture_links`: setup, wording,
@@ -144,12 +144,20 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
   - `today` (owner said): today's day-journal entries (New York), at most 6.
   - `investigations` (saved): saved investigations and research results for the
     symbol, open first, at most 4, with their ids so the model can call
-    `get_investigation_changes`.
-  - `watches` (saved): armed level alerts for the symbol and research jobs still
-    queued or running for it, at most 6.
+    `get_investigation_changes`. A copilot conversation's conclusion is shown;
+    a research job's is not (title and status only): a job's text was written
+    by a model that read untrusted web pages, and this block sits in the
+    owner's turn, where `propose_plan` and the book are in reach. Its findings
+    stay a tool result (`get_saved_research`).
+  - `watches` (saved): armed level alerts for the symbol, and queued or running
+    research jobs that name it (question jobs) or are linked to one of its
+    investigations (reassessments); Radar event jobs name an event, not a
+    symbol, so they are not matched. At most 6.
 - A section that cannot be read says `unavailable`; the others stand. If the
   whole read fails or exceeds the tool timeout, the block says the context was
-  unavailable and the turn goes on. Over the size cap, the pack sheds the
+  unavailable and the turn goes on (the read itself finishes in its worker
+  thread; the turn does not wait for it). The read runs before the first model
+  round, so a slow quote provider adds up to the tool timeout to a turn. Over the size cap, the pack sheds the
   least decision-relevant parts first (recent trades, today's notes,
   investigations, memories, then positions beyond three) and marks itself
   `trimmed`; positions and habits go last.
