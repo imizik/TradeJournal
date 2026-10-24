@@ -131,11 +131,14 @@ export default function TradesTable({
   trades,
   accountMap,
   thisYear,
+  returnTo,
 }: {
   trades: Trade[];
   accountMap: Record<string, Account>;
   /** New York's year, from the server, so the server and browser label expiries alike. */
   thisYear: number;
+  /** Filtered list to restore after inspecting a trade. */
+  returnTo?: string;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
   const [shown, setShown] = useState(PAGE);
@@ -190,7 +193,7 @@ export default function TradesTable({
           {sorted.slice(0, shown).map((t) => (
             <tr key={t.id} className="hover:bg-muted/50">
               <Td>
-                <a href={`/trades/${t.id}`} className="font-semibold hover:underline">
+                <a href={`/trades/${t.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`} className="font-semibold hover:underline">
                   {t.ticker}
                 </a>
                 {t.instrument_type === "option" && (

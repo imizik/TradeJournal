@@ -40,6 +40,7 @@ export default async function TradesPage({
     });
     // Clean "all" values to keep URLs tidy
     ["status", "account", "type"].forEach((k) => { if (sp.get(k) === "all") sp.delete(k); });
+    if (p.ticker) sp.set("ticker", p.ticker);
     const s = sp.toString();
     return `/trades${s ? `?${s}` : ""}`;
   }
@@ -73,7 +74,7 @@ export default async function TradesPage({
         </FilterGroup>
       </div>
 
-      <TradesTable trades={trades} accountMap={accountMap} thisYear={Number(newYorkToday().slice(0, 4))} />
+      <TradesTable returnTo={filterUrl({}) === "/trades" ? undefined : filterUrl({})} trades={trades} accountMap={accountMap} thisYear={Number(newYorkToday().slice(0, 4))} />
     </div>
   );
 }
