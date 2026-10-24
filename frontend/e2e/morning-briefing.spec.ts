@@ -410,6 +410,8 @@ test("opportunity brief leads with market context and new setups, then short urg
   await expect(compact).toContainText("Research only · confirmation missing");
   await expect(compact).toContainText("Frozen briefing, not a live price feed");
   await expect(compact).toContainText("Tradier invented fixture");
+  // "Journal & performance" streams in after the briefing: measure it once it is there.
+  await expect(page.getByTestId("journal-details")).toBeVisible();
   const first = await compact.boundingBox();
   const summary = await page.getByTestId("journal-details").boundingBox();
   expect(first!.y + first!.height).toBeLessThan(summary!.y);
