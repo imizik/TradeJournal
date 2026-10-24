@@ -270,10 +270,10 @@ reason, and ruff lints them without importing them.
 
 - `docs/agent/last-reconciled.json` — the commit documentation was last
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
-  and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
-  judgement half is `.claude/skills/docs-drift/SKILL.md`. It runs unattended
-  every Saturday as a Claude Code routine in Anthropic's cloud ("Weekly docs
-  drift pass" at claude.ai/code/routines), on the Claude plan rather than API
+  and warns past 30 (it never fails CI); `tests/test_docs_links.py` checks
+  names and anchors. The judgement half is `.claude/skills/docs-drift/SKILL.md`.
+  It runs unattended every day as a Claude Code routine in Anthropic's cloud
+  ("Daily docs drift pass" at claude.ai/code/routines), on the Claude plan rather than API
   credits, so it needs no token, no Mac and no launchd job. From 20 code
   commits on, and only when no earlier `claude/docs-drift-*` pull request is
   still open, it runs the pass on a fresh clone of `main`, edits only

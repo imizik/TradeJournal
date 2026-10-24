@@ -8,9 +8,14 @@ database for the whole of the week after the VPS cutover, and deployment as
 "deliberately unspecified" while six systemd services were running.
 
 So this asks. It counts the commits that touched code since the last recorded
-reconciliation, and fails once that number passes a threshold. The fix is the
+reconciliation, and warns once that number passes a threshold. The fix is the
 pass itself -- `.claude/skills/docs-drift/SKILL.md` -- followed by writing the
 commit reconciled to into `docs/agent/last-reconciled.json`.
+
+It warns rather than fails: the daily "docs drift pass" cloud routine does the
+pass and opens a pull request on its own, so an overdue pass must not block
+unrelated pull requests. A marker that names no real commit still fails,
+because that would switch the count off for the routine too.
 
 What it cannot check is that the pass actually happened: nothing stops someone
 editing the marker and moving on. It is a prompt at the right moment, not a
@@ -26,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import warnings
 from datetime import date
 from pathlib import Path
 
@@ -124,7 +130,9 @@ def test_the_drift_pass_is_not_overdue() -> None:
         pytest.skip(f"{sha} is not countable here (shallow clone, or no marker in history)")
 
     behind = code_commits_since(base)
-    assert behind <= THRESHOLD, (
+    if behind <= THRESHOLD:
+        return
+    warnings.warn(
         f"{behind} code commits have landed since documentation was last "
         f"reconciled at {base} ({marker['date']}); the threshold is "
         f"{THRESHOLD}.\n\n"
@@ -135,7 +143,10 @@ def test_the_drift_pass_is_not_overdue() -> None:
         f"{MARKER.relative_to(REPO_ROOT)}:\n"
         f'    {{"commit": "<full sha>", "date": "<YYYY-MM-DD>", "note": "..."}}\n\n'
         f"Bumping the marker without reading the documents is the one thing "
-        f"this check cannot detect, and the only way it stops working."
+        f"this check cannot detect, and the only way it stops working.\n\n"
+        f"Not blocking: the daily docs drift routine opens this pass as a pull "
+        f"request by itself.",
+        stacklevel=1,
     )
 
 
