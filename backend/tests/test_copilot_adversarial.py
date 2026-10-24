@@ -249,12 +249,13 @@ def test_replay_what_changed_hides_an_investigations_later_edit(tmp_path, monkey
     assert "HINDSIGHT" not in json.dumps(replay.get_investigation_changes(saved["id"]))
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (copilot_tools.saved_research, owned by PR #459's file): in replay a record "
-                                       "created before the moment but edited after it shows its later conclusion")
 def test_replay_saved_research_hides_an_investigations_later_edit(tmp_path, monkeypatch):
     replay = _replay_world(tmp_path, monkeypatch)
     _edited_after(replay.at.astimezone(UTC).replace(tzinfo=None))
-    assert "HINDSIGHT" not in json.dumps(replay.get_saved_research("NBIS", 5))
+    out = replay.get_saved_research("NBIS", 5)
+    assert "HINDSIGHT" not in json.dumps(out)
+    item = next(i for i in out["items"] if i["title"] == "NBIS bounce")
+    assert item["later_state"].startswith("Updated after the replay moment") and "conclusion" not in item
 
 
 # =========================================================================== 3. false or unseen citations
@@ -495,8 +496,6 @@ def test_the_turn_cap_holds_for_dated_unknown_or_missing_model_ids(model):
     assert [e["code"] for e in events if e["type"] == "error"] == ["budget"] and len(adapter.seen) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (copilot.run_turn): a turn's whole usage is priced at the last round's model, "
-                                       "so an Opus fallback round followed by a Sonnet round is under-counted and the cap is missed")
 def test_the_turn_cap_counts_a_fallback_rounds_own_price():
     # Round 1 on Opus (fallback): 12,000 output = $0.24. Round 2 on Sonnet: 1,000 output = $0.01. Spent $0.25 = the cap.
     adapter = Scripted({"content": [_use("get_quotes", {"symbols": ["NBIS"]})], "usage": _usage(12_000), "model": "claude-opus-5-5"},

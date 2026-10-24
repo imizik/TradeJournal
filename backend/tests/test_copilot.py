@@ -334,6 +334,15 @@ def test_turn_stops_at_its_spend_cap(monkeypatch):
     assert len(calls) == 2 and [e["code"] for e in events if e["type"] == "error"] == ["budget"]
 
 
+@pytest.mark.parametrize("raw", ["inf", "-inf", "nan", "1e999", "0", "-1", "lots"])
+def test_turn_budget_from_the_environment_must_be_positive_and_finite(monkeypatch, caplog, raw):
+    monkeypatch.setenv("COPILOT_TURN_BUDGET_USD", raw)  # "inf" would otherwise switch the spend cap off
+    assert copilot.settings().turn_budget_usd == 0.25
+    assert "COPILOT_TURN_BUDGET_USD" in caplog.text
+    monkeypatch.setenv("COPILOT_TURN_BUDGET_USD", "0.5")
+    assert copilot.settings().turn_budget_usd == 0.5
+
+
 def test_anthropic_errors_are_mapped_without_secrets(monkeypatch):
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     cases = [

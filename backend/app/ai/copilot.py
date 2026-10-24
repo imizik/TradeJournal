@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -139,12 +140,16 @@ def evidence_for(cfg: Settings):
 
 
 def _float_env(name: str, default: float) -> float:
-    """A positive number from the environment; anything malformed falls back to the default rather than a 500."""
+    """A positive, finite number from the environment; anything else falls back to the default rather than a 500
+    (``inf`` would disable a spend cap)."""
     try:
         value = float(os.environ.get(name) or default)
     except ValueError:
-        return default
-    return value if value > 0 else default
+        value = math.nan
+    if math.isfinite(value) and value > 0:
+        return value
+    log.warning("%s is not a positive finite number; using %s", name, default)
+    return default
 
 
 def _price(model: str | None) -> tuple[float, float, float, float]:
@@ -505,6 +510,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
         now = evidence.at
     messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + history[-1]["content"]}
     usage = _zero_usage()
+    spent_usd = 0.0  # each round priced at its own model: a fallback round may be dearer than the next
     metrics: dict[str, Any] = {"backend": cfg.backend, "evidence": cfg.evidence, "model": getattr(adapter, "model", None) or cfg.model,
                                "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
                                "max_silence_ms": 0, "rounds": 0, "tool_calls": []}
@@ -543,10 +549,11 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     raise CopilotError("model_output", "The model stream ended without a message.")
                 for key in usage:
                     usage[key] += final.usage.get(key, 0)
+                spent_usd += cost_usd(final.model or metrics["model"], {key: final.usage.get(key, 0) for key in usage})
                 if final.model:
                     metrics["model"] = final.model
                 messages.append({"role": "assistant", "content": final.content})
-                spent = cost_usd(metrics["model"], usage) if cfg.backend == "anthropic" else 0.0
+                spent = spent_usd if cfg.backend == "anthropic" else 0.0
                 over_budget = spent is not None and spent >= cfg.turn_budget_usd
                 if final.stop_reason == "refusal":
                     yield {"type": "error", "code": "refusal", "message": "The model declined to answer this request."}
@@ -585,7 +592,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
         log.warning("copilot turn failed: %s", type(exc).__name__)
         yield {"type": "error", "code": "internal", "message": "The copilot turn failed unexpectedly."}
     seen()  # the turn's end: a long wait before the answer finished counts as silence too
-    metrics.update(total_ms=elapsed(), usage=usage, cost_usd=cost_usd(metrics["model"], usage) if cfg.backend == "anthropic" else 0.0)
+    metrics.update(total_ms=elapsed(), usage=usage, cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
     log.info("copilot turn backend=%s model=%s first_feedback_ms=%s first_text_ms=%s max_silence_ms=%s total_ms=%s "
              "rounds=%s tools=%s in=%s out=%s cache_read=%s cost=%s",
              cfg.backend, metrics["model"], metrics["first_feedback_ms"], metrics["first_text_ms"], metrics["max_silence_ms"],
