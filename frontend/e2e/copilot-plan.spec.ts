@@ -52,7 +52,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
   await page.route("**/copilot/research-jobs/reassess", (route) => {
     post("reassess", route);
     const body = route.request().postDataJSON();
-    server.jobs = [{ id: "j1", kind: "reassess", status: "queued", input: { investigation_id: body.investigation_id, question: body.question, requested_by: "owner" },
+    server.jobs = [{ id: "j1", kind: "reassess", status: "queued", input: { investigation_id: body.investigation_id, question: body.question, requested_by: "owner", from_investigation: body.investigation_id },
       attempts: 0, error: null, cost_usd: null, investigation_id: null, created_at: "2026-10-24T14:01:00", next_attempt_at: "2026-10-25T14:01:00", finished_at: null }];
     return route.fulfill({ status: 201, json: { job: server.jobs[0], created: true, queue_enabled: !server.queueOff } });
   });

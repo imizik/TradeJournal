@@ -340,16 +340,20 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
     after_days}` queues the owner's "revisit this question": one reassess job
     for that investigation, due `after_days` (0-30) from now, at most once a
     day per investigation and due date. Its assignment adds the owner's
-    question to the usual reassessment. While it waits, it counts as that
+    question to the usual reassessment. It records `from_investigation` too,
+    so `?from_investigation=` lists it with that investigation's jobs. While it waits, it counts as that
     investigation's waiting reassessment, so the automatic reassessment
     (`RESEARCH_REASSESS_AFTER_HOURS`) skips the investigation until it has
     run: up to 30 days for the longest revisit.
   - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
-    job; the same question and symbols are queued at most once a day. An
-    optional `investigation_id` is kept in the job's input as
+    job. An optional `investigation_id` is kept in the job's input as
     `from_investigation`, so the lab can show the job on the investigation it
-    came from; the job does not read it.
-  - `GET /copilot/research-jobs` lists jobs with the day's spend.
+    came from; the job does not read it. The same question and symbols from
+    the same investigation are queued at most once a day. A failed or
+    cancelled one can be asked again: its row keeps its outcome under a
+    retired key. Jobs queued by the triggers are never re-queued this way.
+  - `GET /copilot/research-jobs` lists jobs with the day's spend;
+    `?from_investigation=<id>` keeps one investigation's jobs.
   - `POST /copilot/research-jobs/{id}/cancel` cancels a queued job, or stops a
     running one.
 - **In the lab** (`frontend/components/copilot/ResearchDeeper.tsx`): an open
@@ -357,6 +361,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   /copilot/research-jobs` reports `queue_enabled`.
   - It opens a form prefilled with the investigation's symbol and its latest
     question; the owner edits it and queues a linked job.
+  - The button is hidden while a job for the investigation is queued or
+    running.
   - The job's status, cost and error show under the investigation. The list
     is re-read every 10 s while a job is queued or running, and no longer
     after that.
@@ -387,6 +393,36 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   set `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
   question with the POST route, and read the result in the lab's saved
   investigations.
+
+### In production (VPS)
+
+The release carries the SDK: `deploy/build.py` builds the `copilot-plan` extra
+from its sdist, a 164 KB pure-Python wheel instead of the ~126 MB PyPI wheel
+with a second (~270 MB unpacked) Claude Code inside. `deploy/control.py` installs that extra.
+Jobs run the release's own `bin/claude`, the version
+`deploy/claude-code/package.json` pins, which needs to be 2.1.257 or later
+for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
+
+- **Auth.** `RESEARCH_AUTH=api_key` with `ANTHROPIC_API_KEY` in
+  `/etc/tradejournal/backend.env`. The job passes only that key: the plan
+  token from `claude-plan.env` and everything else is blanked. Claude Code
+  must report `authMethod=api_key` and `apiKeySource=ANTHROPIC_API_KEY`
+  before a job runs. Its state goes under
+  `/var/lib/tradejournal/claude/research-api`, apart from the plan reviews'
+  state. Plan auth is refused there, because the database is Postgres.
+- **Turning it on, conservatively.** Add `RESEARCH_QUEUE_ENABLED=true`,
+  `RESEARCH_AUTH=api_key`, a small `RESEARCH_BUDGET_USD` and
+  `RESEARCH_DAILY_BUDGET_USD`, and leave the two trigger settings unset. Then
+  run `sudo systemctl restart tradejournal-api`. Queue one question with
+  `POST /copilot/research-jobs` and watch it with `GET /copilot/research-jobs`.
+  Turning the queue off again (unset, then restart) leaves queued jobs
+  waiting.
+- **CI.** The "Ubuntu package and MCP smokes" job checks the installed release
+  without a model call:
+  - `bin/claude --version` matches the pin;
+  - `claude_agent_sdk` imports from the release venv without a bundled CLI;
+  - the API-key preflight passes as the `tradejournal` user with a dummy key;
+  - plan auth is refused on Postgres.
 
 ## Before a live API test
 

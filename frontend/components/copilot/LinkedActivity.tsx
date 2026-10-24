@@ -15,7 +15,7 @@ export default function LinkedActivity({ investigationId, refreshKey }: { invest
     const controller = new AbortController();
     listAlerts(controller.signal).then(payload => setAlerts(payload.alerts.filter(alert =>
       (alert.source_kind as string) === "copilot" && alert.source_id === investigationId))).catch(() => { /* shown when readable */ });
-    listResearchJobs(controller.signal).then(payload => setJobs(payload.jobs.filter(job =>
+    listResearchJobs(controller.signal, investigationId).then(payload => setJobs(payload.jobs.filter(job =>
       job.kind === "reassess" && job.input.investigation_id === investigationId))).catch(() => { /* shown when readable */ });
     return () => controller.abort();
   }, [investigationId, refreshKey]);

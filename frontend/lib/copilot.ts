@@ -199,7 +199,9 @@ async function queueRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-export const listResearchJobs = (signal?: AbortSignal) => queueRequest<ResearchJobs>("?limit=50", { signal });
+/** With an investigation, only the jobs asked from it, so a busy queue cannot push them out of the page. */
+export const listResearchJobs = (signal?: AbortSignal, fromInvestigation?: string) =>
+  queueRequest<ResearchJobs>(`?limit=50${fromInvestigation ? `&from_investigation=${encodeURIComponent(fromInvestigation)}` : ""}`, { signal });
 export const enqueueResearch = (question: string, symbols: string[], investigationId: string) =>
   queueRequest<{ job: ResearchJob; created: boolean; queue_enabled: boolean }>("", { method: "POST",
     body: JSON.stringify({ question, symbols, investigation_id: investigationId }) });

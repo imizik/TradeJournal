@@ -56,9 +56,12 @@ def enqueue_revisit(body: RevisitJob, session: Session = Depends(get_session)):
 
 
 @router.get("")
-def list_jobs(status: str | None = None, limit: int = 50, session: Session = Depends(get_session)):
+def list_jobs(status: str | None = None, limit: int = 50, from_investigation: uuid.UUID | None = None,
+              session: Session = Depends(get_session)):
     cfg = research_queue.settings()
-    return {"jobs": research_queue.list_jobs(status=status, limit=limit, session=session), "queue_enabled": cfg.enabled,
+    jobs = research_queue.list_jobs(status=status, limit=limit, session=session,
+                                    from_investigation=str(from_investigation) if from_investigation else None)
+    return {"jobs": jobs, "queue_enabled": cfg.enabled,
             "daily_budget_usd": cfg.daily_budget_usd, "spent_today_usd": research_queue.spent_today(session=session)}
 
 

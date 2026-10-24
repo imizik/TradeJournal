@@ -53,10 +53,11 @@ dev = [
     # CI resolve the same rule set. Bump deliberately, in its own commit.
     "ruff==0.16.7",
 ]
-# Copilot Lab's plan backend (COPILOT_BACKEND=plan, docs/copilot-lab.md): the
-# Claude Agent SDK runs the lab's read-only turn on the owner's Claude plan.
-# Optional because the wheel bundles a ~270 MB Claude Code binary that CI and
-# production do not need (the lab is off there and its tests stub the SDK).
+# The Claude Agent SDK for Copilot Lab's research jobs (on the VPS) and its
+# local plan backend (docs/copilot-lab.md). An extra, because its ~126 MB PyPI
+# wheel bundles a ~270 MB Claude Code binary that CI does not need (its tests
+# stub the SDK). The release builds it from its sdist into a pure wheel that runs
+# the release's own bin/claude (deploy/build.py) and installs the extra.
 copilot-plan = [
     "claude-agent-sdk==0.2.174",
 ]

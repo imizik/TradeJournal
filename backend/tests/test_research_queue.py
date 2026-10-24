@@ -404,7 +404,9 @@ def test_the_owner_can_revisit_an_investigation_later_through_the_route(monkeypa
         made = client.post("/copilot/research-jobs/reassess", json={"investigation_id": saved["id"], "question": "Still lagging?", "after_days": 2})
         assert made.status_code == 201 and made.json()["created"]
         job = made.json()["job"]
-        assert job["kind"] == "reassess" and job["input"] == {"investigation_id": saved["id"], "question": "Still lagging?", "requested_by": "owner"}
+        assert job["kind"] == "reassess" and job["input"] == {"investigation_id": saved["id"], "question": "Still lagging?",
+                                                              "requested_by": "owner", "from_investigation": saved["id"]}
+        assert [j["id"] for j in client.get(f"/copilot/research-jobs?from_investigation={saved['id']}").json()["jobs"]] == [job["id"]]
         assert job["next_attempt_at"] == "2026-10-26T15:00:00"
         again = client.post("/copilot/research-jobs/reassess", json={"investigation_id": saved["id"], "question": "Still lagging?", "after_days": 2})
         assert again.json()["created"] is False  # once a day per investigation and due date
@@ -420,3 +422,48 @@ def test_the_owner_can_revisit_an_investigation_later_through_the_route(monkeypa
     question, symbols, title = q.assignment(claimed)
     assert question.endswith("The owner asked to revisit this question in particular: Still lagging?")
     assert symbols == ["NBIS"] and title == "Reassess: NBIS bounce"
+
+
+def test_a_question_is_its_own_job_per_investigation_and_can_be_asked_again_after_it_fails():
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    job_a, _ = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)
+    job_b, created = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=b)
+    assert created and job_b["id"] != job_a["id"]  # B gets its own job instead of A's
+    assert [j["id"] for j in q.list_jobs(from_investigation=a)] == [job_a["id"]]
+    assert [j["id"] for j in q.list_jobs(from_investigation=b)] == [job_b["id"]]
+    assert q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)[1] is False  # still queued: dedupes
+
+    # Failed or cancelled: asking again queues a new job, and the old one keeps its outcome.
+    with Session(engine) as db:
+        row = db.get(ResearchJob, uuid.UUID(job_a["id"]))
+        row.status, row.error = "failed", "timed out"
+        db.commit()
+    retry, created = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)
+    assert created and retry["id"] != job_a["id"] and retry["status"] == "queued"
+    assert {j["id"]: j["status"] for j in q.list_jobs(from_investigation=a)} == {retry["id"]: "queued", job_a["id"]: "failed"}
+    q.cancel(retry["id"])
+    again, created = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)
+    assert created and again["id"] not in (retry["id"], job_a["id"])
+    # A done job still dedupes for the day.
+    with Session(engine) as db:
+        db.get(ResearchJob, uuid.UUID(again["id"])).status = "done"
+        db.commit()
+    assert q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a) == (q.list_jobs(from_investigation=a)[0], False)
+
+    # Only owner-asked questions are retried: a trigger's failed job keeps its key, so a pass does not queue it again.
+    radar, _ = q.enqueue("radar_event", {"event_id": "evt-1"}, "radar_event:evt-1")
+    with Session(engine) as db:
+        db.get(ResearchJob, uuid.UUID(radar["id"])).status = "failed"
+        db.commit()
+    assert q.enqueue("radar_event", {"event_id": "evt-1"}, "radar_event:evt-1")[1] is False
+
+
+def test_the_route_lists_one_investigations_jobs(monkeypatch):
+    monkeypatch.delenv("RESEARCH_QUEUE_ENABLED", raising=False)
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    with TestClient(app) as client:
+        for source, question in ((a, "q1"), (b, "q2"), (None, "q3")):
+            client.post("/copilot/research-jobs", json={"question": question, **({"investigation_id": source} if source else {})})
+        assert [j["input"]["question"] for j in client.get(f"/copilot/research-jobs?from_investigation={a}").json()["jobs"]] == ["q1"]
+        assert len(client.get("/copilot/research-jobs").json()["jobs"]) == 3
+        assert client.get("/copilot/research-jobs?from_investigation=nope").status_code == 422

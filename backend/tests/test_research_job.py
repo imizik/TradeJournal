@@ -3,6 +3,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -221,3 +222,21 @@ def test_news_links_from_the_lab_news_tool_count_as_seen(plan_env, saved, monkey
     record = _run(sdk, evidence=copilot_tools.LiveEvidence())
     assert record["lab_tool_calls"][0]["status"] == "ok"
     assert record["checks"]["unseen_citations"] == ["https://www.benzinga.com/news/26/10/99999999/not-returned"]
+
+
+def test_api_key_mode_uses_its_own_config_dir_and_needs_claude_code_to_report_the_key(plan_env, monkeypatch, tmp_path):  # noqa: F811
+    monkeypatch.setenv("TJ_CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    seen = {}
+
+    def status(command, env, **kwargs):
+        seen.update(command=command, env=env)
+        return SimpleNamespace(stdout=json.dumps({"authMethod": "api_key", "apiProvider": "firstParty",
+                                                  "apiKeySource": "ANTHROPIC_API_KEY"}))
+
+    monkeypatch.setattr(research_job.subprocess, "run", status)
+    binary, env = research_job.prepare("api_key")
+    assert binary == "/bin/sh" and seen["command"][1:] == ["auth", "status", "--json"]
+    assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude" / "research-api") and Path(env["CLAUDE_CONFIG_DIR"]).is_dir()
+    assert seen["env"]["ANTHROPIC_API_KEY"] == "sk-test" and seen["env"][plan_runner.TOKEN_ENV] == ""
+    assert seen["env"]["CLAUDE_CONFIG_DIR"] == env["CLAUDE_CONFIG_DIR"]

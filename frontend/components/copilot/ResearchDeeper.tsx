@@ -26,7 +26,8 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
   const active = useRef(new Set<string>());
 
   const apply = useCallback((result: ResearchJobs) => {
-    const mine = result.jobs.filter(job => job.input.from_investigation === investigationId);
+    // Only "Research deeper" jobs: an owner revisit (shown under Linked) may wait for days and must not hide the button.
+    const mine = result.jobs.filter(job => job.kind === "question" && job.input.from_investigation === investigationId);
     // A job that was waiting or running and has now finished puts its result under Recent.
     if (mine.some(job => active.current.has(job.id) && !ACTIVE_JOB.has(job.status))) onFinished();
     active.current = new Set(mine.filter(job => ACTIVE_JOB.has(job.status)).map(job => job.id));
@@ -36,16 +37,20 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
 
   useEffect(() => {
     const controller = new AbortController();
-    listResearchJobs(controller.signal).then(apply).catch(() => { if (!controller.signal.aborted) setEnabled(false); });
+    listResearchJobs(controller.signal, investigationId).then(apply).catch(() => { if (!controller.signal.aborted) setEnabled(false); });
     return () => controller.abort();
-  }, [apply]);
+  }, [apply, investigationId]);
 
   const waiting = jobs.some(job => ACTIVE_JOB.has(job.status));
   useEffect(() => {
     if (!waiting) return;
-    const timer = window.setInterval(() => { listResearchJobs().then(apply).catch(() => { /* the next poll tries again */ }); }, POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [waiting, apply]);
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      listResearchJobs(controller.signal, investigationId).then(apply).catch(() => { /* the next poll tries again */ });
+    }, POLL_MS);
+    // Leaving the investigation stops the polls and any read still in flight.
+    return () => { window.clearInterval(timer); controller.abort(); };
+  }, [waiting, apply, investigationId]);
 
   async function submit() {
     if (!form || sending) return;
@@ -69,7 +74,7 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
   if (!enabled) return null;
   return (
     <section aria-label="Research deeper" className="space-y-2 text-xs">
-      {!form && (
+      {!form && !waiting && (
         <button type="button" onClick={() => setForm({ symbol, question: topic })}
           className="min-h-11 rounded border px-2 py-1 text-muted-foreground hover:text-foreground sm:min-h-0">Research deeper</button>
       )}

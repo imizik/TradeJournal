@@ -10,7 +10,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session, delete
 
 from app.database import get_session
@@ -29,9 +29,19 @@ class AlertCreate(BaseModel):
     condition: str
     interval: str | None = None
     session: str = "regular"
-    source_kind: str = Field(pattern="^(level|drawing|auto)$")
+    source_kind: str = Field(pattern="^(level|drawing|auto|copilot)$")  # copilot: confirmed in the Copilot Lab, source_id = its investigation
     source_id: str | None = Field(default=None, max_length=80)
     label: str = Field(default="", max_length=120)
+
+    @model_validator(mode="after")
+    def copilot_needs_its_investigation(self):
+        # Its notification links to /copilot-lab?investigation=<source_id>: only a real investigation id goes there.
+        if self.source_kind == "copilot":
+            try:
+                self.source_id = str(uuid.UUID(self.source_id or ""))
+            except ValueError:
+                raise ValueError("A Copilot Lab alert needs its investigation's id.") from None
+        return self
 
 
 class AlertRearm(BaseModel):
