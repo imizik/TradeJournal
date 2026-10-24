@@ -161,12 +161,13 @@ function StatusLine({ status, error }: { status: CopilotStatus | null; error: st
   );
 }
 
-export default function CopilotLab() {
+/** ``link`` comes from `/copilot-lab?symbol=X&context=...`: a new investigation, prefilled and not sent. */
+export default function CopilotLab({ link = null }: { link?: { symbol: string; context: string } | null }) {
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [symbol, setSymbol] = useState("NBIS");
+  const [symbol, setSymbol] = useState(link?.symbol || "NBIS");
   const [messages, setMessages] = useState<LabMessage[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(link?.context ? `Context: ${link.context}\n\n` : "");
   const [busy, setBusy] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
@@ -202,12 +203,13 @@ export default function CopilotLab() {
       void refreshRecent();
       let id: string | null = null;
       try { id = window.localStorage.getItem(CURRENT_KEY); } catch { /* start fresh */ }
-      if (id) getInvestigation(id).then(saved => { if (!controller.signal.aborted) open(saved); }).catch(() => remember(null));
+      if (link) remember(null); // a deep link starts fresh rather than reopening the last investigation
+      else if (id) getInvestigation(id).then(saved => { if (!controller.signal.aborted) open(saved); }).catch(() => remember(null));
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
     });
     return () => controller.abort();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount only; the page remounts the lab per deep link
 
   /** Save the whole investigation: created on its first answer, then updated against the revision it was read at. */
   async function persist(next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
@@ -304,10 +306,10 @@ export default function CopilotLab() {
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Symbol
           <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10))}
-            className="w-24 rounded border bg-background px-2 py-1 text-sm uppercase text-foreground" aria-label="Investigation symbol" />
+            className="w-24 rounded border bg-background px-2 py-1 text-base uppercase text-foreground sm:text-sm" aria-label="Investigation symbol" />
         </label>
         <button type="button" onClick={startNew} disabled={busy || (!messages.length && !current)}
-          className="rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">New investigation</button>
+          className="min-h-11 rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0">New investigation</button>
         {saveState && (
           <span role={saveState.state === "error" ? "alert" : undefined}
             className={cn("text-xs", saveState.state === "error" ? "text-rose-300" : "text-muted-foreground")}>
@@ -322,7 +324,7 @@ export default function CopilotLab() {
           {recent.map(item => (
             <button key={item.id} type="button" onClick={() => void resume(item.id)} disabled={busy}
               aria-current={item.id === current?.id ? "true" : undefined}
-              className={cn("max-w-[16rem] truncate rounded border px-2 py-0.5 text-left disabled:opacity-40",
+              className={cn("min-h-11 max-w-[16rem] truncate rounded border px-2 py-0.5 text-left disabled:opacity-40 sm:min-h-0",
                 item.id === current?.id ? "border-primary/60 text-foreground" : "text-muted-foreground hover:text-foreground")}
               title={`${item.title}${item.conclusion ? ` — ${item.conclusion}` : ""} · ${shortTime(item.updated_at)}`}>
               {item.symbol ? `${item.symbol} · ` : ""}{item.source === "research_job" ? "research · " : ""}{item.status === "closed" ? "closed · " : ""}{item.title}
@@ -338,15 +340,15 @@ export default function CopilotLab() {
             onBlur={() => { if ((conclusion.trim() || null) !== current.conclusion) void persist({ conclusion: conclusion.trim() || null }); }}
             onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
             placeholder="One-line conclusion (optional)" aria-label="Conclusion"
-            className="min-w-[12rem] flex-1 rounded border bg-background px-2 py-1 text-xs text-foreground" />
+            className="min-w-[12rem] flex-1 rounded border bg-background px-2 py-1 text-base text-foreground sm:text-xs" />
           <button type="button" disabled={busy} onClick={() => void persist({ status: current.status === "open" ? "closed" : "open" })}
-            className="rounded border px-2 py-1 hover:text-foreground disabled:opacity-40">{current.status === "open" ? "Close" : "Reopen"}</button>
+            className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">{current.status === "open" ? "Close" : "Reopen"}</button>
         </div>
       )}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
 
-      <div className="min-h-[16rem] space-y-4 rounded border bg-card/40 p-3" aria-live="polite">
+      <div className="min-h-[10rem] space-y-4 rounded border bg-card/40 p-3 sm:min-h-[16rem]" aria-live="polite">
         {!messages.length && !current?.findings && (
           <p className="text-sm text-muted-foreground">
             Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”
@@ -371,10 +373,10 @@ export default function CopilotLab() {
         <textarea value={draft} onChange={e => setDraft(e.target.value.slice(0, 4000))} rows={2} disabled={!enabled}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
           placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
-          className="min-h-[2.75rem] flex-1 resize-y rounded border bg-background px-3 py-2 text-sm text-foreground disabled:opacity-50" />
+          className="min-h-[2.75rem] min-w-0 flex-1 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
         {busy
-          ? <button type="button" onClick={() => abort.current?.abort()} className="rounded border px-3 py-2 text-sm">Stop</button>
-          : <button type="submit" disabled={!enabled || !draft.trim()} className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
+          ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
+          : <button type="submit" disabled={!enabled || !draft.trim()} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
       </form>
     </div>
   );

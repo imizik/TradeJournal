@@ -11,6 +11,15 @@ untouched.
 - `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
   (`frontend/components/copilot/CopilotLab.tsx`). It is not in the nav.
+- Entry points: `/copilot-lab?symbol=X&context=<short text>` opens a new
+  investigation with the symbol set and the message box prefilled with
+  `Context: <text>` (at most 300 characters); nothing is sent until the owner
+  presses Send. "Ask copilot" links (`frontend/components/copilot/AskCopilot.tsx`)
+  sit on Charts' Symbol info Overview tab (the current symbol) and in a Radar
+  event's detail (the event symbol and its one-line summary). They render
+  nothing for the assistant profile or while `/copilot/status` says the lab is
+  off. Browser proof: `frontend/e2e/copilot-entry.spec.ts`, including a 375 px
+  phone layout check.
 - `GET`/`POST /copilot/investigations` and `GET`/`PUT /copilot/investigations/{id}`
   hold saved investigations (below).
 - All these routes are owner-only: they are in no assistant grant
