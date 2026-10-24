@@ -23,7 +23,11 @@ def test_pooled_transport_is_reused_without_credentials_or_cookies_leaking(monke
         market_http.get("https://provider-a.test/bars", headers={"Authorization": "Bearer invented-a"}, params={"symbol": "SPY"}, timeout=3)
         market_http.get("https://provider-a.test/bars", headers={"Authorization": "Bearer invented-b"}, timeout=5)
         market_http.get("https://provider-b.test/bars", timeout=2)
+        market_http.post("https://provider-a.test/quotes", data={"symbols": "SPY"}, headers={"Authorization": "Bearer invented-c"}, timeout=4)
         assert len(created) == 1
+        assert requests[3].method == "POST" and requests[3].content == b"symbols=SPY"
+        assert requests[3].headers["content-type"] == "application/x-www-form-urlencoded"
+        assert requests[3].headers["authorization"] == "Bearer invented-c" and requests[3].extensions["timeout"]["read"] == 4
         assert requests[0].url.params["symbol"] == "SPY"
         assert requests[0].extensions["timeout"]["read"] == 3
         assert requests[1].extensions["timeout"]["read"] == 5

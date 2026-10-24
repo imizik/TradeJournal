@@ -1606,3 +1606,53 @@ class MarketContextItem(SQLModel, table=True):
     observed_at: Optional[datetime] = None   # vix: provider trade time (UTC)
     fetched_at: datetime                     # UTC, when the provider data was read (a cached calendar keeps its age)
     source: str
+
+
+class CopilotInvestigation(SQLModel, table=True):
+    """A saved Copilot Lab conversation or background research result
+    (docs/copilot-lab.md; app/engine/copilot_investigations.py). Text only: the
+    transcript holds role/content pairs, the evidence list holds references
+    (tool name, as-of time, provenance kind, which answer used it), never the
+    data, and findings hold a research job's cited summary. Links to
+    follow-ups, plans or decisions are deliberately absent."""
+
+    __tablename__ = "copilot_investigation"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    source: str = Field(default="copilot", index=True)  # "copilot" | "research_job"
+    title: str
+    symbol: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="open")      # "open" | "closed"
+    conclusion: Optional[str] = None         # optional one line
+    transcript_json: str = Field(sa_column=Column(Text, nullable=False))
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    findings_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # validated Findings
+    revision: int = Field(default=1)         # bumped on every save; a stale save is refused
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class ResearchJob(SQLModel, table=True):
+    """One queued background research job (docs/copilot-lab.md § Research queue;
+    app/engine/research_queue.py). The input is a question, a Radar event id or a
+    saved investigation to reassess; the result is a saved investigation. The
+    dedupe key is unique so a trigger cannot queue the same work twice."""
+
+    __tablename__ = "research_job"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    kind: str                                   # "question" | "radar_event" | "reassess"
+    input_json: str = Field(sa_column=Column(Text, nullable=False))  # {question, symbols} | {event_id} | {investigation_id}
+    status: str = Field(default="queued", index=True)  # queued | running | done | failed | cancelled
+    dedupe_key: str = Field(sa_column=Column(String, nullable=False, unique=True))
+    attempts: int = Field(default=0)
+    error: Optional[str] = None                 # last failure, short text
+    cost_usd: Optional[float] = None            # summed over attempts (API-equivalent on the plan)
+    # One entry per attempt, {at, usd, estimated}: the attempt's budget is charged when it starts and replaced by the
+    # real cost once known, so the daily cap counts retries, timeouts, cancels and restarts.
+    spend_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    investigation_id: Optional[uuid.UUID] = None  # the saved result
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    next_attempt_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None

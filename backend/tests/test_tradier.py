@@ -1,6 +1,6 @@
 """Tradier client: response shapes, error mapping, and retry behaviour.
 
-No network. `httpx.post` is replaced, so what is exercised is this module's own
+No network. `market_http.post` is replaced, so what is exercised is this module's own
 handling of the shapes Tradier documents -- including the one that bites:
 `quotes.quote` is an OBJECT for a single symbol and an ARRAY for several.
 """
@@ -42,7 +42,7 @@ def _serve(monkeypatch, *responses, record=None):
             record.append({"url": url, "data": data, "headers": headers})
         return queue.pop(0)
 
-    monkeypatch.setattr(tradier.httpx, "post", fake_post)
+    monkeypatch.setattr(tradier.market_http, "post", fake_post)
     monkeypatch.setattr(tradier.time, "sleep", lambda _seconds: None)
 
 
@@ -128,7 +128,7 @@ def test_empty_and_blank_symbol_lists_never_call_out(monkeypatch):
     def explode(*_args, **_kwargs):
         raise AssertionError("should not have made a request")
 
-    monkeypatch.setattr(tradier.httpx, "post", explode)
+    monkeypatch.setattr(tradier.market_http, "post", explode)
 
     assert tradier.get_quotes([]) == {}
     assert tradier.get_quotes(["", "   "]) == {}
@@ -189,7 +189,7 @@ def test_transport_errors_are_retried_then_raise(monkeypatch):
         calls.append(1)
         raise httpx.ConnectError("no route")
 
-    monkeypatch.setattr(tradier.httpx, "post", fake_post)
+    monkeypatch.setattr(tradier.market_http, "post", fake_post)
     monkeypatch.setattr(tradier.time, "sleep", lambda _seconds: None)
 
     with pytest.raises(tradier.TradierError):

@@ -50,7 +50,7 @@ for (const layout of ["single", "multi"] as const) test(`navigation load benchma
   const backend = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT || 8099}`;
   await request.post(`${backend}/__test/dashboard-state?value=ready`);
   await measure("first_chart", () => page.goto("/charts"), usable);
-  for (let i = 0; i < 4; i++) await measure("first_chart", () => page.reload(), usable);
+  for (let i = 0; i < 4; i++) await measure("reload_chart", () => page.reload(), usable);
   await delay(750); // Initial context finishes before testing a return visit.
   for (let i = 0; i < 5; i++) {
     await page.getByRole("link", { name: "Dashboard", exact: true }).click();
@@ -69,6 +69,23 @@ for (const layout of ["single", "multi"] as const) test(`navigation load benchma
   for (let i = 0; i < 4; i++) await measure("dashboard_filter", () => page.getByRole("link", { name: i % 2 ? "All types" : "Options", exact: true }).click(), async () => {
     await expect(page.getByRole("link", { name: i % 2 ? "All types" : "Options", exact: true })).toHaveAttribute("aria-current", "true"); await paint(page);
   });
+  // First feedback after clicking a page whose server data is slow (journal trades +2s).
+  await request.post(`${backend}/__test/dashboard-state?value=slow`);
+  try {
+    for (let i = 0; i < 3; i++) {
+      await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+      await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+      await measure("click_feedback_slow_page", () => page.getByRole("link", { name: "Trades", exact: true }).click(),
+        () => expect(page.getByTestId("nav-pending").or(page.getByRole("heading", { name: "Trades", exact: true })).first()).toBeVisible());
+      await expect(page.getByRole("heading", { name: "Trades", exact: true })).toBeVisible();
+    }
+  } finally { await request.post(`${backend}/__test/dashboard-state?value=ready`); }
+  // Position attention while journal statistics are slow (+2s); it does not use them.
+  const attention = page.getByRole("complementary", { name: "Attention and data status" }).getByLabel(/^\d+ items?$/);
+  await request.post(`${backend}/__test/dashboard-state?value=slow_stats`);
+  try {
+    for (let i = 0; i < 3; i++) await measure("dashboard_attention_slow_stats", () => page.goto("/", { waitUntil: "commit" }), async () => { await expect(attention).toBeVisible(); await paint(page); });
+  } finally { await request.post(`${backend}/__test/dashboard-state?value=ready`); }
   await request.post(`${backend}/__test/dashboard-state?value=slow`);
   try {
     await measure("dashboard_market_slow_journal", () => page.goto("/", { waitUntil: "commit" }), async () => { await expect(page.locator('[aria-label="Market and discovery"]')).toBeVisible(); await paint(page); });

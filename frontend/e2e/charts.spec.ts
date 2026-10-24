@@ -974,21 +974,30 @@ test("a tick re-renders only the charts whose candles moved; the clock and the c
       before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
       warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
+  let historyReads = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/backend/charts/history?")) historyReads += 1; });
   await openAt(page, TUESDAY_1032, (url) => currentFixture(url, TUESDAY_1032));
   await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:40");
   const renders = () => page.evaluate(() => Object.fromEntries((window as RenderWindow).__tjRenders!));
   const settled = async () => { await page.waitForTimeout(300); return renders(); };
+  // Loading settles on the paused clock too: a panel whose candles landed after the pause still has its 120 ms
+  // visible-range debounce pending, and the older-history page it asks for renders every chart when it arrives.
+  // Let that run before the baseline, so the clock check below measures the clock alone.
+  await page.clock.runFor(1000);
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:39");
   const before = await settled();
+  const readsBefore = historyReads;
   expect(Object.keys(before).sort()).toEqual(["Panel 2", "Panel 3", "Panel 4", "Panel 5", "main"]);
   const plus = (base: Record<string, number>, changed: string[]) =>
     Object.fromEntries(Object.entries(base).map(([id, count]) => [id, count + (changed.includes(id) ? 1 : 0)]));
 
   // Three seconds pass: every countdown moves, and no chart renders.
   await page.clock.runFor(3000);
-  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:37");
-  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:37");
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:36");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:36");
   expect(await settled()).toEqual(before);
+  expect(historyReads).toBe(readsBefore); // loading had settled: nothing but the clock ran
 
   // Scrubbing the crosshair across the main chart changes the readouts on it and on a linked chart, and renders no chart (UX-G).
   const box = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -1416,6 +1425,10 @@ test("linked time ranges follow the chart being moved, by time, without feedback
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-Panel 2").locator("canvas").first()).toBeVisible();
+  // Panel 2 (15m) has its candles, and the opening view it asked for is applied on the chart's next frame:
+  // a read in between sees the library's default view instead.
+  await expect(page.getByTestId("canvas-Panel 2")).toHaveAttribute("data-bars", String(Math.min(1200, Math.ceil(3 * 86400 / STEP["15m"]))));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const unlinked = await visibleRange(page, "Panel 2");
   const main = page.getByTestId("canvas-main");
   const box = (await main.boundingBox())!;
@@ -1711,6 +1724,26 @@ test("settings kept in a browser before the server saved them merge with another
   await expect(levelsPanel(page)).toContainText("Phone level");
   await expect(levelsPanel(page)).toContainText("Desk level");
   expect(server.saves).toHaveLength(1);
+});
+
+test("candles load from this browser's copy while saved settings load, then follow the server's copy", async ({ page, context }) => {
+  await fakeChartSettings(context, { revision: 1, data: { watchlist: ["SPY", "TSLA"] } });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await context.route("**/api/backend/charts/settings", async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.fallback();
+  });
+  await page.addInitScript(() => localStorage.setItem("tradejournal.charts.v1", JSON.stringify({ watchlist: ["SPY", "QQQ"] })));
+  const reads: string[] = [];
+  await stub(page, (url) => { const query = new URL(url).searchParams; if (query.get("phase") !== "prices") reads.push(query.get("watchlist") ?? ""); });
+  await page.goto("/charts");
+  await expect(syncStatus(page)).toHaveText("Loading saved settings");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", /[1-9]\d*/); // drawn before the server answered
+  expect(reads[0]).toBe("SPY,QQQ");
+  release();
+  await expect(syncStatus(page)).toHaveText("Saved");
+  await expect.poll(() => reads.at(-1)).toBe("SPY,TSLA"); // the server's watchlist is read once it arrives
 });
 
 for (const outcome of ["arrive", "fail"] as const) {

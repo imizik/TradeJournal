@@ -3,6 +3,7 @@
 from bisect import bisect_right
 import asyncio
 from datetime import UTC, datetime
+import functools
 import json
 import re
 import time
@@ -10,6 +11,7 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
@@ -49,6 +51,25 @@ def stream_clock():
     return time.monotonic()
 
 
+def _encoded(route):
+    """Serialize a large chart payload in the route's worker thread. FastAPI would
+    otherwise walk every candle with jsonable_encoder on the event loop, stalling
+    every other request (streams, Dashboard) for each refresh. Same JSON as
+    JSONResponse; values json cannot write (UUIDs, datetimes) still use FastAPI's
+    encoder. Opt-in Server-Timing set on the injected response is kept."""
+    @functools.wraps(route)
+    def wrapped(*args, **kwargs):
+        data = route(*args, **kwargs)
+        options = {"ensure_ascii": False, "allow_nan": False, "separators": (",", ":")}
+        try:
+            body = json.dumps(data, default=jsonable_encoder, **options)
+        except TypeError:  # a key json cannot write (a UUID or date): FastAPI's encoder names it as before
+            body = json.dumps(jsonable_encoder(data), **options)
+        timing = kwargs["response"].headers.get("server-timing")
+        return Response(body, media_type="application/json", headers={"Server-Timing": timing} if timing else None)
+    return wrapped
+
+
 def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], bool]:
     panel_bars = [p["bars"] for p in panels if p["bars"]]
     if not panel_bars:
@@ -77,6 +98,7 @@ def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], 
 
 
 @router.get("/history")
+@_encoded
 def history(
     request: Request,
     response: Response,
@@ -161,6 +183,7 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
 
 
 @router.get("/workspace")
+@_encoded
 def workspace(
     request: Request,
     response: Response,

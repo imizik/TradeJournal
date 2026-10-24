@@ -9,7 +9,7 @@ import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTab
 import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
-import OwnerDashboard, { OwnerDashboardShell, OwnerAttention } from "@/components/dashboard/OwnerDashboard";
+import OwnerDashboard, { OwnerDashboardShell, OwnerAttention, type AttentionProps } from "@/components/dashboard/OwnerDashboard";
 import DashboardLoading from "@/components/dashboard/DashboardLoading";
 import DashboardError from "@/components/dashboard/DashboardError";
 import { money, newYorkToday } from "@/lib/format";
@@ -47,28 +47,42 @@ export default async function DashboardPage({
     if (params.practice_run) practiceParams.set("practice_run", params.practice_run);
     redirect(`/practice?${practiceParams}${params.decision ? "#saved-decisions" : ""}`);
   }
-  const result = loadDashboard(access, searchParams);
+  // Position attention renders once trades and quotes are in, without waiting for journal statistics.
+  const attention = Promise.withResolvers<AttentionProps>();
+  attention.promise.catch(() => undefined); // disclosed by DashboardAttention
+  const result = loadDashboard(access, searchParams, attention.resolve);
+  result.catch(attention.reject);
   if (access.owner) return <OwnerDashboardShell today={newYorkToday()}
-    attention={<DashboardData access={access} searchParams={searchParams} result={result} section="attention" />}
+    attention={<DashboardAttention attention={attention.promise} />}
     journal={<Suspense fallback={<DashboardLoading />}><DashboardData access={access} searchParams={searchParams} result={result} /></Suspense>} />;
   return <DashboardData access={access} searchParams={searchParams} result={result} />;
 }
 
-async function DashboardData({ access, searchParams, result, section = "journal" }: {
-  access: AppAccess; searchParams: Promise<DashboardParams>; result: ReturnType<typeof loadDashboard>; section?: "attention" | "journal";
+async function DashboardAttention({ attention }: { attention: Promise<AttentionProps> }) {
+  let props: AttentionProps;
+  try {
+    props = await attention;
+  } catch {
+    return <p role="status" className="text-xs text-amber-300">Position attention is unavailable while the journal cannot load.</p>;
+  }
+  return <OwnerAttention {...props} />;
+}
+
+async function DashboardData({ access, searchParams, result }: {
+  access: AppAccess; searchParams: Promise<DashboardParams>; result: ReturnType<typeof loadDashboard>;
 }) {
   let loaded: Awaited<ReturnType<typeof loadDashboard>>;
   try {
     loaded = await result;
   } catch (error) {
     if (!access.owner) throw error;
-    return section === "attention" ? <p role="status" className="text-xs text-amber-300">Position attention is unavailable while the journal cannot load.</p> : <DashboardError searchParams={await searchParams} />;
+    return <DashboardError searchParams={await searchParams} />;
   }
-  if ("ownerProps" in loaded) return section === "attention" ? <OwnerAttention {...loaded.ownerProps} /> : <OwnerDashboard {...loaded.ownerProps} />;
+  if ("ownerProps" in loaded) return <OwnerDashboard {...loaded.ownerProps} />;
   return loaded;
 }
 
-async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardParams>) {
+async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardParams>, onPositions?: (props: AttentionProps) => void) {
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();
 
@@ -81,8 +95,10 @@ async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardP
 
   const statsQuery = statsParams.toString();
 
-  const [stats, allTrades, accounts, decisions, params] = await Promise.all([
-    api.stats(statsQuery),
+  // Statistics load alongside trades and position quotes; only the journal section waits for them.
+  const statsRequest = api.stats(statsQuery);
+  statsRequest.catch(() => undefined); // awaited below
+  const [allTrades, accounts, decisions, params] = await Promise.all([
     api.trades(),
     api.accounts(),
     api.decisions(),
@@ -220,11 +236,15 @@ async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardP
 
   const recentClosed = trades.filter((trade) => trade.status !== "open").slice(0, 10);
 
-  if (access.owner) return { ownerProps: {
-    trades, accounts, stats, rows: openPositionRows, quotes: quotesByTradeId, today: newYorkToday(),
+  const positionProps = {
+    trades, accounts, rows: openPositionRows, quotes: quotesByTradeId, today: newYorkToday(),
     unrealized: totalUnrealizedPnl, quotedCount: quotedPositions.length, grossValue: grossMarkedValue,
     netValue: netMarkedValue, largest: largestMarkedPosition, decisions: decisions.decisions, params: resolvedParams, quoteError,
-  } };
+  };
+  onPositions?.(positionProps);
+  const stats = await statsRequest;
+
+  if (access.owner) return { ownerProps: { ...positionProps, stats } };
 
   return (
     <div className="space-y-6">
