@@ -591,6 +591,9 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     const feed = feedFor(frame.symbol);
     if (historyFlights.current.has(key) || !feed) return;
     const past = currentOlder[key];
+    // Rendered mid-load: that flight has just ended but its candles are not drawn yet, so this
+    // cursor is stale and the view that asked (a queued prefetch) is about to be replaced.
+    if (past?.loading && !retry && beforeOverride === undefined) return;
     if ((past?.exhausted || past?.issue || failedHistory.current.has(key)) && !retry && beforeOverride === undefined) return;
     failedHistory.current.delete(key);
     const before = (retry ? past?.request?.before : undefined) ?? beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);

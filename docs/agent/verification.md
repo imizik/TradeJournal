@@ -349,6 +349,12 @@ Notes that will save you time:
   different browser. `browserType.launch: Executable doesn't exist` means no
   browser was found, which reads like a missing install but can also be a
   version mismatch.
+- **Streamed Dashboard sections can land after `page.goto` returns.** React
+  reveals completed Suspense boundaries in batches at least 300 ms apart, so
+  the second section (Attention or the journal) may still be hidden after
+  `load`. Wait on it with a retrying assertion (`toBeVisible`, `toContainText`)
+  before one-shot reads such as `boundingBox()`, `textContent()` or
+  `evaluate()`; `smoke.spec.ts` and `morning-briefing.spec.ts` each flaked on this.
 - Asserted numbers come from `EXPECTED` in `seed_dev_data.py`, which
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,
