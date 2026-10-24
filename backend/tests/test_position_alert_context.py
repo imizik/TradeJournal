@@ -87,7 +87,7 @@ def test_real_context_is_cut_off_frozen_and_identical_on_retry(engine, world, ma
     step(clock, watcher, 61)
     watcher.deliver()
     assert sent[0] == sent[1]
-    assert sent[1][2]["path"] == f"/trades/{alert.trade_id}"
+    assert sent[1][2]["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
     assert alerts(engine)[0].context_snapshot_json == alert.context_snapshot_json
     assert alerts(engine)[0].delivery == "sent" and len(alerts(engine)) == 1
 
@@ -202,7 +202,7 @@ def test_malformed_saved_context_still_delivers_original_alert_once(engine, worl
     assert len(attempts) == 1 and alerts(engine)[0].delivery == "sent"
     assert attempts[0][1].endswith("\n\nSince-entry context unavailable.")
     assert attempts[0][1].startswith(position_alerts._base_message(alert, "4:00 PM", 20)[1])
-    assert attempts[0][2]["path"] == f"/trades/{alert.trade_id}"
+    assert attempts[0][2]["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
 
 
 def test_ambiguous_send_retains_context_and_is_never_resent(engine, world, market, monkeypatch):

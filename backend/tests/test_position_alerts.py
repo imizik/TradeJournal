@@ -138,8 +138,8 @@ def test_a_gain_given_back_sends_one_alert(engine, world):
     a = found[0]
     assert (a.contracts, a.avg_cost, a.mark, a.bid, a.gain, a.peak_gain) == (2, 400, 412, 410, 24, 204)
     title, body, _ = position_alerts.message(a)
-    assert title == "SNDK 10/23/26 230C: gave back its gain"
-    assert body == "Was up +$204 (+26%), now +$24 (+3%) at a $4.12 mid, bid $4.10. 2 contracts open. Close it or decide." + OFF_CONTEXT
+    assert title == "SNDK 10/23/26 230C: give-back triggered"
+    assert body == "Peak +$204 (+26%), now +$24 (+3%) at a $4.12 mid, bid $4.10. Gain reached the +3% give-back threshold or below. 2 contracts open. Review your exit plan." + OFF_CONTEXT
 
 
 def test_a_small_position_never_arms_on_percent_alone(engine, world):
@@ -282,7 +282,8 @@ def test_a_missed_first_expiry_alert_is_not_sent_late_and_half_days_move_both(en
 
 
 def sent_to(monkeypatch, record):
-    def publish(title, body, priority=4, tags=(), path=""):
+    def publish(title, body, priority=4, tags=(), path="", direct_click=False):
+        assert direct_click is True
         record.append((title, path))
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(ntfy, "publish", publish)
@@ -306,7 +307,7 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     sent_to(monkeypatch, sent)
     watcher.deliver()
     watcher.deliver()
-    assert sent == [("SNDK 10/23/26 230C: gave back its gain", f"/trades/{alert.trade_id}")]
+    assert sent == [("SNDK 10/23/26 230C: give-back triggered", f"/trades/{alert.trade_id}?alert={alert.id}")]
     assert alerts(engine)[0].delivery == "sent"
 
 
@@ -364,6 +365,9 @@ def test_the_trade_page_reads_this_positions_alerts(engine, world, monkeypatch):
         app.dependency_overrides[get_session] = lambda: db
         body = TestClient(app).get(f"/trades/{trade_id}/phone-alerts").json()
         assert db.exec(select(PositionWatch)).one().armed_at is not None
+    assert body["alerts"][0]["id"] == str(alerts(engine)[0].id)
+    assert body["alerts"][0]["contract"] == "SNDK 10/23/26 230C"
+    assert body["alerts"][0]["quoted_at"] == int(alerts(engine)[0].quoted_at.replace(tzinfo=UTC).timestamp())
     assert body["enabled"] is True
     assert body["giveback_dollar_floor_applies"] is True
     assert [(a["kind"], a["gain"], a["peak_gain"], a["delivery"]) for a in body["alerts"]] == [("giveback", 4.0, 124.0, "pending")]
@@ -644,7 +648,7 @@ def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch
     sent_to(monkeypatch, sent)
     watcher.deliver()
     watcher.deliver()
-    assert sent == [("SNDK 10/23/26 230C: open an hour, re-decide", f"/trades/{alert.trade_id}")]
+    assert sent == [("SNDK 10/23/26 230C: open an hour, re-decide", f"/trades/{alert.trade_id}?alert={alert.id}")]
     with Session(engine) as db:
         row = db.get(PositionAlert, alert.id)
         row.delivery, row.claimed_at = "sending", datetime.fromtimestamp(clock.now - 200, UTC).replace(tzinfo=None)
