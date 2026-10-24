@@ -1,15 +1,18 @@
 import { apiUrl } from "./api";
+import type { AlertsPayload } from "./alerts";
 
 export type CopilotStatus =
   | { enabled: false; reason: string }
   | { enabled: true; backend: "fake" | "anthropic" | "plan"; evidence: "fixture" | "live" | "replay"; model: string; effort: string;
       replay?: { at: string; session: string; passes_before: number; last_pass_at: string } | { error: string };
       fallbacks: boolean; key_configured: boolean; plan_configured: boolean; tools: string[];
+      /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. */
+      capabilities?: { copilot_alerts: boolean };
       limits: { max_rounds: number; max_tool_calls: number; tool_timeout_s: number; turn_timeout_s: number } };
 
 export type ToolEvent = {
   type: "tool"; id: string; name: string; status: "running" | "ok" | "error"; input?: Record<string, unknown>;
-  summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved"; as_of: string | number | null; state?: string | null };
+  summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
 };
 
 export type TurnMetrics = {
@@ -26,10 +29,17 @@ export type CopilotEvent =
   | { type: "text"; delta: string }
   | { type: "progress"; text: string }
   | ToolEvent
+  | ({ type: "proposal" } & Proposal)
   | { type: "error"; code: string; message: string }
   | { type: "done"; metrics: TurnMetrics };
 
-export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
+/** A step the model proposed (propose_plan). It is only a card: nothing exists until the owner confirms it. */
+export type Proposal = { id: string } & (
+  | { kind: "watch"; symbol: string; condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null;
+      label: string; why: string; last?: number; as_of?: string | number | null }
+  | { kind: "revisit"; question: string; horizon_days: number });
+
+export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
 
 export async function getCopilotStatus(signal?: AbortSignal): Promise<CopilotStatus> {
   const response = await fetch(apiUrl("/copilot/status"), { cache: "no-store", signal });
@@ -153,21 +163,26 @@ export function copilotLabHref(symbol: string, context?: string) {
 }
 
 /** The deep link's values, or null when there is none; an invalid symbol is dropped. */
-export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[] }) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The deep link's values, or null when there is none. `investigation` opens that saved investigation. */
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
+  const investigation = one(params.investigation).trim();
+  if (UUID_RE.test(investigation)) return { symbol: "", context: "", investigation: investigation.toLowerCase() };
   if (!symbol && !context) return null;
-  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context };
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null };
 }
 
 // --------------------------------------------------------------------------- research queue
 
 export type ResearchJob = {
   id: string; kind: "question" | "radar_event" | "reassess"; status: "queued" | "running" | "done" | "failed" | "cancelled";
-  input: { question?: string; symbols?: string[]; from_investigation?: string };
+  input: { question?: string; symbols?: string[]; from_investigation?: string; investigation_id?: string };
   attempts: number; error: string | null; cost_usd: number | null; investigation_id: string | null;
-  created_at: string; finished_at: string | null;
+  created_at: string; next_attempt_at?: string; finished_at: string | null;
 };
 export type ResearchJobs = { jobs: ResearchJob[]; queue_enabled: boolean; daily_budget_usd: number; spent_today_usd: number };
 export const ACTIVE_JOB = new Set<ResearchJob["status"]>(["queued", "running"]);
@@ -187,3 +202,25 @@ export const listResearchJobs = (signal?: AbortSignal) => queueRequest<ResearchJ
 export const enqueueResearch = (question: string, symbols: string[], investigationId: string) =>
   queueRequest<{ job: ResearchJob; created: boolean; queue_enabled: boolean }>("", { method: "POST",
     body: JSON.stringify({ question, symbols, investigation_id: investigationId }) });
+
+// --------------------------------------------------------------------------- confirming a proposal
+
+export type FreshQuote = { symbol: string; last: number | null; trade_time: number | null; fetched_at: number | null; age_s: number | null; issue: string | null; fresh: boolean };
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(apiUrl(path), { cache: "no-store", ...init, headers: init?.body ? { "Content-Type": "application/json" } : undefined });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as T;
+}
+
+export const freshQuote = (symbol: string) => request<FreshQuote>(`/copilot/quote?symbol=${encodeURIComponent(symbol)}`);
+export const enqueueRevisit = (investigationId: string, question: string, afterDays: number) =>
+  request<{ job: ResearchJob; created: boolean; queue_enabled: boolean }>("/copilot/research-jobs/reassess",
+    { method: "POST", body: JSON.stringify({ investigation_id: investigationId, question, after_days: afterDays }) });
+/** A confirmed watch becomes an ordinary level alert, marked as coming from this investigation. */
+export const createWatch = (investigationId: string, watch: Extract<Proposal, { kind: "watch" }>, reference: number) =>
+  request<AlertsPayload>("/charts/alerts", { method: "POST", body: JSON.stringify({
+    symbol: watch.symbol, price: watch.price, reference, condition: watch.condition, interval: watch.interval, session: "regular",
+    source_kind: "copilot", source_id: investigationId, label: watch.label }) });
+export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });

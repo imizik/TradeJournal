@@ -28,7 +28,7 @@ untouched.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
   call six read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes and saved research
-  (below). Each tool
+  (below), plus `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
@@ -49,6 +49,41 @@ untouched.
   text), first text, longest wait between visible events, total latency, tool
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
+
+## Confirm a plan
+
+When asked for a plan, the model may call `propose_plan` (at most two per
+answer). The tool validates the proposal and writes nothing. The lab streams
+it as a `proposal` event and shows a card with **Confirm** and **Dismiss**;
+nothing exists until the owner confirms.
+
+- **Watch:** `symbol`, `condition` (`touches`, `crosses` or `closes_beyond`,
+  the last with an `interval` of 1m-4h), a positive `price`, a `label` of at
+  most 60 characters and a `why` of at most 300. The symbol must have a
+  current price in the turn's evidence, so a made-up ticker is refused.
+  - Confirm reads `GET /copilot/quote?symbol=X` (the chart feed's last price,
+    with how old the read is). A read older than a minute, or no price, is
+    refused.
+  - Then it calls the existing `POST /charts/alerts` with the fresh price as
+    `reference`, `source_kind="copilot"`, `source_id=<investigation id>` and
+    the label. That route's limits apply: 20 active alerts, 5 symbols and no
+    duplicates.
+  - `GET /copilot/status` reports `capabilities.copilot_alerts`, asked of the
+    alerts route's own request model. While that route refuses `copilot`,
+    the card says "Awaiting alert support" instead of Confirm.
+- **Revisit:** a `question` of at most 500 characters and `horizon_days`
+  (1-30). Confirm queues a reassess job through
+  `POST /copilot/research-jobs/reassess` (Research queue, below). It works
+  whether or not alerts are supported.
+- **Linked activity:** under an open investigation, the lab lists its level
+  alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
+  (armed, or fired with a time and price), and its revisit jobs. Both come
+  from their own routes; there is no new store.
+- Proposal cards live in the conversation on screen, not in the saved
+  transcript. A confirmed step remains as linked activity.
+- `/copilot-lab?investigation=<id>` opens that saved investigation.
+- Conditional plans and follow-ups (Jo) are not touched.
+- Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 
 ## Saved investigations
 
@@ -139,7 +174,7 @@ credits.
   run under that exact environment must report the plan token as the sign-in.
   Otherwise the chat returns 503 and asks for `claude setup-token`. It never
   falls back to an API key.
-- **Same limits.** Only the six lab tools, as in-process SDK MCP tools that
+- **Same limits.** Only the seven lab tools, as in-process SDK MCP tools that
   call `copilot_tools.validate()` and the same timed, bounded runner; the same
   8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
   120 s per turn and the spend cap above.
@@ -299,6 +334,11 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 | `RESEARCH_REASSESS_AFTER_HOURS` | `0` (off) | N: each original open investigation that has been neither updated nor reassessed for N hours, and has no job waiting, gets one `reassess` job, at most one a day. A reassessment's own output is never reassessed. |
 
 - **Owner-only routes** (in no assistant grant):
+  - `POST /copilot/research-jobs/reassess` with `{investigation_id, question,
+    after_days}` queues the owner's "revisit this question": one reassess job
+    for that investigation, due `after_days` (0-30) from now, at most once a
+    day per investigation and due date. Its assignment adds the owner's
+    question to the usual reassessment.
   - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
     job; the same question and symbols are queued at most once a day. An
     optional `investigation_id` is kept in the job's input as
