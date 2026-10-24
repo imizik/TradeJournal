@@ -73,7 +73,7 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(plan_env, saved)
     o = sdk.options
     assert o.tools == ["WebSearch", "WebFetch"]
     kept_out = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories")
-    assert research_job.EXCLUDED_LAB_TOOLS == kept_out
+    assert set(research_job.JOB_TOOLS) == {t["name"] for t in copilot_tools.TOOLS} - set(kept_out)  # an allowlist
     assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in kept_out)]
     # A background job reads untrusted pages and can fetch URLs: it never proposes, reads another investigation by id,
     # or sees the owner's book (positions, trades, memories), which a crafted link could carry out. The chart is market data.
@@ -276,3 +276,26 @@ def test_the_job_hook_denies_the_lab_only_tools_by_name():
         decision = asyncio.run(rec.pre_tool({"tool_name": name, "tool_input": {}}, "t1", None))
         assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert asyncio.run(rec.pre_tool({"tool_name": "mcp__tradejournal__get_quotes", "tool_input": {}}, "t2", None)) == {}
+
+
+def test_only_url_fields_of_search_results_count_as_seen():
+    rec = research_job._Recorder(research_job.JobLimits())
+    planted = "https://evil.example/in-a-snippet"
+    asyncio.run(rec.post_search({"tool_name": "WebSearch", "tool_response": {"results": [
+        {"content": [{"title": "t", "url": ARTICLE}], "text": f"Read more at {planted}"}]}}, "t", None))
+    assert rec.seen_urls == {ARTICLE}
+
+
+@pytest.mark.parametrize("published,later", [
+    ("2026-10-22", False),                 # a bare date before the evidence day: its end of day is still before
+    ("2026-10-23", True),                  # the evidence day itself: its end is after 11:12 ET
+    ("2026-10-23T11:00:00", False),        # no offset: read as New York
+    ("2026-10-23T15:30:00Z", True),        # 11:30 ET
+    ("unknown", True), ("", True),         # cannot be shown to precede the evidence time
+])
+def test_replay_reads_citation_times_conservatively(published, later):
+    from app.engine.chart_math import ET
+    evidence = SimpleNamespace(label="replay", at=datetime(2026, 10, 23, 11, 12, tzinfo=ET))
+    cited = _assessment(citations=[{"url": ARTICLE, "publisher": "p", "published_at": published, "title": "t"}])
+    checks = research_job._checks(cited, research_job._Recorder(research_job.JobLimits()), evidence)
+    assert checks["after_evidence_time"] == ([ARTICLE] if later else [])

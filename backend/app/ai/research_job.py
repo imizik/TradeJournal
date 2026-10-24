@@ -35,15 +35,15 @@ from typing import Any
 from app.ai import copilot, copilot_plan, copilot_tools, plan_runner
 
 SERVER = "tradejournal"
-# Jobs read untrusted pages and can fetch URLs: no proposals, and no reading other saved investigations by id.
-# Never the owner's book: a job reads untrusted pages and can fetch URLs, so positions, trades or memories could leak
-# out through a crafted link. The chart (market data only) is fine.
-EXCLUDED_LAB_TOOLS = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories")
-LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in EXCLUDED_LAB_TOOLS]
+# An allowlist, so a new copilot tool never reaches a job by default. Jobs read untrusted pages and can fetch URLs:
+# market reads, the chart and the owner's saved research text only. Never the owner's book (positions, trades,
+# memories), which a crafted link could carry out; never a proposal; never another investigation by id.
+JOB_TOOLS = ("get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
+             "get_saved_research", "get_chart_context")
+LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] in JOB_TOOLS]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 # Claude Code's own tool for returning the output_format answer: output only, no capability.
 OUTPUT_TOOL = "StructuredOutput"
-URL = r"https?://[^\s\"'<>)\]\\]+"
 
 
 def same_url(url: str) -> str:
@@ -125,8 +125,8 @@ class JobLimits:
 
 
 def limits() -> JobLimits:
-    from app.ai.copilot import _float_env
-    return JobLimits(budget_usd=_float_env("RESEARCH_BUDGET_USD", 0.50))
+    from app.engine.research_queue import _number
+    return JobLimits(budget_usd=_number("RESEARCH_BUDGET_USD", 0.50, float, positive=True))
 
 
 def auth_mode() -> str:
@@ -277,13 +277,44 @@ class _Recorder:
         return {}
 
     async def post_search(self, data: dict, tool_use_id, context) -> dict:
-        self.seen_urls.update(re.findall(URL, json.dumps(data.get("tool_response"), default=str)))
+        # The search results' own url fields only: a URL inside a snippet's text is not something the job found.
+        self.seen_urls.update(_url_fields(data.get("tool_response")))
         return {}
 
     async def post_fetch(self, data: dict, tool_use_id, context) -> dict:
         # Only a fetch that succeeded was read: a failed one (404, blocked, guessed link) runs no PostToolUse hook.
         self.seen_urls.add(str((data.get("tool_input") or {}).get("url", "")))
         return {}
+
+
+def _url_fields(value) -> set[str]:
+    """Every http(s) string under a key named "url", at any depth."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "url" and isinstance(item, str) and item.startswith(("https://", "http://")):
+                found.add(item)
+            else:
+                found |= _url_fields(item)
+    elif isinstance(value, list):
+        for item in value:
+            found |= _url_fields(item)
+    return found
+
+
+def published_moment(value) -> datetime | None:
+    """A citation's publish time, read conservatively: a time without an offset is New York, a bare date is that
+    day's end in New York. None when it cannot be read."""
+    from app.engine.chart_math import ET
+    text = str(value or "").strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            day = datetime.fromisoformat(text)
+            return day.replace(hour=23, minute=59, second=59, tzinfo=ET)
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=ET) if moment.tzinfo is None else moment
 
 
 def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
@@ -296,7 +327,14 @@ def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
             block = {"id": f"job_{len(rec.lab) + 1}", "name": name, "input": args}
             rec.lab.append(block)
             result, event = await copilot._run_tool(evidence, block, cfg)
-            rec.seen_urls.update(re.findall(URL, result["content"]))
+            if name == "get_symbol_news" and not result.get("is_error"):
+                # Only each article's structured url: a URL planted in a headline or summary must not verify a citation.
+                try:
+                    articles = json.loads(result["content"]).get("articles") or []
+                except (ValueError, AttributeError):
+                    articles = []
+                rec.seen_urls.update(a["url"] for a in articles if isinstance(a, dict) and isinstance(a.get("url"), str)
+                                     and a["url"].startswith(("https://", "http://")))
             block.update({k: event.get(k) for k in ("status", "summary", "provenance", "ms")}, input=event.get("input", args))
             return {"content": [{"type": "text", "text": result["content"]}], "is_error": bool(result.get("is_error"))}
 
@@ -304,7 +342,7 @@ def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
                         annotations=sdk.ToolAnnotations(readOnlyHint=True))(handler)
 
     return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0",
-                                     tools=[make(t) for t in copilot_tools.TOOLS if t["name"] not in EXCLUDED_LAB_TOOLS])
+                                     tools=[make(t) for t in copilot_tools.TOOLS if t["name"] in JOB_TOOLS])
 
 
 def options(sdk, binary: str, env: dict, model: str, lim: JobLimits, server, rec: _Recorder):
@@ -333,11 +371,9 @@ def _checks(assessment: dict, rec: _Recorder, evidence) -> dict:
     later = []
     if getattr(evidence, "label", "") == "replay":
         for c in assessment.get("citations", []):
-            try:
-                published = datetime.fromisoformat(str(c.get("published_at")).replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            if published.tzinfo and published > evidence.at:
+            published = published_moment(c.get("published_at"))
+            # An unreadable or "unknown" time cannot be shown to precede the evidence time, so it counts as after.
+            if published is None or published > evidence.at:
                 later.append(c["url"])
     return {"unseen_citations": unseen, "unread_evidence_refs": unread, "after_evidence_time": later}
 

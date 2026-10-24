@@ -345,10 +345,15 @@ Trigger it by hand only, with `backend/scripts/run_research_job.py "question"
 --symbols NBIS,CRWV --evidence fixture|live|replay [--out job.json] [--no-save]`.
 It has no scheduler, Radar wake-up or notification yet.
 
-- **Tools.** The lab tools except `propose_plan`, `get_investigation_changes`
-  and the book tools (`get_positions`, `get_trades`, `get_memories`), all
-  in-process with the same validation, timeout and size bound, plus the
-  built-in `WebSearch` and `WebFetch`, and nothing else. A
+- **Tools.** An allowlist (`research_job.JOB_TOOLS`), so a new copilot tool
+  never reaches a job by default.
+  - Allowed: the market reads (group comparison, peer moves, symbol news,
+    earnings dates, quotes), `get_saved_research` and `get_chart_context`,
+    plus the built-in `WebSearch` and `WebFetch`, and nothing else.
+  - Not allowed: `propose_plan`, `get_investigation_changes` and the book
+    tools. These aren't registered for a job at all.
+  - Lab tools run in-process with the same validation, timeout and size
+    bound. A
   PreToolUse hook denies any other tool and caps a job at 8 searches, 10
   fetches and 12 lab-tool calls. Other limits: 24 turns, 600 s, and
   `max_budget_usd` from `RESEARCH_BUDGET_USD` (default $0.50). Built-in tools,
@@ -370,10 +375,14 @@ It has no scheduler, Radar wake-up or notification yet.
   evidence references (tool and `as_of`). The record also has the lab tool
   calls the server actually ran, with provenance, plus web counts, cost (an
   API-price equivalent on the plan) and server-side checks:
-  - citations whose URL the job never searched, fetched successfully (a failed
-    fetch was never read) or got back from a lab tool;
+  - citations whose URL the job never got from a search result's `url`
+    field, a successful fetch (a failed fetch was never read), or the lab news
+    tool's structured article `url`. A URL that only appears inside some text,
+    such as a headline, summary or snippet, does not count;
   - evidence references to tools it never called;
-  - under replay, sources published after the evidence time.
+  - under replay, sources published after the evidence time. A time without
+    an offset is read as New York, a bare date as that day's end in New York,
+    and an unreadable or "unknown" time counts as after.
 
   It is research only: no plan, watch, alert or trade instruction. The prompt
   gives the evidence time in both ET and UTC, and the system prompt says to
@@ -468,7 +477,9 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
     store, which fails the job instead of leaving it running.
   - A job left running by a restart or a shutdown goes back to the queue.
   - A malformed number setting falls back to its default with a warning; it
-    never stops the API.
+    never stops the API. Budgets and caps (`RESEARCH_BUDGET_USD`,
+    `RESEARCH_DAILY_BUDGET_USD`, `RESEARCH_NOTIFY_DAILY_MAX`) must be finite
+    and above zero, so `nan`, `inf`, `0` and negative values fall back too.
 - **Results:**
   - A finished job links to its saved investigation (`source="research_job"`).
   - A Radar job is titled `Radar: …`, and a reassessment is saved as a new
