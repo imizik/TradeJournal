@@ -8,7 +8,7 @@ test.beforeEach(async ({ request }) => {
   expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBeTruthy();
 });
 
-for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]] as const) {
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
   test(`radar feed, detail, rating and chart link on ${size}`, async ({ page, request }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -25,6 +25,9 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     // The latest news check: catalyst headline first, marked against the move, never called its cause.
     await expect(card.getByTestId("radar-news-line")).toHaveText(
       "News nearby: Micron raises quarterly revenue forecast on AI memory demand · benzinga · 10:41 AM (before the move)");
+    await expect(page.getByTestId("radar-movers")).toBeVisible();
+    expect((await card.boundingBox())!.y).toBeLessThan((await page.getByTestId("radar-movers").boundingBox())!.y);
+    await page.screenshot({ path: test.info().outputPath(`radar-first-glance-${page.viewportSize()!.width}.png`) });
     await card.getByRole("button").first().click();
     const original = page.getByRole("region", { name: "Original evidence" });
     await expect(original).toContainText("As first saved");
@@ -54,7 +57,7 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
   });
 }
 
-for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]] as const) {
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
   test(`radar movers panel is a plain ranking on ${size}`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -71,7 +74,8 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     await expect(spot).toContainText("SPOT");
     await expect(spot).toContainText("+10.6%");
     await expect(spot).toContainText("+12.0%"); // versus SPY
-    await expect(spot).toContainText("gap"); // opened at the gap: from open +0.5%, under a third of the day move
+    await expect(spot).toContainText("Opening gap +10.0%");
+    await expect(spot).toContainText("Since open +0.5%"); // opened at the gap: from open +0.5%, under a third of the day move
     const target = new URL((await spot.getByRole("link", { name: "SPOT" }).getAttribute("href"))!, "http://fixture");
     expect(target.searchParams.get("symbol")).toBe("SPOT");
     expect(target.searchParams.get("radar_session")).toBe("2026-10-20");
@@ -80,7 +84,8 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 375, 812]
     const cohr = laggards.getByTestId("radar-mover").first();
     await expect(cohr).toContainText("COHR");
     await expect(cohr).toContainText("−13.3%");
-    await expect(cohr).not.toContainText("gap");
+    await expect(cohr).toContainText("Opening gap 0.0%");
+    await expect(cohr).toContainText("Since open −13.3%");
     await expect(cohr).toContainText("−0.2%"); // last 15 min, from the earlier seeded pass
     await expect(panel.getByTestId("radar-mover-group").first()).toContainText("median");
     await expect(panel.getByTestId("radar-mover-group").first()).toContainText("most:");
@@ -125,4 +130,28 @@ test("Radar navigation context rejects invalid dates and keeps return links inte
   }
   expect(radarSession("2026-02-30")).toBeUndefined();
   expect(radarSession("../../")).toBeUndefined();
+});
+
+
+test("Radar empty events and stale rankings remain explicit on phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/radar/feed*", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ json: { ...body, events: [], since_last_visit: [] } });
+  });
+  await page.route("**/radar/movers?*", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ json: { ...body, state: "stale", reason: "Recording has fallen behind; these numbers are from the last pass shown." } });
+  });
+  await page.goto("/radar");
+  const empty = page.getByText("Radar has not produced any developments yet", { exact: false });
+  await expect(empty).toBeVisible();
+  const panel = page.getByTestId("radar-movers");
+  await expect(panel).toContainText("Recording has fallen behind");
+  await expect(panel).toContainText("missing or invalid timestamps are excluded");
+  expect((await empty.boundingBox())!.y).toBeLessThan((await panel.boundingBox())!.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: test.info().outputPath("radar-empty-stale-phone.png") });
 });

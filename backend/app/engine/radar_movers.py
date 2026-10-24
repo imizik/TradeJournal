@@ -5,6 +5,9 @@ as missing, never shown as 0%.
 """
 from datetime import datetime
 from statistics import median
+from math import isfinite
+
+from app.engine.radar_comparison import _endpoint
 
 LOOKBACK_SECONDS = 15 * 60
 LOOKBACK_TOLERANCE_SECONDS = 120
@@ -16,7 +19,7 @@ def _epoch(value: str) -> float:
 
 
 def _price(value) -> float | None:
-    return float(value) if isinstance(value, (int, float)) and value > 0 else None
+    return float(value) if isinstance(value, (int, float)) and isfinite(value) and value > 0 else None
 
 
 def _pct(now: float, base: float) -> float:
@@ -30,10 +33,11 @@ def earlier_pass(recorded: list[dict], latest: dict) -> dict | None:
     return min(near, key=lambda p: abs(_epoch(p["started_at"]) - target)) if near else None
 
 
-def build_movers(universe: dict, quotes: list[dict], earlier_quotes: list[dict] | None) -> dict:
+def build_movers(universe: dict, quotes: list[dict], earlier_quotes: list[dict] | None, *, latest: dict, earlier: dict | None = None) -> dict:
     """Header numbers, leaders, laggards, group summaries and missing symbols; ``None`` when SPY has no usable quote."""
-    by_symbol = {q["symbol"]: q for q in quotes}
-    before = {q["symbol"]: _price(q["last"]) for q in earlier_quotes or []}
+    by_symbol = {q["symbol"]: q for q in quotes if _endpoint(q, latest)[0] is not None}
+    before = {q["symbol"]: q["last"] for q in earlier_quotes or []
+              if earlier is not None and _endpoint(q, earlier)[0] is not None}
     day: dict[str, float] = {}
     for row in universe["symbols"]:
         q = by_symbol.get(row["symbol"])
@@ -57,6 +61,7 @@ def build_movers(universe: dict, quotes: list[dict], earlier_quotes: list[dict] 
         rows[sym] = {
             "symbol": sym, "kind": row["kind"], "last": q["last"], "day_pct": day[sym],
             "from_open_pct": _pct(q["last"], open_) if open_ else None,
+            "open_gap_pct": _pct(open_, q["prev_close"]) if open_ else None,
             "vs_spy": round(day[sym] - day["SPY"], 3),
             "sector": sector if sector in day else None,
             "vs_sector": round(day[sym] - day[sector], 3) if sector in day else None,

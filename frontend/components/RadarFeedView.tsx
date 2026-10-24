@@ -260,7 +260,7 @@ export default function RadarFeedView() {
       </div>
       {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
 
-      {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
+      {feed.state !== "off" && <h2 className="text-base font-semibold">Developments</h2>}
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -279,6 +279,7 @@ export default function RadarFeedView() {
           <ul className="space-y-2">{earlier.map(card)}</ul>
         </section>
       )}
+      {feed.state !== "off" && <RadarMovers session={session ?? feed.session ?? undefined} />}
     </div>
   );
 }

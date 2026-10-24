@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { getMovers, groupLine, radarChartHref, isGap, moversHeader, pctText, type RadarMover, type RadarMovers } from "@/lib/radar";
+import { getMovers, groupLine, radarChartHref, moversHeader, pctText, type RadarMover, type RadarMovers } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 
 const tone = (value: number | null) => (value == null ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : value < 0 ? "text-rose-300" : "text-foreground");
@@ -21,12 +21,11 @@ function Table({ title, rows, movers, allGroups }: { title: string; rows: RadarM
             <th className="pb-1 text-right font-medium">15 min</th>
           </tr>
         </thead>
-        <tbody>
           {rows.map((m) => (
-            <tr key={m.symbol} className="border-t" data-testid="radar-mover">
+            <tbody key={m.symbol} className="border-t" data-testid="radar-mover"><tr>
               <td className="py-1.5 pr-1 font-medium">
                 <Link href={radarChartHref(m.symbol, movers, undefined, allGroups)} className="text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground">{m.symbol}</Link>
-                {isGap(m) && <span title="Gap: the move since the open is under a third of the day's move" className="ml-1 rounded bg-secondary px-1 py-px text-[10px] font-normal text-muted-foreground">gap</span>}
+
               </td>
               <td className={cn("py-1.5 text-right tabular-nums", tone(m.day_pct))}>{pctText(m.day_pct)}</td>
               <td className={cn("py-1.5 text-right tabular-nums", tone(m.vs_spy))}>{pctText(m.vs_spy)}</td>
@@ -36,8 +35,11 @@ function Table({ title, rows, movers, allGroups }: { title: string; rows: RadarM
               </td>
               <td className={cn("py-1.5 text-right tabular-nums", tone(m.last_15m_pct))}>{pctText(m.last_15m_pct)}</td>
             </tr>
+            <tr><td colSpan={5} className="pb-2 text-[11px] text-muted-foreground">
+              Opening gap <span className={cn("tabular-nums", tone(m.open_gap_pct))}>{pctText(m.open_gap_pct)}</span>
+              <span className="mx-2">·</span>Since open <span className={cn("tabular-nums", tone(m.from_open_pct))}>{pctText(m.from_open_pct)}</span>
+            </td></tr></tbody>
           ))}
-        </tbody>
       </table>
     </section>
   );
@@ -85,7 +87,7 @@ export default function RadarMovers({ session }: { session: string | undefined }
   return (
     <section id="radar-movers" aria-label="Movers now" className="space-y-3 rounded-lg border bg-card p-3" data-testid="radar-movers">
       <div>
-        <h2 className="text-sm font-semibold text-foreground">Movers now</h2>
+        <h2 className="text-sm font-semibold text-foreground">Latest recorded movers</h2>
         <p className="text-xs text-muted-foreground">A plain ranking of the latest recorded pass, not alerts. Biggest and smallest moves against SPY; nothing here is a signal.</p>
       </div>
       {error && <p role="alert" className="text-xs text-amber-300">Movers could not be refreshed. Showing the last reading.</p>}
@@ -95,13 +97,13 @@ export default function RadarMovers({ session }: { session: string | undefined }
         <>
           <p className={cn("text-sm font-medium tabular-nums", movers.state === "stale" ? "text-amber-300" : "text-foreground")} data-testid="radar-movers-header">{moversHeader(movers)}</p>
           {movers.state === "stale" && <p className="text-xs text-amber-300">{movers.reason}</p>}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2">
             <Table title="Leaders" rows={movers.leaders} movers={movers} allGroups={allGroups} />
             <Table title="Laggards" rows={movers.laggards} movers={movers} allGroups={allGroups} />
           </div>
           <p className="text-[11px] text-muted-foreground">
             Day is versus the previous close. 15 min is versus the pass about 15 minutes earlier{movers.header?.has_earlier_pass ? "" : " (none recorded yet)"}.
-            “gap” marks a move since the open under a third of the day move (a simple label). Sector is its ETF. {movers.missing.length > 0 ? `${movers.missing.length} ${movers.missing.length === 1 ? "symbol" : "symbols"} had no usable quote and ${movers.missing.length === 1 ? "is" : "are"} left out.` : ""}
+            Opening gap is open versus previous close; since open is last versus open. These returns are not additive. Sector is its ETF. Only trades no more than 2 minutes old at their recorded pass are used; missing or invalid timestamps are excluded. A dash means unavailable, including an ineligible earlier quote. {movers.missing.length > 0 ? `${movers.missing.length} ${movers.missing.length === 1 ? "symbol" : "symbols"} had no usable quote and ${movers.missing.length === 1 ? "is" : "are"} left out.` : ""}
           </p>
           <div className="space-y-1">
             <h3 className="text-xs font-semibold text-foreground">Groups, by size of median move against SPY</h3>

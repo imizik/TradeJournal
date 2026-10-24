@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.engine.chart_math import ET
-from app.engine.radar_movers import build_movers
+from app.engine.radar_movers import build_movers as _build_movers
 from app.engine.radar_store import RadarStore
 from app.main import app
 from app.routers import radar
@@ -30,7 +30,7 @@ def _pass(minute: str, status="ok"):
 
 def _q(symbol, last, prev=100.0, open_=None, minute="14:34"):
     return {"symbol": symbol, "last": last, "prev_close": prev, "open": prev if open_ is None else open_, "high": None, "low": None,
-            "volume": 1, "bid": None, "ask": None, "trade_time_ms": None, "retrieved_at": _stamp(minute)}
+            "volume": 1, "bid": None, "ask": None, "trade_time_ms": _at(minute) * 1000, "retrieved_at": _stamp(minute)}
 
 
 def _etf(symbol):
@@ -55,6 +55,11 @@ def _quotes():
             _q("DDD", 0.0)]                                                   # zero price: missing
 
 
+def build_movers(universe, quotes, earlier_quotes):
+    return _build_movers(universe, quotes, earlier_quotes, latest=_pass("14:34"),
+                         earlier=_pass("14:34") if earlier_quotes is not None else None)
+
+
 def test_math_ranking_and_missing():
     out = build_movers(UNIVERSE, _quotes(), [_q("AAA", 100.0), _q("CCC", 100.0)])
     assert out["header"] == {"spy_day_pct": -1.0, "qqq_day_pct": -2.0, "symbols_with_data": 6, "symbols_tracked": 7, "has_earlier_pass": True}
@@ -63,6 +68,7 @@ def test_math_ranking_and_missing():
     assert [r["symbol"] for r in out["laggards"]] == []  # fewer than 10 stocks all sit in the leaders list
     aaa = next(r for r in out["leaders"] if r["symbol"] == "AAA")
     assert aaa["day_pct"] == -10.0 and aaa["vs_spy"] == -9.0
+    assert aaa["open_gap_pct"] == -9.0
     assert aaa["from_open_pct"] == pytest.approx(-1.099, abs=0.001)
     assert aaa["sector"] == "SMH" and aaa["vs_sector"] == -6.0
     assert aaa["last_15m_pct"] == -10.0
@@ -115,7 +121,7 @@ def api(tmp_path, monkeypatch):
 
 def test_states(api, monkeypatch):
     assert api.client.get("/radar/movers").json()["state"] == "no_data"
-    api.store.append_pass(_pass("14:19"), _quotes())
+    api.store.append_pass(_pass("14:19"), [{**q, "retrieved_at": _stamp("14:19"), "trade_time_ms": _at("14:19") * 1000} for q in _quotes()])
     api.store.append_pass(_pass("14:34", "failed"))  # a failed pass is never the latest
     body = api.client.get("/radar/movers").json()
     assert body["state"] == "stale" and body["pass_at"] == _stamp("14:19")  # live and 15 minutes behind
@@ -149,7 +155,44 @@ def test_owner_only(boundary, tmp_path):  # noqa: F811
 
 
 def test_partial_latest_pass_is_not_stale(api):
-    api.store.append_pass(_pass("14:19"), _quotes())
+    api.store.append_pass(_pass("14:19"), [{**q, "retrieved_at": _stamp("14:19"), "trade_time_ms": _at("14:19") * 1000} for q in _quotes()])
     api.store.append_pass(_pass("14:34", "partial"), _quotes())
     body = api.client.get("/radar/movers").json()
     assert body["state"] == "ok" and body["pass_at"] == _stamp("14:34")
+
+
+@pytest.mark.parametrize('symbol', ['AAA', 'SPY', 'QQQ', 'SMH'])
+@pytest.mark.parametrize('offset', [-1, 120.001, None])
+def test_ineligible_latest_quote_cannot_rank_or_supply_baseline(symbol, offset):
+    quotes = _quotes()
+    quote = next(q for q in quotes if q['symbol'] == symbol)
+    quote['trade_time_ms'] = None if offset is None else (_at('14:34') - offset) * 1000
+    out = build_movers(UNIVERSE, quotes, None)
+    assert symbol in out['missing']
+    if symbol == 'SPY':
+        assert out['header'] is None and not out['leaders'] and not out['groups']
+    elif symbol == 'QQQ':
+        assert out['header']['qqq_day_pct'] is None
+    elif symbol == 'SMH':
+        assert all(r['vs_sector'] is None for r in out['leaders'])
+    else:
+        assert all(r['symbol'] != symbol for r in out['leaders'])
+        assert next(g for g in out['groups'] if g['name'] == 'Chips')['members_with_data'] == 1
+
+
+@pytest.mark.parametrize('offset,available', [(0, True), (120, True), (120.001, False), (-1, False), (None, False)])
+def test_earlier_endpoint_freshness_uses_its_own_recorded_time(offset, available):
+    quote = _q('AAA', 100, minute='14:19')
+    quote['trade_time_ms'] = None if offset is None else (_at('14:19') - offset) * 1000
+    out = _build_movers(UNIVERSE, _quotes(), [quote], latest=_pass('14:34'), earlier=_pass('14:19'))
+    aaa = next(r for r in out['leaders'] if r['symbol'] == 'AAA')
+    assert aaa['last_15m_pct'] == (-10.0 if available else None)
+    assert aaa['day_pct'] == -10.0
+
+
+def test_quote_outside_pass_is_omitted_and_nonfinite_reference_is_missing():
+    quotes = _quotes()
+    quotes[3]['retrieved_at'] = _stamp('14:33')
+    quotes[4]['prev_close'] = float('inf')
+    out = build_movers(UNIVERSE, quotes, None)
+    assert set(out['missing']) == {'AAA', 'BBB', 'DDD'}
