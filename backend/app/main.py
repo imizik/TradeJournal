@@ -411,6 +411,8 @@ app.include_router(jo_briefing.router, prefix="/jo", tags=["personal Jo"])
 app.include_router(conditional_plans_router.router, prefix="/jo/conditional-plans", tags=["personal Jo"])
 app.include_router(market_reads_router.router, prefix="/jo/market-reads", tags=["personal Jo"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
+from app.routers import copilot as copilot_router  # owner-only lab; handlers refuse unless COPILOT_ENABLED=true
+app.include_router(copilot_router.router, prefix="/copilot", tags=["copilot lab"])
 
 # Inspect the finalized route catalog; permission checks precede all handlers.
 app.add_middleware(AccessMiddleware, routes=app.router.routes)
