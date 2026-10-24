@@ -29,7 +29,7 @@ class AlertCreate(BaseModel):
     condition: str
     interval: str | None = None
     session: str = "regular"
-    source_kind: str = Field(pattern="^(level|drawing|auto)$")
+    source_kind: str = Field(pattern="^(level|drawing|auto|copilot)$")  # copilot: confirmed in the Copilot Lab, source_id = its investigation
     source_id: str | None = Field(default=None, max_length=80)
     label: str = Field(default="", max_length=120)
 

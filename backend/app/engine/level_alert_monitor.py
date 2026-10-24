@@ -369,7 +369,11 @@ class LevelAlertMonitor:
                  "bar_time": event.bar_time, "detected_at": _epoch(event.detected_at)})
             event.attempts += 1
             try:
-                ntfy.publish(title, body, path="/charts")
+                if alert.source_kind == "copilot" and alert.source_id:
+                    # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
+                    ntfy.publish(title, body, path=f"/copilot-lab?investigation={alert.source_id}", direct_click=True)
+                else:
+                    ntfy.publish(title, body, path="/charts")
             except ntfy.NtfyError as exc:
                 event.delivery = "pending"
                 event.next_attempt_at = _utc(now + BACKOFF[min(event.attempts, len(BACKOFF)) - 1])
