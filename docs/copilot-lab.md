@@ -283,6 +283,51 @@ It has no scheduler, Radar wake-up or notification yet.
     citations and 4 evidence refs. It stated the evidence time as 11:12 ET
     (15:12Z), and all its server checks passed.
 
+## Research queue
+
+Research jobs can also be queued and run in the background by the API process
+(`backend/app/engine/research_queue.py`, table `research_job`). The runner is
+off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESEARCH_QUEUE_ENABLED` | unset (off) | `true` starts the runner in the API process. Jobs can be queued while it is off; they wait. |
+| `RESEARCH_AUTH` | `plan` | On a server, set `api_key` and `ANTHROPIC_API_KEY`. `plan` is refused unless the database is local. |
+| `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
+| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC (API-equivalent on the plan). It is checked before every attempt. At the cap, queued jobs wait for the next day. |
+| `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
+| `RESEARCH_REASSESS_AFTER_HOURS` | `0` (off) | N: each original open investigation that has been neither updated nor reassessed for N hours, and has no job waiting, gets one `reassess` job, at most one a day. A reassessment's own output is never reassessed. |
+
+- **Owner-only routes** (in no assistant grant):
+  - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
+    job; the same question and symbols are queued at most once a day.
+  - `GET /copilot/research-jobs` lists jobs with the day's spend.
+  - `POST /copilot/research-jobs/{id}/cancel` cancels a queued job, or stops a
+    running one.
+- **How a job runs:**
+  - One job at a time, through the research job above, with live evidence.
+  - Each attempt's budget is capped by what is left of the day. That budget is
+    charged when the attempt starts and replaced by the real cost once known.
+    An attempt that times out, fails, is cancelled or is cut off by a restart
+    or shutdown keeps the charge, so the cap never misses spend. A job refused
+    before any model call, or one whose input is missing, costs nothing.
+  - Timeouts, SDK failures and missing assessments are retried after 1 and
+    then 5 minutes, three attempts in all. Auth, budget and missing-input
+    failures fail at once.
+  - Every failure is recorded on the job, including a broken input or Radar
+    store, which fails the job instead of leaving it running.
+  - A job left running by a restart or a shutdown goes back to the queue.
+  - A malformed number setting falls back to its default with a warning; it
+    never stops the API.
+- **Results:**
+  - A finished job links to its saved investigation (`source="research_job"`).
+  - A Radar job is titled `Radar: …`, and a reassessment is saved as a new
+    investigation titled `Reassess: …`.
+- **Not included:** notifications, ntfy and phone alerts. To try it locally,
+  set `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
+  question with the POST route, and read the result in the lab's saved
+  investigations.
+
 ## Before a live API test
 
 1. The owner approves the spend. A billing refusal is reported as "API credits
