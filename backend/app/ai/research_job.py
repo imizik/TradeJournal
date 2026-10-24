@@ -163,7 +163,7 @@ def save_research_result(record: dict) -> str:
                 for b in record["lab_tool_calls"] if b.get("status") == "ok"]
     symbols = record["symbols"]
     saved = inv.save_research_result(
-        title=record["question"][:120], symbol=symbols[0] if symbols else None,
+        title=record.get("title") or record["question"][:120], symbol=symbols[0] if symbols else None,
         findings=findings_for(record["assessment"], record["checks"]), evidence=evidence[:400],
         transcript=[{"role": "user", "content": record["question"][:20_000]}], evidence_at=record.get("evidence_at"))
     return saved["id"]
@@ -321,11 +321,12 @@ def _checks(assessment: dict, rec: _Recorder, evidence) -> dict:
 
 
 async def run_job(question: str, symbols: list[str], evidence, *, now: datetime, sdk=None, model: str | None = None,
-                  mode: str | None = None, lim: JobLimits | None = None, save: bool = True) -> dict:
+                  mode: str | None = None, lim: JobLimits | None = None, save: bool = True, title: str | None = None) -> dict:
     """Run one job to completion and return the result record (also on failure, with ``status: error``)."""
     lim, mode = lim or limits(), mode or auth_mode()
     model = model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL
-    binary, env = prepare(mode)
+    # Claude Code's sign-in check is a subprocess; keep it off the event loop (the queue runs in the API process).
+    binary, env = await asyncio.to_thread(prepare, mode)
     if sdk is None:
         import claude_agent_sdk as sdk
     cfg = copilot.Settings(enabled=True, backend="plan", evidence=getattr(evidence, "label", "live"), model=model,
@@ -334,6 +335,7 @@ async def run_job(question: str, symbols: list[str], evidence, *, now: datetime,
     started = time.monotonic()
     record: dict[str, Any] = {
         "id": str(uuid.uuid4()), "source": "research_job", "status": "error", "question": question, "symbols": symbols,
+        "title": (title or question)[:120],
         "evidence": cfg.evidence, "created_at": datetime.now(UTC).isoformat(timespec="seconds"), "auth": mode,
         "model": model, "disclaimer": DISCLAIMER,
         **({"evidence_at": evidence.at.isoformat()} if cfg.evidence == "replay" else {}),
