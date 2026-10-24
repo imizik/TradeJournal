@@ -127,7 +127,7 @@ test("exit habits card shows each alert's follow-up and the four habits against 
   await expect(aapl).toContainText("Trimmed within 15 min");
   await expect(aapl).toContainText("Still open, so there is no result yet.");
   const link = nvda.getByRole("link");
-  await expect(link).toHaveAttribute("href", /^\/trades\/[0-9a-f-]{36}$/);
+  await expect(link).toHaveAttribute("href", /^\/trades\/[0-9a-f-]{36}\?alert=[0-9a-f-]{36}$/); // the alert itself, not just its trade
   await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-desktop.png") });
   await page.screenshot({ path: test.info().outputPath("dashboard-exit-habits-page-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
@@ -135,7 +135,8 @@ test("exit habits card shows each alert's follow-up and the four habits against 
   await card.scrollIntoViewIfNeeded();
   await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-phone.png") });
   await link.click();
-  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]{36}$/);
+  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]{36}\?alert=[0-9a-f-]{36}$/);
+  await expect(page.getByTestId("selected-position-alert")).toContainText("Give-back triggered");
   expect(errors).toEqual([]);
 });
 

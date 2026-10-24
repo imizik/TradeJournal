@@ -25,15 +25,18 @@ export default async function AttentionPanel({ rows, quotes, quoteError, today, 
 }) {
   const optionTickers = [...new Set(rows.filter(({ trade }) => trade.instrument_type === "option"
     && trade.expiration && trade.expiration.slice(0, 10) >= today).map(({ trade }) => trade.ticker))].sort();
-  const [alerts, jobs, gmail, events] = await Promise.all([
+  const optionIds = rows.filter(({ trade }) => trade.instrument_type === "option").map(({ trade }) => trade.id);
+  const [alerts, jobs, gmail, events, phone] = await Promise.all([
     api.levelAlerts().then((payload) => payload.alerts, () => null),
     api.syncJobs().catch(() => null),
     api.gmailHealth().catch(() => null),
     Promise.all(optionTickers.map((ticker) => api.symbolEvents(ticker).then((value) => value.earnings as Earnings, () => null))),
+    Promise.all(optionIds.map((id) => api.tradePhoneAlerts(id).then((value) => value.alerts, () => null))),
   ]);
   const { items, unavailable } = buildAttention({
     rows, quotes, quoteError, today, now: requestTime(), decisions, alerts, jobs, gmail,
     earnings: Object.fromEntries(optionTickers.map((ticker, index) => [ticker, events[index]])),
+    phoneAlerts: Object.fromEntries(optionIds.map((id, index) => [id, phone[index]])),
   });
   return <AttentionCard items={items} unavailable={unavailable} scope={scope} />;
 }

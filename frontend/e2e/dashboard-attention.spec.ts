@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import type { DecisionRecord, GmailHealth, PositionQuote, SyncJob, Trade } from "../lib/api";
+import type { DecisionRecord, GmailHealth, PositionQuote, SyncJob, Trade, TradePhoneAlert } from "../lib/api";
 import type { LevelAlert } from "../lib/alerts";
 import type { OpenPositionMeta, OpenPositionRow } from "../lib/dashboard";
 import type { Earnings } from "../lib/symbolInfo";
@@ -86,6 +86,27 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
     .toEqual(buildAttention(base({ rows, quotes, gmail: health("down") })).items.map((i) => i.id));
 });
 
+const phoneAlert = (id: string, minutesAgo: number, over: Partial<TradePhoneAlert> = {}): TradePhoneAlert => ({ id, kind: "giveback",
+  detected_at: (NOW - minutesAgo * 60000) / 1000, contracts: 2, gain: 24, gain_pct: 0.03, peak_gain: 204, peak_gain_pct: 0.255, ...over });
+
+test("a give-back alert stays listed for the rest of its day while the position is open", () => {
+  const rows = [option("nvda", "NVDA", "2026-10-30"), option("amd", "AMD", "2026-10-30"), option("mu", "MU", "2026-10-30"), option("x", "X", "2026-10-30")];
+  const quotes = { nvda: mark(1), amd: mark(1), mu: mark(1), x: mark(1) };
+  const { items, unavailable } = buildAttention(base({ rows, quotes, phoneAlerts: {
+    // The later of two give-backs today is the one listed; an expiry alert is not a give-back.
+    nvda: [phoneAlert("first", 90, { gain: 10 }), phoneAlert("second", 20), phoneAlert("expiry", 5, { kind: "expiry_first" })],
+    amd: [phoneAlert("yesterday", 16 * 60)], // 23:00 ET the day before
+    mu: null,
+  } }));
+  expect(items.map((item) => item.id)).toEqual(["giveback:second"]);
+  expect(items[0]).toMatchObject({ priority: "alert", title: "NVDA 100C 10/30 gave back its gain", when: "20m ago", href: "/trades/nvda?alert=second",
+    detail: "Peak +$204 (+26%), +$24 (+3%) at the alert. 2 open now." });
+  expect(unavailable).toEqual(["Phone alerts for MU 100C 10/30"]);
+  // Newer give-backs sort ahead of older price alerts, like the price alerts among themselves.
+  expect(buildAttention(base({ rows, quotes, alerts: [fired("price", 30)], phoneAlerts: { nvda: [phoneAlert("g", 10)] } })).items.map((i) => i.id))
+    .toEqual(["giveback:g", "alert:price"]);
+});
+
 test("attention discloses failed sources instead of reading them as quiet", () => {
   const rows = [option("a", "NVDA", "2026-10-30"), option("b", "AMD", "2026-10-30")];
   const failed = buildAttention(base({ rows, quotes: {}, quoteError: true, gmail: null, jobs: null, alerts: null,
@@ -97,6 +118,52 @@ test("attention discloses failed sources instead of reading them as quiet", () =
   expect(buildAttention(base({ gmail: health("degraded") })).items[0].title).toBe("Fill import is degraded");
   expect(buildAttention(base({ rows: [option("n", "X", null)], quotes: { n: mark(1) } })).items.map((i) => i.id)).toEqual(["no-expiry:n"]);
   expect(buildAttention(base({ rows: [stock("u", "X", { direction: "unknown" })], quotes: { u: mark(null, 1) } })).items.map((i) => i.id)).toEqual(["no-basis:u"]);
+});
+
+test("a give-back alert from today opens its exact alert from Attention at phone width", async ({ page }) => {
+  const seeded = JSON.parse(execFileSync(python, ["-c", `
+import json
+from datetime import datetime,timedelta
+from sqlmodel import Session,select
+from app.database import engine
+from app.engine.position_alerts import anchor
+from app.models import Account,Fill,PositionAlert,Trade,TradeFill
+assert engine.url.database.endswith('/data/e2e_seed.db')
+with Session(engine) as db:
+    roth=db.exec(select(Account.id).where(Account.type=='roth_ira')).one()
+    trade=db.exec(select(Trade).where(Trade.ticker=='AAPL',Trade.account_id==roth,Trade.status=='open',Trade.instrument_type=='option')).one()
+    entries=db.exec(select(Fill).join(TradeFill,TradeFill.fill_id==Fill.id).where(TradeFill.trade_id==trade.id,TradeFill.role=='entry')).all()
+    alert=PositionAlert(account_id=roth,source_key=anchor(entries),kind='giveback',generation=99,trade_id=trade.id,contract='AAPL 230C',
+        contracts=6,avg_cost=200,mark=206,bid=205,gain=36,gain_pct=0.03,peak_gain=660,peak_gain_pct=0.55,
+        detected_at=datetime.utcnow()-timedelta(minutes=1),delivery='sent')
+    db.add(alert);db.commit()
+    print(json.dumps({"alert":str(alert.id),"trade":str(trade.id)}))
+`], { cwd: backend, env: seedEnv, encoding: "utf8" }).trim()) as { alert: string; trade: string };
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    const panel = page.getByRole("region", { name: "Attention" });
+    const item = panel.locator(`[data-attention-id="giveback:${seeded.alert}"]`);
+    await expect(item).toContainText("gave back its gain");
+    await expect(item).toContainText("Peak +$660 (+55%), +$36 (+3%) at the alert.");
+    await expect(item).toHaveAttribute("href", `/trades/${seeded.trade}?alert=${seeded.alert}`);
+    await panel.screenshot({ path: test.info().outputPath("dashboard-attention-giveback-phone.png"), animations: "disabled" });
+    // The Exit Habits card opens the same alert, not just its trade.
+    const habits = page.getByTestId("exit-habits").getByTestId("exit-habits-alert").filter({ hasText: "AAPL 230C" });
+    await expect(habits.getByRole("link")).toHaveAttribute("href", `/trades/${seeded.trade}?alert=${seeded.alert}`);
+    await item.click();
+    await expect(page.getByTestId("selected-position-alert")).toContainText("Give-back triggered");
+  } finally {
+    // Leave no alert behind: the Exit Habits seed only runs on a database without one.
+    execFileSync(python, ["-c", `
+import sys,uuid
+from sqlmodel import Session,delete
+from app.database import engine
+from app.models import PositionAlert
+with Session(engine) as db:
+    db.exec(delete(PositionAlert).where(PositionAlert.id==uuid.UUID(sys.argv[1])));db.commit()
+`, seeded.alert], { cwd: backend, env: seedEnv });
+  }
 });
 
 test("attention panel streams in, links to its records and opens Sync from a job item", async ({ page }) => {

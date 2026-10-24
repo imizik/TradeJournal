@@ -58,7 +58,7 @@ function ExitHabitsView({ body }: { body: ExitHabitsBody }) {
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent alerts</h3>
       {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, ALERTS_SHOWN).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-          {a.trade_id ? <Link href={`/trades/${a.trade_id}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</Link>
+          {a.trade_id ? <Link href={`/trades/${a.trade_id}?alert=${encodeURIComponent(a.id)}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</Link>
             : <span className="text-sm font-medium">{a.contract}</span>}
           <span className="text-xs text-muted-foreground">{kindLabel(a.kind)} · {time(a.detected_at)} ET</span>
         </div>
