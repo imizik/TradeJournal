@@ -246,9 +246,11 @@ export const createWatch = (investigationId: string, watch: Extract<Proposal, { 
 export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });
 /** A confirmed memory is saved through the existing Jo memory store as the owner's own statement (they edited and
  * confirmed the words), active at once, with the investigation it came from as its reference. */
-const operationId = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-export const saveMemory = (memory: Extract<Proposal, { kind: "memory" }>, text: string, investigationId: string | null) =>
+export const operationId = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+/** ``operation`` is minted once per card, so a Confirm retried after a lost response replays the same save instead of
+ * writing a second memory (the store replays by operation id). */
+export const saveMemory = (memory: Extract<Proposal, { kind: "memory" }>, text: string, investigationId: string | null, operation: string) =>
   request<{ id: string; memory_id: string; revision: number }>("/jo/memories", { method: "POST", body: JSON.stringify({
-    operation_id: operationId(), kind: memory.memory_kind, symbol: memory.symbol, original_text: text,
+    operation_id: operation, kind: memory.memory_kind, symbol: memory.symbol, original_text: text,
     interpretation: memory.interpretation ?? null, source: "owner_statement",
     source_reference: investigationId ? `copilot:${investigationId}` : "copilot", status: "active", owner_confirmed: true }) });

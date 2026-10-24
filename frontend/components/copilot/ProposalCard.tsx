@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { createWatch, enqueueRevisit, freshQuote, saveMemory, type Proposal } from "@/lib/copilot";
+import { useRef, useState } from "react";
+import { createWatch, enqueueRevisit, freshQuote, operationId, saveMemory, type Proposal } from "@/lib/copilot";
 
 const CONDITION: Record<string, string> = { touches: "touches", crosses: "crosses", closes_beyond: "closes beyond" };
 const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -22,6 +22,7 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(proposal.kind === "memory" ? proposal.text : "");
+  const operation = useRef(operationId());  // one id per card: a retried Confirm replays, never duplicates
   if (phase === "dismissed") return null;
   const watch = proposal.kind === "watch";
   const memory = proposal.kind === "memory";
@@ -35,7 +36,7 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
     setError(null);
     try {
       if (proposal.kind === "memory") {
-        await saveMemory(proposal, text.trim(), investigationId);
+        await saveMemory(proposal, text.trim(), investigationId, operation.current);
         setNote(`Remembered (${proposal.memory_kind}${proposal.symbol ? `, ${proposal.symbol}` : ""}). It joins your approved memories from the next turn.`);
       } else if (proposal.kind === "watch") {
         // The side the alert waits on comes from the price now, so a stale or missing quote is refused.
