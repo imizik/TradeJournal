@@ -1425,6 +1425,10 @@ test("linked time ranges follow the chart being moved, by time, without feedback
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-Panel 2").locator("canvas").first()).toBeVisible();
+  // Panel 2 (15m) has its candles, and the opening view it asked for is applied on the chart's next frame:
+  // a read in between sees the library's default view instead.
+  await expect(page.getByTestId("canvas-Panel 2")).toHaveAttribute("data-bars", String(Math.min(1200, Math.ceil(3 * 86400 / STEP["15m"]))));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const unlinked = await visibleRange(page, "Panel 2");
   const main = page.getByTestId("canvas-main");
   const box = (await main.boundingBox())!;
