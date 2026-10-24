@@ -349,16 +349,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (!content || busy || !status?.enabled) return;
     // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
     // 40,000 in all): the newest whole pairs are kept, long answers clipped, a failed empty answer left out.
+    // Paired from the end, so a transcript that opens with an unanswered question (a research result) stays aligned.
     const pairs: { role: "user" | "assistant"; content: string }[][] = [];
-    for (let i = 0; i + 1 < messages.length; i += 2) {
-      const [question, answer] = [messages[i], messages[i + 1]];
-      if (question.role === "user" && answer.role === "assistant" && answer.content.trim())
-        pairs.push([{ role: "user", content: question.content.slice(0, MAX_CHARS) },
-          { role: "assistant", content: clip(answer.content) }]);
+    for (let i = messages.length - 1; i > 0;) {
+      const [question, answer] = [messages[i - 1], messages[i]];
+      if (question.role === "user" && answer.role === "assistant") {
+        if (answer.content.trim())
+          pairs.push([{ role: "user", content: question.content.slice(0, MAX_CHARS) },
+            { role: "assistant", content: clip(answer.content) }]);
+        i -= 2;
+      } else i -= 1;
     }
     const history: { role: "user" | "assistant"; content: string }[] = [{ role: "user", content }];
     let total = content.length;
-    for (const pair of pairs.reverse()) {
+    for (const pair of pairs) {
       const size = pair[0].content.length + pair[1].content.length;
       if (history.length + 2 > MAX_MESSAGES || total + size > MAX_TOTAL) break;
       history.unshift(...pair);
