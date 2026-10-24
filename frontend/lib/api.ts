@@ -479,6 +479,10 @@ export type JobStatus = {
   updated_at?: string | null;
 };
 
+/** One open-trade phone alert, as `GET /trades/{id}/phone-alerts` lists it (the trade page reads the rest). */
+export type TradePhoneAlert = { id: string; kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour"; detected_at: number;
+  contracts: number; gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null };
+
 export type SyncJob = {
   job_type: string;
   label: string;
@@ -997,6 +1001,7 @@ return {
   gmailHealth: () => get<GmailHealth>("/gmail/health"),
   syncJobs: () => get<SyncJob[]>("/sync/jobs"),
   levelAlerts: () => get<import("./alerts").AlertsPayload>("/charts/alerts"),
+  tradePhoneAlerts: (tradeId: string) => get<{ alerts: TradePhoneAlert[] }>(`/trades/${encodeURIComponent(tradeId)}/phone-alerts`),
   symbolEvents: (symbol: string) => get<import("./symbolInfo").SymbolEvents>(`/charts/symbol/${encodeURIComponent(symbol)}/events`),
   syncRuns: () => get<SyncRun[]>("/sync/runs"),
   runSyncPipeline: () => post<{ pipeline_run_id: string }>("/sync/pipeline/run"),

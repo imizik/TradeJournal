@@ -1,4 +1,4 @@
-import type { DecisionRecord, GmailHealth, PositionQuote, SyncJob } from "@/lib/api";
+import type { DecisionRecord, GmailHealth, PositionQuote, SyncJob, TradePhoneAlert } from "@/lib/api";
 import type { LevelAlert } from "@/lib/alerts";
 import type { Earnings } from "@/lib/symbolInfo";
 import { getCurrentMark, type OpenPositionRow } from "@/lib/dashboard";
@@ -34,6 +34,8 @@ export type AttentionInputs = {
   gmail: GmailHealth | null;
   /** Per underlying of an open option; a missing key was not requested. */
   earnings: Record<string, Earnings | null>;
+  /** Phone alerts per open option trade ID; a missing key was not requested, `null` failed. */
+  phoneAlerts?: Record<string, TradePhoneAlert[] | null>;
 };
 
 export type AttentionResult = { items: AttentionItem[]; unavailable: string[] };
@@ -52,6 +54,14 @@ function addDays(day: string, days: number): string {
 
 function shortDate(day: string): string {
   return `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+}
+
+function money(value: number | null): string {
+  return value == null ? "?" : `${value < 0 ? "-" : "+"}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function percent(value: number | null): string {
+  return value == null ? "?" : `${value < 0 ? "" : "+"}${Math.round(value * 100)}%`;
 }
 
 function ago(now: number, at: number): string {
@@ -114,6 +124,17 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
         detail: `${meta.qtyLeft} contract${meta.qtyLeft === 1 ? "" : "s"} open.`, when: isToday ? "Today" : shortDate(expiration),
         href: tradeHref(trade.id), sortKey: expiration });
     }
+    // A give-back alert stays listed for the rest of its ET day while the position is open, so a dismissed push is not lost.
+    const phone = input.phoneAlerts?.[trade.id];
+    const giveback = phone?.filter((alert) => alert.kind === "giveback"
+      && new Date(alert.detected_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === today)
+      .sort((a, b) => b.detected_at - a.detected_at)[0];
+    if (giveback) {
+      items.push({ id: `giveback:${giveback.id}`, priority: "alert", title: `${contract(row)} gave back its gain`,
+        detail: `Peak ${money(giveback.peak_gain)} (${percent(giveback.peak_gain_pct)}), ${money(giveback.gain)} (${percent(giveback.gain_pct)}) at the alert. ${meta.qtyLeft} open now.`,
+        when: ago(now, giveback.detected_at * 1000), href: `${tradeHref(trade.id)}?alert=${encodeURIComponent(giveback.id)}`,
+        sortKey: String(1e10 - giveback.detected_at).padStart(11, "0") });
+    }
     if (expiration && expiration >= today) {
       const earnings = input.earnings[trade.ticker];
       const next = earnings?.state === "ready" ? earnings.next : null;
@@ -128,6 +149,8 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
   }
   const earningsGaps = Object.entries(input.earnings).filter(([, value]) => value == null || value.state === "unavailable" || value.state === "loading").map(([symbol]) => symbol).sort();
   if (earningsGaps.length) unavailable.push(`Earnings dates for ${earningsGaps.join(", ")}`);
+  const phoneGaps = rows.filter(({ trade }) => input.phoneAlerts?.[trade.id] === null).map(contract).sort();
+  if (phoneGaps.length) unavailable.push(`Phone alerts for ${phoneGaps.join(", ")}`);
 
   const { gmail } = input;
   if (gmail == null) unavailable.push("Gmail import status");
