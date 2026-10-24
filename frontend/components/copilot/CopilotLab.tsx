@@ -26,7 +26,7 @@ const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
 const TOOL_LABEL: Record<string, string> = {
   get_group_comparison: "Group comparison", get_peer_moves: "Peer moves", get_symbol_news: "News",
-  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research",
+  get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal",
 };
 
 function inline(text: string) {
@@ -369,10 +369,10 @@ export default function CopilotLab({ link = null }: { link?: { symbol: string; c
             className="min-h-11 rounded border px-2 py-1 hover:text-foreground disabled:opacity-40 sm:min-h-0">{current.status === "open" ? "Close" : "Reopen"}</button>
         </div>
       )}
-      {current && <ResearchDeeper key={current.id} investigationId={current.id} symbol={symbol} topic={topic}
+      {current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
         onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />}
 
-      {current && <LinkedActivity key={current.id} investigationId={current.id} refreshKey={linkedKey} />}
+      {current && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
 

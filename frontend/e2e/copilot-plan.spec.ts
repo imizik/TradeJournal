@@ -80,6 +80,8 @@ test("a proposed watch is confirmed against a fresh quote and shows as a linked 
   const linked = page.getByRole("region", { name: "Linked to this investigation" });
   await expect(linked).toContainText("Alert · armed");
   await expect(linked).toContainText("NBIS 2% below the last price");
+  await expect(page.getByRole("region", { name: "Research deeper" })).toHaveCount(1); // one per investigation, also after it saves
+  await page.screenshot({ path: test.info().outputPath("confirm-a-plan.png") });
 });
 
 test("a stale quote refuses the watch and sends nothing", async ({ page }) => {
