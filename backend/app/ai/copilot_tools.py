@@ -81,6 +81,39 @@ TOOLS: list[dict] = [
                                                              "description": "The saved investigation's id (a UUID)"}}},
     },
     {
+        "name": "get_chart_context",
+        "description": "What the owner's chart shows for a symbol on one timeframe (1m, 5m, 15m, 1h or 1D), from the "
+                       "same feed as the Charts page: the last ~40 bars (UTC time, OHLC, volume, relative volume, "
+                       "extended-hours flag), the nearest automatic level zones each side with their tested/broken "
+                       "state, VWAP and its 1-sigma band, relative volume, and the session open/high/low with the prior "
+                       "close. Read through as_of; a quote is not a fill.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "timeframe"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "timeframe": {"type": "string", "enum": ["1m", "5m", "15m", "1h", "1D"]}}},
+    },
+    {
+        "name": "get_positions",
+        "description": "The owner's open positions from their journal: symbol, stock or option (side, strike, expiry), "
+                       "quantity, average entry, current mark, unrealized P&L in $ and %, days held, and an account "
+                       "label. Use it when the owner asks about their own holdings. No account identifiers.",
+        "input_schema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    {
+        "name": "get_trades",
+        "description": "The owner's recent closed trades in one symbol from their journal, newest first: entry and exit "
+                       "time and price, P&L, hold time, and tags. Their own history, for how they have traded it.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "limit": {"type": "integer", "description": "1-10, default 5"}}},
+    },
+    {
+        "name": "get_memories",
+        "description": "The owner's approved memories (statements, theses, preferences and lessons they confirmed for "
+                       "Jo), newest first. Read-only; take them as the owner's own words about how they trade.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"limit": {"type": "integer", "description": "1-10, default 5"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -165,6 +198,17 @@ def validate(name: str, args: Any) -> dict:
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= MAX_SYMBOLS:
             raise ToolInputError(f"symbols must list 1-{MAX_SYMBOLS} tickers")
         return {"symbols": list(dict.fromkeys(_symbol(s) for s in symbols))}
+    if name == "get_positions":
+        return {}
+    if name in ("get_trades", "get_memories"):
+        limit = args.get("limit", 5)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10:
+            raise ToolInputError("limit must be 1-10")
+        return {"limit": limit} if name == "get_memories" else {"symbol": _symbol(args.get("symbol")), "limit": limit}
+    if name == "get_chart_context":
+        if args.get("timeframe") not in ("1m", "5m", "15m", "1h", "1D"):
+            raise ToolInputError("timeframe must be 1m, 5m, 15m, 1h or 1D")
+        return {"symbol": _symbol(args.get("symbol")), "timeframe": args["timeframe"]}
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -302,7 +346,7 @@ def _iso(value) -> str | None:
 
 
 # Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
-CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 8, 6, 5, 2
+CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -438,6 +482,22 @@ class LiveEvidence:
         from app.engine.quotes import get_stock_quotes
         return {"fetched_at": _now(), "prices": get_stock_quotes(symbols)}
 
+    def get_chart_context(self, symbol: str, timeframe: str) -> dict:
+        from app.ai import copilot_book
+        return copilot_book.chart_context(symbol, timeframe)
+
+    def get_positions(self) -> dict:
+        from app.ai import copilot_book
+        return copilot_book.positions()
+
+    def get_trades(self, symbol: str, limit: int = 5) -> dict:
+        from app.ai import copilot_book
+        return copilot_book.trades(symbol, limit)
+
+    def get_memories(self, limit: int = 5) -> dict:
+        from app.ai import copilot_book
+        return copilot_book.memories(limit)
+
 
 PROVENANCE = {
     "get_group_comparison": ("Radar recorded passes (Tradier sampled trades)", "recorded"),
@@ -447,6 +507,10 @@ PROVENANCE = {
     "get_quotes": ("Tradier / Alpaca quotes (60 s cache)", "fetched"),
     "get_saved_research": ("Saved investigations and research results (TradeJournal)", "saved"),
     "get_investigation_changes": ("Saved investigation, its alerts and research jobs (TradeJournal)", "saved"),
+    "get_chart_context": ("Charts workspace feed (Tradier today, stored sessions, automatic levels)", "fetched"),
+    "get_positions": ("Journal open positions (fills) · Tradier marks", "fetched"),
+    "get_trades": ("Journal closed trades (TradeJournal)", "saved"),
+    "get_memories": ("Owner-approved Jo memories (TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

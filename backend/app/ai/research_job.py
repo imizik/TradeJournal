@@ -36,7 +36,10 @@ from app.ai import copilot, copilot_plan, copilot_tools, plan_runner
 
 SERVER = "tradejournal"
 # Jobs read untrusted pages and can fetch URLs: no proposals, and no reading other saved investigations by id.
-LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in ("propose_plan", "get_investigation_changes")]
+# Never the owner's book: a job reads untrusted pages and can fetch URLs, so positions, trades or memories could leak
+# out through a crafted link. The chart (market data only) is fine.
+EXCLUDED_LAB_TOOLS = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories")
+LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in EXCLUDED_LAB_TOOLS]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 # Claude Code's own tool for returning the output_format answer: output only, no capability.
 OUTPUT_TOOL = "StructuredOutput"
@@ -297,7 +300,8 @@ def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
         return sdk.tool(name, spec["description"], spec["input_schema"],
                         annotations=sdk.ToolAnnotations(readOnlyHint=True))(handler)
 
-    return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=[make(t) for t in copilot_tools.TOOLS])
+    return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0",
+                                     tools=[make(t) for t in copilot_tools.TOOLS if t["name"] not in EXCLUDED_LAB_TOOLS])
 
 
 def options(sdk, binary: str, env: dict, model: str, lim: JobLimits, server, rec: _Recorder):
