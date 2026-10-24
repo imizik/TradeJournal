@@ -39,7 +39,9 @@ export type TradeCardData = {
     | "entry_distance_from_premarket_low_pct" | "entry_distance_from_prev_high_pct" | "entry_distance_from_prev_low_pct" | "entry_gap_pct", number | null>>;
 };
 export type OptionMark = { mark: number | null; mark_per_contract: number | null; basis: "mid" | "last" | null; bid: number | null; ask: number | null;
-  last: number | null; provider: string | null; quoted_at: number | null; open_pnl: number | null };
+  last: number | null; provider: string | null; quoted_at: number | null; open_pnl: number | null;
+  /** Contracts still open; absent from an older backend. */
+  open?: number | null };
 
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(apiUrl(path), { cache: "no-store", signal });

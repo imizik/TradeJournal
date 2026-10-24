@@ -173,9 +173,10 @@ def test_option_mark_reports_its_age_and_open_pnl(client, db, monkeypatch):
     mark = client.get(f"/charts/journal/trades/{call.id}/mark").json()
     assert mark["mark"] == 4.0 and mark["mark_per_contract"] == 400 and mark["basis"] == "mid" and mark["quoted_at"] == 1789000000
     assert mark["open_pnl"] == pytest.approx(400 - 310)  # per share x 100 vs per contract
+    assert mark["open"] == 1
     monkeypatch.setattr(charts, "option_mark", lambda req: (OptionQuoteResult(provider="tradier"), None))
     assert client.get(f"/charts/journal/trades/{call.id}/mark").json() == {
-        "mark": None, "mark_per_contract": None, "basis": None, "bid": None, "ask": None, "last": None, "provider": "tradier", "quoted_at": None, "open_pnl": None}
+        "mark": None, "mark_per_contract": None, "basis": None, "bid": None, "ask": None, "last": None, "provider": "tradier", "quoted_at": None, "open_pnl": None, "open": 1}
     # A stock trade has no option mark; its open P&L comes from the chart's own price.
     stock = trade_for(db, 1)
     assert client.get(f"/charts/journal/trades/{stock.id}/mark").status_code == 422

@@ -83,6 +83,18 @@ const linkedAlert = { id: "10000000-0000-0000-0000-000000000001", contract: "AAP
   kind: "giveback", detected_at: alertAt, quoted_at: alertAt - 5, contracts: 2, mark: 412, bid: 410,
   gain: 24, gain_pct: 0.03, peak_gain: 204, peak_gain_pct: 0.255, delivery: "sent", error: null, delivered_at: alertAt + 2 };
 
+// The current quote and the linked plan are faked too: the seeded backend has neither a live quote nor a plan for AAPL.
+const quotedAt = Math.floor(Date.now() / 1000) - 30;
+const nowMark = { mark: 4.3, mark_per_contract: 430, basis: "mid", bid: 4.28, ask: 4.32, last: 4.3, provider: "tradier",
+  quoted_at: quotedAt, open: 2, open_pnl: 60 };
+const linkedPlan = (tradeId: string) => ({ id: "plan-1", client_id: "plan-1", received_at: alertAt - 7200, client_captured_at: null,
+  account_id: "roth", account_label: "Roth", underlying: "AAPL", side: "buy_calls", instrument: "option", mode: "template",
+  template_id: null, template_revision: null, setup_label: "Reclaim", wording: "Out on a 5m close back below 228.", note: "Trim half at +40%.",
+  strike: 230, expiration: null, quantity: 2, context_state: "unavailable", context: { state: "unavailable", reason: "fixture" },
+  image: { state: "unavailable", note: null, bytes: null }, audio: null, transcript: null, not_taken_at: null, notes: [],
+  link: { id: "link-1", method: "suggested", linked_at: alertAt - 3600, unlinked_at: null, trade_id: tradeId, contract: "AAPL 230C",
+    entry_time: alertAt - 3600, entry_time_reliable: true, status: "open", timing: "pre_entry" } });
+
 for (const width of [390, 1440]) {
   test(`notification selects its exact historical event above the summary at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -92,9 +104,22 @@ for (const width of [390, 1440]) {
     await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
       enabled: false, watch: null, alerts: [{ ...linkedAlert, contract: `${trade.ticker} ${trade.expiration} ${trade.strike}C` }, { ...linkedAlert, id: "later", gain: -50, detected_at: alertAt + 3600 }],
     } }));
+    await page.route(`**/charts/journal/trades/${trade.id}/mark`, route => route.fulfill({ json: nowMark }));
+    await page.route(`**/charts/captures/for-trade/${trade.id}`, route => route.fulfill({ json: { captures: [linkedPlan(trade.id)] } }));
     await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}`);
     const selected = page.getByTestId("selected-position-alert");
     await expect(selected.getByRole("heading", { name: "Give-back triggered" })).toBeInViewport();
+    const plan = page.getByRole("region", { name: "Pre-trade plan" });
+    await expect(plan).toContainText("Out on a 5m close back below 228.");
+    if (width === 390) await page.screenshot({ path: test.info().outputPath("position-alert-page-phone.png"), fullPage: true });
+    const now = selected.getByTestId("position-now");
+    await expect(now).toContainText("Open P&L now +$60");
+    await expect(now).toContainText("2 contracts open. Option midpoint $4.30 per share. Bid $4.28 per share.");
+    await expect(now).toContainText("Quoted ");
+    // The plan the alert asks you to review sits right under it, above the summary.
+    const planBox = await plan.boundingBox();
+    expect(planBox!.y).toBeGreaterThan((await selected.boundingBox())!.y);
+    expect(planBox!.y + planBox!.height).toBeLessThan((await page.getByRole("heading", { name: "Trade Summary" }).boundingBox())!.y);
     await expect(selected).toContainText("Peak +$204 (+26%) → at trigger +$24 (+3%). Gain reached +3% or below after arming.");
     await expect(selected).toContainText("Triggered Oct 21, 2026, 11:02 AM ET");
     await expect(selected).toContainText("Saved snapshot, not a current quote.");
@@ -128,6 +153,24 @@ test("a closed position keeps its old expired alert as historical context", asyn
   const selected = page.getByTestId("selected-position-alert");
   await expect(selected).toContainText("This position is now closed.");
   await expect(selected).toContainText("not sent: too late to be useful");
+  await expect(selected.getByTestId("position-now")).toHaveCount(0); // nothing open to price
+});
+
+test("a current price that cannot be read says so and can be retried", async ({ page }) => {
+  const trade = await openAapl(page);
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: { enabled: false, watch: null, alerts: [linkedAlert] } }));
+  let reads = 0;
+  await page.route(`**/charts/journal/trades/${trade.id}/mark`, route => ++reads === 1
+    ? route.fulfill({ status: 503, json: { detail: "Quotes are unavailable right now." } })
+    : route.fulfill({ json: { ...nowMark, quoted_at: quotedAt - 3600, open_pnl: -40 } }));
+  await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}`);
+  const now = page.getByTestId("position-now");
+  await expect(now).toContainText("Current price unavailable. Quotes are unavailable right now.");
+  await expect(page.getByTestId("selected-position-alert")).toContainText("at trigger +$24 (+3%)"); // the snapshot still reads
+  await now.getByRole("button", { name: "Try again" }).click();
+  await expect(now).toContainText("Open P&L now -$40");
+  await expect(now).toContainText("Stale: quoted");
+  await now.screenshot({ path: test.info().outputPath("position-now-stale-phone.png") });
 });
 
 for (const state of ["missing", "failed", "loading"]) {
