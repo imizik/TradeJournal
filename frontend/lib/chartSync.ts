@@ -227,7 +227,7 @@ export function useChartSettings(initialSymbol?: string) {
       const allowed = allowedSymbols.split(",").filter(Boolean);
       const saved = local.settings ?? DEFAULT_SETTINGS;
       const safe = { ...saved, watchlist: allowed, symbol: allowed.includes(saved.symbol) ? saved.symbol : allowed[0] ?? "SPY", recent: [], levels: {}, drawings: {} };
-      queueMicrotask(() => { if (alive) { setSettings(safe); setReady(true); setSync("saved"); } });
+      queueMicrotask(() => { if (alive) { setPreviousSymbol(safe.symbol); setSettings(safe); setReady(true); setSync("saved"); } });
       return () => { alive = false; };
     }
     const base = local.meta?.base ?? shared(DEFAULT_SETTINGS);

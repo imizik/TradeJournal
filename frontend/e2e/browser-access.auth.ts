@@ -207,3 +207,37 @@ test("an assistant with a saved Level 2 dock preference gets no Level 2 tab, pan
   expect(level2Post.status()).toBe(403);
   await expect(page.getByRole("link", { name: "Charts", exact: true }).first()).toBeVisible();
 });
+
+
+test("a restricted historical chart returns to a granted live symbol", async ({ page, browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  try {
+    const session = await (await owner.request.get("/api/access/me")).json();
+    const identifier = `chart-return-${Date.now()}`;
+    const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": session.csrf },
+      data: { identifier, grants: { symbols: ["MU", "NVDA"], run_ids: [], journal_read: false } } });
+    expect(created.status()).toBe(201);
+    const credential = await created.json();
+    await page.goto("/login");
+    await page.getByLabel("Assistant ID").fill(identifier);
+    await page.getByLabel("Access key").fill(credential.key);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page.getByText("Read-only assistant access")).toBeVisible();
+    const symbols: string[] = [];
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/backend/charts/workspace") symbols.push(url.searchParams.get("symbol") ?? "");
+    });
+    const from = Date.parse("2026-07-14T13:40:00Z") / 1000;
+    await page.goto(`/charts?symbol=NVDA&from=${from}&to=${from + 2400}`);
+    await expect.poll(() => symbols.includes("NVDA")).toBe(true);
+    const banner = page.getByRole("status", { name: "Past trade view" });
+    await expect(banner).toBeVisible();
+    const before = symbols.length;
+    await banner.getByRole("button", { name: "Back to live" }).click();
+    await expect(banner).toHaveCount(0);
+    await expect.poll(() => symbols.slice(before).includes("MU")).toBe(true);
+    expect(symbols.every(symbol => ["MU", "NVDA"].includes(symbol))).toBe(true);
+    await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toHaveCount(0);
+  } finally { await owner.close(); }
+});
