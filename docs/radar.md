@@ -171,6 +171,27 @@ call. Question, comparisons and decision: [spec](../research/radar-outcomes/spec
 plan only (never an API key), what set the furthest continuations apart from the furthest reversals;
 it is hindsight input for a later rule version.
 
+On the VPS, run both by hand as the API's user with its settings (no timer is installed):
+
+```bash
+sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradejournal \
+  -p WorkingDirectory=/opt/tradejournal/current/backend -p EnvironmentFile=/etc/tradejournal/backend.env \
+  /opt/tradejournal/current/backend/.venv/bin/python -m scripts.radar_outcomes \
+  /var/lib/tradejournal/radar/radar.sqlite --out /var/lib/tradejournal/radar/outcomes.jsonl
+sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradejournal \
+  -p WorkingDirectory=/opt/tradejournal/current/backend -p EnvironmentFile=/etc/tradejournal/backend.env \
+  -p EnvironmentFile=/etc/tradejournal/claude-plan.env -E TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude \
+  -E TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude /opt/tradejournal/current/backend/.venv/bin/python \
+  scripts/radar_outcomes_review.py /var/lib/tradejournal/radar/outcomes.jsonl --since <first session> \
+  --out /var/lib/tradejournal/radar/review-<date>.json
+```
+
+The review calls the research job directly, so `RESEARCH_BUDGET_USD` caps it but the queue's
+`RESEARCH_DAILY_BUDGET_USD` does not count it; run it at most once a week. First run, October 24:
+the scorer opened the live store read-only and scored 0 (no rule-written events yet); the review,
+on that day's replayed in-sample events, ran on the plan in 56 s ($0.14 API-equivalent, 13 citations,
+server checks clean).
+
 ## Movers now
 
 `GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) supplies the
