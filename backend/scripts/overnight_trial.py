@@ -102,6 +102,8 @@ def root_path(path):
         if part.is_symlink():
             raise ValueError("trial root cannot contain symlinks below the temporary directory")
     resolved = root.resolve()
+    if resolved == temp or not resolved.is_relative_to(temp):
+        raise ValueError("trial root must stay inside the system temporary directory")
     if resolved.exists():
         info = resolved.stat()
         if not resolved.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077:

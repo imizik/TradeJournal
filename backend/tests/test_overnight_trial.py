@@ -75,7 +75,10 @@ def test_deadline_kills_calculation_child_and_preserves_failed_attempt(root, mon
     def delayed(self, request, payload, run_id, worker_fd, on_started=None):
         # Real calculation subprocess, interrupted while its parent waits.
         def started():
-            time.sleep(.2)
+            # Arm after spawn, so slow CI disk/startup cannot consume the
+            # test deadline before there is a child whose cleanup we verify.
+            with trial.deadline(.05):
+                time.sleep(.2)
         return original(self, request, payload, run_id, worker_fd, started)
 
     from app.engine import research_studio_store as module
@@ -88,8 +91,7 @@ def test_deadline_kills_calculation_child_and_preserves_failed_attempt(root, mon
 
     monkeypatch.setattr(module.subprocess, "Popen", capture)
     monkeypatch.setattr(trial.ResearchStore, "_child", delayed)
-    with trial.deadline(.05):
-        receipt = store.work_once()
+    receipt = store.work_once()
     assert receipt["status"] == "failed"
     assert "TimeoutError" in receipt["reason"]
     assert child_pids and all(p.poll() is not None for p in child_pids)
@@ -184,6 +186,11 @@ def test_root_and_store_redirection_refuse(root, tmp_path):
     # The platform temp path may include /var -> /private/var on macOS.
     platform_path = Path(tempfile.gettempdir()) / ("trial-" + str(uuid.uuid4()))
     assert trial.root_path(platform_path) == platform_path.resolve()
+    for prefix in (Path(tempfile.gettempdir()), Path(tempfile.gettempdir()).resolve()):
+        escape = prefix / ".." / ("trial-escape-" + str(uuid.uuid4()))
+        with pytest.raises(ValueError, match="temporary"):
+            trial.root_path(escape)
+        assert not escape.exists()
     with pytest.raises(ValueError, match="temporary"):
         trial.root_path(Path.home() / "research")
     alias = tmp_path / "alias"
