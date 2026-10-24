@@ -71,7 +71,8 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(plan_env, saved)
     _run(sdk)
     o = sdk.options
     assert o.tools == ["WebSearch", "WebFetch"]
-    assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS)]
+    assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] != "propose_plan")]
+    assert "mcp__tradejournal__propose_plan" not in o.allowed_tools  # a background job reads untrusted pages; it never proposes
     assert set(o.mcp_servers) == {"tradejournal"} and o.strict_mcp_config is True and o.setting_sources == []
     assert o.permission_mode == "dontAsk" and o.verbatim_prompts is True and o.max_budget_usd == 0.50 and o.max_turns == 24
     assert {"restricted", "no-session-persistence", "disable-slash-commands"} <= set(o.extra_args)

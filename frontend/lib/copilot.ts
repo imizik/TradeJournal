@@ -134,11 +134,12 @@ export const createInvestigation = (fields: InvestigationFields) =>
 export const updateInvestigation = (id: string, revision: number, fields: InvestigationFields) =>
   investigationRequest<Investigation>(`/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ ...fields, revision }) });
 
-/** What is saved: the text of each message and, per answer, which tools it used and how old their data was. */
+/** What is saved: the text of each message and, per answer, which tools it used and how old their data was.
+ * A proposal is not evidence, so propose_plan is left out. */
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
     transcript: messages.map(m => ({ role: m.role, content: m.content })),
-    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance)
+    evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan")
       .map(t => ({ tool: t.name, as_of: t.provenance!.as_of, kind: t.provenance!.kind, message: i }))),
   };
 }

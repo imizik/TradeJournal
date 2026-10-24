@@ -46,7 +46,8 @@ class EvidenceRef(_Strict):
     """Which tool a result relied on and how old its data was; never the data."""
     tool: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     as_of: str | float | None = None
-    kind: Literal["recorded", "fetched", "cached", "simulated", "replay", "saved"] | None = None
+    # "proposal" only so a page saved before proposals were left out of evidence still saves.
+    kind: Literal["recorded", "fetched", "cached", "simulated", "replay", "saved", "proposal"] | None = None
     message: int | None = Field(None, ge=0)  # transcript index of the answer that used it
 
 

@@ -17,7 +17,11 @@ const WATCH = { id: "p1", kind: "watch", symbol: "NBIS", condition: "crosses", p
   label: "NBIS 2% below the last price", why: "A break here would mean the bounce failed.", last: 94.35, as_of: "2026-10-24T14:00:00Z" };
 const REVISIT = { id: "p2", kind: "revisit", question: "Is NBIS still lagging its group?", horizon_days: 1 };
 const sse = (events: object[]) => events.map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+// Live provenance, as in production: the quote is "fetched" and the proposal is "proposal" (fixture evidence would
+// relabel both "simulated").
 const TURN = sse([
+  { type: "tool", id: "q1", name: "get_quotes", status: "running" },
+  { type: "tool", id: "q1", name: "get_quotes", status: "ok", summary: "NBIS 94.35", ms: 1, provenance: { source: "Tradier", kind: "fetched", as_of: "2026-10-24T14:00:00Z" } },
   { type: "tool", id: "p1", name: "propose_plan", status: "running" },
   { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed watch", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
   { type: "proposal", ...WATCH },
@@ -27,7 +31,7 @@ const TURN = sse([
     tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
 ]);
 
-type Server = { alerts: object[]; jobs: object[]; posts: { path: string; body: unknown }[]; quote: { fresh: boolean; last: number | null } };
+type Server = { alerts: object[]; jobs: object[]; posts: { path: string; body: unknown }[]; quote: { fresh: boolean; last: number | null }; queueOff?: boolean };
 
 async function lab(page: Page, server: Server, { alertsSupported = true, url = "/copilot-lab" } = {}) {
   const post = (path: string, route: import("@playwright/test").Route) => server.posts.push({ path, body: route.request().postDataJSON() });
@@ -50,7 +54,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
     const body = route.request().postDataJSON();
     server.jobs = [{ id: "j1", kind: "reassess", status: "queued", input: { investigation_id: body.investigation_id, question: body.question, requested_by: "owner" },
       attempts: 0, error: null, cost_usd: null, investigation_id: null, created_at: "2026-10-24T14:01:00", next_attempt_at: "2026-10-25T14:01:00", finished_at: null }];
-    return route.fulfill({ status: 201, json: { job: server.jobs[0], created: true, queue_enabled: true } });
+    return route.fulfill({ status: 201, json: { job: server.jobs[0], created: true, queue_enabled: !server.queueOff } });
   });
   await page.goto(url);
 }
@@ -62,12 +66,19 @@ async function askForPlan(page: Page) {
   await expect(page.getByText("Saved", { exact: true })).toBeVisible(); // the investigation exists, so Confirm can link to it
 }
 
+/** The kinds `EvidenceRef.kind` accepts (backend/app/engine/copilot_investigations.py) apart from the legacy "proposal". */
+const EVIDENCE_KINDS = ["recorded", "fetched", "cached", "simulated", "replay", "saved"];
+
 const fresh = (): Server => ({ alerts: [], jobs: [], posts: [], quote: { fresh: true, last: 94.35 } });
 
 test("a proposed watch is confirmed against a fresh quote and shows as a linked alert", async ({ page }) => {
   const server = fresh();
   await lab(page, server);
   await askForPlan(page);
+  // The saved investigation carries the quote as evidence and leaves the proposal out: a proposal is not evidence.
+  const saved = server.posts.find((p) => p.path === "investigations")!.body as { evidence: { tool: string; kind: string; message: number }[] };
+  expect(saved.evidence).toEqual([{ tool: "get_quotes", as_of: "2026-10-24T14:00:00Z", kind: "fetched", message: 1 }]);
+  expect(saved.evidence.every((ref) => EVIDENCE_KINDS.includes(ref.kind))).toBe(true);
   const card = page.getByRole("region", { name: "Proposed watch" });
   await expect(card).toContainText("Proposed watch · NBIS crosses 92.46");
   await expect(card).toContainText("Label: NBIS 2% below the last price");
@@ -96,7 +107,7 @@ test("a stale quote refuses the watch and sends nothing", async ({ page }) => {
 });
 
 test("without alert support a watch waits, while a revisit still confirms; Dismiss removes a card", async ({ page }) => {
-  const server = fresh();
+  const server = { ...fresh(), queueOff: true };
   await lab(page, server, { alertsSupported: false });
   await askForPlan(page);
   const watch = page.getByRole("region", { name: "Proposed watch" });
@@ -105,7 +116,7 @@ test("without alert support a watch waits, while a revisit still confirms; Dismi
   const revisit = page.getByRole("region", { name: "Proposed revisit" });
   await expect(revisit).toContainText("Research again in 1 day: Is NBIS still lagging its group?");
   await revisit.getByRole("button", { name: "Confirm" }).click();
-  await expect(revisit.getByRole("status")).toHaveText("Revisit queued.");
+  await expect(revisit.getByRole("status")).toHaveText("Revisit queued. The research queue is off, so it waits until the queue is turned on.");
   expect(server.posts.find((p) => p.path === "reassess")!.body).toEqual({ investigation_id: INV, question: "Is NBIS still lagging its group?", after_days: 1 });
   await expect(page.getByRole("region", { name: "Linked to this investigation" })).toContainText("Revisit · queued");
   await watch.getByRole("button", { name: "Dismiss" }).click();

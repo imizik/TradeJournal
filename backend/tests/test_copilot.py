@@ -725,3 +725,28 @@ def test_quote_for_confirming_is_fresh_only_when_recent_and_priced(monkeypatch):
         assert client.get("/copilot/quote?symbol=NBIS").json() | {"fetched_at": None} == {
             "symbol": "NBIS", "last": None, "trade_time": None, "fetched_at": None, "age_s": 0.0, "issue": None, "fresh": False}
         assert client.get("/copilot/quote?symbol=nb is").status_code == 422
+
+
+def test_a_plan_turn_under_live_evidence_still_saves(monkeypatch):
+    """Under live evidence propose_plan's provenance kind stays "proposal" (fixture evidence relabels it "simulated",
+    which hid this). The lab leaves proposals out of saved evidence, and a page that still sends one saves too."""
+    class Live(FixtureEvidence):
+        label = "live"
+
+    history = [{"role": "user", "content": "NBIS, let's make a plan."}]
+    events = _turn(history, copilot.FakeAdapter(0), evidence=Live())
+    tools = [e for e in events if e["type"] == "tool" and e.get("status") == "ok"]
+    assert {t["name"]: t["provenance"]["kind"] for t in tools} == {"get_quotes": "fetched", "propose_plan": "proposal"}
+    answer = _text(events)
+    lab = [t for t in tools if t["name"] != "propose_plan"]  # what frontend/lib/copilot.ts toSaved sends
+    as_sent_before = tools  # what a page from before the fix sent
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        for refs in (lab, as_sent_before):
+            body = {"title": "NBIS plan", "symbol": "NBIS", "transcript": [*history, {"role": "assistant", "content": answer}],
+                    "evidence": [{"tool": t["name"], "as_of": t["provenance"]["as_of"], "kind": t["provenance"]["kind"], "message": 1} for t in refs]}
+            made = client.post("/copilot/investigations", json=body)
+            assert made.status_code == 201, made.text
+            saved = made.json()
+            put = client.put(f"/copilot/investigations/{saved['id']}", json={**body, "revision": saved["revision"]})
+            assert put.status_code == 200, put.text

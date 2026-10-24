@@ -37,7 +37,8 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
         setNote(`Alert set: ${proposalText(proposal)} (${proposal.symbol} was ${number(quote.last)}).`);
       } else {
         const made = await enqueueRevisit(investigationId, proposal.question, proposal.horizon_days);
-        setNote(made.created ? "Revisit queued." : "This revisit was already queued today.");
+        const queued = made.created ? "Revisit queued." : "This revisit was already queued today.";
+        setNote(made.queue_enabled ? queued : `${queued} The research queue is off, so it waits until the queue is turned on.`);
       }
       setPhase("done");
       onDone();

@@ -72,7 +72,8 @@ nothing exists until the owner confirms.
     alerts route's own request model. While that route refuses `copilot`,
     the card says "Awaiting alert support" instead of Confirm.
 - **Revisit:** a `question` of at most 500 characters and `horizon_days`
-  (1-30). Confirm queues a reassess job through
+  (1-30). Proposals are not evidence, so they are left out of the saved
+  investigation's evidence references. Confirm queues a reassess job through
   `POST /copilot/research-jobs/reassess` (Research queue, below). It works
   whether or not alerts are supported.
 - **Linked activity:** under an open investigation, the lab lists its level
@@ -174,7 +175,8 @@ credits.
   run under that exact environment must report the plan token as the sign-in.
   Otherwise the chat returns 503 and asks for `claude setup-token`. It never
   falls back to an API key.
-- **Same limits.** Only the seven lab tools, as in-process SDK MCP tools that
+- **Same limits.** Only the seven lab tools (background research jobs get the six read-only ones, never
+  `propose_plan`), as in-process SDK MCP tools that
   call `copilot_tools.validate()` and the same timed, bounded runner; the same
   8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
   120 s per turn and the spend cap above.
@@ -338,7 +340,10 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
     after_days}` queues the owner's "revisit this question": one reassess job
     for that investigation, due `after_days` (0-30) from now, at most once a
     day per investigation and due date. Its assignment adds the owner's
-    question to the usual reassessment.
+    question to the usual reassessment. While it waits, it counts as that
+    investigation's waiting reassessment, so the automatic reassessment
+    (`RESEARCH_REASSESS_AFTER_HOURS`) skips the investigation until it has
+    run: up to 30 days for the longest revisit.
   - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
     job; the same question and symbols are queued at most once a day. An
     optional `investigation_id` is kept in the job's input as
