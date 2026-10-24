@@ -90,13 +90,18 @@ def root_path(path):
     root = Path(path).absolute()
     # Fixture seeding is intentionally restricted to a new disposable temp root.
     # Resolve the OS temp alias, but refuse user-selected symlinks below it.
-    temp = Path(tempfile.gettempdir()).resolve()
-    resolved = root.resolve()
-    if resolved == temp or not resolved.is_relative_to(temp):
+    raw_temp = Path(tempfile.gettempdir()).absolute()
+    temp = raw_temp.resolve()
+    if root.is_relative_to(raw_temp):
+        root = temp / root.relative_to(raw_temp)
+    if root == temp or not root.is_relative_to(temp):
         raise ValueError("trial root must be a child of the system temporary directory")
     for part in (root, *root.parents):
-        if part.is_symlink() and part.resolve() != temp:
+        if part == temp:
+            break
+        if part.is_symlink():
             raise ValueError("trial root cannot contain symlinks below the temporary directory")
+    resolved = root.resolve()
     if resolved.exists():
         info = resolved.stat()
         if not resolved.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077:
@@ -216,18 +221,22 @@ def execute(root, action, retry_id=None):
         # A busy existing ResearchStore raises ValueError. Refuse without
         # overwriting the receipt of a live owner (including an orphan child).
         store.recover()
+        status = store.status(receipt["research"]["run_id"])
+        if action == "retry":
+            if not retry_id or str(uuid.UUID(retry_id)) != retry_id:
+                raise ValueError("retry requires a canonical operation UUID")
+            if receipt.get("retry_operation") != retry_id:
+                if status["status"] not in ("failed", "cancelled"):
+                    raise ValueError("retry requires a failed or cancelled research run")
+                if status["attempt"] >= LIMITS["max_attempts"]:
+                    raise ValueError("trial attempt budget exhausted")
         try:
-            status = store.status(receipt["research"]["run_id"])
             if action in ("run", "retry"):
                 if receipt["driver_sha256"] != hashlib.sha256(Path(__file__).read_bytes()).hexdigest() or receipt["analysis_code_id"] != code_identity():
                     raise ValueError("trial code changed; preserve this run and create a new trial")
             if action == "retry":
-                if not retry_id or str(uuid.UUID(retry_id)) != retry_id:
-                    raise ValueError("retry requires a canonical operation UUID")
                 # Same retry operation is idempotent even after it consumed the last attempt.
                 if receipt.get("retry_operation") != retry_id:
-                    if status["attempt"] >= LIMITS["max_attempts"]:
-                        raise ValueError("trial attempt budget exhausted")
                     receipt["retry_operation"] = retry_id
                     publish(root, "receipt.json", receipt)
                 if status["attempt"] < LIMITS["max_attempts"]:

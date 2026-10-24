@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -60,8 +61,9 @@ def test_failed_work_is_not_replayed_and_retry_is_bounded_idempotent(root):
     assert trial.execute(root, "retry", op)["research"]["attempt"] == 2
     assert trial.execute(root, "retry", op)["research"]["attempt"] == 2
     store.work_once(compute=fail)
-    exhausted = trial.execute(root, "retry", str(uuid.uuid4()))
-    assert "budget exhausted" in exhausted["failure"]
+    with pytest.raises(ValueError, match="budget exhausted"):
+        trial.execute(root, "retry", str(uuid.uuid4()))
+    assert trial.execute(root, "retry", op)["research"]["attempt"] == 2
     assert store.status(receipt["research"]["run_id"])["attempt"] == 2
 
 
@@ -136,6 +138,21 @@ def test_duplicate_coordinator_and_initialization_refuse(root):
     assert (root / "receipt.json").read_bytes() == before
 
 
+def test_rejected_retries_preserve_completed_receipt_report_and_ledger(root):
+    completed = trial.execute(root, "run")
+    receipt = (root / "receipt.json").read_bytes()
+    report = (root / "morning.md").read_bytes()
+    for operation_id in (None, "malformed", str(uuid.uuid4())):
+        command = [sys.executable, trial.__file__, "retry", "--root", str(root)]
+        if operation_id:
+            command += ["--operation-id", operation_id]
+        refused = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        assert refused.returncode == 2, refused.stdout + refused.stderr
+        assert (root / "receipt.json").read_bytes() == receipt
+        assert (root / "morning.md").read_bytes() == report
+        assert trial.store_for(root).status(completed["research"]["run_id"]) == completed["research"]
+
+
 def test_incomplete_initialization_and_changed_code_are_reported(tmp_path, monkeypatch):
     root = tmp_path / "broken"
     monkeypatch.setattr(trial, "seed", fail)
@@ -164,6 +181,9 @@ def test_modified_result_never_appears_successful(root):
 
 
 def test_root_and_store_redirection_refuse(root, tmp_path):
+    # The platform temp path may include /var -> /private/var on macOS.
+    platform_path = Path(tempfile.gettempdir()) / ("trial-" + str(uuid.uuid4()))
+    assert trial.root_path(platform_path) == platform_path.resolve()
     with pytest.raises(ValueError, match="temporary"):
         trial.root_path(Path.home() / "research")
     alias = tmp_path / "alias"
