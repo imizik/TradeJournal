@@ -320,6 +320,13 @@ def saved_research(symbol: str, limit: int = 3, before: datetime | None = None) 
             seen = findings.get("evidence_at") or row["created_at"]
             if datetime.fromisoformat(seen.replace("Z", "+00:00")) > before:
                 continue
+            # Edited after the frozen moment: its later status, conclusion, messages and findings would be hindsight.
+            if datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00")) > before:
+                items.append({"id": row["id"], "source": row["source"], "title": row["title"], "created_at": row["created_at"],
+                              "later_state": "Updated after the replay moment: its later status, conclusion, messages "
+                                             "and findings are hidden.",
+                              **({"evidence_at": findings["evidence_at"]} if findings.get("evidence_at") else {})})
+                continue
         items.append({
             "id": row["id"], "source": row["source"], "title": row["title"], "status": row["status"],
             "created_at": row["created_at"], "updated_at": row["updated_at"], "conclusion": row["conclusion"],
