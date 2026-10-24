@@ -348,6 +348,36 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   question with the POST route, and read the result in the lab's saved
   investigations.
 
+### In production (VPS)
+
+The release carries the SDK: `deploy/build.py` builds the `copilot-plan` extra
+from its sdist, a 164 KB pure-Python wheel instead of the ~126 MB PyPI wheel
+with a second (~270 MB unpacked) Claude Code inside. `deploy/control.py` installs that extra.
+Jobs run the release's own `bin/claude`, the version
+`deploy/claude-code/package.json` pins, which needs to be 2.1.257 or later
+for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
+
+- **Auth.** `RESEARCH_AUTH=api_key` with `ANTHROPIC_API_KEY` in
+  `/etc/tradejournal/backend.env`. The job passes only that key: the plan
+  token from `claude-plan.env` and everything else is blanked. Claude Code
+  must report `authMethod=api_key` and `apiKeySource=ANTHROPIC_API_KEY`
+  before a job runs. Its state goes under
+  `/var/lib/tradejournal/claude/research-api`, apart from the plan reviews'
+  state. Plan auth is refused there, because the database is Postgres.
+- **Turning it on, conservatively.** Add `RESEARCH_QUEUE_ENABLED=true`,
+  `RESEARCH_AUTH=api_key`, a small `RESEARCH_BUDGET_USD` and
+  `RESEARCH_DAILY_BUDGET_USD`, and leave the two trigger settings unset. Then
+  run `sudo systemctl restart tradejournal-api`. Queue one question with
+  `POST /copilot/research-jobs` and watch it with `GET /copilot/research-jobs`.
+  Turning the queue off again (unset, then restart) leaves queued jobs
+  waiting.
+- **CI.** The "Ubuntu package and MCP smokes" job checks the installed release
+  without a model call:
+  - `bin/claude --version` matches the pin;
+  - `claude_agent_sdk` imports from the release venv without a bundled CLI;
+  - the API-key preflight passes as the `tradejournal` user with a dummy key;
+  - plan auth is refused on Postgres.
+
 ## Before a live API test
 
 1. The owner approves the spend. A billing refusal is reported as "API credits
