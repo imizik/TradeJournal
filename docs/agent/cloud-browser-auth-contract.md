@@ -158,8 +158,19 @@ used through the assistant entrance. No browser localStorage bearer tokens.
 Initial limits to implement: assistant sessions expire after seven days or
 24 hours idle; assistant credentials expire after 30 days unless renewed by
 the owner. Private-owner sessions expire after 12 hours or two hours idle and
-can be silently re-established through the private Tailscale entrance. No
-background call can extend the absolute lifetime. These are selected product
+can be silently re-established through the private Tailscale entrance.
+
+Concurrent owner requests arriving with the same incoming cookie (including
+no cookie) share only an in-flight bootstrap on that private frontend. The
+coordination is scoped to its upstream, gateway key and configured origin,
+and is discarded when bootstrap settles. Every request still verifies the
+returned session with the backend. This prevents a renewal burst from
+exhausting the existing four-session cap; it does not cache authorization,
+extend expiry, or bootstrap through the assistant entrance. Concurrent fresh
+owner browsers may share that one newly issued owner session; subsequent
+independent bootstraps remain separate.
+
+No background call can extend the absolute lifetime. These are selected product
 limits, not observed Dot session behavior; adjust only through a versioned
 configuration and a new live login test.
 
