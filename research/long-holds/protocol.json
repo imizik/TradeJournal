@@ -1,0 +1,61 @@
+{
+  "protocol_id": "long-holds-20261024-v1",
+  "registered": "2026-10-24",
+  "registered_before": "any outcome of these rules was computed; the October 24 exit study had reported only that the 22 trades held longer than 10 days lost $5,209 together, and the October 21 audit that overnight holds did worse",
+  "question": "For the October 2025-26 long option trades held longer than 10 calendar days, would closing the whole position at the close of the 1st, 3rd or 5th session have kept more money than the actual exits?",
+  "population": {
+    "trades": "the trades in the exit-counterfactual-20261024-v1 extract whose window (closed_at date minus opened_at date, plus 1) is longer than 10 calendar days: exactly the exit study's exclusion (22 trades, -$5,209 there)",
+    "extract": "the same file the exit study read, produced by `python -m scripts.exit_counterfactual_study extract`; registered bytes sha256 023e0e11302cdc685f789dfd452d103feeb36d87385232c819fc8eedb1878eda. A run on any other file reports extract_is_registered false and must say so",
+    "excluded_and_counted": [
+      "incomplete contract (no expiration, type or strike)",
+      "a fill side other than buy_to_open or sell_to_close",
+      "no cached Alpaca option daily bars covering the window (fetched only with --fetch)",
+      "fills that do not allocate first-in-first-out"
+    ]
+  },
+  "sessions": "New York weekdays except NYSE holidays (2025-07-04, 2025-09-01, 2025-11-27, 2025-12-25, 2026-01-01, 2026-01-19, 2026-02-16, 2026-04-03, 2026-05-25, 2026-06-19, 2026-07-03, 2026-09-07, 2026-11-26, 2026-12-25); the session of the first entry is session 1",
+  "position_accounting": "actual fills applied in time order, first in first out; at the exit every contract still open is sold and later fills (adds or exits) are dropped; return on premium divides by the premium of the entries made before the exit",
+  "execution": {
+    "price": "the Alpaca daily option trade bar's close for the exit session (options/1Day cache layout of app.engine.alpaca), sold at the session close",
+    "missing_bar": "when session N has no daily bar, the first of sessions N+1 and N+2 that has one; otherwise the rule does not apply and the actual exit stands (counted)",
+    "after_actual_exit": "an exit session whose close is not before the actual final exit (or expiry close) does not apply; the actual exit stands (counted)",
+    "cost_base": "sell at the close less 3% of price, minimum $0.01 per contract share (the exit study's assumed half spread)",
+    "cost_stress": "the same at 9% of price"
+  },
+  "rules": {
+    "exit_session_1": "close of session 1",
+    "exit_session_3": "close of session 3",
+    "exit_session_5": "close of session 5"
+  },
+  "tests": 3,
+  "outcomes": {
+    "primary": "total dollar difference, counterfactual minus actual, over every trade in the population (untouched trades contribute 0)",
+    "secondary": [
+      "mean difference in return on premium (percentage points) over the trades a rule touched",
+      "descriptive only: the dollar difference on eventual losers and on eventual winners"
+    ],
+    "benchmark": "none registered: the rules are themselves the comparison with holding, the exit study found an exit's moment adds little beyond exiting sooner, and with about 22 trades a random-session benchmark would have no power",
+    "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261024); Bonferroni across the 3 sessions: 98.33% two-sided intervals for primary decisions"
+  },
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the audit and the exit study read both, and the population was chosen because its total was known to be negative. Every result is exploratory"
+  },
+  "decisions": {
+    "supported_saving": "primary 98.33% interval above 0, still above 0 at the stress cost, and in each period: at least 5 touched trades, dollar difference above 0 and return-on-premium difference above 0",
+    "outcomes": {
+      "supported_saving": "eligible for prospective testing as a hold limit",
+      "primary interval above 0 but a period has fewer than 5 touched trades": "investigate further: too few long holds in a period to check consistency",
+      "interval includes 0 or periods disagree": "reject as a demonstrated saving",
+      "primary interval below 0": "reject: exiting by that session would have cost money"
+    }
+  },
+  "limits": [
+    "a daily bar's close is the last trade print, which may be well before 16:00 on an illiquid contract, and not a bid/ask midpoint",
+    "the population is small and was selected because its total was negative; a saving on it is expected unless the losses came late, so only a decision against the rule is strong evidence",
+    "dollars are dominated by position size; the return-on-premium difference is the size-neutral check",
+    "no counterfactual re-entry: after a rule exit the trade is over"
+  ],
+  "prospective": "not registered here; a forward test needs its own protocol id after this run"
+}

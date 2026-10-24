@@ -1,0 +1,54 @@
+{
+  "protocol_id": "stop-after-green-20261024-v1",
+  "registered": "2026-10-24",
+  "registered_before": "any outcome of this rule was computed; the October 21 behavior audit's association (entries while the day was already green: 642 trades, -$8,942) was already known and motivated the rule, and the October 24 exit study had already read the same extract",
+  "question": "Had the owner stopped opening new trades for the rest of the day once the day's realized P&L was above $X, would the October 2025-26 long option trades have kept more money, and is the saving more than trading less by the same premium would give?",
+  "population": {
+    "trades": "every trade in the exit-counterfactual-20261024-v1 extract (closed or expired long option trades opened 2025-07-10 to 2026-10-19), including those held longer than 10 days; no option bars are needed",
+    "extract": "the same file the exit study read, produced by `python -m scripts.exit_counterfactual_study extract`; registered bytes sha256 023e0e11302cdc685f789dfd452d103feeb36d87385232c819fc8eedb1878eda. A run on any other file reports extract_is_registered false and must say so",
+    "excluded_and_counted": [
+      "a fill side other than buy_to_open or sell_to_close",
+      "fills that do not allocate first-in-first-out"
+    ]
+  },
+  "position_accounting": "each trade's P&L and entry premium come from its actual fills replayed first in first out (exit study Position); what is left open at the end expired worthless",
+  "day_pnl": "the day's realized P&L at an instant is the sum, over trades kept by the counterfactual whose closed_at falls on that New York calendar day strictly before the instant, of their whole-trade P&L; both accounts together; partial exits count only when the trade closes, as realized_pnl_today_before does",
+  "rules": {
+    "stop_above_0": "trigger at the first trade close that lifts the day's realized P&L above $0; every trade whose first entry is later that day (strictly after the trigger) is not taken",
+    "stop_above_250": "the same with $250",
+    "stop_above_500": "the same with $500",
+    "order": "days are processed in date order so a skipped multi-day trade never counts toward a later day's P&L; adds to a position opened before the trigger are kept"
+  },
+  "tests": 3,
+  "outcomes": {
+    "primary": "total dollar difference, counterfactual minus actual (minus the skipped trades' P&L), over every trade in the population",
+    "secondary": [
+      "aggregate return on premium, counterfactual minus actual, in percentage points (total P&L / total entry premium)",
+      "size-neutral: skipped trades' mean return on premium minus the kept trades' mean, in points (below 0 favors the rule)",
+      "benchmark, trading less by the same premium: every trade scaled by (1 - skipped premium / total premium); selection value = rule difference minus that flat cut's difference"
+    ],
+    "uncertainty": "2,000 bootstrap resamples by New York trading day of first entry (seed 20261024); Bonferroni across the 3 thresholds: 98.33% two-sided intervals for primary decisions"
+  },
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the audit that motivated the rule read both, and the thresholds were chosen knowing its result. Every result is exploratory; a positive check half is consistency, not confirmation"
+  },
+  "decisions": {
+    "supported_saving": "primary 98.33% interval above 0, and in each period: at least one trade skipped, dollar difference above 0, aggregate return-on-premium difference above 0, and skipped trades' mean return on premium below the kept trades'",
+    "selection_informative": "supported_saving and the selection value's 98.33% interval above 0",
+    "outcomes": {
+      "supported_saving and selection_informative": "eligible for prospective testing as a daily stop",
+      "supported_saving only": "investigate further: the saving is trading less, not stopping once green",
+      "interval includes 0 or periods disagree": "reject as a demonstrated saving",
+      "primary interval below 0": "reject: stopping once green would have cost money"
+    }
+  },
+  "limits": [
+    "stock trades and positions open at extract time are not in the extract, so the day's P&L omits them",
+    "skipping later entries assumes the owner would not have traded differently in other ways (no substitution, no different size on earlier trades)",
+    "dollars are dominated by position size; the size-neutral difference is the check",
+    "the audit measured the association; this asks what the rule would have done, on the same trades, so it cannot confirm the audit independently"
+  ],
+  "prospective": "not registered here; a forward test needs its own protocol id after this run"
+}
