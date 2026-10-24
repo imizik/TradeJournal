@@ -289,6 +289,7 @@ def test_only_url_fields_of_search_results_count_as_seen():
 @pytest.mark.parametrize("published,later", [
     ("2026-10-22", False),                 # a bare date before the evidence day: its end of day is still before
     ("2026-10-23", True),                  # the evidence day itself: its end is after 11:12 ET
+    ("20261023", True), ("2026-W43-5", True), ("20261022", False),  # compact and week dates: date-only, end of day
     ("2026-10-23T11:00:00", False),        # no offset: read as New York
     ("2026-10-23T15:30:00Z", True),        # 11:30 ET
     ("unknown", True), ("", True),         # cannot be shown to precede the evidence time

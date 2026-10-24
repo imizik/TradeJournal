@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import subprocess
 import time
 import uuid
@@ -306,11 +305,15 @@ def published_moment(value) -> datetime | None:
     """A citation's publish time, read conservatively: a time without an offset is New York, a bare date is that
     day's end in New York. None when it cannot be read."""
     from app.engine.chart_math import ET
+    from datetime import date
     text = str(value or "").strip()
     try:
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-            day = datetime.fromisoformat(text)
-            return day.replace(hour=23, minute=59, second=59, tzinfo=ET)
+        # Any date-only ISO form (2026-10-23, 20261023, 2026-W43-5): that day's end in New York.
+        day = date.fromisoformat(text)
+        return datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=ET)
+    except ValueError:
+        pass
+    try:
         moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
