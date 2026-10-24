@@ -6,6 +6,7 @@ import {
   MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
   recordVisit, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
+import AskCopilot from "@/components/copilot/AskCopilot";
 import RadarMovers from "@/components/RadarMovers";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +130,7 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
         <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary">
           Open chart · {symbol}
         </Link>
+        <AskCopilot symbol={symbol} context={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
       </div>
       <div role="group" aria-label="Was this useful?" className="space-y-1.5">
         <p className="text-xs text-muted-foreground">Was this useful? {rating ? "Your saved answer is highlighted." : "Not rated yet."}</p>
