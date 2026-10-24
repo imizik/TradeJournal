@@ -11,15 +11,37 @@ untouched.
 - `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
   (`frontend/components/copilot/CopilotLab.tsx`). It is not in the nav.
-- Entry points: `/copilot-lab?symbol=X&context=<short text>` opens a new
-  investigation with the symbol set and the message box prefilled with
-  `Context: <text>` (at most 300 characters); nothing is sent until the owner
-  presses Send. "Ask copilot" links (`frontend/components/copilot/AskCopilot.tsx`)
-  sit on Charts' Symbol info Overview tab (the current symbol) and in a Radar
-  event's detail (the event symbol and its one-line summary). They render
-  nothing for the assistant profile or while `/copilot/status` says the lab is
-  off. Browser proof: `frontend/e2e/copilot-entry.spec.ts`, including a 375 px
-  phone layout check.
+- One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
+  It is the full page (`variant="page"`, `CopilotLab.tsx`: Recent, symbol,
+  history, deep links) and the panel beside other pages (`variant="panel"`).
+  Both share investigations, proposals, Research deeper, What changed? and
+  linked activity. A panel renders nothing for the assistant profile or while
+  the lab is off.
+  - The nav, every panel and every Ask copilot button share one
+    `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
+    `useCopilotOn`).
+- Entry points (nothing is ever sent until the owner presses Send):
+  - **Nav:** "Copilot" opens `/copilot-lab`. It is owner-only, shown only
+    while the lab is on.
+  - **Charts:** a "Copilot" tab in the side dock, beside the watchlist, layers
+    and ladder. It uses the dock's width and divider, and on a phone it is
+    the dock's bottom sheet.
+    - It opens on the chart's symbol, resuming that symbol's latest open
+      investigation, or starting one with `Context: Charts · <symbol>
+      <interval> chart` in the message box.
+    - When the chart's symbol changes, an empty panel follows. A
+      conversation is never retargeted: the panel offers "Switch to <symbol>"
+      or "Keep <symbol>" (Switch waits for a turn in progress).
+    - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
+      the lab.
+  - **Radar:** "Ask copilot" in an event's detail opens the same panel in
+    place, as a right-hand drawer (full screen on a phone), on the event
+    symbol, with its one-line summary as the context.
+  - **Deep link:** `/copilot-lab?symbol=X&context=<short text>` opens a new
+    investigation with the symbol set and `Context: <text>` (at most 300
+    characters) in the message box.
+  - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
+    phone check) and `frontend/e2e/copilot-panel.spec.ts`.
 - `GET`/`POST /copilot/investigations` and `GET`/`PUT /copilot/investigations/{id}`
   hold saved investigations (below).
 - All these routes are owner-only: they are in no assistant grant
