@@ -132,16 +132,22 @@ TOOLS: list[dict] = [
                        "alert on `symbol` at `price` (condition touches, crosses or closes_beyond; closes_beyond needs "
                        "`interval` 1m-4h), with a short `label` (at most 60 characters) and `why` (at most 300). "
                        "kind=revisit: research this investigation again after `horizon_days` (1-30), focused on "
-                       "`question` (at most 500 characters).",
+                       "`question` (at most 500 characters). kind=memory: something the owner said that is worth "
+                       "remembering across conversations: `memory_kind` (statement, thesis, preference or lesson), "
+                       "`text` (their words or a faithful paraphrase, at most 400 characters), optional "
+                       "`interpretation` (what it should change about how you work, at most 300) and optional `symbol` "
+                       "when it is about one. The owner edits the text and confirms; nothing is remembered until then.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["kind"],
-                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit"]},
+                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit", "memory"]},
                                         "symbol": _SYMBOL_SCHEMA,
                                         "condition": {"type": "string", "enum": ["touches", "crosses", "closes_beyond"]},
                                         "price": {"type": "number", "description": "The level, positive"},
                                         "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"},
                                         "label": {"type": "string"}, "why": {"type": "string"},
                                         "question": {"type": "string"},
-                                        "horizon_days": {"type": "integer", "description": "1-30, default 1"}}},
+                                        "horizon_days": {"type": "integer", "description": "1-30, default 1"},
+                                        "memory_kind": {"type": "string", "enum": ["statement", "thesis", "preference", "lesson"]},
+                                        "text": {"type": "string"}, "interpretation": {"type": "string"}}},
     },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
@@ -164,15 +170,33 @@ def _text(args: dict, key: str, most: int) -> str:
     return " ".join(value.split())
 
 
+MEMORY_KINDS = ("statement", "thesis", "preference", "lesson")  # jo_briefing_common.MemorySave.kind
+MEMORY_SYMBOL = re.compile(r"^[A-Z]{1,6}(\.[A-Z])?$")  # jo_briefing_common.Symbol: what the memory store accepts
+MEMORY_TEXT, MEMORY_INTERPRETATION = 400, 300
+
+
 def _proposal(args: dict) -> dict:
     from app.engine import level_alerts
     kind = args.get("kind")
     keys = {"watch": {"kind", "symbol", "condition", "price", "interval", "label", "why"},
-            "revisit": {"kind", "question", "horizon_days"}}.get(kind)
+            "revisit": {"kind", "question", "horizon_days"},
+            "memory": {"kind", "memory_kind", "symbol", "text", "interpretation"}}.get(kind)
     if keys is None:
-        raise ToolInputError("kind must be watch or revisit")
+        raise ToolInputError("kind must be watch, revisit or memory")
     if set(args) - keys:
         raise ToolInputError(f"unexpected arguments for {kind}: {sorted(set(args) - keys)}")
+    if kind == "memory":
+        if args.get("memory_kind") not in MEMORY_KINDS:
+            raise ToolInputError("memory_kind must be statement, thesis, preference or lesson")
+        symbol = args.get("symbol")
+        if symbol is not None:
+            symbol = _symbol(symbol)
+            if not MEMORY_SYMBOL.match(symbol):
+                raise ToolInputError("a memory's symbol is 1-6 letters (the memory store's form)")
+        out = {"kind": "memory", "memory_kind": args["memory_kind"], "symbol": symbol, "text": _text(args, "text", MEMORY_TEXT)}
+        if args.get("interpretation") is not None:
+            out["interpretation"] = _text(args, "interpretation", MEMORY_INTERPRETATION)
+        return out
     if kind == "revisit":
         days = args.get("horizon_days", 1)
         if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
@@ -573,6 +597,9 @@ def bounded(data: dict) -> str:
 def propose(evidence, proposal: dict) -> dict:
     """A validated proposal, shown to the owner as a card; nothing is written. A watch needs a current price for its
     symbol from this turn's evidence, so a made-up ticker is refused, and the card can show which side it waits on."""
+    if proposal["kind"] == "memory":
+        return {"state": "ok", "proposal": proposal,
+                "note": "Shown to the owner as a card with the text to edit and confirm. Nothing is remembered until they confirm."}
     if proposal["kind"] == "watch":
         quote = evidence.get_quotes([proposal["symbol"]])
         last = (quote.get("prices") or {}).get(proposal["symbol"])

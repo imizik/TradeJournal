@@ -295,7 +295,9 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     assert metrics["usage"] == {"input_tokens": 2000, "output_tokens": 1000, "cache_read_input_tokens": 4000, "cache_creation_input_tokens": 0}
     assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.2) / 1e6)
     assert metrics["first_text_ms"] is not None and [t["name"] for t in metrics["tool_calls"]] == ["owner_context", "get_group_comparison"]
-    assert metrics["first_feedback_ms"] == metrics["first_progress_ms"] <= metrics["first_text_ms"]
+    # The pack's row is the first thing the trader sees, then the progress note, then text: equal only when both land
+    # in the same millisecond (as they did on #470's CI run), so order, not equality.
+    assert metrics["first_feedback_ms"] <= metrics["first_progress_ms"] <= metrics["first_text_ms"]
     assert 0 <= metrics["max_silence_ms"] <= metrics["total_ms"]
 
 
@@ -923,3 +925,78 @@ def test_replay_hides_whatever_happened_to_an_investigation_after_its_moment():
     assert [(j["status"], j["finished_at"]) for j in out["research_jobs"]] == [("running", None)]
     assert out["results"] == []
     assert out["evidence_as_of"]  # its evidence predates the moment
+
+
+# --------------------------------------------------------------------------- memory proposals and the prompt's frame
+
+@pytest.mark.parametrize("args", [
+    {"kind": "memory", "text": "t"},                                                     # no memory_kind
+    {"kind": "memory", "memory_kind": "rule", "text": "t"},                              # not a store kind
+    {"kind": "memory", "memory_kind": "lesson", "text": "   "},                          # blank
+    {"kind": "memory", "memory_kind": "lesson", "text": "x" * 401},                      # over the cap
+    {"kind": "memory", "memory_kind": "lesson", "text": "t", "symbol": "BRK.B1"},        # not the store's symbol form
+    {"kind": "memory", "memory_kind": "lesson", "text": "t", "interpretation": "i" * 301},
+    {"kind": "memory", "memory_kind": "lesson", "text": "t", "price": 90},               # a watch's key
+])
+def test_memory_proposals_outside_the_contract_are_refused(args):
+    with pytest.raises(copilot_tools.ToolInputError):
+        copilot_tools.validate("propose_plan", args)
+
+
+def test_a_memory_proposal_is_normalized_needs_no_price_and_writes_nothing():
+    memory = copilot_tools.validate("propose_plan", {"kind": "memory", "memory_kind": "thesis", "symbol": "nbis",
+                                                     "text": "  NBIS is a two-year  infrastructure thesis for me. ",
+                                                     "interpretation": "Ask whether a weekly call fits that horizon."})
+    assert memory == {"kind": "memory", "memory_kind": "thesis", "symbol": "NBIS", "text": "NBIS is a two-year infrastructure thesis for me.",
+                      "interpretation": "Ask whether a weekly call fits that horizon."}
+    assert copilot_tools.validate("propose_plan", {"kind": "memory", "memory_kind": "lesson", "text": "t"}) == {
+        "kind": "memory", "memory_kind": "lesson", "symbol": None, "text": "t"}
+
+    class Dead(FixtureEvidence):
+        def get_quotes(self, symbols):
+            raise AssertionError("a memory needs no price")
+    shown = copilot_tools.call(Dead(), "propose_plan", memory)
+    assert shown["proposal"] == memory and "Nothing is remembered until they confirm" in shown["note"]
+    assert copilot._summary("propose_plan", shown) == "proposed memory (thesis, NBIS): NBIS is a two-year infrastructure thesis for me."
+
+
+def test_remember_proposes_a_memory_card_in_the_owners_words_and_saves_nothing():
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import JoMemoryRevision
+    with Session(engine) as db:
+        before = len(db.exec(select(JoMemoryRevision)).all())
+    events = _turn([{"role": "user", "content": "Remember that NBIS is a two-year infrastructure thesis for me, not a weekly trade."}],
+                   copilot.FakeAdapter(0))
+    [card] = [e for e in events if e["type"] == "proposal"]
+    assert card["kind"] == "memory" and card["memory_kind"] == "statement" and card["symbol"] == "NBIS"
+    assert card["text"] == "NBIS is a two-year infrastructure thesis for me, not a weekly trade."
+    tool = next(e for e in events if e["type"] == "tool" and e["name"] == "propose_plan" and e["status"] == "ok")
+    assert tool["provenance"]["kind"] == "simulated" and tool["summary"].startswith("proposed memory (statement, NBIS)")
+    assert "nothing is remembered until you do" in _text(events)
+    with Session(engine) as db:
+        assert len(db.exec(select(JoMemoryRevision)).all()) == before  # a card only; the owner's Confirm writes
+
+
+def test_the_confirmed_memory_shape_is_what_the_store_accepts():
+    """What the card's Confirm sends (frontend/lib/copilot.ts saveMemory): the owner's edited words as their own statement,
+    active and confirmed, with the investigation as reference. The route is the existing owner-only POST /jo/memories."""
+    from jo_briefing_common import MemorySave
+    body = MemorySave(operation_id="3f1c2b9a-0d4e-4f6a-9b8c-7d6e5f4a3b2c", kind="thesis", symbol="NBIS",
+                      original_text="NBIS is a two-year infrastructure thesis for me.", interpretation="Ask whether a weekly call fits.",
+                      source="owner_statement", source_reference="copilot:33333333-3333-4333-8333-333333333333",
+                      status="active", owner_confirmed=True)
+    assert body.status == "active" and body.source == "owner_statement"
+    with pytest.raises(ValueError):
+        MemorySave(operation_id="op", kind="thesis", original_text="t", source="owner_statement", status="active")  # no owner_confirmed
+
+
+def test_the_prompt_frames_the_owner_the_four_questions_and_memory_without_rules_or_diagnoses():
+    prompt = copilot.SYSTEM_PROMPT
+    for phrase in ("working hypotheses", "never a diagnosis", "exits, not entries", "associations in past trades, not rules",
+                   "rejected all three mechanical exits", "1. Thesis", "2. Setup", "3. Instrument", "4. The decision now",
+                   "no implied volatility or Greeks", "\"Nothing here changes the plan\"", "propose_plan kind=memory",
+                   "nothing is remembered", "never one that characterizes their psychology",
+                   "you cannot create alerts or research jobs yourself", "never turn a measured count into a judgement"):
+        assert phrase in prompt, phrase
+    assert "always exit" not in prompt.lower() and "you must sell" not in prompt.lower()

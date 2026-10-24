@@ -164,7 +164,7 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
       )}
       {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
       {status.backend === "plan" && !status.plan_configured && <span className="text-rose-300">Plan token or Agent SDK not set up</span>}
-      {!compact && <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed watch or revisit exists only once you confirm it</span>}
+      {!compact && <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed watch, revisit or memory exists only once you confirm it</span>}
     </p>
   );
 }
