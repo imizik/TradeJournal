@@ -1630,3 +1630,26 @@ class CopilotInvestigation(SQLModel, table=True):
     revision: int = Field(default=1)         # bumped on every save; a stale save is refused
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class ResearchJob(SQLModel, table=True):
+    """One queued background research job (docs/copilot-lab.md § Research queue;
+    app/engine/research_queue.py). The input is a question, a Radar event id or a
+    saved investigation to reassess; the result is a saved investigation. The
+    dedupe key is unique so a trigger cannot queue the same work twice."""
+
+    __tablename__ = "research_job"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    kind: str                                   # "question" | "radar_event" | "reassess"
+    input_json: str = Field(sa_column=Column(Text, nullable=False))  # {question, symbols} | {event_id} | {investigation_id}
+    status: str = Field(default="queued", index=True)  # queued | running | done | failed | cancelled
+    dedupe_key: str = Field(sa_column=Column(String, nullable=False, unique=True))
+    attempts: int = Field(default=0)
+    error: Optional[str] = None                 # last failure, short text
+    cost_usd: Optional[float] = None            # summed over attempts (API-equivalent on the plan)
+    investigation_id: Optional[uuid.UUID] = None  # the saved result
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    next_attempt_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None

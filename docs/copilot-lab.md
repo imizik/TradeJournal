@@ -274,6 +274,44 @@ It has no scheduler, Radar wake-up or notification yet.
     citations and 4 evidence refs. It stated the evidence time as 11:12 ET
     (15:12Z), and all its server checks passed.
 
+## Research queue
+
+Research jobs can also be queued and run in the background by the API process
+(`backend/app/engine/research_queue.py`, table `research_job`). The runner is
+off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESEARCH_QUEUE_ENABLED` | unset (off) | `true` starts the runner in the API process. Jobs can be queued while it is off; they wait. |
+| `RESEARCH_AUTH` | `plan` | On a server, set `api_key` and `ANTHROPIC_API_KEY`. `plan` is refused unless the database is local. |
+| `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
+| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total for jobs finished since midnight UTC (API-equivalent on the plan). At the cap, queued jobs wait for the next day. |
+| `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
+| `RESEARCH_REASSESS_AFTER_HOURS` | `0` (off) | N: each open investigation not updated for N hours gets at most one `reassess` job a day. |
+
+- **Owner-only routes** (in no assistant grant):
+  - `POST /copilot/research-jobs` with `{question, symbols}` queues a question
+    job; the same question and symbols are queued at most once a day.
+  - `GET /copilot/research-jobs` lists jobs with the day's spend.
+  - `POST /copilot/research-jobs/{id}/cancel` cancels a queued job, or stops a
+    running one.
+- **How a job runs:**
+  - One job at a time, through the research job above, with live evidence.
+  - Each job's budget is capped by what is left of the day.
+  - Timeouts, SDK failures and missing assessments are retried after 1 and
+    then 5 minutes, three attempts in all. Auth, budget and missing-input
+    failures fail at once.
+  - Every failure is recorded on the job.
+  - A job left running by a restart goes back to the queue.
+- **Results:**
+  - A finished job links to its saved investigation (`source="research_job"`).
+  - A Radar job is titled `Radar: …`, and a reassessment is saved as a new
+    investigation titled `Reassess: …`.
+- **Not included:** notifications, ntfy and phone alerts. To try it locally,
+  set `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
+  question with the POST route, and read the result in the lab's saved
+  investigations.
+
 ## Before a live API test
 
 1. The owner approves the spend. A billing refusal is reported as "API credits
