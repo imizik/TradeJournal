@@ -7485,3 +7485,51 @@ test("a late first-candle response cannot replace complete context", async ({ pa
   for (const id of ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"])
     await expect(page.getByTestId(`canvas-${id}`)).toHaveAttribute("data-bars", "240");
 });
+
+for (const width of [390, 1440]) test(`later notes submit once while pending and keep text after failure at ${width}px`, { tag: "@captures" }, async ({ page, request }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await captureSetup(request, []);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade", exact: true }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy stock", exact: true }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan", exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+  const id = (await savedCaptures(request))[0].id;
+  await page.getByRole("button", { name: "Show plan details" }).click();
+  await page.getByRole("button", { name: "Add a later note" }).click();
+  const input = page.getByLabel("Later note", { exact: true });
+  const words = `Follow-up survives a refused save ${width}`;
+  await input.fill(words);
+  let calls = 0;
+  let reject = true;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**${CAPTURES}/${id}/notes`, async (route) => {
+    calls++;
+    await pending;
+    if (reject) await route.fulfill({ status: 503, json: { detail: "Fixture note save unavailable" } });
+    else await route.fulfill({ response: await route.fetch() });
+  });
+  try {
+    await page.getByRole("button", { name: "Add", exact: true }).dblclick();
+    await expect.poll(() => calls).toBe(1);
+    await expect(page.getByRole("button", { name: "Adding…", exact: true })).toBeDisabled();
+    await expect(input).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled();
+    await page.screenshot({ path: test.info().outputPath(`plan-note-pending-${width === 390 ? "phone" : "desktop"}.png`) });
+  } finally { release(); }
+  await expect(page.getByRole("region", { name: "Saved plan" }).getByRole("alert")).toContainText("Fixture note save unavailable");
+  await expect(input).toBeEnabled();
+  await expect(input).toHaveValue(words);
+  reject = false;
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(input).toHaveCount(0);
+  expect(calls).toBe(2);
+  const saved = (await savedCaptures(request)).find((row) => row.id === id)!;
+  expect(saved.notes.map((note) => note.text)).toEqual([words]);
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(words);
+});

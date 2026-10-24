@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, Loader2, NotebookPen, RotateCcw, X } from "lucide-react";
 import { audioUrl, captureTime, captureTitle, imageUrl, lateBy, SIDE_LABEL, TIMING_LABEL } from "@/lib/captures";
 import type { Capture, CaptureNote, OutboxItem } from "@/lib/captures";
@@ -35,6 +35,21 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
   const [writing, setWriting] = useState<CaptureNote["kind"] | null>(null);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const saveNote = async () => {
+    if (!capture || !writing || !text.trim() || saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true); setProblem("");
+    try {
+      await onNote(capture.id, writing, text);
+      setWriting(null); setText("");
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "The note could not be saved. Try again.");
+    } finally {
+      saveLock.current = false; setSaving(false);
+    }
+  };
   const unsent = outbox.filter((item) => item.kind !== "image");
   const images = outbox.filter((item) => item.kind === "image");
   // An image whose plan is not the one shown (dismissed, or a newer plan took the strip) keeps its own Retry here.
@@ -110,11 +125,11 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
         {!writing && capture.mode === "voice" && transcript?.status === "ready" && <button type="button" onClick={() => setWriting("transcript_correction")} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Correct transcript</button>}
         {!writing && <button type="button" onClick={() => setWriting("note")} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Add a later note</button>}
       </div>
-      {writing && <form className="flex gap-1.5" onSubmit={(event) => { event.preventDefault(); onNote(capture.id, writing, text).then(() => { setWriting(null); setText(""); setProblem(""); }).catch((error: Error) => setProblem(error.message)); }}>
-        <input aria-label={writing === "note" ? "Later note" : "Transcript correction"} autoFocus value={text} maxLength={2000} onChange={(event) => setText(event.target.value)}
+      {writing && <form className="flex gap-1.5" onSubmit={(event) => { event.preventDefault(); void saveNote(); }}>
+        <input aria-label={writing === "note" ? "Later note" : "Transcript correction"} autoFocus value={text} disabled={saving} maxLength={2000} onChange={(event) => setText(event.target.value)}
           placeholder={writing === "note" ? "Shown as added later; the plan itself does not change" : "What was said; the original transcript stays beside it"} className={`min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 outline-none ${narrow ? "h-11" : "h-7"}`} />
-        <button type="submit" disabled={!text.trim()} className={`rounded bg-slate-700 px-2 text-slate-100 disabled:opacity-40 ${tap}`}>Add</button>
-        <button type="button" onClick={() => { setWriting(null); setText(""); }} className={`text-slate-400 ${tap}`}>Cancel</button>
+        <button type="submit" disabled={saving || !text.trim()} className={`rounded bg-slate-700 px-2 text-slate-100 disabled:opacity-40 ${tap}`}>{saving ? "Adding…" : "Add"}</button>
+        <button type="button" disabled={saving} onClick={() => { setWriting(null); setText(""); }} className={`text-slate-400 ${tap}`}>Cancel</button>
       </form>}
       {problem && <p role="alert" className="text-amber-300">{problem}</p>}
     </div>}
