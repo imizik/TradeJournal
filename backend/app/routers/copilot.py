@@ -58,7 +58,8 @@ def copilot_alerts_supported() -> bool:
     from pydantic import ValidationError
     from app.routers.level_alerts import AlertCreate
     try:
-        AlertCreate(symbol="SPY", price=1.0, reference=2.0, condition="touches", source_kind="copilot")
+        AlertCreate(symbol="SPY", price=1.0, reference=2.0, condition="touches", source_kind="copilot",
+                    source_id="00000000-0000-4000-8000-000000000000")  # shaped like the investigation id Confirm sends
     except ValidationError:
         return False
     return True
