@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, listInvestigations, streamTurn, toSaved,
   updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
@@ -170,6 +170,14 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
 
 export type PanelLink = { symbol: string; context: string; investigation: string | null };
 
+/** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
+function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
+  next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
+  return { title: current?.title ?? (messages[0].content.split("\n")[0].slice(0, 80) || "Untitled"),
+    symbol: symbol.trim().toUpperCase() || null, status: next.status ?? current?.status ?? "open",
+    conclusion: next.conclusion !== undefined ? next.conclusion : current?.conclusion ?? null, ...toSaved(messages) };
+}
+
 /**
  * One copilot conversation with its proposals, research and linked activity. ``variant="page"`` is the full
  * Copilot Lab (Recent, symbol, history, deep links). ``variant="panel"`` sits beside a page: it follows
@@ -177,7 +185,7 @@ export type PanelLink = { symbol: string; context: string; investigation: string
  * line, offers (never forces) a switch when the page's symbol changes, and renders nothing unless the owner has
  * the lab on. ``link`` (a deep link, or Radar's drawer) starts a new investigation, prefilled and not sent.
  */
-export default function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
 }) {
   const panel = variant === "panel";
@@ -199,6 +207,17 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
   const [conclusion, setConclusion] = useState("");
   const [linkedKey, setLinkedKey] = useState(0);
   const unsaved = useRef(false);
+  // What an awaited follow re-checks when it resolves, since the owner may have typed or sent meanwhile.
+  const turns = useRef(0); // sends so far
+  const running = useRef(false);
+  const shown = useRef(0); // messages on screen
+  const typed = useRef(false); // the draft holds the owner's own words
+  // The newest conversation, for saving it if the panel is closed mid-turn.
+  const latest = useRef<{ messages: LabMessage[]; current: Current | null; symbol: string }>({ messages: [], current: null, symbol: "" });
+  useEffect(() => {
+    shown.current = messages.length;
+    latest.current = { messages, current, symbol };
+  });
 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
@@ -211,25 +230,35 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
     remember(saved.id);
   }
 
-  /** A panel's symbol: its latest open investigation, or a fresh conversation with the page's context line. */
-  async function follow(target: string, signal?: AbortSignal) {
-    let latest: InvestigationSummary | undefined;
-    try { latest = (await listInvestigations(target)).find(item => item.status === "open" && item.symbol === target); } catch { /* start fresh */ }
-    if (signal?.aborted) return;
-    if (latest) {
-      try { open(await getInvestigation(latest.id)); return; } catch { /* start fresh */ }
+  /**
+   * A panel's symbol: its latest open investigation, or a fresh conversation with the page's context line. The
+   * reads take a moment; if the owner sends (or, when ``automatic``, the panel gets a conversation) before they
+   * answer, the result is dropped rather than replacing a conversation mid-turn.
+   */
+  async function follow(target: string, signal?: AbortSignal, automatic = false) {
+    const asked = turns.current;
+    const stale = () => signal?.aborted || running.current || turns.current !== asked || (automatic && shown.current > 0);
+    let found: InvestigationSummary | undefined;
+    try { found = (await listInvestigations(target)).find(item => item.status === "open" && item.symbol === target); } catch { /* start fresh */ }
+    if (stale()) return;
+    if (found) {
+      try {
+        const saved = await getInvestigation(found.id);
+        if (!stale()) open(saved);
+        return;
+      } catch { /* start fresh */ }
     }
-    fresh(target);
+    if (!stale()) fresh(target);
   }
 
-  /** A new conversation on ``target``, with the page's context line ready in the message box. */
+  /** A new conversation on ``target``, with the page's context line ready, unless the owner has typed their own. */
   function fresh(target: string) {
     setMessages([]);
     setCurrent(null);
     setConclusion("");
     setSaveState(null);
     setSymbol(target);
-    setDraft(pageContext ? `Context: ${pageContext}\n\n` : "");
+    if (!typed.current) setDraft(pageContext ? `Context: ${pageContext}\n\n` : "");
     remember(null);
   }
 
@@ -246,7 +275,7 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
       if (controller.signal.aborted) return;
       setStatus(next);
       if (!next.enabled) return;
-      if (panel && !link) { void follow(pageSymbol || symbol, controller.signal); return; }
+      if (panel && !link) { void follow(pageSymbol || symbol, controller.signal, true); return; }
       if (panel) return; // Radar's drawer: a new investigation from its link
       void refreshRecent();
       let id: string | null = null;
@@ -269,9 +298,7 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
   /** Save the whole investigation: created on its first answer, then updated against the revision it was read at. */
   async function persist(next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
     if (!messages.length) return;
-    const fields = { title: current?.title ?? (messages[0].content.split("\n")[0].slice(0, 80) || "Untitled"),
-      symbol: symbol.trim().toUpperCase() || null, status: next.status ?? current?.status ?? "open",
-      conclusion: next.conclusion !== undefined ? next.conclusion : current?.conclusion ?? null, ...toSaved(messages) };
+    const fields = savedFields(messages, current, symbol, next);
     setSaveState({ state: "saving" });
     try {
       const saved = current ? await updateInvestigation(current.id, current.revision, fields) : await createInvestigation(fields);
@@ -283,6 +310,17 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Saving failed." });
     }
   }
+
+  // Closed mid-turn (a dock tab, a sheet, Radar's drawer, leaving the page): stop the turn, which stops it on the
+  // server too, and save what had arrived, so neither the answer so far nor the spend is lost from view.
+  useEffect(() => () => {
+    if (!abort.current) return;
+    abort.current.abort();
+    const { messages: said, current: saved, symbol: about } = latest.current;
+    if (!said.length) return;
+    const fields = savedFields(said, saved, about);
+    void (saved ? updateInvestigation(saved.id, saved.revision, fields) : createInvestigation(fields)).catch(() => { /* best effort */ });
+  }, []);
 
   useEffect(() => {
     if (busy || !unsaved.current) return;
@@ -299,7 +337,7 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
   useEffect(() => {
     if (!offer || engaged || busy || !pageSymbol) return;
     const controller = new AbortController();
-    void follow(pageSymbol, controller.signal);
+    void follow(pageSymbol, controller.signal, true);
     return () => controller.abort();
   }, [pageSymbol]); // eslint-disable-line react-hooks/exhaustive-deps -- only a change of the page's symbol moves an empty panel
 
@@ -326,6 +364,9 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
       history.unshift(...pair);
       total += size;
     }
+    turns.current += 1;
+    running.current = true;
+    typed.current = false;
     setMessages(current => [...current, { role: "user", content }, { role: "assistant", content: "", tools: [] }]);
     setDraft("");
     setBusy(true);
@@ -351,6 +392,7 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
         : { code: "network", message: error instanceof Error && error.message ? "Copilot Lab could not be reached." : "Copilot Lab failed." } }));
     } finally {
       unsaved.current = true;
+      running.current = false;
       setBusy(false);
       abort.current = null;
     }
@@ -493,7 +535,7 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
       </div>
 
       <form onSubmit={e => { e.preventDefault(); void send(draft); }} className={cn("flex items-end gap-2", panel && "sticky bottom-0 bg-[#121924] py-1")}>
-        <textarea value={draft} onChange={e => setDraft(e.target.value.slice(0, 4000))} rows={2} disabled={!enabled}
+        <textarea value={draft} onChange={e => { typed.current = true; setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
           placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
           className="min-h-[2.75rem] min-w-0 flex-1 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
@@ -504,3 +546,6 @@ export default function CopilotPanel({ link = null, variant = "page", pageSymbol
     </div>
   );
 }
+
+/** Memoized: the page around it (Charts' refreshes) re-renders the conversation only when its props change. */
+export default memo(CopilotPanel);

@@ -1429,7 +1429,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   // Level 2 is the owner's: an assistant with a saved Level 2 tab sees the watchlist and starts no request.
   const level2Panel = (sheet: boolean) => isMacroSymbol(symbol) ? <p className="p-3 text-xs text-slate-400">Depth is unavailable for these index charts.</p> : <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={recorded.heatmap ?? heatmaps.get(symbol) ?? null} flow={flow} onFlow={setFlow} recorded={recorded.state} recording={recorded.recording} heatAllowed={heatAllowed} onClose={() => showDock(null)} />;
   // The same conversation as the Copilot Lab, on this chart's symbol and main interval; it remounts per symbol only by its own choice.
-  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={() => showDock(null)} />;
+  // A stable close for the (memoized) Copilot panel, so a refresh of the charts does not re-render it.
+  const latestShowDock = useRef<(tab: DockTab | null) => void>(() => undefined);
+  useEffect(() => { latestShowDock.current = showDock; });
+  const closeCopilot = useCallback(() => latestShowDock.current(null), []);
+  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "vwapBands") toggleVwapBands(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}

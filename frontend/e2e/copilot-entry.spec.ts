@@ -80,6 +80,27 @@ test("Radar's Ask copilot opens the copilot in place, prefilled with the event a
   await expect(drawer).toHaveCount(0);
 });
 
+test("Radar's copilot drawer closes on Escape or its backdrop, and fills a phone", async ({ page }) => {
+  await labOn(page);
+  await openMuEvent(page);
+  const ask = page.getByRole("button", { name: "Ask copilot · MU" });
+  await ask.click();
+  const drawer = page.getByRole("dialog", { name: "Copilot for MU" });
+  await expect(drawer).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
+  await expect(ask).toBeFocused(); // focus returns to the button that opened it
+  await ask.click();
+  await page.getByTestId("copilot-drawer-backdrop").click({ position: { x: 20, y: 300 } });
+  await expect(drawer).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await ask.click();
+  const box = (await drawer.boundingBox())!;
+  expect([box.x, box.width]).toEqual([0, 375]); // full screen on a phone
+  await expect(drawer.getByLabel("Message")).toHaveValue(/^Context: Radar .+MU up 4\.1%/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
 test("Charts' Overview offers Ask copilot for the current symbol", async ({ page }) => {
   await labOn(page);
   await page.goto("/charts?symbol=MU");

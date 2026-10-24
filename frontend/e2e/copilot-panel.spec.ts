@@ -23,7 +23,12 @@ const record = (id: string, symbol: string, transcript: { role: string; content:
   transcript, evidence: [], findings: null,
 });
 
-type Lab = { saved: Map<string, ReturnType<typeof record>>; chats: { messages: { content: string }[]; symbol: string | null }[] };
+type Lab = {
+  saved: Map<string, ReturnType<typeof record>>; chats: { messages: { content: string }[]; symbol: string | null }[];
+  /** Hold a symbol's investigation list, or the next turn, until the test releases it. */
+  holdList?: { symbol: string; until: Promise<void> }; holdChat?: Promise<void>; posts?: { transcript: { role: string; content: string }[] }[];
+};
+const gate = () => { let open!: () => void; const until = new Promise<void>((resolve) => { open = resolve; }); return { until, open }; };
 
 /** Candles for any symbol (the e2e backend has no Tradier key), so the chart draws beside the panel. */
 async function stubCharts(page: Page) {
@@ -43,12 +48,14 @@ async function stubCharts(page: Page) {
 async function stubLab(page: Page, lab: Lab, enabled = true) {
   await stubCharts(page);
   await page.route("**/copilot/status", (route) => route.fulfill({ json: enabled ? ON : { enabled: false, reason: "Copilot Lab is off." } }));
-  await page.route("**/copilot/investigations?*", (route) => {
+  await page.route("**/copilot/investigations?*", async (route) => {
     const symbol = new URL(route.request().url()).searchParams.get("symbol");
-    return route.fulfill({ json: { investigations: [...lab.saved.values()].filter((r) => !symbol || r.symbol === symbol) } });
+    if (lab.holdList && symbol === lab.holdList.symbol) await lab.holdList.until;
+    return route.fulfill({ json: { investigations: [...lab.saved.values()].filter((r) => !symbol || r.symbol === symbol) } }).catch(() => undefined);
   });
   const save = (route: Route, id: string) => {
     const body = route.request().postDataJSON();
+    (lab.posts ??= []).push(body);
     const saved = record(id, body.symbol, body.transcript, (lab.saved.get(id)?.revision ?? 0) + 1);
     lab.saved.set(id, saved);
     return route.fulfill({ status: route.request().method() === "POST" ? 201 : 200, json: saved });
@@ -58,9 +65,10 @@ async function stubLab(page: Page, lab: Lab, enabled = true) {
     const id = new URL(route.request().url()).pathname.split("/").at(-1)!;
     return route.request().method() === "PUT" ? save(route, id) : route.fulfill({ json: lab.saved.get(id) });
   });
-  await page.route("**/copilot/chat", (route) => {
+  await page.route("**/copilot/chat", async (route) => {
     lab.chats.push(route.request().postDataJSON());
-    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn(ANSWER) });
+    if (lab.holdChat) await lab.holdChat;
+    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn(ANSWER) }).catch(() => undefined);
   });
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
@@ -173,4 +181,84 @@ test("on a 375 px phone the Charts copilot is the dock's sheet and nothing scrol
   expect((await send.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("charts-copilot-375.png") });
+});
+
+test("a follow that answers after the owner has sent is dropped: the turn and a typed draft are kept", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  lab.saved.set(NVDA, record(NVDA, "NVDA", [{ role: "user", content: "Is NVDA extended?" }, { role: "assistant", content: "Yes, well above VWAP." }]));
+  const held = gate();
+  lab.holdList = { symbol: "NVDA", until: held.until };
+  await stubLab(page, lab);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=MRVL");
+  const panel = await openPanel(page);
+  await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
+  await chartSymbol(page, "NVDA"); // the empty panel starts to follow NVDA; its read is held
+  await panel.getByLabel("Message").fill("Is MRVL leading?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByText(ANSWER)).toBeVisible();
+  held.open(); // NVDA's investigation arrives after the turn
+  await expect(panel.getByRole("status", { name: "Symbol changed" })).toContainText("this conversation is about MRVL");
+  await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
+  await expect(panel.getByText(ANSWER)).toBeVisible();
+  await expect(panel.getByText("Yes, well above VWAP.")).toHaveCount(0);
+  expect(lab.chats.map((chat) => chat.symbol)).toEqual(["MRVL"]);
+});
+
+test("following to a new symbol keeps a draft the owner typed", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  await stubLab(page, lab);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=MRVL");
+  const panel = await openPanel(page);
+  await panel.getByLabel("Message").fill("My own question");
+  await chartSymbol(page, "AMD");
+  await expect(panel.getByRole("heading", { name: "Copilot · AMD" })).toBeVisible();
+  await expect(panel.getByLabel("Message")).toHaveValue("My own question");
+});
+
+test("closing the panel mid-turn stops the turn and saves what was asked", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  const held = gate();
+  lab.holdChat = held.until;
+  await stubLab(page, lab);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=MRVL");
+  const panel = await openPanel(page);
+  const aborted = page.waitForEvent("requestfailed", (request) => request.url().includes("/copilot/chat"));
+  await panel.getByLabel("Message").fill("Is MRVL leading?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible(); // mid-turn
+  await page.getByRole("button", { name: "Copilot", exact: true }).click(); // close the dock tab
+  await expect(page.getByTestId("copilot-panel")).toHaveCount(0);
+  await aborted; // the turn stopped
+  await expect.poll(() => lab.posts?.length ?? 0).toBe(1);
+  expect(lab.posts![0].transcript[0]).toEqual({ role: "user", content: "Is MRVL leading?" });
+  held.open();
+  // Reopening resumes that saved investigation.
+  const again = await openPanel(page);
+  await expect(again.getByText("Is MRVL leading?")).toBeVisible();
+});
+
+test("Switch waits for a turn in progress", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  await stubLab(page, lab);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=MRVL");
+  const panel = await openPanel(page);
+  await panel.getByLabel("Message").fill("Is MRVL leading?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByText(ANSWER)).toBeVisible();
+  const held = gate();
+  lab.holdChat = held.until;
+  await panel.getByLabel("Message").fill("And the group?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible();
+  await chartSymbol(page, "NVDA");
+  const offer = panel.getByRole("status", { name: "Symbol changed" });
+  await expect(offer.getByRole("button", { name: "Switch to NVDA" })).toBeDisabled();
+  await expect(offer).toContainText("after this answer");
+  held.open();
+  await expect(offer.getByRole("button", { name: "Switch to NVDA" })).toBeEnabled();
+  await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
 });
