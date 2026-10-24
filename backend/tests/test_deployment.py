@@ -1271,3 +1271,22 @@ def test_market_read_flag_reaches_the_config_from_systemd(alerts, monkeypatch, t
     monkeypatch.setenv("JO_MORNING_ALERTS", "true")
     config = alerts.load_config()
     assert config["JO_MARKET_READ_ALERTS"] == "true" and config["JO_MORNING_ALERTS"] == "true"
+
+
+def test_research_jobs_ship_a_pure_agent_sdk_that_runs_the_release_claude_code():
+    """Research jobs (docs/copilot-lab.md § Research queue) use claude-agent-sdk from the copilot-plan extra. The
+    release builds it from its sdist, so the ~126 MB PyPI wheel's bundled Claude Code never rides along, and installs
+    the extra."""
+    root = Path(__file__).resolve().parents[2]
+    build = (root / "deploy/build.py").read_text()
+    assert "[copilot-plan]" in build and '"--no-binary", "claude-agent-sdk"' in build and "py3-none-any.whl" in build
+    assert '"trade-journal-backend[copilot-plan]==0.1.0"' in (root / "deploy/control.py").read_text()
+    pyproject = (root / "backend/pyproject.toml").read_text()
+    assert re.search(r'copilot-plan = \[\s*"claude-agent-sdk==\d+\.\d+\.\d+",\s*\]', pyproject)
+    # The pinned SDK needs Claude Code 2.1.257 or later (its README); verbatim prompts need 2.1.248.
+    pinned = json.loads((root / "deploy/claude-code/package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
+    assert tuple(int(part) for part in pinned.split(".")) >= (2, 1, 257)
+    api = (root / "deploy/systemd/tradejournal-api.service").read_text()
+    assert "TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude" in api
+    assert "TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude" in api and "ReadWritePaths=/var/lib/tradejournal" in api
+    assert "assert_research_job_ready(release)" in (root / "deploy/smoke.py").read_text()
