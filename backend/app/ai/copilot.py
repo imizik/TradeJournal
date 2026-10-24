@@ -54,9 +54,17 @@ Confirm and Dismiss. Always end a plan by stating clearly that nothing is saved 
 a card: you cannot create alerts or research jobs yourself.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
-- When the owner asks about their own holdings or history, use get_positions and get_trades (and get_memories for \
-what they have told Jo); get_chart_context shows what their chart shows. Never reveal or guess account numbers or \
-identifiers; refer to an account only by the label the tools give.
+- Every message from the owner arrives after an owner context block TradeJournal assembled for the turn: their open \
+positions (the turn's symbol first, with hold time, days to expiry, give-back watch, phone alerts and any plan they \
+captured), their closed trades in the symbol, their exit-habit scorecard, approved memories, today's notes, saved \
+investigations and armed watches. It is labelled by origin: "owner said" is their own words; "measured" is a journal \
+fact; "saved" is an earlier conclusion that may be stale. Lead with what is relevant in it: an open position in the \
+symbol they ask about, a plan they captured, a thesis they saved, a habit the current situation resembles. Say which \
+kind of fact you are using, and never turn a measured count into a judgement about them. Do not re-read positions, \
+trades or memories it already shows; get_owner_context is for a different symbol. When the owner asks about their \
+own holdings or history beyond it, use get_positions and get_trades (and get_memories for what they have told Jo); \
+get_chart_context shows what their chart shows. Never reveal or guess account numbers or identifiers; refer to an \
+account only by the label the tools give.
 - You cannot place orders or change accounts, and you cannot save plans or set alerts yourself: propose_plan only \
 proposes. Say so if asked.
 - Keep answers short and conversational: a few tight paragraphs or bullets, no diagnostics dumps."""
@@ -256,19 +264,21 @@ class FakeAdapter:
 
     @staticmethod
     def _symbol(messages: list[dict]) -> str:
+        from app.ai.copilot_context import user_text
         for message in reversed(messages):
             if message["role"] == "user" and isinstance(message["content"], str):
                 found = re.search(r"selected symbol: ([A-Z.\-]+)", message["content"])
                 if found:
                     return found.group(1)
-                tickers = re.findall(r"\b[A-Z]{2,5}\b", message["content"].split("\n\n", 1)[-1])
+                tickers = re.findall(r"\b[A-Z]{2,5}\b", user_text(message["content"]))
                 if tickers:
                     return tickers[0]
         return "SPY"
 
     async def stream_round(self, system, messages, tools, allow_tools=True):
+        from app.ai.copilot_context import user_text
         last = messages[-1]
-        prompt = next(m["content"] for m in reversed(messages) if m["role"] == "user" and isinstance(m["content"], str))
+        prompt = user_text(next(m["content"] for m in reversed(messages) if m["role"] == "user" and isinstance(m["content"], str)))
         lower = prompt.lower()
         symbol = self._symbol(messages)
         results = _results(messages)
@@ -443,6 +453,9 @@ def _summary(name: str, data: dict) -> str:
         return f"{len(data.get('alerts', []))} alerts ({fired} fired), {len(data.get('research_jobs', []))} research jobs"
     if name == "get_saved_research":
         return f"{len(data.get('items', []))} saved"
+    if name in ("owner_context", "get_owner_context"):
+        from app.ai import copilot_context
+        return copilot_context.summary(data)
     if name == "get_quotes":
         return ", ".join(f"{s} {p}" for s, p in (data.get("prices") or {}).items())[:160]
     return ""
@@ -499,6 +512,31 @@ def context_line(symbol: str | None, now: datetime, replay: bool = False, simula
     return f"[Copilot Lab context: {focus}; server time {now:%Y-%m-%d %H:%M} ET]\n\n"
 
 
+async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[str, dict]:
+    """The owner context pack for this turn, read once before the first model round: ``(block, event)``. The block
+    goes in front of the owner's message; the event is the UI's evidence row. A failure or timeout reads as
+    unavailable and never stops the turn."""
+    from app.ai import copilot_context
+    started = time.monotonic()
+    event = {"type": "tool", "id": "owner_context", "name": "owner_context"}
+    read = getattr(evidence, "owner_context", None)
+    try:
+        if read is None:
+            raise LookupError("evidence has no owner context")
+        pack = await asyncio.wait_for(asyncio.to_thread(read, symbol), cfg.tool_timeout_s)
+        label = getattr(evidence, "label", "")
+        if label == "fixture":
+            pack = {**SIMULATED_MARKER, **pack}
+        event.update(status="ok", provenance=copilot_tools.provenance("owner_context", pack, label),
+                     summary=copilot_context.summary(pack))
+    except Exception as exc:  # noqa: BLE001 - the pack is a convenience; the turn goes on without it
+        log.warning("owner context unavailable: %s", type(exc).__name__)
+        pack = {"state": "unavailable", "reason": "The owner context could not be read this turn."}
+        event.update(status="error", summary="unavailable")
+    event["ms"] = round((time.monotonic() - started) * 1000)
+    return copilot_context.block(pack), event
+
+
 async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapter, evidence,
                    now: datetime) -> AsyncIterator[dict]:
     """Stream one turn as UI events: progress, text, tool, error, done (always last, with metrics)."""
@@ -508,7 +546,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     simulated = getattr(evidence, "label", "") == "fixture"
     if replay:
         now = evidence.at
-    messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + history[-1]["content"]}
+    block, pack_event = await owner_context(evidence, symbol, cfg)
+    messages[-1] = {"role": "user", "content": context_line(symbol, now, replay, simulated) + block + history[-1]["content"]}
     usage = _zero_usage()
     spent_usd = 0.0  # each round priced at its own model: a fallback round may be dearer than the next
     metrics: dict[str, Any] = {"backend": cfg.backend, "evidence": cfg.evidence, "model": getattr(adapter, "model", None) or cfg.model,
@@ -530,6 +569,9 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
             if k and metrics[k] is None:
                 metrics[k] = now_ms
 
+    metrics["tool_calls"].append({k: pack_event.get(k) for k in ("name", "status", "ms")})
+    seen()
+    yield pack_event
     try:
         async with asyncio.timeout(cfg.turn_timeout_s):
             for round_no in range(cfg.max_rounds):

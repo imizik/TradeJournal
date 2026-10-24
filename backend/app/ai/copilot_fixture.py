@@ -112,7 +112,47 @@ class FixtureEvidence:
                  "hold_minutes": 35, "status": "closed", "expired_worthless": False, "tags": ["chased"]}]
         return {"symbol": symbol, "state": "ok", "as_of": AT, "simulated": True, "trades": rows[:limit]}
 
-    def get_memories(self, limit: int = 5) -> dict:
+    def get_memories(self, limit: int = 5, symbol: str | None = None) -> dict:
         rows = [{"kind": "lesson", "symbol": None, "text": "Simulated: I chase green opens and give the gains back.", "saved_at": AT},
                 {"kind": "thesis", "symbol": "NBIS", "text": "Simulated: NBIS is a financing story until the debt settles.", "saved_at": AT}]
-        return {"state": "ok", "as_of": AT, "simulated": True, "memories": rows[:limit]}
+        if symbol:
+            rows = [m for m in rows if m["symbol"] == symbol] + [m for m in rows if m["symbol"] is None]
+        return {"state": "ok", "as_of": AT, "simulated": True, **({"symbol": symbol} if symbol else {}), "memories": rows[:limit]}
+
+    def owner_context(self, symbol: str | None) -> dict:
+        """SIMULATED: shaped like ``copilot_context.owner_context`` for the demo book above."""
+        from app.ai.copilot_context import PROVENANCE
+        book = self.get_positions()["positions"]
+        book.sort(key=lambda p: p["symbol"] != symbol)
+        for p in book:
+            if p["instrument"] == "option":
+                p.update(days_to_expiry=29, expires_today=False, peak_gain_usd=96.0, peak_gain_pct=15.7, giveback="fired",
+                         phone_alerts=[{"kind": "giveback", "at": "2026-10-20T15:48:00Z"}],
+                         plan={"setup": "Group recovery", "wording": "Simulated: buy the first higher low after the group turns; out if NBIS loses the open.",
+                               "captured_at": "2026-10-17T13:35:00Z"})
+        pack = {"state": "ok", "as_of": AT, "symbol": symbol, "simulated": True, "provenance": PROVENANCE,
+                "positions": {"state": "ok", "count": len(book), "shown": len(book), "positions": book,
+                              "units": "Options: avg_entry, mark and peak are dollars per contract (premium x 100). Stocks: per share."},
+                "habits": {"state": "ok", "as_of": AT, "since": "2026-10-21", "recent_trades": 9, "baseline_trades": 1450, "habits": [
+                    {"habit": "Was up 10% and $50, then closed red", "recent": "2 of 9", "baseline_pct": 15.6, "recent_usd": -412.0},
+                    {"habit": "Held an hour or more, closed red the same day", "recent": "1 of 9", "baseline_pct": 11.2, "recent_usd": -180.0},
+                    {"habit": "Expired worthless", "recent": "0 of 9", "baseline_pct": 2.8, "recent_usd": 0.0},
+                    {"habit": "Opened while the day was already green", "recent": "4 of 9 (+1 unknown)", "baseline_pct": 42.0, "recent_usd": -95.0}],
+                           "source": "SIMULATED scorecard shaped like the behavior audit's"},
+                "memories": {"state": "ok", "memories": self.get_memories(8, symbol)["memories"]},
+                "today": {"state": "ok", "day": SESSION, "entries": [
+                    {"kind": "outlook", "at": "2026-10-23T12:40:00Z", "text": "Simulated: semis heavy premarket; I want to see whether the neoclouds hold their lows before I touch calls."}]}}
+        if symbol:
+            pack["history"] = {"state": "ok", "symbol": symbol, "closed_trades": 2, "wins": 1, "realized_usd": 8.0,
+                               "recent": [{k: v for k, v in t.items() if k != "account"} for t in self.get_trades(symbol, 4)["trades"]]}
+            pack["investigations"] = {"state": "ok", "investigations": [
+                {"id": "11111111-1111-4111-8111-111111111111", "source": "copilot", "title": f"Simulated: is the {symbol} recovery real?",
+                 "status": "open", "conclusion": "Group is confirming; the symbol lags. Wait for it to lead a 15-minute window.",
+                 "updated_at": "2026-10-22T19:05:00Z"}]}
+            pack["watches"] = {"state": "ok", "watches": [
+                {"watch": "level alert", "price": 92.5, "condition": "crosses", "label": f"{symbol} loses the bounce low", "source": "copilot",
+                 "armed_at": "2026-10-22T19:06:00Z"}]}
+        return pack
+
+    def get_owner_context(self, symbol: str) -> dict:
+        return self.owner_context(symbol)

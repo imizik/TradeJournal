@@ -70,7 +70,8 @@ def _secret_free(out):
 @pytest.mark.parametrize("name,args", [
     ("get_chart_context", {"symbol": "NBIS"}), ("get_chart_context", {"symbol": "NBIS", "timeframe": "2m"}),
     ("get_positions", {"account": "x"}), ("get_trades", {"symbol": "NBIS", "limit": 11}),
-    ("get_trades", {"limit": 3}), ("get_memories", {"limit": 0}), ("get_memories", {"symbol": "NBIS"}),
+    ("get_trades", {"limit": 3}), ("get_memories", {"limit": 0}), ("get_memories", {"symbol": "nb!s"}),
+    ("get_owner_context", {}), ("get_owner_context", {"symbol": "NBIS", "limit": 1}),
 ])
 def test_inputs_are_validated(name, args):
     with pytest.raises(copilot_tools.ToolInputError):
@@ -219,7 +220,7 @@ def test_a_scripted_turn_reads_the_book_and_the_chart():
                                                   copilot.FakeAdapter(0), FixtureEvidence(), datetime(2026, 10, 23, 11, 12))]
     events = asyncio.run(collect())
     tools = {e["name"]: e for e in events if e["type"] == "tool" and e["status"] != "running"}
-    assert set(tools) == {"get_positions", "get_chart_context"} and all(t["status"] == "ok" for t in tools.values())
+    assert set(tools) == {"owner_context", "get_positions", "get_chart_context"} and all(t["status"] == "ok" for t in tools.values())
     text = "".join(e["delta"] for e in events if e["type"] == "text")
     assert "Your open positions:" in text and "NBIS option 2 at 610.0, now 455.0" in text and "Simulated" in text
     assert events[-1]["type"] == "done"

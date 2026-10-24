@@ -41,7 +41,7 @@ CLEAN = {"unseen_citations": [], "unread_evidence_refs": [], "after_evidence_tim
 # never another investigation by id. get_chart_context (market data, PR #459) is listed so that PR keeps passing.
 JOB_SAFE = {"get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
             "get_saved_research", "get_chart_context"}
-NEVER_IN_JOBS = {"propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories"}
+NEVER_IN_JOBS = {"propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories", "get_owner_context"}
 
 
 @pytest.fixture(autouse=True)
@@ -116,14 +116,14 @@ def test_pushback_rereads_evidence_instead_of_answering_from_history():
     # History is text only: nothing from the earlier answer reaches the model as evidence, and tools are offered.
     assert all(isinstance(m["content"], str) for m in first["messages"]) and first["allow"] is True
     assert {"get_group_comparison", "get_peer_moves"} <= set(first["tools"])
-    assert [e["name"] for e in events if e["type"] == "tool" and e["status"] == "ok"] == ["get_group_comparison", "get_peer_moves"]
+    assert [e["name"] for e in events if e["type"] == "tool" and e["status"] == "ok"] == ["owner_context", "get_group_comparison", "get_peer_moves"]
     fresh = json.loads(_results(adapter.seen[1]["messages"])[0]["content"])
     assert fresh["recent_15m"]["rows"][0] == {"symbol": "NBIS", "role": "selected", "change_pct": 0.84}
 
 
 def test_the_scripted_model_rechecks_on_pushback_and_drops_the_stale_number():
     events = _turn([*STALE, {"role": "user", "content": "But CRWV is leading, you're wrong."}], copilot.FakeAdapter(0))
-    assert {e["name"] for e in events if e["type"] == "tool" and e["status"] == "ok"} == {"get_group_comparison", "get_peer_moves"}
+    assert {e["name"] for e in events if e["type"] == "tool" and e["status"] == "ok"} == {"owner_context", "get_group_comparison", "get_peer_moves"}
     answer = _text(events)
     assert "Re-checked the comparison" in answer and "+5.00%" not in answer and "+0.84%" in answer
 
@@ -133,7 +133,7 @@ def test_caving_and_defending_models_both_get_the_recheck_prompt_and_fresh_tools
     a tool call still gets both, and a defending one gets fresh results to defend with."""
     pushback = [*STALE, {"role": "user", "content": "You're wrong, it's lagging."}]
     caving = Scripted([_say("You're right, I was wrong.")])
-    assert not [e for e in _turn(pushback, caving) if e["type"] == "tool"]
+    assert not [e for e in _turn(pushback, caving) if e["type"] == "tool" and e["name"] != "owner_context"]
     defending = Scripted([_use("get_group_comparison", {"symbol": "NBIS"})], [_say("Still lagging: +0.84% vs CRWV +1.92%.")])
     _turn(pushback, defending)
     for seen in (caving.seen[0], defending.seen[0]):
@@ -364,7 +364,7 @@ def test_an_answer_claiming_an_alert_was_set_creates_nothing():
     before = _rows()
     events = _turn([{"role": "user", "content": "Set an alert at 92 for NBIS."}],
                    Scripted([_say("Done: I've set an alert at 92.00 and queued a revisit for tomorrow.")]))
-    assert not [e for e in events if e["type"] in ("proposal", "tool")] and _rows() == before
+    assert not [e for e in events if e["type"] == "proposal" or (e["type"] == "tool" and e["name"] != "owner_context")] and _rows() == before
     # Nothing on the server flags the false claim itself; the prompt is the only guard, and the UI shows no card.
     assert "you cannot create alerts or research jobs yourself" in copilot.SYSTEM_PROMPT
 
