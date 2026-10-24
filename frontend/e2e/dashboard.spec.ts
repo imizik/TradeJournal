@@ -326,6 +326,23 @@ test("empty, missing quote, quote error and journal retry states are explicit", 
   } finally { await state("ready"); }
 });
 
+test("attention does not wait for journal statistics, and a slow page answers the click at once", async ({ page, request }) => {
+  const state = async (value: string) => expect((await request.post(`${API}/__test/dashboard-state?value=${value}`)).ok()).toBe(true);
+  try {
+    await state("slow_stats");
+    await page.goto("/", { waitUntil: "commit" });
+    await expect(page.getByRole("complementary", { name: "Attention and data status" }).getByLabel(/^\d+ items?$/)).toBeVisible();
+    await expect(page.getByRole("status", { name: "Loading workspace" })).toBeVisible(); // the journal still waits for statistics
+    await expect(page.getByRole("status", { name: "Loading workspace" })).toHaveCount(0);
+    await state("slow");
+    await page.getByRole("link", { name: "Trades", exact: true }).click();
+    await expect(page.getByTestId("nav-pending")).toBeVisible(); // before the slow journal answers
+    await page.screenshot({ path: test.info().outputPath("nav-pending-desktop.png"), clip: { x: 0, y: 0, width: 300, height: 420 } });
+    await expect(page.getByRole("heading", { name: "Trades", exact: true })).toBeVisible();
+    await expect(page.getByTestId("nav-pending")).toHaveCount(0);
+  } finally { await state("ready"); }
+});
+
 test("journal retry makes a fresh page GET and preserves scope", async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const params = new URLSearchParams({ account: "all", type: "option" });

@@ -363,7 +363,7 @@ def test_default_quote_does_not_sleep_and_recovers_on_next_pass(engine, monkeypa
         pytest.fail("Scanner quote reads must not sleep between attempts")
 
     monkeypatch.setattr(setup_scanner.tradier, "TRADIER_API_KEY", "test-token")
-    monkeypatch.setattr(setup_scanner.tradier.httpx, "post", post)
+    monkeypatch.setattr(setup_scanner.tradier.market_http, "post", post)
     monkeypatch.setattr(setup_scanner.tradier.time, "sleep", refuse_sleep)
     clock = Clock(at(9, 50, 35))
     watch = setup_scanner.SetupScanner(engine, Feed(), Calendar(), Options(), clock)

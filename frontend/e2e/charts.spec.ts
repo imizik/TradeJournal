@@ -1713,6 +1713,26 @@ test("settings kept in a browser before the server saved them merge with another
   expect(server.saves).toHaveLength(1);
 });
 
+test("candles load from this browser's copy while saved settings load, then follow the server's copy", async ({ page, context }) => {
+  await fakeChartSettings(context, { revision: 1, data: { watchlist: ["SPY", "TSLA"] } });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await context.route("**/api/backend/charts/settings", async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.fallback();
+  });
+  await page.addInitScript(() => localStorage.setItem("tradejournal.charts.v1", JSON.stringify({ watchlist: ["SPY", "QQQ"] })));
+  const reads: string[] = [];
+  await stub(page, (url) => { const query = new URL(url).searchParams; if (query.get("phase") !== "prices") reads.push(query.get("watchlist") ?? ""); });
+  await page.goto("/charts");
+  await expect(syncStatus(page)).toHaveText("Loading saved settings");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", /[1-9]\d*/); // drawn before the server answered
+  expect(reads[0]).toBe("SPY,QQQ");
+  release();
+  await expect(syncStatus(page)).toHaveText("Saved");
+  await expect.poll(() => reads.at(-1)).toBe("SPY,TSLA"); // the server's watchlist is read once it arrives
+});
+
 for (const outcome of ["arrive", "fail"] as const) {
   test(`changes made while saved settings load are kept when they ${outcome}`, async ({ page, context }) => {
     const server = await fakeChartSettings(context, { revision: 2, data: { levels: { MRVL: [{ id: "phone", price: 250, label: "Phone level" }] } } });

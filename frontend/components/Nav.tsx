@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppAccess } from "@/components/AccessProvider";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -11,6 +11,14 @@ import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
 import type { GmailHealth } from "@/lib/api";
 import { fullScreenRoute } from "@/components/AppMain";
+
+/** On a clicked link while its page loads: the click answers at once, and a fast page
+ * is not held back by a loading screen (React delays revealing those by ~300ms). */
+function Pending({ corner = false }: { corner?: boolean }) {
+  const { pending } = useLinkStatus();
+  return <span aria-hidden data-testid={pending ? "nav-pending" : undefined}
+    className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-primary transition-opacity", pending ? "animate-pulse opacity-100" : "opacity-0", corner ? "absolute right-1 top-1" : "ml-auto")} />;
+}
 
 /** Whether the charts page shows the full sidebar instead of the icon rail, on this device only (C7.3). */
 const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
@@ -151,7 +159,7 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
               className={cn(
                 // min-h-11 keeps every row a comfortable tap target on a phone.
                 rail
-                  ? "flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+                  ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
                   : "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-secondary text-foreground"
@@ -160,6 +168,7 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
             >
               <Icon className="h-4 w-4 shrink-0" />
               {!rail && label}
+              <Pending corner={rail} />
             </Link>
         );
         return <li key={href}>
@@ -246,9 +255,10 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
-              className={cn("flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+              className={cn("relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
               <Icon className={cn("h-5 w-5", active && "text-primary")} />
               {label}
+              <Pending corner />
             </Link>
           );
         })}

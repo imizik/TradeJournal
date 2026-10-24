@@ -114,7 +114,7 @@ def exit_habits_seed():
 @core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state
-    if value not in {"ready", "quotes_unavailable", "quotes_error", "journal_error", "slow"}:
+    if value not in {"ready", "quotes_unavailable", "quotes_error", "journal_error", "slow", "slow_stats"}:
         raise HTTPException(400, "Invalid fixture state")
     state = value
     return {"state": state}
@@ -129,6 +129,8 @@ async def app(scope, receive, send):
             return
         if state == "slow":
             await asyncio.sleep(2)
+    if scope["type"] == "http" and scope["path"] == "/stats" and scope["method"] == "GET" and state == "slow_stats":
+        await asyncio.sleep(2)
     await core_app(scope, receive, send)
 
 

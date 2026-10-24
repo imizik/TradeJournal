@@ -171,6 +171,9 @@ export function useChartSettings(initialSymbol?: string) {
   const allowedSymbols = (grants.symbols ?? []).join(",");
   const [settings, setSettings] = useState<ChartSettings>(() => ({ ...DEFAULT_SETTINGS, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }));
   const [ready, setReady] = useState(false);
+  // This browser's copy is on screen while the server's loads: charts may read with it.
+  // Saving still waits for `ready`, so nothing is written against an unknown revision.
+  const [localReady, setLocalReady] = useState(false);
   const [previousSymbol, setPreviousSymbol] = useState(DEFAULT_SETTINGS.symbol);
   const [sync, setSync] = useState<SyncState>("loading");
   const [stored, setStored] = useState(true);
@@ -237,6 +240,7 @@ export function useChartSettings(initialSymbol?: string) {
     queueMicrotask(() => { if (alive && local.settings) {
       setPreviousSymbol(local.settings.symbol);
       setSettings({ ...local.settings, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) });
+      setLocalReady(true);
     } });
     fetchSettings().then((server) => {
       if (!alive) return;
@@ -300,5 +304,5 @@ export function useChartSettings(initialSymbol?: string) {
   useEffect(() => () => window.clearTimeout(pending.current), []);
 
   const update = useCallback((action: SetStateAction<ChartSettings>) => { setMerged(false); setSettings(action); }, []);
-  return { settings, setSettings: update, ready, sync, merged, stored, previousSymbol };
+  return { settings, setSettings: update, ready, localReady, sync, merged, stored, previousSymbol };
 }
