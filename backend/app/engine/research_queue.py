@@ -31,6 +31,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import uuid
@@ -76,26 +77,31 @@ class QueueSettings:
     notify_daily_max: int = 3     # RESEARCH_NOTIFY_DAILY_MAX: pings per ET day, all jobs together
 
 
-def _number(name: str, default, cast):
-    """A malformed value falls back with a warning instead of stopping the API."""
+def _number(name: str, default, cast, positive: bool = False):
+    """A malformed value falls back with a warning instead of stopping the API. A budget or a cap must be a finite
+    number above zero: nan compares false with everything and inf is no cap, so either would lift it."""
     raw = os.environ.get(name)
     if raw in (None, ""):
         return default
     try:
-        return cast(raw)
+        value = cast(raw)
     except ValueError:
         log.warning("%s=%r is not a number; using %s", name, raw, default)
         return default
+    if not math.isfinite(value) or value < 0 or (positive and value == 0):
+        log.warning("%s=%r is not a %s number; using %s", name, raw, "positive" if positive else "finite, non-negative", default)
+        return default
+    return value
 
 
 def settings() -> QueueSettings:
     return QueueSettings(
         enabled=os.environ.get("RESEARCH_QUEUE_ENABLED") == "true",
-        daily_budget_usd=_number("RESEARCH_DAILY_BUDGET_USD", 2.0, float),
+        daily_budget_usd=_number("RESEARCH_DAILY_BUDGET_USD", 2.0, float, positive=True),
         radar_trigger=os.environ.get("RESEARCH_RADAR_TRIGGER") == "true",
         reassess_after_hours=_number("RESEARCH_REASSESS_AFTER_HOURS", 0, int),
         notify_enabled=os.environ.get("RESEARCH_NOTIFY_ENABLED") == "true",
-        notify_daily_max=_number("RESEARCH_NOTIFY_DAILY_MAX", 3, int),
+        notify_daily_max=_number("RESEARCH_NOTIFY_DAILY_MAX", 3, int, positive=True),
     )
 
 

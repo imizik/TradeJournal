@@ -332,8 +332,6 @@ def test_a_post_evidence_source_in_replay_is_flagged(plan_env, monkeypatch):  # 
     assert record["checks"]["after_evidence_time"] == [ARTICLE]
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (research_job._checks): in replay a citation time without a UTC offset, "
-                                       "e.g. a bare date the day after, escapes the hindsight check")
 @pytest.mark.parametrize("published", ["2026-10-24", "2026-10-23T16:00:00"])
 def test_a_post_evidence_source_without_an_offset_is_flagged(plan_env, monkeypatch, published):  # noqa: F811
     from app.engine.chart_math import ET
@@ -344,8 +342,6 @@ def test_a_post_evidence_source_without_an_offset_is_flagged(plan_env, monkeypat
     assert record["checks"]["after_evidence_time"] == [ARTICLE]
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (research_job._lab_server): any URL inside a lab tool's text, such as an "
-                                       "injected headline summary, counts as seen, so citing it passes the checks")
 def test_a_url_planted_in_tool_text_does_not_verify_a_citation(plan_env, pushes):  # noqa: F811
     planted = "https://evil.example/fake-downgrade"
 
@@ -526,8 +522,6 @@ def test_the_daily_cap_holds_across_timeouts_retries_and_cancels():
     assert q.cancel(waiting["id"])["status"] == "cancelled" and q.spent_today() == 1.0 and len(timeout.calls) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (research_queue.settings): RESEARCH_DAILY_BUDGET_USD=nan parses as a number and "
-                                       "every comparison with it is false, so the daily cap stops applying")
 def test_a_non_finite_daily_budget_never_lifts_the_cap(monkeypatch):
     monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "nan")
     for i in range(10):
@@ -599,9 +593,6 @@ def test_research_jobs_hold_no_book_action_or_cross_investigation_tool(plan_env,
         assert decision["hookSpecificOutput"]["permissionDecision"] == "deny", name
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT (research_job.LAB_TOOLS, lines PR #459 edits): jobs get every copilot tool "
-                                       "except a denylist, so a new tool (a book read, say) reaches web-reading jobs unless "
-                                       "someone remembers to exclude it")
 def test_a_new_copilot_tool_is_not_granted_to_research_jobs():
     probe = ("import json; from app.ai import copilot_tools; "
              "copilot_tools.TOOLS.append({'name': 'get_cash_balance', 'description': 'x', 'input_schema': {'type': 'object', 'properties': {}}}); "

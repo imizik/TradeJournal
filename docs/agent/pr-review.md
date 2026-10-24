@@ -57,10 +57,11 @@ these, in whole or in part, waits for the user's approval and merge:
    authentication, Tailscale, CORS), the cloud assistant's data and namespace
    boundaries, and widening what an agent or MCP tool may write, send or reach,
    including the in-app agent's tool list in `backend/app/ai/copilot_tools.py`.
-   A tool added there also reaches the web-enabled research job unless it is in
-   `EXCLUDED_LAB_TOOLS` (`backend/app/ai/research_job.py`). A new read-only
-   tool is exempt only when every agent that receives it was already allowed
-   that data.
+   A tool added there reaches the web-enabled research job only once it is
+   added to the allowlist `research_job.JOB_TOOLS`
+   (`backend/app/ai/research_job.py`), and that addition is itself a gated
+   widening. A new read-only tool is exempt only when every agent that
+   receives it was already allowed that data.
 
 Everything else, including tier 2 financial, FIFO, fill, reconciliation and
 additive-migration work, is merged by its owner under
