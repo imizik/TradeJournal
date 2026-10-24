@@ -1,5 +1,12 @@
 {
   "protocol_id": "exit-counterfactual-20261024-v1",
+  "provenance": {
+    "protocol_id": "exit-counterfactual-20261024-v1",
+    "extract_sha256": "023e0e11302cdc685f789dfd452d103feeb36d87385232c819fc8eedb1878eda",
+    "source_sha": "18e230b40156d4c7c95ce0889b493897dec5b022",
+    "source_dirty": false,
+    "note": "Added after the run, without rerunning it. The run executed from a working tree whose study script equals this commit's (the extract-only changes were committed there unchanged); the extract hash is of the file the run read."
+  },
   "extract_trades": 1528,
   "analyzed": 1506,
   "excluded": {

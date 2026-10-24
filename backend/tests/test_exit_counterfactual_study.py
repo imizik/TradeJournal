@@ -174,3 +174,9 @@ def test_run_end_to_end_from_an_extract_and_a_cached_window(tmp_path):
     assert results["rules"]["giveback"]["check"]["touched"] == 2
     assert results["rules"]["giveback"]["exploration"]["touched"] == 0
     assert (tmp_path / "out" / "results.json").exists()
+    import hashlib
+    import re
+    prov = results["provenance"]
+    assert prov["protocol_id"] == s.PROTOCOL_ID
+    assert prov["extract_sha256"] == hashlib.sha256(extract.read_bytes()).hexdigest()
+    assert prov["source_sha"] is None or re.fullmatch(r"[0-9a-f]{40}", prov["source_sha"])

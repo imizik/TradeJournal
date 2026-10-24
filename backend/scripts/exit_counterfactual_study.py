@@ -23,6 +23,7 @@ from bisect import bisect_left
 from collections import defaultdict, deque
 from datetime import UTC, date, datetime, time as day_time, timedelta
 from decimal import Decimal
+import hashlib
 import json
 from pathlib import Path
 import random
@@ -379,6 +380,21 @@ def fetch_bars(cache: Path, symbol: str, start: datetime, end: datetime) -> list
 # ---------------------------------------------------------------- commands
 
 
+def provenance(trades_path: Path) -> dict:
+    """What a run receipt needs to name its inputs: the protocol, the extract's bytes and the code."""
+    root = Path(__file__).resolve().parents[2]
+
+    def git(*args):
+        try:
+            return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    status = git("status", "--porcelain", "--untracked-files=no")
+    return {"protocol_id": PROTOCOL_ID, "extract_sha256": hashlib.sha256(trades_path.read_bytes()).hexdigest(),
+            "source_sha": git("rev-parse", "HEAD"), "source_dirty": None if status is None else bool(status)}
+
+
 def run(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
     trades, fills, excluded = load_extract(trades_path)
     rng = random.Random(SEED)
@@ -401,7 +417,7 @@ def run(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
         row["period"] = "check" if date.fromisoformat(row["day"]) >= CHECK_START else "exploration"
         row["recorded_pnl"] = float(trade["realized_pnl"]) if trade["realized_pnl"] is not None else None
         rows.append(row)
-    results = {"protocol_id": PROTOCOL_ID, "extract_trades": len(trades) + sum(excluded.values()),
+    results = {"protocol_id": PROTOCOL_ID, "provenance": provenance(trades_path), "extract_trades": len(trades) + sum(excluded.values()),
                "analyzed": len(rows), "excluded": excluded, "fetched_windows": fetched,
                "recorded_pnl_mismatch": sum(1 for r in rows if r["recorded_pnl"] is not None
                                             and abs(r["recorded_pnl"] - r["actual_pnl"]) > 0.5),
