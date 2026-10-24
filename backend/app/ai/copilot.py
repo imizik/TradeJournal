@@ -397,7 +397,9 @@ class FakeAdapter:
         if data.get("state") != "ok":
             return head + f"I couldn't read that trade: {data.get('reason') or 'the review was not readable'}."
         t, path, plan = data["trade"], data.get("path") or {}, data.get("plan") or {}
-        money = lambda v: "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
+
+        def money(v) -> str:
+            return "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
         sent = (data.get("alerts") or {}).get("alerts") or []
         matched = [h["habit"].lower() for h in (data.get("habits") or {}).get("habits", []) if h["this_trade"] == "yes"]
         lines = [f"**{t['contract']}**, {t['entry_time']} to {t['exit_time']}: {money(t['pnl_usd'])} ({t['pnl_pct']}%), "
