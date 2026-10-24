@@ -158,6 +158,19 @@ earlier, one of which faded within 8 minutes) and a lower sector threshold
 (3.0–4.0 added 1–13 sector events a session that mostly repeated the SPY story
 against a flat sector ETF).
 
+### Outcome scoring
+
+`backend/scripts/radar_outcomes.py /abs/path/radar.sqlite --out /abs/path/outcomes.jsonl` opens the store
+read-only and scores each recorded event of a completed session at its first-seen pass: the return
+against SPY at +30 min, +60 min and the close, signed in the event's direction, beside the plain Movers
+leaders (or laggards) and five random tracked stocks at the same pass. It appends one line per newly
+scored event, so results outlive the 20-session quote pruning; run it at least every 20 sessions. The
+read-out is per rule version and decides only after 20 sessions of one version. No provider or model
+call. Question, comparisons and decision: [spec](../research/radar-outcomes/spec.md).
+`backend/scripts/radar_outcomes_review.py` optionally asks one Copilot Lab research job, on the Claude
+plan only (never an API key), what set the furthest continuations apart from the furthest reversals;
+it is hindsight input for a later rule version.
+
 ## Movers now
 
 `GET /radar/movers?session=YYYY-MM-DD` (owner-only, read-only) supplies the
