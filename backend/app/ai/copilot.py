@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -139,12 +140,16 @@ def evidence_for(cfg: Settings):
 
 
 def _float_env(name: str, default: float) -> float:
-    """A positive number from the environment; anything malformed falls back to the default rather than a 500."""
+    """A positive, finite number from the environment; anything else falls back to the default rather than a 500
+    (``inf`` would disable a spend cap)."""
     try:
         value = float(os.environ.get(name) or default)
     except ValueError:
-        return default
-    return value if value > 0 else default
+        value = math.nan
+    if math.isfinite(value) and value > 0:
+        return value
+    log.warning("%s is not a positive finite number; using %s", name, default)
+    return default
 
 
 def _price(model: str | None) -> tuple[float, float, float, float]:
