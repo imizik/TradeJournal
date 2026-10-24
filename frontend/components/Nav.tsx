@@ -5,7 +5,8 @@ import Link, { useLinkStatus } from "next/link";
 import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bot, LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { useCopilotOn } from "@/components/copilot/useCopilotOn";
+import { Bot, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -38,6 +39,8 @@ const navItems: { href: string; label: string; icon: typeof Bot; heading?: strin
   { href: "/practice", label: "Daily Practice", icon: Target },
   { href: "/advisor-review", label: "Advisor review", icon: Scale },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch, heading: "Labs" },
+  // Owner-only and only while the lab is on; never first in its group, so hiding it never hides the heading.
+  { href: "/copilot-lab", label: "Copilot", icon: MessagesSquare },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
   { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
@@ -146,9 +149,10 @@ function MoreButton({ open, onOpen, trouble }: { open: boolean; onOpen: () => vo
 function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
+  const copilot = useCopilotOn(); // the owner's, and only while the lab is on
   return (
     <ul className="space-y-1">
-      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write)).map(({ href, label, icon: Icon, heading }) => {
+      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot)).map(({ href, label, icon: Icon, heading }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
         const link = (
             <Link

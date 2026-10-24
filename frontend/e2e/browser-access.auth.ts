@@ -286,3 +286,30 @@ test("concurrent owner reads renew without evicting their in-flight sessions", a
     }
   } finally { await owner.close(); }
 });
+
+test("an assistant sees no copilot anywhere, even with the lab reported on", async ({ page, browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  const ownerPage = await owner.newPage();
+  await ownerPage.goto("/");
+  const ownerSession = await (await owner.request.get("/api/access/me")).json();
+  const identifier = `dot-copilot-${Date.now()}`;
+  const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": ownerSession.csrf }, data: { identifier, grants: { symbols: ["MU", "NVDA"], run_ids: [], journal_read: false } } });
+  expect(created.status()).toBe(201);
+  const credential = await created.json();
+  await owner.close();
+  await page.goto("/login");
+  await page.getByLabel("Assistant ID").fill(identifier);
+  await page.getByLabel("Access key").fill(credential.key);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByText("Read-only assistant access")).toBeVisible();
+  // Even if a status read said the lab is on, an assistant gets no nav item, no Charts dock tab and no panel.
+  await page.route("**/copilot/status", route => route.fulfill({ json: { enabled: true, backend: "fake", evidence: "fixture", model: "x", effort: "medium",
+    fallbacks: false, key_configured: false, plan_configured: false, tools: [], limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120 } } }));
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByRole("button", { name: "Watchlist", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copilot", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("copilot-panel")).toHaveCount(0);
+  await expect(page.getByText(/^Ask copilot/)).toHaveCount(0);
+  expect((await page.request.get("/api/backend/copilot/status")).status()).toBe(403); // and the proxy refuses it
+});

@@ -41,6 +41,14 @@ export type Proposal = { id: string } & (
 
 export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
 
+/** One status read per page load, shared by the nav, the panels and every Ask copilot button. Only an answer is
+ * kept: a failed read is tried again by the next caller. */
+let statusOnce: Promise<CopilotStatus> | null = null;
+export function copilotStatus(): Promise<CopilotStatus> {
+  statusOnce ??= getCopilotStatus().catch(error => { statusOnce = null; throw error; });
+  return statusOnce;
+}
+
 export async function getCopilotStatus(signal?: AbortSignal): Promise<CopilotStatus> {
   const response = await fetch(apiUrl("/copilot/status"), { cache: "no-store", signal });
   if (!response.ok) throw new Error(response.status === 403 ? "Copilot Lab is owner-only." : `Copilot Lab status failed (${response.status}).`);
@@ -127,7 +135,8 @@ async function investigationRequest<T>(path: string, init?: RequestInit): Promis
   return response.json();
 }
 
-export const listInvestigations = () => investigationRequest<{ investigations: InvestigationSummary[] }>("?limit=8").then(r => r.investigations);
+export const listInvestigations = (symbol?: string) =>
+  investigationRequest<{ investigations: InvestigationSummary[] }>(`?limit=8${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}`).then(r => r.investigations);
 export const getInvestigation = (id: string) => investigationRequest<Investigation>(`/${encodeURIComponent(id)}`);
 export const createInvestigation = (fields: InvestigationFields) =>
   investigationRequest<Investigation>("", { method: "POST", body: JSON.stringify(fields) });

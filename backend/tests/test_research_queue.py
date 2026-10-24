@@ -235,9 +235,9 @@ def test_assistant_sessions_cannot_reach_the_queue(boundary):  # noqa: F811
 
 def test_the_runner_starts_only_when_enabled(monkeypatch):
     monkeypatch.setenv("RESEARCH_QUEUE_ENABLED", "true")
-    monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "0")  # started, but nothing may run
+    monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "0.01")  # started, but below any job's minimum: nothing may run
     with TestClient(app):
-        assert isinstance(app.state.research_queue, q.QueueRunner) and app.state.research_queue.cfg.daily_budget_usd == 0
+        assert isinstance(app.state.research_queue, q.QueueRunner) and app.state.research_queue.cfg.daily_budget_usd == 0.01
 
 
 
@@ -467,3 +467,14 @@ def test_the_route_lists_one_investigations_jobs(monkeypatch):
         assert [j["input"]["question"] for j in client.get(f"/copilot/research-jobs?from_investigation={a}").json()["jobs"]] == ["q1"]
         assert len(client.get("/copilot/research-jobs").json()["jobs"]) == 3
         assert client.get("/copilot/research-jobs?from_investigation=nope").status_code == 422
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf", "0", "-1"])
+def test_budgets_and_caps_must_be_finite_and_positive(monkeypatch, raw):
+    from app.ai import research_job
+    for name in ("RESEARCH_DAILY_BUDGET_USD", "RESEARCH_BUDGET_USD", "RESEARCH_NOTIFY_DAILY_MAX"):
+        monkeypatch.setenv(name, raw)
+    cfg = q.settings()
+    assert (cfg.daily_budget_usd, cfg.notify_daily_max, research_job.limits().budget_usd) == (2.0, 3, 0.50)
+    monkeypatch.setenv("RESEARCH_REASSESS_AFTER_HOURS", "0")  # zero is "off" here, not a cap
+    assert q.settings().reassess_after_hours == 0

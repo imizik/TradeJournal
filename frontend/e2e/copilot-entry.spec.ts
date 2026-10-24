@@ -27,7 +27,10 @@ test.beforeEach(async ({ request }) => {
 async function noLinkOnceAnswered(page: Page, answered: Promise<unknown>) {
   await answered;
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-  await expect(page.getByRole("link", { name: /Ask copilot/ })).toHaveCount(0);
+  // Neither the link, the drawer button, the Charts dock tab nor the nav item.
+  await expect(page.getByText(/^Ask copilot/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copilot", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
 }
 
 const statusAnswer = (page: Page) => page.waitForResponse((response) => response.url().includes("/copilot/status"));
@@ -60,19 +63,42 @@ for (const [label, reply] of [
   });
 }
 
-test("Radar's Ask copilot opens a new, prefilled, unsent investigation", async ({ page }) => {
+test("Radar's Ask copilot opens the copilot in place, prefilled with the event and unsent", async ({ page }) => {
+  let chats = 0;
+  await labOn(page);
+  await page.route("**/copilot/chat", (route) => { chats += 1; return route.abort(); });
+  await openMuEvent(page);
+  await page.getByRole("button", { name: "Ask copilot · MU" }).click();
+  const drawer = page.getByRole("dialog", { name: "Copilot for MU" });
+  await expect(drawer.getByRole("heading", { name: "Copilot · MU" })).toBeVisible();
+  await expect(drawer.getByLabel("Message")).toHaveValue(/^Context: Radar .+: MU up 4\.1% while SMH is up 0\.6%/);
+  await expect(drawer.getByText(/Ask about an opportunity/)).toBeVisible(); // nothing was sent
+  await expect(page).toHaveURL(/\/radar/); // still on Radar, beside the event
+  await page.waitForTimeout(300);
+  expect(chats).toBe(0);
+  await drawer.getByRole("button", { name: "Close copilot" }).click();
+  await expect(drawer).toHaveCount(0);
+});
+
+test("Radar's copilot drawer closes on Escape or its backdrop, and fills a phone", async ({ page }) => {
   await labOn(page);
   await openMuEvent(page);
-  const ask = page.getByRole("link", { name: "Ask copilot · MU" });
-  const href = new URL((await ask.getAttribute("href"))!, "http://fixture");
-  expect(href.pathname).toBe("/copilot-lab");
-  expect(href.searchParams.get("symbol")).toBe("MU");
-  expect(href.searchParams.get("context")).toMatch(/^Radar .+: MU up 4\.1% while SMH is up 0\.6%/);
+  const ask = page.getByRole("button", { name: "Ask copilot · MU" });
   await ask.click();
-  await expect(page).toHaveURL(/\/copilot-lab\?symbol=MU/);
-  await expect(page.getByLabel("Investigation symbol")).toHaveValue("MU");
-  await expect(page.getByLabel("Message")).toHaveValue(/^Context: Radar .+MU up 4\.1%/);
-  await expect(page.getByText(/Ask about an opportunity/)).toBeVisible(); // nothing was sent
+  const drawer = page.getByRole("dialog", { name: "Copilot for MU" });
+  await expect(drawer).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
+  await expect(ask).toBeFocused(); // focus returns to the button that opened it
+  await ask.click();
+  await page.getByTestId("copilot-drawer-backdrop").click({ position: { x: 20, y: 300 } });
+  await expect(drawer).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await ask.click();
+  const box = (await drawer.boundingBox())!;
+  expect([box.x, box.width]).toEqual([0, 375]); // full screen on a phone
+  await expect(drawer.getByLabel("Message")).toHaveValue(/^Context: Radar .+MU up 4\.1%/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
 test("Charts' Overview offers Ask copilot for the current symbol", async ({ page }) => {

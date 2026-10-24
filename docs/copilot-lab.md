@@ -10,16 +10,43 @@ untouched.
 
 - `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
-  (`frontend/components/copilot/CopilotLab.tsx`). It is not in the nav.
-- Entry points: `/copilot-lab?symbol=X&context=<short text>` opens a new
-  investigation with the symbol set and the message box prefilled with
-  `Context: <text>` (at most 300 characters); nothing is sent until the owner
-  presses Send. "Ask copilot" links (`frontend/components/copilot/AskCopilot.tsx`)
-  sit on Charts' Symbol info Overview tab (the current symbol) and in a Radar
-  event's detail (the event symbol and its one-line summary). They render
-  nothing for the assistant profile or while `/copilot/status` says the lab is
-  off. Browser proof: `frontend/e2e/copilot-entry.spec.ts`, including a 375 px
-  phone layout check.
+  (`frontend/components/copilot/CopilotLab.tsx`). It is in the nav ("Copilot") only for the owner while the lab is on.
+- One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
+  It is the full page (`variant="page"`, `CopilotLab.tsx`: Recent, symbol,
+  history, deep links) and the panel beside other pages (`variant="panel"`).
+  Both share investigations, proposals, Research deeper, What changed? and
+  linked activity. A panel renders nothing for the assistant profile or while
+  the lab is off.
+  - The nav, every panel and every Ask copilot button share one
+    `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
+    `useCopilotOn`).
+- Entry points (nothing is ever sent until the owner presses Send):
+  - **Nav:** "Copilot" opens `/copilot-lab`. It is owner-only, shown only
+    while the lab is on.
+  - **Charts:** a "Copilot" tab in the side dock, beside the watchlist, layers
+    and ladder. It uses the dock's width and divider, and on a phone it is
+    the dock's bottom sheet.
+    - It opens on the chart's symbol, resuming that symbol's latest open
+      investigation, or starting one with `Context: Charts · <symbol>
+      <interval> chart` in the message box.
+    - When the chart's symbol changes, an empty panel follows. A
+      conversation is never retargeted: the panel offers "Switch to <symbol>"
+      or "Keep <symbol>" (Switch waits for a turn in progress).
+    - A follow still loading when the owner sends is dropped, and a draft
+      the owner typed is never replaced.
+    - Closing a panel mid-turn (the dock tab, the sheet, Radar's drawer, or
+      leaving the page) stops the turn and saves what had arrived.
+    - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
+      the lab.
+  - **Radar:** "Ask copilot" in an event's detail opens the same panel in
+    place, as a right-hand drawer (full screen on a phone), on the event
+    symbol, with its one-line summary as the context. Escape or the backdrop
+    closes it, and focus returns to the button.
+  - **Deep link:** `/copilot-lab?symbol=X&context=<short text>` opens a new
+    investigation with the symbol set and `Context: <text>` (at most 300
+    characters) in the message box.
+  - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
+    phone check) and `frontend/e2e/copilot-panel.spec.ts`.
 - `GET`/`POST /copilot/investigations` and `GET`/`PUT /copilot/investigations/{id}`
   hold saved investigations (below).
 - All these routes are owner-only: they are in no assistant grant
@@ -345,10 +372,15 @@ Trigger it by hand only, with `backend/scripts/run_research_job.py "question"
 --symbols NBIS,CRWV --evidence fixture|live|replay [--out job.json] [--no-save]`.
 It has no scheduler, Radar wake-up or notification yet.
 
-- **Tools.** The lab tools except `propose_plan`, `get_investigation_changes`
-  and the book tools (`get_positions`, `get_trades`, `get_memories`), all
-  in-process with the same validation, timeout and size bound, plus the
-  built-in `WebSearch` and `WebFetch`, and nothing else. A
+- **Tools.** An allowlist (`research_job.JOB_TOOLS`), so a new copilot tool
+  never reaches a job by default.
+  - Allowed: the market reads (group comparison, peer moves, symbol news,
+    earnings dates, quotes), `get_saved_research` and `get_chart_context`,
+    plus the built-in `WebSearch` and `WebFetch`, and nothing else.
+  - Not allowed: `propose_plan`, `get_investigation_changes` and the book
+    tools. These aren't registered for a job at all.
+  - Lab tools run in-process with the same validation, timeout and size
+    bound. A
   PreToolUse hook denies any other tool and caps a job at 8 searches, 10
   fetches and 12 lab-tool calls. Other limits: 24 turns, 600 s, and
   `max_budget_usd` from `RESEARCH_BUDGET_USD` (default $0.50). Built-in tools,
@@ -370,10 +402,14 @@ It has no scheduler, Radar wake-up or notification yet.
   evidence references (tool and `as_of`). The record also has the lab tool
   calls the server actually ran, with provenance, plus web counts, cost (an
   API-price equivalent on the plan) and server-side checks:
-  - citations whose URL the job never searched, fetched successfully (a failed
-    fetch was never read) or got back from a lab tool;
+  - citations whose URL the job never got from a search result's `url`
+    field, a successful fetch (a failed fetch was never read), or the lab news
+    tool's structured article `url`. A URL that only appears inside some text,
+    such as a headline, summary or snippet, does not count;
   - evidence references to tools it never called;
-  - under replay, sources published after the evidence time.
+  - under replay, sources published after the evidence time. A time without
+    an offset is read as New York, a bare date as that day's end in New York,
+    and an unreadable or "unknown" time counts as after.
 
   It is research only: no plan, watch, alert or trade instruction. The prompt
   gives the evidence time in both ET and UTC, and the system prompt says to
@@ -468,7 +504,9 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
     store, which fails the job instead of leaving it running.
   - A job left running by a restart or a shutdown goes back to the queue.
   - A malformed number setting falls back to its default with a warning; it
-    never stops the API.
+    never stops the API. Budgets and caps (`RESEARCH_BUDGET_USD`,
+    `RESEARCH_DAILY_BUDGET_USD`, `RESEARCH_NOTIFY_DAILY_MAX`) must be finite
+    and above zero, so `nan`, `inf`, `0` and negative values fall back too.
 - **Results:**
   - A finished job links to its saved investigation (`source="research_job"`).
   - A Radar job is titled `Radar: …`, and a reassessment is saved as a new

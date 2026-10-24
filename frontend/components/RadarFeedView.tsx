@@ -130,7 +130,7 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
         <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary">
           Open chart · {symbol}
         </Link>
-        <AskCopilot symbol={symbol} context={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
+        <AskCopilot drawer symbol={symbol} context={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
       </div>
       <div role="group" aria-label="Was this useful?" className="space-y-1.5">
         <p className="text-xs text-muted-foreground">Was this useful? {rating ? "Your saved answer is highlighted." : "Not rated yet."}</p>
