@@ -33,6 +33,7 @@ permissions and acceptance.
 | Document | Read it when |
 |---|---|
 | [dots-integration.md](dots-integration.md) | Current Dots delivery status and functionality priorities; role separation and shadow-runner boundaries |
+| [owner-acceptance-runbook.md](owner-acceptance-runbook.md) | Isaac's phone-first checks that turn built/activated board rows into observed evidence: steps, pass/fail and what to record |
 | [shadow-s1-contract.md](shadow-s1-contract.md) | Shadow Isaac S1: Jo takes or skips scanner setups for its own paper book; tools, visibility cutoff, labels, acceptance and the 50-trade review |
 | [setup-scanner-contract.md](setup-scanner-contract.md) | Setup scanner S1: universe, VWAP-fade and opening-range rules, contract choice, rules-only paper baseline, daily health notes, stock awareness and conditional price-plan follow-through |
 | [shadow-trader-design.md](shadow-trader-design.md) | The informed shadow trader and setup co-pilot direction that S1–S4 build toward |
