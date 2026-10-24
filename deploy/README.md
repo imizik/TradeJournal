@@ -78,7 +78,10 @@ python3.12 deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-$(date
 ```
 
 The build uses `git archive HEAD`, installs npm's lockfile, and resolves Python
-runtime wheels once into the artifact. Reuse the same artifact for rollback;
+runtime wheels once into the artifact, including the `copilot-plan` extra
+(the Claude Agent SDK for Copilot Lab research jobs). That extra is built from
+its sdist, so it carries no second Claude Code; jobs run the release's
+`bin/claude`. Reuse the same artifact for rollback;
 a later rebuild can resolve newer Python dependencies. Generated caches,
 local configuration, OAuth tokens and databases are excluded. The VPS never
 runs npm, a Next build, or an online pip install. ARM hosts need an ARM build;

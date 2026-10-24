@@ -174,9 +174,13 @@ def save_research_result(record: dict) -> str:
 def child_env(mode: str) -> dict[str, str]:
     env = copilot_plan.child_env()
     if mode == "api_key":
-        # The API key replaces the plan token; nothing else changes.
+        # The API key replaces the plan token, and Claude Code keeps API-key state apart from the plan reviews'
+        # (a subdirectory of the same private, writable state directory).
         env[plan_runner.TOKEN_ENV] = ""
         env["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY", "")
+        config = Path(env["CLAUDE_CONFIG_DIR"]) / "research-api"
+        config.mkdir(parents=True, exist_ok=True, mode=0o700)
+        env["CLAUDE_CONFIG_DIR"] = str(config)
     return env
 
 
@@ -187,7 +191,8 @@ def _api_key_preflight(binary: str, env: dict[str, str]) -> None:
         status = json.loads(out.stdout or "{}")
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         raise ResearchError("auth_source", f"Claude Code could not report its sign-in ({type(exc).__name__}).") from exc
-    if status.get("apiKeySource") != "ANTHROPIC_API_KEY" or status.get("apiProvider", "firstParty") != "firstParty":
+    if (status.get("authMethod") != "api_key" or status.get("apiKeySource") != "ANTHROPIC_API_KEY"
+            or status.get("apiProvider", "firstParty") != "firstParty"):
         raise ResearchError("auth_source", "Claude Code would not sign in with ANTHROPIC_API_KEY.")
 
 

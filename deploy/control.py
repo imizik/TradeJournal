@@ -152,7 +152,7 @@ def install(archive: Path, digest: str) -> Path:
             shutil.rmtree(cache)
         cache.symlink_to(STATE / "frontend-cache" / destination.name)
         run("/usr/bin/python3.12", "-m", "venv", backend / ".venv")
-        run(backend / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links", destination / "wheels", "trade-journal-backend==0.1.0")
+        run(backend / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links", destination / "wheels", "trade-journal-backend[copilot-plan]==0.1.0")
         CONFIG.mkdir(parents=True, exist_ok=True, mode=0o700)
         for filename in ("backend.env", "migration.env"):
             target = CONFIG / filename

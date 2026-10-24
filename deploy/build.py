@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 
 
 def run(*command, **kwargs):
@@ -69,7 +70,16 @@ def main() -> None:
         release.mkdir(mode=0o755)
         shutil.copytree(source / "backend", release / "backend")
         shutil.copytree(source / "deploy", release / "deploy")
-        run(sys.executable, "-m", "pip", "wheel", source / "backend", "--wheel-dir", release / "wheels")
+        # The copilot-plan extra is the Claude Agent SDK for research jobs. Its PyPI wheels bundle a ~270 MB Claude
+        # Code binary; built from its sdist it is pure Python, and it runs the release's own bin/claude instead.
+        run(sys.executable, "-m", "pip", "wheel", f"{source / 'backend'}[copilot-plan]", "--no-binary", "claude-agent-sdk",
+            "--wheel-dir", release / "wheels")
+        sdk_wheels = list((release / "wheels").glob("claude_agent_sdk-*.whl"))
+        if len(sdk_wheels) != 1 or not sdk_wheels[0].name.endswith("-py3-none-any.whl"):
+            raise ValueError(f"Expected one pure claude-agent-sdk wheel, found {[w.name for w in sdk_wheels]}")
+        with zipfile.ZipFile(sdk_wheels[0]) as wheel:
+            if any(name.startswith("claude_agent_sdk/_bundled/claude") for name in wheel.namelist()):
+                raise ValueError("The claude-agent-sdk wheel bundles a Claude Code binary; the release ships bin/claude")
         env = os.environ.copy()
         env.update(NEXT_PUBLIC_API_URL="/api/backend", API_PROXY_TARGET="http://127.0.0.1:8080", API_INTERNAL_URL="http://127.0.0.1:8080", NEXT_TELEMETRY_DISABLED="1")
         frontend = source / "frontend"

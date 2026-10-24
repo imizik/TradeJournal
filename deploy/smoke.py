@@ -165,6 +165,41 @@ def assert_moomoo_credentials_are_loaded_as_service_user():
     # successful start proves it loaded and parsed both runtime copies.
 
 
+RESEARCH_CHECK = """
+import os
+from pathlib import Path
+import claude_agent_sdk
+assert not (Path(claude_agent_sdk.__file__).parent / "_bundled/claude").exists(), "the SDK must not bundle its own CLI"
+from app.ai import research_job
+binary, env = research_job.prepare("api_key")  # Claude Code itself reports the API key as its sign-in
+assert binary == os.environ["TJ_CLAUDE_BIN"], binary
+assert env["ANTHROPIC_API_KEY"] == os.environ["ANTHROPIC_API_KEY"] and env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+assert env["CLAUDE_CONFIG_DIR"] == os.environ["TJ_CLAUDE_CONFIG_DIR"] + "/research-api"
+try:
+    research_job.prepare("plan")
+except research_job.ResearchError as exc:
+    assert exc.code == "plan_local_only", exc.code
+else:
+    raise AssertionError("plan auth must be refused on Postgres")
+print("research job ready", claude_agent_sdk.__version__)
+"""
+
+
+def assert_research_job_ready(release):
+    """The release runs research jobs with RESEARCH_AUTH=api_key on its own bin/claude. No model call: the key is a
+    dummy, and Claude Code's sign-in report is local."""
+    pinned = json.loads((release / "release.json").read_text())["claude_code"]
+    version = control.run(release / "bin/claude", "--version", capture_output=True, text=True).stdout.strip()
+    assert version.startswith(f"{pinned} "), version
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(control.STATE / "claude"), "DATABASE_URL": URL,
+           "TJ_CLAUDE_BIN": str(release / "bin/claude"), "TJ_CLAUDE_CONFIG_DIR": str(control.STATE / "claude"),
+           "CLAUDE_CODE_OAUTH_TOKEN": "ci-dummy-plan-token", "ANTHROPIC_API_KEY": "ci-dummy-not-a-key",
+           "PYTHONDONTWRITEBYTECODE": "1"}
+    out = control.run("runuser", "-u", "tradejournal", "--", release / "backend/.venv/bin/python", "-c", RESEARCH_CHECK,
+                      cwd=release / "backend", env=env, capture_output=True, text=True).stdout
+    assert "research job ready" in out, out
+
+
 def prepare_moomoo_smoke():
     """Create an idle, credential-free fixture for native systemd lifecycle checks."""
     try:
@@ -220,6 +255,7 @@ def main():
         control.run(*controller, *args)
 
     try:
+        assert_research_job_ready(release)
         cli("migrate", release.name, "--confirm-database", IDENTITY)
         control.run("runuser", "-u", "tradejournal", "--", release / "backend/.venv/bin/python", "scripts/seed_dev_data.py", "--database-url", URL, cwd=release / "backend", env={**os.environ, "DATABASE_URL": URL, "MIGRATION_DATABASE_URL": URL, "PYTHONDONTWRITEBYTECODE": "1"})
         cli("activate", release.name, "--confirm-database", IDENTITY)
