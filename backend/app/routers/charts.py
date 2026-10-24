@@ -173,6 +173,7 @@ def workspace(
     options: str = Query("", max_length=20),
     ranges: bool = Query(False),
     auto: bool = Query(True),
+    phase: str = Query("full", pattern="^(full|prices)$"),
     db: Session = Depends(get_session),
 ):
     """The main symbol's panels and quotes, plus panels for up to four symbols
@@ -201,6 +202,16 @@ def workspace(
             layer = Layer.parse(options) if options else None
         except ValueError:
             raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
+
+        if phase == "prices":
+            # First useful candles do not wait for other symbols, daily levels,
+            # options, RVol or journal reads. Same price basis and calendar.
+            try:
+                data = chart_feed.workspace(symbol, frames, [], session, calendar=chart_calendar, quotes=False, auto=False)
+            except ChartFeedError as exc:
+                raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
+            return {**data, "context_pending": True, "extras": {}, "fills": [], "fills_truncated": False,
+                    "positions": [], "alerts": [], "journal_access": "pending" if access.is_journal(request) else "restricted"}
 
         def levels_for(scope: str | None):
             found = {}

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useEffect, useState } from "react";
 import { coverageLine, getFeed, headlineMeta, newsLine, nyTime, STATUS_TEXT, type RadarFeed } from "@/lib/radar";
@@ -18,7 +19,7 @@ export default function RadarPreview() {
   }, [refresh]);
   const events = feed?.state !== "off" ? [...(feed?.events ?? [])]
     .sort((a, b) => b.first_seen_at.localeCompare(a.first_seen_at)).slice(0, 3) : [];
-  return <DashboardCard title="Radar discoveries" action={<a href="/radar" className={dashboardLink}>Open Radar →</a>}>
+  return <DashboardCard title="Radar discoveries" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
     <div className="min-w-0 space-y-3 break-words" data-testid="radar-preview">
       {error && <p role="status" className="text-xs text-amber-300">Radar could not load.{feed && " Showing the previous snapshot; current status is unknown."}</p>}
       {!feed && !error && <p role="status" className="text-sm text-muted-foreground">Loading saved discoveries…</p>}
@@ -31,7 +32,7 @@ export default function RadarPreview() {
           return <li key={event.event_id} className="space-y-1 py-2 first:pt-0">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-sm font-medium">{event.group ?? event.symbols.join(", ")}</span>
-              {symbol && <a href={`/charts?symbol=${encodeURIComponent(symbol)}`} className={dashboardLink}>Open {symbol} chart →</a>}
+              {symbol && <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className={dashboardLink}>Open {symbol} chart →</Link>}
             </div>
             <p className="line-clamp-2 text-sm">{event.summary}</p>
             <p className="line-clamp-2 text-xs text-muted-foreground">{newsLine(event.news, event.session_date)}</p>
@@ -45,7 +46,7 @@ export default function RadarPreview() {
                   </div>)}</div>
                 : <p className="py-2 text-muted-foreground">{newsLine(event.news, event.session_date)}</p>}
               {event.news?.checked_at && <p className="text-muted-foreground">News checked <time dateTime={event.news.checked_at}>{new Date(event.news.checked_at).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET</time></p>}
-              <a href="/radar" className={dashboardLink}>Inspect saved evidence in Radar →</a>
+              <Link href="/radar" className={dashboardLink}>Inspect saved evidence in Radar →</Link>
             </details>
             <p className="text-xs text-muted-foreground">Detected <time dateTime={event.first_seen_at}>{nyTime(event.first_seen_at)} ET</time>
               {event.latest_status && ` · ${STATUS_TEXT[event.latest_status]}`} · saved evidence in Radar</p>

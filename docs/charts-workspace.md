@@ -2363,3 +2363,27 @@ changed membership fail closed; this does not change Movers sector rules.
 
 Verification: `backend/tests/test_radar_entry.py` and the since-entry cases in
 `frontend/e2e/chart-journal.spec.ts`. Fixture acceptance is not production proof.
+
+### Returning to Charts and progressive opening
+
+Owner navigation keeps at most four recent workspace snapshots in browser memory,
+scoped to the current access identity/grants. A snapshot expires five minutes
+from its workspace check and is never restored on a different New York date.
+Returning or choosing a recent symbol can draw the saved candles and completed
+history immediately, including its visible time range. The amber snapshot notice
+retains the original check time and explicitly says prices/journal context are
+refreshing or may be outdated if refresh fails. Provider timestamps are never
+advanced by restoring a snapshot. No data cache is persisted to localStorage;
+shared settings still reconcile through their existing revision/merge protocol.
+A new route link applies its own symbol and historical focus.
+
+On a workspace without a recent snapshot, the client requests its selected
+interval with `phase=prices` while the ordinary full workspace loads. This
+read uses the same calendar, split basis and indicator calculations, but omits
+quotes, other symbols, automatic levels, options, RVol and journal context. A
+visible loading/error notice distinguishes this partial answer from full context.
+A late first-candle response cannot replace the full answer. The ordinary full
+15-second refresh and hidden-tab suppression remain; provider budgets, cooldowns,
+shared locks and history warmup are unchanged. Tradier chart and Alpaca history
+reads reuse a bounded HTTP connection pool without reusing request credentials
+or cookies. Existing server caches still coalesce identical provider reads.

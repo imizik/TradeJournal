@@ -165,11 +165,11 @@ function writeLocal(settings: ChartSettings, meta: Meta): boolean {
  * before the server kept them), saved there shortly after each change, and
  * refreshed when the page regains focus or every 30 seconds while visible.
  */
-export function useChartSettings() {
+export function useChartSettings(initialSymbol?: string) {
   const { owner, grants } = useAppAccess();
   const localOnly = !owner;
   const allowedSymbols = (grants.symbols ?? []).join(",");
-  const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<ChartSettings>(() => ({ ...DEFAULT_SETTINGS, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }));
   const [ready, setReady] = useState(false);
   const [sync, setSync] = useState<SyncState>("loading");
   const [stored, setStored] = useState(true);
@@ -233,7 +233,7 @@ export function useChartSettings() {
     // This browser's copy shows while the server's loads (read after hydration,
     // so the server render matches). Anything changed meanwhile is part of this
     // device's changes, merged in below.
-    queueMicrotask(() => { if (alive && local.settings) setSettings(local.settings); });
+    queueMicrotask(() => { if (alive && local.settings) setSettings({ ...local.settings, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }); });
     fetchSettings().then((server) => {
       if (!alive) return;
       const theirs = server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS);
@@ -253,7 +253,7 @@ export function useChartSettings() {
       setSync("offline");
     }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
-  }, [localOnly, allowedSymbols]);
+  }, [localOnly, allowedSymbols, initialSymbol]);
 
   useEffect(() => {
     latest.current = settings;

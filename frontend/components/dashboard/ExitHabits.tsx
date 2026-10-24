@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
@@ -57,7 +58,7 @@ function ExitHabitsView({ body }: { body: ExitHabitsBody }) {
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent alerts</h3>
       {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, ALERTS_SHOWN).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-          {a.trade_id ? <a href={`/trades/${a.trade_id}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</a>
+          {a.trade_id ? <Link href={`/trades/${a.trade_id}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</Link>
             : <span className="text-sm font-medium">{a.contract}</span>}
           <span className="text-xs text-muted-foreground">{kindLabel(a.kind)} · {time(a.detected_at)} ET</span>
         </div>
@@ -78,7 +79,7 @@ export default function ExitHabits() {
       .then(setBody).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, []);
-  return <DashboardCard title="Exit habits" action={<a href="/analytics" className={dashboardLink}>Analytics →</a>}>
+  return <DashboardCard title="Exit habits" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
     {body ? <ExitHabitsView body={body} />
       : <p role="status" className={`text-sm ${error ? "text-amber-300" : "text-muted-foreground"}`}>{error ? "Exit habits could not load." : "Loading exit habits…"}</p>}
   </DashboardCard>;

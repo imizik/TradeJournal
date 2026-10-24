@@ -13,6 +13,7 @@ import threading
 import time
 
 import httpx
+from app.engine import market_http
 
 from app.engine.chart_timing import measured, measured_lock
 from app.engine import chart_levels, chart_rvol, tradier
@@ -71,7 +72,7 @@ class ChartFeed:
                     raise ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
                 self._calls.append(now)
                 with measured("tradier_provider"):
-                    response = httpx.get(
+                    response = market_http.get(
                         f"{tradier.TRADIER_BASE_URL}{path}", params=params,
                         headers={"Authorization": f"Bearer {tradier.TRADIER_API_KEY}", "Accept": "application/json"},
                         timeout=10,

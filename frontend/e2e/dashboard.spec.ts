@@ -319,6 +319,8 @@ test("empty, missing quote, quote error and journal retry states are explicit", 
     await state("slow");
     await page.goto("/?type=option", { waitUntil: "commit" });
     await expect(page.getByRole("status", { name: "Loading workspace" })).toBeVisible();
+    await expect(page.locator('[aria-label="Market and discovery"]')).toBeVisible();
+    await expect(page.getByTestId("radar-preview")).toBeVisible();
     await page.screenshot({ path: test.info().outputPath("dashboard-loading-desktop.png"), animations: "disabled" });
     await expect(page.getByTestId("owner-dashboard")).toBeVisible();
   } finally { await state("ready"); }

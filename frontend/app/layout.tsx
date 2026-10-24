@@ -7,6 +7,7 @@ import AssistantSession from "@/components/AssistantSession";
 import AccessProvider from "@/components/AccessProvider";
 import { currentAccess } from "@/lib/accessServer";
 import { PRIVATE_ACCESS } from "@/lib/accessTypes";
+import { ChartSessionProvider } from "@/lib/chartSession";
 import AppMain from "@/components/AppMain";
 
 // Session identity and permissions are evaluated per request in both profiles.
@@ -44,7 +45,7 @@ export default async function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <AccessProvider access={access ?? { ...PRIVATE_ACCESS, owner: false, enabled: true }}><div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
           {access && <Nav owner={owner} journal={owner || !!access.grants.journal_read} />}
-          <AppMain banner={owner ? <GmailStatusBanner /> : access ? <AssistantSession /> : null}>{children}</AppMain>
+          <ChartSessionProvider><AppMain banner={owner ? <GmailStatusBanner /> : access ? <AssistantSession /> : null}>{children}</AppMain></ChartSessionProvider>
         </div></AccessProvider>
       </body>
     </html>

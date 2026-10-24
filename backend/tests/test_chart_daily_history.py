@@ -45,7 +45,7 @@ class Tradier:
         self.data, self.calls, self.status, self.body = data, [], 200, None
         monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
         monkeypatch.setattr(feed_module.tradier, "TRADIER_BASE_URL", "https://api.tradier.com")
-        monkeypatch.setattr(feed_module.httpx, "get", self.get)
+        monkeypatch.setattr(feed_module.market_http, "get", self.get)
 
         class Clock(datetime):  # 10:00 New York on TODAY, whenever the suite runs
             @classmethod
@@ -209,7 +209,7 @@ def test_a_failed_daily_read_leaves_intraday_panels_loading(tradier, monkeypatch
             return httpx.Response(429, json={}, request=httpx.Request("GET", url))
         return original(url, params, headers, timeout)
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     data = ChartFeed().workspace("SPY", ["5m", "1D"], [], "regular")
     assert data["panels"]["5m"]["bars"] and data["panels"]["1D"]["bars"] == []
     assert data["issues"] and data["intraday_as_of"] is not None

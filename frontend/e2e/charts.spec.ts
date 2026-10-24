@@ -7326,3 +7326,44 @@ test("opt-in initial chart timings record each ready panel once", async ({ page 
   await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
   expect(await page.evaluate(() => window.__tjChartPerformance!.samples.initial_panel_studies.length)).toBe(5);
 });
+
+test("returning to Charts restores a disclosed snapshot while refresh fails", async ({ page }) => {
+  await registerCharts(page);
+  let fail = false;
+  await page.route("**/api/backend/charts/workspace?**", async route => {
+    if (fail) return route.fulfill({ status: 503, json: { detail: "Fixture refresh unavailable" } });
+    const data = fixture(route.request().url());
+    data.fetched_at.intraday = Math.floor(Date.now() / 1000) - 120;
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  const candles = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, IChartApi> }).__tjCharts.get("main")!
+    .panes()[0].getSeries().find(series => series.seriesType() === "Candlestick")!.data());
+  const bars = await candles();
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 140, to: 200 }));
+  await expect.poll(() => logicalRange(page, "main")).toMatchObject({ from: 140, to: 200 });
+  const range = await visibleRange(page, "main");
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  fail = true;
+  await page.getByRole("link", { name: "Charts", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toContainText("Refresh failed");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  expect(await candles()).toEqual(bars);
+  await expect.poll(() => visibleRange(page, "main")).toEqual(range);
+  await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toContainText("may be outdated");
+});
+
+test("first candles stay usable when supporting context fails", async ({ page }) => {
+  await page.route("**/api/backend/charts/workspace?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("phase") !== "prices")
+      return route.fulfill({ status: 503, json: { detail: "Fixture context unavailable" } });
+    return route.fulfill({ json: { ...fixture(route.request().url()), context_pending: true, fills: [], positions: [], alerts: [] } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await expect(page.getByRole("status", { name: "Chart context loading" })).toContainText("could not refresh");
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending");
+});

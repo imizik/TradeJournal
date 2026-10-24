@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefOpportunity, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
@@ -160,7 +161,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       if (e?.observed_at && (!group.observed || Date.parse(e.observed_at) > Date.parse(group.observed))) group.observed = e.observed_at;
     }
     return <p className="text-xs leading-relaxed text-muted-foreground"><span className="font-medium">Sources: </span>{groups.map((g, i) => <span key={g.first}>
-      {g.known && !compact ? <a className="underline underline-offset-2 hover:text-foreground" href={`#evidence-${g.first}`} onClick={openEvidence}>{g.label}{g.count > 1 ? ` ×${g.count}` : ""}</a> : <span>{g.label}{g.count > 1 ? ` ×${g.count}` : ""}</span>}
+      {g.known && !compact ? <Link className="underline underline-offset-2 hover:text-foreground" href={`#evidence-${g.first}`} onClick={openEvidence}>{g.label}{g.count > 1 ? ` ×${g.count}` : ""}</Link> : <span>{g.label}{g.count > 1 ? ` ×${g.count}` : ""}</span>}
       {g.observed && <> · {g.count > 1 ? "latest " : ""}observed <time dateTime={g.observed}>{clock(g.observed, day)}</time></>}{i < groups.length - 1 ? "; " : ""}
     </span>)}</p>;
   };
@@ -242,10 +243,10 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       <p className="mb-3 text-xs text-muted-foreground">Exact saved evidence behind this summary; it has not been refreshed.</p>
       {savedEvidence(body.summary_evidence_ids)}
     </details>}
-    {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <a href="/morning/memories" className="text-primary hover:underline">Add a belief →</a></p>}
+    {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <Link href="/morning/memories" className="text-primary hover:underline">Add a belief →</Link></p>}
   </section>;
 
-  if (compact) return <DashboardCard title="Morning briefing" action={<a href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</a>}>
+  if (compact) return <DashboardCard title="Morning briefing" action={<Link href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</Link>}>
     <div className="min-w-0 space-y-3 break-words" data-testid="morning-briefing">
       {error && <p role="alert" className="text-sm text-amber-300">{error}{data && " Showing the previously loaded record; current status is unknown."}</p>}
       {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading saved briefing…</p>}
@@ -260,7 +261,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
           return <article key={index} className="space-y-1.5 rounded-md border p-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-sm font-semibold">{item.symbol ?? "Journal review"}</h3>
-              {item.symbol && <a href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</a>}
+              {item.symbol && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</Link>}
             </div>
             {setup && <p className="text-xs text-amber-300">{setup.status === "research_only" ? "Research only · confirmation missing" : "Conditional setup · wait for trigger"}</p>}
             <p className="line-clamp-2 text-sm leading-relaxed">{item.what_matters}</p>
@@ -321,7 +322,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h3 className="text-base font-semibold"><span className="mr-2 tabular-nums text-muted-foreground">{opportunityFirst && index >= opportunities.length ? index - opportunities.length + 1 : index + 1}</span>{item.symbol ?? "Portfolio review"}</h3>
           <div className="flex flex-wrap items-center gap-x-4">
-            {item.symbol && <a href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</a>}
+            {item.symbol && <Link href={`/charts?symbol=${encodeURIComponent(item.symbol)}`} className={dashboardLink}>Open {item.symbol} chart →</Link>}
             <button type="button" aria-expanded={asking === index} className={textButton} onClick={() => ask(index)}>Ask Jo about {item.symbol ?? `priority ${index + 1}`}</button>
           </div>
         </div>
@@ -335,7 +336,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
             const used = usedMemories(item);
             return used.length > 0 && <div className="sm:grid sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-3">
               <dt className="text-xs font-medium text-muted-foreground sm:pt-0.5">Your saved view</dt>
-              <dd className="space-y-1">{used.map((m) => <p key={m.id}><a href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="hover:underline">“{m.body.original_text}”</a><span className="block text-xs text-muted-foreground">{memoryMeta(m)}</span></p>)}</dd>
+              <dd className="space-y-1">{used.map((m) => <p key={m.id}><Link href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="hover:underline">“{m.body.original_text}”</Link><span className="block text-xs text-muted-foreground">{memoryMeta(m)}</span></p>)}</dd>
             </div>;
           })()}
         </dl>
@@ -354,9 +355,9 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       {([["useful", "Useful"], ["meh", "Meh"], ["missed", "Missed something"]] as const).map(([value, label]) => <button key={value} type="button" disabled={saving} aria-pressed={data?.feedback.rating === value} className={`${button} ${data?.feedback.rating === value ? "bg-secondary" : ""}`} onClick={() => void rate(value)}>{label}</button>)}
     </div>{feedbackError && <p role="alert" className="mt-2 text-sm text-amber-300">{feedbackError}</p>}</section>}
     {data && <div className="space-y-2">
-      <a href="/morning/memories" className={textButton}>Saved memories and Jo’s proposals →</a>
-      <a href="/morning/watches" className={textButton}>Jo’s price watches →</a>
-      <a href="/morning/market-reads" className={textButton}>Jo’s scheduled market reads →</a>
+      <Link href="/morning/memories" className={textButton}>Saved memories and Jo’s proposals →</Link>
+      <Link href="/morning/watches" className={textButton}>Jo’s price watches →</Link>
+      <Link href="/morning/market-reads" className={textButton}>Jo’s scheduled market reads →</Link>
       {!!gaps.length && <details className="rounded-md border border-amber-500/30 px-3"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Limited coverage · {gaps.length} {gaps.length === 1 ? "gap" : "gaps"} disclosed</summary><p className="mb-3 text-xs text-muted-foreground">This brief has missing or unverified evidence. Check these details before relying on it.</p><ul className="list-disc space-y-2 pb-3 pl-4 text-sm text-muted-foreground">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></details>}
       {packet && !packet.redacted_at && <details id="brief-evidence" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Evidence and personal context ({packet.body.evidence?.length ?? 0})</summary>
@@ -364,12 +365,12 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
         <ol className="space-y-4 pb-3">{packet.body.evidence?.map((e) => <li id={`evidence-${e.id}`} key={e.id} className="scroll-mt-20 border-t pt-3 text-sm">
           <p className="font-medium">{sourceLabel(e)} · {kindLabel(e.kind)}</p>
           <p className="mt-1 whitespace-pre-wrap">{e.text}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{e.source} · {e.observed_at ? `Observed ${time(e.observed_at)}` : "Observation time unavailable"} · Retrieved {time(e.retrieved_at)} · ID <code>{e.id}</code>{(() => { const m = memoryFor(e); return m && <> · <a href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="underline underline-offset-2">memory revision {m.revision}</a></>; })()}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{e.source} · {e.observed_at ? `Observed ${time(e.observed_at)}` : "Observation time unavailable"} · Retrieved {time(e.retrieved_at)} · ID <code>{e.id}</code>{(() => { const m = memoryFor(e); return m && <> · <Link href={`#memory-${m.id}`} onClick={openDetails("brief-memories")} className="underline underline-offset-2">memory revision {m.revision}</Link></>; })()}</p>
         </li>)}</ol>
       </details>}
       {!!memories.length && <details id="brief-memories" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Your saved memories in this packet ({memories.length})</summary>
-        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief. <a href="/morning/memories" className="text-primary hover:underline">Review or correct saved memories →</a></p>
+        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief. <Link href="/morning/memories" className="text-primary hover:underline">Review or correct saved memories →</Link></p>
         <ol className="space-y-4 pb-3">{memories.map((m) => <li id={`memory-${m.id}`} key={m.id} className="scroll-mt-20 border-t pt-3 text-sm">
           {m.redacted_at ? <p className="text-muted-foreground">Removed memory · revision {m.revision}</p> : <>
             <p className="font-medium">{memoryMeta(m)}</p>

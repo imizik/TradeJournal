@@ -18,6 +18,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
+from app.engine import market_http
 
 from app.engine.chart_timing import measured, measured_lock
 from app.engine import alpaca, chart_rvol
@@ -185,7 +186,7 @@ class ChartHistory:
         self._calls.append(now)
         try:
             with measured("history_provider"):
-                response = httpx.get(f"{alpaca.DATA_URL}/v2/stocks/{quote(symbol, safe='')}/bars", params=params,
+                response = market_http.get(f"{alpaca.DATA_URL}/v2/stocks/{quote(symbol, safe='')}/bars", params=params,
                                      headers={"APCA-API-KEY-ID": alpaca.ALPACA_API_KEY,
                                               "APCA-API-SECRET-KEY": alpaca.ALPACA_API_SECRET},
                                      timeout=max(0.05, min(10, deadline - now)))
