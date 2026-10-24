@@ -184,6 +184,9 @@ export type ResearchJob = {
   input: { question?: string; symbols?: string[]; from_investigation?: string; investigation_id?: string };
   attempts: number; error: string | null; cost_usd: number | null; investigation_id: string | null;
   created_at: string; next_attempt_at?: string; finished_at: string | null;
+  /** Set when a job finishes done: was it material, and what happened to its phone ping. */
+  notify?: { material_change: boolean; material_reason: string; status: "sent" | "sending" | "skipped" | "failed";
+    reason?: string; error?: string } | null;
 };
 export type ResearchJobs = { jobs: ResearchJob[]; queue_enabled: boolean; daily_budget_usd: number; spent_today_usd: number };
 export const ACTIVE_JOB = new Set<ResearchJob["status"]>(["queued", "running"]);

@@ -12,6 +12,27 @@ const TONE: Record<ResearchJob["status"], string> = {
   failed: "bg-rose-500/10 text-rose-300", cancelled: "bg-muted text-muted-foreground",
 };
 
+const PING: Record<NonNullable<ResearchJob["notify"]>["status"], string> = {
+  sent: "phone ping sent", sending: "phone ping sending", skipped: "no phone ping", failed: "phone ping failed",
+};
+
+/** A finished job's materiality and what happened to its phone ping. Read-only. */
+export function JobMateriality({ job }: { job: ResearchJob }) {
+  const note = job.notify;
+  if (!note) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+      {note.material_change
+        ? <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300" title={note.material_reason}>Material · {note.material_reason}</span>
+        : <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">Not material</span>}
+      {note.material_change && (
+        <span className={cn("text-muted-foreground", note.status === "failed" && "text-rose-300")}
+          title={note.error ?? note.reason}>{PING[note.status]}{note.status === "skipped" && note.reason ? ` (${note.reason})` : ""}</span>
+      )}
+    </span>
+  );
+}
+
 /** "Research deeper" for one saved investigation: queue a background research job from it and follow its status.
  * Renders nothing unless the research queue is enabled. */
 export default function ResearchDeeper({ investigationId, symbol, topic, onFinished, onOpenResult, onDiscuss }: {
@@ -105,6 +126,7 @@ export default function ResearchDeeper({ investigationId, symbol, topic, onFinis
               <span className="min-w-0 truncate text-muted-foreground" title={job.input.question}>{job.input.question}</span>
               {job.cost_usd !== null && <span className="tabular-nums text-muted-foreground">${job.cost_usd.toFixed(2)}</span>}
               {job.status === "failed" && job.error && <span className="text-rose-300">{job.error}</span>}
+              <JobMateriality job={job} />
               {job.status === "done" && job.investigation_id && (
                 <>
                   <button type="button" onClick={() => onOpenResult(job.investigation_id!)} className="min-h-11 rounded border px-2 py-0.5 hover:text-foreground sm:min-h-0">Open result</button>

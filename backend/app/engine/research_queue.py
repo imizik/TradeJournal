@@ -21,7 +21,9 @@ Two optional triggers enqueue work, both off by default:
   reassessment's own output) not updated and not reassessed in N hours gets one
   ``reassess`` job, at most one a day.
 
-Nothing here notifies, alerts, trades or writes plans, watches or memories.
+With ``RESEARCH_NOTIFY_ENABLED=true`` (default off), a job that finds something
+material about an open investigation sends one phone ping (``plan_notification``);
+nothing else here notifies, and nothing trades or writes plans, watches or memories.
 """
 from __future__ import annotations
 
@@ -69,6 +71,8 @@ class QueueSettings:
     reassess_after_hours: int  # 0 = off
     idle_s: float = 15.0
     trigger_every_s: float = 300.0
+    notify_enabled: bool = False  # RESEARCH_NOTIFY_ENABLED: a phone ping for a material result
+    notify_daily_max: int = 3     # RESEARCH_NOTIFY_DAILY_MAX: pings per ET day, all jobs together
 
 
 def _number(name: str, default, cast):
@@ -89,6 +93,8 @@ def settings() -> QueueSettings:
         daily_budget_usd=_number("RESEARCH_DAILY_BUDGET_USD", 2.0, float),
         radar_trigger=os.environ.get("RESEARCH_RADAR_TRIGGER") == "true",
         reassess_after_hours=_number("RESEARCH_REASSESS_AFTER_HOURS", 0, int),
+        notify_enabled=os.environ.get("RESEARCH_NOTIFY_ENABLED") == "true",
+        notify_daily_max=_number("RESEARCH_NOTIFY_DAILY_MAX", 3, int),
     )
 
 
@@ -126,7 +132,8 @@ def view(job: ResearchJob) -> dict:
             "investigation_id": str(job.investigation_id) if job.investigation_id else None,
             "created_at": job.created_at.isoformat(), "next_attempt_at": job.next_attempt_at.isoformat(),
             "started_at": job.started_at and job.started_at.isoformat(),
-            "finished_at": job.finished_at and job.finished_at.isoformat()}
+            "finished_at": job.finished_at and job.finished_at.isoformat(),
+            "notify": json.loads(job.notify_json) if job.notify_json else None}
 
 
 # --------------------------------------------------------------------------- enqueue / list / cancel
@@ -420,6 +427,90 @@ def assignment(job: dict) -> tuple[str, list[str], str]:
     return question, [saved["symbol"]] if saved.get("symbol") else [], f"Reassess: {saved['title']}"[:120]
 
 
+# --------------------------------------------------------------------------- material results: one phone ping
+
+def linked_investigation(job: dict) -> str | None:
+    """The saved investigation a job was asked about: a reassessment's, or the one "Research deeper" ran from."""
+    data = job["input"]
+    return data.get("investigation_id") if job["kind"] == "reassess" else data.get("from_investigation")
+
+
+def _pinged(db: Session) -> list[dict]:
+    """Pings attempted today (ET), including one cut off mid-send."""
+    since = _utcnow() - timedelta(days=2)
+    notes = [json.loads(job.notify_json) for job in db.exec(select(ResearchJob).where(
+        col(ResearchJob.finished_at) >= since, col(ResearchJob.notify_json).is_not(None)))]
+    return [n for n in notes if n.get("day") == _today() and n.get("status") in ("sent", "sending")]
+
+
+def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Session | None = None) -> dict | None:
+    """Record a finished job's materiality and decide its ping. Returns what to send, or None (the reason is recorded).
+
+    A ping needs: the flag on, ``material_change`` true, a link to an investigation that is still open, clean server
+    checks (no unseen citation, no source after the evidence time), no ping yet for this job, none today for that
+    investigation, and fewer than ``notify_daily_max`` today. It is reserved as ``sending`` before it is sent, so a crash
+    can never send it twice."""
+    from app.engine import copilot_investigations as inv
+    with _session(session) as db:
+        job = _job(db, job_id)
+        if job.status != "done" or job.notify_json:
+            return None
+        current = view(job)
+        assessment = record.get("assessment") or {}
+        material = assessment.get("material_change") is True
+        reason = " ".join(str(assessment.get("material_reason") or "").split())[:140]
+        linked = linked_investigation(current)
+        note = {"material_change": material, "material_reason": reason if material else "", "day": _today(),
+                "at": _utcnow().isoformat(timespec="seconds"), "investigation_id": linked}
+        checks = record.get("checks") or {}
+        skip = None
+        if not material:
+            skip = "not material"
+        elif not cfg.notify_enabled:
+            skip = "notifications are off"
+        else:
+            saved = None
+            if linked:
+                try:
+                    saved = inv.get(linked, session=db)
+                except inv.InvestigationError:
+                    saved = None
+            pinged = _pinged(db)
+            if saved is None or saved.get("status") != "open":
+                skip = "not linked to an open investigation"
+            elif checks.get("unseen_citations") or checks.get("after_evidence_time"):
+                skip = "server checks not clean"
+            elif any(n.get("investigation_id") == linked for n in pinged):
+                skip = "already pinged for this investigation today"
+            elif len(pinged) >= cfg.notify_daily_max:
+                skip = "daily ping limit reached"
+        if skip:
+            note.update(status="skipped", reason=skip)
+        else:
+            note.update(status="sending")
+        job.notify_json = json.dumps(note)
+        db.add(job)
+        db.commit()
+        if skip:
+            return None
+        symbols = current["input"].get("symbols") or ([saved["symbol"]] if saved.get("symbol") else [])
+        subject = f"Research: {symbols[0]} – {reason}" if symbols else f"Research – {reason}"
+        summary = str(assessment.get("summary") or "")
+        return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={linked}"}
+
+
+def record_delivery(job_id: str, *, status: str, message_id: str | None = None, error: str | None = None,
+                    session: Session | None = None) -> dict:
+    with _session(session) as db:
+        job = _job(db, job_id)
+        note = json.loads(job.notify_json or "{}")
+        note.update(status=status, **({"message_id": message_id} if message_id else {}), **({"error": error[:300]} if error else {}))
+        job.notify_json = json.dumps(note)
+        db.add(job)
+        db.commit()
+        return view(job)
+
+
 # --------------------------------------------------------------------------- the loop
 
 class QueueRunner:
@@ -490,8 +581,29 @@ class QueueRunner:
             return await self._outcome(job["id"], error={"code": "internal", "message": type(exc).__name__})
         error = record.get("error") or (None if record.get("saved_id") else
                                         {"code": "save_failed", "message": record.get("save_error") or "not saved"})
-        return await self._outcome(job["id"], cost_usd=(record.get("metrics") or {}).get("cost_usd"),
-                                   investigation_id=record.get("saved_id"), error=error)
+        finished = await self._outcome(job["id"], cost_usd=(record.get("metrics") or {}).get("cost_usd"),
+                                       investigation_id=record.get("saved_id"), error=error)
+        if finished["status"] == "done":
+            finished = await self._notify(finished, record)
+        return finished
+
+    async def _notify(self, job: dict, record: dict) -> dict:
+        """One phone ping for a material result, at most. A failed ping is recorded and never retried; it never fails
+        the job."""
+        from app.engine import ntfy
+        try:
+            push = await asyncio.to_thread(plan_notification, job["id"], record, self.cfg)
+            if push is None:
+                return await asyncio.to_thread(get, job["id"])
+            try:
+                message_id = await asyncio.to_thread(ntfy.publish, push["title"], push["message"], path=push["path"],
+                                                     direct_click=True)
+            except Exception as exc:  # noqa: BLE001 - ntfy refused or was unreachable: recorded, the job stays done
+                return await asyncio.to_thread(record_delivery, job["id"], status="failed", error=f"{type(exc).__name__}: {exc}")
+            return await asyncio.to_thread(record_delivery, job["id"], status="sent", message_id=message_id)
+        except Exception:  # noqa: BLE001 - never let a ping problem fail a finished job
+            log.exception("Research job ping failed")
+            return await asyncio.to_thread(get, job["id"])
 
     async def loop(self) -> None:
         import time

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { alertText, type LevelAlert } from "@/lib/alerts";
 import { listAlerts, listResearchJobs, type ResearchJob } from "@/lib/copilot";
+import { JobMateriality } from "./ResearchDeeper";
 
 const at = (seconds: number) => new Date(seconds * 1000).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const day = (iso: string) => new Date(`${iso}Z`).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
@@ -40,6 +41,7 @@ export default function LinkedActivity({ investigationId, refreshKey }: { invest
             <span className="min-w-0 truncate text-muted-foreground" title={job.input.question}>{job.input.question}</span>
             {job.status === "queued" && job.next_attempt_at && <span className="text-muted-foreground">due {day(job.next_attempt_at)}</span>}
             {job.cost_usd !== null && <span className="tabular-nums text-muted-foreground">${job.cost_usd.toFixed(2)}</span>}
+            <JobMateriality job={job} />
           </li>
         ))}
       </ul>
