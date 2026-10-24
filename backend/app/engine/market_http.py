@@ -1,4 +1,4 @@
-"""Connection reuse for chart market-data reads; callers still own budgets,
+"""Connection reuse for market-data reads (charts, Tradier quotes); callers still own budgets,
 cache keys, timeouts, retries and credentials. No response cache or cookie reuse."""
 import atexit
 import threading
@@ -9,6 +9,14 @@ _client: httpx.Client | None = None
 
 
 def get(url: str, **kwargs) -> httpx.Response:
+    return _send("GET", url, **kwargs)
+
+
+def post(url: str, **kwargs) -> httpx.Response:
+    return _send("POST", url, **kwargs)
+
+
+def _send(method: str, url: str, **kwargs) -> httpx.Response:
     global _client
     with _lock:
         if _client is None:
@@ -17,7 +25,7 @@ def get(url: str, **kwargs) -> httpx.Response:
     # Explicit requests avoid persisting provider cookies between requests.
     headers = client.headers.copy()  # retain compression / keep-alive defaults
     headers.update(kwargs.pop("headers", None) or {})
-    request = httpx.Request("GET", url, params=kwargs.pop("params", None), headers=headers)
+    request = httpx.Request(method, url, params=kwargs.pop("params", None), data=kwargs.pop("data", None), headers=headers)
     timeout = httpx.Timeout(kwargs.pop("timeout", 10))
     request.extensions["timeout"] = timeout.as_dict()
     return client.send(request, **kwargs)

@@ -2375,6 +2375,9 @@ retains the original check time and explicitly says prices/journal context are
 refreshing or may be outdated if refresh fails. Provider timestamps are never
 advanced by restoring a snapshot. No data cache is persisted to localStorage;
 shared settings still reconcile through their existing revision/merge protocol.
+When this browser has a saved copy, candles load from it without waiting for
+the server's settings; a server copy that changes the request loads again.
+Saving still waits for the server's revision.
 A new route link applies its own symbol and historical focus.
 
 On a workspace without a recent snapshot, the client requests its selected
@@ -2386,4 +2389,7 @@ A late first-candle response cannot replace the full answer. The ordinary full
 15-second refresh and hidden-tab suppression remain; provider budgets, cooldowns,
 shared locks and history warmup are unchanged. Tradier chart and Alpaca history
 reads reuse a bounded HTTP connection pool without reusing request credentials
-or cookies. Existing server caches still coalesce identical provider reads.
+or cookies; Tradier quote reads share the same pool. Existing server caches
+still coalesce identical provider reads. `/charts/workspace` and `/charts/history`
+serialize their JSON in the request's worker thread instead of FastAPI's
+event-loop encoder, so a refresh does not stall other requests while it is written.

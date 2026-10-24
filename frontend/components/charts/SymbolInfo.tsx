@@ -1,6 +1,7 @@
 "use client";
 
 import { useAppAccess } from "@/components/AccessProvider";
+import AskCopilot from "@/components/copilot/AskCopilot";
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
@@ -200,6 +201,7 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
         {radarGroup && view.tab === "Overview" && peers}
+        {owner && view.tab === "Overview" && <AskCopilot symbol={symbol} className="mb-2 inline-flex min-h-11 items-center rounded border border-slate-700 px-3 text-xs text-slate-200 hover:bg-slate-800 lg:min-h-0 lg:py-1" />}
         {owner && view.tab === "Overview" && <div id={`${id}-holding`}><HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={onPeers ?? (() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" }))} /></div>}
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}

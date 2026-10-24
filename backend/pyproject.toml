@@ -53,6 +53,13 @@ dev = [
     # CI resolve the same rule set. Bump deliberately, in its own commit.
     "ruff==0.16.7",
 ]
+# Copilot Lab's plan backend (COPILOT_BACKEND=plan, docs/copilot-lab.md): the
+# Claude Agent SDK runs the lab's read-only turn on the owner's Claude plan.
+# Optional because the wheel bundles a ~270 MB Claude Code binary that CI and
+# production do not need (the lab is off there and its tests stub the SDK).
+copilot-plan = [
+    "claude-agent-sdk==0.2.174",
+]
 
 [tool.pytest.ini_options]
 # Scope collection to tests/. Without this pytest walks scripts/, where some

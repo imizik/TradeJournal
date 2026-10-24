@@ -289,6 +289,18 @@ async def _maybe_start_jo_morning(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+async def _maybe_start_research_queue(app_: FastAPI):
+    """Copilot Lab's background research queue; off unless RESEARCH_QUEUE_ENABLED=true."""
+    app_.state.research_queue = None
+    if os.environ.get("RESEARCH_QUEUE_ENABLED") != "true" or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine import research_queue
+    cfg = research_queue.settings()
+    runner = research_queue.QueueRunner(cfg)
+    app_.state.research_queue = runner
+    return asyncio.create_task(runner.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -314,11 +326,15 @@ async def lifespan(_app: FastAPI):
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
     jo_morning = await _maybe_start_jo_morning(_app)
+    research = await _maybe_start_research_queue(_app)
     try:
         yield
     finally:
         if jo_morning is not None:
             jo_morning.cancel()
+        if research is not None:
+            research.cancel()  # the runner stops its attempt and puts the job back before it ends
+            await asyncio.wait({research}, timeout=10)
         if market_watch is not None:
             market_watch.cancel()
         if radar is not None:
@@ -411,6 +427,10 @@ app.include_router(jo_briefing.router, prefix="/jo", tags=["personal Jo"])
 app.include_router(conditional_plans_router.router, prefix="/jo/conditional-plans", tags=["personal Jo"])
 app.include_router(market_reads_router.router, prefix="/jo/market-reads", tags=["personal Jo"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
+from app.routers import copilot as copilot_router  # owner-only lab; handlers refuse unless COPILOT_ENABLED=true
+app.include_router(copilot_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import research_jobs as research_jobs_router  # owner-only research queue; runner off by default
+app.include_router(research_jobs_router.router, prefix="/copilot/research-jobs", tags=["copilot lab"])
 
 # Inspect the finalized route catalog; permission checks precede all handlers.
 app.add_middleware(AccessMiddleware, routes=app.router.routes)

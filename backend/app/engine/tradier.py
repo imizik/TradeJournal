@@ -36,6 +36,8 @@ from typing import Any, Optional
 import httpx
 from dotenv import load_dotenv
 
+from app.engine import market_http
+
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 log = logging.getLogger(__name__)
@@ -202,7 +204,7 @@ def _post(path: str, payload: dict[str, str], *, attempts: int = MAX_ATTEMPTS) -
     last_error: Optional[Exception] = None
     for attempt in range(1, attempts + 1):
         try:
-            response = httpx.post(url, data=payload, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+            response = market_http.post(url, data=payload, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
         except httpx.HTTPError as exc:
             last_error = exc
             log.warning("Tradier transport error on %s (attempt %d): %s", path, attempt, exc)
