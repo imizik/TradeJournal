@@ -416,13 +416,18 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
     is "Research: SYMBOL – reason", and a tap opens the linked investigation
     in the lab (`/copilot-lab?investigation=…`).
   - It only sends when every check passes:
-    - the flag is on and the result is material;
+    - the flag is on, and the result is material with a reason;
     - the job is linked to an investigation that is still open (a
       reassessment's, or the one "Research deeper" ran from);
-    - the server checks are clean: no unseen citation and no source after the
-      evidence time;
+    - it cites at least one source, and the server checks are clean: no
+      unseen citation, no evidence reference to a tool the job never called,
+      and no source after the evidence time;
     - there has been no ping yet for that job, none today (ET) for that
-      investigation, and fewer than `RESEARCH_NOTIFY_DAILY_MAX` today.
+      investigation, and fewer than `RESEARCH_NOTIFY_DAILY_MAX` today. A
+      failed ping counts toward both limits, since ntfy may still have
+      delivered it.
+  - Control and bidirectional characters are stripped from the reason, and
+    the link is built from the investigation record's own id.
   - The ping is recorded as `sending` before it goes out, so a crash never
     sends it twice.
   - The job records `sent`, `failed` (never retried, and the job stays done)

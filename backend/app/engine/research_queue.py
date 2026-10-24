@@ -32,6 +32,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -435,21 +436,33 @@ def linked_investigation(job: dict) -> str | None:
     return data.get("investigation_id") if job["kind"] == "reassess" else data.get("from_investigation")
 
 
+# Control characters and bidirectional overrides never reach a notification title.
+_UNSAFE = re.compile("[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+
+
+def _clean(text) -> str:
+    return " ".join(_UNSAFE.sub(" ", str(text or "")).split())
+
+
 def _pinged(db: Session) -> list[dict]:
-    """Pings attempted today (ET), including one cut off mid-send."""
+    """Pings attempted today (ET): sent, cut off mid-send, or failed. A "failed" push may still have been delivered
+    (say, ntfy's reply timed out), so it counts too: never a second ping that day for it."""
     since = _utcnow() - timedelta(days=2)
     notes = [json.loads(job.notify_json) for job in db.exec(select(ResearchJob).where(
         col(ResearchJob.finished_at) >= since, col(ResearchJob.notify_json).is_not(None)))]
-    return [n for n in notes if n.get("day") == _today() and n.get("status") in ("sent", "sending")]
+    return [n for n in notes if n.get("day") == _today() and n.get("status") in ("sent", "sending", "failed")]
 
 
 def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Session | None = None) -> dict | None:
     """Record a finished job's materiality and decide its ping. Returns what to send, or None (the reason is recorded).
 
-    A ping needs: the flag on, ``material_change`` true, a link to an investigation that is still open, clean server
-    checks (no unseen citation, no source after the evidence time), no ping yet for this job, none today for that
-    investigation, and fewer than ``notify_daily_max`` today. It is reserved as ``sending`` before it is sent, so a crash
-    can never send it twice."""
+    A ping needs: the flag on, ``material_change`` true with a reason, a link to an investigation that is still open,
+    at least one citation and clean server checks (no unseen citation, no evidence reference to a tool the job never
+    called, no source after the evidence time), no ping yet for this job, none today for that investigation, and fewer
+    than ``notify_daily_max`` today. It is reserved as ``sending`` before it is sent, so a crash can never send it twice.
+
+    The check and the reservation are not one atomic step: this relies on the queue's single runner (one job at a
+    time, one runner per API process)."""
     from app.engine import copilot_investigations as inv
     with _session(session) as db:
         job = _job(db, job_id)
@@ -458,7 +471,7 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
         current = view(job)
         assessment = record.get("assessment") or {}
         material = assessment.get("material_change") is True
-        reason = " ".join(str(assessment.get("material_reason") or "").split())[:140]
+        reason = _clean(assessment.get("material_reason"))[:140]
         linked = linked_investigation(current)
         note = {"material_change": material, "material_reason": reason if material else "", "day": _today(),
                 "at": _utcnow().isoformat(timespec="seconds"), "investigation_id": linked}
@@ -466,6 +479,8 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
         skip = None
         if not material:
             skip = "not material"
+        elif not reason:
+            skip = "no reason"
         elif not cfg.notify_enabled:
             skip = "notifications are off"
         else:
@@ -476,11 +491,15 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
                 except inv.InvestigationError:
                     saved = None
             pinged = _pinged(db)
+            if saved is not None:
+                note["investigation_id"] = saved["id"]  # the record's own id, never the job's input text
             if saved is None or saved.get("status") != "open":
                 skip = "not linked to an open investigation"
-            elif checks.get("unseen_citations") or checks.get("after_evidence_time"):
+            elif not assessment.get("citations"):
+                skip = "no citation"
+            elif checks.get("unseen_citations") or checks.get("unread_evidence_refs") or checks.get("after_evidence_time"):
                 skip = "server checks not clean"
-            elif any(n.get("investigation_id") == linked for n in pinged):
+            elif any(n.get("investigation_id") == saved["id"] for n in pinged):
                 skip = "already pinged for this investigation today"
             elif len(pinged) >= cfg.notify_daily_max:
                 skip = "daily ping limit reached"
@@ -495,8 +514,8 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
             return None
         symbols = current["input"].get("symbols") or ([saved["symbol"]] if saved.get("symbol") else [])
         subject = f"Research: {symbols[0]} – {reason}" if symbols else f"Research – {reason}"
-        summary = str(assessment.get("summary") or "")
-        return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={linked}"}
+        summary = _clean(assessment.get("summary"))
+        return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={saved['id']}"}
 
 
 def record_delivery(job_id: str, *, status: str, message_id: str | None = None, error: str | None = None,
