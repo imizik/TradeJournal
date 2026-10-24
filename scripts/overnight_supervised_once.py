@@ -146,7 +146,8 @@ def verify(output, *, require_isolation):
         until = time.monotonic() + 5
         while True:
             try:
-                store_for(recovery).recover()
+                with store_for(recovery)._lock("worker.lock", nonblocking=True):
+                    pass
                 break
             except ValueError as exc:
                 if "already active" not in str(exc) or time.monotonic() >= until:
@@ -217,6 +218,16 @@ def verify(output, *, require_isolation):
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--pause-worker":
         paused_worker(Path(sys.argv[2]), Path(sys.argv[3]))
+    elif len(sys.argv) == 2 and sys.argv[1] == "--retention-probe":
+        sys.path.insert(0, str(REPO / "backend"))
+        from scripts.overnight_trial import initialize
+        root = Path(tempfile.gettempdir()).resolve() / "termination-probe"
+        receipt = initialize(root)
+        if receipt["state"] != "queued":
+            raise RuntimeError("retention probe initialization failed")
+        print("intentional outer-kill probe: queued receipt/store persisted", file=sys.stderr, flush=True)
+        write(root / "ready.json", {"run_id": receipt["research"]["run_id"]})
+        signal.pause()  # The Ubuntu supervisor kills the entire container.
     else:
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("--output", type=Path, required=True)
