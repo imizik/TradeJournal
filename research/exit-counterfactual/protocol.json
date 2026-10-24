@@ -1,0 +1,59 @@
+{
+  "protocol_id": "exit-counterfactual-20261024-v1",
+  "registered": "2026-10-24",
+  "registered_before": "any counterfactual outcome was computed; the October 21 behavior audit's associations were already known and motivated the rules",
+  "question": "Had each live position alert's condition closed the whole remaining position, would the October 2025-26 long option trades have kept more money than the actual exits, and does the alert's timing beat an exit at a random minute of the same trade?",
+  "population": {
+    "trades": "closed or expired long option trades (buy_to_open entries, sell_to_close exits) opened 2025-07-10 to 2026-10-19, the behavior audit's dataset",
+    "excluded_and_counted": [
+      "holding window longer than 10 calendar days (path metrics' limit)",
+      "no cached Alpaca option minute bars covering the trade window",
+      "fills that do not allocate first-in-first-out"
+    ],
+    "not_extracted": "trades opened after 2026-10-19 are kept for the prospective evaluation and are not read by this run"
+  },
+  "position_accounting": "actual fills applied in time order, first in first out; at a rule's trigger every remaining contract is sold at the exit price and later fills (adds or exits) are dropped; return on premium divides by the premium of the entries made before the trigger",
+  "marks": "position gain = realized + open contracts x bar close x 100 - entry premium, on regular-session 1-minute trade bars; a bar holding a fill is not judged (minute fills cannot be ordered within their bar), as in trade_path.option_position_path",
+  "execution": {
+    "decision": "at a bar's close",
+    "fill": "open of the next bar that exists within 5 minutes, before the actual final exit; otherwise the rule does not apply to that trade and the actual exit stands (counted)",
+    "cost_base": "sell at the bar open less 3% of price, minimum $0.01 per contract share (half of an assumed 6% bid/ask spread; historical option quotes are not available)",
+    "cost_stress": "the same at 9% of price"
+  },
+  "rules": {
+    "giveback": "the live alert's thresholds: armed at a bar close with gain >= 10% of entry premium and >= $50; fires at the first later bar close with gain <= 3%",
+    "hold_hour": "the live alert's clock: the first bar close at least 60 regular-session minutes after the first entry (an entry before 09:30 counts from 09:30), on the entry day only",
+    "expiry_day": "the live first expiry alert: the first bar close at or after 90 minutes before the close on the expiration date (14:30 ET; 11:30 ET on 13:00 closes)"
+  },
+  "tests": 3,
+  "outcomes": {
+    "primary": "total dollar difference, counterfactual minus actual, over every trade in the population (untouched trades contribute 0)",
+    "secondary": [
+      "mean difference in return on premium (percentage points) over the trades a rule touched",
+      "random-exit comparison: for each touched trade, 200 exits at uniformly random judged minutes between the first judged minute and the actual final exit (seed 20261024); timing value = rule difference minus the random exits' mean difference on the same trades"
+    ],
+    "uncertainty": "2,000 bootstrap resamples by trading day of entry (seed 20261024); Bonferroni across the 3 rules: 98.33% two-sided intervals for primary decisions"
+  },
+  "periods": {
+    "exploration": "opened 2025-07-10 to 2026-03-31",
+    "check": "opened 2026-04-01 to 2026-10-19",
+    "independence": "neither period is untouched: the rules' thresholds came from the audit, which read both. A positive check half is consistency, not confirmation"
+  },
+  "decisions": {
+    "supported_saving": "primary 98.33% interval above 0, each period's dollar difference above 0, each period's return-on-premium difference above 0, and still above 0 at the stress cost",
+    "timing_informative": "supported_saving and the timing value's 98.33% interval above 0",
+    "outcomes": {
+      "supported_saving and timing_informative": "eligible for prospective testing as an exit trigger",
+      "supported_saving only": "investigate further: the money is in exiting sooner, not in the alert's moment",
+      "interval includes 0 or periods disagree": "reject as a demonstrated saving; the alert may still help as a reminder, which this cannot test",
+      "primary interval below 0": "reject: following the rule mechanically would have cost money"
+    }
+  },
+  "limits": [
+    "trade prints, not bid/ask midpoints; the live alert marks at the midpoint",
+    "a mechanical exit is not what an alert does: the alert asks for a decision, so these are bounds on full compliance, not the alert's effect",
+    "dollars are dominated by position size; the return-on-premium difference is the size-neutral check",
+    "no counterfactual re-entry: after a rule exit the trade is over"
+  ],
+  "prospective": "the same code and constants, frozen at this commit, applied to trades opened from 2026-10-20; reviewed once at 30 touched trades for the give-back rule or 2027-01-29, whichever comes first, with no change of thresholds before then"
+}
