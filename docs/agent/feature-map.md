@@ -244,6 +244,10 @@ see the [prototype notes](../level2-synthetic-prototype.md) and
   `backend/scripts/research_studio_prospective.py` and its explicit installer
   `deploy/research_studio_prospective.py` own it. Future results stay separate
   from the historical Studio UI and never enter Factory gates.
+- `overnight_trial.py` — finite invented-data rehearsal around the existing R2
+  store, durable run receipt and consolidated Markdown report; explicit bounded
+  retry, no agents/providers/schedules. [Ownership, host plan and activation
+  boundary](../overnight-engineering.md); `tests/test_overnight_trial.py`.
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
