@@ -191,13 +191,15 @@ def assert_research_job_ready(release):
     pinned = json.loads((release / "release.json").read_text())["claude_code"]
     version = control.run(release / "bin/claude", "--version", capture_output=True, text=True).stdout.strip()
     assert version.startswith(f"{pinned} "), version
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(control.STATE / "claude"), "DATABASE_URL": URL,
+    # runuser is in /usr/sbin on Ubuntu, and subprocess resolves it on this env's PATH.
+    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": str(control.STATE / "claude"), "DATABASE_URL": URL,
            "TJ_CLAUDE_BIN": str(release / "bin/claude"), "TJ_CLAUDE_CONFIG_DIR": str(control.STATE / "claude"),
            "CLAUDE_CODE_OAUTH_TOKEN": "ci-dummy-plan-token", "ANTHROPIC_API_KEY": "ci-dummy-not-a-key",
            "PYTHONDONTWRITEBYTECODE": "1"}
-    out = control.run("runuser", "-u", "tradejournal", "--", release / "backend/.venv/bin/python", "-c", RESEARCH_CHECK,
-                      cwd=release / "backend", env=env, capture_output=True, text=True).stdout
-    assert "research job ready" in out, out
+    check = subprocess.run(["runuser", "-u", "tradejournal", "--", str(release / "backend/.venv/bin/python"), "-c", RESEARCH_CHECK],
+                           cwd=release / "backend", env=env, capture_output=True, text=True, check=False)
+    assert check.returncode == 0 and "research job ready" in check.stdout, (check.stdout + check.stderr)[-3000:]
+    print(check.stdout.strip())
 
 
 def prepare_moomoo_smoke():

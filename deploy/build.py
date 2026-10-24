@@ -70,8 +70,8 @@ def main() -> None:
         release.mkdir(mode=0o755)
         shutil.copytree(source / "backend", release / "backend")
         shutil.copytree(source / "deploy", release / "deploy")
-        # The copilot-plan extra is the Claude Agent SDK for research jobs. Its PyPI wheels bundle a ~270 MB Claude
-        # Code binary; built from its sdist it is pure Python, and it runs the release's own bin/claude instead.
+        # The copilot-plan extra is the Claude Agent SDK for research jobs. Its ~126 MB PyPI wheels bundle a ~270 MB
+        # Claude Code binary; built from its sdist it is pure Python, and it runs the release's own bin/claude instead.
         run(sys.executable, "-m", "pip", "wheel", f"{source / 'backend'}[copilot-plan]", "--no-binary", "claude-agent-sdk",
             "--wheel-dir", release / "wheels")
         sdk_wheels = list((release / "wheels").glob("claude_agent_sdk-*.whl"))

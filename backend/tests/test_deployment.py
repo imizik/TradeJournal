@@ -1275,7 +1275,8 @@ def test_market_read_flag_reaches_the_config_from_systemd(alerts, monkeypatch, t
 
 def test_research_jobs_ship_a_pure_agent_sdk_that_runs_the_release_claude_code():
     """Research jobs (docs/copilot-lab.md § Research queue) use claude-agent-sdk from the copilot-plan extra. The
-    release builds it from its sdist, so no second ~270 MB Claude Code rides along, and installs the extra."""
+    release builds it from its sdist, so the ~126 MB PyPI wheel's bundled Claude Code never rides along, and installs
+    the extra."""
     root = Path(__file__).resolve().parents[2]
     build = (root / "deploy/build.py").read_text()
     assert "[copilot-plan]" in build and '"--no-binary", "claude-agent-sdk"' in build and "py3-none-any.whl" in build

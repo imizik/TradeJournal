@@ -331,8 +331,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 ### In production (VPS)
 
 The release carries the SDK: `deploy/build.py` builds the `copilot-plan` extra
-from its sdist, a 164 KB pure-Python wheel instead of the 126 MB PyPI wheel
-with a second Claude Code inside. `deploy/control.py` installs that extra.
+from its sdist, a 164 KB pure-Python wheel instead of the ~126 MB PyPI wheel
+with a second (~270 MB unpacked) Claude Code inside. `deploy/control.py` installs that extra.
 Jobs run the release's own `bin/claude`, the version
 `deploy/claude-code/package.json` pins, which needs to be 2.1.257 or later
 for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
