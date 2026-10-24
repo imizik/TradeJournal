@@ -43,6 +43,9 @@ test.describe("dashboard", () => {
 
     // Active options precede the optional journal summary and all-time performance.
     const main = page.locator("main").first();
+    // The shell arrives first; wait for the initially collapsed journal stream.
+    await expect(main.getByText("Today's Closed P&L", { exact: true })).toBeAttached();
+    await expect(main.getByText("Trading Performance", { exact: true })).toBeAttached();
     const order = await main.evaluate((root) => {
       const text = root.textContent ?? "";
       return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Active Options"), performance: text.indexOf("Trading Performance") };
