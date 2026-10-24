@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // Copilot Lab adversarial cases that need the browser (backend cases: backend/tests/test_copilot_adversarial.py).
 // Every lab route is stubbed, so no model runs and nothing reaches the e2e backend.
@@ -22,12 +22,7 @@ const answer = (text: string) => [
     usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } })}\n\n`,
 ].join("");
 
-// DEFECT, reported not fixed (CopilotLab.tsx is being refactored in another PR): the history builder pairs messages
-// from index 0 in steps of two. After an odd-length transcript, every later pair is (answer, question) and dropped, so
-// the second follow-up is sent without the first one and its answer.
-test("follow-ups on an opened research result keep the earlier follow-up in the history", async ({ page }) => {
-  test.fail(true, "Known defect: odd-length transcripts misalign the history pairs (see the PR report).");
-  const sent: { role: string; content: string }[][] = [];
+async function openResult(page: Page, sent: { role: string; content: string }[][]) {
   await page.addInitScript((id) => window.localStorage.setItem("tradejournal.copilot-lab.current.v2", id), RESULT);
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [result] } }));
@@ -41,11 +36,32 @@ test("follow-ups on an opened research result keep the earlier follow-up in the 
   });
   await page.goto("/copilot-lab");
   await expect(page.getByText("Financing stress, not demand.")).toBeVisible();
-  for (const [i, text] of ["First follow-up?", "Second follow-up?"].entries()) {
-    await page.getByLabel("Message").fill(text);
-    await page.getByRole("button", { name: "Send" }).click();
-    await expect(page.getByText(`Answer ${i + 1}.`)).toBeVisible();
-  }
+}
+
+async function ask(page: Page, text: string, n: number) {
+  await page.getByLabel("Message").fill(text);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(`Answer ${n}.`)).toBeVisible();
+}
+
+// Guards the expected failure below: the same setup reaches the chat route, so that test fails on its history
+// assertion, not on a stub or a renamed control.
+test("a follow-up on an opened research result reaches the chat route", async ({ page }) => {
+  const sent: { role: string; content: string }[][] = [];
+  await openResult(page, sent);
+  await ask(page, "First follow-up?", 1);
+  expect(sent).toEqual([[{ role: "user", content: "First follow-up?" }]]);
+});
+
+// DEFECT, reported not fixed (CopilotLab.tsx is being refactored in another PR): the history builder pairs messages
+// from index 0 in steps of two. After an odd-length transcript, every later pair is (answer, question) and dropped, so
+// the second follow-up is sent without the first one and its answer.
+test("follow-ups on an opened research result keep the earlier follow-up in the history", async ({ page }) => {
+  test.fail(true, "Known defect: odd-length transcripts misalign the history pairs (see the PR report).");
+  const sent: { role: string; content: string }[][] = [];
+  await openResult(page, sent);
+  await ask(page, "First follow-up?", 1);
+  await ask(page, "Second follow-up?", 2);
   expect(sent[1]).toEqual([
     { role: "user", content: "First follow-up?" }, { role: "assistant", content: "Answer 1." },
     { role: "user", content: "Second follow-up?" },

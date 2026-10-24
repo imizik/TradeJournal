@@ -309,9 +309,9 @@ def test_a_false_citation_or_unread_evidence_is_flagged_and_never_pings(plan_env
     job, _ = _queued(FetchSDK(script))
     assert job["status"] == "done" and job["notify"] == {**job["notify"], "status": "skipped", "reason": "server checks not clean"}
     assert pushes == []
-    saved = inv.get(job["investigation_id"])
-    if flag == "unseen_citations":
-        assert saved["findings"]["citations"][0]["title"].endswith("(unverified)")
+    # The citation is marked unverified only when that check tripped, so this also says which check skipped the ping.
+    unverified = inv.get(job["investigation_id"])["findings"]["citations"][0]["title"].endswith("(unverified)")
+    assert unverified is (flag == "unseen_citations")
 
 
 def test_a_citation_whose_fetch_failed_is_flagged_and_never_pings(plan_env, pushes):  # noqa: F811
