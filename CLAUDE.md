@@ -81,9 +81,9 @@ automatic repair and squash merge under the
 [PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge) once
 CI and the review their tier requires pass.
 [User-gated changes](docs/agent/pr-review.md#user-gated-changes) (agent rules,
-CI and verification tooling, deployment, destructive data changes, and
-auth/security) still require the user's approval and merge; never merge or
-enable auto-merge for them. Changes to this policy are user-gated.
+CI and verification tooling, deployment and activation, destructive data
+changes, and auth/security) still require the user's approval and merge; never
+merge or enable auto-merge for them. Changes to this policy are user-gated.
 CI remains enabled for every PR; only call work merge-ready after required checks
 pass on its final head and any required review is complete. Keep owning PRs you
 will merge while CI is pending; if interrupted or blocked, report that state
