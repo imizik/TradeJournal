@@ -974,21 +974,30 @@ test("a tick re-renders only the charts whose candles moved; the clock and the c
       before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
       warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
+  let historyReads = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/backend/charts/history?")) historyReads += 1; });
   await openAt(page, TUESDAY_1032, (url) => currentFixture(url, TUESDAY_1032));
   await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:40");
   const renders = () => page.evaluate(() => Object.fromEntries((window as RenderWindow).__tjRenders!));
   const settled = async () => { await page.waitForTimeout(300); return renders(); };
+  // Loading settles on the paused clock too: a panel whose candles landed after the pause still has its 120 ms
+  // visible-range debounce pending, and the older-history page it asks for renders every chart when it arrives.
+  // Let that run before the baseline, so the clock check below measures the clock alone.
+  await page.clock.runFor(1000);
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:39");
   const before = await settled();
+  const readsBefore = historyReads;
   expect(Object.keys(before).sort()).toEqual(["Panel 2", "Panel 3", "Panel 4", "Panel 5", "main"]);
   const plus = (base: Record<string, number>, changed: string[]) =>
     Object.fromEntries(Object.entries(base).map(([id, count]) => [id, count + (changed.includes(id) ? 1 : 0)]));
 
   // Three seconds pass: every countdown moves, and no chart renders.
   await page.clock.runFor(3000);
-  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:37");
-  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:37");
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:36");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:36");
   expect(await settled()).toEqual(before);
+  expect(historyReads).toBe(readsBefore); // loading had settled: nothing but the clock ran
 
   // Scrubbing the crosshair across the main chart changes the readouts on it and on a linked chart, and renders no chart (UX-G).
   const box = (await page.getByTestId("canvas-main").boundingBox())!;
