@@ -111,3 +111,21 @@ test("a failed job shows its error and stops polling", async ({ page }) => {
   await page.clock.runFor(60_000);
   expect(queue.reads).toBe(reads);
 });
+
+test("a finished job shows whether it was material and what happened to its phone ping", async ({ page }) => {
+  const material = { material_change: true, material_reason: "Bernstein downgrade adds a financing risk", status: "sent" };
+  const queue: Queue = { enabled: true, reads: 0, posted: [], jobs: [
+    job("done", { cost_usd: 0.3, investigation_id: RESULT, finished_at: "2026-10-24T14:20:00Z", notify: material }),
+    job("done", { id: "job-2", investigation_id: RESULT, finished_at: "2026-10-24T13:20:00Z",
+      notify: { material_change: false, material_reason: "", status: "skipped", reason: "not material" } }),
+    job("done", { id: "job-3", investigation_id: RESULT, finished_at: "2026-10-24T12:20:00Z",
+      notify: { ...material, status: "skipped", reason: "daily ping limit reached" } }),
+  ] };
+  await lab(page, queue);
+  const list = page.getByRole("list", { name: "Research jobs" });
+  await expect(list).toContainText("Material · Bernstein downgrade adds a financing risk");
+  await expect(list).toContainText("phone ping sent");
+  await expect(list).toContainText("Not material");
+  await expect(list).toContainText("no phone ping (daily ping limit reached)");
+  await list.screenshot({ path: test.info().outputPath("research-job-materiality.png") });
+});

@@ -379,6 +379,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 | `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
 | `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC (API-equivalent on the plan). It is checked before every attempt. At the cap, queued jobs wait for the next day. |
 | `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
+| `RESEARCH_NOTIFY_ENABLED` | unset (off) | `true`: a job with a material result about an open investigation sends one phone ping (below). |
+| `RESEARCH_NOTIFY_DAILY_MAX` | `3` | Phone pings per New York day, all jobs together. |
 | `RESEARCH_REASSESS_AFTER_HOURS` | `0` (off) | N: each original open investigation that has been neither updated nor reassessed for N hours, and has no job waiting, gets one `reassess` job, at most one a day. A reassessment's own output is never reassessed. |
 
 - **Owner-only routes** (in no assistant grant):
@@ -435,8 +437,36 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   - A finished job links to its saved investigation (`source="research_job"`).
   - A Radar job is titled `Radar: …`, and a reassessment is saved as a new
     investigation titled `Reassess: …`.
-- **Not included:** notifications, ntfy and phone alerts. To try it locally,
-  set `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
+- **Phone pings for material results** (`RESEARCH_NOTIFY_ENABLED`, off by
+  default):
+  - Every assessment carries `material_change`, false by default, and a
+    `material_reason` of at most 140 characters. It is true only when the
+    linked conclusion should change or a new catalyst or risk appeared;
+    routine confirmation is never material.
+  - A finished job sends one ntfy push through `app.engine.ntfy.publish`,
+    using the API's existing `alerts.env` (`NTFY_URL`, `NTFY_TOKEN`). The title
+    is "Research: SYMBOL – reason", and a tap opens the linked investigation
+    in the lab (`/copilot-lab?investigation=…`).
+  - It only sends when every check passes:
+    - the flag is on, and the result is material with a reason;
+    - the job is linked to an investigation that is still open (a
+      reassessment's, or the one "Research deeper" ran from);
+    - it cites at least one source, and the server checks are clean: no
+      unseen citation, no evidence reference to a tool the job never called,
+      and no source after the evidence time;
+    - there has been no ping yet for that job, none today (ET) for that
+      investigation, and fewer than `RESEARCH_NOTIFY_DAILY_MAX` today. A
+      failed ping counts toward both limits, since ntfy may still have
+      delivered it.
+  - Control and bidirectional characters are stripped from the reason, and
+    the link is built from the investigation record's own id.
+  - The ping is recorded as `sending` before it goes out, so a crash never
+    sends it twice.
+  - The job records `sent`, `failed` (never retried, and the job stays done)
+    or `skipped` with the reason. The lab shows the materiality and that
+    status on each finished job.
+- **Not included:** other notifications. To try the queue locally, set
+  `RESEARCH_QUEUE_ENABLED=true` with a local database (plan auth), queue a
   question with the POST route, and read the result in the lab's saved
   investigations.
 
