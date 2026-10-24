@@ -5,8 +5,16 @@ import { useEffect, useState } from "react";
 import { useAppAccess } from "@/components/AccessProvider";
 import { copilotLabHref, getCopilotStatus } from "@/lib/copilot";
 
-/** One status read per page load, shared by every button on it. */
+/** One status read shared by every button; only an answer is kept, so a failed read is retried on the next mount. */
 let enabled: Promise<boolean> | null = null;
+
+function labEnabled(): Promise<boolean> {
+  enabled ??= getCopilotStatus().then(status => status.enabled, () => {
+    enabled = null;
+    return false;
+  });
+  return enabled;
+}
 
 /** "Ask copilot" link into the lab, prefilled. Owner-only, and nothing at all while the lab is off. */
 export default function AskCopilot({ symbol, context, className }: { symbol: string; context?: string; className?: string }) {
@@ -14,9 +22,8 @@ export default function AskCopilot({ symbol, context, className }: { symbol: str
   const [on, setOn] = useState(false);
   useEffect(() => {
     if (!owner) return;
-    enabled ??= getCopilotStatus().then(status => status.enabled, () => false);
     let live = true;
-    void enabled.then(value => { if (live) setOn(value); });
+    void labEnabled().then(value => { if (live) setOn(value); });
     return () => { live = false; };
   }, [owner]);
   if (!owner || !on) return null;

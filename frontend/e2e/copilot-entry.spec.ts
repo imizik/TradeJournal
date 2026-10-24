@@ -23,11 +23,42 @@ test.beforeEach(async ({ request }) => {
   expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBeTruthy();
 });
 
-test("no Ask copilot entry point while the lab is off", async ({ page }) => {
+/** Asserts after the status answer has arrived and React has painted, so an absent link is a real "no". */
+async function noLinkOnceAnswered(page: Page, answered: Promise<unknown>) {
+  await answered;
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await expect(page.getByRole("link", { name: /Ask copilot/ })).toHaveCount(0);
+}
+
+const statusAnswer = (page: Page) => page.waitForResponse((response) => response.url().includes("/copilot/status"));
+
+async function noEntryPoints(page: Page) {
+  let answered = statusAnswer(page);
   await openMuEvent(page);
   await expect(page.getByRole("link", { name: /Open chart · MU/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Ask copilot/ })).toHaveCount(0);
+  await noLinkOnceAnswered(page, answered);
+  answered = statusAnswer(page);
+  await page.goto("/charts?symbol=MU");
+  const info = page.getByRole("region", { name: "Symbol info", exact: true });
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await noLinkOnceAnswered(page, answered);
+}
+
+test("no Ask copilot entry point while the lab is off", async ({ page }) => {
+  await noEntryPoints(page);  // the e2e backend's own answer
 });
+
+for (const [label, reply] of [
+  ["says off", { json: { enabled: false, reason: "Copilot Lab is off." } }],
+  ["fails", { status: 500, json: { detail: "boom" } }],
+] as const) {
+  test(`no Ask copilot entry point in Radar or Charts when status ${label}`, async ({ page }) => {
+    let reads = 0;
+    await page.route("**/copilot/status", (route) => { reads += 1; return route.fulfill(reply); });
+    await noEntryPoints(page);
+    expect(reads).toBeGreaterThan(0);
+  });
+}
 
 test("Radar's Ask copilot opens a new, prefilled, unsent investigation", async ({ page }) => {
   await labOn(page);
