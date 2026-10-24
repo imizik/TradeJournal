@@ -141,6 +141,59 @@ def test_catalog_metadata_and_scopes(harness):
         assert set(tools["pre_trade_check"]["inputSchema"]["required"]) == {"ticker", "side", "instrument", "horizon"}
 
 
+@pytest.mark.parametrize("price_watch,followup", [(False, False), (True, False), (False, True), (True, True)])
+def test_conversation_instructions_match_enabled_commitment_paths(harness, tmp_path, price_watch, followup):
+    """Protect the exposed routing/commitment contract, not model quality or latency."""
+    snapshots, outbox = tmp_path / "conversation-snapshots", tmp_path / "conversation-outbox"
+    snapshots.mkdir()
+    outbox.mkdir()
+    harness.configure(conditional_plan_enabled=price_watch, followup_enabled=followup,
+        market_watch_snapshots_dir=str(snapshots), market_watch_outbox_dir=str(outbox))
+    with TestClient(harness.server().streamable_http_app()) as client:
+        response = client.post(RESOURCE, headers={"Accept": "application/json",
+            "Authorization": "Bearer " + harness.token()}, json={"jsonrpc": "2.0", "id": 1,
+            "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                "clientInfo": {"name": "conversation-contract-test", "version": "1"}}})
+        assert response.status_code == 200, response.text
+        instructions = response.json()["result"]["instructions"]
+        catalog = rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]
+        descriptions = {tool["name"]: " ".join(tool["description"].split()) for tool in catalog}
+
+    # Exploration must not route straight into a recorded verdict or commitment.
+    assert "Exploration is not an actionable verdict" in instructions
+    assert "do not call pre_trade_check, attach_model_verdict or save monitoring just because" in instructions
+    assert "Call pre_trade_check once per idea" not in instructions
+    # The narrower conversational routing cannot remove actual advice safeguards.
+    assert "Actionable entry, wait or pass advice on a specific idea is a check" in instructions
+    assert "attach_model_verdict before you answer" in instructions
+    assert "if a save fails, say the advice is unrecorded" in instructions
+    assert "authorization and freshness remain valid" in instructions
+    assert "Never interleave personal tools between shadow_setup and shadow_decide" in instructions
+    assert "Do not search Gmail as a prerequisite for ordinary discussion" in instructions
+    assert "email-workflow guards still apply" in instructions
+    assert "starts plan development, not activation" in instructions
+    assert "a complete explicit request already supplies approval" in instructions
+    assert ("conditional_plan_create" in descriptions) == price_watch
+    assert ("followup_create" in descriptions) == followup
+    if price_watch:
+        assert "required fresh own check or stock-alert source" in instructions
+        assert "Report pending until conditional_plan_status confirms monitoring" in instructions
+        assert "save only after the owner agrees" in descriptions["conditional_plan_create"]
+        assert "First read a fresh own pre_trade_check or stock_alert" in descriptions["conditional_plan_create"]
+    elif followup:
+        assert "Only periodic personal follow-up reviews are available" in instructions
+        assert "no continuous price monitor is active" in instructions
+    else:
+        assert 'None is active on this connection, so say "I can\'t monitor this"' in instructions
+    if followup:
+        assert "research-only questions need no price watch" in instructions
+        assert "saved receipt and acknowledged worker status" in instructions
+        assert "Agree on the question, review time and expiry" in descriptions["followup_create"]
+        assert "Do not save mere discussion" in descriptions["followup_create"]
+    assert not harness.requests  # Reading instructions/catalog never performs provider research.
+    assert not list(outbox.iterdir())  # Nor does it save a responsibility or notification intent.
+
+
 @pytest.mark.parametrize("change,status", [
     ({"audience": "https://check.example.test/advisor/mcp"}, 401),
     ({"audience": "https://check.example.test/mcp"}, 401),

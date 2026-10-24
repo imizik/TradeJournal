@@ -56,8 +56,10 @@ def register(server, config, ledger, authenticated, scopes, clock):
     async def followup_create(followup: FollowupSave) -> dict[str, Any]:
         """Save a responsibility from the owner's conversation: original request, personal relevance,
         review question, up to three symbols, next review and expiry (within seven days).
-        Use for explicit follow-up requests and continuing ideas the owner asked you to follow.
-        Do not save every mentioned ticker or invent interests. Five active responsibilities max.
+        Use for an owner-approved research responsibility; no price watch or trade verdict is required.
+        Agree on the question, review time and expiry; clarify missing terms, not already approved ones.
+        Preserve original words separately from your interpretation. Do not save mere discussion,
+        every mentioned ticker or inferred interests. Five active responsibilities max.
         Link an own conditional price plan when exact price monitoring was saved separately.
         This schedules evidence reviews during verified market sessions, NOT continuous news/thesis
         monitoring. Say queued until followup_list reports worker acknowledgement. Finish known

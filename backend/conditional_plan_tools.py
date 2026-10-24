@@ -41,7 +41,10 @@ def register(server, config, ledger, authenticated, scopes, clock):
         expires_at: str,
         rationale: Annotated[str, Field(min_length=1, max_length=1000)],
     ) -> dict[str, Any]:
-        """Save an advisory intraday price plan and request deterministic phone follow-through.
+        """Save an owner-approved advisory intraday price plan and request deterministic phone follow-through.
+        A vague 'watch this recovery' starts discussion, not this tool. Propose supported conditions
+        and expiry; save only after the owner agrees. A complete explicit request needs no repeat approval.
+        Research-only questions use followup_create when enabled, without inventing a price trigger.
         First read a fresh own pre_trade_check or stock_alert. Finish ALL pending S1 shadow
         commits before this call. Long: N consecutive completed 1m closes strictly ABOVE
         trigger; one close strictly BELOW invalidation fails it (short reverses both).
