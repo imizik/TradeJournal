@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { DecisionRecord, PositionQuote } from "@/lib/api";
 import { api } from "@/lib/serverApi";
 import type { OpenPositionRow } from "@/lib/dashboard";
@@ -39,7 +40,7 @@ export default async function AttentionPanel({ rows, quotes, quoteError, today, 
 
 function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
   return <li>
-    <a href={item.href} className="flex min-h-11 items-start gap-3 rounded-md px-2 py-2 hover:bg-secondary" data-attention-id={item.id}>
+    <Link href={item.href} className="flex min-h-11 items-start gap-3 rounded-md px-2 py-2 hover:bg-secondary" data-attention-id={item.id}>
       <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
       <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[item.priority]}`} />
       <span className="min-w-0 flex-1">
@@ -48,7 +49,7 @@ function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
       </span>
       <span className={`shrink-0 text-[11px] tabular-nums ${CUE[item.priority]}`}>{item.when}</span>
       <span aria-hidden className="shrink-0 text-xs text-muted-foreground">›</span>
-    </a>
+    </Link>
   </li>;
 }
 

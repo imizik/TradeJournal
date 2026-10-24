@@ -159,7 +159,7 @@ def test_the_default_quote_reader_makes_one_budgeted_tradier_call(monkeypatch):
         return httpx.Response(200, json=QUOTES, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     data, _, issue = SymbolPeers._read_quotes(["AMD", "AVGO"])
     assert issue is None and "quotes" in data
     assert len(calls) == 1 and calls[0][0].endswith("/v1/markets/quotes") and calls[0][1] == {"symbols": "AMD,AVGO"}

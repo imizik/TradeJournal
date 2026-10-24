@@ -69,7 +69,7 @@ def index_feed(monkeypatch):
         else:
             pytest.fail(f"Stock-only provider path requested: {url}")
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     return ChartFeed(), calls
 
 
@@ -104,7 +104,7 @@ def test_index_cache_failure_keeps_original_observation_and_fetch_time(index_fee
     clock[0] += 61
     def denied(*args, **kwargs):
         return httpx.Response(429, json={}, request=httpx.Request("GET", "https://api.tradier.com/v1/markets/timesales"))
-    monkeypatch.setattr(feed_module.httpx, "get", denied)
+    monkeypatch.setattr(feed_module.market_http, "get", denied)
     retained = feed.workspace("VIX", ["4h"], [], "extended", quotes=False)
     assert retained["panels"] == first["panels"]
     assert retained["intraday_as_of"] == first["intraday_as_of"]

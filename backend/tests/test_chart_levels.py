@@ -575,7 +575,7 @@ def test_the_workspace_sends_zones_and_each_intraday_panels_interactions(monkeyp
             payload = {"quotes": {"quote": []}}
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     asked = []
 
     def stored(symbol, day):

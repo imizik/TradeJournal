@@ -68,7 +68,7 @@ def test_every_initial_page_and_retry_request_is_sip_raw_and_safe(history, monke
         status, payload = replies.pop(0)
         return httpx.Response(status, json=payload, headers={"Retry-After": "1"}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     first = history.page("SPY", "1m", "extended", before, limit=2)
     assert first["issue"]["code"] == "rate_limited" and first["continuation"]
     assert not history._path("SPY", day).exists()  # incomplete candidate was never published
@@ -99,7 +99,7 @@ def test_symbol_is_one_cache_and_url_segment_and_current_session_is_rejected(his
         calls.append(url)
         return httpx.Response(200, json={"bars": [], "next_page_token": None}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     history._session(symbol, day, Work((symbol, "1m", "regular", 1, 1), day), module.time.monotonic() + 10, [0])
     assert calls[0].endswith("/BRK%2FB/bars")
 
@@ -121,7 +121,7 @@ def test_symbol_is_one_cache_and_url_segment_and_current_session_is_rejected(his
 def test_empty_success_corruption_and_malformed_are_distinct(history, monkeypatch):
     day = previous_weekday()
     work = Work(("SPY", "1m", "regular", 1, 1), day)
-    monkeypatch.setattr(module.httpx, "get", lambda url, **kw: httpx.Response(200, json={"bars": [], "next_page_token": None}, request=httpx.Request("GET", url)))
+    monkeypatch.setattr(module.market_http, "get", lambda url, **kw: httpx.Response(200, json={"bars": [], "next_page_token": None}, request=httpx.Request("GET", url)))
     assert history._session("SPY", day, work, module.time.monotonic() + 10, [0]) == []
     assert history._cached("SPY", day) == []
     path = history._path("SPY", day)
@@ -130,18 +130,18 @@ def test_empty_success_corruption_and_malformed_are_distinct(history, monkeypatc
         history._cached("SPY", day)
     assert corrupt.value.code == "cache_invalid"
     path.unlink()
-    monkeypatch.setattr(module.httpx, "get", lambda url, **kw: httpx.Response(200, json={"unexpected": []}, request=httpx.Request("GET", url)))
+    monkeypatch.setattr(module.market_http, "get", lambda url, **kw: httpx.Response(200, json={"unexpected": []}, request=httpx.Request("GET", url)))
     with pytest.raises(HistoryError) as malformed:
         history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
     assert malformed.value.code == "malformed" and not path.exists()
     # Alpaca's answer for a day without a single minute (an index, or before a listing) is its own reason, and not stored.
-    monkeypatch.setattr(module.httpx, "get", lambda url, **kw: httpx.Response(200, json={"bars": None, "next_page_token": None, "symbol": "SPY"}, request=httpx.Request("GET", url)))
+    monkeypatch.setattr(module.market_http, "get", lambda url, **kw: httpx.Response(200, json={"bars": None, "next_page_token": None, "symbol": "SPY"}, request=httpx.Request("GET", url)))
     with pytest.raises(HistoryError) as nothing:
         history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
     assert nothing.value.code == "no_data" and str(nothing.value) == f"Alpaca has no minute bars for SPY on {day}." and not path.exists()
     # Null bars for another symbol, or with a page still to come, is not that answer.
     for body in ({"bars": None, "next_page_token": None, "symbol": "QQQ"}, {"bars": None, "next_page_token": "x", "symbol": "SPY"}):
-        monkeypatch.setattr(module.httpx, "get", lambda url, body=body, **kw: httpx.Response(200, json=body, request=httpx.Request("GET", url)))
+        monkeypatch.setattr(module.market_http, "get", lambda url, body=body, **kw: httpx.Response(200, json=body, request=httpx.Request("GET", url)))
         with pytest.raises(HistoryError) as other:
             history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
         assert other.value.code == "malformed"
@@ -157,7 +157,7 @@ def test_simultaneous_miss_coalesces_and_continuation_is_bound(history, monkeypa
         calls.append(kw["params"])
         return httpx.Response(200, json={"bars": [raw(day, 9, 30)], "next_page_token": None}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     with ThreadPoolExecutor(max_workers=2) as pool:
         pages = list(pool.map(lambda _: history.page("SPY", "1m", "regular", before, limit=1), range(2)))
     assert len(calls) == 1
@@ -239,7 +239,7 @@ def test_history_wait_does_not_hold_tradier_lock(history, monkeypatch):
             return httpx.Response(200, json={"bars": [raw(day, 9, 30)], "next_page_token": None}, request=httpx.Request("GET", url))
         return httpx.Response(200, json={"quotes": {"quote": []}}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     with ThreadPoolExecutor(max_workers=2) as pool:
         future = pool.submit(history.page, "SPY", "1m", "regular", before, 1)
         assert entered.wait(2)
@@ -262,7 +262,7 @@ def test_eight_attempt_batch_resumes_paginated_session_without_partial_file(hist
                                           "next_page_token": str(number) if number < 10 else None},
                               request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     first = history.page("SPY", "1m", "regular", before, limit=1)
     assert first["issue"]["code"] == "pending" and first["continuation"]
     assert len(calls) == 8 and not history._path("SPY", day).exists()
@@ -280,7 +280,7 @@ def test_rolling_budget_counts_actual_http_attempts(history, monkeypatch):
         calls.append(kw["params"])
         return httpx.Response(200, json={"bars": [], "next_page_token": None}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     for _ in range(30):
         history._attempt("SPY", day, None, module.time.monotonic() + 10, [0])
     with pytest.raises(HistoryError) as capped:
@@ -347,7 +347,7 @@ def test_holidays_cost_no_alpaca_request_and_half_days_end_at_13_00(history, mon
         bars = [raw(day, 9, 30, 100), raw(day, 12, 59, 101), raw(day, 13, 0, 102), raw(day, 15, 59, 103)]
         return httpx.Response(200, json={"bars": bars, "next_page_token": None}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     before = completed_session_cursor(half)
     page = history.page("SPY", "1h", "regular", before, limit=5)
     assert holiday not in requested and requested[:2] == [half, earlier]
@@ -442,7 +442,7 @@ def test_batched_page_matches_single_session_prices_and_studies(history, monkeyp
         calls.append(dict(params))
         return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     before = completed_session_cursor(previous_weekday())
 
     def finish(store):
@@ -490,7 +490,7 @@ def test_batched_pagination_keeps_bounds_and_publishes_only_complete_sessions(hi
             rows += [raw(day - timedelta(days=3), 20, 0), raw(day, 3, 59), raw(day, 20, 0)]
         return httpx.Response(200, json={"bars": rows, "next_page_token": str(number) if number < 10 else None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     with pytest.raises(HistoryError, match="still loading"):
         history._session("SPY", day, work, module.time.monotonic() + 10, [0])
     assert len(calls) == 8 and list(history.root.rglob("*.json")) == []
@@ -523,7 +523,7 @@ def test_failed_batch_cannot_publish_or_reuse_partial_sessions(history, monkeypa
             return httpx.Response(429 if failure == "rate_limited" else 403, json={}, headers={"Retry-After": "1"})
         return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     before = completed_session_cursor(previous_weekday())
     first = history.page("SPY", "1h", "extended", before, 65)
     assert first["issue"]["code"] == failure
@@ -548,7 +548,7 @@ def test_batch_stops_before_existing_cache_and_discards_superseded_partial_work(
         calls.append(dict(params))
         return httpx.Response(200, json={"bars": range_rows(params), "next_page_token": None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     work = Work(("SPY", "1h", "extended", 1, 65), day, batch_sessions=5)
     history._session("SPY", day, work, module.time.monotonic() + 10, [0])
     assert datetime.fromisoformat(calls[0]["start"]).astimezone(ET).date() == day
@@ -576,7 +576,7 @@ def test_batch_preserves_an_older_session_completed_between_provider_pages(histo
         return httpx.Response(200, json={"bars": range_rows(params) if number == 9 else [],
                                         "next_page_token": str(number) if number < 9 else None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     with pytest.raises(HistoryError, match="still loading"):
         history._session("SPY", day, work, module.time.monotonic() + 10, [0])
     history._publish("SPY", friday, [normalized(friday, 9, 30, 123)])
@@ -595,7 +595,7 @@ def test_batch_does_not_invent_empty_sessions(history, monkeypatch):
         return httpx.Response(200, json={"bars": [r for r in range_rows(params)
             if datetime.fromisoformat(r["t"]).astimezone(ET).date() != friday], "next_page_token": None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     assert len(history._session("SPY", day, work, module.time.monotonic() + 10, [0])) == 16
     assert history._cached("SPY", friday) is None
 
@@ -619,7 +619,7 @@ def test_missing_batch_endpoint_uses_single_session_semantics(history, monkeypat
         return httpx.Response(200, json={"bars": [r for r in range_rows(params)
             if datetime.fromisoformat(r["t"]).astimezone(ET).date() != day], "next_page_token": None})
 
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     page = history.page("SPY", "1h", "extended", before, 65)
     if pause_before_verification:
         assert page["issue"]["code"] == "pending" and len(calls) == 8

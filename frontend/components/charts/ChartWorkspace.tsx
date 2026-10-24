@@ -1,4 +1,5 @@
 "use client";
+import { useChartSession, type ChartResponse } from "@/lib/chartSession";
 
 import Link from "next/link";
 import { useAppAccess } from "@/components/AccessProvider";
@@ -35,7 +36,7 @@ import ToolbarMenu from "./ToolbarMenu";
 import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
-import type { ColorKey, ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import type { ColorKey, ChartBar, ChartPanelData, ChartQuote, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { receiveChartTick, startSymbolTiming, useQuoteTiming } from "@/lib/chartPerformance";
@@ -256,9 +257,9 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
   </>;
 }
 
-export default function ChartWorkspace() {
+export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: string }) {
   // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
-  const { settings: storedSettings, setSettings, ready, sync, merged, stored } = useChartSettings();
+  const { settings: storedSettings, setSettings, ready, sync, merged, stored, previousSymbol } = useChartSettings(initialSymbol);
   const settings = useMemo(() => instrumentSettings(storedSettings), [storedSettings]);
   const { owner, grants } = useAppAccess();
   const allowedSymbols = (grants.symbols ?? []).join(",");
@@ -283,8 +284,10 @@ export default function ChartWorkspace() {
     url.searchParams.set("symbol", settings.symbol);
     window.history.replaceState(window.history.state, "", url);
   }, [ready, settings.symbol, setSettings, owner, allowedSymbols]);
-  const [response, setResponse] = useState<{ key: string; session: ChartSettings["session"]; data: ChartData } | null>(null);
+  const cache = useChartSession();
+  const [received, setResponse] = useState<ChartResponse | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
+  const [historyKey, setHistoryKey] = useState("");
   const [rollover, setRollover] = useState<{ key: string; before: number; pending: string[] } | null>(null);
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -394,6 +397,17 @@ export default function ChartWorkspace() {
   const vwapBandsOn = !settings.vwapBandsHidden && !settings.studiesHidden;
   const autoParam = !(optionsOn || rangesOn) || !settings.autoLevelsHidden;
   const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}|${optionsKey ?? ""}|${rangesOn}|${autoParam}`;
+  const saved = cache?.get(requestKey);
+  const restored = received?.key !== requestKey && !!saved;
+  const response = restored ? saved!.response : received;
+  const restoredRanges = useRef(new Map<string, { from: number; to: number }>());
+  // Save only server-confirmed responses. Reading a snapshot never renews its age.
+  useEffect(() => {
+    if (!response || response.data.context_pending || response.key !== requestKey || !cache || (restored && historyKey !== requestKey)) return;
+    const snapshot = { response, older, ranges: new Map(visibleTimes.current) };
+    cache.put(snapshot);
+    return () => { snapshot.ranges = new Map(visibleTimes.current); };
+  }, [cache, response, older, requestKey, restored, historyKey]);
   // Market trades survive symbol/session/layout changes; each consumer selects
   // its symbol and session. Reconnect only when the subscribed union changes.
   const streamKey = "market";
@@ -413,7 +427,7 @@ export default function ChartWorkspace() {
   const sampleChart = latest?.sample_data === true;
   const streamReady = !!latest;
   const requestFailed = error?.key === requestKey;
-  const currentOlder = useMemo(() => older.key === session ? older.panels : {}, [older, session]);
+  const currentOlder = useMemo(() => restored && historyKey !== requestKey ? saved!.older.panels : older.key === session ? older.panels : {}, [older, session, restored, saved, historyKey, requestKey]);
   const hasData = !!current;
   const lives = useMemo(() => new Map([...wanted.keys()].map((name) => [name, {
     store: stream, key: streamKey, symbol: name, session, fetched: feedFor(name)?.fetched_at.intraday ?? 0,
@@ -428,7 +442,7 @@ export default function ChartWorkspace() {
       const tail = feedFor(slot.symbol)?.panels[slot.interval];
       const past = currentOlder[key];
       if (!tail || merged.has(key)) continue;
-      if (!past?.bars.length) { merged.set(key, tail); continue; }
+      if (!past?.bars.length || (past.adjustment && splitsKey(past.adjustment) !== splitsKey(feedFor(slot.symbol)?.adjustment))) { merged.set(key, tail); continue; }
       const bars = mergeBars(retainHistory(past.bars, tail.bars, visibleTimes.current.get(key) ?? null), tail.bars);
       const times = new Set(bars.map((bar) => bar.time));
       merged.set(key, { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] });
@@ -542,6 +556,18 @@ export default function ChartWorkspace() {
       : { ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => shown.has(key))) });
   }, [framesKey]);
 
+  useEffect(() => {
+    const snapshot = cache?.get(requestKey);
+    setHistoryKey(requestKey);
+    restoredRanges.current = snapshot?.ranges ?? new Map();
+    if (snapshot) {
+      lastWorkspaceDay.current = { key: session, day: new Date(snapshot.response.data.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) };
+      visibleTimes.current = new Map(snapshot.ranges);
+      setOlder({ key: session, panels: Object.fromEntries(Object.entries(snapshot.older.panels).map(([key, panel]) =>
+        [key, panel ? { ...panel, loading: false } : panel])) });
+    }
+  }, [cache, requestKey, session]);
+
   // A split recorded while the tab is open changes the basis of candles already loaded. Those are dropped,
   // never mixed with newer pages; scrolling back rereads them on the new basis.
   const feedBasis = JSON.stringify([...wanted.keys()].map((name) => { const a = feedFor(name)?.adjustment; return [name, a ? splitsKey(a) : null]; }));
@@ -654,11 +680,11 @@ export default function ChartWorkspace() {
   const beforePast = useRef<string | null>(null);
   // Once the shared settings are in, chart the trade's symbol (the symbol on screen is this device's own).
   useEffect(() => {
+    if (ready && past && !past.started && !beforePast.current) beforePast.current = previousSymbol;
     if (ready && past && !past.started && settings.symbol !== past.symbol) {
-      beforePast.current = settings.symbol;
       setSettings((s) => s.symbol === past.symbol ? s : ({ ...s, symbol: past.symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== past.symbol)].slice(0, 8) }));
     }
-  }, [ready, past, settings.symbol, setSettings]);
+  }, [ready, past, settings.symbol, setSettings, previousSymbol]);
   // With its candles on screen: load the stored history page that holds the trade into every
   // chart of the symbol, centre each on the trade's arrows, and open the trade's card.
   useEffect(() => {
@@ -758,6 +784,7 @@ export default function ChartWorkspace() {
     let alive = true;
     let busy = false;
     let recoveryPending = false;
+    let hasFull = !!cache?.get(requestKey);
     let controller: AbortController | null = null;
     const extras = Object.fromEntries(extrasKey.split(",").filter(Boolean).map((part) => {
       const [name, frames] = part.split(":");
@@ -769,8 +796,30 @@ export default function ChartWorkspace() {
       if (!alive || busy || document.hidden) return;
       busy = true;
       inFlight.current = true;
+      controller?.abort();
       controller = new AbortController();
       setLoading(true);
+      const firstController = new AbortController();
+      if (!hasFull) {
+        // The full read starts too: slow context must not delay first candles,
+        // and waiting for first candles must not add a round trip to all panels.
+        // The provider's existing keyed cache/lock coalesces the minute read.
+        void fetchChartData({ symbol, session, intervals: [intervalKey.split(",")[0] as Interval],
+          watchlist: [], extras: {}, phase: "prices" }, AbortSignal.any([controller.signal, firstController.signal])).then(first => {
+          if (alive && !firstController.signal.aborted && !hasFull && Object.values(first.panels).some(panel => panel?.bars.length)) {
+            setResponse(previous => {
+              if (previous?.session === session && previous.data.symbol === first.symbol) return previous;
+              // Keep held comparison panels while only the selected candles arrive.
+              // Their original fetch timestamps and basis remain attached.
+              const retained = previous?.session === session ? previous.data : undefined;
+              const held = retained ? { ...retained.extras, [retained.symbol]: retained } : {};
+              const retainedExtras = Object.fromEntries(Object.keys(extras).flatMap(name => held[name] ? [[name, held[name]]] : []));
+              return { key: requestKey, session, data: { ...first, quotes: retained?.quotes ?? first.quotes,
+                extras: retainedExtras, context_pending: true } };
+            });
+          }
+        }).catch(() => { /* The full request owns failure/retry disclosure. */ });
+      }
       try {
         const result = await fetchChartData({ symbol, session, intervals: intervalKey.split(",") as Interval[],
           watchlist: watchlistKey ? watchlistKey.split(",") : [], extras, options: optionsKey, ranges: rangesOn, auto: autoParam }, controller.signal);
@@ -781,6 +830,7 @@ export default function ChartWorkspace() {
               pending: framesKey.split(",").filter((key) => intradayInterval(key.split("|")[1] as Interval)) });
           }
           lastWorkspaceDay.current = { key: session, day };
+          hasFull = true;
           setResponse({ key: requestKey, session, data: result }); setError(null);
           const waiting = [result.auto_levels, ...Object.values(result.extras ?? {}).map((other) => other.auto_levels)].some((levels) => levels?.options?.state === "loading" || levels?.ranges?.state === "loading");
           if (waiting && soon === undefined) soon = window.setTimeout(() => { soon = undefined; void load(); }, 4000);
@@ -788,6 +838,9 @@ export default function ChartWorkspace() {
       } catch (err) {
         if (alive && !controller.signal.aborted) setError({ key: requestKey, message: err instanceof Error ? err.message : "Unable to refresh charts." });
       } finally {
+        // On success, a late primary response must not replace full context.
+        // On failure it may still supply candles, under the existing error.
+        if (hasFull) firstController.abort();
         busy = false;
         if (alive) {
           inFlight.current = false; setLoading(false);
@@ -803,7 +856,7 @@ export default function ChartWorkspace() {
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); window.clearTimeout(soon); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam]);
+  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam, cache]);
 
   useEffect(() => {
     stream.onGap(() => refreshNow.current());
@@ -874,6 +927,7 @@ export default function ChartWorkspace() {
     window.history.replaceState(window.history.state, "", url);
   };
   const chooseSymbol = (symbol: string) => {
+    initialLinkSymbol.current = null;
     if (settings.symbol !== symbol) startSymbolTiming(symbol);
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, intervals: s.intervals.map((v, i) => ((!i || !s.panelSymbols[i]) && !supportedIntervals(symbol).includes(v)) ? "4h" : v), recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
     setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null); setStrike(null);
@@ -1807,6 +1861,12 @@ export default function ChartWorkspace() {
     className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={named}>Plan trade</span></button>;
 
   const alerts = [
+    current?.context_pending && <p key="context" role="status" aria-label="Chart context loading" className="text-xs text-amber-300">
+      {requestFailed ? "Supporting charts and context could not refresh." : "Loading supporting charts, levels and journal context…"}
+    </p>,
+    restored && <p key="restored" role="status" aria-label="Saved chart snapshot" className="text-xs text-amber-300">
+      Saved chart snapshot · {etTime(saved!.response.data.checked_at)} ET · {requestFailed ? "Refresh failed; prices and journal context may be outdated." : "Refreshing prices and journal context…"}
+    </p>,
     past && <div key="past" role="status" aria-label="Past trade view" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-xs text-sky-100">
       <span>Showing {past.symbol} {etTime(past.from, true)}, {etTime(past.from)}{past.to !== past.from ? `–${etTime(past.to, true) === etTime(past.from, true) ? "" : `${etTime(past.to, true)}, `}${etTime(past.to)}` : ""} ET, on stored consolidated candles.</span>
       <button onClick={backToLive} className="inline-flex min-h-7 items-center rounded border border-sky-400/40 px-2 text-sky-100 hover:bg-sky-500/15">Back to live</button></div>,
@@ -1918,7 +1978,7 @@ export default function ChartWorkspace() {
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                 onMenu={isMacroSymbol(slot.symbol) ? undefined : openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                 maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined} onPlan={narrow ? openPlan : undefined}
-                history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))} />
+                restoreRange={saved?.ranges.get(frameKey(slot)) ?? restoredRanges.current.get(frameKey(slot))} history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))} />
               </div>
             </div>)}
             {sized ? <Splitter key="rows" label="Resize main chart and smaller charts" orientation="horizontal" className={`h-1 ${cover ? "invisible" : ""}`}
@@ -1940,7 +2000,7 @@ export default function ChartWorkspace() {
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} indexAsOf={feedFor(slot.symbol)?.intraday_as_of} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
                   notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={panelIndicators[slot.index]} colors={colors} ownStudies={settings.panelStudies[slot.index]} onStudies={(next) => setPanelStudies(slot.index, next)} studiesHidden={settings.studiesHidden} levels={isMacroSymbol(slot.symbol) ? NO_LEVELS : visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={isMacroSymbol(slot.symbol) ? NO_DRAWINGS : visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn && !isMacroSymbol(slot.symbol) ? settings.optionsLayer.nearest : null} rangeBands={rangesOn && !isMacroSymbol(slot.symbol)} vwapBands={vwapBandsOn && !isMacroSymbol(slot.symbol)} volumeCandles={settings.volumeCandles && !isMacroSymbol(slot.symbol)} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={settings.newsOnSmall ? newsMarkers : null} newsSmall={settings.newsOnSmall} onNews={openNews} alerts={isMacroSymbol(slot.symbol) ? NO_MARKS : alertMarks.get(slot.symbol) ?? NO_MARKS} positions={isMacroSymbol(slot.symbol) ? NO_POSITIONS : positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
-                  history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))}
+                  restoreRange={saved?.ranges.get(frameKey(slot)) ?? restoredRanges.current.get(frameKey(slot))} history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} onUserMove={() => pastJumps.current.delete(frameKey(slot))}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}

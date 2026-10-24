@@ -78,7 +78,7 @@ class Session:
         monkeypatch.setattr(alpaca, "ALPACA_API_KEY", "key")
         monkeypatch.setattr(alpaca, "ALPACA_API_SECRET", "secret")
         monkeypatch.setattr(history_module, "WARMUP", 0)
-        monkeypatch.setattr(history_module.httpx, "get", self.get)
+        monkeypatch.setattr(history_module.market_http, "get", self.get)
 
     def get(self, url, *, params, headers, timeout):
         self.calls.append(params)
@@ -225,7 +225,7 @@ def test_workspace_daily_and_weekly_match_whichever_basis_the_provider_used(monk
         payload = {"history": {"day": days}} if "history" in url else {"series": None} if "timesales" in url else {"quotes": {"quote": {"symbol": "NVDA", "last": 122}}}
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     data = ChartFeed(splits=FixedSplits(KNOWN)).workspace("NVDA", ["1D", "1W"], [], "regular")
     daily_bars, weekly = data["panels"]["1D"]["bars"], data["panels"]["1W"]["bars"]
     assert [round(b["close"], 6) for b in daily_bars[:5]] == [120.0, 121.0, 122.0, 123.0, 124.0]

@@ -1,0 +1,49 @@
+{
+  "environment": "local HTTP/1.1, no TLS/provider, 5 trials of 12 sequential reads",
+  "trials": {
+    "before": [
+      {
+        "ms": 146.949,
+        "connections": 12
+      },
+      {
+        "ms": 64.797,
+        "connections": 12
+      },
+      {
+        "ms": 67.102,
+        "connections": 12
+      },
+      {
+        "ms": 74.332,
+        "connections": 12
+      },
+      {
+        "ms": 101.539,
+        "connections": 12
+      }
+    ],
+    "pooled": [
+      {
+        "ms": 26.22,
+        "connections": 1
+      },
+      {
+        "ms": 17.973,
+        "connections": 1
+      },
+      {
+        "ms": 15.71,
+        "connections": 1
+      },
+      {
+        "ms": 17.426,
+        "connections": 1
+      },
+      {
+        "ms": 15.687,
+        "connections": 1
+      }
+    ]
+  }
+}

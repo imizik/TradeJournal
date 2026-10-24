@@ -1,4 +1,5 @@
-import { Suspense } from "react";
+import Link from "next/link";
+import { Suspense, type ReactNode } from "react";
 import type { Account, DecisionRecord, PositionQuote, Stats, Trade } from "@/lib/api";
 import type { OpenPositionRow } from "@/lib/dashboard";
 import { getPositionMarketValue } from "@/lib/dashboard";
@@ -19,14 +20,40 @@ type Params = { account?: string; type?: string; decision?: string; practice_run
 
 /** Only the root route's owner branch mounts this command center. Data and
  * actions remain owned by the existing journal and Practice implementations. */
-export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, today,
-  unrealized, quotedCount, grossValue, netValue, largest, decisions, params, quoteError }: {
+type OwnerProps = {
   trades: Trade[]; accounts: Account[]; stats: Stats; rows: OpenPositionRow[];
   quotes: Record<string, PositionQuote>; today: string; unrealized: number | null;
   quotedCount: number; grossValue: number | null; netValue: number | null;
   largest: { trade: Trade; marketValue: number | null } | null;
   decisions: DecisionRecord[]; params: Params; quoteError: boolean;
-}) {
+};
+
+export function OwnerDashboardShell({ today, journal, attention }: { today: string; journal: ReactNode; attention: ReactNode }) {
+  return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
+    <header>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1><DashboardActions /></div>
+      <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
+    </header>
+    <JoTodayLine today={today} />
+    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      <div className="min-w-0 space-y-4" aria-label="Market and discovery"><MorningBriefing initialDay={today} compact /><RadarPreview /></div>
+      <aside className="min-w-0 space-y-4" aria-label="Attention and data status">
+        <Suspense fallback={<AttentionLoading />}>{attention}</Suspense>
+        <ExitHabits /><DataFreshness />
+      </aside>
+    </div>
+    {journal}
+  </div>;
+}
+
+export function OwnerAttention({ accounts, rows, quotes, quoteError, today, decisions, params }: OwnerProps) {
+  return <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
+    scope={[params.account && params.account !== "all" ? accounts.find((a) => a.type === params.account)?.name ?? params.account : null,
+      params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />;
+}
+
+export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, today,
+  unrealized, quotedCount, grossValue, netValue, largest, params, quoteError }: OwnerProps) {
   const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const accountOptions = Array.from(new Map(accounts.map((a) => [a.type, a])).values());
   const todayClosed = closedInPeriod(trades, today, today);
@@ -55,28 +82,8 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
     return `/${search.size ? `?${search}` : ""}`;
   }
 
-  return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
-    <header>
-      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1><DashboardActions /></div>
-      <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
-    </header>
-    <JoTodayLine today={today} />
+  return <div className="min-w-0 space-y-4">
     {quoteError && <p role="alert" className="rounded-md border border-amber-500/30 px-4 py-3 text-sm text-amber-300">Some position quotes could not load. Unavailable marks are shown as —. Reload to retry.</p>}
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-      <div className="min-w-0 space-y-4" aria-label="Market and discovery">
-        <MorningBriefing initialDay={today} compact />
-        <RadarPreview />
-      </div>
-      <aside className="min-w-0 space-y-4" aria-label="Attention and data status">
-        <Suspense fallback={<AttentionLoading />}>
-          <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
-            scope={[params.account && params.account !== "all" ? accountOptions.find((a) => a.type === params.account)?.name ?? params.account : null,
-              params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />
-        </Suspense>
-        <ExitHabits />
-        <DataFreshness />
-      </aside>
-    </div>
     <section className="min-w-0 space-y-4" aria-label="Your journal">
       <div><h2 className="text-base font-semibold">Your journal</h2>
         <p className="mt-1 text-xs text-muted-foreground">Filters apply to journal positions, Attention position checks and performance. The saved briefing and Radar keep their own scope.</p>
@@ -86,8 +93,8 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
           { name: "type" as const, label: "Type", choices: [{ value: "all", label: "All types" }, { value: "option", label: "Options" }, { value: "stock", label: "Stocks" }] }].map(({ name, label, choices }) =>
           <div key={name} className="flex flex-wrap items-center gap-1" role="group" aria-label={label}>
             <span className="mr-1 text-xs text-muted-foreground">{label}</span>
-            {choices.map((choice) => <a key={choice.value} href={filterHref(name, choice.value)} aria-current={(params[name] ?? "all") === choice.value ? "true" : undefined}
-              className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</a>)}
+            {choices.map((choice) => <Link key={choice.value} href={filterHref(name, choice.value)} aria-current={(params[name] ?? "all") === choice.value ? "true" : undefined}
+              className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</Link>)}
           </div>)}
       </div>
       <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
@@ -106,13 +113,13 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
             <SummaryFigure label="Open Positions" value={String(rows.length)} detail={`${options.length} options · ${stocks.length} stock${stocks.length === 1 ? "" : "s"}`} />
             <SummaryFigure label="All-Time Closed P&L" value={money(stats.total_pnl, { signed: true })} tone={pnlTone(stats.total_pnl)} detail={`${stats.closed_trades} closed trades`} />
           </div>
-          <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
+          <DashboardCard title="Today's Session" action={<Link className={dashboardLink} href={`/daily/${today}`}>Review today →</Link>}>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs text-muted-foreground">
               <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
               <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
               <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
                 <p className="mt-1">Closed P&amp;L excludes trims of positions still open.</p>
-                <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
+                <Link className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</Link></div>
             </div>
           </DashboardCard>
           <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
@@ -135,7 +142,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
         </div>
       </details>}
       <PerformanceOverview trades={trades} compact analyticsHref={analyticsHref} />
-      <DashboardCard title="Recent Closed Trades" action={<a className={dashboardLink} href={tradesHref}>All trades →</a>}>
+      <DashboardCard title="Recent Closed Trades" action={<Link className={dashboardLink} href={tradesHref}>All trades →</Link>}>
         <RecentClosedTable trades={recentCloses(trades)} accountMap={accountMap} />
       </DashboardCard>
         </div>

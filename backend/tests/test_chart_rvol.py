@@ -192,7 +192,7 @@ def feed(monkeypatch):
             payload = {"quotes": {"quote": []}}
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     return ChartFeed()
 
 
@@ -294,7 +294,7 @@ def test_the_job_fetches_one_session_once_through_the_chart_budget(tmp_path, mon
         return httpx.Response(200, json={"bars": alpaca_day, "next_page_token": None}, request=httpx.Request("GET", url))
 
     alpaca_day = alpaca(day, "09:30", "09:31", 1)
-    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.market_http, "get", get)
     history = ChartHistory(tmp_path)
     assert [b["volume"] for b in history.session("SPY", day)] == [111.0, 148.0]
     assert history.session("SPY", day) == history.stored("SPY", day)
@@ -380,7 +380,7 @@ def test_a_history_page_carries_each_shown_sessions_rvol_against_its_own_window(
 def test_a_history_page_without_the_calendar_says_why_and_never_fetches(stored, monkeypatch):
     from app.engine import chart_history as module
 
-    monkeypatch.setattr(module.httpx, "get", lambda *a, **k: pytest.fail("RVol must not fetch"))
+    monkeypatch.setattr(module.market_http, "get", lambda *a, **k: pytest.fail("RVol must not fetch"))
     page = stored.page("SPY", "5m", "regular", int(ny(PAST, "16:00").timestamp()), limit=20)
     assert page["rvol"]["2026-09-28"]["state"] == "ready"
     # The same stored sessions without the calendar (a ready baseline already worked out is kept, so a fresh store).

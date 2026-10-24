@@ -224,7 +224,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: requested, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, volumeCandles = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
+export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: requested, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, vwapBands = false, volumeCandles = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, restoreRange, onUserMove, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
   indexAsOf?: number | null;
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
@@ -299,6 +299,7 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   /** The selection bar's lock, on a locked item. */
   onUnlock?(id: string): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null; rvol?: Record<string, RvolBaseline> };
+  restoreRange?: { from: number; to: number };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   /** The trader moved this chart's view themself (a drag, the wheel, a touch, Latest candles). */
   onUserMove?(): void;
@@ -989,7 +990,9 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
-      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, openingBars()));
+      if (restoreRange && restoreRange.from >= bars[0].time && restoreRange.to <= bars.at(-1)!.time) {
+        current.chart.timeScale().setVisibleRange({ from: restoreRange.from as Time, to: restoreRange.to as Time });
+      } else current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, openingBars()));
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;

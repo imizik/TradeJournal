@@ -158,7 +158,7 @@ def test_calendar_requests_share_the_chart_feed_budget(tmp_path, monkeypatch):
         requests.append((url, params))
         return httpx.Response(200, json=NOVEMBER, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     feed = ChartFeed()
     calendar = ChartCalendar(tmp_path, feed)
     assert calendar.hours(date(2026, 11, 27))["close"] == 780

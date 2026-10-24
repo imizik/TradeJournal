@@ -198,6 +198,7 @@ export type SymbolPanels = {
   positions?: ChartPosition[];
 };
 export type ChartData = SymbolPanels & {
+  context_pending?: boolean;
   sample_data?: boolean;
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
   refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
@@ -675,13 +676,14 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
  * `options` asks for the options levels layer (`optionsQuery`) and `ranges` for the range bands (C2.7);
  * with either, `auto: false` leaves the automatic levels out of the zones.
  */
-export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, ranges = false, auto = true }: {
+export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, ranges = false, auto = true, phase = "full" }: {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: ChartSettings["session"]; extras: Record<string, Interval[]>;
-  options?: string | null; ranges?: boolean; auto?: boolean;
+  options?: string | null; ranges?: boolean; auto?: boolean; phase?: "full" | "prices";
 }, signal: AbortSignal): Promise<ChartData> {
   const query = new URLSearchParams({ symbol, intervals: intervals.join(","), watchlist: watchlist.join(","), session });
   const held = Object.entries(extras).map(([name, frames]) => `${name}:${frames.join(".")}`).join(",");
   if (held) query.set("extras", held);
+  if (phase === "prices") query.set("phase", phase);
   if (options) query.set("options", options);
   if (ranges) query.set("ranges", "1");
   if ((options || ranges) && !auto) query.set("auto", "0");

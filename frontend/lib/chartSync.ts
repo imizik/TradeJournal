@@ -165,12 +165,13 @@ function writeLocal(settings: ChartSettings, meta: Meta): boolean {
  * before the server kept them), saved there shortly after each change, and
  * refreshed when the page regains focus or every 30 seconds while visible.
  */
-export function useChartSettings() {
+export function useChartSettings(initialSymbol?: string) {
   const { owner, grants } = useAppAccess();
   const localOnly = !owner;
   const allowedSymbols = (grants.symbols ?? []).join(",");
-  const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<ChartSettings>(() => ({ ...DEFAULT_SETTINGS, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }));
   const [ready, setReady] = useState(false);
+  const [previousSymbol, setPreviousSymbol] = useState(DEFAULT_SETTINGS.symbol);
   const [sync, setSync] = useState<SyncState>("loading");
   const [stored, setStored] = useState(true);
   // Set when a save was refused and merged; cleared by this device's next change.
@@ -226,14 +227,17 @@ export function useChartSettings() {
       const allowed = allowedSymbols.split(",").filter(Boolean);
       const saved = local.settings ?? DEFAULT_SETTINGS;
       const safe = { ...saved, watchlist: allowed, symbol: allowed.includes(saved.symbol) ? saved.symbol : allowed[0] ?? "SPY", recent: [], levels: {}, drawings: {} };
-      queueMicrotask(() => { if (alive) { setSettings(safe); setReady(true); setSync("saved"); } });
+      queueMicrotask(() => { if (alive) { setPreviousSymbol(safe.symbol); setSettings(safe); setReady(true); setSync("saved"); } });
       return () => { alive = false; };
     }
     const base = local.meta?.base ?? shared(DEFAULT_SETTINGS);
     // This browser's copy shows while the server's loads (read after hydration,
     // so the server render matches). Anything changed meanwhile is part of this
     // device's changes, merged in below.
-    queueMicrotask(() => { if (alive && local.settings) setSettings(local.settings); });
+    queueMicrotask(() => { if (alive && local.settings) {
+      setPreviousSymbol(local.settings.symbol);
+      setSettings({ ...local.settings, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) });
+    } });
     fetchSettings().then((server) => {
       if (!alive) return;
       const theirs = server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS);
@@ -253,7 +257,7 @@ export function useChartSettings() {
       setSync("offline");
     }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
-  }, [localOnly, allowedSymbols]);
+  }, [localOnly, allowedSymbols, initialSymbol]);
 
   useEffect(() => {
     latest.current = settings;
@@ -296,5 +300,5 @@ export function useChartSettings() {
   useEffect(() => () => window.clearTimeout(pending.current), []);
 
   const update = useCallback((action: SetStateAction<ChartSettings>) => { setMerged(false); setSettings(action); }, []);
-  return { settings, setSettings: update, ready, sync, merged, stored };
+  return { settings, setSettings: update, ready, sync, merged, stored, previousSymbol };
 }

@@ -1,0 +1,50 @@
+{
+  "layout": "single",
+  "settingsDelayMs": 400,
+  "workspaceDelayMs": 600,
+  "samples": {
+    "first_chart": [
+      1574,
+      1600,
+      1483,
+      1484,
+      1516
+    ],
+    "return_chart": [
+      160,
+      159,
+      166,
+      140,
+      129
+    ],
+    "symbol_new_or_recent": [
+      901,
+      99,
+      84,
+      99,
+      100
+    ],
+    "symbol_return": [
+      101,
+      99,
+      101,
+      99,
+      108
+    ],
+    "new_symbol_slow_context": [
+      908
+    ],
+    "dashboard_filter": [
+      103,
+      100,
+      100,
+      100
+    ],
+    "dashboard_market_slow_journal": [
+      129
+    ]
+  },
+  "workspaceReads": 28,
+  "documentReads": 6,
+  "errors": []
+}

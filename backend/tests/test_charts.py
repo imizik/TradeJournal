@@ -179,7 +179,7 @@ def provider(monkeypatch):
                                                 "week_52_high": 120, "week_52_low": 80}}}
         return httpx.Response(status[0], json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(feed_module.httpx, "get", get)
+    monkeypatch.setattr(feed_module.market_http, "get", get)
     return ChartFeed(), calls, clock, status
 
 
@@ -678,3 +678,36 @@ def test_workspace_timing_is_opt_in_and_does_not_change_payload(route_client):
     assert 'server-timing' not in plain.headers
     assert 'total;dur=' in timed.headers['server-timing']
     assert plain.json() == timed.json()
+
+
+def test_prices_phase_defers_context_and_preserves_access(route_client, monkeypatch):
+    calls = []
+    original = charts.chart_feed.workspace
+
+    def read(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", read)
+    monkeypatch.setattr(charts, "_markers", lambda *a, **k: pytest.fail("prices must not read the journal"))
+    response = route_client.get("/charts/workspace?symbol=SPY&intervals=5m&phase=prices&extras=QQQ:1h&options=oi.week.0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["context_pending"] is True
+    assert data["extras"] == {} and data["positions"] == [] and data["fills"] == []
+    assert len(calls) == 1
+    assert calls[0][0][0:3] == ("SPY", ["5m"], [])
+    assert calls[0][1]["auto"] is False
+    assert "stored_session" not in calls[0][1]
+    assert route_client.get("/charts/workspace?phase=unknown").status_code == 422
+
+
+def test_first_prices_match_full_candles_without_duplicate_minute_download(provider):
+    feed, calls, _, _ = provider
+    first = feed.workspace("SPY", ["5m"], [], "extended", quotes=False, auto=False)
+    assert len(calls) == 1 and "timesales" in calls[0][0]
+    full = feed.workspace("SPY", ["5m", "1D"], ["SPY", "QQQ"], "extended")
+    assert first["panels"]["5m"] == full["panels"]["5m"]
+    assert first["fetched_at"]["intraday"] == full["fetched_at"]["intraday"]
+    assert first["adjustment"] == full["adjustment"]
+    assert sum("timesales" in url for url, _ in calls) == 1
