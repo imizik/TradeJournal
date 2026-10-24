@@ -86,6 +86,10 @@ you to remember something, or agrees with a conclusion they want kept, propose i
 one per answer, and it counts toward the two proposals an answer may make): their words or a faithful paraphrase as text, what it should change about how you work as \
 interpretation, and the symbol when it is about one. They edit the text and confirm the card; nothing is remembered \
 until they do. Never propose a memory from measured counts alone, and never one that characterizes their psychology.
+- When the owner asks you to review a closed trade, call get_trade_review with the trade id from their message. Compare \
+what the plan assumed with what happened (entry, path, alerts, exit), and keep thesis apart from execution: a losing \
+trade can have a sound thesis and a winning one a poor exit. Say plainly when one trade cannot support a lesson, and \
+propose a memory only if the owner states one.
 - If asked to make a plan, you may propose a concise conditional plan (thesis, trigger, invalidation, what to watch, \
 size/risk notes as questions for the trader). When it has a concrete price level to watch or a question worth \
 revisiting, also propose that step with propose_plan (at most two per answer): the owner sees it as a card with \
@@ -324,6 +328,19 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        review = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", lower)
+        if review and "review this trade" in lower:
+            if isinstance(last["content"], str) and allow_tools:
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_trade_review",
+                                       "input": {"trade_id": review.group(1)}}], "tool_use", _zero_usage(), self.model)
+                return
+            text = self._review(results.get("get_trade_review") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "remember" in lower and allow_tools and isinstance(last["content"], str):
             said = re.sub(r"^.*?remember\b[:,]?\s*(that\s+)?", "", prompt, count=1, flags=re.I | re.S).strip() or prompt
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "propose_plan",
@@ -373,6 +390,30 @@ class FakeAdapter:
                        + "".join(f"; {a['symbol']} at {a['fired']['price']} ({a['fired']['at']})" for a in fired) + ".\n"
                        f"- Research: {len(done)} result(s) finished since the last update.\n"
                        f"- Saved conclusion: {saved['conclusion'] or 'none'}. Re-check it against fresh evidence before relying on it.")
+
+    @staticmethod
+    def _review(data: dict) -> str:
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if data.get("state") != "ok":
+            return head + f"I couldn't read that trade: {data.get('reason') or 'the review was not readable'}."
+        t, path, plan = data["trade"], data.get("path") or {}, data.get("plan") or {}
+        money = lambda v: "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
+        sent = (data.get("alerts") or {}).get("alerts") or []
+        matched = [h["habit"].lower() for h in (data.get("habits") or {}).get("habits", []) if h["this_trade"] == "yes"]
+        lines = [f"**{t['contract']}**, {t['entry_time']} to {t['exit_time']}: {money(t['pnl_usd'])} ({t['pnl_pct']}%), "
+                 f"held {t['hold_minutes']} minutes."]
+        lines.append(f"- What the plan assumed ({plan.get('timing', 'no timing')}): {plan.get('wording') or plan.get('setup') or 'no wording saved'}" if plan.get("state") == "ok"
+                     else "- No plan was captured for it, so there is nothing to compare the entry with.")
+        lines.append(f"- What happened: the option peaked at {path.get('option_peak_pct', '?')}% "
+                     f"({money(path.get('option_peak_unrealized_usd'))}) and gave back {money(path.get('option_giveback_from_peak_usd')).lstrip('+')} from there."
+                     if path.get("state") == "ok" else "- No price path was recorded for it.")
+        for a in sent:
+            lines.append(f"- {a['kind']} alert at {a['at']}: then {a.get('then', 'unknown')}, "
+                         f"{money(a.get('vs_closing_at_alert_usd'))} against closing at the alert.")
+        lines.append("- Thesis vs execution: the result alone says nothing about the thesis; the question here is the exit"
+                     + (f" ({'; '.join(matched)})." if matched else "."))
+        lines.append("- Lesson: one trade cannot support one. If you want something kept, say it in your words and I'll put it on a card.")
+        return head + "\n".join(lines)
 
     @staticmethod
     def _plan_calls(symbol: str, last: dict, results: dict) -> list[tuple[str, dict]]:
@@ -492,6 +533,13 @@ def _summary(name: str, data: dict) -> str:
             return (data.get("reason") or "unavailable")[:160]
         fired = sum(1 for a in data.get("alerts", []) if a.get("fired"))
         return f"{len(data.get('alerts', []))} alerts ({fired} fired), {len(data.get('research_jobs', []))} research jobs"
+    if name == "get_trade_review":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        t = data.get("trade") or {}
+        pnl = "" if t.get("pnl_usd") is None else f" {t['pnl_usd']:+,.2f} $"
+        return (f"{t.get('contract')}{pnl} · plan {(data.get('plan') or {}).get('state', 'unavailable')} · "
+                f"{(data.get('alerts') or {}).get('sent', 0)} alerts")[:160]
     if name == "get_saved_research":
         return f"{len(data.get('items', []))} saved"
     if name in ("owner_context", "get_owner_context"):
