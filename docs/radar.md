@@ -25,8 +25,9 @@ involve Jo.
 3. **Owner-only API (built):** `backend/app/routers/radar.py` — feed, event
    detail, coverage, since-last-visit, visits and feedback. See
    [Feed API](#feed-api-and-screen).
-4. **`/radar` screen (built),** `frontend/app/radar/page.tsx`, checked against
-   the sample event until step 2 writes real ones.
+4. **`/radar` screen (built),** `frontend/app/radar/page.tsx`. Step 2 now
+   writes real events; the browser test still checks it against the sample
+   event (`frontend/e2e/radar.spec.ts`).
 5. **News enrichment (built):** "news nearby" or "cause unknown" on each
    event, `backend/app/engine/radar_news.py`. See [News nearby](#news-nearby).
 
