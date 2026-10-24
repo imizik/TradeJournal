@@ -433,6 +433,13 @@ on precision under 40%, more than 40 names a session, or failed scans on 3 or
 more sessions. Passing earns a screen section next; phone alerts remain a
 separate decision.
 
+## Social buzz (studied, not built)
+
+An October 24 desk study looked at adding a Reddit/X/Stocktwits attention signal
+and recommends against building one now; at most a free, record-only forward
+test after the premarket pilot is scored. See
+[the feasibility study](radar-social-buzz-feasibility.md).
+
 ## Activation boundary
 
 The recorder is off unless both variables are set in the VPS `backend.env`
