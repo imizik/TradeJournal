@@ -66,6 +66,10 @@ class FixtureEvidence:
         return {"symbol": symbol, "today": SESSION, "next_earnings": {"date": "2026-11-12", "status": "estimated", "label": "Q3 2026"},
                 "recent_reports": [{"date": "2026-08-07", "label": "Q2 2026"}], "state": "ready", "message": None, "fetched_at": AT}
 
+    def get_investigation_changes(self, investigation_id: str) -> dict:
+        return {"investigation_id": investigation_id, "state": "unavailable", "as_of": AT,
+                "reason": "Fixture mode does not read the owner's saved investigations (simulated)."}
+
     def get_saved_research(self, symbol: str, limit: int = 3) -> dict:
         return {"symbol": symbol, "state": "ok", "as_of": AT, "items": [],
                 "note": "Fixture mode does not read the owner's saved research (simulated)."}

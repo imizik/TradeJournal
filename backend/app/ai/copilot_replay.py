@@ -11,7 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from app.ai.copilot_tools import compact_comparison, compact_events, compact_news, group_mismatch, saved_research
+from app.ai.copilot_tools import (compact_comparison, compact_events, compact_news, group_mismatch, investigation_changes,
+                                  saved_research)
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import compare_group, empty_comparison, iso
 from app.engine.radar_store import RadarStore, load_universe
@@ -74,6 +75,9 @@ class ReplayEvidence:
         out = compact_news({**raw, "articles": kept}, limit)
         out.update(as_of=self.at.isoformat(timespec="minutes"), filtered_out_after_replay=len(raw.get("articles", [])) - len(kept))
         return out
+
+    def get_investigation_changes(self, investigation_id: str) -> dict:
+        return investigation_changes(investigation_id, before=self.at)  # nothing that happened after the frozen moment
 
     def get_saved_research(self, symbol: str, limit: int = 3) -> dict:
         return saved_research(symbol, limit, before=self.at)  # nothing saved after the frozen moment

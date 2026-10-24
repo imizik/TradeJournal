@@ -26,9 +26,10 @@ untouched.
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call six read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
-  comparison, peer moves, symbol news, earnings dates, quotes and saved research
-  (below), plus `propose_plan`, which writes nothing (see Confirm a plan). Each tool
+  call seven read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  comparison, peer moves, symbol news, earnings dates, quotes, saved research
+  and investigation changes (below). It can also call `propose_plan`, which
+  writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
@@ -49,6 +50,34 @@ untouched.
   text), first text, longest wait between visible events, total latency, tool
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
+
+## What changed?
+
+A reopened investigation, from Recent or from an alert's
+`?investigation=<id>` link, offers **What changed?**. One tap sends one
+turn with a fixed prompt that names the investigation's id. Opening never
+sends it, because a turn costs money. From an alert's link, the same prompt
+waits in the message box, unsent. The prompt asks the model to call:
+
+- `get_investigation_changes(investigation_id)` (read-only, provenance
+  `saved`). It returns:
+  - the saved title, symbol, status, conclusion, summary and last-updated time;
+  - each tool's newest evidence as-of time;
+  - the level alerts confirmed from the investigation: armed, or fired with
+    time and price;
+  - its research jobs (questions and revisits), each saying whether it
+    finished since the last update;
+  - up to three of their results.
+
+  It is capped at 12 evidence tools, 10 alerts, 10 jobs and 3 results. An
+  unknown id is refused. Replay leaves out anything after the frozen moment,
+  and fixture mode reads nothing.
+- Then fresh comparison, peer, news and quote reads, so it can say what moved
+  against the saved as-of times and whether the conclusion still holds.
+
+Background research jobs get neither this tool nor `propose_plan`. They read
+untrusted pages and can fetch URLs, so injected text must not make them read
+another investigation by id.
 
 ## Confirm a plan
 
@@ -184,8 +213,7 @@ credits.
   run under that exact environment must report the plan token as the sign-in.
   Otherwise the chat returns 503 and asks for `claude setup-token`. It never
   falls back to an API key.
-- **Same limits.** Only the seven lab tools (background research jobs get the six read-only ones, never
-  `propose_plan`), as in-process SDK MCP tools that
+- **Same limits.** Only the eight lab tools, as in-process SDK MCP tools that
   call `copilot_tools.validate()` and the same timed, bounded runner; the same
   8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
   120 s per turn and the spend cap above.

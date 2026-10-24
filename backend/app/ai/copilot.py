@@ -264,6 +264,19 @@ class FakeAdapter:
         lower = prompt.lower()
         symbol = self._symbol(messages)
         results = _results(messages)
+        changed = re.search(r"investigation ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
+        if changed and "what changed" in lower:
+            if isinstance(last["content"], str) and allow_tools:
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_investigation_changes",
+                                       "input": {"investigation_id": changed.group(1)}}], "tool_use", _zero_usage(), self.model)
+                return
+            text = self._changes(results.get("get_investigation_changes") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "plan" in lower and allow_tools and (calls := self._plan_calls(symbol, last, results)):
             content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
                        for i, (n, a) in enumerate(calls)]
@@ -286,6 +299,20 @@ class FakeAdapter:
                 await asyncio.sleep(self.delay_s)
             yield "text", piece
         yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+
+    @staticmethod
+    def _changes(data: dict) -> str:
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if data.get("state") != "ok":
+            return head + f"I couldn't read what changed: {data.get('reason') or 'the investigation was not readable'}."
+        saved = data["investigation"]
+        fired = [a for a in data["alerts"] if a["fired"]]
+        done = [j for j in data["research_jobs"] if j["since_last_update"]]
+        return head + (f"**Since {saved['updated_at']}** ({saved['title']}):\n\n"
+                       f"- Alerts: {len(data['alerts'])} linked, {len(fired)} fired"
+                       + "".join(f"; {a['symbol']} at {a['fired']['price']} ({a['fired']['at']})" for a in fired) + ".\n"
+                       f"- Research: {len(done)} result(s) finished since the last update.\n"
+                       f"- Saved conclusion: {saved['conclusion'] or 'none'}. Re-check it against fresh evidence before relying on it.")
 
     @staticmethod
     def _plan_calls(symbol: str, last: dict, results: dict) -> list[tuple[str, dict]]:
@@ -387,6 +414,11 @@ def _summary(name: str, data: dict) -> str:
         p = data.get("proposal") or {}
         return (f"proposed watch: {p.get('symbol')} {p.get('condition')} {p.get('price')}" if p.get("kind") == "watch"
                 else f"proposed revisit in {p.get('horizon_days')} d")[:160]
+    if name == "get_investigation_changes":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        fired = sum(1 for a in data.get("alerts", []) if a.get("fired"))
+        return f"{len(data.get('alerts', []))} alerts ({fired} fired), {len(data.get('research_jobs', []))} research jobs"
     if name == "get_saved_research":
         return f"{len(data.get('items', []))} saved"
     if name == "get_quotes":

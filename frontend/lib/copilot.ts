@@ -157,6 +157,10 @@ export const CONTEXT_MAX = 300;
 const SYMBOL_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 
 /** `/copilot-lab?symbol=X&context=...`: opens a new investigation prefilled, never sent on its own. */
+/** The "What changed?" turn for a reopened investigation: the id goes in the text, so every backend can act on it. */
+export const whatChangedPrompt = (investigationId: string) =>
+  `What changed? Use get_investigation_changes for investigation ${investigationId}, then compare it with fresh group, peer, news and quote reads, and say whether the saved conclusion still holds.`;
+
 export function copilotLabHref(symbol: string, context?: string) {
   const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
   if (context?.trim()) query.set("context", context.trim().slice(0, CONTEXT_MAX));
