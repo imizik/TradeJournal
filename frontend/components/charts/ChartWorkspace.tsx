@@ -259,7 +259,7 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
 
 export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: string }) {
   // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
-  const { settings: storedSettings, setSettings, ready, sync, merged, stored } = useChartSettings(initialSymbol);
+  const { settings: storedSettings, setSettings, ready, sync, merged, stored, previousSymbol } = useChartSettings(initialSymbol);
   const settings = useMemo(() => instrumentSettings(storedSettings), [storedSettings]);
   const { owner, grants } = useAppAccess();
   const allowedSymbols = (grants.symbols ?? []).join(",");
@@ -287,6 +287,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const cache = useChartSession();
   const [received, setResponse] = useState<ChartResponse | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
+  const [historyKey, setHistoryKey] = useState("");
   const [rollover, setRollover] = useState<{ key: string; before: number; pending: string[] } | null>(null);
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -402,11 +403,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const restoredRanges = useRef(new Map<string, { from: number; to: number }>());
   // Save only server-confirmed responses. Reading a snapshot never renews its age.
   useEffect(() => {
-    if (!received || received.data.context_pending || received.key !== requestKey || !cache) return;
-    const snapshot = { response: received, older, ranges: new Map(visibleTimes.current) };
+    if (!response || response.data.context_pending || response.key !== requestKey || !cache || (restored && historyKey !== requestKey)) return;
+    const snapshot = { response, older, ranges: new Map(visibleTimes.current) };
     cache.put(snapshot);
     return () => { snapshot.ranges = new Map(visibleTimes.current); };
-  }, [cache, received, older, requestKey]);
+  }, [cache, response, older, requestKey, restored, historyKey]);
   // Market trades survive symbol/session/layout changes; each consumer selects
   // its symbol and session. Reconnect only when the subscribed union changes.
   const streamKey = "market";
@@ -426,7 +427,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const sampleChart = latest?.sample_data === true;
   const streamReady = !!latest;
   const requestFailed = error?.key === requestKey;
-  const currentOlder = useMemo(() => restored ? saved!.older.panels : older.key === session ? older.panels : {}, [older, session, restored, saved]);
+  const currentOlder = useMemo(() => restored && historyKey !== requestKey ? saved!.older.panels : older.key === session ? older.panels : {}, [older, session, restored, saved, historyKey, requestKey]);
   const hasData = !!current;
   const lives = useMemo(() => new Map([...wanted.keys()].map((name) => [name, {
     store: stream, key: streamKey, symbol: name, session, fetched: feedFor(name)?.fetched_at.intraday ?? 0,
@@ -557,8 +558,10 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
   useEffect(() => {
     const snapshot = cache?.get(requestKey);
+    setHistoryKey(requestKey);
     restoredRanges.current = snapshot?.ranges ?? new Map();
     if (snapshot) {
+      lastWorkspaceDay.current = { key: session, day: new Date(snapshot.response.data.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) };
       visibleTimes.current = new Map(snapshot.ranges);
       setOlder({ key: session, panels: Object.fromEntries(Object.entries(snapshot.older.panels).map(([key, panel]) =>
         [key, panel ? { ...panel, loading: false } : panel])) });
@@ -677,11 +680,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const beforePast = useRef<string | null>(null);
   // Once the shared settings are in, chart the trade's symbol (the symbol on screen is this device's own).
   useEffect(() => {
+    if (ready && past && !past.started && !beforePast.current) beforePast.current = previousSymbol;
     if (ready && past && !past.started && settings.symbol !== past.symbol) {
-      beforePast.current = settings.symbol;
       setSettings((s) => s.symbol === past.symbol ? s : ({ ...s, symbol: past.symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== past.symbol)].slice(0, 8) }));
     }
-  }, [ready, past, settings.symbol, setSettings]);
+  }, [ready, past, settings.symbol, setSettings, previousSymbol]);
   // With its candles on screen: load the stored history page that holds the trade into every
   // chart of the symbol, centre each on the trade's arrows, and open the trade's card.
   useEffect(() => {
@@ -803,7 +806,18 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
         // The provider's existing keyed cache/lock coalesces the minute read.
         void fetchChartData({ symbol, session, intervals: [intervalKey.split(",")[0] as Interval],
           watchlist: [], extras: {}, phase: "prices" }, AbortSignal.any([controller.signal, firstController.signal])).then(first => {
-          if (alive && !firstController.signal.aborted && !hasFull) setResponse({ key: requestKey, session, data: first });
+          if (alive && !firstController.signal.aborted && !hasFull && Object.values(first.panels).some(panel => panel?.bars.length)) {
+            setResponse(previous => {
+              if (previous?.session === session && previous.data.symbol === first.symbol) return previous;
+              // Keep held comparison panels while only the selected candles arrive.
+              // Their original fetch timestamps and basis remain attached.
+              const retained = previous?.session === session ? previous.data : undefined;
+              const held = retained ? { ...retained.extras, [retained.symbol]: retained } : {};
+              const retainedExtras = Object.fromEntries(Object.keys(extras).flatMap(name => held[name] ? [[name, held[name]]] : []));
+              return { key: requestKey, session, data: { ...first, quotes: retained?.quotes ?? first.quotes,
+                extras: retainedExtras, context_pending: true } };
+            });
+          }
         }).catch(() => { /* The full request owns failure/retry disclosure. */ });
       }
       try {

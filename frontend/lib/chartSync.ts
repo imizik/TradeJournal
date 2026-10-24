@@ -171,6 +171,7 @@ export function useChartSettings(initialSymbol?: string) {
   const allowedSymbols = (grants.symbols ?? []).join(",");
   const [settings, setSettings] = useState<ChartSettings>(() => ({ ...DEFAULT_SETTINGS, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }));
   const [ready, setReady] = useState(false);
+  const [previousSymbol, setPreviousSymbol] = useState(DEFAULT_SETTINGS.symbol);
   const [sync, setSync] = useState<SyncState>("loading");
   const [stored, setStored] = useState(true);
   // Set when a save was refused and merged; cleared by this device's next change.
@@ -233,7 +234,10 @@ export function useChartSettings(initialSymbol?: string) {
     // This browser's copy shows while the server's loads (read after hydration,
     // so the server render matches). Anything changed meanwhile is part of this
     // device's changes, merged in below.
-    queueMicrotask(() => { if (alive && local.settings) setSettings({ ...local.settings, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) }); });
+    queueMicrotask(() => { if (alive && local.settings) {
+      setPreviousSymbol(local.settings.symbol);
+      setSettings({ ...local.settings, ...(initialSymbol && validSymbol(initialSymbol) ? { symbol: initialSymbol } : {}) });
+    } });
     fetchSettings().then((server) => {
       if (!alive) return;
       const theirs = server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS);
@@ -296,5 +300,5 @@ export function useChartSettings(initialSymbol?: string) {
   useEffect(() => () => window.clearTimeout(pending.current), []);
 
   const update = useCallback((action: SetStateAction<ChartSettings>) => { setMerged(false); setSettings(action); }, []);
-  return { settings, setSettings: update, ready, sync, merged, stored };
+  return { settings, setSettings: update, ready, sync, merged, stored, previousSymbol };
 }

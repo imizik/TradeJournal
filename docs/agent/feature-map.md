@@ -476,14 +476,14 @@ Weekly exit review: `backend/app/engine/weekly_review.py`, `backend/app/routers/
 ### Navigation continuity and Dashboard streaming
 
 `frontend/lib/chartSession.tsx` owns the bounded, owner-only browser snapshot
-cache used by `ChartWorkspace.tsx`; `chart-session.spec.ts` covers expiry/bounds,
+cache used by `ChartWorkspace.tsx`; `frontend/e2e/chart-session.spec.ts` covers expiry/bounds,
 and `charts.spec.ts` covers failure disclosure, exact candle and viewport reuse.
 The owner Dashboard shell mounts morning/Radar context independently of the
 shared journal/quote promise in `frontend/app/page.tsx`. Journal and Attention
 still use the existing calculations and error disclosures; ordinary internal
 Dashboard links use client navigation. `dashboard.spec.ts` checks partial loading,
 filters, failures and desktop/phone layout. The opt-in
-`navigation-performance.spec.ts` measures these paths on invented candles and
+`frontend/e2e/navigation-performance.spec.ts` measures these paths on invented candles and
 controlled response delays; it makes no provider calls. Chart provider transport
 is in `backend/app/engine/market_http.py`, with credential/timeout/no-cookie-reuse
 coverage in `backend/tests/test_market_http.py`.

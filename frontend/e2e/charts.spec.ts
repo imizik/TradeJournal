@@ -1105,9 +1105,9 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
     end_time: Date.parse("2026-09-29T13:35:00Z") / 1000 + index * 300,
     source: "alpaca_sip" as const }));
   await page.route("**/api/backend/charts/workspace?**", (route) => {
-    refreshes++;
+    if (new URL(route.request().url()).searchParams.get("phase") !== "prices") refreshes++;
     const data = fixture(route.request().url());
-    data.checked_at = refreshes === 1 ? beforeMidnight : afterMidnight;
+    data.checked_at = refreshes <= 1 ? beforeMidnight : afterMidnight;
     data.fetched_at.intraday = data.checked_at;
     if (refreshes > 1) for (const [interval, panel] of Object.entries(data.panels))
       if (interval !== "1D" && interval !== "1W" && panel) panel.bars = [];
@@ -4578,7 +4578,7 @@ test("maximize and restore each chart: the same instances, view, selection and s
   await mockStream(page);
   const requests: number[] = [];
   await gmail(page, true);
-  await stub(page, () => { requests.push(Date.now()); });
+  await stub(page, url => { if (new URL(url).searchParams.get("phase") !== "prices") requests.push(Date.now()); });
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   await addLevel(page, "Pivot", "250.00");
@@ -4631,7 +4631,8 @@ test("maximize and restore each chart: the same instances, view, selection and s
   await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toBeVisible();
   expect(await sameCharts(page)).toBe(true);
   expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams); // both symbols already belong to the subscribed watchlist
-  // Maximizing and restoring fetched nothing: only the two symbol and two interval switches, and the regular refresh.
+  // Full reads: two symbol and two interval switches, plus the regular refresh.
+  // Cold switches also request their independent first-candle phase.
   await expect.poll(() => requests.length - before).toBeGreaterThanOrEqual(4);
   expect(requests.length - before - 4).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
 
@@ -5603,6 +5604,8 @@ test("an automatic level's menu sets a close-beyond alert on that chart's interv
   const server = await stubAlerts(page, false);
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Candles are usable before the full automatic-level context arrives.
+  await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
   // PDH 254.30 and the round 254: price is above the zone, so its top edge.
   const zone = AUTO_ZONES[2];
   await rightClick(page, "main", { x: 300, y: await autoY(page, "main", zone.id) });
@@ -6703,7 +6706,7 @@ test("watchlist stays live during a slow symbol switch and bursts preserve candl
   const delayed = new Promise<void>((resolve) => { release = resolve; });
   let requests = 0;
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
-    requests++;
+    if (new URL(route.request().url()).searchParams.get("phase") !== "prices") requests++;
     if (new URL(route.request().url()).searchParams.get("symbol") === "NVDA") await delayed;
     await route.fulfill({ json: fixture(route.request().url()) });
   });
@@ -7330,6 +7333,16 @@ test("opt-in initial chart timings record each ready panel once", async ({ page 
 test("returning to Charts restores a disclosed snapshot while refresh fails", async ({ page }) => {
   await registerCharts(page);
   let fail = false;
+  let historyFails = true;
+  await page.route("**/api/backend/charts/history?**", route => {
+    if (historyFails) return route.fulfill({ status: 503, json: { detail: { message: "Fixture history unavailable" } } });
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixturePanels(["5m"])["5m"]!.bars[0];
+    const bars = Array.from({ length: 40 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (40 - i) * 300, end_time: before - (39 - i) * 300 }));
+    return route.fulfill({ json: { symbol: "MRVL", interval: "5m", session: "extended", before, limit: 1200, bars, markers: [], older_cursor: bars[0].time,
+      exhausted: true, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
   await page.route("**/api/backend/charts/workspace?**", async route => {
     if (fail) return route.fulfill({ status: 503, json: { detail: "Fixture refresh unavailable" } });
     const data = fixture(route.request().url());
@@ -7354,6 +7367,12 @@ test("returning to Charts restores a disclosed snapshot while refresh fails", as
   expect(await candles()).toEqual(bars);
   await expect.poll(() => visibleRange(page, "main")).toEqual(range);
   await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toContainText("may be outdated");
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 0, to: 60 }));
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toContainText("Fixture history unavailable");
+  historyFails = false;
+  await page.getByRole("button", { name: "Retry history", exact: true }).click();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "280");
+  await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toContainText("Refresh failed");
 });
 
 test("first candles stay usable when supporting context fails", async ({ page }) => {
@@ -7366,4 +7385,70 @@ test("first candles stay usable when supporting context fails", async ({ page })
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   await expect(page.getByRole("status", { name: "Chart context loading" })).toContainText("could not refresh");
   await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending");
+});
+
+test("restored history rolls over when the first fresh workspace crosses NY midnight", async ({ page, context }) => {
+  await fakeChartSettings(context, { data: { layout: "single" } });
+  await registerCharts(page);
+  const before = Date.parse("2026-10-24T03:59:58Z") / 1000;
+  const after = before + 4;
+  await page.clock.setFixedTime(new Date(before * 1000));
+  let returned = false, nextDay = false, release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const tail = fixturePanels(["5m"])["5m"]!.bars;
+  const old = tail.slice(0, 40).map(bar => ({ ...bar, source: "alpaca_sip", time: bar.time - 86400 * 30, end_time: bar.end_time! - 86400 * 30 }));
+  const asks: number[] = [];
+  await page.route("**/api/backend/charts/history?**", route => {
+    const query = new URL(route.request().url()).searchParams;
+    const cutoff = Number(query.get("before")); asks.push(cutoff);
+    const bars = nextDay ? tail.map(bar => ({ ...bar, source: "alpaca_sip" })) : old;
+    return route.fulfill({ json: { symbol: "MRVL", interval: "5m", session: "extended", before: cutoff, limit: 1200, bars, markers: [], older_cursor: bars[0].time,
+      exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+  await page.route("**/api/backend/charts/workspace?**", async route => {
+    if (returned) await gate;
+    const data = fixture(route.request().url());
+    data.checked_at = nextDay ? after : before;
+    data.fetched_at.intraday = data.checked_at;
+    if (nextDay) data.panels["5m"]!.bars = [];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
+  // Range prefetch deliberately ignores the 60ms programmatic-reset window.
+  await page.waitForTimeout(100);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 0, to: 60 }));
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "280");
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+  returned = true;
+  await page.getByRole("link", { name: "Charts", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toBeVisible();
+  nextDay = true;
+  await page.clock.setFixedTime(new Date(after * 1000));
+  release();
+  await expect.poll(() => asks.includes(after)).toBe(true);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "280");
+  await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toHaveCount(0);
+});
+
+
+test("a late first-candle response cannot replace complete context", async ({ page }) => {
+  let release = () => {}, completed = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/backend/charts/workspace?**", async route => {
+    const first = new URL(route.request().url()).searchParams.get("phase") === "prices";
+    if (first) await gate;
+    try { await route.fulfill({ json: { ...fixture(route.request().url()), context_pending: first } }); }
+    finally { if (first) completed = true; }
+  });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
+  release();
+  await expect.poll(() => completed).toBe(true);
+  await expect(page.getByRole("status", { name: "Chart context loading" })).toHaveCount(0);
+  for (const id of ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"])
+    await expect(page.getByTestId(`canvas-${id}`)).toHaveAttribute("data-bars", "240");
 });
