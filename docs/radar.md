@@ -167,6 +167,9 @@ leaders (or laggards) and five random tracked stocks at the same pass. It append
 scored event, so results outlive the 20-session quote pruning; run it at least every 20 sessions. The
 read-out is per rule version and decides only after 20 sessions of one version. No provider or model
 call. Question, comparisons and decision: [spec](../research/radar-outcomes/spec.md).
+`backend/scripts/radar_outcomes_review.py` optionally asks one Copilot Lab research job, on the Claude
+plan only (never an API key), what set the furthest continuations apart from the furthest reversals;
+it is hindsight input for a later rule version.
 
 ## Movers now
 
