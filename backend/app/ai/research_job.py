@@ -35,7 +35,8 @@ from typing import Any
 from app.ai import copilot, copilot_plan, copilot_tools, plan_runner
 
 SERVER = "tradejournal"
-LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] != "propose_plan"]  # jobs read untrusted pages: no proposals
+# Jobs read untrusted pages and can fetch URLs: no proposals, and no reading other saved investigations by id.
+LAB_TOOLS = [f"mcp__{SERVER}__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in ("propose_plan", "get_investigation_changes")]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 # Claude Code's own tool for returning the output_format answer: output only, no capability.
 OUTPUT_TOOL = "StructuredOutput"

@@ -403,6 +403,8 @@ def test_assistant_sessions_cannot_reach_the_lab(boundary):  # noqa: F811
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/status").status_code == 403
     assert boundary.public.post("/copilot/chat", json={"messages": [{"role": "user", "content": "NBIS?"}], "symbol": "NBIS"}).status_code == 403
+    what_changed = "What changed? Use get_investigation_changes for investigation 33333333-3333-4333-8333-333333333333."
+    assert boundary.public.post("/copilot/chat", json={"messages": [{"role": "user", "content": what_changed}]}).status_code == 403
     assert boundary.public.get("/copilot/investigations").status_code == 403
     assert boundary.public.post("/copilot/investigations", json={"title": "x"}).status_code == 403
 
@@ -750,3 +752,159 @@ def test_a_plan_turn_under_live_evidence_still_saves(monkeypatch):
             saved = made.json()
             put = client.put(f"/copilot/investigations/{saved['id']}", json={**body, "revision": saved["revision"]})
             assert put.status_code == 200, put.text
+
+
+# --------------------------------------------------------------------------- what changed (reopen)
+
+def _changes_world():
+    """A saved investigation with a fired and an armed copilot alert, another source's alert, and linked jobs."""
+    import time as clock
+    from sqlmodel import Session, delete
+    from app.database import engine
+    from app.engine import copilot_investigations as inv
+    from app.engine import research_queue as q
+    from app.engine.level_alert_monitor import create_alert
+    from app.models import LevelAlert, LevelAlertEvent, ResearchJob
+    with Session(engine) as db:
+        db.exec(delete(LevelAlertEvent))
+        db.exec(delete(LevelAlert))
+        db.exec(delete(ResearchJob))
+        db.commit()
+    saved = inv.create(inv.InvestigationFields(
+        title="NBIS bounce", symbol="NBIS", conclusion="Lagging its group",
+        transcript=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}],
+        evidence=[{"tool": "get_group_comparison", "as_of": f"2026-10-23T15:{m:02d}:00Z", "kind": "recorded", "message": 1} for m in range(10)]
+        + [{"tool": "get_symbol_news", "as_of": "2026-10-23T15:05:00Z", "kind": "fetched", "message": 1}] * 300))
+    now = clock.time()
+    with Session(engine) as db:
+        fired = create_alert(db, symbol="NBIS", price=92.46, reference=94.0, condition="crosses", interval=None, session="regular",
+                             source_kind="copilot", source_id=saved["id"], label="2% below", now=now)
+        create_alert(db, symbol="NBIS", price=99.0, reference=94.0, condition="touches", interval=None, session="regular",
+                     source_kind="copilot", source_id=saved["id"], label="breakout", now=now)
+        create_alert(db, symbol="NBIS", price=90.0, reference=94.0, condition="touches", interval=None, session="regular",
+                     source_kind="level", source_id="lvl", label="not this one", now=now)
+        fired.state, fired.fired_at = "fired", datetime.utcfromtimestamp(now + 60)
+        db.add(LevelAlertEvent(alert_id=fired.id, generation=fired.generation, level=92.46, price=92.4, source="stream",
+                               event_at=datetime.utcfromtimestamp(now + 60)))
+        db.commit()
+    result = inv.save_research_result(title="Deeper on NBIS", symbol="NBIS", findings={"summary": "Financing stress. " * 60})
+    for i in range(12):
+        q.enqueue_question(f"Question {i}?", ["NBIS"], from_investigation=saved["id"])
+    done, _ = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=saved["id"])
+    with Session(engine) as db:
+        row = db.get(ResearchJob, uuid.UUID(done["id"]))
+        row.status, row.finished_at, row.investigation_id, row.cost_usd = "done", datetime.utcnow(), uuid.UUID(result["id"]), 0.31
+        db.commit()
+    return saved
+
+
+def test_investigation_changes_are_bounded_linked_and_need_a_saved_investigation():
+    saved = _changes_world()
+    out = copilot_tools.call(copilot_tools.LiveEvidence(), "get_investigation_changes",
+                             copilot_tools.validate("get_investigation_changes", {"investigation_id": saved["id"].upper()}))
+    assert out["state"] == "ok" and out["investigation"]["conclusion"] == "Lagging its group"
+    assert out["evidence_as_of"] == [{"tool": "get_group_comparison", "as_of": "2026-10-23T15:09:00Z", "kind": "recorded"},
+                                     {"tool": "get_symbol_news", "as_of": "2026-10-23T15:05:00Z", "kind": "fetched"}]
+    assert {a["label"]: bool(a["fired"]) for a in out["alerts"]} == {"2% below": True, "breakout": False}  # only this investigation's
+    fired = next(a for a in out["alerts"] if a["fired"])
+    assert fired["fired"]["price"] == 92.4 and fired["fired"]["at"].endswith("Z")
+    assert len(out["research_jobs"]) == copilot_tools.CHANGE_JOBS and out["research_jobs"][0]["status"] == "done"
+    assert out["research_jobs"][0]["since_last_update"] is True and out["research_jobs"][0]["cost_usd"] == 0.31
+    assert out["results"][0]["title"] == "Deeper on NBIS" and len(out["results"][0]["summary"]) == 200
+    assert len(json.dumps(out)) < copilot_tools.MAX_RESULT_CHARS  # bounded before the 6,000-character cut
+    assert copilot_tools.provenance("get_investigation_changes", out, "live")["kind"] == "saved"
+
+    with pytest.raises(copilot_tools.ToolInputError, match="UUID"):
+        copilot_tools.validate("get_investigation_changes", {"investigation_id": "../etc"})
+    with pytest.raises(copilot_tools.ToolInputError, match="no saved investigation"):
+        copilot_tools.call(copilot_tools.LiveEvidence(), "get_investigation_changes", {"investigation_id": str(uuid.uuid4())})
+    assert FixtureEvidence().get_investigation_changes(saved["id"])["state"] == "unavailable"
+
+
+def test_replay_shows_no_change_after_its_frozen_moment(tmp_path):
+    from app.ai.copilot_replay import ReplayEvidence, parse_at
+    saved = _changes_world()
+    replay = ReplayEvidence(str(_replay_store(tmp_path / "r.sqlite", with_future=False)), parse_at("2026-10-23T11:12"))
+    assert replay.get_investigation_changes(saved["id"])["state"] == "unavailable"  # saved after that moment
+
+
+def test_what_changed_runs_through_the_owner_chat_route(monkeypatch):
+    saved = _changes_world()
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.setenv("COPILOT_EVIDENCE", "live")
+    monkeypatch.delenv("COPILOT_BACKEND", raising=False)
+    monkeypatch.setattr(copilot, "adapter_for", lambda cfg: copilot.FakeAdapter(0))
+    prompt = f"What changed? Use get_investigation_changes for investigation {saved['id']}, then compare it with fresh evidence."
+    with TestClient(app) as client:
+        frames = _frames(client.post("/copilot/chat", json={"messages": [{"role": "user", "content": prompt}], "symbol": "NBIS"}).text)
+    tool = next(f for f in frames if f["type"] == "tool" and f.get("status") == "ok")
+    assert tool["name"] == "get_investigation_changes" and tool["summary"] == "2 alerts (1 fired), 5 research jobs"
+    text = "".join(f["delta"] for f in frames if f["type"] == "text")
+    assert "Alerts: 2 linked, 1 fired; NBIS at 92.4" in text and "1 result(s) finished since the last update" in text
+
+
+def test_investigation_changes_fit_whole_at_every_cap():
+    """The largest answer the caps allow still fits, so bounded() never cuts it mid-string into broken JSON."""
+    from sqlmodel import Session
+    from app.database import engine
+    from app.engine import copilot_investigations as inv
+    from app.engine import research_queue as q
+    from app.engine.level_alert_monitor import create_alert
+    from app.models import LevelAlertEvent, ResearchJob
+    import time as clock
+    saved = _changes_world()
+    tools = [t["name"] for t in copilot_tools.TOOLS]
+    inv.update(saved["id"], inv.InvestigationFields(
+        title="T" * 120, symbol="NBIS", conclusion="C" * 280, findings={"summary": "S" * 2000},
+        evidence=[{"tool": t, "as_of": "2026-10-23T15:59:59.999999+00:00", "kind": "recorded", "message": 1} for t in tools]), 1)
+    now = clock.time()
+    with Session(engine) as db:
+        for i, price in enumerate((10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5)):
+            alert = create_alert(db, symbol="NBIS", price=price, reference=price - 1, condition="closes_beyond", interval="15m",
+                                 session="extended", source_kind="copilot", source_id=saved["id"], label="L" * 60, now=now)
+            db.add(LevelAlertEvent(alert_id=alert.id, generation=alert.generation, level=price, price=price + 0.123456,
+                                   source="closed_bar", event_at=datetime.utcfromtimestamp(now + 1)))
+        db.commit()
+    for i in range(8):
+        result = inv.save_research_result(title="R" * 120, symbol="NBIS", conclusion="K" * 280, findings={"summary": "F" * 2000})
+        job, _ = q.enqueue_question(f"{i}" + "Q" * 1999, ["NBIS"], from_investigation=saved["id"])
+        with Session(engine) as db:
+            row = db.get(ResearchJob, uuid.UUID(job["id"]))
+            row.status, row.finished_at, row.investigation_id, row.cost_usd = "done", datetime.utcnow(), uuid.UUID(result["id"]), 123.456789
+            db.commit()
+    out = copilot_tools.investigation_changes(saved["id"])
+    assert (len(out["alerts"]), len(out["research_jobs"]), len(out["results"])) == (
+        copilot_tools.CHANGE_ALERTS, copilot_tools.CHANGE_JOBS, copilot_tools.CHANGE_RESULTS)
+    assert len(out["evidence_as_of"]) == len(tools) <= copilot_tools.CHANGE_EVIDENCE
+    text = copilot_tools.bounded(out)
+    assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
+
+
+def test_replay_hides_whatever_happened_to_an_investigation_after_its_moment():
+    """Alerts armed or fired, jobs queued or finished, and edits made after the frozen moment are all hindsight."""
+    from datetime import UTC, timedelta
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import CopilotInvestigation, LevelAlert, LevelAlertEvent, ResearchJob
+    saved = _changes_world()
+    moment = datetime.now(UTC) + timedelta(hours=1)
+    before, after = (moment - timedelta(days=2)).replace(tzinfo=None), (moment + timedelta(hours=2)).replace(tzinfo=None)
+    with Session(engine) as db:
+        row = db.get(CopilotInvestigation, uuid.UUID(saved["id"]))
+        row.created_at, row.updated_at = before, after  # created before the moment, edited after it
+        alerts = sorted(db.exec(select(LevelAlert).where(LevelAlert.source_id == saved["id"])).all(), key=lambda a: a.label)
+        alerts[0].armed_at = before  # "2% below": armed before, fired after (below)
+        alerts[1].armed_at = after   # "breakout": armed after the moment
+        for event in db.exec(select(LevelAlertEvent)).all():
+            event.event_at = after
+        for job in db.exec(select(ResearchJob)).all():
+            job.created_at = before if job.status == "done" else after  # the done one was queued before, finished after
+            job.finished_at = after if job.status == "done" else None
+        db.commit()
+    out = copilot_tools.investigation_changes(saved["id"], before=moment)
+    assert out["investigation"]["later_state"].startswith("Updated after the replay moment")
+    assert not {"conclusion", "updated_at", "messages", "status", "summary"} & set(out["investigation"])
+    assert [(a["label"], a["fired"]) for a in out["alerts"]] == [("2% below", None)]  # armed then, not yet fired
+    assert [(j["status"], j["finished_at"]) for j in out["research_jobs"]] == [("running", None)]
+    assert out["results"] == []
+    assert out["evidence_as_of"]  # its evidence predates the moment

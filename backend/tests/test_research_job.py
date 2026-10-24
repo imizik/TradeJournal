@@ -72,8 +72,10 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(plan_env, saved)
     _run(sdk)
     o = sdk.options
     assert o.tools == ["WebSearch", "WebFetch"]
-    assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] != "propose_plan")]
-    assert "mcp__tradejournal__propose_plan" not in o.allowed_tools  # a background job reads untrusted pages; it never proposes
+    kept_out = ("propose_plan", "get_investigation_changes")
+    assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in kept_out)]
+    # A background job reads untrusted pages and can fetch URLs: it never proposes, nor reads another investigation by id.
+    assert not {f"mcp__tradejournal__{name}" for name in kept_out} & set(o.allowed_tools)
     assert set(o.mcp_servers) == {"tradejournal"} and o.strict_mcp_config is True and o.setting_sources == []
     assert o.permission_mode == "dontAsk" and o.verbatim_prompts is True and o.max_budget_usd == 0.50 and o.max_turns == 24
     assert {"restricted", "no-session-persistence", "disable-slash-commands"} <= set(o.extra_args)
@@ -261,3 +263,11 @@ def test_api_key_mode_uses_its_own_config_dir_and_needs_claude_code_to_report_th
     assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude" / "research-api") and Path(env["CLAUDE_CONFIG_DIR"]).is_dir()
     assert seen["env"]["ANTHROPIC_API_KEY"] == "sk-test" and seen["env"][plan_runner.TOKEN_ENV] == ""
     assert seen["env"]["CLAUDE_CONFIG_DIR"] == env["CLAUDE_CONFIG_DIR"]
+
+
+def test_the_job_hook_denies_the_lab_only_tools_by_name():
+    rec = research_job._Recorder(research_job.JobLimits())
+    for name in ("mcp__tradejournal__get_investigation_changes", "mcp__tradejournal__propose_plan"):
+        decision = asyncio.run(rec.pre_tool({"tool_name": name, "tool_input": {}}, "t1", None))
+        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert asyncio.run(rec.pre_tool({"tool_name": "mcp__tradejournal__get_quotes", "tool_input": {}}, "t2", None)) == {}
