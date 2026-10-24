@@ -2,6 +2,8 @@
 
 In no assistant grant. Queuing works with the runner off; jobs then wait until ``RESEARCH_QUEUE_ENABLED=true``.
 """
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -16,6 +18,7 @@ router = APIRouter()
 class QuestionJob(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     symbols: list[str] = Field(default_factory=list, max_length=copilot_tools.MAX_SYMBOLS)
+    investigation_id: uuid.UUID | None = None  # the saved investigation it was asked from (shown there, not read)
 
 
 def _http(exc: research_queue.QueueError) -> HTTPException:
@@ -26,7 +29,9 @@ def _http(exc: research_queue.QueueError) -> HTTPException:
 def enqueue_question(body: QuestionJob, session: Session = Depends(get_session)):
     try:
         symbols = copilot_tools.validate("get_quotes", {"symbols": body.symbols})["symbols"] if body.symbols else []
-        job, created = research_queue.enqueue_question(body.question, symbols, session=session)
+        job, created = research_queue.enqueue_question(
+            body.question, symbols, session=session,
+            from_investigation=str(body.investigation_id) if body.investigation_id else None)
     except copilot_tools.ToolInputError as exc:
         raise HTTPException(422, str(exc))
     except research_queue.QueueError as exc:

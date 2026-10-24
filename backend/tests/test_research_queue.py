@@ -217,6 +217,12 @@ def test_owner_routes_enqueue_list_and_cancel(monkeypatch):
         assert client.post("/copilot/research-jobs/nope/cancel").status_code == 404
         assert client.post("/copilot/research-jobs", json={"question": "x", "symbols": ["../etc"]}).status_code == 422
         assert client.post("/copilot/research-jobs", json={"question": ""}).status_code == 422
+        # Asked from a saved investigation: the link is recorded for the lab to show; the job's assignment ignores it.
+        source = "0b5a3e1c-8f3a-4d7e-9a49-6a2f1d0c7b11"
+        linked = client.post("/copilot/research-jobs", json={"question": "Deeper on NBIS?", "symbols": ["NBIS"], "investigation_id": source}).json()["job"]
+        assert linked["input"] == {"question": "Deeper on NBIS?", "symbols": ["NBIS"], "from_investigation": source}
+        assert q.assignment(linked) == ("Deeper on NBIS?", ["NBIS"], "Deeper on NBIS?")
+        assert client.post("/copilot/research-jobs", json={"question": "x", "investigation_id": "not-a-uuid"}).status_code == 422
 
 
 def test_assistant_sessions_cannot_reach_the_queue(boundary):  # noqa: F811

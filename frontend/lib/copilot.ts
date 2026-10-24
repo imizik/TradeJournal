@@ -160,3 +160,30 @@ export function readDeepLink(params: { symbol?: string | string[]; context?: str
   if (!symbol && !context) return null;
   return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context };
 }
+
+// --------------------------------------------------------------------------- research queue
+
+export type ResearchJob = {
+  id: string; kind: "question" | "radar_event" | "reassess"; status: "queued" | "running" | "done" | "failed" | "cancelled";
+  input: { question?: string; symbols?: string[]; from_investigation?: string };
+  attempts: number; error: string | null; cost_usd: number | null; investigation_id: string | null;
+  created_at: string; finished_at: string | null;
+};
+export type ResearchJobs = { jobs: ResearchJob[]; queue_enabled: boolean; daily_budget_usd: number; spent_today_usd: number };
+export const ACTIVE_JOB = new Set<ResearchJob["status"]>(["queued", "running"]);
+
+async function queueRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(apiUrl(`/copilot/research-jobs${path}`), { cache: "no-store", ...init,
+    headers: init?.body ? { "Content-Type": "application/json" } : undefined });
+  if (!response.ok) {
+    let detail = `Research request failed (${response.status}).`;
+    try { const body = await response.json(); if (typeof body?.detail === "string") detail = body.detail; } catch { /* keep the status */ }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+export const listResearchJobs = (signal?: AbortSignal) => queueRequest<ResearchJobs>("?limit=50", { signal });
+export const enqueueResearch = (question: string, symbols: string[], investigationId: string) =>
+  queueRequest<{ job: ResearchJob; created: boolean; queue_enabled: boolean }>("", { method: "POST",
+    body: JSON.stringify({ question, symbols, investigation_id: investigationId }) });
