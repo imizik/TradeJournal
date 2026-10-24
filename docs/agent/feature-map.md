@@ -12,10 +12,10 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 
 ## The screens
 
-The private sidebar and phone More menu (`components/Nav.tsx`) put Dashboard,
-Charts, Daily Review, Trades, Analytics, Fills, Signals, Scanner, Daily Practice and Advisor
-review first, followed by **Labs** (Strategy Lab, Research Studio, Level 2 lab
-and AI Buildout). Assistant access remains available when enabled. A **Sync**
+The private sidebar and phone More menu (`components/Nav.tsx`) put the everyday
+pages first (Dashboard, Charts, Daily Review, Jo, Trades, Analytics, Fills), then
+**Signals & practice** (Signals, Scanner, Radar, Daily Practice, Advisor review),
+then **Labs** (Strategy Lab, Research Studio, Level 2 lab and AI Buildout). Assistant access remains available when enabled. A **Sync**
 button opens a drawer on any page.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
@@ -80,7 +80,7 @@ Things worth knowing before you touch a page:
   Google OAuth consent screen links to it; keep it true to what the Gmail
   integration does.
 - Phone layout: below `md` the sidebar in `components/Nav.tsx` is replaced by a
-  tab bar fixed at the bottom (Dashboard, Charts, Daily, Trades, and More,
+  tab bar fixed at the bottom (Dashboard, Charts, Daily Review, Trades, and More,
   which opens the slide-out menu with every `navItems` page and the Sync
   drawer) and a slim title bar, hidden on `/charts` so the chart starts
   higher; `AppMain` pads pages above the tab bar. On `/charts` a phone keeps

@@ -3,6 +3,7 @@
 import { useAppAccess } from "@/components/AccessProvider";
 import { useState } from "react";
 import { api, MonthlyFinding, MonthlyReview } from "@/lib/api";
+import { timeET } from "@/lib/format";
 
 const VERDICT = {
   keep: { label: "Keep", tone: "border-emerald-500/50 text-emerald-300" },
@@ -44,7 +45,7 @@ export default function MonthlyAiPanel({ month, monthLabel, closedTrades, initia
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Monthly Review</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Claude review, on your Claude plan, across the {closedTrades} trade(s) that closed in {monthLabel}.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Claude review, on your Claude plan, across the {closedTrades} trade{closedTrades === 1 ? "" : "s"} that closed in {monthLabel}.</p>
         </div>
         <button type="button" onClick={run} disabled={!owner || status === "loading"}
           className="rounded bg-foreground px-3 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50">
@@ -67,7 +68,7 @@ function Result({ review, generatedAt }: { review: MonthlyReview; generatedAt: s
       <div>
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="rounded bg-background px-2 py-0.5 text-xs font-semibold text-foreground">{review.month_grade}</span>
-          {generatedAt && <span className="text-xs text-muted-foreground">Saved {new Date(generatedAt).toLocaleString()}</span>}
+          {generatedAt && <span className="text-xs text-muted-foreground">Saved {timeET(generatedAt, { year: true })}</span>}
         </div>
         <p className="text-foreground/90">{review.summary}</p>
       </div>

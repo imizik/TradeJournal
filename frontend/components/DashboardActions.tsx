@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { api, SyncJob, SyncRun, SyncSummary } from "@/lib/api";
+import { timeET } from "@/lib/format";
 
 type EnrichRange = "day" | "week" | "month" | "all";
 type Tab = "jobs" | "history" | "advanced";
@@ -35,12 +36,7 @@ function fmtRelative(value: string | null | undefined) {
 
 function fmtTime(value: string | null | undefined) {
   if (!value) return "-";
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return timeET(value);
 }
 
 function fmtDuration(seconds: number | null) {

@@ -12,7 +12,8 @@ Use one writer per file/module and at most one migration author at a time.
 Workers preserve others' edits and do not spawn more workers. The owner retains
 product decisions, integration, pushes and PRs. The owner follows the shared
 [PR completion rules](pr-review.md#automatic-repair-and-merge): automatic repair
-and merge for tier 0, user approval and merge for tiers 1/2.
+and merge once required review is clean, user approval and merge for
+[user-gated changes](pr-review.md#user-gated-changes).
 
 ## Escalation
 

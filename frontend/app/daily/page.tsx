@@ -6,7 +6,7 @@ import type { DailyReviewIndexItem, MonthlyReviewIndexItem, PlanRunnerStatus } f
 import type { PlansView } from "@/lib/conditionalPlans";
 import type { MorningMonth } from "@/lib/joMorning";
 import type { MarketReadsView } from "@/lib/marketReads";
-import { money } from "@/lib/format";
+import { money, timeET } from "@/lib/format";
 
 function formatDate(value: string) {
   return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", {
@@ -231,7 +231,7 @@ function MonthGrid({ month, days, weekends, review, jo }: { month: string; days:
           const pnl = day.closed_pnl == null ? "nothing closed" : money(day.closed_pnl, { signed: true, cents: false });
           return (
             <a key={dayNumber} href={`/daily/${day.day}`} aria-label={`${formatDate(day.day)}: ${trades}, ${pnl}, ${state.label.toLowerCase()}${mark ? `, Jo: ${mark.text}` : ""}`}
-              title={day.generated_at ? `Saved ${new Date(day.generated_at).toLocaleString()}` : state.label}
+              title={day.generated_at ? `Saved ${timeET(day.generated_at, { year: true })}` : state.label}
               className={`flex min-h-14 flex-col justify-between rounded-md border p-1.5 transition-colors hover:border-foreground/40 sm:min-h-20 sm:p-2 ${tint(day.closed_pnl)}`}>
               <div className="flex items-center justify-between gap-1">
                 <span className="text-xs font-semibold text-foreground">{dayNumber}</span>

@@ -2,23 +2,19 @@ import { api } from "@/lib/serverApi";
 import type { Account, Fill } from "@/lib/api";
 import ManualFillForm from "@/components/ManualFillForm";
 import { cn } from "@/lib/utils";
+import { wallClockET } from "@/lib/format";
 
 function sourceLabel(fill: Fill) {
   return fill.raw_email_id.startsWith("manual:") ? "Manual" : "Email";
 }
 
 function fmtDateTime(value: string) {
-  return new Date(value).toLocaleString();
+  return wallClockET(value, { year: true, seconds: true });
 }
 
-// Phones drop the year and seconds so the price column still fits.
+// Phones drop the year and seconds so the price column still fits; the time and "ET" wrap as one piece.
 function fmtDateTimeShort(value: string) {
-  return new Date(value).toLocaleString(undefined, {
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return wallClockET(value).replace(/ (AM|PM) ET$/, " $1 ET");
 }
 
 function fmtPrice(fill: Fill) {
@@ -49,9 +45,8 @@ export default async function FillsPage() {
       <div>
         <h1 className="text-xl font-semibold text-foreground">Fills</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          Email imports land here automatically, and manual fills let you backfill historical entries that never
-          existed in Gmail. This is the right place for transferred positions, missing cost basis, and older starter
-          lots you want included in your trade reconstruction.
+          Fills from your broker emails arrive here automatically. Add a manual fill for anything Gmail never had:
+          transferred positions, missing cost basis or older starter lots.
         </p>
       </div>
 

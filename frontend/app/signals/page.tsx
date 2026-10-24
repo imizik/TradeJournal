@@ -54,9 +54,8 @@ export default async function SignalsPage() {
       <div>
         <h1 className="text-xl font-semibold text-foreground">Signals</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          TradingView alerts and their latest scalp analysis. These are decision-support records
-          only — they are
-          isolated from journal fills and FIFO trades, and nothing here places an order.
+          TradingView alerts and their latest scalp analysis. Read-only: nothing here places an order or
+          changes your fills and trades.
         </p>
         <SignalsRefresh />
       </div>

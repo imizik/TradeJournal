@@ -39,7 +39,8 @@ is a trading app. [Review policy](docs/agent/pr-review.md) supplies the detail.
 - **Ordinary, bounded work:** localized fixes, UI tweaks, routine tests and
   documentation. Make the smallest change, run focused checks, push/update the
   PR, repair actionable failures and finish through passing CI and automatic
-  merge. No mandatory subagent, independent review or full local suite.
+  merge unless it is user-gated. No mandatory subagent, independent review or
+  full local suite.
 - **Broad work:** cross-system features or refactors need relevant integration
   coverage and one independent reviewer. Broader tests follow affected behavior,
   not every layer in the system.
@@ -47,6 +48,10 @@ is a trading app. [Review policy](docs/agent/pr-review.md) supplies the detail.
   real-data mutation, auth/security, migrations, deployment, and verification,
   review or CI policy/tooling retain the stronger review and full applicable
   verification in the shared guides. Small diffs are not an exemption here.
+
+Broad and consequential PRs also finish through CI and automatic merge once
+their required reviews are clean, unless they are
+[user-gated](docs/agent/pr-review.md#user-gated-changes).
 
 For changed UI, inspect the affected screen in a running app and exercise any
 changed interaction. For a bug, use a focused reproducer/regression when useful.
@@ -71,15 +76,18 @@ feature-specific safety and acceptance gates; fixture proof is not live proof.
 ## Delivery
 
 Develop on a branch, never directly on `main`. Pushes, PR updates and bounded
-repairs are authorized for both Codex and Claude Code. Ordinary (tier 0) PRs
-are authorized for automatic repair and squash merge under the
-[PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge).
-Broad (tier 1) and consequential (tier 2) PRs still require the user's approval
-and merge; never merge or enable auto-merge for them. This policy change is
-itself tier 2 and must be left for the user to merge.
+repairs are authorized for both Codex and Claude Code. PRs are authorized for
+automatic repair and squash merge under the
+[PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge) once
+CI and the review their tier requires pass.
+[User-gated changes](docs/agent/pr-review.md#user-gated-changes) (agent rules,
+CI and verification tooling, deployment and activation, destructive data
+changes, and auth/security) still require the user's approval and merge; never
+merge or enable auto-merge for them. Changes to this policy are user-gated.
 CI remains enabled for every PR; only call work merge-ready after required checks
-pass on its final head and any required review is complete. Keep owning ordinary
-PRs while CI is pending; if interrupted or blocked, report that state honestly.
+pass on its final head and any required review is complete. Keep owning PRs you
+will merge while CI is pending; if interrupted or blocked, report that state
+honestly.
 Do not rerun a failure until it passes without diagnosing it, weaken tests, or
 conceal missing proof.
 

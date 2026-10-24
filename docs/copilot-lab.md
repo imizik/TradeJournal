@@ -397,8 +397,8 @@ It has no scheduler, Radar wake-up or notification yet.
   evidence references (tool and `as_of`). The record also has the lab tool
   calls the server actually ran, with provenance, plus web counts, cost (an
   API-price equivalent on the plan) and server-side checks:
-  - citations whose URL the job never searched, fetched or got back from a lab
-    tool;
+  - citations whose URL the job never searched, fetched successfully (a failed
+    fetch was never read) or got back from a lab tool;
   - evidence references to tools it never called;
   - under replay, sources published after the evidence time.
 
