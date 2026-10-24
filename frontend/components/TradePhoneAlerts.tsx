@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
-import { chartLink } from "@/lib/chartJournal";
+import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from "@/lib/chartJournal";
 
 // Older API responses still render their history, but cannot identify a linked event.
 type Sent = { id?: string; contract?: string; quoted_at?: number | null;
@@ -21,6 +21,39 @@ const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", se
 const money = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const pct = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
 const time = (s: number) => `${new Date(s * 1000).toLocaleString("en-US", { timeZone: "America/New_York", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`;
+
+// The open position as it is now, next to the alert's saved snapshot: one quote through the dashboard's 60-second cache.
+function PositionNow({ tradeId }: { tradeId: string }) {
+  const [read, setRead] = useState<{ loading: boolean; data?: OptionMark; stale?: boolean; error?: string }>({ loading: true });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    fetchOptionMark(tradeId).then(data => { if (active) setRead({ loading: false, data,
+      stale: data.quoted_at != null && Date.now() / 1000 - data.quoted_at > MARK_STALE_SECONDS }); },
+      err => { if (active) setRead({ loading: false, error: err instanceof Error ? err.message : "The current price could not be read." }); });
+    return () => { active = false; };
+  }, [tradeId, attempt]);
+
+  const { data, stale } = read;
+  const pnlTone = data?.open_pnl == null ? "" : data.open_pnl >= 0 ? "text-emerald-400" : "text-red-400";
+  return <div data-testid="position-now" aria-live="polite" className="space-y-1 rounded-md border p-3">
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Now</h4>
+    {read.loading && <p role="status" className="text-muted-foreground">Reading the current price…</p>}
+    {!read.loading && read.error && <p role="alert" className="text-amber-300">Current price unavailable. {read.error}</p>}
+    {!read.loading && data && (data.mark == null ? <p className="text-muted-foreground">No current quote came back for this contract.</p> : <>
+      <p className={`text-base font-semibold tabular-nums ${pnlTone}`}>Open P&L now {money(data.open_pnl)}</p>
+      <p>
+        {data.open != null && <>{data.open} contract{data.open === 1 ? "" : "s"} open. </>}
+        {data.basis === "last" ? "Last trade" : "Option midpoint"} ${data.mark.toFixed(2)} per share.
+        {data.bid != null && <> Bid ${data.bid.toFixed(2)} per share.</>}
+      </p>
+      {data.quoted_at != null && <p className={`text-xs ${stale ? "text-amber-300" : "text-muted-foreground"}`}>{stale ? "Stale: quoted" : "Quoted"} {time(data.quoted_at)}.</p>}
+    </>)}
+    {!read.loading && <button type="button" onClick={() => { setRead({ loading: true }); setAttempt(n => n + 1); }}
+      className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">{read.error ? "Try again" : "Refresh"}</button>}
+  </div>;
+}
 
 export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: { tradeId: string; alertId?: string; symbol: string; status: string }) {
   const [body, setBody] = useState<Body | null>(null);
@@ -67,6 +100,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: {
         {selected.quoted_at != null && <> Quoted {time(selected.quoted_at)}.</>}
         {status !== "open" && <> This position is now {status}.</>}
       </p>
+      {status === "open" && <PositionNow tradeId={tradeId} />}
       <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
         className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
       <p className="text-xs text-muted-foreground">Delivery: {DELIVERY[selected.delivery]}.</p>

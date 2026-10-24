@@ -321,7 +321,7 @@ def journal_trade(trade_id: uuid.UUID, db: Session = Depends(get_session)):
 @router.get("/journal/trades/{trade_id}/mark")
 def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
     """An open option trade's current premium and open P&L, asked for from its
-    card. One quote through the dashboard's 60-second cache; the answer says
+    chart card or shown next to a position alert. One quote through the dashboard's 60-second cache; the answer says
     when it was quoted, so an old mark is shown as old."""
     trade = db.get(Trade, trade_id)
     if trade is None or trade.instrument_type != "option" or trade.status != "open" or trade.expiration is None:
@@ -338,7 +338,8 @@ def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
         open_pnl = round((mark * 100 - position["avg_cost"]) * position["open"] * sign, 2)
     return {"mark": mark, "mark_per_contract": None if mark is None else round(mark * 100, 2), "basis": basis,
             "bid": quote.bid, "ask": quote.ask, "last": quote.last_price,
-            "provider": quote.provider, "quoted_at": int(quoted_at) if quoted_at else None, "open_pnl": open_pnl}
+            "provider": quote.provider, "quoted_at": int(quoted_at) if quoted_at else None, "open_pnl": open_pnl,
+            "open": position["open"] if position else None}
 
 
 @router.get("/options/{symbol:path}/ladder")

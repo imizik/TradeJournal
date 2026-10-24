@@ -120,6 +120,10 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
 
   const sizeLabel = trade.instrument_type === "stock" ? "Shares" : "Contracts";
   const returnTo = `/trades?ticker=${encodeURIComponent(trade.ticker)}`;
+  const planSection = plans && plans.length > 0 && <section aria-label="Pre-trade plan" className="rounded-lg border bg-card p-5">
+    <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
+    <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
+  </section>;
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -138,6 +142,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
       </div>
 
       {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} symbol={trade.ticker} status={trade.status} />}
+      {/* An alert asks you to review your exit plan, so the plan follows it rather than the summary. */}
+      {alert && planSection}
 
       <div className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -165,10 +171,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         </div>
       </div>
 
-      {plans && plans.length > 0 && <section aria-label="Pre-trade plan" className="rounded-lg border bg-card p-5">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
-        <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
-      </section>}
+      {!alert && planSection}
 
       {!alert && <TradePhoneAlerts key={id} tradeId={id} symbol={trade.ticker} status={trade.status} />}
 
