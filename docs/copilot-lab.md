@@ -130,7 +130,7 @@ credits.
   run under that exact environment must report the plan token as the sign-in.
   Otherwise the chat returns 503 and asks for `claude setup-token`. It never
   falls back to an API key.
-- **Same limits.** Only the five lab tools, as in-process SDK MCP tools that
+- **Same limits.** Only the six lab tools, as in-process SDK MCP tools that
   call `copilot_tools.validate()` and the same timed, bounded runner; the same
   8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
   120 s per turn and the spend cap above.
