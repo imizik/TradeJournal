@@ -1,0 +1,229 @@
+{
+  "protocol_id": "exit-counterfactual-20261024-v1",
+  "extract_trades": 1528,
+  "analyzed": 1506,
+  "excluded": {
+    "window over 10 days": 22
+  },
+  "fetched_windows": 388,
+  "recorded_pnl_mismatch": 0,
+  "actual_total": 19246.98,
+  "rules": {
+    "giveback": {
+      "all": {
+        "trades": 1506,
+        "touched": 206,
+        "dollar_diff": 2891.37,
+        "dollar_diff_stress": -4710.64,
+        "saved": 116,
+        "cost": 90,
+        "pct_diff_mean": -2.44,
+        "timing_value": 3881.33,
+        "random_dollar_diff": -989.96,
+        "dollar_diff_interval": [
+          -14612.4,
+          21814.06
+        ],
+        "pct_diff_interval": [
+          -12.41,
+          7.69
+        ],
+        "timing_value_interval": [
+          -4030.78,
+          12085.92
+        ]
+      },
+      "exploration": {
+        "trades": 1162,
+        "touched": 157,
+        "dollar_diff": -3138.45,
+        "dollar_diff_stress": -8334.1,
+        "saved": 88,
+        "cost": 69,
+        "pct_diff_mean": -3.72,
+        "timing_value": -1355.83,
+        "random_dollar_diff": -1782.62,
+        "dollar_diff_interval": [
+          -14137.76,
+          7164.89
+        ],
+        "pct_diff_interval": [
+          -15.38,
+          6.98
+        ],
+        "timing_value_interval": [
+          -7191.12,
+          4035.52
+        ]
+      },
+      "check": {
+        "trades": 344,
+        "touched": 49,
+        "dollar_diff": 6029.82,
+        "dollar_diff_stress": 3623.46,
+        "saved": 28,
+        "cost": 21,
+        "pct_diff_mean": 1.65,
+        "timing_value": 5237.16,
+        "random_dollar_diff": 792.66,
+        "dollar_diff_interval": [
+          -7308.51,
+          23052.9
+        ],
+        "pct_diff_interval": [
+          -21.12,
+          20.61
+        ],
+        "timing_value_interval": [
+          689.01,
+          11402.11
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    },
+    "hold_hour": {
+      "all": {
+        "trades": 1506,
+        "touched": 337,
+        "dollar_diff": -10170.3,
+        "dollar_diff_stress": -22319.97,
+        "saved": 189,
+        "cost": 146,
+        "pct_diff_mean": -1.38,
+        "timing_value": 209.99,
+        "random_dollar_diff": -10305.4,
+        "dollar_diff_interval": [
+          -28842.63,
+          7827.8
+        ],
+        "pct_diff_interval": [
+          -11.03,
+          7.04
+        ],
+        "timing_value_interval": [
+          -7728.4,
+          8163.29
+        ]
+      },
+      "exploration": {
+        "trades": 1162,
+        "touched": 249,
+        "dollar_diff": -5303.09,
+        "dollar_diff_stress": -12115.85,
+        "saved": 136,
+        "cost": 111,
+        "pct_diff_mean": -0.37,
+        "timing_value": -423.22,
+        "random_dollar_diff": -4804.98,
+        "dollar_diff_interval": [
+          -19160.29,
+          6265.34
+        ],
+        "pct_diff_interval": [
+          -10.73,
+          7.9
+        ],
+        "timing_value_interval": [
+          -7050.5,
+          4743.76
+        ]
+      },
+      "check": {
+        "trades": 344,
+        "touched": 88,
+        "dollar_diff": -4867.21,
+        "dollar_diff_stress": -10204.12,
+        "saved": 53,
+        "cost": 35,
+        "pct_diff_mean": -4.21,
+        "timing_value": 633.21,
+        "random_dollar_diff": -5500.42,
+        "dollar_diff_interval": [
+          -17802.52,
+          9831.79
+        ],
+        "pct_diff_interval": [
+          -34.94,
+          14.48
+        ],
+        "timing_value_interval": [
+          -4034.98,
+          5798.83
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    },
+    "expiry_day": {
+      "all": {
+        "trades": 1506,
+        "touched": 38,
+        "dollar_diff": -2847.74,
+        "dollar_diff_stress": -3107.83,
+        "saved": 21,
+        "cost": 10,
+        "pct_diff_mean": -8.05,
+        "timing_value": -2522.55,
+        "random_dollar_diff": -325.19,
+        "dollar_diff_interval": [
+          -7770.92,
+          593.74
+        ],
+        "pct_diff_interval": [
+          -27.12,
+          8.33
+        ],
+        "timing_value_interval": [
+          -6673.74,
+          -196.08
+        ]
+      },
+      "exploration": {
+        "trades": 1162,
+        "touched": 30,
+        "dollar_diff": -2904.74,
+        "dollar_diff_stress": -3159.56,
+        "saved": 17,
+        "cost": 10,
+        "pct_diff_mean": -11.39,
+        "timing_value": -816.62,
+        "random_dollar_diff": -2088.12,
+        "dollar_diff_interval": [
+          -7676.26,
+          572.79
+        ],
+        "pct_diff_interval": [
+          -35.42,
+          10.34
+        ],
+        "timing_value_interval": [
+          -2288.91,
+          357.23
+        ]
+      },
+      "check": {
+        "trades": 344,
+        "touched": 8,
+        "dollar_diff": 57.0,
+        "dollar_diff_stress": 51.73,
+        "saved": 4,
+        "cost": 0,
+        "pct_diff_mean": 4.47,
+        "timing_value": -1705.93,
+        "random_dollar_diff": 1762.93,
+        "dollar_diff_interval": [
+          0.0,
+          141.0
+        ],
+        "pct_diff_interval": [
+          0.14,
+          11.73
+        ],
+        "timing_value_interval": [
+          -5402.44,
+          -35.24
+        ]
+      },
+      "decision": "reject as a demonstrated saving (interval includes 0 or periods disagree)"
+    }
+  }
+}

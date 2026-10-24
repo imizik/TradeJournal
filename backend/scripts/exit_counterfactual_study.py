@@ -5,7 +5,7 @@ Protocol ``exit-counterfactual-20261024-v1`` (``research/exit-counterfactual/pro
 was committed before any outcome here was computed. Changing a constant below
 makes a different study: register a new protocol id rather than editing this one.
 
-Read-only. ``extract`` runs one ``READ ONLY`` transaction against the journal
+Read-only. ``extract`` runs one ``READ ONLY`` transaction (a plain SELECT: COPY's text format would escape the newlines json_agg emits) against the journal
 over SSH and writes trades and fills to a local file (personal data: keep it
 out of git). ``run`` reads that file and the Alpaca option minute-bar cache,
 fetching a missing window only with ``--fetch``, and writes ``results.json``.
@@ -52,8 +52,7 @@ ENTRY, EXIT = "buy_to_open", "sell_to_close"
 
 EXTRACT_SQL = f"""
 BEGIN READ ONLY;
-COPY (
-  WITH t AS (
+WITH t AS (
     SELECT tr.id, tr.ticker, tr.option_type, tr.strike, tr.expiration, tr.status,
            tr.opened_at, tr.closed_at, tr.realized_pnl, tr.total_premium_paid, a.type AS account_type
     FROM trade tr JOIN account a ON a.id = tr.account_id
@@ -66,8 +65,7 @@ COPY (
     'fills', (SELECT coalesce(json_agg(x ORDER BY x.executed_at, x.fill_id), '[]') FROM (
       SELECT tf.trade_id, tf.fill_id, tf.role, f.side, f.contracts, f.price, f.executed_at
       FROM tradefill tf JOIN fill f ON f.id = tf.fill_id JOIN t ON t.id = tf.trade_id) x)
-  )
-) TO STDOUT;
+  );
 COMMIT;
 """
 
@@ -422,7 +420,7 @@ def run(trades_path: Path, cache: Path, out: Path, fetch: bool) -> dict:
 def extract(ssh: str, out: Path) -> None:
     command = ["ssh", ssh, "sudo -u postgres psql -d tradejournal -X -q -A -t -v ON_ERROR_STOP=1"]
     done = subprocess.run(command, input=EXTRACT_SQL, capture_output=True, text=True, check=True)
-    payload = next(line for line in done.stdout.splitlines() if line.startswith("{"))
+    payload = done.stdout.strip()  # -q -A -t: only the JSON value, which json_agg spreads over lines
     json.loads(payload)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(payload)
