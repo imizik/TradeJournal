@@ -72,10 +72,14 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(plan_env, saved)
     _run(sdk)
     o = sdk.options
     assert o.tools == ["WebSearch", "WebFetch"]
-    kept_out = ("propose_plan", "get_investigation_changes")
+    kept_out = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories")
+    assert research_job.EXCLUDED_LAB_TOOLS == kept_out
     assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in kept_out)]
-    # A background job reads untrusted pages and can fetch URLs: it never proposes, nor reads another investigation by id.
+    # A background job reads untrusted pages and can fetch URLs: it never proposes, reads another investigation by id,
+    # or sees the owner's book (positions, trades, memories), which a crafted link could carry out. The chart is market data.
     assert not {f"mcp__tradejournal__{name}" for name in kept_out} & set(o.allowed_tools)
+    assert "mcp__tradejournal__get_chart_context" in o.allowed_tools
+    assert not set(kept_out) & set(o.mcp_servers["tradejournal"]["tools"])  # not even registered
     assert set(o.mcp_servers) == {"tradejournal"} and o.strict_mcp_config is True and o.setting_sources == []
     assert o.permission_mode == "dontAsk" and o.verbatim_prompts is True and o.max_budget_usd == 0.50 and o.max_turns == 24
     assert {"restricted", "no-session-persistence", "disable-slash-commands"} <= set(o.extra_args)
@@ -267,7 +271,8 @@ def test_api_key_mode_uses_its_own_config_dir_and_needs_claude_code_to_report_th
 
 def test_the_job_hook_denies_the_lab_only_tools_by_name():
     rec = research_job._Recorder(research_job.JobLimits())
-    for name in ("mcp__tradejournal__get_investigation_changes", "mcp__tradejournal__propose_plan"):
+    for name in ("mcp__tradejournal__get_investigation_changes", "mcp__tradejournal__propose_plan",
+                 "mcp__tradejournal__get_positions", "mcp__tradejournal__get_trades", "mcp__tradejournal__get_memories"):
         decision = asyncio.run(rec.pre_tool({"tool_name": name, "tool_input": {}}, "t1", None))
         assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert asyncio.run(rec.pre_tool({"tool_name": "mcp__tradejournal__get_quotes", "tool_input": {}}, "t2", None)) == {}

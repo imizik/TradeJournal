@@ -77,3 +77,42 @@ class FixtureEvidence:
     def get_quotes(self, symbols: list[str]) -> dict:
         prices = {"NBIS": 94.35, "CRWV": 131.20, "APLD": 27.85, "SPY": 671.10, "QQQ": 598.40}
         return {"fetched_at": AT, "prices": {s: prices.get(s) for s in symbols}}
+
+    def get_chart_context(self, symbol: str, timeframe: str) -> dict:
+        from app.ai.copilot_book import compact_chart
+        start, low = 1792767600, 92.40  # 2026-10-23 13:40Z, the recorded low in this scenario
+        bars = [{"time": start + i * 300, "open": low + i * 0.12, "high": low + i * 0.12 + 0.30, "low": low + i * 0.12 - 0.10,
+                 "close": low + (i + 1) * 0.12, "volume": 41_000 + 900 * i, "rvol": 1.3, "extended": False,
+                 "vwap": 93.10, "vwap_sd": 0.85} for i in range(16)]
+        return {**compact_chart(symbol, timeframe, {
+            "panels": {timeframe: {"bars": bars, "level_events": {"z1": {"state": "tested"}, "z2": {"state": "broken"}}}},
+            "auto_levels": {"atr": 4.1, "zones": [{"id": "z1", "low": 95.6, "high": 95.9, "label": "Prior day low", "score": 2},
+                                                  {"id": "z2", "low": 92.3, "high": 92.5, "label": "Session low", "score": 1}]},
+            "rvol": {"state": "ready", "traded": 20, "message": None},
+            "quotes": [{"symbol": symbol, "last": 94.35, "open": 96.80, "day_high": 97.10, "day_low": 92.40,
+                        "previous_close": 97.22, "change_percentage": -2.95, "volume": 3_100_000, "trade_time": 1792768320}],
+            "intraday_as_of": 1792768320, "session": "extended", "market": {"date": SESSION, "status": "open"}}),
+            "simulated": True}
+
+    def get_positions(self) -> dict:
+        return {"state": "ok", "as_of": AT, "simulated": True, "count": 2, "shown": 2, "positions": [
+            {"symbol": "NBIS", "account": "Simulated brokerage", "instrument": "option",
+             "option": {"side": "call", "strike": 100.0, "expiry": "2026-11-21"}, "direction": "long", "quantity": 2,
+             "avg_entry": 610.0, "mark": 455.0, "mark_as_of": AT, "unrealized_usd": -310.0, "unrealized_pct": -25.4, "days_held": 6},
+            {"symbol": "CRWV", "account": "Simulated brokerage", "instrument": "stock", "direction": "long", "quantity": 15,
+             "avg_entry": 124.10, "mark": 131.20, "mark_as_of": None, "unrealized_usd": 106.5, "unrealized_pct": 5.7, "days_held": 11}],
+            "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share."}
+
+    def get_trades(self, symbol: str, limit: int = 5) -> dict:
+        rows = [{"account": "Simulated brokerage", "instrument": "stock", "quantity": 20, "entry_time": "2026-10-14T14:02:00Z",
+                 "exit_time": "2026-10-14T18:40:00Z", "entry_price": 101.2, "exit_price": 104.9, "pnl_usd": 74.0, "pnl_pct": 3.66,
+                 "hold_minutes": 278, "status": "closed", "expired_worthless": False, "tags": ["breakout"]},
+                {"account": "Simulated brokerage", "instrument": "stock", "quantity": 20, "entry_time": "2026-10-08T15:30:00Z",
+                 "exit_time": "2026-10-08T16:05:00Z", "entry_price": 108.4, "exit_price": 105.1, "pnl_usd": -66.0, "pnl_pct": -3.04,
+                 "hold_minutes": 35, "status": "closed", "expired_worthless": False, "tags": ["chased"]}]
+        return {"symbol": symbol, "state": "ok", "as_of": AT, "simulated": True, "trades": rows[:limit]}
+
+    def get_memories(self, limit: int = 5) -> dict:
+        rows = [{"kind": "lesson", "symbol": None, "text": "Simulated: I chase green opens and give the gains back.", "saved_at": AT},
+                {"kind": "thesis", "symbol": "NBIS", "text": "Simulated: NBIS is a financing story until the debt settles.", "saved_at": AT}]
+        return {"state": "ok", "as_of": AT, "simulated": True, "memories": rows[:limit]}
