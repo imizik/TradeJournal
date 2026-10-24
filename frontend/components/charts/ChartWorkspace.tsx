@@ -259,7 +259,10 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
 
 export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: string }) {
   // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
-  const { settings: storedSettings, setSettings, ready, sync, merged, stored, previousSymbol } = useChartSettings(initialSymbol);
+  const { settings: storedSettings, setSettings, ready, localReady, sync, merged, stored, previousSymbol } = useChartSettings(initialSymbol);
+  // Candles load from this browser's saved layout without waiting on the server's copy;
+  // a server layout that differs changes the request and loads again.
+  const readable = ready || localReady;
   const settings = useMemo(() => instrumentSettings(storedSettings), [storedSettings]);
   const { owner, grants } = useAppAccess();
   const allowedSymbols = (grants.symbols ?? []).join(",");
@@ -780,7 +783,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   }, [immersive]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!readable) return;
     let alive = true;
     let busy = false;
     let recoveryPending = false;
@@ -856,7 +859,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); window.clearTimeout(soon); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam, cache]);
+  }, [readable, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam, cache]);
 
   useEffect(() => {
     stream.onGap(() => refreshNow.current());

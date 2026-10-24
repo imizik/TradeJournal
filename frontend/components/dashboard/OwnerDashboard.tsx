@@ -46,7 +46,10 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
   </div>;
 }
 
-export function OwnerAttention({ accounts, rows, quotes, quoteError, today, decisions, params }: OwnerProps) {
+/** Everything the owner dashboard shows except journal statistics, which load separately. */
+export type AttentionProps = Omit<OwnerProps, "stats">;
+
+export function OwnerAttention({ accounts, rows, quotes, quoteError, today, decisions, params }: AttentionProps) {
   return <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
     scope={[params.account && params.account !== "all" ? accounts.find((a) => a.type === params.account)?.name ?? params.account : null,
       params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />;

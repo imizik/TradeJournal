@@ -1,0 +1,171 @@
+{
+  "note": "Three interleaved trials per variant; 'before' is main's route encoding, 'after' is this change.",
+  "trials": {
+    "before": [
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 54.66,
+            "ping_idle_ms_p50": 0.95,
+            "ping_under_load_ms": {
+              "p50": 19.85,
+              "p95": 36.24,
+              "max": 177.28,
+              "samples": 267
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 72.55,
+            "ping_idle_ms_p50": 1.2,
+            "ping_under_load_ms": {
+              "p50": 16.5,
+              "p95": 28.34,
+              "max": 38.83,
+              "samples": 299
+            }
+          }
+        }
+      },
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 47.18,
+            "ping_idle_ms_p50": 0.89,
+            "ping_under_load_ms": {
+              "p50": 28.23,
+              "p95": 31.66,
+              "max": 137.37,
+              "samples": 270
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 63.53,
+            "ping_idle_ms_p50": 0.86,
+            "ping_under_load_ms": {
+              "p50": 19.98,
+              "p95": 30.41,
+              "max": 189.19,
+              "samples": 280
+            }
+          }
+        }
+      },
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 48.84,
+            "ping_idle_ms_p50": 0.88,
+            "ping_under_load_ms": {
+              "p50": 19.7,
+              "p95": 37.05,
+              "max": 115.76,
+              "samples": 278
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 64.77,
+            "ping_idle_ms_p50": 1.13,
+            "ping_under_load_ms": {
+              "p50": 23.56,
+              "p95": 31.28,
+              "max": 169.44,
+              "samples": 279
+            }
+          }
+        }
+      }
+    ],
+    "after": [
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 21.44,
+            "ping_idle_ms_p50": 0.87,
+            "ping_under_load_ms": {
+              "p50": 0.86,
+              "p95": 7.42,
+              "max": 23.17,
+              "samples": 534
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 33.89,
+            "ping_idle_ms_p50": 1.26,
+            "ping_under_load_ms": {
+              "p50": 12.05,
+              "p95": 16.0,
+              "max": 30.26,
+              "samples": 326
+            }
+          }
+        }
+      },
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 19.09,
+            "ping_idle_ms_p50": 0.64,
+            "ping_under_load_ms": {
+              "p50": 6.76,
+              "p95": 8.82,
+              "max": 16.5,
+              "samples": 509
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 29.38,
+            "ping_idle_ms_p50": 1.16,
+            "ping_under_load_ms": {
+              "p50": 12.84,
+              "p95": 21.44,
+              "max": 35.47,
+              "samples": 321
+            }
+          }
+        }
+      },
+      {
+        "environment": "local uvicorn, one worker, invented candles; stall = /ping delay while 1 client(s) read the workspace back to back",
+        "layouts": {
+          "single": {
+            "response_bytes": 736251,
+            "workspace_ms_median": 17.74,
+            "ping_idle_ms_p50": 1.46,
+            "ping_under_load_ms": {
+              "p50": 7.55,
+              "p95": 9.49,
+              "max": 13.71,
+              "samples": 481
+            }
+          },
+          "multi": {
+            "response_bytes": 879412,
+            "workspace_ms_median": 29.35,
+            "ping_idle_ms_p50": 1.59,
+            "ping_under_load_ms": {
+              "p50": 13.13,
+              "p95": 24.17,
+              "max": 56.92,
+              "samples": 320
+            }
+          }
+        }
+      }
+    ]
+  }
+}

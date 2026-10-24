@@ -376,6 +376,19 @@ def test_fill_markers_use_new_york_time_and_preserve_option_identity(route_clien
     assert "put" in markers[0]["label"] and "price" not in markers[0]
 
 
+def test_workspace_json_matches_fastapi_encoding_and_keeps_opt_in_timing(route_client, monkeypatch):
+    # Serialized in the worker thread, not by FastAPI on the event loop: same JSON.
+    odd = {"id": UUID(int=7), "at": datetime(2026, 9, 29, 9, 30), "pair": (1.5, None), "name": "Café"}
+    bars = chart_bars([minute("2026-09-29T09:30")], [], "5m", "regular")
+    monkeypatch.setattr(charts.chart_feed, "workspace", lambda *_, **__: {"panels": {"5m": {"bars": bars, "markers": []}}, "odd": odd})
+    response = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&timing=1")
+    assert response.status_code == 200 and response.headers["content-type"] == "application/json"
+    assert "total;dur=" in response.headers["server-timing"]
+    assert response.json()["odd"] == {"id": str(UUID(int=7)), "at": "2026-09-29T09:30:00", "pair": [1.5, None], "name": "Café"}
+    assert response.json()["panels"]["5m"]["bars"] == json.loads(json.dumps(bars))
+    assert "server-timing" not in route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular").headers
+
+
 def test_history_route_identifies_window_and_returns_bounded_old_markers(route_client, monkeypatch):
     bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
     before = bars[-1]["end_time"] + 1
