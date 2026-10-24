@@ -6361,6 +6361,31 @@ test("on a 390px phone the plan sheet is a bottom sheet; Discretionary with a no
   expect((await savedCaptures(request))[0].note).toBe("Fading the gap into resistance");
 });
 
+for (const width of [390, 1440]) test(`plans remain reachable after an initial chart failure at ${width}px`, { tag: "@captures" }, async ({ page, request }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await captureSetup(request, []);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ status: 503, json: { detail: "Fixture market data unavailable" } }));
+  await page.goto("/charts");
+  await expect(page.getByLabel("Chart data error")).toBeVisible();
+  const open = page.getByRole("button", { name: "Plan trade", exact: true });
+  await expect(open).toBeVisible();
+  await expect(open).toBeInViewport();
+  await open.click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy stock", exact: true }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  const note = `Plan during market-data outage ${width}`;
+  await sheet.getByLabel("Plan note").fill(note);
+  await sheet.getByRole("button", { name: "Save plan", exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+  await page.getByRole("button", { name: "Show plan details" }).click();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(note);
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText("No chart snapshot:");
+  const saved = (await savedCaptures(request)).find((row) => row.note === note)!;
+  expect(saved.context.state).toBe("unavailable");
+  await page.screenshot({ path: test.info().outputPath(`plan-without-chart-${width === 390 ? "phone" : "desktop"}.png`) });
+});
+
 test("a symbol switch while the sheet is open never retargets the plan; a failed chart image still saves the plan", { tag: "@captures" }, async ({ page, request }) => {
   await captureSetup(request);
   await stub(page);

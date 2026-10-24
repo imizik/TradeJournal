@@ -1745,7 +1745,8 @@ except the option mark, which is asked for from a card.
 never recommends a trade and never sends an order.
 
 - **Opening it.** Use the **Plan trade** button in the toolbar (on a phone,
-  **Plan** in the main chart's own bar) or **Alt+P**. Alt+P matches the key's position, so
+  **Plan** in the main chart's own bar, or **Plan trade** in the empty chart
+  area while candles are loading or unavailable) or **Alt+P**. Alt+P matches the key's position, so
   Option+P works on a Mac. It does nothing while you type in a field, while
   another dialog is open or on a key repeat. A desktop opens a compact sheet
   at the right; a phone opens a bottom sheet.
