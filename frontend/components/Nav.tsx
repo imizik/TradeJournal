@@ -6,7 +6,7 @@ import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { Bot, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -36,6 +36,7 @@ const navItems: { href: string; label: string; icon: typeof Bot; heading?: strin
   { href: "/signals", label: "Signals", icon: Radio, heading: "Signals & practice" },
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/radar", label: "Radar", icon: Telescope },
+  { href: "/proof", label: "Proof", icon: ClipboardCheck },
   { href: "/practice", label: "Daily Practice", icon: Target },
   { href: "/advisor-review", label: "Advisor review", icon: Scale },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch, heading: "Labs" },

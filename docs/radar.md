@@ -53,6 +53,17 @@ the newest 20 recorded sessions are pruned (disk); passes and events are kept. W
 the calendar is unavailable during clock hours the pass is recorded as skipped
 rather than guessed.
 
+## Proof read-out
+
+`GET /radar/proof` (owner-only, read-only) feeds the `/proof` page: for the
+newest rule version, the latest rating per event; for each stock event, whether
+the plain Movers top 10 (rebuilt at every recorded pass of its session) listed
+the stock before Radar's first sighting, only later, or never; and whether a
+saved morning brief within 5 days named it first. Helping needs 20+ rated
+events with 40%+ useful and, over 10+ timed stock events, 50%+ where Movers did
+not already have it; otherwise not helping, and below either sample, not enough
+data. Rules and samples are shown on the page. See `backend/app/engine/radar_proof.py`.
+
 ## Feed API and screen
 
 All four routes are owner-only (assistant sessions are denied) and read-only

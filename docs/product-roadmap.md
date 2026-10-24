@@ -54,6 +54,11 @@ automated trading.
   early enough to investigate. Measured by the Radar pilot: his ratings, and
   comparison with the Movers ranking and the morning brief.
 
+The `/proof` page reads both every week: a verdict per question (`helping`,
+`not helping`, or by default `not enough data`) with its rule and sample on
+screen, from `GET /analytics/exit-habits` and `GET /radar/proof`
+(`backend/app/engine/exit_habits.py`, `backend/app/engine/radar_proof.py`).
+
 Then connect the successful workflows through a natural conversational
 experience, reusing the infrastructure already built. The conversational
 copilot (step 3) waits for both proofs. The owner-only, off-by-default

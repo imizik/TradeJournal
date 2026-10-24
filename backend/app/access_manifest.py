@@ -81,6 +81,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /radar/feed',
     'GET /radar/groups/compare',
     'GET /radar/movers',
+    'GET /radar/proof',
     'GET /radar/events/{event_id}',
     'POST /radar/visits',
     'POST /radar/events/{event_id}/feedback',

@@ -24,6 +24,7 @@ from app.engine.chart_math import ET, session_windows
 from app.engine.radar_comparison import compare_group, empty_comparison
 from app.engine.radar_entry import resolve_entry, compare_resolved_entry
 from app.engine.radar_movers import build_movers, earlier_pass
+from app.engine import radar_proof
 from app.engine.radar_runner import enabled
 from app.engine.radar_store import RadarStore, load_universe
 
@@ -229,6 +230,19 @@ def _read_movers(store: RadarStore, session: str | None, now: float, empty: dict
     stale = coverage["live"] and now - _parse(latest["started_at"]) > STALE_SECONDS  # the pass shown, ok or partial
     return {**base, "state": "stale" if stale else "ok",
             "reason": "Recording has fallen behind; these numbers are from the last pass shown." if stale else None}
+
+
+@router.get("/proof")
+def proof(db: Session = Depends(get_session)):
+    """Ratings and timing against Movers and the morning brief, for /proof; read-only."""
+    store, reason = _store(read_only=True)
+    if store is None:
+        return {"state": "off", "reason": reason}
+    try:
+        return radar_proof.build(store, db, load_universe())
+    except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:
+        log.warning("radar proof unreadable: %s", exc)
+        return {"state": "off", "reason": "The Radar file could not be read right now."}
 
 
 @router.get("/events/{event_id}")
