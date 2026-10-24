@@ -264,3 +264,25 @@ test("owner position-alert URL survives a fresh session and session renewal", as
   }
   await owner.close();
 });
+
+test("concurrent owner reads renew without evicting their in-flight sessions", async ({ browser }) => {
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  try {
+    for (const renew of [false, true]) {
+      if (renew) {
+        // Keep this browser's old cookie, but evict its session using the real
+        // four-session cap. Renewal must work without relaxing that cap.
+        for (let i = 0; i < 4; i++) {
+          const other = await browser.newContext({ baseURL: ownerOrigin });
+          try { expect((await other.request.get("/api/access/me")).status()).toBe(200); }
+          finally { await other.close(); }
+        }
+        const backend = `http://127.0.0.1:${process.env.AUTH_BACKEND_PORT ?? 8129}`;
+        expect((await owner.request.get(`${backend}/access/me`, { headers: { "x-tj-gateway": "o".repeat(43) } })).status()).toBe(401);
+      }
+      const responses = await Promise.all(Array.from({ length: 16 }, () => owner.request.get("/api/backend/accounts")));
+      expect(responses.map(response => response.status())).toEqual(Array(16).fill(200));
+      expect((await (await owner.request.get("/api/access/me")).json()).owner).toBe(true);
+    }
+  } finally { await owner.close(); }
+});

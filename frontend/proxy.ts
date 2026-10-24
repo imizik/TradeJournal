@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { accessConfig, upstreamHeaders } from "@/lib/accessServer";
 
+// Only concurrent renewals on the same private entrance and incoming cookie
+// join a bootstrap. Nothing is cached after it settles; every caller still
+// verifies the returned session with the backend before forwarding its request.
+const ownerBootstraps = new Map<string, Promise<string | null>>();
+function bootstrapOwner(config: ReturnType<typeof accessConfig>, cookie: string | null) {
+  const key = JSON.stringify([config.target, config.origin, config.key, cookie]);
+  const pending = ownerBootstraps.get(key);
+  if (pending) return pending;
+  const work = (async () => {
+    const response = await fetch(`${config.target}/access/bootstrap`, { method: "POST", headers: { "x-tj-gateway": config.key, "x-tj-bootstrap": "true" }, cache: "no-store", redirect: "manual" });
+    if (!response.ok) throw new Error("Private access could not be verified");
+    return response.headers.get("set-cookie");
+  })();
+  ownerBootstraps.set(key, work);
+  void work.finally(() => { if (ownerBootstraps.get(key) === work) ownerBootstraps.delete(key); }).catch(() => {});
+  return work;
+}
+
 export async function proxy(request: NextRequest) {
   try {
     const config = accessConfig();
@@ -13,9 +31,7 @@ export async function proxy(request: NextRequest) {
     let cookie: string | null = null;
     let check = await fetch(`${config.target}/access/me`, { headers: upstreamHeaders(clean), cache: "no-store", redirect: "manual" });
     if (check.status === 401 && config.profile === "owner") {
-      const response = await fetch(`${config.target}/access/bootstrap`, { method: "POST", headers: { "x-tj-gateway": config.key, "x-tj-bootstrap": "true" }, cache: "no-store", redirect: "manual" });
-      if (!response.ok) return NextResponse.json({ detail: "Private access could not be verified" }, { status: 503 });
-      cookie = response.headers.get("set-cookie");
+      cookie = await bootstrapOwner(config, clean.get("cookie"));
       if (!cookie) return NextResponse.json({ detail: "Session could not be established" }, { status: 503 });
       const pair = cookie.split(";", 1)[0];
       const name = pair.split("=", 1)[0];
