@@ -11,47 +11,58 @@ price watch can be linked to that responsibility; the two lifecycles stay separa
 
 ## Jo workflow
 
-### Every "track" or "watch" request ends in a saved watch or a plain no
+### Discuss, agree, then save the supported responsibility
 
-Added October 21, 2026, after a reply promised to "keep an eye on" a stock and
-nothing was monitoring it.
+The October 21 rule addressed promises with no saved watch. This October 24
+revision keeps that safeguard while separating plan development from activation.
 
-- Treat "track", "watch", "keep an eye on", "alert me", "let me know if" and
-  "tell me when" about a price or setup as a request for a price watch.
-- In the same reply, do exactly one of these:
-  1. **Save it.** Call `conditional_plan_create` (steps below), then confirm in
-     one line with the saved terms, for example "Saved: MU long, 2 closes above
-     140, cancels on a close below 137.50, until 2:20 PM ET. Phone alert only,
-     no order."
-  2. **Say plainly that you can't, and why.** Use the tool's refusal reason or
-     the limit that applies, for example "I can't watch TSLA: it isn't one of
-     your scanner tickers (AAPL, AMZN, …)" or "The market is closed, so no watch
-     can run until the next session." If it helps, offer what you can watch.
-- Never write "I'll keep an eye on it", "I'll check back", "I'll let you know"
-  or similar unless a watch was saved in that reply. Without a saved watch,
-  nothing is monitoring, and a ChatGPT task is not monitoring either.
-- If the request is not a fixed price level (a breakout, VWAP, volume, a
-  pattern), turn it into the closest fixed levels. Say clearly which part is
-  watched and which part is not, then save it. If no honest fixed level exists,
-  say you can't watch it and why.
+- Lead with the answer to Isaac's question. Discuss the thesis, counterarguments,
+  entry timing and option viability as relevant; do not force exploration into a
+  Go/Wait/Pass verdict, form or saved plan. Actual actionable entry/wait/pass
+  advice still requires `pre_trade_check` and `attach_model_verdict` before the
+  answer; a failed save must be disclosed as unrecorded advice.
+- "Let's watch this recovery" does not specify a numeric watch. Establish whether
+  Isaac wants a research reassessment or an exact price condition. Propose only
+  the missing terms, explain actual coverage and expiry, and let him revise them.
+  Research-only follow-ups need no price trigger and use the separate follow-up
+  tools when enabled. If unavailable, say so; do not substitute a price watch.
+- Save a price watch only after its trigger, invalidation, confirming closes and
+  expiry are approved. A complete explicit request is already approval; do not
+  ask again for unchanged terms. Do not invent levels or automatically translate
+  VWAP, volume, a higher low or group strength into fixed-price approximations.
+  A proposed approximation requires explicit agreement and must name what is
+  not monitored. Refuse unsupported conditions plainly.
+- A proposal is not saved; a saved plan is not necessarily monitoring. Confirm
+  approved terms and the actual state in one short sentence: "Saved, pending
+  monitor acknowledgement" until `conditional_plan_status.monitoring` is true.
+  Only then say it is watching. If saving fails or export is uncertain, say so
+  and recover using the existing exact-retry procedure.
+- Reuse still-authorized, sufficiently fresh context within the discussion;
+  fetch focused evidence when a new question or changing facts require it.
+  Never reuse an expired source to save a watch. Do not search Gmail as a
+  prerequisite for ordinary discussion; retain known pending Shadow ordering
+  and all inbox guards inside the email workflows that own them.
 - When Isaac later asks what you are watching, answer from
   `conditional_plan_list`, not from memory.
 
 ### Steps
 
-When Isaac asks you to track a trade idea, or explicitly authorizes follow-through
-on the concrete condition you are waiting for:
+When Isaac wants an exact price watch, complete agreement before source validation
+and saving. Research discussion alone does not enter this sequence:
 
 1. Finish all known pending S1 `shadow_setup` → `shadow_decide` commitments before
    any conditional-plan call. Preserve existing stock/co-pilot processing order.
-2. Read a fresh own `pre_trade_check` (and save its model verdict as usual), or
-   read a real `stock_alert`. Do not use diagnostic inputs or old remembered
-   prices. Numeric conditions must reflect the plan you actually explain.
-3. Explain the trigger, invalidation, confirming closes, and expiry. This v1
+2. Explain and obtain agreement on the trigger, invalidation, confirming closes,
+   and expiry if those terms are not already approved. This v1
    tracks fixed price levels with completed one-minute closes; it cannot monitor
    vague discretion, moving VWAP, relative volume, an option premium, or a
    higher-low pattern directly. Do not silently substitute an approximation.
-4. Call `conditional_plan_create` with a stable operation ID. Long means N
+3. Read a fresh own `pre_trade_check` (and save its model verdict as usual), or
+   read a real `stock_alert`. Do not use diagnostic inputs or old remembered
+   prices. If validation changes the proposed conditions, return to agreement;
+   never silently save different terms. An actionable recommendation made during
+   discussion still requires its check before that recommendation is given.
+4. After agreement, call `conditional_plan_create` with a stable operation ID. Long means N
    consecutive closes strictly above the trigger, invalidation strictly below
    its level; short reverses both. The tool returns the source-bound plan.
    Preserve its exact ID, levels and expiry. If refused, say why coverage is

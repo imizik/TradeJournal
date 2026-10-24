@@ -73,6 +73,15 @@ or live usefulness. Conditional price watches keep their separate lifecycle.
 
 ### Functionality sequence
 
+**October 24 selected preparation:** conversational instructions now distinguish
+exploration, proposed responsibilities and approved monitoring. Research-only
+follow-ups need no price watch; actual actionable advice retains Check validation
+and saved verdicts. The [three-conversation comparison](../../deploy/market-watch/jo-conversation-trial.md)
+holds the baseline, scripts and latency/usefulness scorecard. This is bounded
+repository preparation only: no hosted instruction/task edit, Check deployment,
+activation or natural conversation-quality result is implied. Peer publication,
+new context/history tools and UI changes remain outside this step.
+
 These are product outcomes, not authorization to implement every row at once.
 Reuse existing OAuth, receipts, host and UI where their contracts permit.
 Resolve an actual blocked user action before adding another infrastructure slice.

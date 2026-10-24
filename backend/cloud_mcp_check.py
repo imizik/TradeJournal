@@ -428,32 +428,46 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
     resource = urlsplit(config.resource_url)
     server = CheckMCP("tradejournal-pretrade-check", json_response=True, stateless_http=True,
         streamable_http_path=RESOURCE_PATH,
-        instructions="Pre-trade check for Isaac's own ideas, intraday or swing (multi-day, scored from daily bars). "
-        "Call pre_trade_check once per idea; it "
+        instructions="Help Isaac research and discuss his own ideas naturally. Lead with a direct, concise answer; "
+        "challenge unsupported assumptions, investigate relevant counterarguments, and revise your view when evidence warrants. "
+        "Separate a recovery thesis from entry timing and option-contract viability. Exploration is not an actionable verdict: "
+        "do not call pre_trade_check, attach_model_verdict or save monitoring just because a ticker or possible trade is discussed. "
+        "Reuse already retrieved context while its authorization and freshness remain valid; retrieve narrowly when the question "
+        "or evidence changes. Missing evidence stays explicit, but routine receipts and diagnostics need not dominate the reply. "
+        "Do not search Gmail as a prerequisite for ordinary discussion; known pending Shadow commitments and email-workflow "
+        "guards still apply. Never interleave personal tools between shadow_setup and shadow_decide. "
+        "For an explicit pre-trade check or actual actionable entry, wait or pass advice on a specific idea, "
+        "call pre_trade_check (intraday or swing, scored from daily bars); it "
         "returns a deterministic rules verdict (go/wait/pass/insufficient_data), reasons, what would change it, "
         "the stop check, live market context and how his own similar closed trades went, plus a saved check ID. "
         "Narrate on top, and for every check save your own verdict and short summary once with "
         "attach_model_verdict before you answer, so it can be graded later. Free text is stored as "
-        "data and never changes the computation. Before the open use preopen_watchlist; while holding use "
-        "position_check; after the close use review_checks. Advice only: nothing places, sizes or arms an "
+        "data and never changes the computation. When relevant, use preopen_watchlist for pre-open facts, "
+        "position_check for published holdings, get_notes for selected captures, or review_checks for saved advice. "
+        "Discussion never establishes an actual position. Advice only: nothing places, sizes or arms an "
         "order. Reuse the same operation_id only to recover an uncertain call; it returns the saved answer. "
         "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id. "
         "Actionable entry, wait or pass advice on a specific idea is a check: save it with pre_trade_check and "
         "attach_model_verdict before you answer so it reopens in review_checks; if a save fails, say the advice "
-        "is unrecorded. Promise monitoring only through a mechanism TradeJournal can see"
+        "is unrecorded. A vague request such as 'let's watch this recovery' starts plan development, not activation. "
+        "Distinguish a research-only follow-up from an exact price watch; propose the supported terms and resolve "
+        "material ambiguity before saving. Do not invent levels or silently approximate a discretionary condition. "
+        "Save only the responsibility the owner has approved; a complete explicit request already supplies approval, "
+        "so do not ask again for unchanged terms. Promise monitoring only through a mechanism TradeJournal can see"
         + (": a saved conditional plan that conditional_plan_status reports as monitoring. "
         if config.conditional_plan_enabled else
         ". Only periodic personal follow-up reviews are available; no continuous price monitor is active. "
         if config.followup_enabled else
         ". None is active on this connection, so say \"I can't monitor this\" instead of offering checks later. ")
         + "ChatGPT tasks or reminders you create are invisible to TradeJournal and are not monitoring. "
-        + ("Conditional price-plan follow-through is enabled: when the owner requests tracking, turn "
-        "a concrete wait into explicit numeric close conditions and expiry with conditional_plan_create. "
+        + ("Conditional price-plan follow-through is enabled: save approved numeric close conditions and expiry "
+        "with conditional_plan_create, using its required fresh own check or stock-alert source. "
         "Report pending until conditional_plan_status confirms monitoring. Use the saved timeline for "
         "follow-up and cancel on request; never say you are watching solely because you described a plan. "
         "This does not alter S1; all pending shadow commits must precede conditional-plan calls."
         if config.conditional_plan_enabled else "")
-        + (" Personal follow-ups are enabled: save continuing questions with followup_create, recover "
+        + (" Personal follow-ups are enabled: research-only questions need no price watch. Agree on the question, "
+        "review time and expiry before followup_create; preserve the owner's words separately from your interpretation. Recover "
         "responsibilities with followup_list, and reassess due inputs with followup_due/followup_review. "
         "These are periodic evidence reviews, not continuous discretionary monitoring. Known pending "
         "shadow work still comes first; no Gmail search is a prerequisite for standalone follow-up reviews. "
@@ -773,8 +787,11 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
         your own verdict with attach_model_verdict (see next_step in the result).
         Run this for actionable entry, wait or pass advice on a specific idea so it is saved; chat-only advice is unrecorded.
-        Saying you will watch or recheck later needs a saved conditional plan when that tool is offered;
-        otherwise say you can't monitor it. ChatGPT tasks are invisible to TradeJournal.
+        This check alone activates no monitoring. For owner-approved exact price conditions use a saved
+        conditional plan when offered; for an approved research-only reassessment use followup_create when
+        offered, without a price watch. Claim coverage only after the relevant worker acknowledgement.
+        If the required capability is unavailable, say so; do not substitute a different responsibility.
+        ChatGPT tasks are invisible to TradeJournal.
         """
         checked = await authenticated("pre_trade_check")
         if any(value is not None and not math.isfinite(value) for value in (entry, stop, strike)):
