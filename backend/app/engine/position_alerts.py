@@ -230,9 +230,9 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
                 f"Open {HOLD_MINUTES} min, {now_part}{peak}. {_count(alert.contracts)} open. "
                 f"Re-decide: close, trim, or set your exit.", 4)
     if alert.kind == "giveback":
-        return (f"{alert.contract}: gave back its gain",
-                f"Was up {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), {now_part}. "
-                f"{_count(alert.contracts)} open. Close it or decide.", 4)
+        return (f"{alert.contract}: give-back triggered",
+                f"Peak {_money(alert.peak_gain)} ({_pct(alert.peak_gain_pct)}), {now_part}. "
+                f"Gain reached the +3% give-back threshold or below. {_count(alert.contracts)} open. Review your exit plan.", 4)
     when = f" The market closes at {close_label}." if close_label else ""
     if alert.kind == "expiry_first":
         return (f"{alert.contract} expires today and is still open",
@@ -421,7 +421,8 @@ class PositionAlerts:
                                             max(1, int((close - now) // 60)) if close else None)
             alert.attempts += 1
             try:
-                ntfy.publish(title, body, priority=priority, tags=("warning",), path=f"/trades/{alert.trade_id}")
+                ntfy.publish(title, body, priority=priority, tags=("warning",),
+                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -459,6 +460,8 @@ def for_trade(db: Session, trade: Trade) -> dict:
         "enabled": enabled(),
         "giveback_dollar_floor_applies": floor_applies,
         "alerts": [{
+            "id": str(a.id), "contract": a.contract,
+            "quoted_at": int(_epoch(a.quoted_at)) if a.quoted_at else None,
             "kind": a.kind, "detected_at": int(_epoch(a.detected_at)), "contracts": a.contracts, "mark": a.mark, "bid": a.bid,
             "gain": a.gain, "gain_pct": a.gain_pct, "peak_gain": a.peak_gain, "peak_gain_pct": a.peak_gain_pct,
             "delivery": a.delivery, "error": a.last_error,

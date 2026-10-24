@@ -241,3 +241,26 @@ test("a restricted historical chart returns to a granted live symbol", async ({ 
     await expect(page.getByRole("status", { name: "Saved chart snapshot" })).toHaveCount(0);
   } finally { await owner.close(); }
 });
+
+test("owner position-alert URL survives a fresh session and session renewal", async ({ browser }) => {
+  const lookup = await browser.newContext({ baseURL: ownerOrigin });
+  const trades = await (await lookup.request.get("/api/backend/trades")).json() as { id: string; instrument_type: string }[];
+  const trade = trades.find(t => t.instrument_type === "option")!;
+  await lookup.close();
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  const page = await owner.newPage();
+  const id = "10000000-0000-0000-0000-000000000001";
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+    enabled: false, watch: null, alerts: [{ id, kind: "giveback", detected_at: 1792594920, contracts: 2,
+      mark: 412, bid: 410, gain: 24, gain_pct: 0.03, peak_gain: 204, peak_gain_pct: 0.255, delivery: "sent", error: null, delivered_at: 1792594922 }],
+  } }));
+  const target = `/trades/${trade.id}?alert=${id}`;
+  for (let visit = 0; visit < 2; visit++) {
+    await owner.clearCookies();
+    await page.goto(target);
+    await expect(page).toHaveURL(ownerOrigin + target);
+    await expect(page.getByTestId("selected-position-alert")).toContainText("at trigger +$24 (+3%)");
+    expect((await (await owner.request.get("/api/access/me")).json()).owner).toBe(true);
+  }
+  await owner.close();
+});
