@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, delete
+from sqlmodel import Session, delete, select
 
 from app.database import engine
 from app.engine import copilot_investigations as inv
@@ -41,6 +41,10 @@ def _done(cost=0.1, saved="00000000-0000-0000-0000-000000000001", error=None):
     return run
 
 
+def _claim():
+    return q.claim_next(0.5, 2.0)
+
+
 def _runner(run, cfg=CFG, **kwargs):
     return q.QueueRunner(cfg, run_job=run, evidence_factory=lambda: "evidence", **kwargs)
 
@@ -67,34 +71,34 @@ def test_question_jobs_dedupe_per_day_and_cancel():
 def test_retry_with_backoff_then_failed_and_non_retryable_fails_at_once():
     job, _ = q.enqueue_question("q", [])
     for attempt in (1, 2):
-        claimed = q.claim_next()
+        claimed = _claim()
         assert claimed["id"] == job["id"] and claimed["attempts"] == attempt
         out = q.record_outcome(job["id"], cost_usd=0.1, investigation_id=None, error={"code": "timeout", "message": "slow"})
-        assert out["status"] == "queued" and out["error"] == "timeout: slow" and q.claim_next() is None  # backing off
+        assert out["status"] == "queued" and out["error"] == "timeout: slow" and _claim() is None  # backing off
         with Session(engine) as db:
             row = db.get(ResearchJob, uuid.UUID(job["id"]))
             row.next_attempt_at = datetime.utcnow() - timedelta(seconds=1)
             db.add(row)
             db.commit()
-    q.claim_next()
+    _claim()
     out = q.record_outcome(job["id"], cost_usd=0.1, investigation_id=None, error={"code": "timeout", "message": "slow"})
     assert out["status"] == "failed" and out["attempts"] == 3 and out["cost_usd"] == pytest.approx(0.3)
 
     other, _ = q.enqueue_question("q2", [])
-    q.claim_next()
+    _claim()
     assert q.record_outcome(other["id"], cost_usd=None, investigation_id=None,
                             error={"code": "plan_local_only", "message": "x"})["status"] == "failed"
 
 
 def test_cancelled_while_running_stays_cancelled_and_restart_requeues():
     job, _ = q.enqueue_question("q", [])
-    q.claim_next()
+    _claim()
     q.cancel(job["id"])
     out = q.record_outcome(job["id"], cost_usd=0.2, investigation_id="00000000-0000-0000-0000-000000000002", error=None)
     assert out["status"] == "cancelled" and out["cost_usd"] == 0.2 and out["investigation_id"].endswith("2")
 
     second, _ = q.enqueue_question("q3", [])
-    q.claim_next()
+    _claim()
     assert q.requeue_interrupted() == 1 and q.get(second["id"])["status"] == "queued"
     assert q.get(second["id"])["error"] == "interrupted by a restart"
 
@@ -111,10 +115,14 @@ def test_radar_events_enqueue_once_and_become_an_assignment(tmp_path, monkeypatc
     monkeypatch.setenv("RADAR_STORE", str(store_path))
     question, symbols, title = q.assignment(job)
     assert EVENT["first_seen_at"] in question and symbols == EVENT["symbols"][:8] and title.startswith("Radar:")
-    monkeypatch.setenv("RADAR_STORE", str(tmp_path / "missing.sqlite"))
-    RadarStore(tmp_path / "missing.sqlite")  # an empty store: the event is gone
-    with pytest.raises(q.QueueError):
+    RadarStore(tmp_path / "empty.sqlite")  # a store without the event
+    monkeypatch.setenv("RADAR_STORE", str(tmp_path / "empty.sqlite"))
+    with pytest.raises(q.QueueError, match="not in the Radar store"):
         q.assignment(job)
+    for missing in (str(tmp_path / "missing.sqlite"), "relative/radar.sqlite", ""):  # never created, relative, unset
+        monkeypatch.setenv("RADAR_STORE", missing)
+        with pytest.raises(q.QueueError, match="RADAR_STORE"):
+            q.assignment(job)
 
 
 def test_stale_open_investigations_get_one_reassessment_a_day():
@@ -156,7 +164,7 @@ def test_runner_retries_failures_and_records_missing_saves():
 
 def test_daily_budget_cap_holds_jobs_and_caps_the_job_budget():
     spent, _ = q.enqueue_question("spent", [])
-    q.claim_next()
+    _claim()
     q.record_outcome(spent["id"], cost_usd=1.8, investigation_id=None, error=None)
     q.enqueue_question("next", [])
     run = _done()
@@ -224,3 +232,159 @@ def test_the_runner_starts_only_when_enabled(monkeypatch):
     monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "0")  # started, but nothing may run
     with TestClient(app):
         assert isinstance(app.state.research_queue, q.QueueRunner) and app.state.research_queue.cfg.daily_budget_usd == 0
+
+
+
+# --------------------------------------------------------------------------- review fixes: spend, reassess, stuck, shutdown
+
+def _skip_backoff():
+    with Session(engine) as db:
+        for job in db.exec(select(ResearchJob)):
+            job.next_attempt_at = datetime.utcnow() - timedelta(seconds=1)
+            db.add(job)
+        db.commit()
+
+
+def test_attempts_with_unknown_cost_are_charged_their_budget_so_the_cap_holds():
+    """Six always-timing-out jobs report no cost: each attempt is charged its $0.50 budget, so a $2 day stops at 4."""
+    for i in range(6):
+        q.enqueue_question(f"q{i}", [])
+
+    async def timeout(question, symbols, evidence, *, now, title, lim):
+        return {"status": "error", "error": {"code": "timeout", "message": "slow"}, "saved_id": None}  # no metrics
+
+    ran = 0
+    for _ in range(30):
+        _skip_backoff()
+        if asyncio.run(_runner(timeout).run_once()) is None:
+            break
+        ran += 1
+    assert ran == 4 and q.spent_today() == pytest.approx(2.0)
+    assert all(e["estimated"] for j in q.list_jobs() for e in j["spend"])
+
+
+def test_retry_pending_cancelled_and_interrupted_attempts_all_count():
+    failing, _ = q.enqueue_question("sdk", [])
+
+    async def sdk_fail(question, symbols, evidence, *, now, title, lim):
+        return {"status": "error", "error": {"code": "sdk", "message": "x"}, "metrics": {"cost_usd": 0.3}, "saved_id": None}
+
+    assert asyncio.run(_runner(sdk_fail).run_once())["status"] == "queued"
+    assert q.spent_today() == pytest.approx(0.3)  # real cost of a job that is not finished yet
+
+    restarted, _ = q.enqueue_question("restart", [])
+    _claim()
+    q.requeue_interrupted()
+    assert q.get(restarted["id"])["spend"][0]["usd"] == 0.5 and q.spent_today() == pytest.approx(0.8)
+
+    slow_job, _ = q.enqueue_question("slow", [])
+
+    async def slow(question, symbols, evidence, *, now, title, lim):
+        await asyncio.sleep(30)
+
+    async def scenario():
+        task = asyncio.create_task(_runner(slow, cancel_poll_s=0.05).run_once())
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(q.cancel, slow_job["id"])
+        return await asyncio.wait_for(task, 5)
+
+    q.cancel(restarted["id"])
+    q.cancel(failing["id"])
+    out = asyncio.run(scenario())
+    assert out["id"] == slow_job["id"] and out["status"] == "cancelled" and out["cost_usd"] == 0.5
+    assert out["error"] is None or "cancelled" in out["error"]
+    assert q.spent_today() == pytest.approx(1.3)
+
+
+def test_refused_or_missing_input_costs_nothing(monkeypatch):
+    monkeypatch.delenv("RADAR_STORE", raising=False)
+    q.enqueue("radar_event", {"event_id": "gone"}, "radar_event:gone")
+    out = asyncio.run(_runner(_done()).run_once())
+    assert out["status"] == "failed" and out["cost_usd"] == 0.0 and q.spent_today() == 0.0
+
+
+def test_a_broken_evidence_source_fails_the_job_instead_of_leaving_it_running():
+    q.enqueue_question("q", [])
+
+    def broken():
+        raise RuntimeError("no store")
+
+    out = asyncio.run(q.QueueRunner(CFG, run_job=_done(), evidence_factory=broken).run_once())
+    assert out["status"] == "failed" and out["error"].startswith("input_error: RuntimeError") and _claim() is None
+
+
+def test_reassessments_stay_one_per_original_per_day_over_several_days(monkeypatch):
+    clock = {"now": datetime(2026, 10, 26, 14, 0)}
+    monkeypatch.setattr(q, "_utcnow", lambda: clock["now"])
+    original = inv.save_research_result(title="Neocloud financing", symbol="CRWV", findings={"summary": "Debt."})
+    other = inv.save_research_result(title="Fresh question", symbol="NBIS", findings={"summary": "s"})
+
+    def age_everything():  # every investigation, outputs included, looks stale
+        with Session(engine) as db:
+            for row in db.exec(select(CopilotInvestigation)):
+                row.updated_at = clock["now"] - timedelta(hours=30)
+                db.add(row)
+            db.commit()
+
+    async def reassess(question, symbols, evidence, *, now, title, lim):
+        saved = inv.save_research_result(title=title, symbol=(symbols or [None])[0], findings={"summary": "new"})
+        return {"status": "ok", "metrics": {"cost_usd": 0.01}, "saved_id": saved["id"]}
+
+    created = []
+    for day in range(4):
+        age_everything()
+        created.append(q.enqueue_reassessments(24))
+        while asyncio.run(_runner(reassess).run_once()) is not None:
+            pass
+        clock["now"] += timedelta(hours=25)
+    assert created == [2, 2, 2, 2]  # the two originals, once a day; outputs are never reassessed
+    jobs = q.list_jobs()
+    assert {j["input"]["investigation_id"] for j in jobs} == {original["id"], other["id"]}
+    with Session(engine) as db:
+        assert len(list(db.exec(select(CopilotInvestigation)))) == 2 + 8
+
+
+def test_a_waiting_reassessment_blocks_another():
+    stale = inv.save_research_result(title="Old", symbol="CRWV", findings={"summary": "s"})
+    with Session(engine) as db:
+        row = db.get(CopilotInvestigation, uuid.UUID(stale["id"]))
+        row.updated_at = datetime.utcnow() - timedelta(hours=30)
+        db.add(row)
+        db.commit()
+    assert q.enqueue_reassessments(24) == 1
+    with Session(engine) as db:  # an older day's job is still queued
+        job = db.exec(select(ResearchJob)).one()
+        job.created_at, job.dedupe_key = job.created_at - timedelta(days=2), "reassess:old"
+        db.add(job)
+        db.commit()
+    assert q.enqueue_reassessments(24) == 0
+
+
+def test_shutdown_stops_the_attempt_and_puts_the_job_back():
+    job, _ = q.enqueue_question("slow", [])
+    seen = {}
+
+    async def slow(question, symbols, evidence, *, now, title, lim):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    async def scenario():
+        loop = asyncio.create_task(_runner(slow, cancel_poll_s=0.05).loop())
+        await asyncio.sleep(0.3)
+        loop.cancel()
+        await asyncio.gather(loop, return_exceptions=True)
+
+    asyncio.run(scenario())
+    after = q.get(job["id"])
+    assert seen.get("cancelled") and after["status"] == "queued" and after["error"] == "interrupted by a shutdown"
+    assert after["spend"][0]["usd"] == 0.5
+
+
+def test_malformed_numbers_fall_back_instead_of_crashing(monkeypatch):
+    monkeypatch.setenv("RESEARCH_DAILY_BUDGET_USD", "two dollars")
+    monkeypatch.setenv("RESEARCH_REASSESS_AFTER_HOURS", "1.5")
+    cfg = q.settings()
+    assert cfg.daily_budget_usd == 2.0 and cfg.reassess_after_hours == 0

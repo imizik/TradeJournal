@@ -292,12 +292,10 @@ async def _maybe_start_jo_morning(app_: FastAPI):
 async def _maybe_start_research_queue(app_: FastAPI):
     """Copilot Lab's background research queue; off unless RESEARCH_QUEUE_ENABLED=true."""
     app_.state.research_queue = None
-    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+    if os.environ.get("RESEARCH_QUEUE_ENABLED") != "true" or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
         return None
     from app.engine import research_queue
     cfg = research_queue.settings()
-    if not cfg.enabled:
-        return None
     runner = research_queue.QueueRunner(cfg)
     app_.state.research_queue = runner
     return asyncio.create_task(runner.loop())
@@ -335,7 +333,8 @@ async def lifespan(_app: FastAPI):
         if jo_morning is not None:
             jo_morning.cancel()
         if research is not None:
-            research.cancel()
+            research.cancel()  # the runner stops its attempt and puts the job back before it ends
+            await asyncio.wait({research}, timeout=10)
         if market_watch is not None:
             market_watch.cancel()
         if radar is not None:

@@ -1648,6 +1648,9 @@ class ResearchJob(SQLModel, table=True):
     attempts: int = Field(default=0)
     error: Optional[str] = None                 # last failure, short text
     cost_usd: Optional[float] = None            # summed over attempts (API-equivalent on the plan)
+    # One entry per attempt, {at, usd, estimated}: the attempt's budget is charged when it starts and replaced by the
+    # real cost once known, so the daily cap counts retries, timeouts, cancels and restarts.
+    spend_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     investigation_id: Optional[uuid.UUID] = None  # the saved result
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     next_attempt_at: datetime = Field(default_factory=datetime.utcnow)

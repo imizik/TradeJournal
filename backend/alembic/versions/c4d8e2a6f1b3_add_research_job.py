@@ -26,6 +26,7 @@ def upgrade():
         sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("error", sa.String(), nullable=True),
         sa.Column("cost_usd", sa.Float(), nullable=True),
+        sa.Column("spend_json", sa.Text(), nullable=False),
         sa.Column("investigation_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("next_attempt_at", sa.DateTime(), nullable=False),

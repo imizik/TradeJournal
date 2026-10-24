@@ -8,12 +8,18 @@ runner retries transient failures with backoff, honours cancel, caps each job's
 budget and the day's total (``RESEARCH_DAILY_BUDGET_USD``, default $2), and
 records failures on the job.
 
+Spend is charged per attempt. When an attempt starts, its whole budget is charged
+as an estimate; it is replaced by the real cost once one is known. An attempt
+that times out, fails, is cancelled or is cut off by a restart keeps the
+estimate, so the daily cap never misses spend.
+
 Two optional triggers enqueue work, both off by default:
 
 - ``RESEARCH_RADAR_TRIGGER=true``: each new Radar event in today's session,
   read only from ``RADAR_STORE``, gets one ``radar_event`` job.
-- ``RESEARCH_REASSESS_AFTER_HOURS=N``: each open investigation last updated more
-  than N hours ago gets at most one ``reassess`` job a day.
+- ``RESEARCH_REASSESS_AFTER_HOURS=N``: each original open investigation (not a
+  reassessment's own output) not updated and not reassessed in N hours gets one
+  ``reassess`` job, at most one a day.
 
 Nothing here notifies, alerts, trades or writes plans, watches or memories.
 """
@@ -27,9 +33,11 @@ import os
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Iterator
 
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.models import CopilotInvestigation, ResearchJob
@@ -42,6 +50,7 @@ MAX_ATTEMPTS = 3
 BACKOFF_S = (60, 300)  # before the 2nd and 3rd attempt
 # Failures worth another attempt; anything else (auth, budget, bad input) fails at once.
 RETRYABLE = {"timeout", "sdk", "no_result", "no_assessment"}
+MIN_JOB_BUDGET_USD = 0.05  # below what is left of the day, nothing starts
 
 
 class QueueError(ValueError):
@@ -62,12 +71,24 @@ class QueueSettings:
     trigger_every_s: float = 300.0
 
 
+def _number(name: str, default, cast):
+    """A malformed value falls back with a warning instead of stopping the API."""
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return cast(raw)
+    except ValueError:
+        log.warning("%s=%r is not a number; using %s", name, raw, default)
+        return default
+
+
 def settings() -> QueueSettings:
     return QueueSettings(
         enabled=os.environ.get("RESEARCH_QUEUE_ENABLED") == "true",
-        daily_budget_usd=float(os.environ.get("RESEARCH_DAILY_BUDGET_USD") or 2.0),
+        daily_budget_usd=_number("RESEARCH_DAILY_BUDGET_USD", 2.0, float),
         radar_trigger=os.environ.get("RESEARCH_RADAR_TRIGGER") == "true",
-        reassess_after_hours=int(os.environ.get("RESEARCH_REASSESS_AFTER_HOURS") or 0),
+        reassess_after_hours=_number("RESEARCH_REASSESS_AFTER_HOURS", 0, int),
     )
 
 
@@ -81,22 +102,31 @@ def _session(session: Session | None) -> Iterator[Session]:
         yield own
 
 
-def view(job: ResearchJob) -> dict:
-    return {"id": str(job.id), "kind": job.kind, "input": json.loads(job.input_json), "status": job.status,
-            "attempts": job.attempts, "error": job.error, "cost_usd": job.cost_usd,
-            "investigation_id": str(job.investigation_id) if job.investigation_id else None,
-            "created_at": job.created_at.isoformat(), "next_attempt_at": job.next_attempt_at.isoformat(),
-            "started_at": job.started_at and job.started_at.isoformat(),
-            "finished_at": job.finished_at and job.finished_at.isoformat()}
+def _utcnow() -> datetime:
+    """Naive UTC, like the model's timestamps. One clock for the module, so tests can move it."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _today() -> str:
     from app.engine.chart_math import ET
-    return datetime.now(ET).date().isoformat()
+    return _utcnow().replace(tzinfo=UTC).astimezone(ET).date().isoformat()
 
 
 def _digest(*parts: str) -> str:
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:24]
+
+
+def _spend(job: ResearchJob) -> list[dict]:
+    return json.loads(job.spend_json or "[]")
+
+
+def view(job: ResearchJob) -> dict:
+    return {"id": str(job.id), "kind": job.kind, "input": json.loads(job.input_json), "status": job.status,
+            "attempts": job.attempts, "error": job.error, "cost_usd": job.cost_usd, "spend": _spend(job),
+            "investigation_id": str(job.investigation_id) if job.investigation_id else None,
+            "created_at": job.created_at.isoformat(), "next_attempt_at": job.next_attempt_at.isoformat(),
+            "started_at": job.started_at and job.started_at.isoformat(),
+            "finished_at": job.finished_at and job.finished_at.isoformat()}
 
 
 # --------------------------------------------------------------------------- enqueue / list / cancel
@@ -109,9 +139,15 @@ def enqueue(kind: str, payload: dict, dedupe_key: str, session: Session | None =
         existing = db.exec(select(ResearchJob).where(ResearchJob.dedupe_key == dedupe_key)).first()
         if existing is not None:
             return view(existing), False
-        job = ResearchJob(kind=kind, input_json=json.dumps(payload), dedupe_key=dedupe_key)
+        now = _utcnow()
+        job = ResearchJob(kind=kind, input_json=json.dumps(payload), dedupe_key=dedupe_key, created_at=now,
+                          next_attempt_at=now)
         db.add(job)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:  # another writer queued the same key between the read and the insert
+            db.rollback()
+            return view(db.exec(select(ResearchJob).where(ResearchJob.dedupe_key == dedupe_key)).one()), False
         db.refresh(job)
         return view(job), True
 
@@ -153,47 +189,51 @@ def cancel(job_id: str | uuid.UUID, session: Session | None = None) -> dict:
     with _session(session) as db:
         job = _job(db, job_id)
         if job.status in ACTIVE:
-            job.status, job.finished_at = "cancelled", datetime.utcnow()
+            job.status, job.finished_at = "cancelled", _utcnow()
             db.add(job)
             db.commit()
             db.refresh(job)
         return view(job)
 
 
-# --------------------------------------------------------------------------- the runner's side
+# --------------------------------------------------------------------------- spend and claiming
+
+def _day_start() -> datetime:
+    return _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
 
 def spent_today(session: Session | None = None) -> float:
-    """Cost of jobs finished since midnight UTC (API-equivalent on the plan)."""
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    """Spend charged for attempts started since midnight UTC, estimates included (API-equivalent on the plan)."""
+    start = _day_start()
     with _session(session) as db:
-        jobs = db.exec(select(ResearchJob).where(col(ResearchJob.finished_at) >= start))
-        return round(sum(job.cost_usd or 0.0 for job in jobs), 6)
+        jobs = db.exec(select(ResearchJob).where(col(ResearchJob.started_at) >= start))
+        return round(sum(entry["usd"] for job in jobs for entry in _spend(job)
+                         if datetime.fromisoformat(entry["at"]) >= start), 6)
 
 
-def requeue_interrupted(session: Session | None = None) -> int:
-    """Jobs left running by a stopped process go back to the queue (their attempt still counts)."""
+def claim_next(job_budget_usd: float, daily_budget_usd: float, session: Session | None = None) -> dict | None:
+    """Start the next due attempt if the day's cap allows, charging its budget as an estimate. The view's
+    ``budget_usd`` is that attempt's budget (the per-job budget, capped by what is left of the day)."""
     with _session(session) as db:
-        jobs = list(db.exec(select(ResearchJob).where(ResearchJob.status == "running")))
-        for job in jobs:
-            job.status, job.error, job.next_attempt_at = "queued", "interrupted by a restart", datetime.utcnow()
-            if job.attempts >= MAX_ATTEMPTS:
-                job.status, job.finished_at = "failed", datetime.utcnow()
-            db.add(job)
-        db.commit()
-        return len(jobs)
-
-
-def claim_next(session: Session | None = None) -> dict | None:
-    with _session(session) as db:
-        job = db.exec(select(ResearchJob).where(ResearchJob.status == "queued", col(ResearchJob.next_attempt_at) <= datetime.utcnow())
+        remaining = daily_budget_usd - spent_today(db)
+        if remaining < MIN_JOB_BUDGET_USD:
+            return None
+        now = _utcnow()
+        job = db.exec(select(ResearchJob).where(ResearchJob.status == "queued", col(ResearchJob.next_attempt_at) <= now)
                       .order_by(col(ResearchJob.created_at)).limit(1)).first()
         if job is None:
             return None
-        job.status, job.attempts, job.started_at = "running", job.attempts + 1, datetime.utcnow()
-        db.add(job)
+        budget = round(min(job_budget_usd, remaining), 6)
+        spend = [*_spend(job), {"at": now.isoformat(), "usd": budget, "estimated": True}]
+        # Conditional, so two claimers can never both start the same attempt.
+        claimed = db.exec(update(ResearchJob).where(col(ResearchJob.id) == job.id, col(ResearchJob.status) == "queued")
+                          .values(status="running", attempts=job.attempts + 1, started_at=now,
+                                  spend_json=json.dumps(spend), cost_usd=round(sum(e["usd"] for e in spend), 6)))
         db.commit()
+        if claimed.rowcount != 1:
+            return None
         db.refresh(job)
-        return view(job)
+        return {**view(job), "budget_usd": budget}
 
 
 def status_of(job_id: str, session: Session | None = None) -> str:
@@ -201,15 +241,25 @@ def status_of(job_id: str, session: Session | None = None) -> str:
         return _job(db, job_id).status
 
 
+def _settle(job: ResearchJob, cost_usd: float | None) -> None:
+    """Replace the current attempt's estimate with its real cost, when one is known."""
+    spend = _spend(job)
+    if cost_usd is not None and spend and spend[-1].get("estimated"):
+        spend[-1] = {**spend[-1], "usd": round(float(cost_usd), 6), "estimated": False}
+    job.spend_json = json.dumps(spend)
+    job.cost_usd = round(sum(e["usd"] for e in spend), 6) if spend else job.cost_usd
+
+
 def record_outcome(job_id: str, *, cost_usd: float | None, investigation_id: str | None, error: dict | None,
                    session: Session | None = None) -> dict:
-    """Done, retry later, or failed. A job cancelled while it ran stays cancelled but keeps its cost and result."""
+    """Done, retry later, or failed. A job cancelled while it ran stays cancelled but keeps its spend and result.
+    ``cost_usd`` None means unknown: the attempt keeps its estimated charge."""
     with _session(session) as db:
         job = _job(db, job_id)
-        job.cost_usd = round((job.cost_usd or 0.0) + (cost_usd or 0.0), 6) if cost_usd is not None else job.cost_usd
+        _settle(job, cost_usd)
         if investigation_id:
             job.investigation_id = uuid.UUID(investigation_id)
-        now = datetime.utcnow()
+        now = _utcnow()
         if job.status == "running":
             if error is None:
                 job.status, job.error, job.finished_at = "done", None, now
@@ -226,6 +276,36 @@ def record_outcome(job_id: str, *, cost_usd: float | None, investigation_id: str
         return view(job)
 
 
+def _interrupt(job: ResearchJob, reason: str) -> None:
+    job.error, job.next_attempt_at = reason, _utcnow()
+    job.status = "queued" if job.attempts < MAX_ATTEMPTS else "failed"
+    if job.status == "failed":
+        job.finished_at = _utcnow()
+
+
+def interrupt(job_id: str, reason: str, session: Session | None = None) -> dict:
+    """A running attempt cut off by a shutdown goes back to the queue; its estimated charge stays."""
+    with _session(session) as db:
+        job = _job(db, job_id)
+        if job.status == "running":
+            _interrupt(job, reason)
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+        return view(job)
+
+
+def requeue_interrupted(session: Session | None = None) -> int:
+    """Jobs left running by a stopped process go back to the queue (their attempt and its charge still count)."""
+    with _session(session) as db:
+        jobs = list(db.exec(select(ResearchJob).where(ResearchJob.status == "running")))
+        for job in jobs:
+            _interrupt(job, "interrupted by a restart")
+            db.add(job)
+        db.commit()
+        return len(jobs)
+
+
 # --------------------------------------------------------------------------- triggers
 
 def enqueue_radar_events(store_path: str, session_date: str | None = None, session: Session | None = None) -> int:
@@ -239,13 +319,20 @@ def enqueue_radar_events(store_path: str, session_date: str | None = None, sessi
 
 
 def enqueue_reassessments(after_hours: int, session: Session | None = None) -> int:
-    """At most one reassess job a day for each open investigation not updated in ``after_hours``."""
-    cutoff = datetime.utcnow() - timedelta(hours=after_hours)
+    """One reassess job for each original open investigation that has been neither updated nor reassessed for
+    ``after_hours``, and has no job waiting. A reassessment's own output is never reassessed; at most one a day."""
+    cutoff = _utcnow() - timedelta(hours=after_hours)
     with _session(session) as db:
+        jobs = list(db.exec(select(ResearchJob).where(ResearchJob.kind == "reassess")))
+        outputs = {str(job.investigation_id) for job in jobs if job.investigation_id}
+        recent = {json.loads(job.input_json)["investigation_id"] for job in jobs
+                  if job.status in ACTIVE or job.created_at >= cutoff}
         stale = [str(row.id) for row in db.exec(select(CopilotInvestigation).where(
             CopilotInvestigation.status == "open", col(CopilotInvestigation.updated_at) < cutoff))]
     created = 0
     for investigation_id in stale:
+        if investigation_id in outputs or investigation_id in recent:
+            continue
         _, new = enqueue("reassess", {"investigation_id": investigation_id},
                          f"reassess:{investigation_id}:{_today()}", session)
         created += new
@@ -262,7 +349,9 @@ def assignment(job: dict) -> tuple[str, list[str], str]:
     if job["kind"] == "radar_event":
         from app.engine.radar_store import RadarStore
         store = os.environ.get("RADAR_STORE", "").strip()
-        event = RadarStore(store, read_only=True).event(data["event_id"]) if store else None
+        if not store or not os.path.isabs(store) or not os.path.isfile(store):
+            raise QueueError("not_found", "RADAR_STORE is not an existing absolute path.")
+        event = RadarStore(store, read_only=True).event(data["event_id"])
         if event is None:
             raise QueueError("not_found", f"Radar event {data['event_id']} is not in the Radar store.")
         symbols = [s for s in event.get("symbols", []) if isinstance(s, str)][:8]
@@ -295,7 +384,7 @@ class QueueRunner:
         self.cfg, self.cancel_poll_s = cfg, cancel_poll_s
         self._run_job, self._evidence = run_job, evidence_factory
         self.last_error: str | None = None
-        self._last_trigger = 0.0
+        self._last_trigger: float | None = None
 
     def _evidence_for_job(self):
         if self._evidence is not None:
@@ -304,7 +393,7 @@ class QueueRunner:
         return LiveEvidence()
 
     async def triggers(self, now: float) -> None:
-        if now - self._last_trigger < self.cfg.trigger_every_s:
+        if self._last_trigger is not None and now - self._last_trigger < self.cfg.trigger_every_s:
             return
         self._last_trigger = now
         store = os.environ.get("RADAR_STORE", "").strip()
@@ -313,41 +402,51 @@ class QueueRunner:
         if self.cfg.reassess_after_hours > 0:
             await asyncio.to_thread(enqueue_reassessments, self.cfg.reassess_after_hours)
 
+    async def _outcome(self, job_id: str, *, cost_usd=None, investigation_id=None, error=None) -> dict:
+        return await asyncio.to_thread(record_outcome, job_id, cost_usd=cost_usd, investigation_id=investigation_id,
+                                       error=error)
+
     async def run_once(self) -> dict | None:
-        """Claim and run one job if the day's budget allows. Returns the finished job view, or None."""
+        """Start one attempt if one is due and the day's cap allows. Returns the job view after it, or None."""
         from app.ai import research_job
-        lim = research_job.limits()
-        remaining = self.cfg.daily_budget_usd - await asyncio.to_thread(spent_today)
-        if remaining <= 0.05:  # the day's cap is (nearly) used up; nothing runs until tomorrow (UTC)
-            return None
-        job = await asyncio.to_thread(claim_next)
+        job = await asyncio.to_thread(claim_next, research_job.limits().budget_usd, self.cfg.daily_budget_usd)
         if job is None:
             return None
         try:
             question, symbols, title = await asyncio.to_thread(assignment, job)
-        except QueueError as exc:
-            return await asyncio.to_thread(record_outcome, job["id"], cost_usd=None, investigation_id=None,
-                                           error={"code": exc.code, "message": str(exc)})
+            evidence = self._evidence_for_job()
+        except QueueError as exc:  # nothing ran: no cost
+            return await self._outcome(job["id"], cost_usd=0.0, error={"code": exc.code, "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001 - a broken input or store fails the job instead of leaving it running
+            return await self._outcome(job["id"], cost_usd=0.0,
+                                       error={"code": "input_error", "message": f"{type(exc).__name__}: {exc}"[:300]})
         from app.engine.chart_math import ET
         run = self._run_job or research_job.run_job
-        task = asyncio.create_task(run(question, symbols, self._evidence_for_job(), now=datetime.now(ET), title=title,
-                                       lim=research_job.JobLimits(budget_usd=min(lim.budget_usd, remaining))))
-        while not task.done():
-            await asyncio.wait({task}, timeout=self.cancel_poll_s)
-            if not task.done() and await asyncio.to_thread(status_of, job["id"]) == "cancelled":
-                task.cancel()
+        task = asyncio.create_task(run(question, symbols, evidence, now=datetime.now(ET), title=title,
+                                       lim=research_job.JobLimits(budget_usd=job["budget_usd"])))
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=self.cancel_poll_s)
+                if not task.done() and await asyncio.to_thread(status_of, job["id"]) == "cancelled":
+                    task.cancel()
+        except asyncio.CancelledError:
+            # The API is shutting down: stop the attempt, and put the job back with its charge kept.
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.shield(asyncio.to_thread(interrupt, job["id"], "interrupted by a shutdown"))
+            raise
         try:
             record = task.result()
-        except asyncio.CancelledError:
-            return await asyncio.to_thread(get, job["id"])
-        except research_job.ResearchError as exc:
-            record = {"error": {"code": exc.code, "message": exc.message}}
+        except asyncio.CancelledError:  # cancelled by the owner; the attempt's cost is unknown, its estimate stays
+            return await self._outcome(job["id"], error={"code": "cancelled", "message": "cancelled while running"})
+        except research_job.ResearchError as exc:  # refused before any model call
+            return await self._outcome(job["id"], cost_usd=0.0, error={"code": exc.code, "message": exc.message})
         except Exception as exc:  # noqa: BLE001 - recorded on the job; the loop goes on
-            record = {"error": {"code": "internal", "message": type(exc).__name__}}
+            return await self._outcome(job["id"], error={"code": "internal", "message": type(exc).__name__})
         error = record.get("error") or (None if record.get("saved_id") else
                                         {"code": "save_failed", "message": record.get("save_error") or "not saved"})
-        return await asyncio.to_thread(record_outcome, job["id"], cost_usd=(record.get("metrics") or {}).get("cost_usd"),
-                                       investigation_id=record.get("saved_id"), error=error)
+        return await self._outcome(job["id"], cost_usd=(record.get("metrics") or {}).get("cost_usd"),
+                                   investigation_id=record.get("saved_id"), error=error)
 
     async def loop(self) -> None:
         import time
@@ -358,6 +457,8 @@ class QueueRunner:
                 await self.triggers(time.monotonic())
                 ran = await self.run_once()
                 self.last_error = None
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 self.last_error = "Research queue pass failed"
                 log.exception("Research queue pass failed")
