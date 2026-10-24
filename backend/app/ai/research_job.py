@@ -11,11 +11,12 @@ WebFetch. No shell, file, edit, subagent, other MCP server or settings file. A
 PreToolUse hook denies anything else and caps web calls. Fetched pages are
 untrusted data; the job has no tool that could act on an injected instruction.
 
-Auth (``RESEARCH_AUTH``): ``plan`` (default) uses the owner's plan token and,
-like the plan chat backend, runs only against a local database; ``api_key``
-uses ``ANTHROPIC_API_KEY`` and is the only mode for a server. Either way the
-child environment carries that one credential, and Claude Code must report it
-as its sign-in before the job starts.
+Auth (``RESEARCH_AUTH``): ``plan`` (default) uses the owner's plan token, also
+on the VPS, by the owner's decision of 2026-10-24 (docs/copilot-lab.md; the
+plan chat backend stays local-only); ``api_key`` uses ``ANTHROPIC_API_KEY``.
+Either way the child environment carries only that one credential, every other
+credential variable is blanked, and Claude Code must report that credential as
+its sign-in before the job starts.
 """
 from __future__ import annotations
 
@@ -172,15 +173,17 @@ def save_research_result(record: dict) -> str:
 # --------------------------------------------------------------------------- auth
 
 def child_env(mode: str) -> dict[str, str]:
+    """One credential only. Every variable that outranks or redirects it is set empty, whether or not the backend has
+    it (the VPS service env holds both the plan token and a valid API key), and each mode keeps its Claude Code state
+    in its own subdirectory, apart from the nightly plan reviews'."""
     env = copilot_plan.child_env()
+    env.update({name: "" for name in plan_runner._OUTRANKING})
     if mode == "api_key":
-        # The API key replaces the plan token, and Claude Code keeps API-key state apart from the plan reviews'
-        # (a subdirectory of the same private, writable state directory).
         env[plan_runner.TOKEN_ENV] = ""
         env["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY", "")
-        config = Path(env["CLAUDE_CONFIG_DIR"]) / "research-api"
-        config.mkdir(parents=True, exist_ok=True, mode=0o700)
-        env["CLAUDE_CONFIG_DIR"] = str(config)
+    config = Path(env["CLAUDE_CONFIG_DIR"]) / ("research-api" if mode == "api_key" else "research-plan")
+    config.mkdir(parents=True, exist_ok=True, mode=0o700)
+    env["CLAUDE_CONFIG_DIR"] = str(config)
     return env
 
 
@@ -198,12 +201,9 @@ def _api_key_preflight(binary: str, env: dict[str, str]) -> None:
 
 def prepare(mode: str) -> tuple[str, dict[str, str]]:
     """The Claude Code binary and child env, once the sign-in is confirmed. Raises ResearchError."""
-    from app.environment import describe
     env = child_env(mode)
     if mode == "plan":
-        if not describe().is_local:
-            raise ResearchError("plan_local_only", "RESEARCH_AUTH=plan is for local testing only (the database is not "
-                                                   "local). Use RESEARCH_AUTH=api_key on a server.")
+        # Claude Code must report the plan token, with no API key source, under exactly this env (plan_runner).
         try:
             return copilot_plan.preflight(env), env
         except copilot.CopilotError as exc:
