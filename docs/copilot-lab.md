@@ -114,6 +114,34 @@ untouched.
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
 
+## How the copilot reasons (system prompt)
+
+`copilot.SYSTEM_PROMPT` (`backend/app/ai/copilot.py`) frames every turn:
+
+- **Who it works with**, as working hypotheses to test against what the owner
+  does, never a diagnosis: debate-driven; semiconductors, AI infrastructure,
+  recoveries, relative strength and catalysts; a longer thesis often expressed
+  through a short-dated option. The [behavior audit](../backend/reports/behavior_audit_2026-10-21.md)'s
+  findings (exits, not entries; 15-60 minute holds best; hour-to-close worst;
+  the 53 green-then-red losers; trading on while green) are stated with their
+  sample and labelled associations, not rules, with the exit counterfactual's
+  rejection of the three mechanical exits. The prompt says to raise one when
+  the position in front of it resembles it, never to recite them.
+- **Four separate questions** for any trade idea: thesis, setup now,
+  instrument fit (expiry, strike and premium against the horizon; marks only,
+  no implied volatility or Greeks, so it says so rather than estimates), and
+  the decision now (what changed for the thesis versus only for the
+  position). "Nothing here changes the plan" and "not worth a trade" are
+  complete answers.
+- The evidence, time-labelling, pushback and untrusted-text rules; the owner
+  context block (below); memory proposals (Confirm a plan); plans; SIMULATED;
+  no orders; brevity that leads with what matters for the decision.
+
+Tests pin the sentences other guards depend on (`tests/test_copilot_book.py`
+on account identifiers, `tests/test_copilot_adversarial.py` on "you cannot
+create alerts or research jobs yourself", `tests/test_copilot.py` on the
+four-question frame and the memory rule).
+
 ## Owner context
 
 Every turn starts with what TradeJournal already knows about the owner, so
@@ -212,7 +240,7 @@ another investigation by id.
 ## Confirm a plan
 
 When asked for a plan, the model may call `propose_plan` (at most two per
-answer). The tool validates the proposal and writes nothing. The lab streams
+answer; one for a memory). The tool validates the proposal and writes nothing. The lab streams
 it as a `proposal` event and shows a card with **Confirm** and **Dismiss**;
 nothing exists until the owner confirms.
 
@@ -235,6 +263,22 @@ nothing exists until the owner confirms.
   investigation's evidence references. Confirm queues a reassess job through
   `POST /copilot/research-jobs/reassess` (Research queue, below). It works
   whether or not alerts are supported.
+- **Memory:** something the owner said that is worth keeping across
+  conversations: `memory_kind` (`statement`, `thesis`, `preference` or
+  `lesson`, the memory store's kinds), `text` (their words or a faithful
+  paraphrase, at most 400 characters), an optional `interpretation` (what it
+  should change about how the copilot works, at most 300) and an optional
+  `symbol` (1-6 letters, the store's form). The system prompt asks for one
+  when the owner states a belief, preference, rule or lesson, asks to be
+  remembered, or agrees with a conclusion they want kept; never from measured
+  counts alone and never about their psychology. The card shows the text in
+  an editable box; Confirm saves it through the existing owner-only
+  `POST /jo/memories` as an `owner_statement` (the owner edited and
+  confirmed the words), `status: active`, `owner_confirmed: true`,
+  `source_reference: copilot:<investigation id>`. It needs no investigation
+  and no alert support. The memory joins the owner context pack and
+  `get_memories` from the next turn. `jo_briefing_common` is untouched: the
+  memory store's schema, kinds and sources are the same as Jo's.
 - **Linked activity:** under an open investigation, the lab lists its level
   alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
   (armed, or fired with a time and price), and its revisit jobs. Both come

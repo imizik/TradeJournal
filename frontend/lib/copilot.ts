@@ -37,7 +37,8 @@ export type CopilotEvent =
 export type Proposal = { id: string } & (
   | { kind: "watch"; symbol: string; condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null;
       label: string; why: string; last?: number; as_of?: string | number | null }
-  | { kind: "revisit"; question: string; horizon_days: number });
+  | { kind: "revisit"; question: string; horizon_days: number }
+  | { kind: "memory"; memory_kind: "statement" | "thesis" | "preference" | "lesson"; symbol: string | null; text: string; interpretation?: string });
 
 export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
 
@@ -243,3 +244,11 @@ export const createWatch = (investigationId: string, watch: Extract<Proposal, { 
     symbol: watch.symbol, price: watch.price, reference, condition: watch.condition, interval: watch.interval, session: "regular",
     source_kind: "copilot", source_id: investigationId, label: watch.label }) });
 export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });
+/** A confirmed memory is saved through the existing Jo memory store as the owner's own statement (they edited and
+ * confirmed the words), active at once, with the investigation it came from as its reference. */
+const operationId = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+export const saveMemory = (memory: Extract<Proposal, { kind: "memory" }>, text: string, investigationId: string | null) =>
+  request<{ id: string; memory_id: string; revision: number }>("/jo/memories", { method: "POST", body: JSON.stringify({
+    operation_id: operationId(), kind: memory.memory_kind, symbol: memory.symbol, original_text: text,
+    interpretation: memory.interpretation ?? null, source: "owner_statement",
+    source_reference: investigationId ? `copilot:${investigationId}` : "copilot", status: "active", owner_confirmed: true }) });

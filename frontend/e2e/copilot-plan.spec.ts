@@ -16,6 +16,8 @@ const record = {
 const WATCH = { id: "p1", kind: "watch", symbol: "NBIS", condition: "crosses", price: 92.46, interval: null,
   label: "NBIS 2% below the last price", why: "A break here would mean the bounce failed.", last: 94.35, as_of: "2026-10-24T14:00:00Z" };
 const REVISIT = { id: "p2", kind: "revisit", question: "Is NBIS still lagging its group?", horizon_days: 1 };
+const MEMORY = { id: "p3", kind: "memory", memory_kind: "thesis", symbol: "NBIS", text: "NBIS is a two-year infra thesis for me.",
+  interpretation: "Ask whether a weekly call fits that horizon." };
 const sse = (events: object[]) => events.map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
 // Live provenance, as in production: the quote is "fetched" and the proposal is "proposal" (fixture evidence would
 // relabel both "simulated").
@@ -26,6 +28,7 @@ const TURN = sse([
   { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed watch", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
   { type: "proposal", ...WATCH },
   { type: "proposal", ...REVISIT },
+  { type: "proposal", ...MEMORY },
   { type: "text", delta: "Plan drafted. Nothing is saved or active until you confirm a card below." },
   { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2,
     tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
@@ -49,6 +52,10 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
     return route.fulfill({ json: { alerts: server.alerts, phone: true } });
   });
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: server.jobs, queue_enabled: true, daily_budget_usd: 2, spent_today_usd: 0 } }));
+  await page.route("**/jo/memories", (route) => {
+    post("memories", route);
+    return route.fulfill({ status: 201, json: { id: "r1", memory_id: "m1", revision: 1, operation_id: "x", status: "active" } });
+  });
   await page.route("**/copilot/research-jobs/reassess", (route) => {
     post("reassess", route);
     const body = route.request().postDataJSON();
@@ -122,6 +129,29 @@ test("without alert support a watch waits, while a revisit still confirms; Dismi
   await watch.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByRole("region", { name: "Proposed watch" })).toHaveCount(0);
   expect(server.posts.filter((p) => p.path === "alerts")).toEqual([]);
+});
+
+test("a memory card saves the owner's edited words as an approved memory, and only on Confirm", async ({ page }) => {
+  const server = fresh();
+  await lab(page, server);
+  await askForPlan(page);
+  const card = page.getByRole("region", { name: "Proposed memory" });
+  await expect(card).toContainText("Proposed memory · thesis · NBIS");
+  await expect(card).toContainText("How it will be used: Ask whether a weekly call fits that horizon.");
+  const box = card.getByLabel("Memory text");
+  await expect(box).toHaveValue("NBIS is a two-year infra thesis for me.");
+  expect(server.posts.filter((p) => p.path === "memories")).toEqual([]); // nothing until Confirm
+  await box.fill("NBIS is a two-year infrastructure thesis for me, not a weekly trade.");
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("status")).toHaveText("Remembered (thesis, NBIS). It joins your approved memories from the next turn.");
+  const [saved] = server.posts.filter((p) => p.path === "memories");
+  const body = saved.body as Record<string, unknown>;
+  expect(body).toMatchObject({ kind: "thesis", symbol: "NBIS", original_text: "NBIS is a two-year infrastructure thesis for me, not a weekly trade.",
+    interpretation: "Ask whether a weekly call fits that horizon.", source: "owner_statement", source_reference: `copilot:${INV}`,
+    status: "active", owner_confirmed: true });
+  expect(typeof body.operation_id).toBe("string");
+  await expect(card.getByRole("button", { name: "Confirm" })).toHaveCount(0);
+  await expect(card.getByLabel("Memory text")).toHaveCount(0); // the saved words are shown as text now
 });
 
 test("?investigation= opens that investigation with its fired alert", async ({ page }) => {
