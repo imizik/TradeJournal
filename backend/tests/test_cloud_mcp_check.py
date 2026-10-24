@@ -173,6 +173,12 @@ def test_conversation_instructions_match_enabled_commitment_paths(harness, tmp_p
     assert "email-workflow guards still apply" in instructions
     assert "starts plan development, not activation" in instructions
     assert "a complete explicit request already supplies approval" in instructions
+    # Advice-tool guidance must not override research-only routing after a check.
+    advice = descriptions["pre_trade_check"]
+    assert "This check alone activates no monitoring" in advice
+    assert "approved research-only reassessment use followup_create when offered, without a price watch" in advice
+    assert "relevant worker acknowledgement" in advice
+    assert "otherwise say you can't monitor it" not in advice
     assert ("conditional_plan_create" in descriptions) == price_watch
     assert ("followup_create" in descriptions) == followup
     if price_watch:

@@ -787,8 +787,11 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
         your own verdict with attach_model_verdict (see next_step in the result).
         Run this for actionable entry, wait or pass advice on a specific idea so it is saved; chat-only advice is unrecorded.
-        Saying you will watch or recheck later needs a saved conditional plan when that tool is offered;
-        otherwise say you can't monitor it. ChatGPT tasks are invisible to TradeJournal.
+        This check alone activates no monitoring. For owner-approved exact price conditions use a saved
+        conditional plan when offered; for an approved research-only reassessment use followup_create when
+        offered, without a price watch. Claim coverage only after the relevant worker acknowledgement.
+        If the required capability is unavailable, say so; do not substitute a different responsibility.
+        ChatGPT tasks are invisible to TradeJournal.
         """
         checked = await authenticated("pre_trade_check")
         if any(value is not None and not math.isfinite(value) for value in (entry, stop, strike)):
