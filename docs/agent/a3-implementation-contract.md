@@ -150,8 +150,9 @@ follow [the repository workflow](codex-workflow.md). The owner keeps consequenti
 semantics, integration, security and final/live verification. One writer per
 shared subsystem; avoid gratuitous delegation or nested workers.
 
-Follow `CLAUDE.md` for authorized normal branch pushes and PR creation; the
-user alone merges. Deployment activation, paid calls and scheduled runtime
+Follow `CLAUDE.md` for authorized normal branch pushes, PR creation and merges;
+[user-gated changes](pr-review.md#user-gated-changes) wait for the user.
+Deployment activation, paid calls and scheduled runtime
 require their concrete approved scope. Earlier VPS approval applied to the A2
 release, not automatic A3 enablement. While an approval-dependent gate is
 pending, finish independent implementation and deterministic verification.

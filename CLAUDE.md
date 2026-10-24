@@ -39,7 +39,8 @@ is a trading app. [Review policy](docs/agent/pr-review.md) supplies the detail.
 - **Ordinary, bounded work:** localized fixes, UI tweaks, routine tests and
   documentation. Make the smallest change, run focused checks, push/update the
   PR, repair actionable failures and finish through passing CI and automatic
-  merge. No mandatory subagent, independent review or full local suite.
+  merge unless it is user-gated. No mandatory subagent, independent review or
+  full local suite.
 - **Broad work:** cross-system features or refactors need relevant integration
   coverage and one independent reviewer. Broader tests follow affected behavior,
   not every layer in the system.
