@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.database import get_session
 from app.engine import reconstructor
 from app.engine.chart_math import ET
-from app.engine.exit_habits import follow_up, habit_flags, scorecard
+from app.engine.exit_habits import follow_up, habit_flags, scorecard, verdict
 from app.models import Account, Fill, FillMarketContext, PositionAlert, Trade, TradeFill, TradePathMetrics
 from app.routers import exit_habits as exit_habits_router
 from app.routers.fills import _rebuild_trades
@@ -161,6 +161,45 @@ def test_only_the_latest_thirty_since_the_alerts_are_compared():
     assert {h["key"]: h for h in out["habits"]}["expired_worthless"]["recent"]["n"] == 0  # the five oldest fell out
 
 
+# ------------------------------------------------------------------ verdict (/proof)
+
+def _card(base_hits: dict, recent_hits: dict, base_n=300, recent_n=30):
+    """Every trade carries all four habits' data; ``*_hits`` says how many have each habit."""
+    def rows(count, hits, closed):
+        return [trade(i, -10 if i < hits.get("held_hour_lost", 0) else 10, closed=closed, opened=closed,
+                      hold=90 if i < hits.get("held_hour_lost", 0) else 10, expired=i < hits.get("expired_worthless", 0),
+                      peak_pct=20, peak_dollars=100, day=50.0 if i < hits.get("opened_green", 0) else -5.0)
+                for i in range(count)]
+    return scorecard(rows(base_n, base_hits, "2026-10-10T15:00") + rows(recent_n, recent_hits, "2026-10-22T15:00"), go_live=WED)
+
+
+def test_verdict_with_no_trades_or_no_baseline_is_not_enough_data():
+    empty = verdict(scorecard([], go_live=WED))
+    assert empty["verdict"] == "not_enough_data" and "no baseline" in empty["reason"]
+    only_recent = verdict(_card({}, {}, base_n=0))
+    assert only_recent["verdict"] == "not_enough_data" and "no baseline" in only_recent["reason"]
+
+
+def test_verdict_under_thirty_recent_trades_is_not_enough_data_even_when_better():
+    out = verdict(_card({"expired_worthless": 60, "opened_green": 120}, {}, recent_n=12))
+    assert out["verdict"] == "not_enough_data" and out["sample"] == 12 and "12 of 30" in out["reason"]
+    assert "2 standard errors" in out["rule"]
+
+
+def test_verdict_helping_needs_two_habits_clearly_lower_and_none_higher():
+    # Baseline: 20% expired, 40% opened green, 30% held-hour losers; recent 30 trades have none of the first two.
+    base = {"expired_worthless": 60, "opened_green": 120, "held_hour_lost": 90}
+    out = verdict(_card(base, {"held_hour_lost": 9}))
+    assert out["verdict"] == "helping"
+    assert out["changes"] == {"green_to_red": "same", "held_hour_lost": "same", "expired_worthless": "lower", "opened_green": "lower"}
+    one = verdict(_card(base, {"held_hour_lost": 9, "opened_green": 12}))  # only expirations clearly fell
+    assert one["verdict"] == "not_enough_data" and "two are needed" in one["reason"]
+    worse = verdict(_card(base, {"held_hour_lost": 20}))  # two lower, but held-hour losers clearly up
+    assert worse["verdict"] == "not_helping" and "more frequent" in worse["reason"]
+    flat = verdict(_card(base, {"expired_worthless": 6, "opened_green": 12, "held_hour_lost": 9}))
+    assert flat["verdict"] == "not_helping" and "No habit" in flat["reason"]
+
+
 # ------------------------------------------------------------------ database + endpoint
 
 class _Thursday(date):
@@ -238,6 +277,8 @@ def test_the_endpoint_reads_alerts_by_source_identity_and_habits(engine):
     assert habits["green_to_red"]["baseline"] == {"n": 0, "trades": 1, "excluded": 0, "pct": 0.0, "pnl": 0.0}
     assert habits["opened_green"]["baseline"] == {"n": 1, "trades": 1, "excluded": 0, "pct": 1.0, "pnl": -20.0}
     assert habits["held_hour_lost"]["baseline"]["n"] == 1
+    assert body["responses"] == {"expired": 1, "closed_15m": 1, "unmatched": 1} and body["alerts_total"] == 3
+    assert body["verdict"]["verdict"] == "not_enough_data"
 
 
 def test_owner_only(boundary):  # noqa: F811

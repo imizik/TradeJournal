@@ -37,10 +37,14 @@ excluded, never counted as a zero.
 - ``expired_worthless``: written off at expiration;
 - ``opened_green``: the first entry fill came while that account's realized P&L
   for the day was above zero (``realized_pnl_today_before``).
+
+**Verdict** (the /proof page): ``helping``, ``not_helping`` or, by default,
+``not_enough_data``, with the rule and sample stated; see ``verdict``.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import UTC, date, datetime, timedelta
+from math import sqrt
 
 from sqlmodel import Session, select
 
@@ -57,6 +61,11 @@ PEAK_DOLLARS = 50.0
 HOUR = 60
 ALERTS_SHOWN = 20
 EPS = 1e-9
+# The /proof verdict: a habit moved when its recent rate is at least Z binomial standard errors (at the
+# baseline rate) from the baseline, over at least MIN_HABIT_TRADES counted trades.
+Z = 2.0
+MIN_HABIT_TRADES = 20
+HABITS_TO_HELP = 2
 
 
 def _et(moment_utc: datetime) -> datetime:
@@ -192,6 +201,40 @@ def scorecard(trades: list[dict], go_live: date = GO_LIVE, window: int = WINDOW)
     }
 
 
+def habit_change(recent: dict, baseline: dict) -> str | None:
+    """``lower``, ``higher`` or ``same`` against the baseline rate; None when either side is too thin to compare."""
+    rate = baseline["pct"]
+    if recent["trades"] < MIN_HABIT_TRADES or rate is None or rate <= 0 or rate >= 1:
+        return None
+    gap = Z * sqrt(rate * (1 - rate) / recent["trades"])
+    diff = recent["n"] / recent["trades"] - rate
+    return "lower" if diff <= -gap else "higher" if diff >= gap else "same"
+
+
+def verdict(card: dict) -> dict:
+    """Do the alerts help? Defaults to not_enough_data; never claims a change the sample cannot show."""
+    rule = (f"Helping: {HABITS_TO_HELP}+ of the 4 habits lower than before alerts by {Z:g} standard errors and none higher, "
+            f"over the last {card['window']} trades. Not helping: none lower, or any higher.")
+    out = {"verdict": "not_enough_data", "rule": rule, "sample": card["recent_trades"], "changes": {}}
+    if not card["baseline_trades"]:
+        return {**out, "reason": "No trades before the alerts went live, so there is no baseline."}
+    if card["recent_trades"] < card["window"]:
+        return {**out, "reason": f"{card['recent_trades']} of {card['window']} trades closed since the alerts went live."}
+    changes = {h["key"]: habit_change(h["recent"], h["baseline"]) for h in card["habits"]}
+    out["changes"] = changes
+    counts = Counter(changes.values())
+    lower, higher = counts["lower"], counts["higher"]
+    if sum(c is not None for c in changes.values()) < HABITS_TO_HELP:
+        return {**out, "reason": "Too few habits have enough counted trades to compare."}
+    if higher:
+        return {**out, "verdict": "not_helping", "reason": f"{higher} habit(s) more frequent than before alerts."}
+    if lower >= HABITS_TO_HELP:
+        return {**out, "verdict": "helping", "reason": f"{lower} habits less frequent than before alerts."}
+    if lower:
+        return {**out, "reason": "One habit is less frequent; two are needed to call it."}
+    return {**out, "verdict": "not_helping", "reason": "No habit is clearly less frequent than before alerts."}
+
+
 # ------------------------------------------------------------------ database
 
 def _epoch(moment: datetime | None) -> int | None:
@@ -241,8 +284,10 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         })
     out = scorecard(rows, go_live)
 
+    out["verdict"] = verdict(out)
+    # Every sent alert counts toward the follow-up tally; only the newest ALERTS_SHOWN are listed.
     alerts = db.exec(select(PositionAlert).where(PositionAlert.delivery.in_(("sent", "unknown")))
-                     .order_by(PositionAlert.detected_at.desc()).limit(ALERTS_SHOWN)).all()
+                     .order_by(PositionAlert.detected_at.desc())).all()
     listed = []
     for a in alerts:
         trade_id = trade_of_source.get((a.account_id, a.source_key))
@@ -256,5 +301,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
             "trade_id": str(trade_id) if trade_id else None, **{k: v for k, v in result.items() if k != "closed_at"},
             "closed_at": _et_epoch(result["closed_at"]),
         })
-    out["alerts"] = listed
+    out["responses"] = dict(Counter(a["response"] or "unmatched" for a in listed))
+    out["alerts_total"] = len(listed)
+    out["alerts"] = listed[:ALERTS_SHOWN]
     return out

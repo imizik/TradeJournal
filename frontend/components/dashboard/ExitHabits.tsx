@@ -12,12 +12,13 @@ type Group = { n: number; trades: number; excluded: number; pct: number | null; 
 type Habit = { key: string; label: string; recent: Group; baseline: Group };
 type Alert = { id: string; kind: string; contract: string; contracts: number; detected_at: number; trade_id: string | null;
   response: string | null; vs_alert: number | null; note: string | null };
-type ExitHabitsBody = { go_live: string; window: number; since_go_live: number; recent_trades: number; baseline_trades: number;
-  habits: Habit[]; alerts: Alert[] };
+export type ExitHabitsBody = { go_live: string; window: number; since_go_live: number; recent_trades: number; baseline_trades: number;
+  habits: Habit[]; alerts: Alert[]; alerts_total: number; responses: Record<string, number>;
+  verdict: { verdict: "helping" | "not_helping" | "not_enough_data"; reason: string; rule: string; sample: number } };
 
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
   hold_hour: "Held an hour" };
-const RESPONSE: Record<string, string> = { closed_15m: "Closed within 15 min", trimmed_15m: "Trimmed within 15 min",
+export const RESPONSE: Record<string, string> = { closed_15m: "Closed within 15 min", trimmed_15m: "Trimmed within 15 min",
   closed_later: "Closed later that day", held_overnight: "Held overnight", expired: "Let it expire", still_open: "Still open" };
 const ALERTS_SHOWN = 3;
 
@@ -43,7 +44,7 @@ function result(a: Alert) {
   return "The same as closing at the alert.";
 }
 
-function ExitHabitsView({ body }: { body: ExitHabitsBody }) {
+export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: ExitHabitsBody; alertsShown?: number }) {
   const since = day(body.go_live);
   const recentName = body.recent_trades < body.window ? `Since ${since} (${body.recent_trades} of ${body.window} so far)` : `Last ${body.window}`;
   return <div className="min-w-0 space-y-3 break-words" data-testid="exit-habits">
@@ -56,7 +57,7 @@ function ExitHabitsView({ body }: { body: ExitHabitsBody }) {
     </li>)}</ul>
     <div className="border-t pt-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent alerts</h3>
-      {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, ALERTS_SHOWN).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
+      {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, alertsShown).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
           {a.trade_id ? <Link href={`/trades/${a.trade_id}?alert=${encodeURIComponent(a.id)}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</Link>
             : <span className="text-sm font-medium">{a.contract}</span>}
