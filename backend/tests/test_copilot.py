@@ -84,8 +84,16 @@ def test_representative_conversation_with_simulated_model_and_evidence():
 
     history += [{"role": "assistant", "content": _text(second)}, {"role": "user", "content": "Okay, let's make a plan."}]
     third = _turn(history, copilot.FakeAdapter(0))
-    assert not [e for e in third if e["type"] == "tool"]
-    assert "no watch, alert or monitoring has been activated" in _text(third)
+    # A plan proposes cards and activates nothing: only a price read and propose_plan run.
+    assert {e["name"] for e in third if e["type"] == "tool"} == {"get_quotes", "propose_plan"}
+    proposals = [e for e in third if e["type"] == "proposal"]
+    assert [p["kind"] for p in proposals] == ["watch", "revisit"]
+    assert proposals[0] | {"id": None} == {"type": "proposal", "id": None, "kind": "watch", "symbol": "NBIS", "condition": "crosses",
+                                           "price": 92.46, "interval": None, "label": "NBIS 2% below the last price",
+                                           "why": "A break here would mean the bounce failed.", "last": 94.35,
+                                           "as_of": "2026-10-23T15:12:00Z"}
+    assert proposals[1]["question"] == "Is NBIS still lagging its group?" and proposals[1]["horizon_days"] == 1
+    assert "Nothing is saved or active until you confirm a card below." in _text(third)
 
 
 def test_context_reaches_only_the_latest_user_message():
@@ -636,3 +644,80 @@ def test_spend_cap_holds_for_dated_or_unpriced_model_ids(monkeypatch, model):
 def test_malformed_budget_env_falls_back_instead_of_failing(monkeypatch):
     monkeypatch.setenv("COPILOT_TURN_BUDGET_USD", "lots")
     assert copilot.settings().turn_budget_usd == 0.25
+
+
+# --------------------------------------------------------------------------- proposals (confirm-a-plan)
+
+@pytest.mark.parametrize("args", [
+    {"kind": "order", "symbol": "NBIS"},
+    {"kind": "watch", "symbol": "../x", "condition": "crosses", "price": 90, "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "near", "price": 90, "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 0, "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": True, "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 90, "label": "x" * 61, "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 90, "label": "l", "why": " "},
+    {"kind": "watch", "symbol": "NBIS", "condition": "closes_beyond", "price": 90, "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 90, "interval": "5m", "label": "l", "why": "w"},
+    {"kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 90, "label": "l", "why": "w", "horizon_days": 2},
+    {"kind": "revisit", "question": "q", "horizon_days": 31},
+    {"kind": "revisit", "question": "x" * 501},
+    {"kind": "revisit", "question": "q", "symbol": "NBIS"},
+])
+def test_proposals_outside_the_contract_are_refused(args):
+    with pytest.raises(copilot_tools.ToolInputError):
+        copilot_tools.validate("propose_plan", args)
+
+
+def test_a_proposal_is_validated_needs_a_real_price_and_writes_nothing():
+    watch = copilot_tools.validate("propose_plan", {"kind": "watch", "symbol": "nbis", "condition": "closes_beyond", "price": 92.4,
+                                                    "interval": "5m", "label": "  Session   low ", "why": "The bounce fails below it."})
+    assert watch == {"kind": "watch", "symbol": "NBIS", "condition": "closes_beyond", "price": 92.4, "interval": "5m",
+                     "label": "Session low", "why": "The bounce fails below it."}
+    assert copilot_tools.validate("propose_plan", {"kind": "revisit", "question": "Still lagging?"})["horizon_days"] == 1
+    shown = copilot_tools.call(FixtureEvidence(), "propose_plan", watch)
+    assert shown["proposal"]["last"] == 94.35 and "Nothing is saved or active" in shown["note"]
+    with pytest.raises(copilot_tools.ToolInputError, match="no current price for ZZZZ"):
+        copilot_tools.call(FixtureEvidence(), "propose_plan", {**watch, "symbol": "ZZZZ"})
+
+    class Asks(copilot.FakeAdapter):
+        """Proposes a made-up ticker: refused to the model, and no card reaches the owner."""
+        async def stream_round(self, system, messages, tools, allow_tools=True):
+            if isinstance(messages[-1]["content"], str):
+                yield "final", copilot.Round([{"type": "tool_use", "id": "p1", "name": "propose_plan", "input": {**watch, "symbol": "ZZZZ"}}],
+                                             "tool_use", copilot._zero_usage())
+                return
+            yield "final", copilot.Round([{"type": "text", "text": "ok"}], "end_turn", copilot._zero_usage())
+
+    events = _turn([{"role": "user", "content": "plan"}], Asks(0))
+    assert not [e for e in events if e["type"] == "proposal"]
+    assert [e["summary"] for e in events if e["type"] == "tool" and e.get("status") == "error"] == ["refused: no current price for ZZZZ, so it cannot be watched"]
+
+
+def test_status_says_whether_alerts_from_the_lab_are_accepted(monkeypatch):
+    from app.routers import level_alerts
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        # The alerts route's own model decides: today it refuses source_kind="copilot".
+        assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": False}
+
+        class Open(level_alerts.AlertCreate):
+            source_kind: str  # as once the alerts route accepts copilot
+        monkeypatch.setattr(level_alerts, "AlertCreate", Open)
+        assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": True}
+
+
+def test_quote_for_confirming_is_fresh_only_when_recent_and_priced(monkeypatch):
+    import time as clock
+    from app.engine.chart_feed import chart_feed
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    reads = {"rows": [{"symbol": "NBIS", "last": 94.1, "trade_time": 1790000000}], "at": clock.time() - 5, "issue": None}
+    monkeypatch.setattr(chart_feed, "quote_rows", lambda symbols: (reads["rows"], reads["at"], reads["issue"]))
+    with TestClient(app) as client:
+        fresh = client.get("/copilot/quote?symbol=NBIS").json()
+        assert fresh["fresh"] is True and fresh["last"] == 94.1 and fresh["trade_time"] == 1790000000
+        reads.update(at=clock.time() - 300, issue="Tradier unavailable; showing a kept copy")
+        assert client.get("/copilot/quote?symbol=NBIS").json()["fresh"] is False
+        reads.update(rows=[], at=clock.time(), issue=None)
+        assert client.get("/copilot/quote?symbol=NBIS").json() | {"fetched_at": None} == {
+            "symbol": "NBIS", "last": None, "trade_time": None, "fetched_at": None, "age_s": 0.0, "issue": None, "fresh": False}
+        assert client.get("/copilot/quote?symbol=nb is").status_code == 422

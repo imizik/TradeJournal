@@ -9,9 +9,10 @@ saved investigation the page writes: text transcript and evidence references.
 import asyncio
 from datetime import datetime
 import json
+import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -42,12 +43,46 @@ def status():
     if not cfg.enabled:
         return {"enabled": False, "reason": "Copilot Lab is off. Set COPILOT_ENABLED=true on the private backend to try it."}
     out = cfg.public()
+    out["capabilities"] = {"copilot_alerts": copilot_alerts_supported()}
     if cfg.evidence == "replay":
         try:
             out["replay"] = copilot.evidence_for(cfg).describe()
         except copilot.CopilotError as exc:
             out["replay"] = {"error": exc.message}
     return out
+
+
+def copilot_alerts_supported() -> bool:
+    """Whether the level-alert route accepts alerts the owner confirms here (``source_kind="copilot"``). Asked of the
+    route's own request model, so the lab's Confirm turns on by itself once that route allows it."""
+    from pydantic import ValidationError
+    from app.routers.level_alerts import AlertCreate
+    try:
+        AlertCreate(symbol="SPY", price=1.0, reference=2.0, condition="touches", source_kind="copilot")
+    except ValidationError:
+        return False
+    return True
+
+
+QUOTE_FRESH_S = 60
+
+
+@router.get("/quote")
+def quote(symbol: str = Query(..., pattern=r"^[A-Z][A-Z0-9.\-]{0,9}$")):
+    """A fresh last price for confirming a watch: the side an alert waits on comes from it. ``fresh`` is false when
+    the read is older than a minute (a provider outage serving a kept copy) or there is no price."""
+    from app.engine.chart_feed import ChartFeedError, chart_feed
+    _enabled()
+    try:
+        rows, fetched_at, issue = chart_feed.quote_rows([symbol])
+    except ChartFeedError as exc:
+        raise HTTPException(503, str(exc)) from None
+    row = next((r for r in rows if r.get("symbol") == symbol), {})
+    last = row.get("last")
+    age = None if fetched_at is None else max(0.0, time.time() - fetched_at)
+    fresh = isinstance(last, (int, float)) and last > 0 and age is not None and age <= QUOTE_FRESH_S and not issue
+    return {"symbol": symbol, "last": last, "trade_time": row.get("trade_time"), "fetched_at": fetched_at,
+            "age_s": None if age is None else round(age, 1), "issue": issue, "fresh": fresh}
 
 
 @router.post("/chat")

@@ -170,6 +170,8 @@ class PlanAdapter:
                 await queue.put(("event", {"type": "tool", "id": block["id"], "name": name, "status": "running"}))
                 result, event = await copilot._run_tool(evidence, block, cfg)
                 await queue.put(("event", event))
+                if (proposal := copilot.proposal_event(event)) is not None:
+                    await queue.put(("event", proposal))
                 return {"content": [{"type": "text", "text": result["content"]}], "is_error": bool(result.get("is_error"))}
 
             return sdk.tool(name, spec["description"], spec["input_schema"],
@@ -222,7 +224,7 @@ class PlanAdapter:
                 if kind is _DONE:
                     break
                 if kind == "event":
-                    if value.get("status") != "running":
+                    if value.get("type") == "tool" and value.get("status") != "running":
                         metrics["tool_calls"].append({k: value.get(k) for k in ("name", "status", "ms")})
                     yield value
                 elif kind == "timeout":
