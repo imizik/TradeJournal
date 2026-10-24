@@ -103,6 +103,10 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def _utc_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -204,21 +208,21 @@ def _create_run(session: Session, job_type: str, message: str, *, params: dict |
 def _run_gmail_sync(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
     result = _import_fills_from_gmail(session, start_enrichment=False)
     processed = int(result["saved"]) + int(result["skipped"])
-    return processed, f"Imported {result['saved']} new fill(s), skipped {result['skipped']}."
+    return processed, f"Imported {_count(result['saved'], 'new fill')}, skipped {result['skipped']}."
 
 
 def _run_fill_check(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
     total = session.exec(select(func.count(Fill.id))).one()
     manual = session.exec(select(func.count(Fill.id)).where(Fill.raw_email_id.like("manual:%"))).one()
     imported = max(0, total - manual)
-    return total, f"{total} fill(s): {imported} imported, {manual} manual."
+    return total, f"{_count(total, 'fill')}: {imported} imported, {manual} manual."
 
 
 def _run_trade_rebuild(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
     rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/rebuild")
     session.commit()
     suffix = f" {len(anomalies)} anomaly/anomalies logged." if anomalies else ""
-    return rebuilt, f"Rebuilt {rebuilt} trade(s).{suffix}"
+    return rebuilt, f"Rebuilt {_count(rebuilt, 'trade')}.{suffix}"
 
 
 def _run_options_snapshot(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
@@ -281,7 +285,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
             import_result["saved"] = int(result["saved"])
             import_result["skipped"] = int(result["skipped"])
             done = import_result["saved"] + import_result["skipped"]
-            return done, f"Imported {result['saved']} new fill(s), skipped {result['skipped']}."
+            return done, f"Imported {_count(result['saved'], 'new fill')}, skipped {result['skipped']}."
 
         processed = 0
 
@@ -423,7 +427,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
             return
 
         if saved > 0:
-            _set_job(job_id, done=1, phase="pipeline_step", current=f"Rebuilding trades after {saved} new fill(s)")
+            _set_job(job_id, done=1, phase="pipeline_step", current=f"Rebuilding trades after {_count(saved, 'new fill')}")
             with Session(engine) as session:
                 rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/gmail-push")
                 session.commit()
@@ -435,7 +439,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
             # Another execution email is already waiting. Import it first; the
             # queued run enriches both, so a burst of fills is not held behind
             # provider-paced enrichment.
-            message = f"Gmail push imported {saved} fill(s) and rebuilt {rebuilt} trade(s); enrichment deferred to the next queued push."
+            message = f"Gmail push imported {_count(saved, 'fill')} and rebuilt {_count(rebuilt, 'trade')}; enrichment deferred to the next queued push."
             _set_job(job_id, status="succeeded", done=5, total=5, enriched=processed, phase="complete", current=message, finished_at=_now())
             return
 
@@ -452,7 +456,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         if path.total:
             processed += _wait_for_job(path.id).enriched
 
-        message = f"Gmail push imported {saved} fill(s), rebuilt {rebuilt} trade(s), and refreshed enrichment."
+        message = f"Gmail push imported {_count(saved, 'fill')}, rebuilt {_count(rebuilt, 'trade')}, and refreshed enrichment."
         if anomalies:
             message += f" {len(anomalies)} anomaly/anomalies logged."
         _set_job(
@@ -653,7 +657,7 @@ def _run_resync_all(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
     result = _import_fills_from_gmail(session, start_enrichment=False)
     rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/resync-all")
     session.commit()
-    message = f"Resynced {result['saved']} fill(s), rebuilt {rebuilt} trade(s)."
+    message = f"Resynced {_count(result['saved'], 'fill')}, rebuilt {_count(rebuilt, 'trade')}."
     if anomalies:
         message += f" {len(anomalies)} anomaly/anomalies logged."
     return result["saved"], message

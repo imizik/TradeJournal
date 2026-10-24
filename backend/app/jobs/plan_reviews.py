@@ -160,7 +160,7 @@ def run(session: Session, dry_run: bool = False, today: date | None = None) -> d
         "usage": {"input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0.0}, "model": None,
     }
     if dry_run:
-        status.update(state="dry_run", message=f"{len(picked)} review(s) would be written.")
+        status.update(state="dry_run", message=f"{len(picked)} review{'' if len(picked) == 1 else 's'} would be written.")
         return status
     if not picked:
         status.update(state="nothing", message="The latest trading day and last month already have current reviews.")
@@ -192,7 +192,7 @@ def run(session: Session, dry_run: bool = False, today: date | None = None) -> d
     if status["state"] != "failed":
         status["state"] = "failed" if status["failed"] else "ok"
         if not status["message"]:
-            status["message"] = f"{len(status['written'])} review(s) written" + (f", {len(status['failed'])} failed" if status["failed"] else "") + "."
+            status["message"] = f"{len(status['written'])} review{'' if len(status['written']) == 1 else 's'} written" + (f", {len(status['failed'])} failed" if status["failed"] else "") + "."
     status["finished_at"] = datetime.now(timezone.utc).isoformat()
     return status
 
