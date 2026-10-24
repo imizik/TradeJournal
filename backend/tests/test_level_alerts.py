@@ -484,3 +484,17 @@ def test_the_route_accepts_copilot_alerts_and_still_refuses_unknown_sources(clie
     assert made.status_code == 200
     assert [(a["source_kind"], a["source_id"]) for a in made.json()["alerts"]] == [("copilot", "33333333-3333-4333-8333-333333333333")]
     assert http.post("/charts/alerts", json=body(source_kind="jo", price=590.0)).status_code == 422
+    # Only an investigation's id can be a Copilot alert's source: it becomes the notification's link.
+    for bad in ("x/../charts", "lvl-1", None):
+        assert http.post("/charts/alerts", json=body(source_kind="copilot", source_id=bad, price=591.0)).status_code == 422
+
+
+def test_a_copilot_alert_without_a_real_investigation_id_still_links_to_charts(engine, monkeypatch):
+    calls = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
+    with Session(engine) as db:  # a row the route would refuse, written some other way
+        create_alert(db, symbol="SPY", price=100.0, reference=99.0, condition="crosses", interval=None, session="regular",
+                     source_kind="copilot", source_id="../trades?x=1", label="Odd", now=TEN)
+    fire(engine, [TEN + 60]).deliver()
+    assert calls == [{"path": "/charts"}]
