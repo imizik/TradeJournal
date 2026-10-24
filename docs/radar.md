@@ -30,6 +30,9 @@ involve Jo.
    event (`frontend/e2e/radar.spec.ts`).
 5. **News enrichment (built):** "news nearby" or "cause unknown" on each
    event, `backend/app/engine/radar_news.py`. See [News nearby](#news-nearby).
+6. **Premarket pilot (built, off, record-only):**
+   `backend/app/engine/radar_premarket.py`. See
+   [Premarket pilot](#premarket-pilot-record-only).
 
 ## Recorder
 
@@ -290,12 +293,61 @@ cause unknown" or "News unavailable — cause unknown" — and the detail lists 
 headlines with links and when they were checked. Nothing says a headline
 caused the move.
 
+## Premarket pilot (record-only)
+
+Radar's passes start at 09:30, but in an October 12–23 back-test (144 stocks,
+Alpaca SIP minutes) 41% of the moves that reached 5 points against SPY had
+started overnight or premarket. Unusual volume, options volume and headlines
+found almost none of the intraday moves earlier than price did. The pilot
+checks whether a pre-open list is worth having; it alerts no one and is not on
+the screen.
+
+With `RADAR_PREMARKET_ENABLED=true` inside an enabled recorder, each open
+session day gets one scan at 08:50 and one at 09:20 New York. A scan makes one
+batched quote read (previous closes, 4 requests), then one 1-minute timesales
+read per tracked symbol through the shared chart feed (uncached), at 40 a minute (about
+4.3 minutes for 169 symbols), stopping 7½ minutes after the checkpoint so the
+09:20 scan ends before the open. Only minutes completed by the checkpoint
+count. Tradier quotes' `last` stays at the regular close outside the session,
+so prices come from the minutes; on October 22–23 their 09:25 closes matched
+SIP on all 46 checked symbol-days, with 80–90% of SIP's dollar volume.
+
+Rule `radar-premarket-v0` (frozen for the pilot) flags a stock whose premarket
+change differs from SPY's by at least 3 points, with at least $250k traded
+premarket and a last minute at most 10 minutes before the checkpoint. Each
+scan and every symbol's reading (previous close, last, bar count, volume,
+dollar volume, change, change against SPY, flag, read error) are written once
+to `<RADAR_STORE stem>-premarket.sqlite`, a separate append-only file; the
+Radar store, its rules and its screen are unchanged. A failed scan is recorded
+and not retried, and a setup error in the pilot file leaves the recorder
+running without it. Deploys hold from 09:25, so one at 08:50–09:25 can cut a
+scan short. The same back-test, at these two times, gave median lists of
+15 and 23 stocks with 74–75% becoming 5-point moves.
+
+Scoring after 10 sessions (read-only):
+
+```bash
+cd backend && PYTHONPATH=. .venv/bin/python scripts/radar_premarket_eval.py /abs/radar.sqlite
+```
+
+The 09:20 list passes when all four hold (every Radar session from the first
+scan counts; a morning with no scan is a failed one): scans recorded on at least 9 of 10
+sessions with at least 95% of reads succeeding; a median of 8–35 names a
+session; at least 50% of names become moves of 5 points or more against SPY
+after the open (from Radar's own passes); and at least 60% of the important
+moves already 3 points away at 09:20 are on the list. The pilot stops early
+on precision under 40%, more than 40 names a session, or failed scans on 3 or
+more sessions. Passing earns a screen section next; phone alerts remain a
+separate decision.
+
 ## Activation boundary
 
 The recorder is off unless both variables are set in the VPS `backend.env`
 (set since October 22 with Isaac's OK). The v0 rules have no flag of their own:
 wherever the recorder runs, detection runs with it and writes events to the
-screen. Nothing here sends phone alerts; those wait for a pilot.
+screen. Nothing here sends phone alerts; those wait for a pilot. The premarket
+pilot has its own `RADAR_PREMARKET_ENABLED`, off by default; turning it on is
+Isaac's call.
 
 
 ### Movers to Charts navigation
