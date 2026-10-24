@@ -166,30 +166,30 @@ def _warm_option_quotes(trades: list) -> None:
         get_option_quotes(wanted)
 
 
-def positions(session=None) -> dict:
-    from sqlmodel import Session, select
-    from app.database import engine
+def position_rows(db, limit: int = MAX_POSITIONS) -> tuple[list[tuple], int]:
+    """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
+    look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position."""
+    from sqlmodel import select
     from app.engine import chart_journal
     from app.engine.quotes import get_stock_quotes
     from app.models import Account, Trade
-    with (Session(engine) if session is None else nullcontext(session)) as db:
-        trades = {str(t.id): t for t in db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
-                                                .where(Trade.status == "open").where(_not_webull())).all()}
-        tickers = sorted({t.ticker for t in trades.values()})
-        held = [p for ticker in tickers for p in chart_journal.positions(db, ticker) if p["trade_id"] in trades]
+    trades = {str(t.id): t for t in db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                                            .where(Trade.status == "open").where(_not_webull())).all()}
+    tickers = sorted({t.ticker for t in trades.values()})
+    held = [p for ticker in tickers for p in chart_journal.positions(db, ticker) if p["trade_id"] in trades]
     quotes = get_stock_quotes(sorted({trades[p["trade_id"]].ticker for p in held if trades[p["trade_id"]].instrument_type == "stock"})) if held else {}
-    _warm_option_quotes([trades[p["trade_id"]] for p in held[:MAX_POSITIONS]])
+    _warm_option_quotes([trades[p["trade_id"]] for p in held[:limit]])
     from app.engine.chart_math import ET
     now = datetime.now(UTC)
-    rows = []
-    for p in held[:MAX_POSITIONS]:
+    pairs = []
+    for p in held[:limit]:
         trade = trades[p["trade_id"]]
         mark, quoted_at = _mark(trade, quotes)
         cost, quantity = p.get("avg_cost"), p.get("open") or 0
         sign = -1 if p.get("direction") == "short" else 1
         gain = None if mark is None or cost is None else round(sign * (mark - cost) * quantity, 2)
         opened = trade.opened_at.replace(tzinfo=ET) if trade.opened_at.tzinfo is None else trade.opened_at  # New York wall clock
-        rows.append({
+        pairs.append((trade, {
             "symbol": trade.ticker, "account": _label(p.get("account")), "instrument": trade.instrument_type,
             **({"option": {"side": trade.option_type, "strike": _round(float(trade.strike)), "expiry": trade.expiration.isoformat()}}
                if trade.instrument_type == "option" else {}),
@@ -197,8 +197,18 @@ def positions(session=None) -> dict:
             "mark": _round(mark), **({"mark_as_of": quoted_at} if quoted_at else {}), "unrealized_usd": gain,
             "unrealized_pct": None if gain is None or not cost else round(100 * sign * (mark - cost) / cost, 1),
             "opened_at": _journal_time(trade.opened_at), "days_held": (now - opened).days,
-        })
-    return {"state": "ok", "as_of": _iso(now), "count": len(held), "shown": len(rows), "positions": rows,
+        }))
+    return pairs, len(held)
+
+
+def positions(session=None) -> dict:
+    from sqlmodel import Session
+    from app.database import engine
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        pairs, count = position_rows(db)
+    rows = [row for _, row in pairs]
+    now = datetime.now(UTC)
+    return {"state": "ok", "as_of": _iso(now), "count": count, "shown": len(rows), "positions": rows,
             "units": "Options: avg_entry and mark are dollars per contract (the premium x 100). Stocks: dollars per share. "
                      "opened_at is New York time.",
             "excluded": "Webull accounts (dormant)"}
@@ -233,17 +243,23 @@ def trades(symbol: str, limit: int = 5, session=None) -> dict:
             "units": "Option prices are per contract as the journal stores them; stock prices per share. Times are New York."}
 
 
-def memories(limit: int = 5, session=None) -> dict:
+def memories(limit: int = 5, symbol: str | None = None, session=None) -> dict:
+    """Approved memories, newest first; with ``symbol``, that symbol's first and then the general ones (no symbol)."""
     from sqlmodel import Session
     from app.database import engine
     from app.engine import jo_briefing
     with (Session(engine) if session is None else nullcontext(session)) as db:
-        found = [m for m in jo_briefing.memories(db, status="active", limit=MAX_MEMORIES * 2) if not m.get("redacted_at")]
+        if symbol:
+            found = jo_briefing.memories(db, status="active", symbol=symbol, limit=MAX_MEMORIES)
+            found += [m for m in jo_briefing.memories(db, status="active", limit=MAX_MEMORIES * 4) if not m.get("symbol")]
+        else:
+            found = jo_briefing.memories(db, status="active", limit=MAX_MEMORIES * 2)
+        found = [m for m in found if not m.get("redacted_at")]
     rows = []
     for m in found[:min(limit, MAX_MEMORIES)]:
         body = m.get("body") or {}
         rows.append({"kind": body.get("kind"), "symbol": m.get("symbol"), "text": str(body.get("original_text") or "")[:280],
                      **({"interpretation": str(body["interpretation"])[:160]} if body.get("interpretation") else {}),
                      "saved_at": _iso(m.get("received_at"))})
-    return {"state": "ok", "as_of": _now(), "memories": rows,
+    return {"state": "ok", "as_of": _now(), **({"symbol": symbol} if symbol else {}), "memories": rows,
             "note": "The owner's approved memories: statements, theses, preferences and lessons they confirmed. Read-only."}

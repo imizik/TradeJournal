@@ -91,10 +91,11 @@ def preflight(env: dict[str, str]) -> str:
     return binary
 
 
-def prompt_for(history: list[dict], symbol: str | None, now: datetime, replay: bool = False) -> str:
-    """One prompt: Claude Code takes a single user message, so earlier text-only turns are quoted into it."""
+def prompt_for(history: list[dict], symbol: str | None, now: datetime, replay: bool = False, owner_block: str = "") -> str:
+    """One prompt: Claude Code takes a single user message, so earlier text-only turns are quoted into it. The owner
+    context block (``copilot.owner_context``) follows the context line, before the quoted conversation."""
     *earlier, last = history
-    text = copilot.context_line(symbol, now, replay)
+    text = copilot.context_line(symbol, now, replay) + owner_block
     if earlier:
         text += ("Conversation so far (text only; re-check evidence with the tools rather than trusting earlier numbers):\n\n"
                  + "\n\n".join(f"{'Trader' if m['role'] == 'user' else 'Copilot'}: {m['content']}" for m in earlier)
@@ -197,12 +198,16 @@ class PlanAdapter:
         def elapsed() -> int:
             return round((time.monotonic() - started) * 1000)
 
+        owner_block, pack_event = await copilot.owner_context(evidence, symbol, cfg)
+        metrics["tool_calls"].append({k: pack_event.get(k) for k in ("name", "status", "ms")})
+        yield pack_event
+
         async def produce():
             try:
                 import anyio
                 # An anyio deadline, so the SDK's shielded close still stops Claude Code on timeout.
                 with anyio.fail_after(cfg.turn_timeout_s):
-                    async for message in sdk.query(prompt=prompt_for(history, symbol, now, replay),
+                    async for message in sdk.query(prompt=prompt_for(history, symbol, now, replay, owner_block),
                                                    options=self.options(self.server(evidence, queue, state))):
                         await queue.put(("message", message))
             except TimeoutError:

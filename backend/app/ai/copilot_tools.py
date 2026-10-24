@@ -109,9 +109,21 @@ TOOLS: list[dict] = [
     {
         "name": "get_memories",
         "description": "The owner's approved memories (statements, theses, preferences and lessons they confirmed for "
-                       "Jo), newest first. Read-only; take them as the owner's own words about how they trade.",
+                       "Jo), newest first; with `symbol`, that symbol's memories first, then the general ones. Read-only; "
+                       "take them as the owner's own words about how they trade.",
         "input_schema": {"type": "object", "additionalProperties": False,
-                         "properties": {"limit": {"type": "integer", "description": "1-10, default 5"}}},
+                         "properties": {"limit": {"type": "integer", "description": "1-10, default 5"},
+                                        "symbol": _SYMBOL_SCHEMA}},
+    },
+    {
+        "name": "get_owner_context",
+        "description": "The owner context pack for another symbol: their open positions (that symbol first, with hold "
+                       "time, days to expiry, give-back watch, phone alerts and any captured plan), closed trades in it, "
+                       "their exit-habit scorecard, approved memories, today's notes, saved investigations and armed "
+                       "watches. The turn's own symbol arrives with every message already; call this only for a "
+                       "different symbol. Journal facts and the owner's words, not market data.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA}},
     },
     {
         "name": "propose_plan",
@@ -204,7 +216,11 @@ def validate(name: str, args: Any) -> dict:
         limit = args.get("limit", 5)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10:
             raise ToolInputError("limit must be 1-10")
-        return {"limit": limit} if name == "get_memories" else {"symbol": _symbol(args.get("symbol")), "limit": limit}
+        if name == "get_memories":
+            return {"limit": limit, **({"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {})}
+        return {"symbol": _symbol(args.get("symbol")), "limit": limit}
+    if name == "get_owner_context":
+        return {"symbol": _symbol(args.get("symbol"))}
     if name == "get_chart_context":
         if args.get("timeframe") not in ("1m", "5m", "15m", "1h", "1D"):
             raise ToolInputError("timeframe must be 1m, 5m, 15m, 1h or 1D")
@@ -354,6 +370,8 @@ def _iso(value) -> str | None:
 
 # Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
 CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
+# The owner context rows are the owner's own book and words, not market evidence: "what changed" leaves them out.
+BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context"})
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -386,7 +404,7 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
     later = after_cutoff(record["updated_at"])
     latest: dict[str, Any] = {}  # each tool's newest as-of time among the saved evidence references
     for ref in record["evidence"]:
-        if ref.get("as_of") is None or after_cutoff(ref["as_of"]):
+        if ref.get("as_of") is None or after_cutoff(ref["as_of"]) or ref.get("tool") in BOOK_CONTEXT_TOOLS:
             continue
         if str(ref["as_of"]) > str(latest.get(ref["tool"], {}).get("as_of", "")):
             latest[ref["tool"]] = {"tool": ref["tool"], "as_of": ref["as_of"], "kind": ref.get("kind")}
@@ -502,9 +520,17 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.trades(symbol, limit)
 
-    def get_memories(self, limit: int = 5) -> dict:
+    def get_memories(self, limit: int = 5, symbol: str | None = None) -> dict:
         from app.ai import copilot_book
-        return copilot_book.memories(limit)
+        return copilot_book.memories(limit, symbol)
+
+    def owner_context(self, symbol: str | None) -> dict:
+        """The pack prepended to every turn (docs/copilot-lab.md § Owner context)."""
+        from app.ai import copilot_context
+        return copilot_context.owner_context(symbol)
+
+    def get_owner_context(self, symbol: str) -> dict:
+        return self.owner_context(symbol)
 
 
 PROVENANCE = {
@@ -519,6 +545,10 @@ PROVENANCE = {
     "get_positions": ("Journal open positions (fills) · Tradier marks", "fetched"),
     "get_trades": ("Journal closed trades (TradeJournal)", "saved"),
     "get_memories": ("Owner-approved Jo memories (TradeJournal)", "saved"),
+    "get_owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
+                          "saved investigations and armed watches (TradeJournal)", "saved"),
+    "owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
+                      "saved investigations and armed watches (TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

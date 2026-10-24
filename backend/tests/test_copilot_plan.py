@@ -228,7 +228,7 @@ def test_events_metrics_and_bounded_tool_results(plan_env):
     ])
     events = _turn(sdk)
     assert "".join(e["delta"] for e in events if e["type"] == "text") == "Checking. \n\nGroup is confirming."
-    tools = [e for e in events if e["type"] == "tool"]
+    tools = [e for e in events if e["type"] == "tool" and e["name"] != "owner_context"]
     assert [(t["name"], t["status"]) for t in tools] == [("get_group_comparison", "running"), ("get_group_comparison", "ok"),
                                                          ("get_symbol_news", "running"), ("get_symbol_news", "ok")]
     assert tools[3]["input"] == {"symbol": "NBIS", "limit": 3} and tools[1]["provenance"]["kind"] == "simulated"
@@ -241,7 +241,7 @@ def test_events_metrics_and_bounded_tool_results(plan_env):
     assert m["backend"] == "plan" and m["billing"] == "claude_plan" and m["evidence"] == "fixture"
     assert m["cost_usd"] == 0.0123 and m["rounds"] == 2 and m["first_text_ms"] is not None and m["total_ms"] >= 0
     assert m["usage"] == {"input_tokens": 1200, "output_tokens": 300, "cache_read_input_tokens": 400, "cache_creation_input_tokens": 50}
-    assert [t["name"] for t in m["tool_calls"]] == ["get_group_comparison", "get_symbol_news"]
+    assert [t["name"] for t in m["tool_calls"]] == ["owner_context", "get_group_comparison", "get_symbol_news"]
     assert "[Copilot Lab context: selected symbol: NBIS" in sdk.prompt
 
 
@@ -249,12 +249,12 @@ def test_tool_call_cap_and_input_validation(plan_env):
     sdk = FakeSDK([("tool", "get_quotes", {"symbols": ["NBIS"]}), ("tool", "get_peer_moves", {"symbol": "../etc"}),
                    ("tool", "get_quotes", {"symbols": ["CRWV"]}), ("message", ResultMessage())])
     events = _turn(sdk, cfg=_cfg(max_tool_calls=2))
-    finished = [e for e in events if e["type"] == "tool" and e["status"] != "running"]
+    finished = [e for e in events if e["type"] == "tool" and e["status"] != "running" and e["name"] != "owner_context"]
     assert [(e["name"], e["status"]) for e in finished] == [("get_quotes", "ok"), ("get_peer_moves", "error")]
     assert finished[1]["summary"].startswith("refused")
     assert sdk.tool_results[1]["is_error"] and sdk.tool_results[2] == {
         "content": [{"type": "text", "text": "Tool-call budget for this turn is used up."}], "is_error": True}
-    assert len(events[-1]["metrics"]["tool_calls"]) == 2
+    assert len(events[-1]["metrics"]["tool_calls"]) == 3  # the pack's row and the two calls the cap let through
 
 
 def test_history_is_quoted_into_one_prompt(plan_env):
@@ -320,5 +320,6 @@ def test_plan_backend_route_streams_the_sdk_turn(plan_env, monkeypatch):
     with TestClient(app) as client:
         response = client.post("/copilot/chat", json={"messages": [{"role": "user", "content": "NBIS?"}], "symbol": "NBIS"})
         frames = [json.loads(line[5:]) for line in response.text.splitlines() if line.startswith("data:")]
-    assert response.status_code == 200 and [f["type"] for f in frames] == ["tool", "tool", "text", "done"]
+    assert response.status_code == 200 and [f["type"] for f in frames] == ["tool", "tool", "tool", "text", "done"]
+    assert frames[0]["name"] == "owner_context"  # the pack's row, before the model's first call
     assert frames[-1]["metrics"]["backend"] == "plan" and frames[-1]["metrics"]["cost_usd"] == 0.0123

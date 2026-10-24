@@ -69,7 +69,7 @@ def test_representative_conversation_with_simulated_model_and_evidence():
     first = _turn([{"role": "user", "content": "NBIS looks like it might recover. Is the whole neocloud group confirming?"}],
                   copilot.FakeAdapter(0))
     assert [e["text"] for e in first if e["type"] == "progress"] == ["Checking group comparison, symbol news, symbol events for NBIS."]
-    tools = [e for e in first if e["type"] == "tool" and e["status"] != "running"]
+    tools = [e for e in first if e["type"] == "tool" and e["status"] != "running" and e["name"] != "owner_context"]
     assert {t["name"] for t in tools} == {"get_group_comparison", "get_symbol_news", "get_symbol_events"}
     assert all(t["provenance"]["kind"] == "simulated" and t["provenance"]["as_of"] for t in tools)
     answer = _text(first)
@@ -79,13 +79,13 @@ def test_representative_conversation_with_simulated_model_and_evidence():
     history = [{"role": "user", "content": "NBIS looks like it might recover."}, {"role": "assistant", "content": answer},
                {"role": "user", "content": "But CRWV and APLD are recovering too. You're discounting the group strength."}]
     second = _turn(history, copilot.FakeAdapter(0))
-    assert {e["name"] for e in second if e["type"] == "tool"} == {"get_group_comparison", "get_peer_moves"}
+    assert {e["name"] for e in second if e["type"] == "tool"} == {"owner_context", "get_group_comparison", "get_peer_moves"}
     assert "CRWV +1.92%" in _text(second) and "lagging" in _text(second)
 
     history += [{"role": "assistant", "content": _text(second)}, {"role": "user", "content": "Okay, let's make a plan."}]
     third = _turn(history, copilot.FakeAdapter(0))
     # A plan proposes cards and activates nothing: only a price read and propose_plan run.
-    assert {e["name"] for e in third if e["type"] == "tool"} == {"get_quotes", "propose_plan"}
+    assert {e["name"] for e in third if e["type"] == "tool"} == {"owner_context", "get_quotes", "propose_plan"}
     proposals = [e for e in third if e["type"] == "proposal"]
     assert [p["kind"] for p in proposals] == ["watch", "revisit"]
     assert proposals[0] | {"id": None} == {"type": "proposal", "id": None, "kind": "watch", "symbol": "NBIS", "condition": "crosses",
@@ -161,7 +161,7 @@ class Greedy:
 def test_tool_calls_and_rounds_are_capped():
     greedy = Greedy()
     events = _turn([{"role": "user", "content": "go"}], greedy, cfg=_cfg(max_tool_calls=5, max_rounds=4))
-    ran = [e for e in events if e["type"] == "tool" and e["status"] == "ok"]
+    ran = [e for e in events if e["type"] == "tool" and e["status"] == "ok" and e["name"] != "owner_context"]
     assert len(ran) == 5
     assert greedy.allowed[-1] is False and len(greedy.allowed) <= 4
     assert events[-1]["metrics"]["rounds"] == len(greedy.allowed)
@@ -206,7 +206,7 @@ def test_refusal_and_truncated_tool_input_never_run_tools():
     for stop, code in (("refusal", "refusal"), ("max_tokens", "truncated")):
         events = _turn([{"role": "user", "content": "x"}], Says(stop))
         assert [e["code"] for e in events if e["type"] == "error"] == [code]
-        assert not [e for e in events if e["type"] == "tool"]
+        assert not [e for e in events if e["type"] == "tool" and e["name"] != "owner_context"]
 
 
 def test_unexpected_failures_still_end_with_an_error_and_done():
@@ -284,7 +284,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     assert first["betas"] == [copilot.PROGRESS_BETA, "server-side-fallback-2026-07-01"]
     assert first["extra_body"] == {"fallbacks": "default"}
     assert [e["text"] for e in events if e["type"] == "progress"] == ["Checking ", "Checking the group."]
-    order = [e["type"] for e in events]
+    order = [e["type"] for e in events if e.get("name") != "owner_context"]  # the pack's row precedes the model
     assert order.index("progress") < order.index("tool") < order.index("text")
     assert {t["name"] for t in first["tools"]} == copilot_tools.TOOL_NAMES and all(t["eager_input_streaming"] for t in first["tools"])
     # The thinking block and tool_use go back unchanged within the turn; the tool result follows.
@@ -294,7 +294,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     metrics = events[-1]["metrics"]
     assert metrics["usage"] == {"input_tokens": 2000, "output_tokens": 1000, "cache_read_input_tokens": 4000, "cache_creation_input_tokens": 0}
     assert metrics["cost_usd"] == pytest.approx((2000 * 2 + 1000 * 10 + 4000 * 0.2) / 1e6)
-    assert metrics["first_text_ms"] is not None and metrics["tool_calls"][0]["name"] == "get_group_comparison"
+    assert metrics["first_text_ms"] is not None and [t["name"] for t in metrics["tool_calls"]] == ["owner_context", "get_group_comparison"]
     assert metrics["first_feedback_ms"] == metrics["first_progress_ms"] <= metrics["first_text_ms"]
     assert 0 <= metrics["max_silence_ms"] <= metrics["total_ms"]
 
@@ -747,7 +747,7 @@ def test_a_plan_turn_under_live_evidence_still_saves(monkeypatch):
     history = [{"role": "user", "content": "NBIS, let's make a plan."}]
     events = _turn(history, copilot.FakeAdapter(0), evidence=Live())
     tools = [e for e in events if e["type"] == "tool" and e.get("status") == "ok"]
-    assert {t["name"]: t["provenance"]["kind"] for t in tools} == {"get_quotes": "fetched", "propose_plan": "proposal"}
+    assert {t["name"]: t["provenance"]["kind"] for t in tools} == {"owner_context": "saved", "get_quotes": "fetched", "propose_plan": "proposal"}
     answer = _text(events)
     lab = [t for t in tools if t["name"] != "propose_plan"]  # what frontend/lib/copilot.ts toSaved sends
     as_sent_before = tools  # what a page from before the fix sent
@@ -846,7 +846,7 @@ def test_what_changed_runs_through_the_owner_chat_route(monkeypatch):
     prompt = f"What changed? Use get_investigation_changes for investigation {saved['id']}, then compare it with fresh evidence."
     with TestClient(app) as client:
         frames = _frames(client.post("/copilot/chat", json={"messages": [{"role": "user", "content": prompt}], "symbol": "NBIS"}).text)
-    tool = next(f for f in frames if f["type"] == "tool" and f.get("status") == "ok")
+    tool = next(f for f in frames if f["type"] == "tool" and f.get("status") == "ok" and f["name"] != "owner_context")
     assert tool["name"] == "get_investigation_changes" and tool["summary"] == "2 alerts (1 fired), 5 research jobs"
     text = "".join(f["delta"] for f in frames if f["type"] == "text")
     assert "Alerts: 2 linked, 1 fired; NBIS at 92.4" in text and "1 result(s) finished since the last update" in text
@@ -862,12 +862,14 @@ def test_investigation_changes_fit_whole_at_every_cap():
     from app.models import LevelAlertEvent, ResearchJob
     import time as clock
     saved = _changes_world()
-    # Every tool that can carry an as_of (propose_plan has none), on the longest symbol a ticker can be.
-    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan"]
+    # Every market tool that can carry an as_of (propose_plan has none; the owner context rows are the book, left out
+    # below), on the longest symbol a ticker can be.
+    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan" and t["name"] not in copilot_tools.BOOK_CONTEXT_TOOLS]
     symbol = "ABCDEFGHIJ"
     inv.update(saved["id"], inv.InvestigationFields(
         title="T" * 120, symbol=symbol, conclusion="C" * 280, findings={"summary": "S" * 2000},
-        evidence=[{"tool": t, "as_of": "2026-10-23T15:59:59.999999+00:00", "kind": "recorded", "message": 1} for t in tools]), 1)
+        evidence=[{"tool": t, "as_of": "2026-10-23T15:59:59.999999+00:00", "kind": "recorded", "message": 1}
+                  for t in (*tools, "owner_context", "get_owner_context")]), 1)
     now = clock.time()
     with Session(engine) as db:
         for i, price in enumerate((10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5)):
@@ -887,6 +889,7 @@ def test_investigation_changes_fit_whole_at_every_cap():
     assert (len(out["alerts"]), len(out["research_jobs"]), len(out["results"])) == (
         copilot_tools.CHANGE_ALERTS, copilot_tools.CHANGE_JOBS, copilot_tools.CHANGE_RESULTS)
     assert len(out["evidence_as_of"]) == len(tools) <= copilot_tools.CHANGE_EVIDENCE
+    assert not {e["tool"] for e in out["evidence_as_of"]} & copilot_tools.BOOK_CONTEXT_TOOLS
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS - 200, len(text)  # headroom for longer ids or times
     assert json.loads(text) == json.loads(json.dumps(out, default=str))

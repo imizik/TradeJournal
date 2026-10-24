@@ -53,9 +53,10 @@ untouched.
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call eleven read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call twelve read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
-  investigation changes (below), and the chart and book tools below. It can
+  investigation changes (below), the chart and book tools below, and the owner
+  context pack for another symbol (Owner context, below). It can
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
@@ -81,9 +82,10 @@ untouched.
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
     are read in one batched quote call before the per-contract cache reads.
-  - `get_memories(limit ≤ 10)` lists the owner's approved (active, not
-    redacted) Jo memories, read through `jo_briefing.memories`; it never
-    writes Codex's store.
+  - `get_memories(limit ≤ 10, symbol?)` lists the owner's approved (active,
+    not redacted) Jo memories, read through `jo_briefing.memories`; with a
+    symbol, that symbol's first and then the general ones. It never writes
+    Codex's store.
   - No account number, account id, broker id, trade id or fill id is ever
     returned. An account appears only by its name, with digit runs removed.
     Webull is left out (dormant).
@@ -112,6 +114,60 @@ untouched.
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
 
+## Owner context
+
+Every turn starts with what TradeJournal already knows about the owner, so
+the model spends no tool rounds rediscovering them and leads with it: an open
+position in the symbol they ask about, the plan they captured for it, a thesis
+they saved, a habit the moment resembles. `backend/app/ai/copilot_context.py`
+assembles one bounded pack (at most 5,500 characters, about 1,400 tokens) for
+the turn's symbol, from services that already exist, and `run_turn` puts it
+after the context line and before the owner's message. The browser never sends
+it; it is rebuilt on the server each turn, so marks and hold times are current.
+
+- **Sections**, each with a provenance label the system prompt explains
+  (`owner said` = their own words; `measured` = journal facts; `saved` = earlier
+  conclusions and watches, possibly stale):
+  - `positions` (measured): `get_positions`' rows, the turn's symbol first and at
+    most 8, each with its minutes held when opened today, days to expiry and
+    expires-today flag, the give-back watch (`not armed`, `armed` or `fired`,
+    with the peak gain) and the last three phone alerts `position_alerts` keeps
+    for it, and the plan captured before it (`capture_links`: setup, wording,
+    note, time; owner said).
+  - `history` (measured): closed trades in the symbol (count, wins, realized $)
+    and the latest four, as `get_trades` shows them.
+  - `habits` (measured): the behavior audit's four exit habits through
+    `exit_habits.build`, the latest 30 closed long options against the baseline,
+    cached for ten minutes in the process.
+  - `memories` (owner said): approved memories for the symbol, then general
+    ones, at most 8.
+  - `today` (owner said): today's day-journal entries (New York), at most 6.
+  - `investigations` (saved): saved investigations and research results for the
+    symbol, open first, at most 4, with their ids so the model can call
+    `get_investigation_changes`.
+  - `watches` (saved): armed level alerts for the symbol and research jobs still
+    queued or running for it, at most 6.
+- A section that cannot be read says `unavailable`; the others stand. If the
+  whole read fails or exceeds the tool timeout, the block says the context was
+  unavailable and the turn goes on. Over the size cap, the pack sheds the
+  least decision-relevant parts first (recent trades, today's notes,
+  investigations, memories, then positions beyond three) and marks itself
+  `trimmed`; positions and habits go last.
+- The UI shows it as the first evidence row of every answer ("Your context",
+  provenance `saved`, with a one-line summary such as "2 open (NBIS +6.1%,
+  give-back armed) · 3 memories · 1 investigations"), and the saved
+  investigation keeps that reference like any other.
+- `get_owner_context(symbol)` returns the same pack for a different symbol.
+  Research jobs never get it (it is not in their allowlist): it carries the
+  book.
+- Fixture mode serves a simulated pack marked `simulated`; replay says the
+  pack is unavailable, as the book is. The fake model reads only the owner's
+  words after the block (`copilot_context.user_text`), so the pack's text never
+  steers its scripted tool choice.
+- No account number, account id, trade id, fill id or broker id is in it; the
+  only ids are saved investigations'.
+- Tests: `backend/tests/test_copilot_context.py`.
+
 ## What changed?
 
 A reopened investigation, from Recent or from an alert's
@@ -130,9 +186,10 @@ waits in the message box, unsent. The prompt asks the model to call:
     finished since the last update;
   - up to two of their results.
 
-  It is capped at 8 evidence tools, 6 alerts, 5 jobs and 2 results, with text
+  It is capped at 12 evidence tools, 6 alerts, 5 jobs and 2 results, with text
   trimmed, so the largest answer still fits whole within a tool result's
-  6,000 characters. Linked jobs are found in SQL by the investigation's id. An
+  6,000 characters. The owner context rows (Owner context, above) are left out
+  of the evidence times: they are the owner's book, not market evidence. Linked jobs are found in SQL by the investigation's id. An
   unknown id is refused. Replay leaves out anything after the frozen moment:
   alerts armed or fired later, jobs queued or finished later, and evidence
   dated later. If the investigation was edited after the moment, its later
