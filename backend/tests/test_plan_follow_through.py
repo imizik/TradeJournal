@@ -2,7 +2,7 @@
 with the question ready, and its time stop becomes one timed ping about a position opened after the plan. Phone only."""
 
 import asyncio
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
@@ -18,7 +18,7 @@ from app.database import get_session
 from app.engine import level_alerts, ntfy, plan_time_stops, reconstructor
 from app.engine import level_alert_monitor as monitor_module
 from app.engine.chart_math import ET
-from app.engine.level_alert_monitor import LevelAlertMonitor, alert_rows, create_alert
+from app.engine.level_alert_monitor import LevelAlertMonitor, create_alert
 from app.engine.plan_time_stops import PlanTimeStops, parse
 from app.models import Account, Fill, LevelAlertEvent, PlanTimeStop, Trade
 from app.routers import level_alerts as alert_routes
