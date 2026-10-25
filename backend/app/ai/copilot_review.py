@@ -1,7 +1,8 @@
-"""Copilot Lab's closed-trade review (docs/copilot-lab.md § Review a closed trade).
+"""Copilot Lab's trade and position review (docs/copilot-lab.md § Review a trade or position).
 
-``trade_review`` gathers, for one closed trade the owner opened from its trade
-page, what the journal already holds about it, from services that exist:
+``trade_review`` gathers, for one trade the owner opened from its trade page or
+a position alert, what the journal already holds about it, from services that
+exist. For a closed trade:
 
 - ``trade``: contract, entry and exit (New York wall clock with its offset),
   prices, P&L in $ and %, hold minutes, status, expired worthless;
@@ -14,6 +15,12 @@ page, what the journal already holds about it, from services that exist:
 - ``habits``: this trade against the behavior audit's four exit habits
   (``exit_habits.habit_flags``), closed long options only;
 - ``comparison``: the symbol's latest other closed trades (``copilot_book.trades``).
+
+For an open position the same ``trade`` (no exit yet), ``plan``, ``alerts`` (what
+followed so far) and ``comparison``, plus ``now``: the current mark and open P&L
+(``copilot_book.position_rows``, the dashboard's quote engine), minutes held,
+days to expiry, the give-back watch's peak and give-back, and the latest alert.
+There is no path or habits section until it closes.
 
 Read-only. The trade id comes in from the owner's UI and never goes back out:
 no trade, fill, account or broker id is returned, and an account appears only by
@@ -40,6 +47,13 @@ PROVENANCE = {
     "alerts": "measured: phone alerts sent for this position and what the fills show happened after each",
     "habits": "measured: the behavior audit's four exit habits for this one trade; associations, not rules",
     "comparison": "measured: the symbol's latest other closed trades",
+}
+OPEN_PROVENANCE = {
+    "trade": "measured: the journal's reconstructed open position and its fills so far",
+    "now": "fetched: the current mark and open P&L; measured: minutes held, expiry, the give-back watch's peak and the latest alert",
+    "plan": PROVENANCE["plan"],
+    "alerts": "measured: phone alerts sent for this position and what the fills show since each",
+    "comparison": PROVENANCE["comparison"],
 }
 
 
@@ -143,6 +157,37 @@ def _habits(db, trade, fills: list[dict]) -> dict:
                                       for key, label in exit_habits.HABITS]}
 
 
+def _now(db, trade) -> dict:
+    from app.engine import position_alerts
+    from app.engine.chart_math import ET
+    pairs, _ = copilot_book.position_rows(db, limit=1, only=trade)
+    if not pairs:
+        return {"state": "unavailable", "reason": "The journal shows nothing open for this position."}
+    row = pairs[0][1]
+    now_et = datetime.now(ET)
+    opened = trade.opened_at.replace(tzinfo=ET) if trade.opened_at.tzinfo is None else trade.opened_at.astimezone(ET)
+    out = {"state": "ok", "mark": row["mark"], "mark_as_of": row.get("mark_as_of"),
+           "open_quantity": row["quantity"], "avg_entry": row["avg_entry"],
+           "open_pnl_usd": row["unrealized_usd"], "open_pnl_pct": row["unrealized_pct"],
+           "minutes_held": max(0, int((now_et - opened).total_seconds() // 60)),
+           "quote": None if row["mark"] is not None else "No current quote came back, so the open P&L is unknown."}
+    if trade.instrument_type == "option" and trade.expiration:
+        out["days_to_expiry"] = (trade.expiration - now_et.date()).days
+        out["expires_today"] = trade.expiration == now_et.date()
+        watch = position_alerts.for_trade(db, trade)
+        if w := watch.get("watch"):
+            out["peak_gain_usd"], out["peak_gain_pct"] = w.get("peak_gain"), _pct(w.get("peak_gain_pct"))
+            if w.get("peak_gain") is not None and row["unrealized_usd"] is not None:
+                out["given_back_from_peak_usd"] = round(max(0.0, w["peak_gain"] - row["unrealized_usd"]), 2)
+            out["giveback_watch"] = "fired" if w.get("fired") else "armed" if w.get("armed") else "not armed"
+        sent = [a for a in watch.get("alerts", []) if a["delivery"] in ("sent", "unknown")]
+        if sent:
+            a = sent[-1]
+            out["latest_alert"] = {"kind": a["kind"], "at": copilot_book._iso(a["detected_at"]), "gain_usd": a["gain"],
+                                   "gain_pct": _pct(a["gain_pct"])}
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _comparison(db, trade) -> dict:
     rows = copilot_book.trades(trade.ticker, MAX_COMPARISON, session=db, exclude=trade.id)["trades"]
     for row in rows:
@@ -160,7 +205,7 @@ def _section(build) -> dict:
 
 
 def trade_review(trade_id: str, session=None) -> dict:
-    """The review of one closed trade; ``ReviewNotFound`` when no trade has that id."""
+    """The review of one closed trade or open position; ``ReviewNotFound`` when no trade has that id."""
     from sqlmodel import Session
     from app.database import engine
     from app.engine.chart_journal import contract_label
@@ -172,25 +217,37 @@ def trade_review(trade_id: str, session=None) -> dict:
         account = db.get(Account, trade.account_id)
         if account is not None and account.broker == "webull":
             return {"state": "unavailable", "reason": "Webull trades are left out (dormant by the owner's choice)."}
-        if trade.status == "open":
-            return {"state": "unavailable", "reason": "This trade is still open; a review needs a closed trade. "
-                                                      "The owner context pack shows open positions."}
         fills = _fills(db, trade)
+        about = {
+            "symbol": trade.ticker, "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type,
+                                                               trade.strike, trade.expiration),
+            "instrument": trade.instrument_type, "account": copilot_book._label(account.name if account else None),
+            "quantity": float(trade.contracts), "entry_time": copilot_book._journal_time(trade.opened_at),
+            "entry_price": copilot_book._round(float(trade.avg_entry_premium)), "premium_paid_usd": _num(trade.total_premium_paid),
+            "status": trade.status,
+            "fills": {"count": len(fills), "entries": sum(f["role"] == "entry" for f in fills),
+                      "exits": sum(f["role"] != "entry" for f in fills)},
+        }
+        if trade.status == "open":
+            return shed({
+                "state": "ok", "as_of": copilot_book._now(), "provenance": OPEN_PROVENANCE, "trade": about,
+                "now": _section(lambda: _now(db, trade)),
+                "plan": _section(lambda: _plan(db, trade)),
+                "alerts": _section(lambda: _alerts(db, trade, fills)),
+                "comparison": _section(lambda: _comparison(db, trade)),
+                "units": "Option prices are per contract as the journal stores them (premium x 100); stock prices per share. "
+                         "Percentages are percent. Times are New York.",
+                "note": "An open position: lead with the decision now. Keep the thesis apart from the position (time held, gain "
+                        "given back, expiry near), and compare with the plan's invalidation and time stop if one was captured. "
+                        "The owner decides; nothing here is an order.",
+            })
         review = {
             "state": "ok", "as_of": copilot_book._now(), "provenance": PROVENANCE,
             "trade": {
-                "symbol": trade.ticker, "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type,
-                                                                   trade.strike, trade.expiration),
-                "instrument": trade.instrument_type, "account": copilot_book._label(account.name if account else None),
-                "quantity": float(trade.contracts), "entry_time": copilot_book._journal_time(trade.opened_at),
-                "exit_time": copilot_book._journal_time(trade.closed_at),
-                "entry_price": copilot_book._round(float(trade.avg_entry_premium)),
+                **about, "exit_time": copilot_book._journal_time(trade.closed_at),
                 "exit_price": None if trade.avg_exit_premium is None else copilot_book._round(float(trade.avg_exit_premium)),
-                "premium_paid_usd": _num(trade.total_premium_paid),
                 "pnl_usd": _num(trade.realized_pnl), "pnl_pct": _pct(trade.pnl_pct), "hold_minutes": trade.hold_duration_mins,
-                "status": trade.status, "expired_worthless": bool(trade.expired_worthless),
-                "fills": {"count": len(fills), "entries": sum(f["role"] == "entry" for f in fills),
-                          "exits": sum(f["role"] != "entry" for f in fills)},
+                "expired_worthless": bool(trade.expired_worthless),
             },
             "path": _section(lambda: _path(db, trade)),
             "plan": _section(lambda: _plan(db, trade)),

@@ -1,6 +1,6 @@
-"""The closed-trade review (docs/copilot-lab.md § Review a closed trade): assembled from a seeded journal, every section
-present, free of identifiers, within the tool bound; unknown ids refused; simulated in the fixture, unavailable in
-replay; never given to research jobs."""
+"""The trade and position review (docs/copilot-lab.md § Review a trade or position): assembled from a seeded journal,
+every section present for a closed trade and for an open position (with its `now`), free of identifiers, within the tool
+bound; Webull and unknown ids refused; simulated in the fixture, unavailable in replay; never given to research jobs."""
 import asyncio
 import json
 import uuid
@@ -12,10 +12,11 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.ai import copilot, copilot_book, copilot_review, copilot_tools, research_job
-from app.ai.copilot_fixture import FixtureEvidence
+from app.ai.copilot_fixture import OPEN_REVIEW_ID, FixtureEvidence
 from app.ai.copilot_replay import ReplayEvidence
 from app.engine import capture_links, position_alerts
-from app.models import (Account, Fill, FillMarketContext, PositionAlert, Trade, TradeCapture, TradeFill,
+from app.engine.chart_math import ET
+from app.models import (Account, Fill, FillMarketContext, PositionAlert, PositionWatch, Trade, TradeCapture, TradeFill,
                         TradePathMetrics)
 from app.routers.fills import _rebuild_trades
 
@@ -24,6 +25,8 @@ DAY = (datetime.now() - timedelta(days=3)).replace(hour=10, minute=5, second=0, 
 EXPIRY = (DAY + timedelta(days=30)).date()
 CALL = {"option_type": "call", "strike": 100, "expiration": EXPIRY}
 REVIEWED = UUID(int=1)  # a trade's id is its first entry fill's id
+HELD = UUID(int=12)  # the open call
+OPENED = DAY + timedelta(days=2, minutes=10)
 SECRETS = ("8267", "4242", "RH-55501234", "WB-99887766", str(ROTH), str(WEBULL))
 
 
@@ -53,6 +56,7 @@ def db():
             fill(9, "NBIS", "buy", 3, 50, DAY - timedelta(days=1), account=WEBULL),                 # dormant: never shown
             fill(10, "NBIS", "sell", 3, 60, DAY - timedelta(days=1, minutes=-5), account=WEBULL),
             fill(11, "NBIS", "buy", 1, 92, DAY + timedelta(days=2)),                                # still open
+            fill(12, "NBIS", "buy_to_open", 2, 300, OPENED, option_type="call", strike=105, expiration=EXPIRY),  # open call
         ])
         session.commit()
         _rebuild_trades(session, "test")
@@ -89,7 +93,7 @@ def _seed_world(db):
 def _secret_free(out) -> str:
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
-    ids = {str(UUID(int=n)) for n in range(1, 12)}
+    ids = {str(UUID(int=n)) for n in range(1, 13)}
     assert not [s for s in (*SECRETS, *ids) if s in text], text
     assert "trade_id" not in text and "fill_id" not in text and "account_label" not in text
     return text
@@ -138,8 +142,70 @@ def test_a_bare_trade_reads_missing_sections_plainly(db):
     assert stock["habits"]["state"] == "not_applicable" and stock["trade"]["contract"] == "NBIS stock"
 
 
-def test_open_webull_and_unknown_trades_are_not_reviewed(db):
-    assert copilot_review.trade_review(str(UUID(int=11)), session=db)["state"] == "unavailable"  # still open
+def _seed_open(db, monkeypatch):
+    """The open call: marked at $310 a contract (+$20), its watch peaked at $362 (+$124) and fired a give-back, and a plan
+    captured before it. Quotes are stubbed; the marking path is copilot_book's."""
+    from app.engine import quotes
+    monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda trades: None)
+    monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: 95.0 for s in symbols})
+    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (310.0, "2026-10-23T15:10:00Z") if trade.instrument_type == "option"
+                        else (q.get(trade.ticker), None))
+    trade = db.get(Trade, HELD)
+    entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
+                      .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
+    key, entry_utc = position_alerts.anchor(entries), capture_links.entry_utc(trade.opened_at)
+    db.add(PositionWatch(account_id=ROTH, source_key=key, generation=1, contracts=2, avg_cost=300, peak_mark=362,
+                         peak_at=entry_utc + timedelta(minutes=20), armed_at=entry_utc + timedelta(minutes=10)))
+    db.add(PositionAlert(kind="giveback", detected_at=entry_utc + timedelta(minutes=50), delivery="sent", account_id=ROTH,
+                         source_key=key, generation=1, trade_id=trade.id, contract="NBIS 105C", contracts=2, avg_cost=300,
+                         mark=309, gain=18, gain_pct=0.03, peak_gain=124, peak_gain_pct=0.2067))
+    capture = TradeCapture(client_id="c2", received_at=entry_utc - timedelta(minutes=30), account_id=ROTH,
+                           account_label="Robinhood Roth 8267", underlying="NBIS", side="buy_calls", instrument="option",
+                           mode="discretionary", setup_label="Copilot plan",
+                           wording="Entry above 101 on a 5m close; invalidation below 97.50; time stop 11:30.",
+                           context_state="unavailable", image_state="unavailable")
+    db.add(capture)
+    db.commit()
+    capture_links.link(db, capture, trade.id)
+
+
+def test_an_open_position_reads_now_plan_alerts_and_comparison(db, monkeypatch):
+    _seed_open(db, monkeypatch)
+    review = copilot_review.trade_review(str(HELD), session=db)
+    text = _secret_free(review)
+    assert review["state"] == "ok" and "trimmed" not in review
+    assert set(review["provenance"]) == {"trade", "now", "plan", "alerts", "comparison"} == set(copilot_review.OPEN_PROVENANCE)
+    assert "path" not in review and "habits" not in review and "order" in review["note"]
+
+    t = review["trade"]
+    assert (t["status"], t["entry_price"], t["quantity"], t["account"]) == ("open", 300.0, 2.0, "Robinhood Roth")
+    assert "exit_time" not in t and "pnl_usd" not in t and t["contract"].endswith("105C")
+
+    now, today = review["now"], datetime.now(ET)
+    assert (now["mark"], now["open_pnl_usd"], now["open_pnl_pct"], now["open_quantity"]) == (310.0, 20.0, 3.3, 2)
+    assert (now["peak_gain_usd"], now["peak_gain_pct"], now["given_back_from_peak_usd"], now["giveback_watch"]) == (124.0, 20.7, 104.0, "fired")
+    assert (now["days_to_expiry"], now["expires_today"]) == ((EXPIRY - today.date()).days, False)
+    assert abs(now["minutes_held"] - (today - OPENED.replace(tzinfo=ET)).total_seconds() // 60) <= 1
+    assert now["latest_alert"]["kind"] == "giveback" and (now["latest_alert"]["gain_usd"], now["latest_alert"]["gain_pct"]) == (18, 3.0)
+    assert now["mark_as_of"] == "2026-10-23T15:10:00Z" and "quote" not in now
+
+    assert review["plan"]["setup"] == "Copilot plan" and "time stop 11:30" in review["plan"]["wording"]
+    [alert] = review["alerts"]["alerts"]
+    assert alert["then"] == "still_open" and "no result yet" in alert["note"]
+    assert [r["pnl_usd"] for r in review["comparison"]["trades"]] == [-25.0, -110.0, 50.0]  # closed NBIS only, not Webull
+    assert "WB" not in text
+
+
+def test_an_open_position_without_a_quote_says_so(db, monkeypatch):
+    _seed_open(db, monkeypatch)
+    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (None, None))
+    now = copilot_review.trade_review(str(HELD), session=db)["now"]
+    assert "open_pnl_usd" not in now and "given_back_from_peak_usd" not in now and "No current quote" in now["quote"]
+    stock = copilot_review.trade_review(str(UUID(int=11)), session=db)  # an open stock: no expiry, no watch
+    assert stock["now"]["state"] == "ok" and "days_to_expiry" not in stock["now"] and stock["trade"]["contract"] == "NBIS stock"
+
+
+def test_webull_and_unknown_trades_are_not_reviewed(db):
     webull = copilot_review.trade_review(str(UUID(int=9)), session=db)
     assert webull["state"] == "unavailable" and "Webull" in webull["reason"] and "4242" not in json.dumps(webull)
     with pytest.raises(copilot_review.ReviewNotFound):
@@ -195,6 +261,30 @@ def test_replay_is_unavailable_and_the_fixture_is_simulated():
     assert len(copilot_tools.bounded(fixture)) <= copilot_tools.MAX_RESULT_CHARS
 
 
+def test_the_fixture_simulates_an_open_review():
+    fixture = FixtureEvidence().get_trade_review(OPEN_REVIEW_ID)
+    assert fixture["simulated"] is True and fixture["trade"]["status"] == "open"
+    assert set(fixture["provenance"]) == set(copilot_review.OPEN_PROVENANCE) and fixture["now"]["giveback_watch"] == "fired"
+    assert len(copilot_tools.bounded(fixture)) <= copilot_tools.MAX_RESULT_CHARS
+    replay = ReplayEvidence.__new__(ReplayEvidence)
+    assert replay.get_trade_review(OPEN_REVIEW_ID)["state"] == "unavailable"
+
+
+def test_the_scripted_model_reviews_a_position_from_the_alert_link_text():
+    cfg = copilot.Settings(enabled=True, backend="fake", evidence="fixture", model="m", effort="medium", fallbacks=False,
+                           key_configured=False)
+
+    async def collect():
+        content = f"Context: Review this position: {OPEN_REVIEW_ID}. Give-back alert at 11:48 AM: was +$96, now +$20."
+        return [e async for e in copilot.run_turn([{"role": "user", "content": content}], "NBIS", cfg,
+                                                  copilot.FakeAdapter(0), FixtureEvidence(), datetime(2026, 10, 23, 11, 12))]
+    events = asyncio.run(collect())
+    [tool] = [e for e in events if e["type"] == "tool" and e["name"] == "get_trade_review" and e["status"] == "ok"]
+    assert tool["input"] == {"trade_id": OPEN_REVIEW_ID} and tool["summary"].startswith("NBIS 11/21/26 100C -310.00 $ open")
+    text = "".join(e["delta"] for e in events if e["type"] == "text")
+    assert "Simulated model" in text and "decision now" in text and "won't make it an order" in text
+
+
 def test_the_scripted_model_reviews_a_trade_from_the_deep_link_text():
     cfg = copilot.Settings(enabled=True, backend="fake", evidence="fixture", model="m", effort="medium", fallbacks=False,
                            key_configured=False)
@@ -216,6 +306,8 @@ def test_the_system_prompt_asks_for_the_review_frame():
     assert "call get_trade_review with the trade id from their message" in prompt
     assert "keep thesis apart from execution" in prompt and "one trade cannot support a lesson" in prompt
     assert "propose a memory only if the owner states one" in prompt
+    assert "Review this position:" in prompt and "Lead with the decision now" in prompt
+    assert "invalidation and time stop" in prompt and "Never tell them to sell or hold as an order" in prompt
 
 
 def test_trades_can_leave_one_out(db):

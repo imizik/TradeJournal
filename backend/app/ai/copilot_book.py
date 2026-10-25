@@ -166,17 +166,19 @@ def _warm_option_quotes(trades: list) -> None:
         get_option_quotes(wanted)
 
 
-def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None) -> tuple[list[tuple], int]:
+def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only=None) -> tuple[list[tuple], int]:
     """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
     look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position.
     ``first`` puts that symbol's positions ahead of the alphabetical rest before the ``limit`` cut, so the symbol a
-    turn is about is never the one dropped from a large book."""
+    turn is about is never the one dropped from a large book. ``only`` (a trade) marks that one position alone."""
     from sqlmodel import select
     from app.engine import chart_journal
     from app.engine.quotes import get_stock_quotes
     from app.models import Account, Trade
     trades = {str(t.id): t for t in db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
                                             .where(Trade.status == "open").where(_not_webull())).all()}
+    if only is not None:
+        trades = {k: t for k, t in trades.items() if k == str(only.id)}
     tickers = sorted({t.ticker for t in trades.values()})
     held = [p for ticker in tickers for p in chart_journal.positions(db, ticker) if p["trade_id"] in trades]
     if first:

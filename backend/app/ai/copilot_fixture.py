@@ -9,6 +9,7 @@ from app.ai.copilot_tools import compact_comparison
 
 SESSION = "2026-10-23"
 AT = "2026-10-23T15:12:00Z"
+OPEN_REVIEW_ID = "00000000-0000-4000-8000-0000000000a1"  # the trade id that reads as the open NBIS call in get_trade_review
 GROUP = {"name": "Neoclouds and AI hosting", "members": ["NBIS", "CRWV", "APLD", "IREN", "CIFR", "WULF", "ORCL"]}
 
 _RECENT = {"NBIS": 0.84, "CRWV": 1.92, "APLD": 1.61, "IREN": 0.35, "CIFR": -0.22, "WULF": 0.41, "ORCL": -0.10, "QQQ": 0.18, "SPY": 0.09}
@@ -173,8 +174,32 @@ class FixtureEvidence:
         return self.owner_context(symbol)
 
     def get_trade_review(self, trade_id: str) -> dict:
-        """SIMULATED: shaped like ``copilot_review.trade_review`` for a closed NBIS call that gave back its gain."""
-        from app.ai.copilot_review import PROVENANCE
+        """SIMULATED: shaped like ``copilot_review.trade_review`` for a closed NBIS call that gave back its gain, or, for
+        ``OPEN_REVIEW_ID``, for the open NBIS call ``get_positions`` shows."""
+        from app.ai.copilot_review import OPEN_PROVENANCE, PROVENANCE
+        if trade_id == OPEN_REVIEW_ID:
+            return {
+                "state": "ok", "as_of": AT, "simulated": True, "provenance": OPEN_PROVENANCE,
+                "trade": {"symbol": "NBIS", "contract": "NBIS 11/21/26 100C", "instrument": "option", "account": "Simulated brokerage",
+                          "quantity": 2.0, "entry_time": "2026-10-17T09:52:00-04:00", "entry_price": 610.0, "premium_paid_usd": 1220.0,
+                          "status": "open", "fills": {"count": 1, "entries": 1, "exits": 0}},
+                "now": {"state": "ok", "mark": 455.0, "mark_as_of": AT, "open_quantity": 2, "avg_entry": 610.0, "open_pnl_usd": -310.0,
+                        "open_pnl_pct": -25.4, "minutes_held": 8840, "days_to_expiry": 29, "expires_today": False,
+                        "peak_gain_usd": 96.0, "peak_gain_pct": 15.7, "given_back_from_peak_usd": 406.0, "giveback_watch": "fired",
+                        "latest_alert": {"kind": "giveback", "at": "2026-10-20T15:48:00Z", "gain_usd": 20.0, "gain_pct": 1.6}},
+                "plan": {"state": "ok", "setup": "Group recovery", "side": "buy_calls", "mode": "discretionary",
+                         "wording": "Simulated: buy the first higher low after the group turns; out if NBIS loses the open.",
+                         "captured_at": "2026-10-17T13:35:00Z", "timing": "pre_entry"},
+                "alerts": {"state": "ok", "sent": 1, "shown": 1, "alerts": [
+                    {"kind": "giveback", "at": "2026-10-20T15:48:00Z", "contracts_open": 2.0, "mark": 620.0, "gain_usd": 20.0,
+                     "gain_pct": 1.6, "peak_gain_usd": 96.0, "peak_gain_pct": 15.7, "then": "still_open",
+                     "note": "Still open, so there is no result yet."}]},
+                "comparison": {"state": "ok", "symbol": "NBIS",
+                               "trades": [{k: v for k, v in t.items() if k != "account"} for t in self.get_trades("NBIS", 4)["trades"]]},
+                "units": "SIMULATED fixture. Option prices are per contract (premium x 100); percentages are percent; times New York.",
+                "note": "An open position: lead with the decision now. Keep the thesis apart from the position, and compare with "
+                        "the plan's invalidation and time stop if one was captured. The owner decides; nothing here is an order.",
+            }
         return {
             "state": "ok", "as_of": AT, "simulated": True, "provenance": PROVENANCE,
             "trade": {"symbol": "NBIS", "contract": "NBIS 11/21/26 100C", "instrument": "option", "account": "Simulated brokerage",
