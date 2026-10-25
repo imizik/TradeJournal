@@ -6,17 +6,18 @@ import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from 
 
 // Older API responses still render their history, but cannot identify a linked event.
 type Sent = { id?: string; contract?: string; quoted_at?: number | null;
-  kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour"; detected_at: number; contracts: number; mark: number | null; bid?: number | null;
+  kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
-  delivery: "pending" | "sending" | "sent" | "expired" | "unknown"; error: string | null; delivered_at: number | null };
+  delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped"; error: string | null; delivered_at: number | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
 // The optional field keeps older API responses on the original +$50 rule.
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
 
 const KIND: Record<Sent["kind"], string> = { giveback: "Give-back triggered", expiry_first: "Expires today", expiry_final: "30 minutes to the close",
-  hold_hour: "Open an hour: re-decide" };
+  hold_hour: "Open an hour: re-decide", plan_nudge: "No plan yet: plan nudge" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "accepted by ntfy; phone display unconfirmed",
-  expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent" };
+  expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent",
+  skipped: "not sent: today's nudge limit was reached" };
 
 const money = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const pct = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
@@ -75,7 +76,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: {
     <span className="text-muted-foreground"> · {time(a.detected_at)} · {DELIVERY[a.delivery]}</span>
     <div className="text-muted-foreground">
       {a.kind === "giveback" && <>Was up {money(a.peak_gain)} ({pct(a.peak_gain_pct)}), </>}
-      {a.mark != null ? <>at {money(a.gain)} ({pct(a.gain_pct)}) with {a.contracts} open</> : <>no live quote, {a.contracts} open</>}
+      {a.kind === "plan_nudge" ? <>Opened {a.entry ?? a.contracts} with no plan linked or suggested</>
+        : a.mark != null ? <>at {money(a.gain)} ({pct(a.gain_pct)}) with {a.contracts} open</> : <>no live quote, {a.contracts} open</>}
     </div>
   </li>)}</ul>;
   return <section aria-label="Phone alerts" data-testid="trade-phone-alerts" className={`rounded-lg border bg-card p-5 text-sm ${alertId ? "border-primary/60" : ""}`}>

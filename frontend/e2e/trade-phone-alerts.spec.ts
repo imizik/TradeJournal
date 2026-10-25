@@ -51,6 +51,25 @@ test("switched on: the watch state and each alert's delivery read plainly at pho
   await section.screenshot({ path: test.info().outputPath("trade-phone-alerts-phone.png") });
 });
 
+test("an unplanned-entry nudge reads as its own row, and a capped one says why it was not sent", async ({ page }) => {
+  const trade = await openAapl(page);
+  const at = Date.parse("2026-10-21T14:03:00Z") / 1000;
+  const nudge = { kind: "plan_nudge", contract: "AAPL 10/23/26 230C", entry: "2 at $3.10", detected_at: at, contracts: 2, mark: null, bid: null,
+    gain: null, gain_pct: null, peak_gain: null, peak_gain_pct: null, error: null };
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+    enabled: false, watch: null,
+    alerts: [{ ...nudge, id: "n1", delivery: "sent", delivered_at: at + 2 }, { ...nudge, id: "n2", detected_at: at + 60, delivery: "skipped", delivered_at: null }],
+  } }));
+  await page.goto(`/trades/${trade.id}`);
+  const section = page.getByTestId("trade-phone-alerts");
+  await expect(section).toContainText("No plan yet: plan nudge · Oct 21, 2026, 10:03 AM ET · accepted by ntfy; phone display unconfirmed");
+  await expect(section).toContainText("Opened 2 at $3.10 with no plan linked or suggested");
+  await expect(section).toContainText("not sent: today's nudge limit was reached");
+  await expect(section).not.toContainText("no live quote");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await section.screenshot({ path: test.info().outputPath("trade-plan-nudge-phone.png") });
+});
+
 test("the configured account's SPY exception does not show the $50 arming floor", async ({ page }) => {
   const trade = await openAapl(page);
   const at = Date.parse("2026-10-21T15:02:00Z") / 1000;
