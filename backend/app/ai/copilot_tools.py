@@ -132,15 +132,17 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_trade_review",
-        "description": "A lightweight review of one of the owner's closed trades, by the id their trade page sent: the "
-                       "contract, entry and exit (New York time), prices, P&L $ and %, hold minutes and fills; the recorded "
-                       "price path (option peak, give-back); the plan they captured and whether it came before the entry; "
-                       "the phone alerts sent and what they did after each; this trade against the audit's four exit "
-                       "habits; and their latest other closed trades in the symbol. Journal facts and the owner's words, "
-                       "not market data.",
+        "description": "A lightweight review of one of the owner's trades, closed or still open, by the id their trade "
+                       "page or a position alert sent. Closed: the contract, entry and exit (New York time), prices, P&L $ "
+                       "and %, hold minutes and fills; the recorded price path (option peak, give-back); the plan they "
+                       "captured and whether it came before the entry; the phone alerts sent and what they did after each; "
+                       "this trade against the audit's four exit habits; and their latest other closed trades in the "
+                       "symbol. Open: the same trade, plan, alerts (what followed so far) and comparison, plus now: the "
+                       "current mark and open P&L $ and %, minutes held, days to expiry, the give-back watch's peak and "
+                       "give-back, and the latest alert. Journal facts, current marks and the owner's words.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["trade_id"],
                          "properties": {"trade_id": {"type": "string",
-                                                     "description": "The closed trade's id (a UUID) from the owner's message"}}},
+                                                     "description": "The trade's id (a UUID) from the owner's message"}}},
     },
     {
         "name": "propose_plan",
@@ -321,7 +323,7 @@ def validate(name: str, args: Any) -> dict:
         try:
             return {"trade_id": str(uuid.UUID(str(args.get("trade_id"))))}
         except ValueError:
-            raise ToolInputError("trade_id must be a closed trade's id (a UUID)") from None
+            raise ToolInputError("trade_id must be a trade's id (a UUID)") from None
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -654,7 +656,8 @@ PROVENANCE = {
                           "saved investigations and armed watches (TradeJournal)", "saved"),
     "owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
                       "saved investigations and armed watches (TradeJournal)", "saved"),
-    "get_trade_review": ("Journal trade, fills and path metrics · captured plan · phone alerts and exit habits (TradeJournal)",
+    "get_trade_review": ("Journal trade, fills and path metrics · current mark when open · captured plan · phone alerts and exit "
+                         "habits (TradeJournal)",
                          "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }

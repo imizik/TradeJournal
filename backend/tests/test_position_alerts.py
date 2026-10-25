@@ -281,10 +281,12 @@ def test_a_missed_first_expiry_alert_is_not_sent_late_and_half_days_move_both(en
     assert "no live quote right now" in position_alerts.message(found[0])[1]
 
 
-def sent_to(monkeypatch, record):
-    def publish(title, body, priority=4, tags=(), path="", direct_click=False):
+def sent_to(monkeypatch, record, buttons=None):
+    def publish(title, body, priority=4, tags=(), path="", direct_click=False, more=()):
         assert direct_click is True
         record.append((title, path))
+        if buttons is not None:
+            buttons.append(more)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(ntfy, "publish", publish)
 
@@ -309,6 +311,55 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     watcher.deliver()
     assert sent == [("SNDK 10/23/26 230C: give-back triggered", f"/trades/{alert.trade_id}?alert={alert.id}")]
     assert alerts(engine)[0].delivery == "sent"
+
+
+def test_ask_copilot_rides_along_only_while_the_lab_is_on(engine, world, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    clock, _, watcher = world
+    alert = fired(engine, world)
+    monkeypatch.delenv("COPILOT_ENABLED", raising=False)
+    sent, buttons = [], []
+    sent_to(monkeypatch, sent, buttons)
+    watcher.deliver()
+    assert buttons == [()]  # lab off: only the Open app action ntfy.publish always adds
+
+    with Session(engine) as db:
+        db.get(PositionAlert, alert.id).delivery = "pending"
+        db.commit()
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    watcher.deliver()
+    [(label, path)] = buttons[1]
+    query = parse_qs(urlsplit(path).query)
+    assert label == "Ask copilot" and path.startswith("/copilot-lab?") and query["symbol"] == ["SNDK"]
+    assert query["context"] == [f"Review this position: {alert.trade_id}. Give-back alert at "
+                                f"{position_alerts._clock_label(position_alerts._minute_of(position_alerts._epoch(alert.detected_at)))}: "
+                                f"was {position_alerts._money(alert.peak_gain)}, now {position_alerts._money(alert.gain)}."]
+    assert len(query["context"][0]) <= 300 and len("https://isaac-trading-alerts.duckdns.org" + path) <= 500
+
+    with Session(engine) as db:
+        db.get(PositionAlert, alert.id).delivery = "pending"
+        db.commit()
+    monkeypatch.setattr(position_alerts, "ask_copilot_path", lambda alert: 1 / 0)
+    watcher.deliver()  # a broken extra button never holds back the alert
+    assert buttons[2] == () and alerts(engine)[0].delivery == "sent"
+
+
+def test_publish_adds_the_extra_actions_after_open_app(monkeypatch):
+    bodies = []
+
+    def post(url, json, headers, timeout):
+        bodies.append(json)
+        return httpx.Response(200, json={"id": "r"})
+    monkeypatch.setattr(httpx, "post", post)
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.delenv("NTFY_IPV4_ONLY", raising=False)
+    monkeypatch.setenv("ALERT_APP_URL", "https://app.example/")
+    ntfy.publish("t", "b", path="/trades/x", direct_click=True, more=(("Ask copilot", "/copilot-lab?symbol=X"),))
+    assert bodies[0]["actions"] == [{"action": "view", "label": "Open app", "url": "https://app.example/trades/x"},
+                                    {"action": "view", "label": "Ask copilot", "url": "https://app.example/copilot-lab?symbol=X"}]
+    monkeypatch.delenv("ALERT_APP_URL")
+    ntfy.publish("t", "b", path="/trades/x", more=(("Ask copilot", "/copilot-lab?symbol=X"),))
+    assert "actions" not in bodies[1]  # no app address, no buttons
 
 
 def test_a_stale_claim_is_unknown_and_never_resent(engine, world, monkeypatch):

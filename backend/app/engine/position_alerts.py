@@ -58,6 +58,7 @@ import logging
 import os
 import time
 from typing import Callable
+from urllib.parse import urlencode
 import uuid
 
 import httpx
@@ -248,6 +249,31 @@ def message(alert: PositionAlert, close_label: str | None = None, minutes_left: 
     return title, body + ("\n\n" + context if context else ""), priority
 
 
+ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
+            "expiry_final": "30-minutes-left alert"}
+
+
+def ask_copilot_path(alert: PositionAlert) -> str:
+    """The lab, prefilled to review this position with what the alert saw (docs/copilot-lab.md § Review a trade or position)."""
+    was = f"was {_money(alert.peak_gain)}, " if alert.kind == "giveback" and alert.peak_gain is not None else ""
+    now = f"now {_money(alert.gain)}" if alert.mark is not None else "no live quote"
+    context = (f"Review this position: {alert.trade_id}. {ASK_KIND.get(alert.kind, 'Position alert')} at "
+               f"{_clock_label(_minute_of(_epoch(alert.detected_at)))}: {was}{now}.")
+    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0], "context": context[:300]})
+
+
+def _ask_copilot(alert: PositionAlert) -> tuple[tuple[str, str], ...]:
+    """The extra push action, only while Copilot Lab is on (its own switch, read here without loading the lab).
+    Optional, so it can never stop the alert itself from going out."""
+    if os.environ.get("COPILOT_ENABLED") != "true":
+        return ()
+    try:
+        return (("Ask copilot", ask_copilot_path(alert)),)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extra button
+        log.warning("Ask copilot action skipped for a position alert", exc_info=True)
+        return ()
+
+
 def _minute_of(stamp: float) -> int:
     moment = datetime.fromtimestamp(stamp, ET)
     return moment.hour * 60 + moment.minute
@@ -419,10 +445,11 @@ class PositionAlerts:
                 return
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None)
+            more = _ask_copilot(alert)
             alert.attempts += 1
             try:
                 ntfy.publish(title, body, priority=priority, tags=("warning",),
-                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True)
+                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
