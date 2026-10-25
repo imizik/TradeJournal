@@ -94,6 +94,7 @@ export default function PlansBoard({ open }: { open(id: string): void }) {
         <h2 className="text-sm font-semibold text-foreground">Plans</h2>
         {board?.plans.length ? <span className="text-xs text-muted-foreground">{board.plans.length} armed · nearest trigger first</span> : null}
         {board?.quote_issue && <span className="text-xs text-amber-300">Prices: {board.quote_issue}</span>}
+        {board && error && <span className="text-xs text-amber-300">Not refreshed: {error}</span>}
       </div>
       {error && !board ? <p className="text-muted-foreground">Plans unavailable: {error}</p>
         : !board ? <p className="text-muted-foreground">Reading your plans…</p>
