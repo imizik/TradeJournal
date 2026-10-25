@@ -370,13 +370,17 @@ def _invalidation(db, capture, trade) -> dict:
     if not alerts:
         return {"invalidation": "no_alert"}
     opened, closed = capture_links.entry_utc(trade.opened_at), capture_links.entry_utc(trade.closed_at)
-    hit = db.exec(select(LevelAlertEvent.event_at).where(LevelAlertEvent.alert_id.in_([a.id for a in alerts]),
-                                                         LevelAlertEvent.event_at >= opened, LevelAlertEvent.event_at <= closed)
-                  .order_by(LevelAlertEvent.event_at)).first()
-    if hit is None:
-        return {"invalidation": "not_hit_while_held", "level": alerts[0].price}
-    minutes = int((closed - hit).total_seconds() // 60)
-    return {"invalidation": "hit_while_held", "level": alerts[0].price, "hit_at": copilot_book._iso(hit),
+    # Fills carry the broker's minute: an exit stamped 10:05 may have come after a 10:05:20 firing.
+    if trade.closed_at.second == 0 and trade.closed_at.microsecond == 0:
+        closed += timedelta(minutes=1)
+    found = db.exec(select(LevelAlertEvent.event_at, LevelAlertEvent.level)
+                    .where(LevelAlertEvent.alert_id.in_([a.id for a in alerts]), LevelAlertEvent.event_at >= opened,
+                           LevelAlertEvent.event_at < closed).order_by(LevelAlertEvent.event_at)).first()
+    if found is None:
+        return {"invalidation": "not_hit_while_held", "level": max(alerts, key=lambda a: a.created_at).price}
+    hit, level = found
+    minutes = max(0, int((capture_links.entry_utc(trade.closed_at) - hit).total_seconds() // 60))
+    return {"invalidation": "hit_while_held", "level": level, "hit_at": copilot_book._iso(hit),
             "minutes_to_exit": minutes,
             "then": "expired" if trade.status == "expired" else "out_15m" if minutes <= OUT_MINUTES else "held_past_15m"}
 

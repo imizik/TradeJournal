@@ -263,3 +263,12 @@ def test_the_system_prompt_asks_for_the_week_frame():
     assert "call get_week_review" in prompt and "Lead with planned vs unplanned" in prompt
     assert "at most one or two things to practice next week" in prompt and "grounded in a count" in prompt
     assert "when the sample is too small" in prompt and "Propose a memory only if the owner states a lesson" in prompt
+
+
+def test_an_exit_in_the_firing_minute_counts_as_out(db):
+    """The invalidation fires at 11:15:20 and the sale is stamped 11:15 (the broker's minute): hit, out 0 minutes later."""
+    capture = _plan(db, APLD, "plan-apld-early", _utc(WED) + timedelta(minutes=10), "APLD")
+    _invalidation(db, "APLD", capture.received_at, _utc(WED) + timedelta(minutes=70, seconds=20), str(uuid4()))
+    db.commit()
+    [hit] = copilot_review.week_review("2026-10-21", session=db)["follow_through"]["hits"]
+    assert (hit["contract"].split()[0], hit["minutes_to_exit"], hit["then"], hit["level"]) == ("APLD", 0, "out_15m", 97.5)
