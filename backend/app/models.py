@@ -686,6 +686,29 @@ class PlanTimeStop(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class PremarketPrep(SQLModel, table=True):
+    """One trading morning's pre-market prep (``engine/premarket_prep.py``): the
+    copilot's short prep, saved as an investigation, and its single phone ping.
+    The unique ``day`` (New York) is the once-a-day guard: a restart or a second
+    process cannot prepare or send a second one. Delivery is an outbox on the same
+    row, at most once, as plan nudges are."""
+
+    __tablename__ = "premarket_prep"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(unique=True)
+    detected_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: when the day's prep was claimed
+    investigation_id: Optional[str] = None  # the saved copilot investigation the ping opens
+    fallback: bool = False  # the copilot turn failed: the ping carries the raw facts
+    body: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    delivery: str = Field(default="preparing", index=True)  # preparing | pending | sending | sent | expired | unknown
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class CaptureTemplate(SQLModel, table=True):
     """A favorite pre-trade template (Charts C3.4): the user's setup label and
     their own invalidation/exit wording. Editing bumps ``revision``; a capture

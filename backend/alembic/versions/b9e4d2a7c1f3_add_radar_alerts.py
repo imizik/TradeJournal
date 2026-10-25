@@ -1,13 +1,13 @@
 """Radar phone alerts (additive): the at-most-once outbox for Radar event pings.
 
 Revision ID: b9e4d2a7c1f3
-Revises: d4f8b2c6e1a9
+Revises: e5a9c3d7f2b4
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "b9e4d2a7c1f3"
-down_revision = "d4f8b2c6e1a9"
+down_revision = "e5a9c3d7f2b4"
 branch_labels = None
 depends_on = None
 
