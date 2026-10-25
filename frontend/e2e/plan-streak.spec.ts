@@ -44,10 +44,6 @@ test("a broken streak names the last unplanned entry", async ({ page }) => {
 test("phone title bar: a compact chip, a 44px tap target, no sideways scroll", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await answer(page, STREAK);
-  // The usual sync line ("Live sync"), not the seeded disconnected one.
-  await page.route("**/api/backend/gmail/health", (route) => route.fulfill({ json: {
-    status: "live", message: "Gmail is connected.", action: null, listener_enabled: true, last_notification_at: null,
-    last_import_at: null, watch_expires_at: null, data_version: "e2e" } }));
   await page.goto("/");
   const chip = page.getByTestId("plan-streak-compact");
   await expect(chip).toBeVisible();
@@ -58,11 +54,15 @@ test("phone title bar: a compact chip, a 44px tap target, no sideways scroll", a
   expect(box.height).toBeGreaterThanOrEqual(44);
   expect(box.width).toBeGreaterThanOrEqual(44);
   // Title, sync line, chip and Sync all fit in the bar; the title is not cut short.
-  await expect(page.getByRole("banner").getByText("Live sync")).toBeVisible();
+  // The seeded "Gmail disconnected" is the longest sync line; the title must still fit beside it.
+  await expect(page.getByRole("banner").getByText("Gmail disconnected")).toBeVisible();
   const title = page.getByRole("banner").getByRole("heading", { name: "Trade Journal" });
   expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // The tap areas touch but never overlap: the sync line, the chip and Sync each keep their own.
   const sync = (await page.getByRole("banner").getByRole("button", { name: /Sync/ }).boundingBox())!;
-  expect(box.x + box.width).toBeLessThanOrEqual(sync.x);
+  const line = (await page.getByRole("banner").getByText("Gmail disconnected").boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(sync.x + 0.5);
+  expect(line.x + line.width).toBeLessThanOrEqual(box.x + 0.5);
   const overflow = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth + 1);
   await page.screenshot({ path: test.info().outputPath("plan-streak-phone.png"), animations: "disabled" });

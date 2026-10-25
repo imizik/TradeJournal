@@ -84,7 +84,8 @@ export default function PlanStreakChip({ variant = "full", onNavigate }: { varia
   if (!owner || !data?.show) return null;
   const lit = data.current > 0;
   const label = describe(data);
-  // The rail and the phone title bar carry the count alone; the label says the rest.
+  // The rail and the phone title bar carry the count alone; the label says the rest. In the title bar the
+  // 44px tap area absorbs the bar's gaps (-mx-2) so the title and the sync line keep their room.
   const text = variant === "rail" || variant === "compact" ? `${data.current}`
     : lit ? `${data.current} planned`
     : !data.last_break ? "0 planned"
@@ -93,7 +94,7 @@ export default function PlanStreakChip({ variant = "full", onNavigate }: { varia
     <Link href={REVIEW_WEEK} onClick={onNavigate} aria-label={label} title={variant === "rail" ? undefined : label} data-testid={`plan-streak-${variant}`}
       className={cn("flex shrink-0 items-center gap-1 rounded-md text-[11px] font-medium tabular-nums transition-colors hover:bg-secondary hover:text-foreground",
         lit ? "text-foreground" : "text-muted-foreground",
-        variant === "rail" ? "h-10 w-10 justify-center" : variant === "compact" ? "h-11 min-w-11 justify-center px-2"
+        variant === "rail" ? "h-10 w-10 justify-center" : variant === "compact" ? "-mx-2 h-11 min-w-11 justify-center px-2"
           : variant === "menu" ? "mt-1 -ml-2 min-h-11 min-w-0 max-w-full px-2" : "mt-1 -ml-1 min-w-0 max-w-full px-1 py-0.5")}>
       <Flame aria-hidden className={cn("h-3.5 w-3.5 shrink-0", lit ? "text-amber-400" : "text-muted-foreground")} />
       <span className="truncate">{text}</span>
