@@ -35,10 +35,18 @@ def fill(n, ticker, side, qty, price, at, account=ROTH, **option):
 
 @pytest.fixture
 def db(monkeypatch):
+    class BookClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(NOW.timestamp(), tz)
+
+    # The holdings reader must use the same instant as owner_context(now=NOW).
+    monkeypatch.setattr(copilot_book, "datetime", BookClock)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: {"CRWV": 131.2}.get(s) for s in symbols})
     monkeypatch.setattr(quotes, "option_mark", lambda req: (OptionQuoteResult(mid=3.3, last_price=3.2), 1792768320.0))
+    monkeypatch.setattr(quotes, "get_option_quotes", lambda requests: [OptionQuoteResult(mid=3.3)] * len(requests))
     copilot_context.clear_habits_cache()
     with Session(engine) as session:
         session.add(Account(id=ROTH, name="Robinhood Roth 8267", type="roth_ira", last4="8267", broker="robinhood",
@@ -48,7 +56,8 @@ def db(monkeypatch):
         call = {"option_type": "call", "strike": 100, "expiration": EXPIRY}
         session.add_all([
             fill(1, "NBIS", "buy_to_open", 2, 310, TODAY.replace(tzinfo=None), **call),          # open today: 2 calls at $3.10
-            fill(2, "CRWV", "buy", 10, 120, TODAY.replace(tzinfo=None) - timedelta(days=9)),      # open: 10 shares
+            # Nine elapsed days, including when the interval crosses a DST change.
+            fill(2, "CRWV", "buy", 10, 120, (NOW.astimezone(UTC) - timedelta(days=9)).astimezone(ET).replace(tzinfo=None)),
             fill(3, "CRWV", "buy", 5, 100, TODAY.replace(tzinfo=None) - timedelta(days=20)),     # closed: +$50
             fill(4, "CRWV", "sell", 5, 110, TODAY.replace(tzinfo=None) - timedelta(days=20, hours=-5)),
             fill(5, "NBIS", "buy_to_open", 1, 200, TODAY.replace(tzinfo=None) - timedelta(days=3), **call),  # closed red
