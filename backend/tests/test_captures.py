@@ -171,6 +171,16 @@ def test_choices_are_explicit_and_nothing_is_guessed(client):
     assert (option["instrument"], option["strike"], option["expiration"], option["quantity"]) == ("option", 180, "2026-10-09", None)
 
 
+def test_a_discretionary_plan_can_carry_its_own_name_and_wording(client):
+    """What a Copilot Lab plan card's Confirm sends: its own setup name and wording, no template."""
+    http, _ = client
+    row = http.post("/charts/captures", json=plan(setup_label=" Copilot plan ", wording="Entry: 5m close above 95.90. Invalidation: 92.30.")).json()
+    assert (row["mode"], row["template_id"], row["setup_label"], row["wording"]) == (
+        "discretionary", None, "Copilot plan", "Entry: 5m close above 95.90. Invalidation: 92.30.")
+    for overrides in ({"setup_label": "Copilot plan"}, {"setup_label": "x" * 41, "wording": "w"}, {"setup_label": "s", "wording": "w" * 401}):
+        assert http.post("/charts/captures", json=plan(**overrides)).status_code == 422, overrides
+
+
 def test_without_a_chart_snapshot_the_plan_saves_and_says_so(client):
     http, _ = client
     row = http.post("/charts/captures", json=plan(context={"state": "unavailable", "reason": "The chart now shows AMD."})).json()

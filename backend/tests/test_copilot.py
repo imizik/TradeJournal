@@ -929,6 +929,80 @@ def test_replay_hides_whatever_happened_to_an_investigation_after_its_moment():
     assert out["evidence_as_of"]  # its evidence predates the moment
 
 
+# --------------------------------------------------------------------------- trade plan proposals
+
+PLAN = {"kind": "trade_plan", "symbol": "nbis", "direction": "long", "instrument": "calls", "contract": "Nov 21 100C",
+        "thesis": "  Neoclouds   turn and NBIS reclaims the prior-day low. ",
+        "entry_trigger": {"condition": "closes_beyond", "price": 95.9, "interval": "5m"},
+        "invalidation": {"condition": "crosses", "price": 92.3}, "time_stop": "out by 15:30", "size_note": "one starter"}
+
+
+@pytest.mark.parametrize("change", [
+    {"direction": "sideways"}, {"instrument": "futures"},
+    {"instrument": "puts"},                                                            # puts are a short view
+    {"direction": "short", "instrument": "calls"},
+    {"thesis": " "}, {"thesis": "x" * 301}, {"contract": "x" * 41}, {"time_stop": "x" * 81}, {"size_note": "x" * 121},
+    {"entry_trigger": {"condition": "closes_beyond", "price": 95.9}},                  # no interval
+    {"entry_trigger": {"condition": "crosses", "price": float("inf")}},
+    {"entry_trigger": {"condition": "crosses", "price": 0}},
+    {"entry_trigger": 95.9},
+    {"entry_trigger": {"condition": "crosses", "price": 95.9, "label": "x"}},
+    {"invalidation": {"condition": "crosses", "price": 96.0}},                         # a long's stop above its entry
+    {"direction": "short", "instrument": "stock"},                                     # a short's stop below its entry
+    {"label": "x"},                                                                    # a watch's key
+])
+def test_trade_plans_outside_the_contract_are_refused(change):
+    with pytest.raises(copilot_tools.ToolInputError):
+        copilot_tools.validate("propose_plan", {**PLAN, **change})
+
+
+def test_a_trade_plan_is_normalized_needs_a_price_on_the_live_side_and_writes_nothing():
+    plan = copilot_tools.validate("propose_plan", PLAN)
+    assert plan == {"kind": "trade_plan", "symbol": "NBIS", "direction": "long", "instrument": "calls", "contract": "Nov 21 100C",
+                    "thesis": "Neoclouds turn and NBIS reclaims the prior-day low.",
+                    "entry_trigger": {"condition": "closes_beyond", "price": 95.9, "interval": "5m"},
+                    "invalidation": {"condition": "crosses", "price": 92.3, "interval": None},
+                    "time_stop": "out by 15:30", "size_note": "one starter"}
+    short = copilot_tools.validate("propose_plan", {**PLAN, "direction": "short", "instrument": "puts", "contract": None,
+                                                    "entry_trigger": {"condition": "crosses", "price": 92.3},
+                                                    "invalidation": {"condition": "touches", "price": 95.9}})
+    assert (short["contract"], short["time_stop"]) == (None, "out by 15:30")
+    shown = copilot_tools.call(FixtureEvidence(), "propose_plan", plan)
+    assert shown["proposal"]["last"] == 94.35 and "Nothing is saved or armed until they confirm" in shown["note"]
+    assert copilot._summary("propose_plan", shown) == "proposed plan: NBIS long calls, entry 95.9, invalidation 92.3"
+    with pytest.raises(copilot_tools.ToolInputError, match="no current price for ZZZZ"):
+        copilot_tools.call(FixtureEvidence(), "propose_plan", {**plan, "symbol": "ZZZZ"})
+    with pytest.raises(copilot_tools.ToolInputError, match="already past the invalidation"):
+        copilot_tools.call(FixtureEvidence(), "propose_plan", {**plan, "entry_trigger": {**plan["entry_trigger"], "price": 99.0},
+                                                               "invalidation": {**plan["invalidation"], "price": 95.0}})
+
+
+def test_plan_a_trade_reads_the_chart_and_proposes_one_plan_card_that_saves_nothing():
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import LevelAlert, TradeCapture
+    with Session(engine) as db:
+        before = (len(db.exec(select(TradeCapture)).all()), len(db.exec(select(LevelAlert)).all()))
+    events = _turn([{"role": "user", "content": "Context: Plan a trade: yolo NBIS calls"}], copilot.FakeAdapter(0))
+    assert {e["name"] for e in events if e["type"] == "tool"} == {"owner_context", "get_quotes", "get_chart_context", "propose_plan"}
+    [card] = [e for e in events if e["type"] == "proposal"]
+    assert (card["kind"], card["symbol"], card["direction"], card["instrument"]) == ("trade_plan", "NBIS", "long", "calls")
+    # Levels drafted from the 5m chart: a close above the level overhead, out through the level below.
+    assert card["entry_trigger"] == {"condition": "closes_beyond", "price": 95.9, "interval": "5m"}
+    assert card["invalidation"] == {"condition": "crosses", "price": 92.3, "interval": None} and card["last"] == 94.35
+    assert "Nothing is saved or armed until you confirm it." in _text(events)
+    with Session(engine) as db:
+        assert (len(db.exec(select(TradeCapture)).all()), len(db.exec(select(LevelAlert)).all())) == before
+
+
+def test_the_prompt_pressure_tests_a_trade_before_one_plan_card():
+    prompt = " ".join(copilot.SYSTEM_PROMPT.split())
+    for phrase in ('carries the "Plan a trade:" context', "pressure-test the idea", "Ask only for what is missing",
+                   "do not interrogate them: draft concrete levels from get_chart_context", "exactly one propose_plan kind=trade_plan",
+                   "counts toward the two proposals an answer may make", "nothing exists until they confirm it"):
+        assert phrase in prompt, phrase
+
+
 # --------------------------------------------------------------------------- memory proposals and the prompt's frame
 
 @pytest.mark.parametrize("args", [
