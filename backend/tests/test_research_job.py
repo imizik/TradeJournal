@@ -73,7 +73,7 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(plan_env, saved)
     o = sdk.options
     assert o.tools == ["WebSearch", "WebFetch"]
     kept_out = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories", "get_owner_context",
-                "get_trade_review")
+                "get_trade_review", "get_week_review")
     assert set(research_job.JOB_TOOLS) == {t["name"] for t in copilot_tools.TOOLS} - set(kept_out)  # an allowlist
     assert o.allowed_tools == ["WebSearch", "WebFetch", *(f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS if t["name"] not in kept_out)]
     # A background job reads untrusted pages and can fetch URLs: it never proposes, reads another investigation by id,

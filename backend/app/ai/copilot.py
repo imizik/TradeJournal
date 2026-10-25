@@ -96,6 +96,12 @@ now (the mark, open P&L, peak and give-back, time held, days to expiry) and the 
 as the fourth question frames it: has anything changed the thesis, or only the position? Compare with the plan's \
 invalidation and time stop if one was captured, and say so when none was. Never tell them to sell or hold as an order; \
 say what each choice means and leave the decision to them.
+- When the owner asks to review their week, or their message carries the "Review my week" context, call \
+get_week_review (no week_start unless they name a week). Lead with planned vs unplanned (trades with a plan captured before \
+the entry, late, or none, and how each did) and the plans' follow-through (invalidation hit while held and out within 15 \
+minutes or not, time stops), then alerts, habits against the baseline and the best and worst exits. Name at most one or two \
+things to practice next week, each grounded in a count from the review. Say plainly when the sample is too small to show a \
+change. Propose a memory only if the owner states a lesson.
 - If asked to make a plan, you may propose a concise conditional plan (thesis, trigger, invalidation, what to watch, \
 size/risk notes as questions for the trader). When it has a concrete price level to watch or a question worth \
 revisiting, also propose that step with propose_plan (at most two per answer): the owner sees it as a card with \
@@ -356,6 +362,19 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if "review my week" in lower:
+            if isinstance(last["content"], str) and allow_tools:
+                named = re.search(r"review my week of (\d{4}-\d{2}-\d{2})", lower)
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_week_review",
+                                       "input": {"week_start": named.group(1)} if named else {}}], "tool_use", _zero_usage(), self.model)
+                return
+            text = self._week(results.get("get_week_review") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "remember" in lower and allow_tools and isinstance(last["content"], str):
             said = re.sub(r"^.*?remember\b[:,]?\s*(that\s+)?", "", prompt, count=1, flags=re.I | re.S).strip() or prompt
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "propose_plan",
@@ -457,6 +476,32 @@ class FakeAdapter:
         lines.append("- Thesis vs execution: the result alone says nothing about the thesis; the question here is the exit"
                      + (f" ({'; '.join(matched)})." if matched else "."))
         lines.append("- Lesson: one trade cannot support one. If you want something kept, say it in your words and I'll put it on a card.")
+        return head + "\n".join(lines)
+
+    @staticmethod
+    def _week(data: dict) -> str:
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if data.get("state") != "ok":
+            return head + f"I couldn't review that week: {data.get('reason') or 'the review was not readable'}."
+        week, t, planned, follow = data["week"], data["totals"], data["planned"], data.get("follow_through") or {}
+
+        def money(v) -> str:
+            return "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
+        lines = [f"**Week of {week['start']}**: {t['trades']} trades, {money(t['pnl_usd'])}, win rate {t['win_rate_pct']}%."]
+        lines.append("- Planned vs unplanned: " + "; ".join(
+            f"{b['label'].lower()} {b['trades']} ({money(b['pnl_usd'])})" for b in planned.values()) + ".")
+        if follow.get("state") == "ok":
+            lines.append(f"- Follow-through: the invalidation hit while held on {follow['invalidation_hit_while_held']} planned "
+                         f"trade(s); out within 15 minutes on {follow['out_within_15m']}, held past it on {follow['held_past_15m']} "
+                         f"({money(follow['held_past_pnl_usd'])}). Time stops due: {follow['time_stops']['due']}.")
+        alerts = data.get("alerts") or {}
+        then = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in (alerts.get("then") or {}).items()) or "nothing to match"
+        lines.append(f"- Phone alerts: {alerts.get('sent', 0)} sent; then {then}.")
+        practice = ("being out within 15 minutes when the invalidation breaks" if follow.get("held_past_15m")
+                    else "capturing the plan before the entry" if planned["none"]["trades"] else "the same plan-first routine")
+        lines.append(f"- To practice next week: {practice}.")
+        if (data.get("sample") or {}).get("small"):
+            lines.append(f"- Small sample: {data['sample']['trades']} trades cannot show that a habit changed.")
         return head + "\n".join(lines)
 
     @staticmethod
@@ -619,6 +664,12 @@ def _summary(name: str, data: dict) -> str:
         pnl = ("" if value is None else f" {value:+,.2f} $") + (" open" if t.get("status") == "open" else "")
         return (f"{t.get('contract')}{pnl} · plan {(data.get('plan') or {}).get('state', 'unavailable')} · "
                 f"{(data.get('alerts') or {}).get('sent', 0)} alerts")[:160]
+    if name == "get_week_review":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        t, p = data.get("totals") or {}, data.get("planned") or {}
+        return (f"week of {(data.get('week') or {}).get('start')}: {t.get('trades')} trades {t.get('pnl_usd', 0):+,.2f} $ · planned "
+                + "/".join(str((p.get(k) or {}).get("trades", 0)) for k in ("pre_entry", "late_or_unverified", "none")))[:160]
     if name == "get_saved_research":
         return f"{len(data.get('items', []))} saved"
     if name in ("owner_context", "get_owner_context"):
