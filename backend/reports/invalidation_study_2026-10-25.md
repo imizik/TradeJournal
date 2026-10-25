@@ -372,7 +372,7 @@ Same definitions and columns as the primary table. Empty time-stop risk sets are
 | `summary-iex.json` | `6a1501e5726edde80172cd1353a49c0ff56110e9a2e4efd43f8b41d5b5a93cfe` |
 | `summary-sip.json` | `212b39098a03084541d4bde3cc83aa3b2b034da2e9a32737fdf36a39b6b6cdd5` |
 | `study.py` | `55fb1b45d21af244f9ae3d7f234e831eaad5b31f60adebab131b4b566ac35dc4` |
-| `recovery.py` | `dfaf2b5ff02f96d3859c060bc1035b38f79b3197d5b14e39b9f0f0ef8f9d7c36` |
+| `recovery.py` | `da918831390b9b91d6cfd17ea90ffdec1940b0bda5e9d668d76fd2fa6c4f0599` |
 | `summarize.py` | `cd23ca1ab95d2111771321435daa468a6fc2f01b8f9d2d49fe9799e0d7d292de` |
 | `check.py` | `5419aba0847b8cdcaa4384a89a8717bd48a406915ee796c5dfefc48e522902d7` |
 
@@ -601,7 +601,7 @@ for feed in ['iex','sip']:
    r['recovered_high']=any(h>=0 for c,h in later) if later else None
    r['post_marks']=len(later)
    r['red']=r.get('mark') is not None and r['mark']<0
-  
+
  (R/f'rows-{feed}.json').write_text(json.dumps(rows))
  print('recovery updated',feed,flush=True)
 ```
