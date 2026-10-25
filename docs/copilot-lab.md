@@ -48,6 +48,9 @@ untouched.
   - **Trade page:** a closed trade offers "Review with copilot" next to
     "Open on chart", which deep-links with `Review this trade: <trade id>` as
     the context (Review a closed trade, below).
+  - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
+    `Plan this position: …` when a new position has no plan (see the
+    [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.

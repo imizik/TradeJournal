@@ -1,0 +1,247 @@
+"""Unplanned-entry nudge: one phone ping when a position opens with no plan covering it.
+
+The owner often enters without a plan. When a new position's first entry fill
+is ``GRACE_MINUTES`` old (default 3, so a plan captured just before it, or a
+fill email's delay, does not false-fire) and no plan is linked to the trade
+(``capture_links.for_trade``) or suggested for it by an unlinked plan from the
+last day (``capture_links.suggestions``), one ntfy notification goes out. It
+opens the copilot (``/copilot-lab?symbol=…&context=…``) to plan the position.
+Nothing here places, changes or suggests an order.
+
+Off unless ``PLAN_NUDGE_ENABLED=true``. It runs on the level alert monitor's
+loop beside position alerts, at most every ``RUN_SECONDS``, in the regular
+session only. Only entries since this process started count, so switching it
+on (or a restart) never nudges positions already open. Webull is dormant and
+left out. One nudge per position, anchored in the first entry fill's source
+identity as position alerts are, so a trade rebuild never re-sends. At most
+``PLAN_NUDGE_DAILY_CAP`` (default 5) are sent a day; a position past the cap
+is recorded ``skipped`` and not nudged later. Delivery is at-most-once, as
+position alerts': a send that may have reached ntfy is ``unknown`` and never
+resent, and a nudge not sent within ``EXPIRE_SECONDS`` or before the close is
+dropped.
+"""
+
+from datetime import date, datetime, timedelta
+import logging
+import os
+import time
+from typing import Callable
+from urllib.parse import quote, urlencode
+import uuid
+
+from sqlalchemy import func, or_, update
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
+
+from app.engine import capture_links, ntfy
+from app.engine.chart_journal import contract_label, stamp
+from app.engine.chart_math import ET, session_windows
+from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc, anchor
+from app.models import Account, Fill, PlanNudge, Trade, TradeCapture, TradeFill
+
+log = logging.getLogger(__name__)
+
+RUN_SECONDS = 30
+EXPIRE_SECONDS = 15 * 60
+CONTEXT_MAX = 300  # the copilot deep link's limit (frontend/lib/copilot.ts)
+
+
+def enabled() -> bool:
+    return os.environ.get("PLAN_NUDGE_ENABLED", "").lower() == "true"
+
+
+def _setting(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, "").strip()))
+    except ValueError:
+        return default
+
+
+def grace_seconds() -> int:
+    return _setting("PLAN_NUDGE_GRACE_MINUTES", 3) * 60
+
+
+def daily_cap() -> int:
+    return _setting("PLAN_NUDGE_DAILY_CAP", 5)
+
+
+def _short_label(nudge: PlanNudge, expiration: date | None, option_type: str | None, strike) -> str:
+    if expiration is None:
+        return f"{nudge.ticker} stock"
+    return f"{nudge.ticker} {expiration.month}/{expiration.day} {float(strike):g}{'C' if option_type == 'call' else 'P'}"
+
+
+def _size(nudge: PlanNudge) -> str:
+    """'2 at $3.10' for options (premium per share), '10 shares at $120.00' for stock."""
+    if nudge.contract.endswith(" stock"):
+        return f"{nudge.contracts:g} share{'' if nudge.contracts == 1 else 's'} at ${nudge.price:,.2f}"
+    return f"{nudge.contracts:g} at ${nudge.price / 100:,.2f}"
+
+
+def message(nudge: PlanNudge, title_label: str) -> tuple[str, str, str]:
+    """Title, body and the app path the notification opens."""
+    verb = "sold to open" if nudge.side == "sell_to_open" else "opened"
+    context = (f"Plan this position: I just {verb} {nudge.contract} ({_size(nudge)}) without a plan. "
+               "Help me set an invalidation and a time stop.")[:CONTEXT_MAX]
+    path = "/copilot-lab?" + urlencode({"symbol": nudge.ticker, "context": context}, quote_via=quote)
+    return f"{title_label}: no plan yet", f"{verb.capitalize()} {_size(nudge)}. Tap for a 20-second plan.", path
+
+
+def _regular(calendar, day: date):
+    hours = calendar.hours(day) if calendar is not None else None
+    return next((w for w in session_windows(day, hours) if w[0] == "regular"), None)
+
+
+class PlanNudges:
+    def __init__(self, engine, calendar=None, *, clock: Callable[[], float] = time.time):
+        self.engine = engine
+        self.calendar = calendar
+        self.clock = clock
+        self.started_at = clock()  # entries before this are never nudged
+        self._last_run = 0.0
+
+    def run(self) -> None:
+        now = self.clock()
+        if now - self._last_run < RUN_SECONDS:
+            return
+        self._last_run = now
+        moment = datetime.fromtimestamp(now, ET)
+        regular = _regular(self.calendar, moment.date())
+        if regular is None or not regular[1] <= moment.hour * 60 + moment.minute < regular[2]:
+            return
+        with Session(self.engine) as db:
+            found = self._due(db, now, moment.date())
+            if not found:
+                return
+            planned = self._suggested(db, now)
+            for nudge in found:
+                if nudge.trade_id in planned or capture_links.for_trade(db, nudge.trade_id):
+                    continue
+                self._record(db, nudge, moment.date())
+
+    def _due(self, db: Session, now: float, today: date) -> list[PlanNudge]:
+        """Open trades whose first entry is new since start, past the grace period, today, and not nudged yet."""
+        trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                         .where(Trade.status == "open", or_(Account.broker.is_(None), Account.broker != "webull"))).all()
+        if not trades:
+            return []
+        rows = db.exec(select(TradeFill.trade_id, Fill.id, Fill.side, Fill.contracts, Fill.price, Fill.executed_at, Fill.raw_email_id)
+                       .join(Fill, Fill.id == TradeFill.fill_id)
+                       .where(TradeFill.trade_id.in_([t.id for t in trades]), TradeFill.role == "entry")).all()
+        entries: dict = {}
+        for row in rows:
+            entries.setdefault(row.trade_id, []).append(row)
+        out = []
+        for trade in trades:
+            fills = entries.get(trade.id)
+            if not fills:
+                continue
+            first = min(fills, key=lambda f: (f.executed_at, f.raw_email_id or "", str(f.id)))
+            if not capture_links.reliable(first.executed_at) or first.executed_at.date() != today:
+                continue
+            opened = stamp(first.executed_at)
+            # A whole-minute fill time: the fill may have come any time in that minute.
+            if opened + 60 <= self.started_at or now < opened + grace_seconds():
+                continue
+            key = anchor(fills)
+            if db.exec(select(PlanNudge.id).where(PlanNudge.account_id == trade.account_id, PlanNudge.source_key == key)).first():
+                continue
+            held = sum(f.contracts for f in fills)
+            out.append(PlanNudge(
+                account_id=trade.account_id, source_key=key, trade_id=trade.id, ticker=trade.ticker,
+                contract=contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
+                side=first.side, contracts=held, price=round(sum(f.contracts * f.price for f in fills) / held, 2),
+                opened_at=first.executed_at, detected_at=_utc(now)))
+        return out
+
+    def _suggested(self, db: Session, now: float) -> set[uuid.UUID]:
+        """Trades an unlinked plan from the last day is suggested for: a plan the owner has, waiting to be linked."""
+        recent = list(db.exec(select(TradeCapture).where(TradeCapture.received_at >= _utc(now) - timedelta(days=1),
+                                                         TradeCapture.not_taken_at.is_(None))).all())
+        links = capture_links.link_rows(db, recent)
+        unlinked = [c for c in recent if links[c.id]["link"] is None]
+        return {uuid.UUID(s["trade_id"]) for rows in capture_links.suggestions(db, unlinked).values() for s in rows}
+
+    def _record(self, db: Session, nudge: PlanNudge, today: date) -> None:
+        start = datetime(today.year, today.month, today.day, tzinfo=ET)
+        counted = db.exec(select(func.count()).select_from(PlanNudge).where(
+            PlanNudge.detected_at >= _utc(start.timestamp()), PlanNudge.detected_at < _utc((start + timedelta(days=1)).timestamp()),
+            PlanNudge.delivery != "skipped")).one()
+        if counted >= daily_cap():
+            nudge.delivery = "skipped"
+            nudge.last_error = f"Today's limit of {daily_cap()} plan nudges was reached, so it was not sent."
+        db.add(nudge)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()  # another process recorded this position a moment earlier
+            return
+        log.info("Plan nudge %s for %s", nudge.delivery, nudge.contract)
+
+    # ------------------------------------------------------------ deliver
+
+    def deliver(self) -> None:
+        now = self.clock()
+        with Session(self.engine) as db:
+            # A claim this old may have reached ntfy before the pass died: never resent.
+            db.exec(update(PlanNudge).where(PlanNudge.delivery == "sending", PlanNudge.claimed_at < _utc(now - CLAIM_SECONDS))
+                    .values(delivery="unknown", last_error="The send was interrupted and may have reached the phone, so it was not resent."))
+            db.commit()
+            due = db.exec(select(PlanNudge.id).where(PlanNudge.delivery == "pending")
+                          .where((PlanNudge.next_attempt_at.is_(None)) | (PlanNudge.next_attempt_at <= _utc(now)))
+                          .order_by(PlanNudge.detected_at).limit(20)).all()
+        for nudge_id in due:
+            self._send(nudge_id)
+
+    def _send(self, nudge_id: uuid.UUID) -> None:
+        now = self.clock()
+        with Session(self.engine) as db:
+            claimed = db.exec(update(PlanNudge).where(PlanNudge.id == nudge_id, PlanNudge.delivery == "pending")
+                              .values(delivery="sending", claimed_at=_utc(now)))
+            db.commit()
+            if claimed.rowcount != 1:
+                return  # another process or pass has it
+            nudge = db.get(PlanNudge, nudge_id)
+            moment = datetime.fromtimestamp(now, ET)
+            regular = _regular(self.calendar, moment.date())
+            if now - _epoch(nudge.detected_at) > EXPIRE_SECONDS or regular is None or moment.hour * 60 + moment.minute >= regular[2]:
+                nudge.delivery, nudge.last_error = "expired", "Not sent within 15 minutes or before the close, so it was not sent late."
+                db.commit()
+                return
+            if not ntfy.configured():
+                nudge.delivery, nudge.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
+                nudge.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
+                db.commit()
+                return
+            trade = db.get(Trade, nudge.trade_id)
+            label = _short_label(nudge, trade.expiration, trade.option_type, trade.strike) if trade else nudge.contract
+            title, body, path = message(nudge, label)
+            nudge.attempts += 1
+            try:
+                ntfy.publish(title, body, priority=4, tags=("memo",), path=path, direct_click=True)
+            except ntfy.NtfyError as exc:
+                if not _surely_unsent(exc):
+                    nudge.delivery, nudge.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                else:
+                    nudge.delivery, nudge.last_error = "pending", str(exc)
+                    nudge.next_attempt_at = _utc(now + BACKOFF[min(nudge.attempts, len(BACKOFF)) - 1])
+                db.commit()
+                log.warning("Plan nudge delivery failed (attempt %d): %s", nudge.attempts, exc)
+                return
+            nudge.delivery, nudge.delivered_at, nudge.last_error = "sent", _utc(self.clock()), None
+            db.commit()
+
+
+def for_trade(db: Session, trade: Trade) -> list[dict]:
+    """This position's nudge, shaped as a trade-page phone alert row."""
+    entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
+                      .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
+    if not entries:
+        return []
+    rows = db.exec(select(PlanNudge).where(PlanNudge.account_id == trade.account_id, PlanNudge.source_key == anchor(entries))).all()
+    return [{
+        "id": str(n.id), "contract": n.contract, "kind": "plan_nudge", "detected_at": int(_epoch(n.detected_at)),
+        "contracts": n.contracts, "entry": _size(n), "mark": None, "bid": None, "quoted_at": None, "gain": None, "gain_pct": None,
+        "peak_gain": None, "peak_gain_pct": None, "delivery": n.delivery, "error": n.last_error,
+        "delivered_at": int(_epoch(n.delivered_at)) if n.delivered_at else None,
+    } for n in rows]

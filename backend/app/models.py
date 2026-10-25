@@ -582,6 +582,35 @@ class PositionAlert(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class PlanNudge(SQLModel, table=True):
+    """One unplanned-entry phone nudge (``engine/plan_nudges.py``), written once per
+    position: the unique position anchor keeps a restart or a second process from
+    recording it twice. Delivery is an outbox on the same row, as position alerts are."""
+
+    __tablename__ = "plan_nudge"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source_key", name="uq_plan_nudge_position"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)  # the first entry fill's source identity
+    trade_id: uuid.UUID  # the trade when it fired (trades are rebuilt; read by source_key)
+    ticker: str
+    contract: str  # e.g. "NBIS 11/21/26 100C"
+    side: str  # the first entry's opening side
+    contracts: float  # entered so far
+    price: float  # share-weighted entry price, in the fill's units (per contract for options)
+    opened_at: datetime  # the first entry fill, a New York wall clock
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | skipped
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class CaptureTemplate(SQLModel, table=True):
     """A favorite pre-trade template (Charts C3.4): the user's setup label and
     their own invalidation/exit wording. Editing bumps ``revision``; a capture

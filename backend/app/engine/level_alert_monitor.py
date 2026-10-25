@@ -66,11 +66,12 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
-                 positions=None):
+                 positions=None, nudges=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.positions = positions  # Open-trade give-back and expiry alerts, when POSITION_ALERTS_ENABLED
+        self.nudges = nudges  # Unplanned-entry plan nudges, when PLAN_NUDGE_ENABLED
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -136,11 +137,18 @@ class LevelAlertMonitor:
                     if self.scanner is not None:
                         await asyncio.to_thread(self.scanner.run)
                 finally:
-                    if self.positions is not None:
-                        try:
-                            await asyncio.to_thread(self.positions.run)
-                        finally:
-                            await asyncio.to_thread(self.positions.deliver)
+                    try:
+                        if self.positions is not None:
+                            try:
+                                await asyncio.to_thread(self.positions.run)
+                            finally:
+                                await asyncio.to_thread(self.positions.deliver)
+                    finally:
+                        if self.nudges is not None:
+                            try:
+                                await asyncio.to_thread(self.nudges.run)
+                            finally:
+                                await asyncio.to_thread(self.nudges.deliver)
 
     async def _run_alerts(self) -> None:
         await self._record_found()
