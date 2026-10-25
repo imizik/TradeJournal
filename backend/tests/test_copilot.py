@@ -981,7 +981,7 @@ def test_plan_a_trade_reads_the_chart_and_proposes_one_plan_card_that_saves_noth
     from app.models import LevelAlert, TradeCapture
     with Session(engine) as db:
         before = (len(db.exec(select(TradeCapture)).all()), len(db.exec(select(LevelAlert)).all()))
-    events = _turn([{"role": "user", "content": "Plan a trade: yolo NBIS calls"}], copilot.FakeAdapter(0))
+    events = _turn([{"role": "user", "content": "Context: Plan a trade: yolo NBIS calls"}], copilot.FakeAdapter(0))
     assert {e["name"] for e in events if e["type"] == "tool"} == {"owner_context", "get_quotes", "get_chart_context", "propose_plan"}
     [card] = [e for e in events if e["type"] == "proposal"]
     assert (card["kind"], card["symbol"], card["direction"], card["instrument"]) == ("trade_plan", "NBIS", "long", "calls")
@@ -995,7 +995,7 @@ def test_plan_a_trade_reads_the_chart_and_proposes_one_plan_card_that_saves_noth
 
 def test_the_prompt_pressure_tests_a_trade_before_one_plan_card():
     prompt = " ".join(copilot.SYSTEM_PROMPT.split())
-    for phrase in ('starts with "Plan a trade"', "pressure-test the idea", "Ask only for what is missing",
+    for phrase in ('carries the "Plan a trade:" context', "pressure-test the idea", "Ask only for what is missing",
                    "do not interrogate them: draft concrete levels from get_chart_context", "exactly one propose_plan kind=trade_plan",
                    "counts toward the two proposals an answer may make", "nothing exists until they confirm it"):
         assert phrase in prompt, phrase

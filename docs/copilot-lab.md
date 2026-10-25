@@ -339,8 +339,8 @@ nothing exists until the owner confirms.
   memory store's schema, kinds and sources are the same as Jo's.
 - **Trade plan:** one whole plan for a trade the owner wants to take, the
   card the "plan before you enter" loop ends in. When the owner says they
-  want to trade something, or the message starts with "Plan a trade" (the
-  front door's prefill), the system prompt has the model pressure-test it
+  want to trade something, or the message carries the "Plan a trade:"
+  context (the front door's prefill), the system prompt has the model pressure-test it
   first: ask only for what is missing (why now, where it is wrong, how long),
   challenge it with the chart, the group comparison and the owner context
   (their history and habits), and when they are vague ("yolo NBIS calls")
