@@ -154,6 +154,23 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     assert "2 memories" in copilot_context.summary(pack) and "1 past trades in NBIS" in copilot_context.summary(pack)
 
 
+@pytest.mark.parametrize(("minutes_from_boundary", "expected_days"), [(-1, 8), (0, 9), (48, 9)])
+def test_days_held_uses_context_clock_at_elapsed_day_boundary(db, monkeypatch, minutes_from_boundary, expected_days):
+    class LaterWallClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            later = NOW + timedelta(days=2)
+            return later.astimezone(tz) if tz else later.replace(tzinfo=None)
+
+    monkeypatch.setattr(copilot_book, "datetime", LaterWallClock)
+    monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda _: None)
+    opened = (TODAY - timedelta(days=9)).astimezone(UTC)
+    as_of = opened + timedelta(days=9, minutes=minutes_from_boundary)
+    pack = copilot_context.owner_context("CRWV", session=db, now=as_of)
+    stock = next(row for row in pack["positions"]["positions"] if row["symbol"] == "CRWV")
+    assert stock["days_held"] == expected_days
+
+
 def test_a_large_book_keeps_the_turns_symbol_ahead_of_the_cut(db):
     db.add_all([fill(100 + i, f"A{i:02d}", "buy", 1, 10, TODAY.replace(tzinfo=None) - timedelta(days=1)) for i in range(20)])
     db.commit()
