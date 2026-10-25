@@ -722,7 +722,7 @@ def test_status_says_whether_alerts_from_the_lab_are_accepted(monkeypatch):
     with TestClient(app) as client:
         for model, expected in ((Refuses, False), (Accepts, True)):
             monkeypatch.setattr(level_alerts, "AlertCreate", model)
-            assert client.get("/copilot/status").json()["capabilities"] == {"copilot_alerts": expected}
+            assert client.get("/copilot/status").json()["capabilities"]["copilot_alerts"] is expected
 
 
 def test_quote_for_confirming_is_fresh_only_when_recent_and_priced(monkeypatch):

@@ -8,7 +8,7 @@ untouched.
 
 ## What runs
 
-- `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
+- `GET /copilot/status`, `POST /copilot/chat` (Server-Sent Events) and `POST /copilot/transcribe` in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
   (`frontend/components/copilot/CopilotLab.tsx`). It is in the nav ("Copilot") only for the owner while the lab is on.
 - One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
@@ -20,6 +20,36 @@ untouched.
   - The nav, every panel and every Ask copilot button share one
     `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
     `useCopilotOn`).
+- **Hold to talk** (`frontend/components/copilot/VoiceInput.tsx`, every
+  variant): a 44 px mic beside Send, shown only while the lab is on and
+  something can listen.
+  - Press and hold to talk, release to transcribe. A short tap switches to
+    tap-to-stop. Sliding off the button, Cancel, a hidden page or closing the
+    panel drops the clip unsent. A clip stops at 30 seconds and is
+    transcribed. A live timer shows while it listens. A refused microphone
+    says how to allow it.
+  - "Auto-send what I say" (default on, remembered in this
+    browser) sends the words as soon as they are transcribed, after anything
+    already in the box. Off, or while a turn is running, the words wait in
+    the box with "Review the message, then Send."
+  - `POST /copilot/transcribe` (owner-only like every `/copilot` route)
+    takes either `audio` (with `audio_ms`), capped like voice plans at
+    3 MB and 30 seconds, or `text`. Audio goes to the voice-plan Whisper
+    transcriber (`app/engine/transcribe.py` `transcribe_bytes`). Whisper is
+    primed with the owner's most-traded tickers, then Radar's. The clip
+    sits in a temporary file only while it is read. Neither audio nor words
+    are logged or stored. `text` is what the browser's own recognition
+    heard: when `GET /copilot/status`
+    `capabilities.transcriber.configured` is false the page uses
+    `webkitSpeechRecognition`/`SpeechRecognition` instead (iOS Safari has
+    it). With neither, there is no mic. An unconfigured server answers 503
+    with the reason.
+  - Spoken tickers (`app/engine/spoken_tickers.py`): "N-B-I-S", "en bee eye
+    ess", "en bis", "N-BIS" and company names ("Nebius", "applied digital")
+    become the symbol when it is in Radar's universe or the owner's traded
+    tickers. Names come from the AI buildout seed. A phrase changes only
+    when exactly one known symbol fits, so "I see you are why" and
+    "coherent" stay as heard.
 - Entry points (nothing is ever sent until the owner presses Send):
   - **Plan a trade** (`frontend/components/copilot/PlanATrade.tsx`): the
     primary-styled way in, so an impulse gets pressure-tested before the

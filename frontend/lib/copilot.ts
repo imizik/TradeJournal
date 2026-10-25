@@ -7,8 +7,9 @@ export type CopilotStatus =
   | { enabled: true; backend: "fake" | "anthropic" | "plan"; evidence: "fixture" | "live" | "replay"; model: string; effort: string;
       replay?: { at: string; session: string; passes_before: number; last_pass_at: string } | { error: string };
       fallbacks: boolean; key_configured: boolean; plan_configured: boolean; tools: string[];
-      /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. */
-      capabilities?: { copilot_alerts: boolean };
+      /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. transcriber: whether hold-to-talk
+       * can use this server's speech to text (else the browser's own, where it has one). */
+      capabilities?: { copilot_alerts: boolean; transcriber?: { configured: boolean; provider: string } };
       limits: { max_rounds: number; max_tool_calls: number; tool_timeout_s: number; turn_timeout_s: number } };
 
 export type ToolEvent = {
@@ -264,6 +265,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as T;
+}
+
+/** A spoken message as text, spoken tickers written as symbols: a clip for this server's transcriber (deleted once
+ * read), or what the browser's own recognition heard. */
+export type Transcribed = { text: string; heard: string; tickers: { heard: string; symbol: string }[]; provider: string };
+export async function transcribeSpeech(input: { audio: Blob; ms: number } | { text: string }, signal?: AbortSignal): Promise<Transcribed> {
+  const form = new FormData();
+  if ("text" in input) form.append("text", input.text.slice(0, 4000));
+  else {
+    form.append("audio", input.audio, input.audio.type.includes("mp4") ? "clip.m4a" : "clip.webm");
+    form.append("audio_ms", String(Math.round(input.ms)));
+  }
+  const response = await fetch(apiUrl("/copilot/transcribe"), { method: "POST", body: form, cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Transcription failed (${response.status}).`);
+  return body as Transcribed;
 }
 
 export const freshQuote = (symbol: string) => request<FreshQuote>(`/copilot/quote?symbol=${encodeURIComponent(symbol)}`);
