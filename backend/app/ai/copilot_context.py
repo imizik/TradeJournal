@@ -88,7 +88,7 @@ def _section(name: str, build):
 
 def _positions(db, symbol: str | None, now_et: datetime) -> dict:
     from app.engine import capture_links, position_alerts
-    pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol)
+    pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol, now=now_et)
     today = now_et.date()
     rows = []
     for trade, row in pairs[:MAX_POSITIONS]:

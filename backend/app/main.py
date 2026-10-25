@@ -24,6 +24,7 @@ from app.routers import exit_habits as exit_habits_router
 from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
+from app.routers import personal_replay as personal_replay_router
 from app.routers import advisor_shadow as advisor_shadow_router
 from app.routers import cloud_practice, cloud_choices, research_studio
 from app.routers import access as access_router
@@ -418,6 +419,7 @@ app.include_router(webull.router, prefix="/webull", tags=["webull"])
 app.include_router(gmail_push.router, prefix="/gmail", tags=["gmail"])
 app.include_router(packets.router, prefix="/packets", tags=["packets"])
 app.include_router(practice_router.router, prefix="/practice", tags=["practice"])
+app.include_router(personal_replay_router.router, prefix="/practice", tags=["personal decision replay"])
 app.include_router(advisor_shadow_router.router, prefix="/advisor-shadow", tags=["advisor-shadow"])
 app.include_router(decisions_router.router, prefix="/decisions", tags=["decisions"])
 app.include_router(

@@ -143,8 +143,7 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     assert call["plan"]["setup"] == "Group recovery" and call["plan"]["wording"].startswith("Buy the first higher low")
     assert "92.50" in call["plan"]["wording"] and "account_label" not in text  # the owner's words stay whole; the label never joins them
     stock = held["positions"][1]
-    opened = TODAY - timedelta(days=9)  # whole days on the real clock: 8 before 10:05 New York, 9 after
-    assert "held_minutes" not in stock and "giveback" not in stock and stock["days_held"] == (datetime.now(UTC) - opened).days
+    assert "held_minutes" not in stock and "giveback" not in stock and stock["days_held"] == 9
 
     assert pack["history"]["closed_trades"] == 1 and pack["history"]["wins"] == 0 and pack["history"]["realized_usd"] == -50.0
     assert [t["pnl_usd"] for t in pack["history"]["recent"]] == [-50.0] and "account" not in pack["history"]["recent"][0]
@@ -162,6 +161,23 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     assert [h["habit"] for h in habits["habits"]] == [label for _, label in exit_habits.HABITS]
     assert copilot_context.summary(pack).startswith("2 open (NBIS ") and "give-back fired" in copilot_context.summary(pack)
     assert "2 memories" in copilot_context.summary(pack) and "1 past trades in NBIS" in copilot_context.summary(pack)
+
+
+@pytest.mark.parametrize(("minutes_from_boundary", "expected_days"), [(-1, 8), (0, 9), (48, 9)])
+def test_days_held_uses_context_clock_at_elapsed_day_boundary(db, monkeypatch, minutes_from_boundary, expected_days):
+    class LaterWallClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            later = NOW + timedelta(days=2)
+            return later.astimezone(tz) if tz else later.replace(tzinfo=None)
+
+    monkeypatch.setattr(copilot_book, "datetime", LaterWallClock)
+    monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda _: None)
+    opened = (TODAY - timedelta(days=9)).astimezone(UTC)
+    as_of = opened + timedelta(days=9, minutes=minutes_from_boundary)
+    pack = copilot_context.owner_context("CRWV", session=db, now=as_of)
+    stock = next(row for row in pack["positions"]["positions"] if row["symbol"] == "CRWV")
+    assert stock["days_held"] == expected_days
 
 
 def test_a_large_book_keeps_the_turns_symbol_ahead_of_the_cut(db):
