@@ -12,7 +12,7 @@ import json
 import math
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable
 
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
@@ -143,6 +143,20 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["trade_id"],
                          "properties": {"trade_id": {"type": "string",
                                                      "description": "The trade's id (a UUID) from the owner's message"}}},
+    },
+    {
+        "name": "get_week_review",
+        "description": "A review of the owner's trading week (Monday to Friday, New York), by default the latest week "
+                       "with closed trades: totals (trades, P&L $ and on premium, win rate); trades with a plan captured "
+                       "before the entry, late or unverified, and none, each with count, P&L and win rate; for planned "
+                       "trades, whether the plan's invalidation fired while held and whether they were out within 15 "
+                       "minutes, and the time stops due and what followed; phone alerts and what followed; this week's "
+                       "four exit habits against the baseline; and the 3 best and 3 worst exits by option give-back and by "
+                       "P&L. Journal facts and the owner's plans.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"week_start": {"type": "string",
+                                                       "description": "Optional: any date (YYYY-MM-DD) in the week to review; "
+                                                                      "omit for the latest week with closed trades"}}},
     },
     {
         "name": "propose_plan",
@@ -324,6 +338,16 @@ def validate(name: str, args: Any) -> dict:
             return {"trade_id": str(uuid.UUID(str(args.get("trade_id"))))}
         except ValueError:
             raise ToolInputError("trade_id must be a trade's id (a UUID)") from None
+    if name == "get_week_review":
+        if args.get("week_start") is None:
+            return {}
+        try:
+            day = date.fromisoformat(str(args["week_start"]))
+        except ValueError:
+            raise ToolInputError("week_start must be a date, YYYY-MM-DD") from None
+        if not date(2020, 1, 1) <= day <= date.today() + timedelta(days=7):
+            raise ToolInputError("week_start must be a date from 2020 to this week")
+        return {"week_start": day.isoformat()}
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -471,7 +495,7 @@ def _iso(value) -> str | None:
 CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
-BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review"})
+BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review"})
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -639,6 +663,10 @@ class LiveEvidence:
         except copilot_review.ReviewNotFound:
             raise ToolInputError("no trade in the journal has that id") from None
 
+    def get_week_review(self, week_start: str | None = None) -> dict:
+        from app.ai import copilot_review
+        return copilot_review.week_review(week_start)
+
 
 PROVENANCE = {
     "get_group_comparison": ("Radar recorded passes (Tradier sampled trades)", "recorded"),
@@ -659,6 +687,8 @@ PROVENANCE = {
     "get_trade_review": ("Journal trade, fills and path metrics · current mark when open · captured plan · phone alerts and exit "
                          "habits (TradeJournal)",
                          "saved"),
+    "get_week_review": ("Journal week: closed trades, captured plans and their alerts and time stops · phone alerts and exit "
+                        "habits (TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

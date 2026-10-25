@@ -173,6 +173,75 @@ class FixtureEvidence:
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)
 
+    def get_week_review(self, week_start: str | None = None) -> dict:
+        """SIMULATED: shaped like ``copilot_review.week_review`` for a week of eight closed trades, mostly unplanned, with
+        one invalidation that fired while held and was ridden past 15 minutes."""
+        from app.ai.copilot_review import BUCKETS, WEEK_PROVENANCE
+
+        def bucket(key, trades, pnl, paid, wins):
+            return {"label": dict(BUCKETS)[key], "trades": trades, "pnl_usd": pnl,
+                    "pnl_on_premium_pct": round(100 * pnl / paid, 1) if paid else None,
+                    "win_rate_pct": round(100 * wins / trades, 1) if trades else None}
+
+        def row(contract, entry, exit_, pnl, pct, giveback, plan, note):
+            return {"contract": contract, "entry": entry, "exit": exit_, "pnl_usd": pnl, "pnl_pct": pct,
+                    **({"giveback_usd": giveback} if giveback is not None else {}), "plan": plan, "note": note}
+        def bare(r):
+            return {k: v for k, v in r.items() if k != "note"}
+        best = [row("CRWV 11/21/26 140C", "Tue 10-20 09:48", "10:31", 214.0, 35.7, 40.0, "pre_entry",
+                    "Simulated: peaked +43% ($254), gave back $40; held 43 min"),
+                row("APLD 11/07/26 30C", "Wed 10-21 10:02", "10:40", 96.0, 24.0, 22.0, "none",
+                    "Simulated: peaked +30% ($118), gave back $22; held 38 min"),
+                row("NBIS 11/21/26 100C", "Thu 10-22 09:41", "10:12", 38.0, 6.1, 61.0, "late_or_unverified",
+                    "Simulated: peaked +16% ($99), gave back $61; held 31 min")]
+        worst = [row("NBIS 11/21/26 100C", "Tue 10-20 10:05", "14:40", -110.0, -17.7, 234.0, "pre_entry",
+                     "Simulated: peaked +20% ($124), gave back $234; invalidation hit, out 41 min later; 1 alert(s), then closed_later"),
+                 row("IREN 10/30/26 15C", "Fri 10-23 13:55", "15:58", -180.0, -60.0, 228.0, "none",
+                     "Simulated: peaked +16% ($48), gave back $228; held 123 min"),
+                 row("CIFR 10/24/26 6C", "Mon 10-19 11:20", "Fri 10-23 16:00", -95.0, -100.0, 120.0, "none",
+                     "Simulated: peaked +26% ($25), gave back $120; expired worthless")]
+        return {
+            "state": "ok", "as_of": AT, "simulated": True, "provenance": WEEK_PROVENANCE,
+            "week": {"start": "2026-10-19", "end": "2026-10-23", "default": week_start is None},
+            "sample": {"trades": 8, "small": True,
+                       "note": "Only 8 closed trades: describe the week, but it cannot show that a habit changed."},
+            "totals": {"trades": 8, "pnl_usd": -27.0, "pnl_on_premium_pct": -0.9, "win_rate_pct": 50.0, "expired_worthless": 1,
+                       "accounts": ["Simulated brokerage"]},
+            "planned": {"pre_entry": bucket("pre_entry", 2, 104.0, 1220.0, 1),
+                        "late_or_unverified": bucket("late_or_unverified", 1, 38.0, 620.0, 1),
+                        "none": bucket("none", 5, -169.0, 1010.0, 2)},
+            "follow_through": {
+                "state": "ok", "planned_trades": 3, "with_invalidation_alert": 2, "invalidation_hit_while_held": 1,
+                "out_within_15m": 0, "held_past_15m": 1, "held_past_pnl_usd": -110.0,
+                "hits": [{"contract": "NBIS 11/21/26 100C", "level": 92.5, "hit_at": "2026-10-20T17:59:00Z", "minutes_to_exit": 41,
+                          "then": "held_past_15m", "pnl_usd": -110.0}],
+                "time_stops": {"due": 2, "sent": 1, "skipped": 1, "then": {"closed_later": 1},
+                               "rows": [{"symbol": "CRWV", "said": "out by 10:30", "due": "2026-10-20T14:30:00Z", "delivery": "skipped"},
+                                        {"symbol": "NBIS", "said": "out by 14:00", "due": "2026-10-20T18:00:00Z", "delivery": "sent",
+                                         "then": "closed_later"}]},
+                "then": "Simulated. hit_while_held: the plan's invalidation alert fired between the entry and the last exit; "
+                        "out_15m: fully closed within 15 minutes of it."},
+            "alerts": {"state": "ok", "sent": 3, "by_kind": {"giveback": 2, "hold_hour": 1},
+                       "then": {"closed_later": 2, "closed_15m": 1}, "vs_closing_at_alert_usd": -142.0, "compared": 3,
+                       "rule": "vs_closing_at_alert_usd > 0 means what was done after the alerts beat closing at each alert's mark"},
+            "habits": {"state": "ok", "long_options": 8, "habits": [
+                {"habit": "Was up 10% and $50, then closed red", "this_week": "2 of 8", "this_week_pct": 25.0,
+                 "this_week_pnl_usd": -290.0, "baseline_pct": 18.6, "baseline_trades": 285},
+                {"habit": "Held an hour or more, closed red the same day", "this_week": "2 of 8", "this_week_pct": 25.0,
+                 "this_week_pnl_usd": -290.0, "baseline_pct": 21.4, "baseline_trades": 285},
+                {"habit": "Expired worthless", "this_week": "1 of 8", "this_week_pct": 12.5, "this_week_pnl_usd": -95.0,
+                 "baseline_pct": 9.1, "baseline_trades": 285},
+                {"habit": "Opened while the day was already green", "this_week": "3 of 7", "this_week_pct": 42.9,
+                 "this_week_pnl_usd": -61.0, "baseline_pct": 33.0, "baseline_trades": 270}],
+                "baseline": "every closed long option before 2026-10-21, when the phone alerts went live"},
+            "exits": {"state": "ok", "by_pnl": {"best": best, "worst": worst},
+                      "by_giveback": {"best": [bare(best[1]), bare(best[0])], "worst": [bare(worst[0]), bare(worst[1])]},
+                      "rule": "by_pnl best is the highest P&L; by_giveback best gave back the least from its option peak."},
+            "units": "SIMULATED fixture. P&L in $; percentages are percent; times New York (hit_at and due in UTC).",
+            "note": "A week: lead with planned vs unplanned and the plans' follow-through; name at most one or two things to "
+                    "practice next week, grounded in these counts.",
+        }
+
     def get_trade_review(self, trade_id: str) -> dict:
         """SIMULATED: shaped like ``copilot_review.trade_review`` for a closed NBIS call that gave back its gain, or, for
         ``OPEN_REVIEW_ID``, for the open NBIS call ``get_positions`` shows."""
