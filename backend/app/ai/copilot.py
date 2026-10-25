@@ -90,6 +90,12 @@ until they do. Never propose a memory from measured counts alone, and never one 
 what the plan assumed with what happened (entry, path, alerts, exit), and keep thesis apart from execution: a losing \
 trade can have a sound thesis and a winning one a poor exit. Say plainly when one trade cannot support a lesson, and \
 propose a memory only if the owner states one.
+- When the owner asks about an open position, or their message carries the "Review this position:" context from a \
+position alert or trade page, call get_trade_review with the trade id from their message: for an open position it adds \
+now (the mark, open P&L, peak and give-back, time held, days to expiry) and the latest alert. Lead with the decision now, \
+as the fourth question frames it: has anything changed the thesis, or only the position? Compare with the plan's \
+invalidation and time stop if one was captured, and say so when none was. Never tell them to sell or hold as an order; \
+say what each choice means and leave the decision to them.
 - If asked to make a plan, you may propose a concise conditional plan (thesis, trigger, invalidation, what to watch, \
 size/risk notes as questions for the trader). When it has a concrete price level to watch or a question worth \
 revisiting, also propose that step with propose_plan (at most two per answer): the owner sees it as a card with \
@@ -338,7 +344,7 @@ class FakeAdapter:
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
         review = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", lower)
-        if review and "review this trade" in lower:
+        if review and ("review this trade" in lower or "review this position" in lower):
             if isinstance(last["content"], str) and allow_tools:
                 yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_trade_review",
                                        "input": {"trade_id": review.group(1)}}], "tool_use", _zero_usage(), self.model)
@@ -423,6 +429,19 @@ class FakeAdapter:
 
         def money(v) -> str:
             return "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
+        if t.get("status") == "open":
+            now, last = data.get("now") or {}, (data.get("now") or {}).get("latest_alert")
+            lines = [f"**{t['contract']}**, open {now.get('minutes_held', '?')} minutes: {money(now.get('open_pnl_usd'))} "
+                     f"({now.get('open_pnl_pct', '?')}%) now, peak {money(now.get('peak_gain_usd'))}, "
+                     f"{now.get('days_to_expiry', '?')} days to expiry."]
+            if last:
+                lines.append(f"- Latest alert: {last['kind']} at {last['at']}, then {money(last.get('gain_usd'))}.")
+            lines.append(f"- The plan said: {plan.get('wording') or plan.get('setup') or 'no wording saved'}. Is its invalidation hit?"
+                         if plan.get("state") == "ok" else "- No plan was captured, so there is no invalidation or time stop to hold it to.")
+            lines.append("- The decision now: the thesis and the position are separate questions. Time held and gain given back "
+                         "are about the position; only news, the group or the level speak to the thesis.")
+            lines.append("- Your call: closing keeps what is left, holding keeps the thesis exposure. I won't make it an order.")
+            return head + "\n".join(lines)
         sent = (data.get("alerts") or {}).get("alerts") or []
         matched = [h["habit"].lower() for h in (data.get("habits") or {}).get("habits", []) if h["this_trade"] == "yes"]
         lines = [f"**{t['contract']}**, {t['entry_time']} to {t['exit_time']}: {money(t['pnl_usd'])} ({t['pnl_pct']}%), "
@@ -596,7 +615,8 @@ def _summary(name: str, data: dict) -> str:
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]
         t = data.get("trade") or {}
-        pnl = "" if t.get("pnl_usd") is None else f" {t['pnl_usd']:+,.2f} $"
+        value = (data.get("now") or {}).get("open_pnl_usd") if t.get("status") == "open" else t.get("pnl_usd")
+        pnl = ("" if value is None else f" {value:+,.2f} $") + (" open" if t.get("status") == "open" else "")
         return (f"{t.get('contract')}{pnl} · plan {(data.get('plan') or {}).get('state', 'unavailable')} · "
                 f"{(data.get('alerts') or {}).get('sent', 0)} alerts")[:160]
     if name == "get_saved_research":

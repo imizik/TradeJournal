@@ -91,7 +91,11 @@ untouched.
     characters) in the message box.
   - **Trade page:** a closed trade offers "Review with copilot" next to
     "Open on chart", which deep-links with `Review this trade: <trade id>` as
-    the context (Review a closed trade, below).
+    the context; an open one offers "Ask copilot about this position" with
+    `Review this position: <trade id>` (Review a trade or position, below).
+  - **Position alerts:** with the lab on, each position alert push carries an
+    "Ask copilot" action beside "Open app" that deep-links with the alert's
+    context (Review a trade or position, below).
   - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
     `Plan this position: …` when a new position has no plan (see the
     [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
@@ -156,8 +160,8 @@ untouched.
   - `get_trades(symbol, limit ≤ 10)` lists recent closed trades in one symbol,
     newest first: entry and exit time and price, P&L in $ and percent of the
     premium paid, hold time and up to 4 tags of at most 24 characters.
-  - `get_trade_review(trade_id)` reviews one closed trade
-    (`backend/app/ai/copilot_review.py`; Review a closed trade, below).
+  - `get_trade_review(trade_id)` reviews one closed trade or open position
+    (`backend/app/ai/copilot_review.py`; Review a trade or position, below).
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -214,8 +218,8 @@ untouched.
   position). "Nothing here changes the plan" and "not worth a trade" are
   complete answers.
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
-  context block (below); memory proposals (Confirm a plan); closed-trade
-  reviews (Review a closed trade); plans, and pressure-testing a trade the
+  context block (below); memory proposals (Confirm a plan); trade and
+  position reviews (Review a trade or position); plans, and pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
@@ -327,18 +331,25 @@ Background research jobs get neither this tool nor `propose_plan`. They read
 untrusted pages and can fetch URLs, so injected text must not make them read
 another investigation by id.
 
-## Review a closed trade
+## Review a trade or position
 
 On a closed (or expired) trade's page, while the lab is on, **Review with
 copilot** opens `/copilot-lab?symbol=<ticker>&context=Review this trade: <trade
-id>`. The message box holds `Context: Review this trade: <id>`, unsent; the
-owner sends it, adding a question if they like. The system prompt asks the
-model to call:
+id>`. On an open trade's page **Ask copilot about this position** opens it with
+`Review this position: <trade id>`: the primary action inside the selected
+alert a position alert's link opens (`TradePhoneAlerts.tsx`), a header link
+otherwise. The position alert push itself carries an **Ask copilot** ntfy
+action next to Open app (both need `ALERT_APP_URL`; this one also
+`COPILOT_ENABLED=true`), whose context adds what the alert saw, e.g.
+`Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
+(at most 300 characters, `position_alerts.ask_copilot_path`). The message box
+holds the context, unsent; the owner sends it, adding a question if they like.
+The system prompt asks the model to call:
 
 - `get_trade_review(trade_id)` (read-only, provenance `saved`). The id is
-  checked as a UUID; an unknown id is refused, and an open or Webull trade
-  reads `unavailable`. It returns, each section labelled like the owner
-  context pack:
+  checked as a UUID; an unknown id is refused, and a Webull trade reads
+  `unavailable`. For a closed trade it returns, each section labelled like the
+  owner context pack:
   - `trade` (measured): contract, account label, quantity, entry and exit
     (New York wall clock with its offset), prices, premium paid, P&L in $ and
     %, hold minutes, status, expired worthless, and how many entry and exit
@@ -358,7 +369,19 @@ model to call:
     only;
   - `comparison` (measured): the symbol's latest four other closed trades, as
     `get_trades` shows them, without the account.
-- Then the model compares what the plan assumed with what happened, keeps
+- For an open position it returns `trade` (no exit or P&L yet), `plan`,
+  `alerts` (what followed so far: `still_open` until the contracts close) and
+  `comparison`, plus `now`: the mark and open P&L in $ and % through
+  `copilot_book.position_rows` (the dashboard's quote engine; a missing quote
+  says so), minutes and days held (calendar time, weekends included), days
+  to expiry and expires-today, the give-back
+  watch's peak gain, the $ given back from it and its state, and the latest
+  alert (kind, time, gain at the alert). No `path` or `habits` until it
+  closes. The prompt asks the model to lead with the decision now (the fourth
+  question: thesis vs position), compare with the plan's invalidation and
+  time stop if one was captured, and never tell the owner to sell or hold as
+  an order.
+- Then, for a closed trade, the model compares what the plan assumed with what happened, keeps
   thesis apart from execution, says when one trade cannot support a lesson,
   and proposes a memory only if the owner states one.
 - The review is held under 5,800 characters (inside a tool result's 6,000):
@@ -369,12 +392,15 @@ model to call:
   owner's own message. Research jobs never get the tool, and "What changed?"
   leaves it out of an investigation's evidence times, as it does the owner
   context.
-- Fixture mode serves a simulated review marked `simulated`; replay says it is
-  unavailable (the journal now would show what happened after the frozen
-  moment). The fake model answers "review this trade" with a UUID by calling
-  the tool and writing a short scripted comparison.
+- Fixture mode serves a simulated review marked `simulated` (the open NBIS
+  call for `copilot_fixture.OPEN_REVIEW_ID`, a closed one for any other id);
+  replay says it is unavailable (the journal now would show what happened
+  after the frozen moment). The fake model answers "review this trade" or
+  "review this position" with a UUID by calling the tool and writing a short
+  scripted comparison or decision-now summary.
 - Tests: `backend/tests/test_copilot_review.py`,
-  `frontend/e2e/copilot-review.spec.ts`.
+  `backend/tests/test_position_alerts.py` (the push action),
+  `frontend/e2e/copilot-review.spec.ts`, `frontend/e2e/position-copilot.spec.ts`.
 
 ## Confirm a plan
 
