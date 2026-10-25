@@ -1,6 +1,6 @@
 """Thesis watch (docs/copilot-lab.md § Thesis watch): watched set, schedule, each trigger, dedupe, caps, the reassess
 hand-off and the prepared deep link. Seeded journal, stubbed news, quotes, bars and earnings; nothing leaves the test."""
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
@@ -11,8 +11,8 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.engine import copilot_investigations as inv
 from app.engine import jo_briefing, research_queue, thesis_watch
 from app.engine.chart_math import ET
-from app.engine.thesis_watch import ThesisWatch, Watched
-from app.models import Account, Fill, ResearchJob, ThesisWatchTrigger, Trade
+from app.engine.thesis_watch import ThesisWatch
+from app.models import Account, Fill, ResearchJob, ThesisWatchTrigger
 from app.routers.fills import _rebuild_trades
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
@@ -441,7 +441,7 @@ def test_the_owner_s_own_investigation_is_preferred_and_a_research_output_is_nev
     monkeypatch.setenv("RESEARCH_QUEUE_ENABLED", "true")
     with Session(engine) as db:
         own = inv.create(inv.InvestigationFields(title="NBIS thesis", symbol="NBIS"), session=db)["id"]
-        output = inv.save_research_result(title="Reassess: NBIS thesis", symbol="NBIS", findings={"summary": "holds"}, session=db)["id"]
+        inv.save_research_result(title="Reassess: NBIS thesis", symbol="NBIS", findings={"summary": "holds"}, session=db)  # newer, but an output
         only_output = inv.save_research_result(title="CRWV deal", symbol="CRWV", findings={"summary": "terms"}, session=db)["id"]
     with Session(engine) as db:
         rows = {r.symbol: r for r in thesis_watch.watched_set(db)}
