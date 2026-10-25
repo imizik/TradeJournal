@@ -51,6 +51,32 @@ untouched.
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
+- **Open threads**, the lab page's home. While the lab is on, no
+  investigation is open and nothing has been sent, the page (not the panel
+  beside Charts or Radar) shows what is live above the conversation:
+  - positions: symbol, instrument, unrealized %, give-back state, and days to
+    expiry (options) or time held (stocks);
+  - armed alerts: symbol, condition, price, label;
+  - open investigations: title and conclusion, each a link that opens it in
+    place;
+  - waiting research jobs.
+
+  It reads `GET /copilot/threads`, which returns `{positions, investigations,
+  watches, as_of}` from the no-symbol owner context pack (Owner context,
+  below). A position is cut to the fields above: no account, entry, mark or
+  captured plan. Memories and habits are never returned, and the only ids are
+  investigations'. It is a page read, not a turn, so the pack's size cap does
+  not apply (`owner_context(None, bounded=False)`); each section keeps its row
+  caps. A section the server could not read says so. Fixture mode serves the
+  simulated pack. Replay says it is unavailable.
+
+  Opening reads, never sends: a turn costs money, as with What changed?. One
+  button, **What matters right now?**, starts a new conversation with no
+  symbol and sends one fixed prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`):
+  "What matters right now across my open positions, armed watches and open
+  investigations? Lead with anything that needs a decision today; say plainly
+  if nothing does." Browser proof: `frontend/e2e/copilot-home.spec.ts`
+  (including a 375 px phone check).
 - `GET`/`POST /copilot/investigations` and `GET`/`PUT /copilot/investigations/{id}`
   hold saved investigations (below).
 - All these routes are owner-only: they are in no assistant grant
@@ -189,6 +215,14 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     research jobs that name it (question jobs) or are linked to one of its
     investigations (reassessments); Radar event jobs name an event, not a
     symbol, so they are not matched. At most 6.
+- **No symbol** (a turn with an empty symbol box, and Open threads): there is
+  no `history`, and memories are the general ones. `investigations` are the
+  open ones across every symbol, newest first, at most 4, each with its symbol.
+  The same conclusion rule holds: a copilot conversation's is shown, a
+  research job's is not. `watches` are the armed level alerts across every
+  symbol, newest first, at most 6, each with its symbol, then at most 3 queued
+  or running research jobs of any kind, with the symbols they name. The shed
+  order below is unchanged, and watches are never shed.
 - A section that cannot be read says `unavailable`; the others stand. If the
   whole read fails or exceeds the tool timeout, the block says the context was
   unavailable and the turn goes on (the read itself finishes in its worker

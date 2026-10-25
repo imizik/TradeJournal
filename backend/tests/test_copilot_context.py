@@ -17,7 +17,7 @@ from app.engine import capture_links, copilot_investigations, day_journal, exit_
 from app.engine.chart_math import ET
 from app.engine.level_alert_monitor import create_alert
 from app.engine.quotes import OptionQuoteResult
-from app.models import Account, Fill, PositionAlert, PositionWatch, Trade, TradeCapture, TradeFill
+from app.models import Account, Fill, PositionAlert, PositionWatch, ResearchJob, Trade, TradeCapture, TradeFill
 from app.routers.fills import _rebuild_trades
 from sqlmodel import select
 
@@ -165,13 +165,84 @@ def test_a_large_book_keeps_the_turns_symbol_ahead_of_the_cut(db):
     assert total == 22 and [t.ticker for t, _ in rows] == ["A00", "A01", "A02"]  # without ``first``, alphabetical as before
 
 
-def test_no_symbol_gives_the_book_habits_general_memories_and_today_only(db):
+def test_no_symbol_gives_the_book_and_every_open_thread_but_no_history(db):
+    saved = _seed_world(db)
+    pack = copilot_context.owner_context(None, session=db, now=NOW)
+    text = _secret_free(pack)
+    assert "history" not in pack and {"positions", "habits", "memories", "today", "investigations", "watches"} <= set(pack)
+    assert [m["text"] for m in pack["memories"]["memories"]] == ["I give gains back after the first hour."]
+    by_source = {r["source"]: r for r in pack["investigations"]["investigations"]}
+    assert by_source["copilot"]["id"] == saved["id"] and by_source["copilot"]["symbol"] == "NBIS"
+    assert by_source["copilot"]["conclusion"] == "Group confirms; NBIS lags."
+    assert by_source["research_job"]["title"] == "NBIS financing" and "conclusion" not in by_source["research_job"]
+    assert "IGNORE PRIOR RULES" not in text
+    [alert] = pack["watches"]["watches"]
+    assert (alert["watch"], alert["symbol"], alert["price"], alert["label"]) == ("level alert", "NBIS", 92.5, "NBIS loses the bounce low")
+    summary = copilot_context.summary(pack)
+    assert summary.startswith("2 open") and "2 investigations" in summary and "1 watches" in summary
+
+
+def test_no_symbol_caps_open_investigations_and_lists_alerts_and_waiting_jobs_across_symbols(db):
     _seed_world(db)
+    closed = copilot_investigations.create(copilot_investigations.InvestigationFields(
+        title="Closed CRWV idea", symbol="CRWV", status="closed", transcript=[{"role": "user", "content": "q"}], evidence=[]), session=db)
+    for i in range(4):
+        copilot_investigations.create(copilot_investigations.InvestigationFields(
+            title=f"Open {i}", symbol="AMD", conclusion=f"c{i}", transcript=[{"role": "user", "content": "q"}], evidence=[]), session=db)
+    stamp = datetime.now(UTC).timestamp()
+    for i, (symbol, price) in enumerate([("CRWV", 140), ("CRWV", 141), ("AMD", 160), ("AMD", 161), ("APLD", 30), ("APLD", 31), ("CRWV", 142)]):
+        create_alert(db, symbol=symbol, price=price, reference=price - 5, condition="touches", interval=None, session="regular",
+                     source_kind="level", source_id=None, label=f"{symbol} {price}", now=stamp + i + 1)
+    db.add_all([ResearchJob(kind="question", dedupe_key="q1", input_json=json.dumps({"question": "Is AMD's AI ramp real?", "symbols": ["AMD"]})),
+                ResearchJob(kind="radar_event", dedupe_key="r1", status="running", input_json=json.dumps({"event_id": "e1"})),
+                ResearchJob(kind="question", dedupe_key="q2", status="done", input_json=json.dumps({"question": "Finished", "symbols": ["NBIS"]}))])
+    db.commit()
     pack = copilot_context.owner_context(None, session=db, now=NOW)
     _secret_free(pack)
-    assert set(pack) >= {"positions", "habits", "memories", "today"} and not {"history", "investigations", "watches"} & set(pack)
-    assert [m["text"] for m in pack["memories"]["memories"]] == ["I give gains back after the first hour."]
-    assert copilot_context.summary(pack).startswith("2 open")
+    rows = pack["investigations"]["investigations"]
+    assert len(rows) == copilot_context.MAX_INVESTIGATIONS and all(r["status"] == "open" for r in rows)
+    assert closed["id"] not in {r["id"] for r in rows} and [r["title"] for r in rows] == ["Open 3", "Open 2", "Open 1", "Open 0"]
+    watches = pack["watches"]["watches"]
+    alerts = [w for w in watches if w["watch"] == "level alert"]
+    assert len(alerts) == copilot_context.MAX_WATCHES and [a["label"] for a in alerts[:2]] == ["CRWV 142", "APLD 31"]  # newest armed first
+    assert "NBIS loses the bounce low" not in {a["label"] for a in alerts}  # the oldest falls off the cap
+    jobs = [w for w in watches if w["watch"].startswith("research job")]
+    assert {j["watch"] for j in jobs} == {"research job (question)", "research job (radar_event)"}  # every waiting kind; the done one is out
+    question = next(j for j in jobs if j["watch"] == "research job (question)")
+    assert {k: v for k, v in question.items() if k != "due"} == {"watch": "research job (question)", "status": "queued", "symbols": ["AMD"],
+                                                                "question": "Is AMD's AI ramp real?"}
+    per_symbol = copilot_context.owner_context("AMD", session=db, now=NOW)["watches"]["watches"]  # unchanged: one symbol, no symbol field
+    assert {w.get("label") for w in per_symbol if w["watch"] == "level alert"} == {"AMD 160", "AMD 161"}
+    assert all("symbol" not in w for w in per_symbol) and len(per_symbol) == 3
+
+
+def test_a_full_no_symbol_pack_stays_under_the_cap_and_keeps_its_watches(db):
+    long = "word " * 80
+    db.add_all([fill(200 + i, f"B{i:02d}", "buy", 1, 10, TODAY.replace(tzinfo=None) - timedelta(days=1)) for i in range(12)])
+    db.commit()
+    _rebuild_trades(db, "test")
+    base = {"source": "owner_statement", "status": "active", "owner_confirmed": True}
+    for i in range(10):
+        jo_briefing.save_memory(db, jo_briefing.MemorySave(operation_id=f"big{i}", kind="lesson", original_text=f"{i} {long}",
+                                                           interpretation=long, **base))
+        day_journal.append(db, day=NOW.date(), operation_id=f"day{i}", kind="outlook", text=f"{i} {long}")
+        copilot_investigations.create(copilot_investigations.InvestigationFields(
+            title=f"{i} {long}"[:120], symbol="NBIS", conclusion=f"{i} {long}"[:280], transcript=[{"role": "user", "content": "q"}], evidence=[]), session=db)
+    stamp = datetime.now(UTC).timestamp()
+    for i in range(6):
+        create_alert(db, symbol=["NBIS", "CRWV", "AMD"][i % 3], price=200 + i, reference=190, condition="touches", interval=None,
+                     session="regular", source_kind="level", source_id=None, label=long, now=stamp + i)
+    db.add_all([ResearchJob(kind="question", dedupe_key=f"big{i}", input_json=json.dumps({"question": long, "symbols": ["NBIS", "AMD"]}))
+                for i in range(5)])
+    db.commit()
+    pack = copilot_context.owner_context(None, session=db, now=NOW)
+    assert len(json.dumps(pack, default=str, separators=(",", ":"))) <= copilot_context.MAX_PACK_CHARS
+    assert len(pack["watches"]["watches"]) == copilot_context.MAX_WATCHES + copilot_context.MAX_WAITING_JOBS
+    assert pack["positions"]["positions"] and pack["habits"]["state"] == "ok"
+    assert pack["trimmed"] is True and "entries" not in pack["today"]  # shed in the usual order; watches are never shed
+    page = copilot_context.owner_context(None, session=db, now=NOW, bounded=False)  # the Open threads read keeps every section
+    assert "trimmed" not in page and len(page["investigations"]["investigations"]) == copilot_context.MAX_INVESTIGATIONS
+    assert page["positions"]["shown"] == copilot_context.MAX_POSITIONS
 
 
 def test_one_failing_source_leaves_the_rest_standing(db, monkeypatch):
@@ -292,7 +363,7 @@ def test_get_owner_context_is_validated_routed_and_never_a_job_tool(monkeypatch)
     assert copilot_tools.validate("get_owner_context", {"symbol": "crwv"}) == {"symbol": "CRWV"}
     with pytest.raises(copilot_tools.ToolInputError):
         copilot_tools.validate("get_owner_context", {"symbol": "../etc"})
-    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None: {"state": "ok", "symbol": symbol})
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True: {"state": "ok", "symbol": symbol})
     assert copilot_tools.LiveEvidence().get_owner_context("CRWV") == {"state": "ok", "symbol": "CRWV"}
     assert copilot_tools.provenance("get_owner_context", {"state": "ok"}, "live")["kind"] == "saved"
     assert "get_owner_context" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_owner_context" not in research_job.LAB_TOOLS
@@ -306,3 +377,50 @@ def test_memories_take_a_symbol_and_put_its_memories_first(db):
     assert [m["text"] for m in copilot_book.memories(10, session=db)["memories"]] == [
         "CRWV is the group leader.", "I give gains back after the first hour.", "NBIS is a two-year infrastructure thesis for me."]
     assert copilot_tools.validate("get_memories", {"symbol": "nbis", "limit": 3}) == {"limit": 3, "symbol": "NBIS"}
+
+
+# --------------------------------------------------------------------------- the lab's Open threads route
+
+def test_the_threads_route_serves_the_no_symbol_pack_without_memories_habits_or_identifiers(db, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    saved = _seed_world(db)
+    real = copilot_context.owner_context
+    asked = []
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True:
+                        asked.append((symbol, bounded)) or real(symbol, session=db, now=NOW, bounded=bounded))
+    monkeypatch.delenv("COPILOT_ENABLED", raising=False)
+    with TestClient(app) as client:
+        assert client.get("/copilot/threads").status_code == 503  # off unless the lab is on
+        monkeypatch.setenv("COPILOT_ENABLED", "true")
+        monkeypatch.setenv("COPILOT_EVIDENCE", "live")
+        body = client.get("/copilot/threads").json()
+        assert asked == [(None, False)] and set(body) == {"positions", "investigations", "watches", "as_of"}
+        text = _secret_free(body)
+        assert "memories" not in text and "habits" not in text and "Group recovery" not in text and "account" not in text
+        call = next(p for p in body["positions"]["positions"] if p["symbol"] == "NBIS")
+        assert body["positions"]["count"] == 2 and call["giveback"] == "fired" and call["days_to_expiry"] == 12
+        assert not {"avg_entry", "mark", "plan", "phone_alerts", "opened_at"} & set(call)
+        assert saved["id"] in {r["id"] for r in body["investigations"]["investigations"]}
+        assert body["watches"]["watches"][0]["symbol"] == "NBIS"
+
+        monkeypatch.setenv("COPILOT_EVIDENCE", "fixture")  # simulated, shaped the same
+        simulated = client.get("/copilot/threads").json()
+        assert [p["symbol"] for p in simulated["positions"]["positions"]] == ["NBIS", "CRWV"]
+        assert {w["watch"] for w in simulated["watches"]["watches"]} == {"level alert", "research job (reassess)"}
+        assert [r["source"] for r in simulated["investigations"]["investigations"]] == ["copilot", "research_job"]
+        assert "conclusion" not in simulated["investigations"]["investigations"][1]
+
+
+def test_the_threads_route_reports_a_failed_section_honestly(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.setenv("COPILOT_EVIDENCE", "live")
+    monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True: {
+        "state": "ok", "as_of": "t", "positions": {"state": "unavailable"}, "investigations": {"state": "ok", "investigations": []},
+        "watches": {"state": "ok", "watches": []}, "memories": {"state": "ok", "memories": [{"text": "secret"}]}})
+    with TestClient(app) as client:
+        body = client.get("/copilot/threads").json()
+    assert body == {"positions": {"state": "unavailable"}, "investigations": {"state": "ok", "investigations": []},
+                    "watches": {"state": "ok", "watches": []}, "as_of": "t"}
