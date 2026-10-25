@@ -106,11 +106,57 @@ def test_the_bar_store_builds_once_and_rebuilds_when_new_days_arrive(script, tmp
     assert source.calls == len(days)
     assert (tmp_path / "bars" / "sip" / "AAA_15m.pkl").exists()
     again = script.BarStore(source, tmp_path)
-    assert again.load("AAA", 15, date(2024, 1, 31)).days[-1] == date(2024, 1, 31)
+    assert again.load("AAA", 15, None).days[-1] == LAST
     assert source.calls == len(source.days("AAA"))  # read from the pickle
     newer = StubSource(last=date(2024, 10, 4))
     assert script.BarStore(newer, tmp_path).load("AAA", 15, None).days[-1] == date(2024, 10, 4)
     assert newer.calls == len(newer.days("AAA"))
+
+
+def test_stage_cutoff_precedes_source_reads_and_later_caches(script, tmp_path):
+    """An exam cached first must not be opened or served to a screen request."""
+    discovery, confirm, exam = date(2024, 9, 30), date(2026, 3, 31), date(2026, 4, 1)
+
+    class Source:
+        feed = "sip"
+        allowed = None
+
+        def __init__(self):
+            self.reads = []
+
+        def days(self, ticker):
+            return [discovery, confirm, exam]
+
+        def minute_bars(self, ticker, day):
+            assert self.allowed is None or day <= self.allowed, "protected source opened"
+            self.reads.append(day)
+            return [{"t": datetime.combine(day, datetime.min.time(), ET).replace(hour=9, minute=30).isoformat(),
+                     "o": 100, "h": 102, "l": 99, "c": 101, "v": 1000}]
+
+    source = Source()
+    store = script.BarStore(source, tmp_path)
+    assert store.load("AAA", 5, None).days[-1] == exam
+    # A poisoned unbounded disk cache also catches deserialize-then-trim.
+    (tmp_path / "bars" / "sip" / "AAA_5m.pkl").write_bytes(b"do not deserialize exam data")
+    for cutoff in (confirm, discovery):
+        source.allowed = cutoff
+        source.reads.clear()
+        series = store.load("AAA", 5, cutoff)
+        assert series.days[-1] == cutoff
+        assert source.reads == [d for d in source.days("AAA") if d <= cutoff]
+    source.reads.clear()
+    # Discovery disk cache is reusable without opening any minute files.
+    assert script.BarStore(source, tmp_path).load("AAA", 5, discovery).days == [discovery]
+    assert source.reads == []
+
+
+def test_bounded_cache_is_unchanged_by_new_protected_days(script, tmp_path):
+    source = StubSource(last=LAST)
+    before = script.BarStore(source, tmp_path).load("AAA", 15, LAST)
+    newer = StubSource(last=date(2026, 4, 2))
+    after = script.BarStore(newer, tmp_path).load("AAA", 15, LAST)
+    assert newer.calls == 0
+    assert before.time == after.time and before.close == after.close
 
 
 def test_run_judges_a_spec_records_it_and_skips_a_repeat(script, tmp_path, capsys):
@@ -178,6 +224,15 @@ def test_the_committed_specs_parse_and_keep_their_ids():
     assert spec_id(specs["recovery_swing_v0.1_logistic"].parent()) == "re-d5194badb1"
     assert [spec_id(specs[name]) for name in ("recovery_swing_v0.1_logistic", "vwap_reclaim_v0.1", "failed_breakout_v0.1")] == [
         "re-5c58b4e869", "vw-3d24a7243d", "fa-72fca93262"]
+
+
+def test_frozen_orb_rvol_spec_is_exactly_defaults_plus_one_filter():
+    raw = json.loads((RESEARCH / "specs" / "opening_range_breakout_rvol2_v1.json").read_text())
+    frozen = parse_spec(raw)
+    requested = parse_spec({"family": "opening_range_breakout", "filters": [{"feature": "rvol", "min": 2.0}]})
+    assert canonical(frozen) == canonical(requested)
+    assert spec_id(frozen) == "op-998d19a73d"
+    assert spec_id(parse_spec({**raw, "name": "renamed", "notes": "not a new attempt"})) == spec_id(frozen)
 
 
 def test_the_committed_ledger_is_well_formed():
