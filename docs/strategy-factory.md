@@ -497,3 +497,81 @@ Decided with the user on 2026-10-02.
   random sample.
 - Weekly clustering approximates how the names move together; a two-session
   hold can cross into the next week.
+
+## Disabled paper-replay adapter
+
+`backend/scripts/factory_paper_replay.py` is a manual fixture adapter for the
+frozen `research/specs/opening_range_breakout_rvol2_v1.json` candidate
+(`op-998d19a73d`). It reuses `run_candidate` and the family's `on_bar` without
+changing those engines, the candidate, costs, gates, universe or ledger.
+It is not imported by the application or any scheduled job. There is no live
+mode, provider connection, broker order path, migration or candidate evaluation.
+
+From the repository root, with the backend environment installed:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python backend/scripts/factory_paper_replay.py \
+  --demo --output /tmp/factory-paper-demo
+```
+
+This command generates invented MU bars internally; it has no historical input
+path or cache-reader option. Repeating it with the same output directory appends
+zero duplicate observations/events. It writes only `factory-paper-replay.jsonl`
+in the explicit output directory, whose parent must already exist, never the
+Factory ledger or journal database.
+The demo and tests do not spend an attempt and produce no performance score,
+acceptance result or edge claim. Running real candidate data is not authorized by
+this fixture command or by merging its implementation.
+
+The adapter API accepts caller-supplied completed five-minute bars for one core
+symbol. Every prefix goes through the frozen Factory rules and RVOL filter.
+`Series.build` ordinarily labels the last supplied bar as session end; the adapter
+instead labels only the scheduled 16:00/known 13:00 close, so a growing prefix
+cannot spuriously liquidate a position. Batch parity assumes that same complete
+session boundary. Missing 09:30 bars retain Factory's no-range behavior; gaps
+between complete bars retain Factory's next-observed-bar convention. Partial bars
+and a new session without the preceding closing bar are refused. No missing data
+is synthesized. Weekday/alignment and the existing early-close table are checked;
+this is not an exchange-complete holiday or live-calendar service.
+
+Events include accepted/rejected RVOL signals, unfilled gap/session-expired
+signals, ideal model entries and model exits. They carry deterministic identity,
+signal close, order eligibility, observation time and bar interval. Order
+eligibility cannot precede signal receipt. **Ideal bar fills are not executable
+paper fills:** the entry open is already past when its completed bar arrives, and
+an intrabar stop has no known exact timestamp. `paper_fill_at` and
+`paper_fill_price` remain null, with an explicit refusal reason. Session model
+exits have a close timestamp; intrabar exits retain their bar interval instead of
+inventing an exact fill time. No real or paper position is opened.
+
+An optional supplied stock bid/ask observation can compare ask for buys or bid for
+sells with an ideal model price. It requires positive displayed sizes, a valid
+uncrossed book and ordered event/receive timestamps no more than five seconds old
+at observation. Missing, stale, future or invalid quotes remain labelled missing
+or refused; even valid quotes are comparison-only, not fill receipts. This
+five-second diagnostic threshold is not a strategy filter or approved execution
+policy. There is no options selector, sizing, portfolio risk, actual-fill matcher
+or paper performance accounting in this milestone.
+
+One JSONL line commits an input and its new events together under an exclusive
+POSIX file lock, with file flush/fsync, directory and parent-directory fsync,
+and a hash chain. Sync failures propagate; retries repeat those syncs. This uses
+POSIX filesystem durability semantics, not a tested power-cut recovery guarantee. Restart verifies the header,
+source-code fingerprint, chain and replayed event contents. Identical retries
+are no-ops; revised observations, out-of-order bars, price-basis changes (including
+inferred splits), corrupt/torn records or a changed implementation fail closed.
+A torn journal needs explicit manual recovery; the adapter never truncates it.
+The hash chain detects accidental changes, not a malicious writer. Keep these
+scratch receipts separate from actual-fill records. The adapter is bounded to
+2,000 bars and recomputes prefixes: intentionally a test harness, not an efficient
+long-running stream service. SPY context is absent; it is unused by this exact
+RVOL-only candidate, and no other spec is accepted.
+
+`backend/tests/test_factory_paper_replay.py` verifies prefix parity, warmup/filter
+consumption, both directions, stops, gaps, early close, late receipts, quote
+refusals, restart/deduplication, concurrent retries and corruption refusal using
+invented fixtures only. The next milestone is an independently reviewed causal
+quote/order simulator and portfolio controls, followed by separately approved
+prospective observation. Actual fills must be reconciled read-only and kept
+separate from these ideal events. Historical strategy evaluation still requires
+an authorized counted Factory attempt and its protected workflow.
