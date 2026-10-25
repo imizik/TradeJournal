@@ -99,9 +99,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - **Position alerts:** with the lab on, each position alert push carries an
     "Ask copilot" action beside "Open app" that deep-links with the alert's
     context (Review a trade or position, below).
-  - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
-    `Plan this position: …` when a new position has no plan (see the
-    [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
+  - **Phone:** the unplanned-entry nudge (`PLAN_NUDGE_ENABLED`) deep-links here with
+    `Plan this position: …` when a new position has no plan. When a saved plan
+    is suggested for the fill it sends a link ping instead, whose confirm page
+    (`/plans/link`) offers the same **Plan it now** link after "Not this plan"
+    (see the [feature map](agent/feature-map.md), "Plan pings for new positions").
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
@@ -528,6 +530,9 @@ nothing exists until the owner confirms.
     (at most 80) and `size_note` (at most 120).
   - Like a watch, the symbol needs a current price in the turn's evidence,
     and a plan whose price is already past its invalidation is refused.
+  - The saved plan's capture context carries the investigation id, so when the
+    fill arrives and the owner links it from the link ping's confirm page, that
+    page offers "Open its investigation".
   - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
     thesis, entry and invalidation prices, time stop and size as editable
     fields with phone-sized tap targets. Under the time stop it shows when it
