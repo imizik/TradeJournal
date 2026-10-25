@@ -222,3 +222,44 @@ def test_restart_rejects_changed_implementation_and_forged_derived_event(replay,
     path.write_text("\n".join(replay._json(row) for row in rows) + "\n")
     with pytest.raises(ValueError, match="replay differs"):
         replay.ReplayJournal(tmp_path, "MU").append(obs)
+
+
+def test_first_commit_and_retry_sync_file_directory_and_parent(replay, tmp_path, monkeypatch):
+    import os
+    import stat
+    calls = []
+    actual = os.fsync
+
+    def sync(fd):
+        calls.append("directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+        actual(fd)
+
+    monkeypatch.setattr(replay.os, "fsync", sync)
+    output = tmp_path / "new-journal"
+    obs = next(replay.synthetic_demo())
+    replay.ReplayJournal(output, "MU").append(obs)
+    assert calls == ["file", "directory", "directory"]
+    calls.clear()
+    replay.ReplayJournal(output, "MU").append(obs)
+    assert calls == ["file", "directory", "directory"]
+    with pytest.raises(FileNotFoundError):
+        replay.ReplayJournal(tmp_path / "missing-parent" / "journal", "MU").append(obs)
+
+
+def test_directory_sync_failure_is_retried_without_duplicate_events(replay, tmp_path, monkeypatch):
+    import os
+    import stat
+    actual = os.fsync
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("directory sync failed")
+        actual(fd)
+
+    obs = next(replay.synthetic_demo())
+    with monkeypatch.context() as patch:
+        patch.setattr(replay.os, "fsync", fail_directory)
+        with pytest.raises(OSError, match="directory sync failed"):
+            replay.ReplayJournal(tmp_path, "MU").append(obs)
+    assert replay.ReplayJournal(tmp_path, "MU").append(obs) == []
+    assert len((tmp_path / "factory-paper-replay.jsonl").read_text().splitlines()) == 2

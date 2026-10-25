@@ -226,8 +226,20 @@ class ReplayJournal:
         self.header = {"format": "factory-paper-replay-v1", "mode": "disabled_fixture_replay",
                        "ticker": ticker, "spec": canonical(frozen_spec()), "implementation": _implementation()}
 
+    def _sync(self, handle):
+        handle.flush()
+        os.fsync(handle.fileno())
+        # Persist both the journal entry and a newly created output directory.
+        # Its parent must already exist; no unsynced recursive mkdir chain.
+        for directory in (self.directory, self.directory.parent):
+            fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+
     def append(self, observation: Observation) -> list[dict]:
-        self.directory.mkdir(parents=True, exist_ok=True)
+        self.directory.mkdir(exist_ok=True)
         path = self.directory / "factory-paper-replay.jsonl"
         with path.open("a+b") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
@@ -259,6 +271,7 @@ class ReplayJournal:
                 if old.bar.time == observation.bar.time:
                     if old.record() != incoming:
                         raise ValueError("revised observation for committed bar")
+                    self._sync(handle)  # retry after an earlier directory-sync failure
                     return []
             observations.append(observation)
             snapshot = {ev["id"]: ev for ev in replay_snapshot(self.ticker, observations)}
@@ -269,8 +282,7 @@ class ReplayJournal:
             row["hash"] = _digest(row)
             data = ((_json(self.header) + "\n") if not raw else "") + _json(row) + "\n"
             handle.write(data.encode())
-            handle.flush()
-            os.fsync(handle.fileno())
+            self._sync(handle)
             return fresh
 
 

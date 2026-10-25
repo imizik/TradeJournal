@@ -517,7 +517,8 @@ PYTHONPATH=backend backend/.venv/bin/python backend/scripts/factory_paper_replay
 This command generates invented MU bars internally; it has no historical input
 path or cache-reader option. Repeating it with the same output directory appends
 zero duplicate observations/events. It writes only `factory-paper-replay.jsonl`
-in the explicit output directory, never the Factory ledger or journal database.
+in the explicit output directory, whose parent must already exist, never the
+Factory ledger or journal database.
 The demo and tests do not spend an attempt and produce no performance score,
 acceptance result or edge claim. Running real candidate data is not authorized by
 this fixture command or by merging its implementation.
@@ -553,7 +554,9 @@ policy. There is no options selector, sizing, portfolio risk, actual-fill matche
 or paper performance accounting in this milestone.
 
 One JSONL line commits an input and its new events together under an exclusive
-POSIX file lock, with flush/fsync and a hash chain. Restart verifies the header,
+POSIX file lock, with file flush/fsync, directory and parent-directory fsync,
+and a hash chain. Sync failures propagate; retries repeat those syncs. This uses
+POSIX filesystem durability semantics, not a tested power-cut recovery guarantee. Restart verifies the header,
 source-code fingerprint, chain and replayed event contents. Identical retries
 are no-ops; revised observations, out-of-order bars, price-basis changes (including
 inferred splits), corrupt/torn records or a changed implementation fail closed.
