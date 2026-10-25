@@ -126,7 +126,7 @@ class RadarRunner:
         passes = radar_rules.session_passes(self.store.passes(session_date), session_date)
         end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
         if end is None:
-            return 0, 0
+            return [], []
         quotes = self.store.pass_quotes(radar_rules.needed_pass_ids(passes, end))
         saved = [(e, self.store.revisions(e["event_id"])) for e in self.store.events(session_date)
                  if e["rule_version"] == radar_rules.RULE_VERSION]

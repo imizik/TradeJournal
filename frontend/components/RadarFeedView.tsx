@@ -205,10 +205,11 @@ export default function RadarFeedView() {
       if (event) {
         if (rate) {
           // A phone alert's Useful / Not useful action: the tap is the rating, saved once through the usual feedback
-          // route before the event shows, then dropped from the address so a reload cannot repeat it.
-          try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
+          // route before the event shows. It is dropped from the address first, so a reload (or a second effect run
+          // in React strict mode) cannot repeat it.
           const url = new URL(window.location.href); url.searchParams.delete("rate");
           window.history.replaceState(window.history.state, "", url);
+          try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
         }
         if (!day) { try { day = (await getEvent(event)).event.session_date; } catch { /* the feed's default session, then */ } }
       }
