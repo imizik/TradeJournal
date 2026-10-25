@@ -173,7 +173,7 @@ def test_days_held_uses_context_clock_at_elapsed_day_boundary(db, monkeypatch, m
 
     monkeypatch.setattr(copilot_book, "datetime", LaterWallClock)
     monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda _: None)
-    opened = (TODAY - timedelta(days=9)).astimezone(UTC)
+    opened = NOW.astimezone(UTC) - timedelta(days=9)  # the open CRWV fill (fill 2) in the fixture
     as_of = opened + timedelta(days=9, minutes=minutes_from_boundary)
     pack = copilot_context.owner_context("CRWV", session=db, now=as_of)
     stock = next(row for row in pack["positions"]["positions"] if row["symbol"] == "CRWV")
