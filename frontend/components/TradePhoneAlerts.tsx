@@ -84,6 +84,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
     <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{alertId ? "Position alert" : "Phone alerts"}</h2>
     {alertId && !body && <p role="status">{failed ? "This alert could not be loaded. Reload the page to try again." : "Loading the selected alert…"}</p>}
     {alertId && body && !selected && <p role="status">This alert is unavailable for this position. It may have been removed or the link may be incorrect.</p>}
+    {alertId && (failed || (body && !selected)) && askHref && status === "open" && <Link href={askHref}
+      className="mt-2 inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">Ask copilot about this position</Link>}
     {selected && <div data-testid="selected-position-alert" className="space-y-3">
       <div>
         <h3 className="text-base font-semibold">{KIND[selected.kind]}</h3>

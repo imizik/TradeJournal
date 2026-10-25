@@ -336,6 +336,13 @@ def test_ask_copilot_rides_along_only_while_the_lab_is_on(engine, world, monkeyp
                                 f"was {position_alerts._money(alert.peak_gain)}, now {position_alerts._money(alert.gain)}."]
     assert len(query["context"][0]) <= 300 and len("https://isaac-trading-alerts.duckdns.org" + path) <= 500
 
+    with Session(engine) as db:
+        db.get(PositionAlert, alert.id).delivery = "pending"
+        db.commit()
+    monkeypatch.setattr(position_alerts, "ask_copilot_path", lambda alert: 1 / 0)
+    watcher.deliver()  # a broken extra button never holds back the alert
+    assert buttons[2] == () and alerts(engine)[0].delivery == "sent"
+
 
 def test_publish_adds_the_extra_actions_after_open_app(monkeypatch):
     bodies = []

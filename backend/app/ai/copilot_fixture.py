@@ -184,7 +184,7 @@ class FixtureEvidence:
                           "quantity": 2.0, "entry_time": "2026-10-17T09:52:00-04:00", "entry_price": 610.0, "premium_paid_usd": 1220.0,
                           "status": "open", "fills": {"count": 1, "entries": 1, "exits": 0}},
                 "now": {"state": "ok", "mark": 455.0, "mark_as_of": AT, "open_quantity": 2, "avg_entry": 610.0, "open_pnl_usd": -310.0,
-                        "open_pnl_pct": -25.4, "minutes_held": 8840, "days_to_expiry": 29, "expires_today": False,
+                        "open_pnl_pct": -25.4, "minutes_held": 8840, "days_held": 6, "days_to_expiry": 29, "expires_today": False,
                         "peak_gain_usd": 96.0, "peak_gain_pct": 15.7, "given_back_from_peak_usd": 406.0, "giveback_watch": "fired",
                         "latest_alert": {"kind": "giveback", "at": "2026-10-20T15:48:00Z", "gain_usd": 20.0, "gain_pct": 1.6}},
                 "plan": {"state": "ok", "setup": "Group recovery", "side": "buy_calls", "mode": "discretionary",

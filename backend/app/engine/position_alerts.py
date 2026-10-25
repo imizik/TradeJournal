@@ -259,7 +259,19 @@ def ask_copilot_path(alert: PositionAlert) -> str:
     now = f"now {_money(alert.gain)}" if alert.mark is not None else "no live quote"
     context = (f"Review this position: {alert.trade_id}. {ASK_KIND.get(alert.kind, 'Position alert')} at "
                f"{_clock_label(_minute_of(_epoch(alert.detected_at)))}: {was}{now}.")
-    return "/copilot-lab?" + urlencode({"symbol": alert.contract.split()[0], "context": context[:300]})
+    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0], "context": context[:300]})
+
+
+def _ask_copilot(alert: PositionAlert) -> tuple[tuple[str, str], ...]:
+    """The extra push action, only while Copilot Lab is on (its own switch, read here without loading the lab).
+    Optional, so it can never stop the alert itself from going out."""
+    if os.environ.get("COPILOT_ENABLED") != "true":
+        return ()
+    try:
+        return (("Ask copilot", ask_copilot_path(alert)),)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extra button
+        log.warning("Ask copilot action skipped for a position alert", exc_info=True)
+        return ()
 
 
 def _minute_of(stamp: float) -> int:
@@ -433,12 +445,11 @@ class PositionAlerts:
                 return
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None)
+            more = _ask_copilot(alert)
             alert.attempts += 1
             try:
                 ntfy.publish(title, body, priority=priority, tags=("warning",),
-                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True,
-                             # Copilot Lab's own switch (copilot.settings), read here without loading the lab.
-                             more=(("Ask copilot", ask_copilot_path(alert)),) if os.environ.get("COPILOT_ENABLED") == "true" else ())
+                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."

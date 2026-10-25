@@ -185,7 +185,8 @@ def test_an_open_position_reads_now_plan_alerts_and_comparison(db, monkeypatch):
     assert (now["mark"], now["open_pnl_usd"], now["open_pnl_pct"], now["open_quantity"]) == (310.0, 20.0, 3.3, 2)
     assert (now["peak_gain_usd"], now["peak_gain_pct"], now["given_back_from_peak_usd"], now["giveback_watch"]) == (124.0, 20.7, 104.0, "fired")
     assert (now["days_to_expiry"], now["expires_today"]) == ((EXPIRY - today.date()).days, False)
-    assert abs(now["minutes_held"] - (today - OPENED.replace(tzinfo=ET)).total_seconds() // 60) <= 1
+    assert abs(now["minutes_held"] - (today - OPENED.replace(tzinfo=ET)).total_seconds() // 60) <= 1 and now["days_held"] in (0, 1)
+    assert "weekends" in review["units"]
     assert now["latest_alert"]["kind"] == "giveback" and (now["latest_alert"]["gain_usd"], now["latest_alert"]["gain_pct"]) == (18, 3.0)
     assert now["mark_as_of"] == "2026-10-23T15:10:00Z" and "quote" not in now
 

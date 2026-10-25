@@ -83,6 +83,15 @@ test("on the open trade page without an alert, Ask copilot is a secondary header
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("an alert link that no longer resolves still offers Ask copilot", async ({ page }) => {
+  await labOn(page);
+  const trade = await openOption(page);
+  await page.goto(`/trades/${trade.id}?alert=wrong-event`);
+  await expect(page.getByText("This alert is unavailable for this position.")).toBeVisible();
+  await expect(ask(page)).toHaveAttribute("href", href(trade));
+  await expect(ask(page)).toHaveCount(1);
+});
+
 test("a closed trade offers no Ask copilot, only its review", async ({ page }) => {
   await labOn(page);
   const trades = await (await page.request.get("/api/backend/trades")).json() as SeedTrade[];

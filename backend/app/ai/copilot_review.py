@@ -169,7 +169,7 @@ def _now(db, trade) -> dict:
     out = {"state": "ok", "mark": row["mark"], "mark_as_of": row.get("mark_as_of"),
            "open_quantity": row["quantity"], "avg_entry": row["avg_entry"],
            "open_pnl_usd": row["unrealized_usd"], "open_pnl_pct": row["unrealized_pct"],
-           "minutes_held": max(0, int((now_et - opened).total_seconds() // 60)),
+           "minutes_held": max(0, int((now_et - opened).total_seconds() // 60)), "days_held": row["days_held"],
            "quote": None if row["mark"] is not None else "No current quote came back, so the open P&L is unknown."}
     if trade.instrument_type == "option" and trade.expiration:
         out["days_to_expiry"] = (trade.expiration - now_et.date()).days
@@ -236,7 +236,8 @@ def trade_review(trade_id: str, session=None) -> dict:
                 "alerts": _section(lambda: _alerts(db, trade, fills)),
                 "comparison": _section(lambda: _comparison(db, trade)),
                 "units": "Option prices are per contract as the journal stores them (premium x 100); stock prices per share. "
-                         "Percentages are percent. Times are New York.",
+                         "Percentages are percent. Times are New York. minutes_held and days_held are calendar time since the "
+                         "entry, nights and weekends included.",
                 "note": "An open position: lead with the decision now. Keep the thesis apart from the position (time held, gain "
                         "given back, expiry near), and compare with the plan's invalidation and time stop if one was captured. "
                         "The owner decides; nothing here is an order.",

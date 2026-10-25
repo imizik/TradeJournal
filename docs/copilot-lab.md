@@ -343,7 +343,8 @@ The system prompt asks the model to call:
   `alerts` (what followed so far: `still_open` until the contracts close) and
   `comparison`, plus `now`: the mark and open P&L in $ and % through
   `copilot_book.position_rows` (the dashboard's quote engine; a missing quote
-  says so), minutes held, days to expiry and expires-today, the give-back
+  says so), minutes and days held (calendar time, weekends included), days
+  to expiry and expires-today, the give-back
   watch's peak gain, the $ given back from it and its state, and the latest
   alert (kind, time, gain at the alert). No `path` or `habits` until it
   closes. The prompt asks the model to lead with the decision now (the fourth
