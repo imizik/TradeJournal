@@ -87,7 +87,7 @@ isolation. They are not new Dots work; each contract states its own open gate.
 | [../agentic-trading-roadmap.md](../agentic-trading-roadmap.md) | You want the proposed frozen-decision, alert and paper-review loop, grounded factory/thesis design and 30-day evidence goals; planning only |
 | [../radar.md](../radar.md) | You are working on Radar: the five-PR sequence, the quote recorder and its activation boundary |
 | [../radar-social-buzz-feasibility.md](../radar-social-buzz-feasibility.md) | You are considering a social-media or buzz signal for Radar: sources, costs, evidence, and the pre-registered test |
-| [../copilot-lab.md](../copilot-lab.md) | You are working on the owner-only Claude Copilot Lab (off unless `COPILOT_ENABLED=true`): read-only tools, limits, settings, saved investigations, the manual research job and the live-API prerequisites |
+| [../copilot-lab.md](../copilot-lab.md) | You are working on the owner-only Claude Copilot Lab (off unless `COPILOT_ENABLED=true`): read-only tools, limits, settings, saved investigations, the manual research job, the background research queue, confirmed plans with their follow-through pings, and the live-API prerequisites |
 | [../charts-roadmap.md](../charts-roadmap.md) | You are working on `/charts`: execution order, dependencies, acceptance gate, provider evidence and the not-building list |
 | [../charts-deep-history.md](../charts-deep-history.md) | You need C0.0's implemented SIP cache, pagination, warmup, budget and test contract |
 
