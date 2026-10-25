@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import PlansBoard from "@/components/copilot/PlansBoard";
+import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import { asOfText, getOpenThreads, WHAT_MATTERS_PROMPT, type OpenThreads, type ThreadPosition, type ThreadWatch } from "@/lib/copilot";
 import { cn } from "@/lib/utils";
 
@@ -38,8 +39,8 @@ const None = ({ text }: { text: string }) => <p className="text-muted-foreground
 
 /**
  * The lab's home: what is live before the first word. Positions, armed alerts, open investigations and waiting research
- * jobs, read once from ``GET /copilot/threads`` (no turn, no cost). "What matters right now?" is the only thing that sends,
- * and only when pressed.
+ * jobs, read once from ``GET /copilot/threads`` (no turn, no cost). "What matters right now?" and "Review my week" are the
+ * only things that send, and only when pressed.
  */
 function OpenThreadsBlock({ ask, open }: HomeActions) {
   const [threads, setThreads] = useState<OpenThreads | null>(null);
@@ -66,6 +67,11 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
           title="One copilot turn across your positions, watches and open investigations"
           className="min-h-11 w-full rounded bg-primary px-3 py-2 text-sm text-primary-foreground sm:ml-auto sm:min-h-0 sm:w-auto sm:py-1">
           What matters right now?
+        </button>
+        <button type="button" onClick={() => ask(WEEK_REVIEW_CONTEXT)}
+          title="One copilot turn reviewing your latest trading week: planned vs unplanned, follow-through, alerts and exits"
+          className="min-h-11 w-full rounded border border-sky-500/60 px-3 py-2 text-sm text-sky-200 hover:bg-sky-500/15 sm:min-h-0 sm:w-auto sm:py-1">
+          Review my week
         </button>
       </div>
       {error ? <p className="text-muted-foreground">Open threads unavailable: {error}</p>

@@ -89,6 +89,10 @@ class ReplayEvidence:
         return {"state": "unavailable", "reason": "Trade reviews are unavailable in replay (they read the journal as it is now, "
                                                   "including what happened after the frozen moment)."}
 
+    def get_week_review(self, week_start: str | None = None) -> dict:
+        return {"state": "unavailable", "reason": "Week reviews are unavailable in replay (they read the journal as it is now, "
+                                                  "including what happened after the frozen moment)."}
+
     def get_peer_moves(self, symbol: str) -> dict:
         return {"symbol": symbol, "state": "unavailable",
                 "reason": "Peer moves read today's quotes, so they are off in replay. Use get_group_comparison for recorded peer returns."}
