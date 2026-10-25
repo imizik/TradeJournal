@@ -5,7 +5,7 @@ import Link from "next/link";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import PlansBoard from "@/components/copilot/PlansBoard";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
-import { asOfText, getOpenThreads, WHAT_MATTERS_PROMPT, type OpenThreads, type ThreadPosition, type ThreadWatch } from "@/lib/copilot";
+import { asOfText, getOpenThreads, WHAT_MATTERS_PROMPT, type OpenThreads, type ThreadPosition, type ThreadWatch, type ThreadWatchTrigger } from "@/lib/copilot";
 import { cn } from "@/lib/utils";
 
 const pct = (value: number | null | undefined) => value === null || value === undefined ? null : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
@@ -25,6 +25,8 @@ function clock(p: ThreadPosition) {
 }
 
 const Missing = () => <p className="text-muted-foreground">Unavailable right now.</p>;
+
+const triggerLabel = (kind: ThreadWatchTrigger["kind"]) => (kind === "news" ? "News" : kind === "move" ? "Move" : "Earnings");
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -120,6 +122,16 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
                           {item.symbol ? `${item.symbol} · ` : ""}{item.source === "research_job" ? "research · " : ""}{item.title}
                         </Link>
                         {item.conclusion && <p className="text-muted-foreground">{item.conclusion}</p>}
+                        {item.watch && item.watch.length > 0 && (
+                          <ul aria-label={`New since ${item.title}`} className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                            {item.watch.map((w, i) => (
+                              <li key={i} className="break-words">
+                                <span className="text-foreground">{triggerLabel(w.kind)}</span> · {w.text} · {asOfText(w.fired_at)}
+                                {w.delivery === "sent" ? "" : ` · ${w.delivery}${w.reason ? ` (${w.reason})` : ""}`}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </li>
                     ))}
                   </ul>

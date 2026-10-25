@@ -294,6 +294,37 @@ async def _maybe_start_jo_morning(app_: FastAPI):
     return asyncio.create_task(loop())
 
 
+async def _maybe_start_thesis_watch(app_: FastAPI):
+    """Thesis watch (docs/copilot-lab.md § Thesis watch): every 15 minutes in regular hours and once at 08:00 New York;
+    off unless THESIS_WATCH_ENABLED=true."""
+    app_.state.thesis_watch = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.thesis_watch import TICK_SECONDS, watch_from_env
+
+    try:
+        watch = watch_from_env(engine)
+    except Exception:
+        # A bad calendar or store must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Thesis watch could not start; it stays off")
+        watch = None
+    app_.state.thesis_watch = watch
+    if watch is None:
+        return None
+
+    async def loop():
+        while True:
+            try:
+                await asyncio.to_thread(watch.run_once)
+                watch.last_error = None
+            except Exception:
+                watch.last_error = "Thesis watch pass failed"
+                logging.getLogger(__name__).exception("Thesis watch pass failed")
+            await asyncio.sleep(TICK_SECONDS)
+
+    return asyncio.create_task(loop())
+
+
 async def _maybe_start_research_queue(app_: FastAPI):
     """Copilot Lab's background research queue; off unless RESEARCH_QUEUE_ENABLED=true."""
     app_.state.research_queue = None
@@ -332,9 +363,12 @@ async def lifespan(_app: FastAPI):
     radar = await _maybe_start_radar(_app)
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
+    thesis_watch = await _maybe_start_thesis_watch(_app)
     try:
         yield
     finally:
+        if thesis_watch is not None:
+            thesis_watch.cancel()
         if jo_morning is not None:
             jo_morning.cancel()
         if research is not None:
