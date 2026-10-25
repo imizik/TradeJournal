@@ -518,7 +518,8 @@ that section as "why this is evidence, not a rule".
   long's invalidation; counts the owner's closed long calls) or `above` (a
   short's; long puts). The level is matched by **distance**, not price: the
   drafted level's percent from `entry` (the planned entry trigger; the current
-  chart-feed price when omitted, and `unavailable` when there is none) is set
+  chart-feed price when omitted; `unavailable` when there is none or the level
+  is not on `side` of it) is set
   the same percent from each past trade's own entry underlying price (the
   fill's enrichment or its market context, as the path metrics read it). Over
   the owner's trades opened in the last `lookback_days` (30-365, default 180;
@@ -561,8 +562,9 @@ that section as "why this is evidence, not a rule".
   never ids). The plan card (`TradePlanCard.tsx`) shows the row whose level is
   the plan's invalidation under that field as "Your history at this level:
   12 of 31 past NBIS trades crossed −3.8% while held; 5 recovered; median −18%
-  from there", with the link above. When the owner edits the invalidation the
-  line says to re-ask the copilot rather than refetching on every keystroke; a
+  from there", with the link above. When the owner edits the invalidation or
+  the entry the line says to re-ask the copilot rather than refetching on every
+  keystroke; a
   reloaded investigation has no row (evidence references keep no results).
   The Evidence strip labels the read "Your history here".
 

@@ -829,6 +829,10 @@ def level_history(symbol: str, level: float | None = None, side: str | None = No
                     "reason": f"No current {symbol} price to measure the level's distance from; pass the planned entry.",
                     "note": HISTORY_NOTE}
         distance_pct = round((level - reference) / reference * 100, 2)
+        if (side == "below") != (distance_pct < 0):
+            return {"state": "unavailable", "symbol": symbol,
+                    "reason": f"{level} is not {side} the entry {reference}, so there is no distance to match past trades on.",
+                    "note": HISTORY_NOTE}
         result["kind"] = "level"
         result["asked"] = {"level": level, "side": side, "entry": reference, "entry_from": "planned" if entry is not None else "current",
                            "distance_pct": distance_pct}

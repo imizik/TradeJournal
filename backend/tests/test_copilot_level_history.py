@@ -165,6 +165,10 @@ def test_without_a_planned_entry_the_current_price_is_the_reference(db, monkeypa
     monkeypatch.setattr(copilot_review, "_current_price", lambda symbol: 100.0)
     out = history(db, level=97.8, side="below")
     assert out["asked"]["entry_from"] == "current" and out["asked"]["distance_pct"] == -2.2
+    # A level on the wrong side of the reference has no distance to match on.
+    wrong = history(db, level=102.0, side="below", entry=100.0)
+    assert wrong["state"] == "unavailable" and "is not below the entry 100.0" in wrong["reason"]
+    assert history(db, level=98.0, side="above", entry=100.0)["state"] == "unavailable"
     monkeypatch.setattr(copilot_review, "_current_price", lambda symbol: None)
     out = history(db, level=97.8, side="below")
     assert out["state"] == "unavailable" and "pass the planned entry" in out["reason"] and out["note"] == copilot_review.HISTORY_NOTE
@@ -220,7 +224,7 @@ def test_the_scripted_model_asks_for_the_history_and_quotes_it_beside_the_plan()
     assert tool["provenance"]["kind"] == "simulated"
     assert tool["summary"] == "12 of 31 past NBIS trades crossed -3.8% while held; 5 recovered to breakeven; median -18% from there"
     # The card's row: the counts for the drafted invalidation, so the UI can show them under that field.
-    assert tool["history"] == {"symbol": "NBIS", "level": card["invalidation"]["price"], "side": "below", "distance_pct": -3.75, "trades": 31,
+    assert tool["history"] == {"symbol": "NBIS", "level": card["invalidation"]["price"], "side": "below", "entry": 95.9, "distance_pct": -3.75, "trades": 31,
                                "crossed": 12, "recovered": 5, "median_from_cross_pct": -18.0, "small": False, "simulated": True}
     text = "".join(e["delta"] for e in events if e["type"] == "text")
     assert "Your history: 12 of 31 past NBIS trades crossed -3.8% while held; 5 recovered to breakeven; median -18% from there. Evidence to weigh, not a rule." in text

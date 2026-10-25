@@ -152,12 +152,12 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       {history && (
         <p aria-label="Your history at this level" className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Your history at this level: </span>
-          {Number(stop) === history.level ? (
+          {Number(stop) === history.level && Number(entry) === history.entry ? (
             <>
               {historyText(history)}{history.small && " Too few trades to weigh."}{history.simulated && " (Simulated.)"}{" "}
               <a href={EVIDENCE_NOT_RULE_URL} target="_blank" rel="noreferrer" className="underline hover:text-foreground">why this is evidence, not a rule</a>
             </>
-          ) : "you changed the invalidation; re-ask the copilot to refresh it."}
+          ) : "you changed the levels; re-ask the copilot to refresh it."}
         </p>
       )}
       <label className="block space-y-1">

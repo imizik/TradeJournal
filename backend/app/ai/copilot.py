@@ -719,7 +719,7 @@ def level_history_card(data: dict) -> dict | None:
     if data.get("state") != "ok" or data.get("kind") != "level":
         return None
     part, asked = data.get("crossed") or {}, data.get("asked") or {}
-    return {"symbol": data.get("symbol"), "level": asked.get("level"), "side": asked.get("side"),
+    return {"symbol": data.get("symbol"), "level": asked.get("level"), "side": asked.get("side"), "entry": asked.get("entry"),
             "distance_pct": asked.get("distance_pct"), "trades": part.get("of"), "crossed": part.get("trades"),
             "recovered": part.get("recovered_to_breakeven"), "median_from_cross_pct": part.get("median_pnl_from_cross_pct"),
             "small": bool((data.get("sample") or {}).get("small")), "simulated": bool(data.get("simulated"))}

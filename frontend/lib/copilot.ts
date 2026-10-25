@@ -21,7 +21,7 @@ export type ToolEvent = {
 
 /** What the owner's own past trades in the symbol did at a level the same distance from their entry: evidence, not a rule. */
 export type LevelHistory = {
-  symbol: string; level: number; side: "below" | "above"; distance_pct: number; trades: number; crossed: number;
+  symbol: string; level: number; side: "below" | "above"; entry: number; distance_pct: number; trades: number; crossed: number;
   recovered: number; median_from_cross_pct: number | null; small: boolean; simulated: boolean;
 };
 

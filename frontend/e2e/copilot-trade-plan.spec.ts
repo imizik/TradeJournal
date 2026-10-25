@@ -20,7 +20,7 @@ const PLAN = { id: "p1", kind: "trade_plan", symbol: "NBIS", direction: "long", 
   time_stop: "out by 15:30 if the entry has not worked", size_note: "one starter, no adds", last: 94.35, as_of: "2026-10-24T14:00:00Z" };
 const sse = (events: object[]) => events.map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
 // The turn's get_level_history result for the drafted invalidation: the owner's own past trades at that distance, shown under the field.
-const HISTORY = { symbol: "NBIS", level: 92.3, side: "below", distance_pct: -3.75, trades: 31, crossed: 12, recovered: 5, median_from_cross_pct: -18, small: false, simulated: false };
+const HISTORY = { symbol: "NBIS", level: 92.3, side: "below", entry: 95.9, distance_pct: -3.75, trades: 31, crossed: 12, recovered: 5, median_from_cross_pct: -18, small: false, simulated: false };
 const TURN = sse([
   { type: "tool", id: "h1", name: "get_level_history", status: "ok", summary: "12 of 31 past NBIS trades crossed -3.8% while held", ms: 1,
     input: { symbol: "NBIS", level: 92.3, side: "below", entry: 95.9, lookback_days: 180 }, provenance: { source: "Journal closed trades", kind: "saved", as_of: null }, history: HISTORY },
@@ -102,9 +102,14 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   await expect(why).toHaveAttribute("target", "_blank");
   await expect(page.locator("summary").filter({ hasText: "Evidence" })).toContainText("Your history here · saved");
 
+  // An edited level is not refetched on every keystroke: the line asks for a fresh turn instead. The distance was
+  // measured from the drafted entry, so an edited entry stales it too.
+  await card.getByLabel("Entry (5m close beyond)").fill("97");
+  await expect(history).toHaveText("Your history at this level: you changed the levels; re-ask the copilot to refresh it.");
+  await card.getByLabel("Entry (5m close beyond)").fill("95.9");
+  await expect(history).toContainText("12 of 31 past NBIS trades");
   await card.getByLabel("Invalidation (crosses)").fill("96");
-  // An edited level is not refetched on every keystroke: the line asks for a fresh turn instead.
-  await expect(history).toHaveText("Your history at this level: you changed the invalidation; re-ask the copilot to refresh it.");
+  await expect(history).toHaveText("Your history at this level: you changed the levels; re-ask the copilot to refresh it.");
   await expect(card.getByRole("alert")).toHaveText("A long plan's invalidation must be below its entry.");
   await expect(card.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await card.getByLabel("Invalidation (crosses)").fill("92.1");
