@@ -1863,12 +1863,27 @@ A saved plan is tied to the trade it was for by the user; nothing links itself.
   trades in the journal, measures capture rather than discipline or results,
   and never nags. The count refreshes with the strip when a new journal fill
   reaches the chart, not on a timer of its own.
+- **Plan streak.** A small owner-only chip in the nav (`components/PlanStreak.tsx`:
+  under the sidebar title, a flame and count in the charts rail and the phone
+  title bar, and in the phone menu) counts the latest entries in a row with a
+  linked plan received before entry: "4 planned", or "0 planned · last: NBIS
+  100C 10:12" naming the most recent unplanned entry. Entries are first entries
+  in Robinhood accounts (Webull is left out), the tracked accounts since the
+  start date while counting is on, otherwise the last 30 days; an entry with no
+  time of day is left out. A late plan (after entry or timing unverified) or no
+  plan breaks the streak. An entry whose only plan is a suggestion not yet
+  linked is pending for 30 minutes after entry: it neither extends nor breaks
+  the streak until it is linked or that time passes. The chip's label adds the
+  best streak and this week's planned of total entries (Monday to Friday, New
+  York). Tapping it opens the Copilot Lab with "Review my week". It is hidden
+  until counting is on or a plan exists, reads `GET /charts/captures/streak`
+  (no ids) on load, on focus and every five minutes, and changes no link.
 - **Where a linked plan shows.** In the strip, the trade card (C3.1) and the
   trade page: wording, note, recording and transcript, the chart image, later
   notes labeled as later, and the timing.
 - Routes: `GET /charts/captures/review`, `POST /charts/captures/{id}/link` and
   `/unlink`, `PUT /charts/captures/tracking`,
-  `GET /charts/captures/for-trade/{trade_id}`; `needs_linking` in
+  `GET /charts/captures/for-trade/{trade_id}`, `GET /charts/captures/streak`; `needs_linking` in
   `GET /charts/captures`, and `link` and `link_history` on each plan.
   Migration `b5d7e9f1a3c6` adds `capture_link` and two tracking columns on
   `capture_profile`.

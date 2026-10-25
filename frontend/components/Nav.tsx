@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
+import PlanStreakChip from "@/components/PlanStreak";
 import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
@@ -236,6 +237,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           <h1 className="truncate text-sm font-semibold text-foreground">Trade Journal</h1>
           {owner && <SyncStatusLine inline />}
         </div>
+        {owner && <PlanStreakChip variant="compact" />}
         {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />}
       </header>
 
@@ -247,6 +249,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-foreground">Trade Journal</h2>
                 {owner && <SyncStatusLine />}
+                {owner && <PlanStreakChip onNavigate={() => setMenuOpen(false)} />}
                 {/* The charts page hides the phone title bar; the Sync drawer stays reachable here. */}
                 {owner && <div className="mt-2 -ml-2"><SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => { setMenuOpen(false); setPanelOpen(true); }} /></div>}
               </div>
@@ -291,6 +294,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           </button></NavHint>
           <NavLinks pathname={pathname} rail />
           <div className="mt-auto" />
+          {owner && <NavHint label="Plan streak"><PlanStreakChip variant="rail" /></NavHint>}
           {owner && <SyncStatusDot />}
           {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} compact />}
         </nav>
@@ -302,6 +306,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
             {owner && <SyncStatusLine />}
+            {owner && <PlanStreakChip />}
           </div>
           {chartsRoute && (
             <button
