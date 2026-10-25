@@ -66,13 +66,14 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
-                 positions=None, nudges=None, time_stops=None):
+                 positions=None, nudges=None, time_stops=None, prep=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.positions = positions  # Open-trade give-back and expiry alerts, when POSITION_ALERTS_ENABLED
         self.nudges = nudges  # Unplanned-entry plan nudges, when PLAN_NUDGE_ENABLED
         self.time_stops = time_stops  # Copilot plans' time stops, when PLAN_TIME_STOPS_ENABLED
+        self.prep = prep  # The copilot's pre-market prep ping, when PREMARKET_PREP_ENABLED
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -152,11 +153,18 @@ class LevelAlertMonitor:
                                 finally:
                                     await asyncio.to_thread(self.nudges.deliver)
                         finally:
-                            if self.time_stops is not None:
-                                try:
-                                    await asyncio.to_thread(self.time_stops.run)
-                                finally:
-                                    await asyncio.to_thread(self.time_stops.deliver)
+                            try:
+                                if self.time_stops is not None:
+                                    try:
+                                        await asyncio.to_thread(self.time_stops.run)
+                                    finally:
+                                        await asyncio.to_thread(self.time_stops.deliver)
+                            finally:
+                                if self.prep is not None:
+                                    try:
+                                        await asyncio.to_thread(self.prep.run)  # claims only; the prep runs on its own thread
+                                    finally:
+                                        await asyncio.to_thread(self.prep.deliver)
 
     async def _run_alerts(self) -> None:
         await self._record_found()

@@ -638,6 +638,44 @@ nothing exists until the owner confirms.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 
+## Pre-market prep
+
+One phone ping each trading morning with what the owner already holds and has
+planned (`backend/app/engine/premarket_prep.py`). It is the copilot's own short
+prep; Jo's morning briefing (`/morning`) is separate and untouched.
+
+- **When:** at `PREMARKET_PREP_AT` (default `08:30` New York) on a day the
+  market calendar has a regular session, never a weekend or holiday. The day is
+  claimed once (`premarket_prep.day` is unique, additive migration
+  `e5a9c3d7f2b4`), so a restart or a second process never sends a second one.
+  A prep not started within an hour of its time waits for the next trading day.
+- **Pack:** open positions with days to expiry, expires-today, give-back watch
+  state and open P&L (the owner context pack's positions section); armed plans
+  with their distance to the entry and the invalidation (the Plans board's
+  `copilot_plans.board`, one batched quote); earnings from today through Sunday
+  for held symbols and symbols with an active thesis memory (one batched
+  Tradier calendar read, at most 8 symbols); today's pending time stops; the
+  plan streak. A section that fails reads `unavailable`; the rest stand.
+- **Turn:** one `run_turn` on the configured backend and evidence, system
+  prompt unchanged, its turn budget cap included. The message starts "Pre-market
+  prep for …" and asks for at most 6 lines from those facts only: what expires
+  or sits near a trigger today and one thing to decide before the open. The
+  answer, cut to 6 lines, is saved as an open copilot investigation titled
+  `Pre-market prep <date>`, so it shows in Open threads.
+- **Ping:** title `Pre-market prep`, body the first two lines; a tap opens
+  `/copilot-lab?investigation=<id>`. If the turn fails (an error event,
+  including the budget stop, or no text), the ping and the saved record carry
+  the raw facts instead (expiries, the nearest triggers, today's time stops,
+  earnings this week) under "Raw facts (the copilot turn failed):".
+- **Delivery:** the same at-most-once outbox as plan nudges: a send that may
+  have reached ntfy is `unknown` and never resent; a prep that never finished
+  within 10 minutes, or a ping not sent within 30 minutes, is `expired`.
+- **Activation:** off unless `PREMARKET_PREP_ENABLED=true`, and nothing runs
+  while `COPILOT_ENABLED` is off. It runs on the level alert monitor's loop
+  beside the plan pings; the reads and the model turn run on their own thread.
+  Nothing places, changes or suggests an order.
+- Tests: `backend/tests/test_premarket_prep.py`.
+
 ## Saved investigations
 
 After each turn the page saves the conversation as a `copilot_investigation`
@@ -679,6 +717,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). For `plan` it is Claude Code's API-equivalent estimate (`max_budget_usd`); nothing is billed. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
+| `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |
 | `TJ_CLAUDE_CONFIG_DIR` | a private temp directory | `plan` only: Claude Code's state directory, never the owner's `~/.claude` (shared with `backend/app/ai/plan_runner.py`). `TJ_CLAUDE_BIN` picks the Claude Code binary the same way. |
