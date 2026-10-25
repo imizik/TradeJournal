@@ -450,10 +450,16 @@ nothing exists until the owner confirms.
     - The **time stop** is read as a clock time (`out by 15:30`, `15:30`,
       `3:30pm`; a bare 1-8 o'clock is the afternoon) at the next regular
       session that still has it ahead, today when it can be; a length in
-      minutes or hours (`45m`, `2h`, up to 6½ hours) from the Confirm; or a
+      minutes or hours (`45m`, `2h`, up to 6½ hours) from the Confirm, no
+      later than today's close and only while today's session is open; or a
       number of days (`2 days`, up to 30) as that many trading days ahead at
-      15:30 ET (half an hour before an early close). A time outside regular
-      hours, or words with neither, stay a note in the plan's wording.
+      15:30 ET (half an hour before an early close). The market calendar is
+      published only through the current month, so a day count landing in a
+      later month skips weekends but not that month's holidays or early
+      closes; the preview shows the date. A time outside regular hours, a
+      length that reads as a candle or an offset ("5m closes under 92", "10
+      minutes before the close"), or words with neither stay a note in the
+      plan's wording.
     - At its time, if a position in the symbol whose first entry came after
       the plan is still open (Webull left out), one ntfy ping says
       "NBIS time stop: you planned to be out by 15:30." and opens the trade.

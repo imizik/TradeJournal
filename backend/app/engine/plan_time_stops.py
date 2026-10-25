@@ -4,7 +4,10 @@ The plan card's time stop is read by ``parse``: a clock time (``out by 15:30``,
 ``15:30``, ``3:30pm``) is the next regular session that still has it ahead,
 today when it can be; a duration in minutes or hours (``45m``, ``2h``) counts
 from the Confirm; a number of days (``2 days``) is that many trading days
-ahead at 15:30 ET (half an hour before an early close). Text it cannot read
+ahead at 15:30 ET (half an hour before an early close). A length runs no later
+than today's close. The market calendar is only published through the current
+month, so a day count landing in a later month sees weekends but not its
+holidays or early closes (the preview shows the date). Text it cannot read
 stays a note in the plan and schedules nothing.
 
 At ``due_at`` the row is judged once: if the owner holds an open position in
@@ -44,7 +47,9 @@ DAY_STOP_MINUTE = 15 * 60 + 30  # "2 days" means out by 15:30 ET on the second t
 MAX_DAYS = 30  # trading days ahead a time stop may be
 
 _CLOCK = re.compile(r"\b(\d{1,2})(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)?(?![\w:])", re.I)
-_DURATION = re.compile(r"\b(\d{1,3})\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?|trading\s+days?)\b", re.I)
+_DURATION = re.compile(r"(?<![\d.])\b(\d{1,3})\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?|trading\s+days?)\b(\s+\w+)?", re.I)
+# "10 minutes before the close", "5m closes under 92": an offset or a candle, not a length
+_NOT_A_LENGTH = {"before", "after", "close", "closes", "closing", "candle", "candles", "bar", "bars", "chart"}
 
 
 def enabled() -> bool:
@@ -78,6 +83,8 @@ def parse(text: str, now: float, calendar=None) -> dict:
     clock = next((m for m in _CLOCK.finditer(text) if m.group(2) or m.group(3)), None)  # a bare "3" is not a time
     if duration and (clock is None or duration.start() < clock.start()):
         count, unit = int(duration.group(1)), duration.group(2).lower()
+        if (duration.group(3) or "").strip().lower() in _NOT_A_LENGTH:
+            return {"due_at": None, "reason": "That reads as a candle or an offset, not a length, so it stays a note."}
         if count <= 0:
             return {"due_at": None, "reason": "A time stop needs a length above zero."}
         if unit[0] in "dt":
@@ -96,7 +103,11 @@ def parse(text: str, now: float, calendar=None) -> dict:
         minutes = count if unit[0] == "m" else count * 60
         if minutes > 6 * 60 + 30:
             return {"due_at": None, "reason": "For longer than a session, give days (e.g. 2 days)."}
-        due = now + minutes * 60
+        regular = _regular(calendar, today)
+        minute = datetime.fromtimestamp(now, ET)
+        if regular is None or minute.hour * 60 + minute.minute >= regular[2]:
+            return {"due_at": None, "reason": "A length in minutes or hours counts in today's session; give a clock time or days."}
+        due = min(now + minutes * 60, _at(today, regular[2]))  # no later than today's close
         return {"due_at": due, "when": _clock_text(due, now)}
     if clock is None:
         return {"due_at": None, "reason": "No time or length in it, so it stays a note."}

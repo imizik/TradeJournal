@@ -210,6 +210,8 @@ def test_the_alert_route_records_a_plan_role_only_for_a_copilot_alert(alert_clie
     ("45m", at("10:00"), "Wed 10:45"),
     ("2h", at("10:00"), "Wed 12:00"),
     ("90 minutes", at("10:00"), "Wed 11:30"),
+    ("2h", at("15:00"), "Wed 16:00"),  # a length runs no later than the close
+    ("45m", at("12:45", FRI), "Fri 13:00"),  # Friday's early close
     ("2 days", at("10:00"), "Fri 12:30"),  # Friday closes early: half an hour before its close
     ("3 trading days", at("10:00"), "Mon 15:30"),  # Thursday, Friday, Monday
     ("1 day", at("10:00", FRI), "Mon 15:30"),
@@ -224,10 +226,16 @@ def test_the_preview_says_when_in_words():
     assert parse("2 days", at("10:00"), Calendar())["when"] == "Fri Oct 23, 12:30 ET"
 
 
-@pytest.mark.parametrize("text", ["when it feels wrong", "", "0 days", "out by 18:00", "45 days", "8h", "25:00"])
+@pytest.mark.parametrize("text", ["when it feels wrong", "", "0 days", "out by 18:00", "45 days", "8h", "25:00",
+                                  "trail 1.5 hours", "10 minutes before the close", "out if 5m closes under 92"])
 def test_unparseable_time_stops_stay_a_note(text):
     parsed = parse(text, at("10:00"), Calendar())
     assert parsed["due_at"] is None and parsed["reason"]
+
+
+def test_a_length_needs_an_open_session_today():
+    assert parse("45m", at("16:10"), Calendar())["due_at"] is None
+    assert parse("45m", at("10:00", date(2026, 10, 24)), Calendar())["due_at"] is None  # a Saturday
 
 
 def test_a_note_schedules_nothing(engine):
