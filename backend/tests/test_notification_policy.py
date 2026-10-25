@@ -3,7 +3,7 @@ its priority order, the per-position quiet window (merge or suppress), the flag,
 each copilot-side sender adopting it; and what the owner did after each ping, read from the fills and plan links."""
 
 import asyncio
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -186,14 +186,18 @@ def test_a_more_important_ping_is_never_held_by_the_quiet_window(engine):
         final = decide(db, "expiry_final", "f1", now=at("15:31"))
         policy.delivered(db, final, at("15:31"))
         db.commit()
-        # A last-day final or an invalidation is held only by its own duplicate.
+        # A last-day final or an invalidation is never held by the window: a second plan's invalidation in the same
+        # symbol is its own message (each sender already writes one row per firing).
         broke = decide(db, "invalidation", "i1", now=at("15:33"))
         assert broke.action == "send"
         policy.delivered(db, broke, at("15:33"))
         db.commit()
-        assert decide(db, "invalidation", "i2", now=at("15:34")).action == "hold"
-        assert decide(db, "expiry_final", "f2", now=at("15:35")).action == "hold"
-        assert decide(db, "giveback", "g2", now=at("15:36")).action == "hold"  # less important than the invalidation
+        assert decide(db, "invalidation", "i2", now=at("15:34")).action == "send"
+        again = decide(db, "expiry_final", "f2", now=at("15:35"))
+        assert again.action == "send"
+        policy.delivered(db, again, at("15:35"))
+        db.commit()
+        assert decide(db, "giveback", "g2", now=at("15:36")).action == "hold"  # less important than the final just sent
 
 
 def test_the_flag_off_passes_everything_through_but_still_records(engine, monkeypatch):

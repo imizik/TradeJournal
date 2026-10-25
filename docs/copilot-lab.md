@@ -761,7 +761,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   a different kind whose predecessor is still being resent (its send failed) is
   `merged`, its text appended to that resend; otherwise it is `suppressed`. A
   more important kind is never held by the window, and a last-day final or an
-  invalidation is held only by its own duplicate.
+  invalidation is never held by it at all (a second plan's invalidation in the
+  same symbol is its own message).
 - **Record:** every decision is one `phone_ping` row (`sent`, `merged`,
   `suppressed`, `over_cap`, with the reason). A held sender row reads `held`
   with the same reason on the trade page's phone-alert list; the Dashboard Plans

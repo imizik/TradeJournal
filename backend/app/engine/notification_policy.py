@@ -19,9 +19,10 @@ The policy, in the order it is applied:
   (its send failed and is retrying), it is ``merged`` and its text rides with
   the first's resend; otherwise it is ``suppressed``. A ping more important
   than the one before it (the priority order below) is never held by the
-  window, and a last-day final or an invalidation is held only by its own
-  duplicate: a last-day final after a one-hour alert still goes out, and an
-  invalidation after a last-day final does too.
+  window, and a last-day final or an invalidation is never held by it at all
+  (each sender already writes one row per firing, and two plans' invalidations
+  in one symbol are two messages): a last-day final after a one-hour alert
+  still goes out, and so does an invalidation after a last-day final.
 - **Daily cap.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
   across every kind. The priority order keeps the cap from dropping what
   matters: last-day final, invalidation and give-back are never over cap; the
@@ -75,7 +76,7 @@ log = logging.getLogger(__name__)
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "research")
 ALIASES = {"expiry_first": "time_stop", "link": "nudge", "no_plan": "nudge"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
-NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are held by the quiet window only for their own duplicate
+NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
 LOW_PRIORITY = 6  # ranks from here (nudge/link, prep, research) are held first
 RESERVED = 3  # slots under the cap kept for ranks below LOW_PRIORITY
 HELD = ("merged", "suppressed", "over_cap")
@@ -219,15 +220,16 @@ def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, 
 
 
 def _judge(db: Session, row: PhonePing, now: float) -> None:
-    if row.anchor:
+    if row.anchor and row.rank >= NEVER_QUIET:
         recent = db.exec(select(PhonePing).where(PhonePing.anchor == row.anchor, PhonePing.decision == "sent",
                                                  PhonePing.decided_at >= _utc(now - quiet_seconds()))
                          .order_by(PhonePing.decided_at.desc())).all()
-        # A duplicate of a kind sent inside the window is never sent again. The two most important kinds are held by
-        # nothing else; anything else yields to an equal or more important ping sent moments earlier for the same position.
+        # A duplicate of a kind sent inside the window is never sent again; anything else yields to an equal or more
+        # important ping sent moments earlier for the same position. The two most important kinds skip the window: each
+        # sender already writes one row per firing, and two plans' invalidations in one symbol are two messages.
         same = next((p for p in recent if p.kind == row.kind), None)
         prev = same if same is not None else recent[0] if recent else None
-        if prev is not None and (same is not None or (row.rank >= prev.rank and row.rank >= NEVER_QUIET)):
+        if prev is not None and (same is not None or row.rank >= prev.rank):
             minutes = max(1, round((now - _epoch(prev.decided_at)) / 60))
             if same is None and prev.delivered_at is None:
                 row.decision, row.merged_into = "merged", prev.id
