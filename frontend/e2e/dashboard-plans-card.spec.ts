@@ -14,6 +14,7 @@ const epoch = (iso: string) => Date.parse(iso) / 1000;
 const PLAN_PATH = `/copilot-lab?symbol=APLD&context=${encodeURIComponent("Plan this position: I just opened APLD 10/31/26 35C (1 at $1.20) without a plan. Help me set an invalidation and a time stop.")}`;
 const BOOK = {
   count: 3, quotes_at: epoch("2026-10-23T18:49:00Z"), quote_issue: null,
+  held_back_today: { count: 2, by_kind: { "plan nudge": 1, "one-hour": 1 } },
   positions: [
     { trade_id: PLANNED, symbol: "NBIS", contract: "NBIS 10/24/26 100C", instrument: "option", direction: "long", quantity: 2,
       unrealized_usd: 180, unrealized_pct: 29, giveback: "armed", latest_alert: { kind: "hold_hour", at: epoch("2026-10-23T15:05:00Z") },
@@ -51,6 +52,7 @@ test("one row per position: P&L, invalidation distance, time stop countdown, giv
   const { reads } = await dashboard(page);
   const rows = card(page).getByTestId("plans-card-row");
   await expect(rows).toHaveCount(3);
+  await expect(card(page).getByTestId("plans-card-held-back")).toHaveText("Held back today: 2 pings (1 plan nudge, 1 one-hour)");
   await expect(rows.nth(0)).toContainText("2× NBIS 10/24/26 100C");
   await expect(rows.nth(0)).toContainText("+$180 · +29%");
   await expect(rows.nth(0)).toContainText("Invalidation 92.30 · 2.1% away");
