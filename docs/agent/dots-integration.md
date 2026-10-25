@@ -13,7 +13,9 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
-Checkpoint: October 13, 2026 (evening ET), against merged source through PR #304.
+Source checkpoint: October 25, 2026 research-branch reconciliation, including
+application source through PR #325. Runtime observations below retain their
+recorded dates; no host state or new live acceptance was checked in this pass.
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Move
 the checkpoint whenever a row changes, and verify host state before acting.
@@ -32,6 +34,8 @@ slice's stated exit criteria were met. None implies trading edge.
 | Shadow S3 (independence) / S4 (shadow picks contract and exits) | No | No | No | No | S3 research-gated; S4 needs S2 evidence. Hold both until S1 is accepted |
 | Manual A1/A2/A3 fixtures ([contract](advisor-shadow-contract.md)) | Yes | — | A2 one lifecycle | No | Cloud-runner isolation, forward comparison and A3 human-timed acceptance unproven; latest A3 record is 0/3 sessions. Separate from Shadow Isaac S1 |
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
+| Scanner replay | Historical capture/frequency replay implemented (#305/#308), using sealed continuation and cutoff-aware proxies | No live activation implied | Fixture proof only in this reconciliation | No new live acceptance | Offline research does not validate option execution or change S1 |
+| Market watch ([contract](market-watch-design.md)) | MW-1, scheduled reads and MW-2 event wakes/push implemented | MW-1 and scheduled reads recorded Oct 14; event/push off by default | Instructed tool proof; Oct 15 scheduled-call gap recorded | No full-session or 20-session acceptance | Separate activation and natural delivery evidence remain required |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 
 ### Functionality sequence

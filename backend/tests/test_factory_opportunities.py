@@ -23,7 +23,8 @@ def test_packet_does_not_reveal_next_open_fill_or_outcome_and_is_prefix_stable()
         stop=99,features={'day_move':1,'trend':0,'missing':float('nan')},entry_price=999,r=888)
     prefix=Series.build('TEST',bars,5)
     full=Series.build('TEST',bars+[bar(day,590,180,200,1,10)],5)
-    a=op.packet(spec(),signal,prefix);b=op.packet(spec(),signal,full)
+    a=op.packet(spec(),signal,prefix)
+    b=op.packet(spec(),signal,full)
     assert a==b and a['entry_reference']==100 and a['target_reference']==102
     text=json.dumps(a)
     assert 'entry_price' not in text and '888' not in text and '999' not in text
@@ -51,7 +52,8 @@ def card(i,day='2024-02-05',ticker='TEST',family='one'):
 
 def test_balancing_is_stable_and_respects_day_ticker_quotas():
     cards=[card(i,ticker='T'+str(i%5),family='F'+str(i%3)) for i in range(60)]
-    a=op.balanced(cards);b=op.balanced(list(reversed(cards)))
+    a=op.balanced(cards)
+    b=op.balanced(list(reversed(cards)))
     assert a==b and len(a)<=op.MAX_PER_DAY
     from collections import Counter
     assert max(Counter(c['candidate']['ticker'] for c in a).values())<=op.MAX_PER_TICKER_DAY
@@ -69,7 +71,9 @@ def frozen(tmp_path):
 
 
 def choices(tmp_path,rows):
-    p=tmp_path/'choices.json';p.write_text(json.dumps(rows));return p
+    p=tmp_path/'choices.json'
+    p.write_text(json.dumps(rows))
+    return p
 
 
 def test_choices_are_immutable_idempotent_and_unknown_ids_refused(tmp_path):
@@ -95,13 +99,16 @@ def test_sealed_score_only_after_complete_choices_and_preserves_unresolved(tmp_p
     assert result['jo_take']=={'selected':2,'resolved':1,'total_r':2,'mean_r':2}
     assert result['take_all']['total_r']==1
     assert result['fixed_context_filter']['selected']==3
-    private=json.loads((tmp_path/'operator-private/outcomes.json').read_text());private['outcomes']['0']['r']=999
+    private=json.loads((tmp_path/'operator-private/outcomes.json').read_text())
+    private['outcomes']['0']['r']=999
     op.atomic(tmp_path/'operator-private/outcomes.json',private)
-    with pytest.raises(ValueError,match='seal'):op.score(tmp_path)
+    with pytest.raises(ValueError,match='seal'):
+        op.score(tmp_path)
 
 
 def test_gate_rejects_invalid_geometry_without_consulting_outcomes():
-    day=date(2024,2,5);series=Series.build('TEST',[bar(day,570,100,101,99,100)],5)
+    day=date(2024,2,5)
+    series=Series.build('TEST',[bar(day,570,100,101,99,100)],5)
     signal=SimpleNamespace(signal_index=0,signal_time=series.time[0],ticker='TEST',side=1,stop=101,features={})
     assert op.packet(spec(),signal,series) is None
 

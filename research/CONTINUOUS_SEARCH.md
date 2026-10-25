@@ -3,6 +3,10 @@
 Runs only in `/Users/user/TradeJournal-factory`, branch `factory/ledger`.
 This branch is never merged and no unproven strategy PR is created.
 
+The schedule/activation statements below record October 15–16, not a current
+service-health check or authorization to resume. This October 25 PR performs
+preparation and synthetic tests only; no evaluation or attempt is authorized.
+
 `backend/scripts/factory_search.py --tick` runs at most one new candidate.
 launchd calls it every five minutes with `--force`, enabled by Isaac on
 October 15 to continue searching during the day as well as at night. Isaac

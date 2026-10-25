@@ -499,7 +499,11 @@ Be honest about this when reporting work:
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
-  proved only by a real weekly run. The documentation drift routine runs in
+  proved only by a real weekly run. Research-branch intake and opportunity
+  tests use temporary ledgers, budgets and invented bars; they do not authorize
+  an evaluation, consume a real attempt or validate strategy profitability.
+  Physical stage cutoff tests also cover later-first cache reads and the
+  scanner minute-loader hook. The documentation drift routine runs in
   Anthropic's cloud and has no test here; whether its pass is any good is
   judged in review of the pull request it opens.
   `scripts/review_carry.sh`, which lets a clean review survive integrating

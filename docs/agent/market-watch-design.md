@@ -858,7 +858,8 @@ descriptive. Only a measured advantage justifies the idea book.
 
 ## Choices for Isaac
 
-- Whether to authorize the MW-1 activation steps above, then select an MW-2 slice.
+- MW-1 and the first scheduled-read MW-2 slice were authorized and activated
+  October 14 as recorded above; complete their outstanding session acceptance.
 - Whether to authorize the MW-2 activation steps above (event wakes and ntfy
   push on top of #315's schedule; push replaces chat).
 - Whether the MW-2 correction rule is right: a correction skips the budget only

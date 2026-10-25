@@ -1090,6 +1090,11 @@ def spec_id(spec: Spec) -> str:
     return spec.family[:2] + "-" + hashlib.sha256(text.encode()).hexdigest()[:10]
 
 
+# Register after this module's definitions: the research adapter imports them.
 # Mac research-only family: retained on factory/ledger, never merged.
-from app.engine.factory_search_family import ScannerFamily
-FAMILIES["s1_research"] = ScannerFamily
+def _register_search_family():
+    from app.engine.factory_search_family import ScannerFamily
+    FAMILIES["s1_research"] = ScannerFamily
+
+
+_register_search_family()

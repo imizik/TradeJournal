@@ -47,9 +47,10 @@ fork; pass `--ledger` for a scratch ledger.
   moves (a selloff arms every name at once), so treating them as independent
   overstates the evidence.
 - **The bar rises with every try:** t ≥ Φ⁻¹(1 − 0.05/K), where K counts the
-  candidates that have reached confirmation, this one included (Bonferroni,
+  distinct attempted candidate IDs, this one included (Bonferroni,
   one-sided 5%). K = 10 needs 2.58, 20 needs 2.81, 50 needs 3.09, 100 needs
-  3.29. Ideas tested by hand before the factory count too.
+  3.29. On this research branch, screen failures, interrupted reservations
+  and ideas tested by hand count too; repeated records for one ID count once.
 - **Learned filters** (meta-labeling) take the family's signals and learn
   which to keep: a logistic regression on the entry features, trained on the
   discovery-period trades of the same spec without the model, then frozen.
@@ -397,8 +398,11 @@ trades.
   sink both. That is the lead for the next ideas: fewer trades with more
   room per trade, so costs are a smaller share of R.
 
-The ledger counts 10 candidates at confirmation, so the next one there needs
-t ≥ 2.61.
+That initial-run snapshot counted 10 candidates at confirmation, giving the
+next one t ≥ 2.61 under the accounting then in use. It is not the current
+ledger count or threshold. The research branch now counts every distinct
+attempted ID, including reservations and screen failures; use the read-only
+intake inspection for current metadata, without reading protected outcomes.
 
 ## What is verified
 

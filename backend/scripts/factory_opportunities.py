@@ -26,9 +26,15 @@ os.environ['ALPACA_DATA_FEED'] = 'sip'
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'backend'))
 sys.path.insert(0, str(ROOT/'backend/scripts'))
-import factory_search as search
-from app.engine.factory_gates import PERIODS
-from app.engine.factory_data import FeatureContext
+def _load_factory():
+    # Imports follow SIP/path bootstrap without suppressing the import-order check.
+    import factory_search as search
+    from app.engine.factory_gates import PERIODS
+    from app.engine.factory_data import FeatureContext
+    return search, PERIODS, FeatureContext
+
+
+search, PERIODS, FeatureContext = _load_factory()
 
 VERSION = 'opportunity-pilot-v1'
 IDS = ('s1-0b2c5f54ba', 's1-455b2eabc7', 'op-7f71884194',
@@ -88,7 +94,8 @@ def packet(spec, trade, series):
             if (t+timedelta(minutes=series.timeframe)) <= cutoff][-60:]
     factor = math.prod(split.ratio for split in series.splits if split.day > cutoff.astimezone(search.ET).date())
     for row in rows:
-        for field in ('open','high','low','close'):row[field] *= factor
+        for field in ('open','high','low','close'):
+            row[field] *= factor
         row['volume'] /= factor
     identity = dict(spec_id=search.rules.spec_id(spec), ticker=trade.ticker,
                     signal_time=trade.signal_time.isoformat(), side=trade.side)
@@ -115,7 +122,9 @@ def balanced(cards):
     for day, families in sorted(grouped.items()):
         queues = {key: sorted(items, key=lambda c: digest([SEED, c['id']]))
                   for key, items in families.items()}
-        counts = Counter(); used = set(); day_count = 0
+        counts = Counter()
+        used = set()
+        day_count = 0
         while any(queues.values()) and day_count < MAX_PER_DAY:
             for key in sorted(queues):
                 if not queues[key] or day_count >= MAX_PER_DAY:
@@ -125,7 +134,9 @@ def balanced(cards):
                 shared = (ticker, card['candidate']['signal_time'], card['candidate']['side'])
                 if counts[ticker] >= MAX_PER_TICKER_DAY or shared in used:
                     continue
-                counts[ticker] += 1; used.add(shared); day_count += 1
+                counts[ticker] += 1
+                used.add(shared)
+                day_count += 1
                 chosen.append(card)
     return sorted(chosen, key=lambda c: (c['simulated_as_of'], c['candidate']['ticker'], c['id']))
 
@@ -150,31 +161,45 @@ def build(batch=BATCH):
         if through is None or through>DAYS[-1]:
             through=DAYS[-1]
         return store.load(ticker,timeframe,through)
-    cards=[];raw_counts=Counter();rejected=Counter();series_cache={};signal_map={};spec_map={}
+    cards=[]
+    raw_counts=Counter()
+    rejected=Counter()
+    series_cache={}
+    signal_map={}
+    spec_map={}
     for spec in specs:
-        ident=search.rules.spec_id(spec);spec_map[ident]=spec
+        ident=search.rules.spec_id(spec)
+        spec_map[ident]=spec
         market=load(search.rules.MARKET,spec.timeframe,DAYS[-1])
         for ticker in spec.tickers:
             key=(ticker,spec.timeframe)
-            if key not in series_cache:series_cache[key]=load(ticker,spec.timeframe,DAYS[-1])
+            if key not in series_cache:
+                series_cache[key]=load(ticker,spec.timeframe,DAYS[-1])
             series=series_cache[key]
-            if series is None:continue
+            if series is None:
+                continue
             context=FeatureContext(series,market)
             family=spec.rules().start(series)
             def accept(sig):
-                if spec.window and not spec.window[0]<=series.close_minute(sig.index)<=spec.window[1]:return False
+                if spec.window and not spec.window[0]<=series.close_minute(sig.index)<=spec.window[1]:
+                    return False
                 return all(rule.passes(context.at(sig.index,sig.side,sig.stop)) for rule in spec.filters)
             for i in range(len(series)):
                 # Independent opportunities, no future-fill or outcome-dependent
                 # position suppression. Fixed public quotas bound the pilot feed.
                 sig=family.on_bar(i,search.rules.Context(flat=True,halted=False,accept=accept))
-                if sig is None or series.days[series.session[i]] not in DAYS:continue
-                day=str(series.days[series.session[i]]);raw_counts[day]+=1
+                if sig is None or series.days[series.session[i]] not in DAYS:
+                    continue
+                day=str(series.days[series.session[i]])
+                raw_counts[day]+=1
                 provisional=SimpleNamespace(signal_index=i,signal_time=series.time[i],ticker=ticker,
                     side=sig.side,stop=sig.stop,features=context.at(i,sig.side,sig.stop))
                 card=packet(spec,provisional,series)
-                if card is None:rejected[day]+=1;continue
-                cards.append(card);signal_map[card['id']]=(spec,series,sig)
+                if card is None:
+                    rejected[day]+=1
+                    continue
+                cards.append(card)
+                signal_map[card['id']]=(spec,series,sig)
     chosen=balanced(cards)
     # Continuations are evaluated only AFTER the outcome-blind admission/sample.
     outcomes={}
@@ -196,7 +221,8 @@ def build(batch=BATCH):
     private={'nonce':secrets.token_hex(32),'outcomes':{c['id']:outcomes[c['id']] for c in chosen}}
     public['sealed_outcomes_sha256']=digest(private)
     atomic(batch/'operator-private/outcomes.json',private)
-    (batch/'operator-private').chmod(0o700);(batch/'operator-private/outcomes.json').chmod(0o600)
+    (batch/'operator-private').chmod(0o700)
+    (batch/'operator-private/outcomes.json').chmod(0o600)
     atomic(batch/'operator-private/manifest.json',public)
     (batch/'operator-private/manifest.json').chmod(0o600)
     atomic(batch/'public/manifest.json',{'schema':VERSION,'cards':len(chosen),
@@ -234,7 +260,8 @@ def view(batch):
                 with served.open('a') as handle:
                     handle.write(canonical({'id':next_card['id'],'manifest_sha256':digest(public),
                         'card_sha256':digest(next_card),'served_at':datetime.now(search.ET).isoformat()})+'\n')
-                    handle.flush();os.fsync(handle.fileno())
+                    handle.flush()
+                    os.fsync(handle.fileno())
         atomic(batch/'public/current-setup.json',response)
         return response
 
@@ -244,7 +271,8 @@ def decide(batch, source):
     ids={c['id'] for c in public['cards']}
     # Caller supplies Jo-authored choices; this local import is not identity authentication.
     choices=json.loads(source.read_text())
-    if not isinstance(choices,list):raise ValueError('Choices must be a list')
+    if not isinstance(choices,list):
+        raise ValueError('Choices must be a list')
     path=batch/'decisions.jsonl'
     with (batch/'decisions.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
@@ -256,7 +284,8 @@ def decide(batch, source):
             if set(row)!={'id','decision','reason'} or row['id'] not in ids or row['decision'] not in ('take','skip','insufficient_data') or not isinstance(row['reason'],str) or not 1<=len(row['reason'].strip())<=1000:
                 raise ValueError('Unknown card or invalid choice')
             old=previous.get(row['id']) or pending.get(row['id'])
-            if old and any(old[k]!=row[k] for k in row):raise ValueError('Immutable choice conflicts')
+            if old and any(old[k]!=row[k] for k in row):
+                raise ValueError('Immutable choice conflicts')
             if not old:
                 next_card=next(c for c in public['cards'] if c['id'] not in previous and c['id'] not in pending)
                 mark=marks.get(row['id'],{})
@@ -265,8 +294,10 @@ def decide(batch, source):
                 pending[row['id']]={**row,'received_at':datetime.now(search.ET).isoformat(),
                 'source':'operator import; Jo identity not authenticated','manifest_sha256':digest(public)}
         with path.open('a') as handle:
-            for row in pending.values():handle.write(canonical(row)+'\n')
-            handle.flush();os.fsync(handle.fileno())
+            for row in pending.values():
+                handle.write(canonical(row)+'\n')
+            handle.flush()
+            os.fsync(handle.fileno())
     return len(pending)
 
 
@@ -279,19 +310,26 @@ def summary(ids,outcomes):
 def score(batch):
     public=json.loads((batch/'operator-private/manifest.json').read_text())
     choices={r['id']:r for r in map(json.loads,(batch/'decisions.jsonl').read_text().splitlines())}
-    cards=public['cards'];ids={c['id'] for c in cards}
+    cards=public['cards']
+    ids={c['id'] for c in cards}
     if not ids or set(choices)!=ids or any(r.get('manifest_sha256')!=digest(public) for r in choices.values()):
         raise ValueError('Complete unchanged frozen batch before revealing outcomes')
     private=json.loads((batch/'operator-private/outcomes.json').read_text())
-    if digest(private)!=public['sealed_outcomes_sha256']:raise ValueError('Outcome seal mismatch')
-    outcomes=private['outcomes'];take=[c['id'] for c in cards if choices[c['id']]['decision']=='take']
+    if digest(private)!=public['sealed_outcomes_sha256']:
+        raise ValueError('Outcome seal mismatch')
+    outcomes=private['outcomes']
+    take=[c['id'] for c in cards if choices[c['id']]['decision']=='take']
     baseline=[c['id'] for c in cards if (c['features'].get('day_move') is not None and c['features']['day_move']>=0)
               and (c['features'].get('trend') is not None and c['features']['trend']>=0)]
-    groups=defaultdict(list);counts=Counter()
+    groups=defaultdict(list)
+    counts=Counter()
     for c in cards:
-        key=(c['simulated_as_of'][:10],c['candidate']['spec_id']);groups[key].append(c['id'])
-        if c['id'] in take:counts[key]+=1
-    rng=random.Random(SEED);random_totals=[]
+        key=(c['simulated_as_of'][:10],c['candidate']['spec_id'])
+        groups[key].append(c['id'])
+        if c['id'] in take:
+            counts[key]+=1
+    rng=random.Random(SEED)
+    random_totals=[]
     for _ in range(1000):
         sample=[i for key,group in sorted(groups.items()) for i in rng.sample(group,counts[key])]
         random_totals.append(sum(outcomes[i]['r'] for i in sample if outcomes[i]['resolved']))
@@ -306,19 +344,28 @@ def score(batch):
 
 
 def budgeted_build():
-    if ROOT!=Path('/Users/user/TradeJournal-factory'):raise ValueError('Mac factory checkout only')
+    if ROOT!=Path('/Users/user/TradeJournal-factory'):
+        raise ValueError('Mac factory checkout only')
     import subprocess
-    if subprocess.check_output(['git','branch','--show-current'],cwd=ROOT,text=True).strip()!='factory/ledger':raise ValueError('factory/ledger required')
+    if subprocess.check_output(['git','branch','--show-current'],cwd=ROOT,text=True).strip()!='factory/ledger':
+        raise ValueError('factory/ledger required')
     with (search.OUT/'writer.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
-        week=search.DEFAULT_OUT/'week.lock';week.mkdir();(week/'search-pid').write_text(str(os.getpid()))
-        started=time.monotonic();budget=search.OUT/f'{search.night_key(datetime.now(search.ET))}-seconds.json'
-        used=json.loads(budget.read_text()) if budget.exists() else 0;allocation=min(900,search.SECONDS_CAP-used)
+        week=search.DEFAULT_OUT/'week.lock'
+        week.mkdir()
+        (week/'search-pid').write_text(str(os.getpid()))
+        started=time.monotonic()
+        budget=search.OUT/f'{search.night_key(datetime.now(search.ET))}-seconds.json'
+        used=json.loads(budget.read_text()) if budget.exists() else 0
+        allocation=min(900,search.SECONDS_CAP-used)
         try:
-            if BATCH.exists():raise ValueError('Pilot already frozen')
-            if allocation<60:raise ValueError('Existing time budget exhausted; do not reset it')
+            if BATCH.exists():
+                raise ValueError('Pilot already frozen')
+            if allocation<60:
+                raise ValueError('Existing time budget exhausted; do not reset it')
             atomic(budget,used+allocation)
-            signal.signal(signal.SIGALRM,signal.SIG_DFL);signal.alarm(allocation)
+            signal.signal(signal.SIGALRM,signal.SIG_DFL)
+            signal.alarm(allocation)
             quality=build()
             signal.alarm(0)
             atomic(budget,used+min(allocation,math.ceil(time.monotonic()-started)))
@@ -326,16 +373,22 @@ def budgeted_build():
             atomic(ROOT/'research/reports/2026-10-15-opportunity-pilot-v2.json',quality)
             print(json.dumps(quality,indent=2))
         finally:
-            (week/'search-pid').unlink(missing_ok=True);week.rmdir()
+            (week/'search-pid').unlink(missing_ok=True)
+            week.rmdir()
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['build','view','decide','score']);parser.add_argument('--choices',type=Path)
+    parser.add_argument('command',choices=['build','view','decide','score'])
+    parser.add_argument('--choices',type=Path)
     args=parser.parse_args()
-    if args.command=='build':budgeted_build()
-    elif args.command=='view':print(json.dumps(view(BATCH),indent=2))
+    if args.command=='build':
+        budgeted_build()
+    elif args.command=='view':
+        print(json.dumps(view(BATCH),indent=2))
     elif args.command=='decide':
-        if args.choices is None:parser.error('--choices is required')
+        if args.choices is None:
+            parser.error('--choices is required')
         print(decide(BATCH,args.choices))
-    else:print(json.dumps(score(BATCH),indent=2))
+    else:
+        print(json.dumps(score(BATCH),indent=2))
