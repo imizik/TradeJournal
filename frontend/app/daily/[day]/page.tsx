@@ -1,5 +1,6 @@
 import { requireAccess } from "@/lib/accessServer";
 import DayReviewWorkflow from "@/components/DayReviewWorkflow";
+import ReviewMyWeek from "@/components/copilot/ReviewMyWeek";
 import JoDay from "@/components/JoDay";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import { api } from "@/lib/serverApi";
@@ -66,6 +67,15 @@ function shiftWeekday(day: string, step: 1 | -1) {
   const date = new Date(`${day}T12:00:00Z`);
   do date.setUTCDate(date.getUTCDate() + step);
   while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  return date.toISOString().slice(0, 10);
+}
+
+/** The week's Monday when ``day`` is a Friday (the week's last trading day), so its review can name the week. */
+function fridaysMonday(day: string | null) {
+  if (!day) return null;
+  const date = new Date(`${day}T12:00:00Z`);
+  if (date.getUTCDay() !== 5) return null;
+  date.setUTCDate(date.getUTCDate() - 4);
   return date.toISOString().slice(0, 10);
 }
 
@@ -278,12 +288,15 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
             {selectedDay === newYorkToday() ? "Current trading day" : "Trading day"}: {dayLabel}
           </p>
         </div>
-        <a
-          href="/trades"
-          className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-        >
-          All Trades
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          {fridaysMonday(selectedDay) && <ReviewMyWeek monday={fridaysMonday(selectedDay)!} />}
+          <a
+            href="/trades"
+            className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            All Trades
+          </a>
+        </div>
       </div>
 
       <nav

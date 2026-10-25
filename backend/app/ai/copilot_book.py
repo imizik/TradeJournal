@@ -166,11 +166,14 @@ def _warm_option_quotes(trades: list) -> None:
         get_option_quotes(wanted)
 
 
-def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only=None) -> tuple[list[tuple], int]:
+def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only=None,
+                  *, now: datetime | None = None) -> tuple[list[tuple], int]:
     """``([(trade, row), ...], total)``: the row is the model's view (below); the trade lets a caller in this package
     look up what else the journal keeps for it, and never leaves the server. ``total`` counts every open position.
     ``first`` puts that symbol's positions ahead of the alphabetical rest before the ``limit`` cut, so the symbol a
-    turn is about is never the one dropped from a large book. ``only`` (a trade) marks that one position alone."""
+    turn is about is never the one dropped from a large book. ``only`` (a trade) marks that one position alone.
+    ``now`` shares a caller's observation clock for elapsed holding time; it does not turn the current quotes
+    into historical observations."""
     from sqlmodel import select
     from app.engine import chart_journal
     from app.engine.quotes import get_stock_quotes
@@ -186,7 +189,7 @@ def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only
     quotes = get_stock_quotes(sorted({trades[p["trade_id"]].ticker for p in held if trades[p["trade_id"]].instrument_type == "stock"})) if held else {}
     _warm_option_quotes([trades[p["trade_id"]] for p in held[:limit]])
     from app.engine.chart_math import ET
-    now = datetime.now(UTC)
+    now = (now or datetime.now(UTC)).astimezone(UTC)
     pairs = []
     for p in held[:limit]:
         trade = trades[p["trade_id"]]

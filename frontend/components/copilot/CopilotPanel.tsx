@@ -34,6 +34,7 @@ const TOOL_LABEL: Record<string, string> = {
   get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", get_investigation_changes: "What changed",
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
+  get_week_review: "Week review",
 };
 
 function inline(text: string) {
