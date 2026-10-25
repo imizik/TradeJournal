@@ -368,6 +368,18 @@ def test_day_journal_is_owner_only_even_with_existing_journal_read_grant(boundar
     assert boundary.owner.get("/day-journal/2026-09-30").json()["entries"][0]["actor"] == "owner"
 
 
+def test_plan_streak_is_owner_only_even_with_journal_read(boundary):
+    boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
+    created = boundary.owner.post("/access/assistants", json={"identifier": "streak-reader",
+        "grants": {"symbols": ["SPY"], "run_ids": [], "journal_read": True}})
+    assert created.status_code == 201
+    assert signin(boundary, identifier="streak-reader", key=created.json()["key"]).status_code == 200
+    assert boundary.public.get("/charts/captures/streak").status_code == 403
+    owner = boundary.owner.get("/charts/captures/streak")
+    assert owner.status_code == 200, owner.text
+    assert owner.json()["show"] is False
+
+
 def test_journal_read_assistant_cannot_retrieve_owner_thought_reviews_or_calendar_days(boundary):
     from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
 

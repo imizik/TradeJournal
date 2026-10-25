@@ -44,6 +44,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /charts/captures/for-trade/{trade_id}',
     'GET /charts/captures/review',
     'GET /charts/captures/setup',
+    'GET /charts/captures/streak',
     'GET /charts/captures/{capture_id}/audio',
     'GET /charts/captures/{capture_id}/image',
     'GET /charts/history',

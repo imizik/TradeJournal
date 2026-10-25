@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import capture_links, captures, transcribe
+from app.engine import capture_links, captures, plan_streak, transcribe
 from app.engine.captures import CaptureError
 from app.engine.job_runtime import submit_job
 from app.models import Account, CaptureTemplate, TradeCapture
@@ -132,6 +132,12 @@ def review(db: Session = Depends(get_session)):
     ids = {uuid.UUID(item["capture_id"]) for item in data["needs_linking"]} | {uuid.UUID(value) for value in data["unresolved"]}
     rows = captures.rows(db, list(db.exec(select(TradeCapture).where(TradeCapture.id.in_(ids)).order_by(TradeCapture.received_at.desc())).all())) if ids else []
     return {**data, "captures": rows}
+
+
+@router.get("/captures/streak")
+def streak(db: Session = Depends(get_session)):
+    """The plan streak for the nav chip: entries planned before entry, newest first, and this week's count."""
+    return plan_streak.streak(db)
 
 
 @router.put("/captures/tracking")
