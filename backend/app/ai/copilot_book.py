@@ -218,14 +218,17 @@ def positions(session=None) -> dict:
             "excluded": "Webull accounts (dormant)"}
 
 
-def trades(symbol: str, limit: int = 5, session=None) -> dict:
+def trades(symbol: str, limit: int = 5, session=None, exclude=None) -> dict:
+    """Recent closed trades in ``symbol``, newest first; ``exclude`` leaves one trade out (the one under review)."""
     from sqlmodel import Session, col, select
     from app.database import engine
     from app.models import Account, Tag, Trade, TradeTag
     with (Session(engine) if session is None else nullcontext(session)) as db:
-        found = db.exec(select(Trade, Account.name).join(Account, Account.id == Trade.account_id)
-                        .where(Trade.ticker == symbol, Trade.status != "open").where(_not_webull())
-                        .order_by(col(Trade.closed_at).desc()).limit(min(limit, MAX_TRADES))).all()
+        query = (select(Trade, Account.name).join(Account, Account.id == Trade.account_id)
+                 .where(Trade.ticker == symbol, Trade.status != "open").where(_not_webull()))
+        if exclude is not None:
+            query = query.where(Trade.id != exclude)
+        found = db.exec(query.order_by(col(Trade.closed_at).desc()).limit(min(limit, MAX_TRADES))).all()
         ids = [t.id for t, _ in found]
         tags: dict = {}
         if ids:
@@ -240,11 +243,12 @@ def trades(symbol: str, limit: int = 5, session=None) -> dict:
         "entry_price": _round(float(t.avg_entry_premium)),
         "exit_price": None if t.avg_exit_premium is None else _round(float(t.avg_exit_premium)),
         "pnl_usd": None if t.realized_pnl is None else round(float(t.realized_pnl), 2),
-        "pnl_pct": None if t.pnl_pct is None else round(float(t.pnl_pct), 2), "hold_minutes": t.hold_duration_mins,
+        "pnl_pct": None if t.pnl_pct is None else round(100 * float(t.pnl_pct), 1), "hold_minutes": t.hold_duration_mins,
         "status": t.status, "expired_worthless": bool(t.expired_worthless), "tags": sorted(tags.get(t.id, []))[:MAX_TAGS],
     } for t, name in found]
     return {"symbol": symbol, "state": "ok", "as_of": _now(), "trades": rows,
-            "units": "Option prices are per contract as the journal stores them; stock prices per share. Times are New York."}
+            "units": "Option prices are per contract as the journal stores them; stock prices per share. pnl_pct is percent of "
+                     "the premium paid. Times are New York."}
 
 
 def memories(limit: int = 5, symbol: str | None = None, session=None) -> dict:

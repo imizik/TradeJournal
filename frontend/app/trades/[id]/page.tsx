@@ -13,6 +13,8 @@ import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
 import TradeAdvice from "@/components/TradeAdvice";
 import TradePhoneAlerts from "@/components/TradePhoneAlerts";
+import { useCopilotOn } from "@/components/copilot/useCopilotOn";
+import { copilotLabHref } from "@/lib/copilot";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -66,6 +68,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
   const [reviewError, setReviewError] = useState<string | null>(null);
   // Pre-trade plans linked to this trade (Charts C3.6); null while loading or unreadable.
   const [plans, setPlans] = useState<Capture[] | null>(null);
+  // Owner-only, and only while Copilot Lab is on.
+  const copilotOn = useCopilotOn();
 
   useEffect(() => {
     Promise.all([api.trade(id), api.tradeFills(id)])
@@ -139,6 +143,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         </span>
         {newYorkSeconds(trade.opened_at) !== null && <Link href={chartLink({ symbol: trade.ticker, from: newYorkSeconds(trade.opened_at)!, to: newYorkSeconds(trade.closed_at) ?? newYorkSeconds(trade.opened_at), trade: trade.id })}
           className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
+        {copilotOn && trade.status !== "open" && <Link href={copilotLabHref(trade.ticker, `Review this trade: ${trade.id}`)}
+          className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Review with copilot</Link>}
       </div>
 
       {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} symbol={trade.ticker} status={trade.status} />}
