@@ -33,9 +33,9 @@ test("ladder, heatmap and failure states are truthful on desktop and phone", asy
   page.on("websocket", socket => sockets.push(socket.url()));
   page.on("request", request => {
     const url = request.url();
-    // Existing shell reads job status, not data or provider calls (market_context.py).
+    // Existing shell reads job status (market_context.py) and the nav's plan streak (a journal count), not provider calls.
     const shellStatusRead = request.method() === "GET" && [
-      "/api/backend/market-context/enrich/status", "/api/backend/market-context/trade-path/status",
+      "/api/backend/market-context/enrich/status", "/api/backend/market-context/trade-path/status", "/api/backend/charts/captures/streak",
     ].includes(new URL(url).pathname);
     if ((!shellStatusRead && /\/api\/backend\/(charts|quotes|market-context)|moomoo|openapi/i.test(url)) || (url.includes("/api/backend/") && !["GET", "HEAD"].includes(request.method()))) forbiddenRequests.push(`${request.method()} ${url}`);
   });
