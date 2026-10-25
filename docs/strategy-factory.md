@@ -75,8 +75,10 @@ python scripts/strategy_factory.py ledger     # every candidate, its verdict, an
 ```
 
 `run` never touches the network. It builds regular-session bars per ticker
-and timeframe from the local SIP minute cache once, into
-`backend/data/factory/bars/`. A spec already in the ledger is not run again
+and timeframe from the local SIP minute cache into
+`backend/data/factory/bars/`. Source files are filtered by the stage cutoff before
+reading; both memory and disk caches are scoped to that cutoff. An earlier stage
+cannot reuse a later-stage or legacy unbounded cache. A spec already in the ledger is not run again
 (`--rerun` forces it, and it is still counted once). `--no-exam` stops before
 the holdout. Each run writes `report.txt` and one trades file per period it
 was allowed to see (`trades_discovery.csv`, `trades_confirm.csv`,

@@ -137,22 +137,25 @@ class AlpacaCache:
 
 class BarStore:
     """Session bars per ticker and timeframe, built once from the minute cache
-    and kept as a pickle under `data/factory/bars/`, rebuilt when the minute
-    cache has newer days. `load` cuts them at a day and builds the `Series`."""
+    and kept as a pickle under `data/factory/bars/`, scoped to the requested
+    cutoff before reading source files. Later-stage caches cannot serve an
+    earlier stage, even when this process has already loaded the later stage."""
 
     def __init__(self, source: MinuteSource, root: Path, progress: Callable[[str], None] = lambda _: None):
         self.source = source
         self.root = root / "bars" / source.feed
         self.progress = progress
-        self.memory: dict[tuple[str, int], list[Bar]] = {}
+        self.memory: dict[tuple[str, int, date | None], list[Bar]] = {}
         self.requests: list[tuple[str, int, date | None]] = []
 
-    def _bars(self, ticker: str, timeframe: int) -> list[Bar]:
-        key = (ticker, timeframe)
+    def _bars(self, ticker: str, timeframe: int, cutoff: date | None) -> list[Bar]:
+        key = (ticker, timeframe, cutoff)
         if key in self.memory:
             return self.memory[key]
-        days = [day for day in self.source.days(ticker) if day >= DATA_START]
-        path = self.root / f"{ticker}_{timeframe}m.pkl"
+        days = [day for day in self.source.days(ticker)
+                if day >= DATA_START and (cutoff is None or day <= cutoff)]
+        suffix = f"_through_{cutoff.isoformat()}" if cutoff is not None else ""
+        path = self.root / f"{ticker}_{timeframe}m{suffix}.pkl"
         through = days[-1] if days else None
         rows = None
         if path.exists():
@@ -181,7 +184,7 @@ class BarStore:
 
     def load(self, ticker: str, timeframe: int, through: date | None) -> Series | None:
         self.requests.append((ticker, timeframe, through))
-        bars = self._bars(ticker, timeframe)
+        bars = self._bars(ticker, timeframe, through)
         if through is not None:
             bars = [bar for bar in bars if bar.time.astimezone(ET).date() <= through]
         return Series.build(ticker, bars, timeframe) if bars else None
