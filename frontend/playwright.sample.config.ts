@@ -18,7 +18,8 @@ const common = { TJ_ACCESS_ALLOW_LOCAL_HTTP: "true", TJ_OWNER_GATEWAY_KEY: "o".r
 export default defineConfig({
   outputDir: "./sample-test-results", testDir: "./e2e", testMatch: "sample-decision.auth.ts", workers: 1, retries: 0,
   timeout: 60_000, expect: { timeout: 10_000 },
-  use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  // Same browser escape hatch as playwright.config.ts (verify.sh sets it in a cloud sandbox).
+  use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure", ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } } : {}) },
   webServer: [
     { command: `mkdir -p "${state}/data" && touch "${state}/.sample-installation" && "${python}" scripts/seed_dev_data.py --database-url "${db}" && "${python}" -m uvicorn scripts.sample_trial_browser:build_app --factory --host 127.0.0.1 --port ${backend}`, cwd: `${root}/backend`, url: `${api}/health`, reuseExistingServer: false, timeout: 120000,
       env: { ...common, DATABASE_URL: db, MIGRATION_DATABASE_URL: db, TJ_MANUAL_FILLS_BACKUP: manualFillsBackup, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", TJ_DOT_TRIAL_ENABLED: "true", TJ_SAMPLE_DECISION_WRITES: "true", TJ_SAMPLE_REPLAY_ENABLED: "true", TJ_MARKET_DECISION_WRITES: "true", TJ_HISTORICAL_REPLAY_ENABLED: "true", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${state}/job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", POLYGON_API_KEY: "", OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", WEBULL_USERNAME: "", WEBULL_PASSWORD: "", NTFY_URL: "", CAPTURE_TRANSCRIBER: "off" } },
