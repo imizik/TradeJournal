@@ -129,6 +129,25 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   With nothing armed it says so beside the **Plan a trade** button. Browser
   proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
   check); route tests: `tests/test_copilot_plans.py`.
+- **Plans card on the Dashboard** (`components/dashboard/PlansCard.tsx`),
+  near the top of the owner Dashboard above Exit habits, owner-only and shown
+  only while the lab is on. One row per open position (Webull left out): the
+  contract, open P&L in $ and %, then the plan it was entered under:
+  "Invalidation 92.30 · 2.1% away" (or "hit"), "Time stop 15:30 · 41 min",
+  "planned late" when the plan was saved after the fill, and the give-back
+  watch (armed or fired) with the latest open-trade alert. A position with no
+  plan says "No plan" with **Link plan** (the one-tap `/plans/link` page) when
+  a saved plan is suggested for it, else **Plan it** (the same deep link as the
+  unplanned-entry nudge). A tap on the row opens its position review
+  (`Review this position: <trade id>`). With nothing open it says so beside the
+  **Plan a trade** button. It refreshes every minute while visible and reads
+  `GET /copilot/plans/positions` (`app/engine/plan_positions.py`): positions
+  marked as `copilot_book.position_rows` marks them, the oldest linked plan
+  capture, its plan card's invalidation alert and time stop (by the capture's
+  investigation, made within ten minutes of it), one batched underlying quote
+  read for the distance, and `position_alerts.for_trade`. The only id out is
+  each row's trade id. Browser proof: `frontend/e2e/dashboard-plans-card.spec.ts`
+  (with a 375 px phone check); route tests: `tests/test_plan_positions.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation:

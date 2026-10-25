@@ -16,6 +16,7 @@ import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
 import JoTodayLine from "./JoTodayLine";
 import RadarPreview from "./RadarPreview";
 import ExitHabits from "./ExitHabits";
+import PlansCard from "./PlansCard";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -38,6 +39,7 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
       <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
     </header>
     <JoTodayLine today={today} />
+    <PlansCard />
     <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
       <div className="min-w-0 space-y-4" aria-label="Market and discovery"><MorningBriefing initialDay={today} compact /><RadarPreview /></div>
       <aside className="min-w-0 space-y-4" aria-label="Attention and data status">
