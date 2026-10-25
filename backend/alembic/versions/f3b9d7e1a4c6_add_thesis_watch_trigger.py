@@ -1,13 +1,13 @@
 """Thesis watch triggers (additive: a new table).
 
 Revision ID: f3b9d7e1a4c6
-Revises: e5a9c3d7f2b4
+Revises: b9e4d2a7c1f3
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "f3b9d7e1a4c6"
-down_revision = "e5a9c3d7f2b4"
+down_revision = "b9e4d2a7c1f3"
 branch_labels = None
 depends_on = None
 

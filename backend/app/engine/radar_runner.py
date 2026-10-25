@@ -10,8 +10,9 @@ limit or transport failure ends the pass at once (recorded failed or partial);
 the next minute tries again. Nothing is retried within a pass, sent or traded
 here. After an ok or partial pass, ``radar_rules.detect`` appends new events and
 revisions (step 2), then ``radar_news.enrich`` checks headlines near recent
-events (PR 5), so a new event gets its news the same minute. Neither one's
-failure affects the recorded pass. Outside the regular session an optional
+events (PR 5), so a new event gets its news the same minute. With
+``RADAR_ALERTS_ENABLED`` the new events also go to the phone through
+``radar_alerts`` (off by default). None of these failures affects the recorded pass. Outside the regular session an optional
 ``radar_premarket`` scanner (off unless ``RADAR_PREMARKET_ENABLED``) records its
 own pre-open lists in a separate file.
 """
@@ -23,9 +24,9 @@ import os
 import time
 from typing import Callable
 
-from app.engine import radar_news, radar_premarket, radar_rules, tradier
+from app.engine import radar_alerts, radar_news, radar_premarket, radar_rules, tradier
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
-from app.engine.radar_store import RadarPass, RadarQuote, RadarStore, load_universe
+from app.engine.radar_store import RadarEvent, RadarEventRevision, RadarPass, RadarQuote, RadarStore, load_universe
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class RadarRunner:
     def __init__(self, store: RadarStore, calendar, *, universe: dict | None = None,
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
                  clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
-                 premarket: radar_premarket.PremarketScanner | None = None):
+                 premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
@@ -59,6 +60,7 @@ class RadarRunner:
         self.clock = clock
         self.news = news
         self.premarket = premarket
+        self.alerts = alerts  # phone pings for new events; None keeps Radar silent
         self._pruned_for: date | None = None
 
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
@@ -95,11 +97,19 @@ class RadarRunner:
             rows = self._collect(record)
         record["finished_at"] = _iso(datetime.fromtimestamp(self.clock(), ET))
         pass_id = self.store.append_pass(record, rows)
+        new_events: list[RadarEvent] = []
         if inside and record["status"] in radar_rules.USABLE:
             try:
-                self.detect(record["session_date"], pass_id)
+                new_events, _ = self.detect(record["session_date"], pass_id)
             except Exception:  # detection is extra; the recorded pass stands either way
                 log.exception("Radar detection failed")
+        if inside and self.alerts is not None:
+            try:
+                if new_events:
+                    self.alerts.record(new_events)
+                self.alerts.deliver()
+            except Exception:  # a phone ping is extra; the recorded pass and its events stand either way
+                log.exception("Radar alerts failed")
         if inside:
             try:
                 radar_news.enrich(self.store, record["session_date"], datetime.fromtimestamp(self.clock(), UTC), self.news)
@@ -107,8 +117,8 @@ class RadarRunner:
                 log.exception("Radar news enrichment failed")
         return pass_id
 
-    def detect(self, session_date: str, pass_id: int) -> tuple[int, int]:
-        """Append the rules' new events and revisions for one recorded pass; returns how many of each.
+    def detect(self, session_date: str, pass_id: int) -> tuple[list[RadarEvent], list[RadarEventRevision]]:
+        """Append the rules' new events and revisions for one recorded pass; returns the rows written.
 
         Reads the session's pass list, the quotes of only the passes the windows need, and the session's saved
         events of this rule version. Rows already saved (same ids) are skipped, so a restart writes nothing twice.
@@ -116,21 +126,21 @@ class RadarRunner:
         passes = radar_rules.session_passes(self.store.passes(session_date), session_date)
         end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
         if end is None:
-            return 0, 0
+            return [], []
         quotes = self.store.pass_quotes(radar_rules.needed_pass_ids(passes, end))
         saved = [(e, self.store.revisions(e["event_id"])) for e in self.store.events(session_date)
                  if e["rule_version"] == radar_rules.RULE_VERSION]
         events, revisions = radar_rules.detect(self.universe, passes, end, quotes, saved)
-        written = [0, 0]
+        written_events, written_revisions = [], []
         for event in events:
             if self.store.event(event["event_id"]) is None:
                 self.store.append_event(event)
-                written[0] += 1
+                written_events.append(event)
         for revision in revisions:
             if len(self.store.revisions(revision["event_id"])) < revision["revision"]:
                 self.store.append_revision(revision)
-                written[1] += 1
-        return written[0], written[1]
+                written_revisions.append(revision)
+        return written_events, written_revisions
 
     def _collect(self, record: RadarPass) -> list[RadarQuote]:
         batches = [self.symbols[i:i + BATCH_SIZE] for i in range(0, len(self.symbols), BATCH_SIZE)]
@@ -184,6 +194,9 @@ def runner_from_env() -> RadarRunner | None:
     from app.engine.chart_calendar import chart_calendar
     universe = load_universe()
     runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe)
+    if radar_alerts.enabled():
+        from app.database import engine
+        runner.alerts = radar_alerts.RadarAlerts(engine)
     try:
         runner.premarket = radar_premarket.scanner_from_env(store, chart_calendar, universe)
     except Exception:  # an unusable pilot file must not turn the recorder off

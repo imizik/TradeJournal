@@ -13,6 +13,9 @@ Scope: every event of the newest rule version (versions are never pooled).
 - **Morning brief:** the stock as an opportunity or item in a saved, unredacted briefing within
   ``BRIEF_DAYS`` days: ``brief_first`` (on or before the event's day), ``radar_first`` (only after),
   ``not_in_brief``. Shown, not part of the verdict: a brief names at most a handful of stocks.
+- **Alerted:** the events a Radar phone ping reached (``RadarAlert`` rows ``sent``, or ``unknown``, which
+  may have reached the phone), with their ratings, apart from events only seen in the feed. Shown, not
+  part of the verdict.
 """
 from collections import Counter, defaultdict
 from datetime import date
@@ -24,7 +27,7 @@ from sqlmodel import Session, select
 from app.engine.radar_comparison import epoch
 from app.engine.radar_movers import build_movers
 from app.engine.radar_store import RATINGS, RadarStore
-from app.models import MorningBriefingPacket, MorningBriefingRecord
+from app.models import MorningBriefingPacket, MorningBriefingRecord, RadarAlert
 
 STOCK_KINDS = ("relative_to_spy", "relative_to_sector")
 USABLE = ("ok", "partial")
@@ -94,6 +97,14 @@ def briefed_symbols(db: Session) -> dict[date, set[str]]:
     return out
 
 
+def alerted_events(db: Session, event_ids: list[str]) -> set[str]:
+    """The ids among ``event_ids`` whose phone ping was accepted by ntfy, or may have been."""
+    if not event_ids:
+        return set()
+    return set(db.exec(select(RadarAlert.event_id).where(RadarAlert.event_id.in_(event_ids),
+                                                         RadarAlert.delivery.in_(("sent", "unknown")))).all())
+
+
 def build(store: RadarStore, db: Session, universe: dict) -> dict:
     events = store.events()
     newest = max(events, key=lambda e: epoch(e["first_seen_at"]), default=None)
@@ -101,6 +112,8 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
     events = [e for e in events if e["rule_version"] == version]
     latest = store.latest_ratings()
     ratings = Counter(latest.get(e["event_id"], "unrated") for e in events)
+    alerted = alerted_events(db, [e["event_id"] for e in events])
+    alerted_ratings = Counter(latest.get(event_id, "unrated") for event_id in alerted)
     briefs = briefed_symbols(db)
     stocks = [e for e in events if e["kind"] in STOCK_KINDS]
     timeline_of = {}
@@ -122,5 +135,6 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
         "movers": {k: timing[k] for k in ("radar_first", "not_in_movers", "movers_first", "unavailable")},
         "median_lead_minutes": median(leads) if leads else None,
         "brief": {k: brief[k] for k in ("radar_first", "brief_first", "not_in_brief")},
+        "alerted": {"events": len(alerted), "ratings": {r: alerted_ratings[r] for r in (*RATINGS, "unrated")}},
         "verdict": verdict(ratings, timing),
     }
