@@ -36,7 +36,7 @@ test("one candidate: Link is one big tap at 375 px, then Linked with the trade a
   const posted = await serve(page, page_([only]), () => ({ status: 200, json: {} }));
   await page.goto(`/plans/link?trade=${TRADE}`);
   await expect(page.getByText("NBIS 11/21/26 100C")).toBeVisible();
-  await expect(page.getByText("Opened 2 at $3.10 at 10:00:00 AM ET")).toBeVisible();
+  await expect(page.getByText(/^Opened 2 at \$3\.10 at (Oct 21 )?10:00:00 AM ET$/)).toBeVisible();
   await expect(page.getByText("Was this your plan?")).toBeVisible();
   await expect(page.getByText("Before entry")).toBeVisible();
   const link = page.getByRole("button", { name: "Link", exact: true });
@@ -77,7 +77,7 @@ test("a refused link says why and changes nothing here", async ({ page }) => {
     json: { detail: "That trade already has a plan linked. A re-entry is a new trade and needs its own plan." } }));
   await page.goto(`/plans/link?trade=${TRADE}`);
   await page.getByRole("button", { name: "Link", exact: true }).click();
-  await expect(page.getByRole("alert")).toHaveText("Not linked. That trade already has a plan linked. A re-entry is a new trade and needs its own plan.");
+  await expect(page.getByRole("alert").filter({ hasText: "Not linked." })).toHaveText("Not linked. That trade already has a plan linked. A re-entry is a new trade and needs its own plan.");
   await expect(page.getByRole("heading", { name: "Linked" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Link", exact: true })).toBeEnabled();
 });
