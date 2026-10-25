@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MEASURE_LABELS, RATINGS, RULE_TAGS, STATUS_TEXT, coverageLine, getEvent, getFeed, headlineMeta, measureText, newsLine, nyTime, rateEvent,
-  recordVisit, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
+  recordVisit, radarEventId, radarRating, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import AskCopilot from "@/components/copilot/AskCopilot";
 import PlanATrade from "@/components/copilot/PlanATrade";
@@ -151,14 +151,16 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
   );
 }
 
-function EventCard({ event, fresh, open, onToggle, onRated }: {
-  event: RadarFeedEvent; fresh: boolean; open: boolean; onToggle: () => void; onRated: (rating: RadarRating) => void;
+function EventCard({ event, fresh, open, linked, onToggle, onRated }: {
+  event: RadarFeedEvent; fresh: boolean; open: boolean; linked: boolean; onToggle: () => void; onRated: (rating: RadarRating) => void;
 }) {
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => { if (linked && open) ref.current?.scrollIntoView({ block: "start" }); }, [linked, open]);
   const direction = DIRECTION[event.direction];
   const against = event.group ?? event.benchmark;
   const keys = Object.keys(event.measures).filter((k) => k !== "benchmark_change_pct" && k !== "change_pct").slice(0, 3);
   return (
-    <li className="rounded-lg border bg-card" data-testid="radar-event">
+    <li ref={ref} className="rounded-lg border bg-card" data-testid="radar-event">
       <button type="button" onClick={onToggle} aria-expanded={open} className="w-full min-w-0 p-3 text-left">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", direction.className)}>{direction.label}</span>
@@ -188,10 +190,35 @@ function EventCard({ event, fresh, open, onToggle, onRated }: {
 export default function RadarFeedView() {
   const [feed, setFeed] = useState<RadarFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [session, setSession] = useState<string | undefined>();
   const [sessionReady, setSessionReady] = useState(false);
-  useEffect(() => { queueMicrotask(() => { setSession(radarSession(new URLSearchParams(window.location.search).get("session"))); setSessionReady(true); }); }, []);
   const [open, setOpen] = useState<string | null>(null);
+  const [linked, setLinked] = useState<string | null>(null); // the event a phone alert's tap asked for
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const event = radarEventId(params.get("event"));
+      const rate = radarRating(params.get("rate"));
+      let day = params.get("session");
+      if (event) {
+        if (rate) {
+          // A phone alert's Useful / Not useful action: the tap is the rating, saved once through the usual feedback
+          // route before the event shows. It is dropped from the address first, so a reload (or a second effect run
+          // in React strict mode) cannot repeat it.
+          const url = new URL(window.location.href); url.searchParams.delete("rate");
+          window.history.replaceState(window.history.state, "", url);
+          try { await rateEvent(event, rate); } catch { if (live) setNotice("That rating was not saved. You can rate the event below."); }
+        }
+        if (!day) { try { day = (await getEvent(event)).event.session_date; } catch { /* the feed's default session, then */ } }
+      }
+      if (!live) return;
+      setLinked(event); setOpen(event);
+      setSession(radarSession(day)); setSessionReady(true);
+    })();
+    return () => { live = false; };
+  }, []);
   // The last visit as it was when this page opened; opening the page records a new one.
   const baseline = useRef<string | null>(null);
   const visited = useRef(false);
@@ -238,7 +265,7 @@ export default function RadarFeedView() {
   const rated = (id: string) => (rating: RadarRating) =>
     setFeed((f) => f && { ...f, events: f.events.map((e) => e.event_id === id ? { ...e, rating } : e) });
   const card = (e: RadarFeedEvent) => (
-    <EventCard key={e.event_id} event={e} fresh={fresh.has(e.event_id)} open={open === e.event_id}
+    <EventCard key={e.event_id} event={e} fresh={fresh.has(e.event_id)} open={open === e.event_id} linked={linked === e.event_id}
       onToggle={() => setOpen(open === e.event_id ? null : e.event_id)} onRated={rated(e.event_id)} />
   );
 
@@ -263,6 +290,7 @@ export default function RadarFeedView() {
         )}
       </div>
       {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
+      {notice && <p role="alert" className="text-xs text-amber-300">{notice}</p>}
 
       {feed.state !== "off" && <h2 className="text-base font-semibold">Developments</h2>}
 

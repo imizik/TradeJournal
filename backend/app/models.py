@@ -598,6 +598,36 @@ class PositionAlert(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class RadarAlert(SQLModel, table=True):
+    """One Radar phone ping (``engine/radar_alerts.py``) for a newly detected Radar event, written
+    once per event: the unique event id keeps a restart or a second process from recording it twice.
+    The Radar file itself stays append-only and alert-free; this outbox lives in the journal database
+    so ``/radar/proof`` can count alerted events apart from events merely seen in the feed. Delivery
+    is at-most-once, as position alerts are; a capped event is written ``skipped`` and never sent."""
+
+    __tablename__ = "radar_alert"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_radar_alert_event"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    event_id: str = Field(index=True)  # the Radar event, e.g. rv0-2026-10-22-spy-lad-up-1
+    session_date: str = Field(index=True)
+    rule_version: str
+    kind: str  # relative_to_spy | relative_to_sector | group_move
+    subject: str = Field(index=True)  # the stock, or the group name: the hourly cap's key
+    title: str  # e.g. "Radar: LAD +5.3% vs SPY +0.1%"
+    body: str  # the feed's summary and the time
+    first_seen_at: datetime  # UTC, the event's first sighting
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | skipped
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class PlanNudge(SQLModel, table=True):
     """One plan phone ping for a new position (``engine/plan_nudges.py``): the
     unplanned-entry nudge, or the one-tap link ping when a saved plan is suggested

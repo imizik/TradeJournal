@@ -221,7 +221,7 @@ def test_runner_detects_before_news_and_a_restart_writes_nothing_twice(tmp_path)
     assert asked == [["AAA"]]  # the new event got its news check in the same pass
     assert [c["status"] for c in store.news_checks(event["event_id"])] == ["none_found"]
     restarted = _runner(store, 37)
-    assert restarted.detect(DAY, pass_id) == (0, 0) and len(store.events(DAY)) == 1
+    assert restarted.detect(DAY, pass_id) == ([], []) and len(store.events(DAY)) == 1
     replayed = radar_rules.replay(UNIVERSE, radar_rules.session_passes(store.passes(DAY), DAY),
                                   store.pass_quotes(p["id"] for p in store.passes(DAY)))
     assert [e for e, _ in replayed] == store.events(DAY)

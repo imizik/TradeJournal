@@ -531,6 +531,10 @@ Clearing this setting restores the dollar floor for future arming; already-armed
 watches retain their normal give-back coverage. Existing position-alert enablement
 and delivery settings must be preserved when applying this optional setting.
 
+Radar phone alerts (one ping per new Radar event, capped) are separate too and
+remain off unless `RADAR_ALERTS_ENABLED=true` is in `backend.env`; see
+[Radar phone alerts](../docs/radar.md#phone-alerts-off-by-default).
+
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
 long random topic such as `tradejournal-` followed by `openssl rand -hex 16`.
