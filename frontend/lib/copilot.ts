@@ -186,13 +186,14 @@ export function copilotLabHref(symbol: string, context?: string) {
 /** The deep link's values, or null when there is none; an invalid symbol is dropped. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The deep link's values, or null when there is none. `investigation` opens that saved investigation. */
+/** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
+ * with it is the owner's question, ready in the message box (a plan alert's tap). */
 export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
   const investigation = one(params.investigation).trim();
-  if (UUID_RE.test(investigation)) return { symbol: "", context: "", investigation: investigation.toLowerCase() };
+  if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase() };
   if (!symbol && !context) return null;
   return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null };
 }
@@ -274,11 +275,28 @@ export const createWatch = (investigationId: string, watch: Extract<Proposal, { 
   request<AlertsPayload>("/charts/alerts", { method: "POST", body: JSON.stringify({
     symbol: watch.symbol, price: watch.price, reference, condition: watch.condition, interval: watch.interval, session: "regular",
     source_kind: "copilot", source_id: investigationId, label: watch.label }) });
-/** One of a confirmed plan's level alerts: an ordinary alert, marked as coming from this investigation, like a watch. */
-export const createPlanAlert = (investigationId: string, symbol: string, level: PlanLevel, reference: number, label: string) =>
+/** One of a confirmed plan's level alerts: an ordinary alert, marked as coming from this investigation, like a watch.
+ * ``role`` says which level it is, so its phone message names the plan. */
+export const createPlanAlert = (investigationId: string, symbol: string, level: PlanLevel, reference: number, label: string,
+  role: PlanRole) =>
   request<AlertsPayload>("/charts/alerts", { method: "POST", body: JSON.stringify({
     symbol, price: level.price, reference, condition: level.condition, interval: level.interval, session: "regular",
-    source_kind: "copilot", source_id: investigationId, label }) });
+    source_kind: "copilot", source_id: investigationId, label, plan_role: role }) });
+export type PlanRole = "entry" | "invalidation";
+/** When a plan card's time stop would ping (``due_at``, epoch seconds), or why it stays a note. ``enabled``: whether
+ * this server sends time-stop pings (PLAN_TIME_STOPS_ENABLED). */
+export type TimeStopPreview = { due_at: number; when: string; enabled: boolean } | { due_at: null; reason: string; enabled: boolean };
+export type TimeStop = { id: string; symbol: string; text: string; due_at: number;
+  delivery: "scheduled" | "pending" | "sending" | "sent" | "skipped" | "expired" | "unknown"; trade_id: string | null;
+  error: string | null; delivered_at: number | null };
+export type TimeStops = { time_stops: TimeStop[]; enabled: boolean };
+export const previewTimeStop = (text: string, signal?: AbortSignal) =>
+  request<TimeStopPreview>(`/copilot/time-stops/preview?text=${encodeURIComponent(text)}`, { signal });
+/** ``clientId`` is the plan card's: a retried Confirm returns the first time stop. */
+export const saveTimeStop = (clientId: string, investigationId: string, symbol: string, text: string) =>
+  request<TimeStops>("/copilot/time-stops", { method: "POST", body: JSON.stringify({ client_id: clientId, investigation_id: investigationId, symbol, text }) });
+export const listTimeStops = (investigationId: string, signal?: AbortSignal) =>
+  request<TimeStops>(`/copilot/time-stops?investigation=${encodeURIComponent(investigationId)}`, { signal });
 /** A confirmed plan is the owner's pre-trade plan: the existing capture route, discretionary, named "Copilot plan", so
  * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
  * save returns the first plan instead of making a second. */

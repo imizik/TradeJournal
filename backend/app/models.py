@@ -484,6 +484,7 @@ class LevelAlert(SQLModel, table=True):
     source_kind: str  # level | drawing | auto
     source_id: Optional[str] = None
     label: str = ""
+    plan_role: Optional[str] = None  # entry | invalidation: one of a confirmed copilot plan's levels (source_kind copilot)
     state: str = Field(default="active", index=True)  # active | fired
     generation: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -604,6 +605,32 @@ class PlanNudge(SQLModel, table=True):
     opened_at: datetime  # the first entry fill, a New York wall clock
     detected_at: datetime = Field(default_factory=datetime.utcnow)
     delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | skipped
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+class PlanTimeStop(SQLModel, table=True):
+    """A confirmed copilot plan's time stop (``engine/plan_time_stops.py``): one
+    phone ping at ``due_at`` if a position in ``symbol`` opened after the plan is
+    still open then, else recorded ``skipped``. ``client_id`` is minted once per
+    plan card, so a retried Confirm returns the first row. Delivery is an outbox
+    on the same row, at most once, as plan nudges are."""
+
+    __tablename__ = "plan_time_stop"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    client_id: str = Field(unique=True)
+    investigation_id: str = Field(index=True)  # the copilot investigation the plan came from
+    symbol: str
+    text: str  # the owner's words, e.g. "out by 15:30"
+    due_at: datetime  # UTC
+    created_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: the plan's Confirm
+    delivery: str = Field(default="scheduled", index=True)  # scheduled | pending | sending | sent | skipped | expired | unknown
+    trade_id: Optional[uuid.UUID] = None  # the open position it pinged about
+    detected_at: Optional[datetime] = None  # UTC: when it came due and was judged
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
     claimed_at: Optional[datetime] = None

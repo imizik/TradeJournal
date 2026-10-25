@@ -1,22 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, savePlanCapture, type PlanLevel, type TradePlan } from "@/lib/copilot";
+import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
 
 const SIDE: Record<string, CaptureSide> = { "long stock": "buy_stock", "short stock": "short_stock", "long calls": "buy_calls", "short puts": "buy_puts" };
-type Part = "plan" | "entry" | "invalidation";
+type Part = "plan" | "entry" | "invalidation" | "timeStop";
 type Result = { state: "idle" | "working" | "done" | "failed"; text: string };
-const PART_LABEL: Record<Part, string> = { plan: "Pre-trade plan", entry: "Entry alert", invalidation: "Invalidation alert" };
+const PART_LABEL: Record<Part, string> = { plan: "Pre-trade plan", entry: "Entry alert", invalidation: "Invalidation alert", timeStop: "Time stop" };
 const IDLE: Result = { state: "idle", text: "" };
 const field = "w-full rounded border bg-background px-2 py-2 text-base text-foreground disabled:opacity-60 sm:text-sm";
 
 /**
  * The copilot's whole trade plan (propose_plan kind=trade_plan). The owner edits it; Confirm saves it as their pre-trade
- * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). Each part
- * reports its own result, and only a failed part is retried. Nothing is saved or armed before Confirm.
+ * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). A time stop
+ * the server can read as a time ("out by 15:30", "45m", "2 days") is shown before Confirm and saved as a timed ping;
+ * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
+ * Nothing is saved or armed before Confirm.
  */
 export default function TradePlanCard({ plan, investigationId, alertsSupported, onDone }: {
   plan: TradePlan; investigationId: string | null; alertsSupported: boolean; onDone(): void;
@@ -30,9 +32,21 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const [setup, setSetup] = useState<CaptureSetup | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [picked, setAccount] = useState("");
-  const [results, setResults] = useState<Record<Part, Result>>({ plan: IDLE, entry: IDLE, invalidation: IDLE });
+  const [results, setResults] = useState<Record<Part, Result>>({ plan: IDLE, entry: IDLE, invalidation: IDLE, timeStop: IDLE });
+  // The server's reading of the time stop, for the words it was asked about; a failed read leaves it a note.
+  const [preview, setPreview] = useState<{ text: string; read: TimeStopPreview | null } | null>(null);
   const clientId = useRef(newClientId());  // one plan per card: a retried save returns the first one
   useEffect(() => { fetchSetup().then(setSetup).catch(() => setSetupError(true)); }, []);
+  const stopText = timeStop.trim();
+  useEffect(() => {
+    if (!stopText || !alertsSupported) return;
+    const controller = new AbortController();
+    const wait = setTimeout(() => {
+      previewTimeStop(stopText, controller.signal).then(read => setPreview({ text: stopText, read }))
+        .catch(() => { if (!controller.signal.aborted) setPreview({ text: stopText, read: null }); });
+    }, 300);
+    return () => { clearTimeout(wait); controller.abort(); };
+  }, [stopText, alertsSupported]);
   if (dismissed) return null;
 
   const side = SIDE[`${plan.direction} ${plan.instrument}`];
@@ -50,9 +64,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     : null;
   const started = Object.values(results).some(r => r.state !== "idle");
   const busy = Object.values(results).some(r => r.state === "working");
-  const parts: Part[] = alertsSupported ? ["plan", "entry", "invalidation"] : ["plan"];
+  const reading = alertsSupported && !!stopText && preview?.text !== stopText;
+  const timed = alertsSupported && !reading && preview?.read?.due_at ? preview.read : null;
+  const parts: Part[] = alertsSupported ? ["plan", "entry", "invalidation", ...(timed ? ["timeStop" as const] : [])] : ["plan"];
   const finished = parts.every(p => results[p].state === "done");
-  const ready = !problem && !!account && (!alertsSupported || !!investigationId);
+  const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
   const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`,
     timeStop.trim() && `Time stop: ${timeStop.trim()}.`, size.trim() && `Size: ${size.trim()}.`].filter(Boolean).join(" ").slice(0, 400);
@@ -66,6 +82,10 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       if (part === "plan") {
         await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note });
         text = "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.";
+      } else if (part === "timeStop") {
+        await saveTimeStop(clientId.current, investigationId!, plan.symbol, stopText);
+        text = `Set for ${timed?.when ?? "its time"}.`;
+        onDone();
       } else {
         const level = part === "entry" ? entryLevel : stopLevel;
         // The side the alert waits on comes from the price now, so a stale or missing quote is refused, as for a watch.
@@ -75,7 +95,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         // An invalidation already crossed would arm on the wrong side and wait for the move back.
         if (part === "invalidation" && (long ? quote.last < level.price : quote.last > level.price))
           throw new Error(`${plan.symbol} is at ${quote.last}, already past the invalidation at ${level.price}, so it was not set.`);
-        await createPlanAlert(investigationId!, plan.symbol, level, quote.last, `${plan.symbol} ${part}: ${levelText(level)}`.slice(0, 60));
+        await createPlanAlert(investigationId!, plan.symbol, level, quote.last, `${plan.symbol} ${part}: ${levelText(level)}`.slice(0, 60), part);
         text = `Set: ${plan.symbol} ${levelText(level)}.`;
         onDone();
       }
@@ -123,6 +143,13 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         <span className="text-xs text-muted-foreground">Time stop</span>
         <input value={timeStop} onChange={e => setTimeStop(e.target.value.slice(0, 80))} placeholder="e.g. out by 15:30" disabled={locked} className={cn(field, "min-h-11")} />
       </label>
+      {alertsSupported && stopText && !locked && (
+        <p aria-label="When it pings" className="text-xs text-muted-foreground">
+          {reading ? "Reading the time…"
+            : timed ? `Pings ${timed.when} if you hold ${plan.symbol} then, from an entry after this plan.${timed.enabled ? "" : " Time-stop pings are off on this server for now."}`
+            : `Kept as a note: ${preview?.read && "reason" in preview.read ? preview.read.reason : "the time could not be read."}`}
+        </p>
+      )}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">Size</span>
         <input value={size} onChange={e => setSize(e.target.value.slice(0, 120))} placeholder="e.g. one starter, no adds" disabled={locked} className={cn(field, "min-h-11")} />
