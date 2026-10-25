@@ -194,7 +194,7 @@ def _state(row: PracticeReplayAttempt) -> dict:
         choice = data["choices"].get(current)
         if choice:
             checkpoint["decision_received_at"] = choice["received_at"]
-    return {"attempt_id": str(row.id), "scenario_id": row.scenario_id,
+    return {"attempt_id": str(row.id), "operation_id": str(row.operation_id), "scenario_id": row.scenario_id,
             "repeated": data["repeated"], "phase": phase, "checkpoint": checkpoint,
             "choice": data["choices"].get(current) if current else None, "revealed": revealed}
 

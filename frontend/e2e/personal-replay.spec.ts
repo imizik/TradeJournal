@@ -172,3 +172,44 @@ test("a lost start response retries the same attempt after reload", async ({ pag
   expect(operations[0]).toBe(operations[1]);
   expect(created[0]).toBe(created[1]);
 });
+
+test("browser Back restores the selected attempt and then the catalog", async ({ page, request }) => {
+  const attempt = await create(request);
+  for (const checkpoint_id of ["first-look", "later-look"]) {
+    await request.post(`${API}/practice/replay/attempts/${attempt.attempt_id}/choice`, { data: { checkpoint_id, decision: "hold" } });
+    await request.post(`${API}/practice/replay/attempts/${attempt.attempt_id}/reveal`, { data: { checkpoint_id } });
+  }
+  await page.goto(`/practice/replay?attempt=${attempt.attempt_id}`);
+  await page.getByRole("button", { name: "Try this scenario again with new choices" }).click();
+  await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`attempt=${attempt.attempt_id}$`));
+  await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
+  await page.goto("/practice/replay");
+  await page.getByRole("button", { name: "Start replay", exact: true }).click();
+  await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "Start replay", exact: true })).toBeVisible();
+});
+
+test("resuming an uncertain start clears only its matching retry operation", async ({ page }) => {
+  await page.route("**/practice/replay/attempts", async route => {
+    await route.fetch();
+    await route.fulfill({ status: 503, json: { detail: "Start response lost" } });
+  }, { times: 1 });
+  await page.goto("/practice/replay");
+  await page.getByRole("button", { name: "Start replay", exact: true }).click();
+  await expect(page.getByTestId("personal-replay").getByRole("alert")).toContainText("Start response lost");
+  await page.reload();
+  await page.getByRole("link", { name: "Resume last replay" }).click();
+  await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
+  const original = page.url();
+  for (let checkpoint = 0; checkpoint < 2; checkpoint++) {
+    await choose(page, "Hold");
+    await page.getByRole("button", { name: "Reveal what happened next", exact: true }).click();
+  }
+  await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Try this scenario again with new choices" }).click();
+  await expect(page).not.toHaveURL(original);
+  await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import FrozenSampleChart from "@/components/FrozenSampleChart";
 import { getReplayAttempt, listReplayScenarios, revealReplayCheckpoint, saveReplayChoice, startReplayAttempt, type ReplayAttempt, type ReplayChoice, type ReplayScenario } from "@/lib/personalReplay";
 
@@ -15,7 +16,8 @@ const expiryLabel = (value: string) => {
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : value;
 };
 
-export default function PersonalReplay({ initialAttemptId }: { initialAttemptId: string | null }) {
+export default function PersonalReplay() {
+  const initialAttemptId = useSearchParams().get("attempt");
   const [scenarios, setScenarios] = useState<ReplayScenario[]>([]);
   const [attempt, setAttempt] = useState<ReplayAttempt | null>(null);
   const [decision, setDecision] = useState<ReplayChoice["decision"] | null>(null);
@@ -34,7 +36,19 @@ export default function PersonalReplay({ initialAttemptId }: { initialAttemptId:
     setRationale("");
     setAttempt(null);
     setError("");
-    try { const next = await getReplayAttempt(id); if (version === readVersion.current) setAttempt(next); }
+    try {
+      const next = await getReplayAttempt(id);
+      if (version === readVersion.current) {
+        setAttempt(next);
+        // A lost Start response may be recovered through the catalog's Resume
+        // link. Reconcile that exact request, keeping an unrelated pending start.
+        try {
+          if (sessionStorage.getItem("tj-personal-replay-operation") === next.operation_id) {
+            sessionStorage.removeItem("tj-personal-replay-operation");
+          }
+        } catch { /* Reading a durable replay must work without browser storage. */ }
+      }
+    }
     catch (err) { if (version === readVersion.current) setError(err instanceof Error ? err.message : "Saved replay could not be loaded."); }
     finally { if (version === readVersion.current) setAttemptLoading(false); }
   }, []);

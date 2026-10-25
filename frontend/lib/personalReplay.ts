@@ -19,6 +19,7 @@ export type ReplayReveal = {
 };
 export type ReplayAttempt = {
   attempt_id: string;
+  operation_id: string;
   scenario_id: string;
   repeated: boolean;
   phase: "decision" | "complete";

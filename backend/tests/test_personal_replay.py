@@ -111,6 +111,7 @@ def test_create_operation_retry_returns_original_and_new_attempt_is_marked_repea
     first = client.post("/practice/replay/attempts", json={"operation_id": op}).json()
     retry = client.post("/practice/replay/attempts", json={"operation_id": op}).json()
     assert retry["attempt_id"] == first["attempt_id"]
+    assert retry["operation_id"] == first["operation_id"] == op
     assert retry["repeated"] is False
     later = begin(client)
     assert later["repeated"] is True
