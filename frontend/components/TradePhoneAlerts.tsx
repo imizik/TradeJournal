@@ -6,7 +6,7 @@ import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from 
 
 // Older API responses still render their history, but cannot identify a linked event.
 type Sent = { id?: string; contract?: string; quoted_at?: number | null;
-  kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
+  kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped"; error: string | null; delivered_at: number | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
@@ -14,7 +14,8 @@ type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: bo
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
 
 const KIND: Record<Sent["kind"], string> = { giveback: "Give-back triggered", expiry_first: "Expires today", expiry_final: "30 minutes to the close",
-  hold_hour: "Open an hour: re-decide", plan_nudge: "No plan yet: plan nudge" };
+  hold_hour: "Open an hour: re-decide", plan_nudge: "No plan yet: plan nudge",
+  plan_link: "Saved plan found: link ping" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "accepted by ntfy; phone display unconfirmed",
   expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent",
   skipped: "not sent: today's nudge limit was reached" };
@@ -73,10 +74,11 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
   const history = body?.alerts.filter(a => a !== selected) ?? [];
   const rows = <ul className="mt-1 divide-y">{history.map(a => <li key={a.id ?? `${a.kind}-${a.detected_at}`} className="py-2">
     <span className="font-medium">{KIND[a.kind]}</span>
-    <span className="text-muted-foreground"> · {time(a.detected_at)} · {DELIVERY[a.delivery]}</span>
+    <span className="text-muted-foreground"> · {time(a.detected_at)} · {a.kind === "plan_link" && a.delivery === "skipped" && a.error ? a.error : DELIVERY[a.delivery]}</span>
     <div className="text-muted-foreground">
       {a.kind === "giveback" && <>Was up {money(a.peak_gain)} ({pct(a.peak_gain_pct)}), </>}
       {a.kind === "plan_nudge" ? <>Opened {a.entry ?? a.contracts} with no plan linked or suggested</>
+        : a.kind === "plan_link" ? <>Opened {a.entry ?? a.contracts}; a saved plan was suggested to link</>
         : a.mark != null ? <>at {money(a.gain)} ({pct(a.gain_pct)}) with {a.contracts} open</> : <>no live quote, {a.contracts} open</>}
     </div>
   </li>)}</ul>;

@@ -99,12 +99,36 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - **Position alerts:** with the lab on, each position alert push carries an
     "Ask copilot" action beside "Open app" that deep-links with the alert's
     context (Review a trade or position, below).
-  - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
-    `Plan this position: …` when a new position has no plan (see the
-    [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
+  - **Phone:** the unplanned-entry nudge (`PLAN_NUDGE_ENABLED`) deep-links here with
+    `Plan this position: …` when a new position has no plan. When a saved plan
+    is suggested for the fill it sends a link ping instead, whose confirm page
+    (`/plans/link`) offers the same **Plan it now** link after "Not this plan"
+    (see the [feature map](agent/feature-map.md), "Plan pings for new positions").
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
+- **Plans**, at the top of the lab page's home, above Open threads (same
+  conditions: page only, lab on, nothing open or sent). One row per confirmed
+  copilot plan that is still armed: its entry or invalidation alert is armed,
+  its time stop is pending, or the fill linked to its pre-trade plan is an open
+  position. Each row shows the symbol and direction, the thesis in one line,
+  the last price, the distance to the entry and to the invalidation in % and
+  $ (or "hit at 10:41" once fired), the time stop, and the fill: in position,
+  fill to link (a matching open trade not yet linked to the plan), or waiting
+  for entry. Rows sort nearest to an armed trigger first; a tap opens the
+  plan's investigation in place. It reads `GET /copilot/plans`
+  (`app/engine/copilot_plans.py`): the `plan_role` alerts and time stops by
+  investigation, the plan capture (the time stop's `client_id`, else the
+  newest "Copilot plan" capture for the symbol made with them), its capture
+  link, and one batched quote read (`chart_feed.quote_rows`, as
+  `GET /copilot/quote`). An investigation with several plans shows its latest:
+  the parts made within ten minutes of the newest. The only id out is the
+  investigation's. It refreshes every minute while the page is visible. A plan
+  whose alerts have all fired or been deleted and with no open position drops
+  off, and still shows in its investigation (Linked to this investigation).
+  With nothing armed it says so beside the **Plan a trade** button. Browser
+  proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
+  check); route tests: `tests/test_copilot_plans.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation:
@@ -528,6 +552,9 @@ nothing exists until the owner confirms.
     (at most 80) and `size_note` (at most 120).
   - Like a watch, the symbol needs a current price in the turn's evidence,
     and a plan whose price is already past its invalidation is refused.
+  - The saved plan's capture context carries the investigation id, so when the
+    fill arrives and the owner links it from the link ping's confirm page, that
+    page offers "Open its investigation".
   - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
     thesis, entry and invalidation prices, time stop and size as editable
     fields with phone-sized tap targets. Under the time stop it shows when it
