@@ -38,8 +38,8 @@ def epoch(moment: datetime) -> int:
     return int(moment.replace(tzinfo=UTC).timestamp())
 
 
-def buy(engine, n, symbol="NBIS", *, account=ROTH, minute=5, stock=False):
-    with Session(engine) as db:
+def buy(db_engine, n, symbol="NBIS", *, account=ROTH, minute=5, stock=False):
+    with Session(db_engine) as db:
         if stock:
             db.add(Fill(id=UUID(int=n), account_id=account, ticker=symbol, instrument_type="stock", side="buy", contracts=10,
                         price=120, executed_at=datetime(2026, 10, 21, 10, minute), raw_email_id=f"gmail:{n}"))
@@ -53,13 +53,13 @@ def buy(engine, n, symbol="NBIS", *, account=ROTH, minute=5, stock=False):
         return str(db.get(Trade, UUID(int=n)).id)
 
 
-def link(engine, capture_id, n):
-    with Session(engine) as db:
+def link(db_engine, capture_id, n):
+    with Session(db_engine) as db:
         db.add(CaptureLink(capture_id=capture_id, account_id=ROTH, source_key=f"gmail:{n}", method="manual"))
         db.commit()
 
 
-def test_a_planned_position_shows_pl_invalidation_distance_time_stop_countdown_and_timing(engine, lab, marks, quotes):
+def test_a_planned_position_shows_pl_invalidation_distance_time_stop_countdown_and_timing(engine, lab, marks, quotes):  # noqa: F811
     plan = capture(engine, "NBIS")  # 9:59:55, before the 10:05 fill
     time_stop(engine, NBIS, "NBIS")  # due 15:30 New York
     alert(engine, NBIS, "NBIS", "entry", 95.9, state="fired", fired=T0)
@@ -81,7 +81,7 @@ def test_a_planned_position_shows_pl_invalidation_distance_time_stop_countdown_a
     assert body["count"] == 1
 
 
-def test_a_plan_saved_after_the_fill_is_late_and_a_hit_invalidation_says_so(engine, lab, marks):
+def test_a_plan_saved_after_the_fill_is_late_and_a_hit_invalidation_says_so(engine, lab, marks):  # noqa: F811
     plan = capture(engine, "NBIS", minute=20)  # 10:19:55, after the 10:05 fill
     time_stop(engine, NBIS, "NBIS", minute=20, delivery="sent")
     alert(engine, NBIS, "NBIS", "invalidation", 92.3, minute=20, state="fired", fired=T0 + timedelta(minutes=40))
@@ -93,7 +93,7 @@ def test_a_plan_saved_after_the_fill_is_late_and_a_hit_invalidation_says_so(engi
     assert row["plan"]["time_stop"]["state"] == "sent" and "minutes_left" not in row["plan"]["time_stop"]
 
 
-def test_an_unplanned_position_with_a_suggested_plan_carries_the_link_page(engine, lab, marks):
+def test_an_unplanned_position_with_a_suggested_plan_carries_the_link_page(engine, lab, marks):  # noqa: F811
     capture(engine, "NBIS", minute=5)  # 10:04:55, unlinked, matches the 10:05 fill
     trade = buy(engine, 500)
     [row] = lab.get("/copilot/plans/positions").json()["positions"]
@@ -101,7 +101,7 @@ def test_an_unplanned_position_with_a_suggested_plan_carries_the_link_page(engin
     assert row["link_path"] == f"/plans/link?trade={trade}"
 
 
-def test_an_unplanned_position_with_nothing_suggested_carries_the_plan_deep_link(engine, lab, marks):
+def test_an_unplanned_position_with_nothing_suggested_carries_the_plan_deep_link(engine, lab, marks):  # noqa: F811
     buy(engine, 500)
     [row] = lab.get("/copilot/plans/positions").json()["positions"]
     assert row["plan"] is None and row["link_path"] is None
@@ -111,7 +111,7 @@ def test_an_unplanned_position_with_nothing_suggested_carries_the_plan_deep_link
     assert query["symbol"] == ["NBIS"] and query["context"][0].startswith("Plan this position: I just opened NBIS 10/23/26 100C")
 
 
-def test_give_back_state_and_the_latest_sent_alert(engine, lab, marks):
+def test_give_back_state_and_the_latest_sent_alert(engine, lab, marks):  # noqa: F811
     trade = buy(engine, 500)
     with Session(engine) as db:
         db.add(PositionWatch(account_id=ROTH, source_key="gmail:500", contracts=2, avg_cost=310, peak_mark=500,
@@ -126,7 +126,7 @@ def test_give_back_state_and_the_latest_sent_alert(engine, lab, marks):
     assert row["latest_alert"] == {"kind": "giveback", "at": epoch(T0 + timedelta(minutes=90))}
 
 
-def test_webull_is_left_out_and_stock_has_no_watch(engine, lab, marks):
+def test_webull_is_left_out_and_stock_has_no_watch(engine, lab, marks):  # noqa: F811
     with Session(engine) as db:
         db.add(Account(id=WEBULL, name="Webull 4242", type="individual", last4="4242", broker="webull"))
         db.commit()
@@ -136,7 +136,7 @@ def test_webull_is_left_out_and_stock_has_no_watch(engine, lab, marks):
     assert (row["contract"], row["giveback"], row["unrealized_usd"]) == ("CRWV stock", None, 112.0)
 
 
-def test_nothing_open_is_an_empty_list_and_the_only_id_out_is_the_trade(engine, lab, marks):
+def test_nothing_open_is_an_empty_list_and_the_only_id_out_is_the_trade(engine, lab, marks):  # noqa: F811
     assert lab.get("/copilot/plans/positions").json()["positions"] == []
     plan = capture(engine, "NBIS")
     time_stop(engine, NBIS, "NBIS")
@@ -148,7 +148,7 @@ def test_nothing_open_is_an_empty_list_and_the_only_id_out_is_the_trade(engine, 
     assert "gmail:" not in text and "card-1" not in text and "Roth" not in text
 
 
-def test_refused_while_the_lab_is_off(lab, monkeypatch):
+def test_refused_while_the_lab_is_off(lab, monkeypatch):  # noqa: F811
     from types import SimpleNamespace
     from app.routers import copilot_plans as plan_routes
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
