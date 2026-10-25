@@ -171,3 +171,35 @@ class FixtureEvidence:
 
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)
+
+    def get_trade_review(self, trade_id: str) -> dict:
+        """SIMULATED: shaped like ``copilot_review.trade_review`` for a closed NBIS call that gave back its gain."""
+        from app.ai.copilot_review import PROVENANCE
+        return {
+            "state": "ok", "as_of": AT, "simulated": True, "provenance": PROVENANCE,
+            "trade": {"symbol": "NBIS", "contract": "NBIS 11/21/26 100C", "instrument": "option", "account": "Simulated brokerage",
+                      "quantity": 2.0, "entry_time": "2026-10-20T10:05:00-04:00", "exit_time": "2026-10-20T14:40:00-04:00",
+                      "entry_price": 310.0, "exit_price": 255.0, "premium_paid_usd": 620.0, "pnl_usd": -110.0, "pnl_pct": -17.7,
+                      "hold_minutes": 275, "status": "closed", "expired_worthless": False,
+                      "fills": {"count": 3, "entries": 1, "exits": 2}},
+            "path": {"state": "ok", "quality": "simulated", "option_peak_pct": 20.0, "option_peak_unrealized_usd": 124.0,
+                     "option_giveback_from_peak_usd": 234.0, "underlying_peak_pct": 2.4, "underlying_worst_pct": -1.9},
+            "plan": {"state": "ok", "setup": "Group recovery", "side": "buy_calls", "mode": "discretionary",
+                     "wording": "Simulated: buy the first higher low after the neoclouds turn; out below 92.50 or if NBIS loses the open.",
+                     "captured_at": "2026-10-20T13:58:00Z", "timing": "pre_entry"},
+            "alerts": {"state": "ok", "sent": 1, "shown": 1, "alerts": [
+                {"kind": "giveback", "at": "2026-10-20T15:48:00Z", "contracts_open": 2.0, "mark": 320.0, "gain_usd": 20.0,
+                 "gain_pct": 3.2, "peak_gain_usd": 124.0, "peak_gain_pct": 20.0, "then": "closed_later",
+                 "vs_closing_at_alert_usd": -130.0, "value_at_alert_usd": 640.0, "realized_after_usd": 510.0,
+                 "closed_at": "2026-10-20T14:40:00-04:00"}]},
+            "habits": {"state": "ok", "habits": [
+                {"habit": "Was up 10% and $50, then closed red", "this_trade": "yes"},
+                {"habit": "Held an hour or more, closed red the same day", "this_trade": "yes"},
+                {"habit": "Expired worthless", "this_trade": "no"},
+                {"habit": "Opened while the day was already green", "this_trade": "unknown (data missing)"}]},
+            "comparison": {"state": "ok", "symbol": "NBIS",
+                           "trades": [{k: v for k, v in t.items() if k != "account"} for t in self.get_trades("NBIS", 4)["trades"]]},
+            "units": "SIMULATED fixture. Option prices are per contract (premium x 100); percentages are percent; times New York.",
+            "note": "One trade: compare the plan with what happened and keep thesis apart from execution. A single trade "
+                    "rarely supports a lesson on its own.",
+        }

@@ -45,8 +45,12 @@ untouched.
   - **Deep link:** `/copilot-lab?symbol=X&context=<short text>` opens a new
     investigation with the symbol set and `Context: <text>` (at most 300
     characters) in the message box.
+  - **Trade page:** a closed trade offers "Review with copilot" next to
+    "Open on chart", which deep-links with `Review this trade: <trade id>` as
+    the context (Review a closed trade, below).
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
-    phone check) and `frontend/e2e/copilot-panel.spec.ts`.
+    phone check), `frontend/e2e/copilot-panel.spec.ts` and
+    `frontend/e2e/copilot-review.spec.ts`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation:
@@ -79,10 +83,11 @@ untouched.
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call twelve read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call thirteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
-  investigation changes (below), the chart and book tools below, and the owner
-  context pack for another symbol (Owner context, below). It can
+  investigation changes (below), the chart and book tools below (including the
+  closed-trade review), and the owner context pack for another symbol (Owner
+  context, below). It can
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
@@ -102,8 +107,10 @@ untouched.
     quantity, average entry and mark (options per contract, i.e. premium ×
     100), unrealized $ and %, and days held. At most 15 are shown.
   - `get_trades(symbol, limit ≤ 10)` lists recent closed trades in one symbol,
-    newest first: entry and exit time and price, P&L, hold time and up to 4
-    tags of at most 24 characters.
+    newest first: entry and exit time and price, P&L in $ and percent of the
+    premium paid, hold time and up to 4 tags of at most 24 characters.
+  - `get_trade_review(trade_id)` reviews one closed trade
+    (`backend/app/ai/copilot_review.py`; Review a closed trade, below).
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -117,9 +124,9 @@ untouched.
     Webull is left out (dormant).
   - The fixture serves simulated versions. In replay, the chart is
     unavailable (the snapshot has no bars) and so is the book.
-  - Research jobs never get `get_positions`, `get_trades` or `get_memories`:
-    a job reads untrusted pages and can fetch URLs, which could carry the
-    book out. Those three aren't even registered for a job;
+  - Research jobs never get `get_positions`, `get_trades`, `get_memories` or
+    `get_trade_review`: a job reads untrusted pages and can fetch URLs, which
+    could carry the book out. Those four aren't even registered for a job;
     `get_chart_context` is allowed.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
@@ -160,7 +167,8 @@ untouched.
   position). "Nothing here changes the plan" and "not worth a trade" are
   complete answers.
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
-  context block (below); memory proposals (Confirm a plan); plans; SIMULATED;
+  context block (below); memory proposals (Confirm a plan); closed-trade
+  reviews (Review a closed trade); plans; SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
 Tests pin the sentences other guards depend on (`tests/test_copilot_book.py`
@@ -270,6 +278,55 @@ waits in the message box, unsent. The prompt asks the model to call:
 Background research jobs get neither this tool nor `propose_plan`. They read
 untrusted pages and can fetch URLs, so injected text must not make them read
 another investigation by id.
+
+## Review a closed trade
+
+On a closed (or expired) trade's page, while the lab is on, **Review with
+copilot** opens `/copilot-lab?symbol=<ticker>&context=Review this trade: <trade
+id>`. The message box holds `Context: Review this trade: <id>`, unsent; the
+owner sends it, adding a question if they like. The system prompt asks the
+model to call:
+
+- `get_trade_review(trade_id)` (read-only, provenance `saved`). The id is
+  checked as a UUID; an unknown id is refused, and an open or Webull trade
+  reads `unavailable`. It returns, each section labelled like the owner
+  context pack:
+  - `trade` (measured): contract, account label, quantity, entry and exit
+    (New York wall clock with its offset), prices, premium paid, P&L in $ and
+    %, hold minutes, status, expired worthless, and how many entry and exit
+    fills made it;
+  - `path` (measured): `TradePathMetrics`' option peak % and peak unrealized $,
+    the give-back from the peak, the worst unrealized $, the underlying's best
+    and worst move, and the best move in the 30 minutes after the exit;
+  - `plan` (owner said): the plan captured for it (`capture_links.for_trade`:
+    setup, side, mode, wording, note, planned size, time) and its timing
+    against the entry (`pre_entry`, `unverified` or `retrospective`);
+  - `alerts` (measured): the phone alerts sent for the position
+    (`position_alerts.for_trade`, at most 6) and what followed each
+    (`exit_habits.follow_up`: closed within 15 minutes, trimmed, closed later,
+    held overnight or expired, and the $ against closing at the alert's mark);
+  - `habits` (measured): this trade against the behavior audit's four exit
+    habits (`exit_habits.habit_flags`): yes, no or unknown; closed long options
+    only;
+  - `comparison` (measured): the symbol's latest four other closed trades, as
+    `get_trades` shows them, without the account.
+- Then the model compares what the plan assumed with what happened, keeps
+  thesis apart from execution, says when one trade cannot support a lesson,
+  and proposes a memory only if the owner states one.
+- The review is held under 5,800 characters (inside a tool result's 6,000):
+  over that, it drops the provenance labels, then comparison trades, then all
+  but the last three alerts, and marks itself `trimmed`. One failing section
+  reads `unavailable`; the others stand.
+- No trade, fill, account or broker id is returned; the id arrives only in the
+  owner's own message. Research jobs never get the tool, and "What changed?"
+  leaves it out of an investigation's evidence times, as it does the owner
+  context.
+- Fixture mode serves a simulated review marked `simulated`; replay says it is
+  unavailable (the journal now would show what happened after the frozen
+  moment). The fake model answers "review this trade" with a UUID by calling
+  the tool and writing a short scripted comparison.
+- Tests: `backend/tests/test_copilot_review.py`,
+  `frontend/e2e/copilot-review.spec.ts`.
 
 ## Confirm a plan
 

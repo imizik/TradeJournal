@@ -126,6 +126,18 @@ TOOLS: list[dict] = [
                          "properties": {"symbol": _SYMBOL_SCHEMA}},
     },
     {
+        "name": "get_trade_review",
+        "description": "A lightweight review of one of the owner's closed trades, by the id their trade page sent: the "
+                       "contract, entry and exit (New York time), prices, P&L $ and %, hold minutes and fills; the recorded "
+                       "price path (option peak, give-back); the plan they captured and whether it came before the entry; "
+                       "the phone alerts sent and what they did after each; this trade against the audit's four exit "
+                       "habits; and their latest other closed trades in the symbol. Journal facts and the owner's words, "
+                       "not market data.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["trade_id"],
+                         "properties": {"trade_id": {"type": "string",
+                                                     "description": "The closed trade's id (a UUID) from the owner's message"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -249,6 +261,11 @@ def validate(name: str, args: Any) -> dict:
         if args.get("timeframe") not in ("1m", "5m", "15m", "1h", "1D"):
             raise ToolInputError("timeframe must be 1m, 5m, 15m, 1h or 1D")
         return {"symbol": _symbol(args.get("symbol")), "timeframe": args["timeframe"]}
+    if name == "get_trade_review":
+        try:
+            return {"trade_id": str(uuid.UUID(str(args.get("trade_id"))))}
+        except ValueError:
+            raise ToolInputError("trade_id must be a closed trade's id (a UUID)") from None
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -394,8 +411,9 @@ def _iso(value) -> str | None:
 
 # Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
 CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
-# The owner context rows are the owner's own book and words, not market evidence: "what changed" leaves them out.
-BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context"})
+# The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
+# leaves them out.
+BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review"})
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -556,6 +574,13 @@ class LiveEvidence:
     def get_owner_context(self, symbol: str) -> dict:
         return self.owner_context(symbol)
 
+    def get_trade_review(self, trade_id: str) -> dict:
+        from app.ai import copilot_review
+        try:
+            return copilot_review.trade_review(trade_id)
+        except copilot_review.ReviewNotFound:
+            raise ToolInputError("no trade in the journal has that id") from None
+
 
 PROVENANCE = {
     "get_group_comparison": ("Radar recorded passes (Tradier sampled trades)", "recorded"),
@@ -573,6 +598,8 @@ PROVENANCE = {
                           "saved investigations and armed watches (TradeJournal)", "saved"),
     "owner_context": ("Owner context: journal positions, trades and exit habits · approved memories · day journal · "
                       "saved investigations and armed watches (TradeJournal)", "saved"),
+    "get_trade_review": ("Journal trade, fills and path metrics · captured plan · phone alerts and exit habits (TradeJournal)",
+                         "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

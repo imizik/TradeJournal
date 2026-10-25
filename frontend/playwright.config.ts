@@ -67,7 +67,9 @@ export default defineConfig({
         // Escape hatch for sandboxes that ship a preinstalled browser whose
         // build does not match this Playwright version (agent containers
         // typically do). Normally unset: CI and local machines resolve the
-        // browser Playwright installed for itself.
+        // browser Playwright installed for itself. scripts/verify.sh sets it
+        // when unset, preferring the /opt/pw-browsers/chromium launcher and
+        // then a chromium-*/chrome-linux{,64}/chrome binary. By hand:
         //   PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e
         // A fake microphone (a tone) for voice plans (C3.5); it is used only
         // where a page asks for one and a test grants the permission.

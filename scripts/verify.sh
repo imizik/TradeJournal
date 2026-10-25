@@ -123,9 +123,17 @@ if want_e2e; then
     # dedicated ports (8099/3099), and asserts real values reach the DOM.
     # Needs a browser: setup.sh and CI install one. A cloud sandbox ships a
     # preinstalled Chromium under /opt/pw-browsers whose build rarely matches
-    # this Playwright version, so point at it unless told otherwise.
+    # this Playwright version, so point at it unless told otherwise. Prefer the
+    # sandbox's /opt/pw-browsers/chromium launcher; otherwise take the first
+    # chromium-<build> binary in either the old (chrome-linux) or the current
+    # (chrome-linux64) layout.
     if [ -z "${PLAYWRIGHT_CHROMIUM_PATH:-}" ]; then
-      preinstalled="$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome 2>/dev/null | head -1 || true)"
+      if [ -f /opt/pw-browsers/chromium ] && [ -x /opt/pw-browsers/chromium ]; then
+        preinstalled=/opt/pw-browsers/chromium
+      else
+        preinstalled="$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome \
+          /opt/pw-browsers/chromium-*/chrome-linux64/chrome 2>/dev/null | head -1 || true)"
+      fi
       [ -n "$preinstalled" ] && export PLAYWRIGHT_CHROMIUM_PATH="$preinstalled"
     fi
     run "browser tests" frontend npm run --silent e2e

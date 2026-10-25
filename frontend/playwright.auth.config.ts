@@ -19,7 +19,8 @@ export default defineConfig({
   outputDir: "./auth-test-results",
   testDir: "./e2e", testMatch: ["browser-access.auth.ts", "advisor-owner.auth.ts", "advisor-assignments.auth.ts"], workers: 1, retries: 0,
   timeout: 30_000, expect: { timeout: 10_000 },
-  use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  // Same browser escape hatch as playwright.config.ts (verify.sh sets it in a cloud sandbox).
+  use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure", ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } } : {}) },
   webServer: [
     { command: `"${python}" scripts/seed_dev_data.py --database-url "${db}" && "${python}" -m uvicorn app.main:app --host 127.0.0.1 --port ${backend}`, cwd: `${root}/backend`, url: `${api}/health`, reuseExistingServer: false, timeout: 120000,
       env: { ...common, DATABASE_URL: db, TJ_MANUAL_FILLS_BACKUP: manualFillsBackup, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", JO_MORNING_CONFIG: "", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${root}/backend/data/auth_job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", CAPTURE_TRANSCRIBER: "off" } },
