@@ -22,7 +22,7 @@ from urllib.parse import quote, urlencode
 from sqlmodel import Session, select
 
 from app.ai import copilot_book
-from app.engine import capture_links, copilot_plans, plan_nudges, position_alerts
+from app.engine import capture_links, copilot_plans, notification_policy, plan_nudges, position_alerts
 from app.engine.chart_journal import contract_label
 from app.engine.chart_math import ET
 from app.models import LevelAlert, PlanTimeStop, TradeCapture
@@ -120,4 +120,5 @@ def positions(db: Session) -> dict:
                     {"symbol": trade.ticker, "context": f"Plan this position: {out['contract']}. Help me set an invalidation and a time stop."},
                     quote_via=quote)
         rows.append(out)
-    return {"positions": rows, "count": total, "quotes_at": fetched_at, "quote_issue": issue}
+    return {"positions": rows, "count": total, "quotes_at": fetched_at, "quote_issue": issue,
+            "held_back_today": notification_policy.held_back_today(db, now)}

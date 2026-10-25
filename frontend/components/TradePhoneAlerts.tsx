@@ -8,7 +8,9 @@ import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from 
 type Sent = { id?: string; contract?: string; quoted_at?: number | null;
   kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
-  delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped"; error: string | null; delivered_at: number | null };
+  delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped" | "held"; error: string | null; delivered_at: number | null;
+  /** What the fills or a plan link show happened after the ping, e.g. "closed in 6 min" (backend notification_policy.then_text). */
+  then?: string | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
 // The optional field keeps older API responses on the original +$50 rule.
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
@@ -18,7 +20,7 @@ const KIND: Record<Sent["kind"], string> = { giveback: "Give-back triggered", ex
   plan_link: "Saved plan found: link ping" };
 const DELIVERY: Record<Sent["delivery"], string> = { pending: "not sent yet", sending: "sending", sent: "accepted by ntfy; phone display unconfirmed",
   expired: "not sent: too late to be useful", unknown: "may have reached your phone, so it was not resent",
-  skipped: "not sent: today's nudge limit was reached" };
+  skipped: "not sent: today's nudge limit was reached", held: "not sent: held by the notification policy" };
 
 const money = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const pct = (v: number | null) => v == null ? "?" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
@@ -74,7 +76,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
   const history = body?.alerts.filter(a => a !== selected) ?? [];
   const rows = <ul className="mt-1 divide-y">{history.map(a => <li key={a.id ?? `${a.kind}-${a.detected_at}`} className="py-2">
     <span className="font-medium">{KIND[a.kind]}</span>
-    <span className="text-muted-foreground"> · {time(a.detected_at)} · {a.kind === "plan_link" && a.delivery === "skipped" && a.error ? a.error : DELIVERY[a.delivery]}</span>
+    <span className="text-muted-foreground"> · {time(a.detected_at)} · {((a.kind === "plan_link" && a.delivery === "skipped") || a.delivery === "held") && a.error ? a.error : DELIVERY[a.delivery]}{a.then && <> · then: {a.then}</>}</span>
     <div className="text-muted-foreground">
       {a.kind === "giveback" && <>Was up {money(a.peak_gain)} ({pct(a.peak_gain_pct)}), </>}
       {a.kind === "plan_nudge" ? <>Opened {a.entry ?? a.contracts} with no plan linked or suggested</>
@@ -113,7 +115,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
         <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
       </div>
-      <p className="text-xs text-muted-foreground">Delivery: {DELIVERY[selected.delivery]}.</p>
+      <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}</p>
     </div>}
     {body?.enabled && body.watch && !alertId && <p className="text-muted-foreground">
       {body.watch.fired

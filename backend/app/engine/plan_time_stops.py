@@ -20,7 +20,9 @@ Off unless ``PLAN_TIME_STOPS_ENABLED=true``. It runs on the level alert
 monitor's loop beside plan nudges. Webull is dormant and left out. Delivery is
 at-most-once, as plan nudges': a send that may have reached ntfy is
 ``unknown`` and never resent, and one not judged or sent within
-``EXPIRE_SECONDS`` of its time is dropped as ``expired``.
+``EXPIRE_SECONDS`` of its time is dropped as ``expired``. Right before the send,
+``notification_policy.decide`` may hold it (``held``, with the reason): the
+shared daily cap, or a ping for the same position moments earlier.
 """
 
 from datetime import date, datetime, timedelta
@@ -34,7 +36,7 @@ import uuid
 from sqlalchemy import or_, update
 from sqlmodel import Session, select
 
-from app.engine import ntfy
+from app.engine import notification_policy, ntfy
 from app.engine.chart_journal import stamp
 from app.engine.chart_math import ET, session_windows
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc
@@ -238,12 +240,20 @@ class PlanTimeStops:
                 db.commit()
                 return
             title, body, path = message(row)
+            ticket = notification_policy.decide(
+                db, sender="plan_time_stops", source_id=str(row.id), kind="time_stop", title=title, body=body, now=now,
+                anchor=notification_policy.position_anchor(db, row.trade_id), symbol=row.symbol, trade_id=row.trade_id)
+            if ticket.held:
+                row.delivery, row.last_error = "held", ticket.reason
+                db.commit()
+                return
             row.attempts += 1
             try:
-                ntfy.publish(title, body, priority=4, tags=("hourglass",), path=path, direct_click=True)
+                ntfy.publish(title, body + ticket.append, priority=4, tags=("hourglass",), path=path, direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                    notification_policy.delivered(db, ticket, now)
                 else:
                     row.delivery, row.last_error = "pending", str(exc)
                     row.next_attempt_at = _utc(now + BACKOFF[min(row.attempts, len(BACKOFF)) - 1])
@@ -251,4 +261,5 @@ class PlanTimeStops:
                 log.warning("Plan time stop delivery failed (attempt %d): %s", row.attempts, exc)
                 return
             row.delivery, row.delivered_at, row.last_error = "sent", _utc(self.clock()), None
+            notification_policy.delivered(db, ticket, now)
             db.commit()

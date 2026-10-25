@@ -203,6 +203,7 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     from app.engine.plan_nudges import PlanNudges, enabled as plan_nudges_enabled
     from app.engine.plan_time_stops import PlanTimeStops, enabled as plan_time_stops_enabled
     from app.engine.premarket_prep import PremarketPreps, enabled as premarket_prep_enabled
+    from app.engine.notification_policy import FollowUps
 
     paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
     scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time,
@@ -213,7 +214,7 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     prep = PremarketPreps(engine, chart_calendar, clock=time.time) if premarket_prep_enabled() else None
     monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper,
                                 scanner=scanner, positions=positions, nudges=nudges, time_stops=time_stops,
-                                prep=prep)
+                                prep=prep, follow_ups=FollowUps(engine, clock=time.time))
     stream.attach(monitor)
     await monitor.start()
     app_.state.level_alerts = monitor

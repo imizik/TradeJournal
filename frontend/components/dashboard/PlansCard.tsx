@@ -20,7 +20,16 @@ export type PlanPosition = {
   plan: { setup: string; thesis: string | null; timing: "pre_entry" | "late" | "unverified"; invalidation: Invalidation | null; time_stop: TimeStop | null } | null;
   link_path: string | null; plan_path: string | null;
 };
-export type PlanPositions = { positions: PlanPosition[]; count: number; quotes_at: number | null; quote_issue: string | null };
+export type PlanPositions = { positions: PlanPosition[]; count: number; quotes_at: number | null; quote_issue: string | null;
+  /** Phone pings the notification policy held today (New York), by kind label (backend notification_policy.held_back_today). */
+  held_back_today?: { count: number; by_kind: Record<string, number> } };
+
+/** "Held back today: 3 pings (2 plan nudge, 1 one-hour)". */
+export function heldBackText(held: PlanPositions["held_back_today"]): string | null {
+  if (!held || !held.count) return null;
+  const kinds = Object.entries(held.by_kind).map(([kind, n]) => `${n} ${kind}`).join(", ");
+  return `Held back today: ${held.count} ping${held.count === 1 ? "" : "s"}${kinds ? ` (${kinds})` : ""}`;
+}
 
 const REFRESH_MS = 60_000;
 const ALERT: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes", hold_hour: "Held an hour" };
@@ -110,6 +119,8 @@ export default function PlansCard() {
           <PlanATrade className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
         </div>
         : <ul className="grid min-w-0 gap-2 lg:grid-cols-2">{body.positions.map(row => <Row key={row.trade_id} row={row} />)}</ul>}
+      {body && heldBackText(body.held_back_today) && <p data-testid="plans-card-held-back" className="mt-2 text-xs text-muted-foreground"
+        title="Phone pings the notification policy did not send today: over the daily cap, or too soon after another ping for the same position.">{heldBackText(body.held_back_today)}</p>}
     </div>
   </DashboardCard>;
 }
