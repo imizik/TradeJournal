@@ -99,12 +99,36 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - **Position alerts:** with the lab on, each position alert push carries an
     "Ask copilot" action beside "Open app" that deep-links with the alert's
     context (Review a trade or position, below).
-  - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
-    `Plan this position: …` when a new position has no plan (see the
-    [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
+  - **Phone:** the unplanned-entry nudge (`PLAN_NUDGE_ENABLED`) deep-links here with
+    `Plan this position: …` when a new position has no plan. When a saved plan
+    is suggested for the fill it sends a link ping instead, whose confirm page
+    (`/plans/link`) offers the same **Plan it now** link after "Not this plan"
+    (see the [feature map](agent/feature-map.md), "Plan pings for new positions").
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
+- **Plans**, at the top of the lab page's home, above Open threads (same
+  conditions: page only, lab on, nothing open or sent). One row per confirmed
+  copilot plan that is still armed: its entry or invalidation alert is armed,
+  its time stop is pending, or the fill linked to its pre-trade plan is an open
+  position. Each row shows the symbol and direction, the thesis in one line,
+  the last price, the distance to the entry and to the invalidation in % and
+  $ (or "hit at 10:41" once fired), the time stop, and the fill: in position,
+  fill to link (a matching open trade not yet linked to the plan), or waiting
+  for entry. Rows sort nearest to an armed trigger first; a tap opens the
+  plan's investigation in place. It reads `GET /copilot/plans`
+  (`app/engine/copilot_plans.py`): the `plan_role` alerts and time stops by
+  investigation, the plan capture (the time stop's `client_id`, else the
+  newest "Copilot plan" capture for the symbol made with them), its capture
+  link, and one batched quote read (`chart_feed.quote_rows`, as
+  `GET /copilot/quote`). An investigation with several plans shows its latest:
+  the parts made within ten minutes of the newest. The only id out is the
+  investigation's. It refreshes every minute while the page is visible. A plan
+  whose alerts have all fired or been deleted and with no open position drops
+  off, and still shows in its investigation (Linked to this investigation).
+  With nothing armed it says so beside the **Plan a trade** button. Browser
+  proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
+  check); route tests: `tests/test_copilot_plans.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation:
@@ -137,10 +161,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call thirteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call fourteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
   investigation changes (below), the chart and book tools below (including the
-  closed-trade review), and the owner context pack for another symbol (Owner
+  trade review and the week review), and the owner context pack for another symbol (Owner
   context, below). It can
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
@@ -165,6 +189,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     premium paid, hold time and up to 4 tags of at most 24 characters.
   - `get_trade_review(trade_id)` reviews one closed trade or open position
     (`backend/app/ai/copilot_review.py`; Review a trade or position, below).
+  - `get_week_review(week_start?)` reviews one trading week (Review my week,
+    below).
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -222,7 +248,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   complete answers.
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
   context block (below); memory proposals (Confirm a plan); trade and
-  position reviews (Review a trade or position); plans, and pressure-testing a trade the
+  position reviews (Review a trade or position); weekly reviews (Review my
+  week); plans, and pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
@@ -405,6 +432,66 @@ The system prompt asks the model to call:
   `backend/tests/test_position_alerts.py` (the push action),
   `frontend/e2e/copilot-review.spec.ts`, `frontend/e2e/position-copilot.spec.ts`.
 
+## Review my week
+
+While the lab is on, **Review my week** sits on the Dashboard header and on a
+Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
+`/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
+the text in the message box, unsent. On the lab home it sits beside "What
+matters right now?" and sends the turn at once. The system prompt asks the
+model to call:
+
+- `get_week_review(week_start?)` (read-only, provenance `saved`;
+  `copilot_review.week_review`). `week_start` is any `YYYY-MM-DD` in the week
+  (2020 to next week); without one it reads the latest week with a closed
+  trade. A week is Monday 00:00 to Saturday 00:00 New York, by close time;
+  Webull trades are left out. With no closed trades it reads `none` (and names
+  the latest week that has some). Otherwise it returns:
+  - `week` and `sample` (fewer than 10 trades is `small`, with a note that it
+    cannot show a habit changed);
+  - `totals`: trades, P&L $, P&L on premium paid %, win rate, expired
+    worthless, account labels;
+  - `planned`: `pre_entry` (a plan captured and linked before the entry),
+    `late_or_unverified` (captured inside the entry's minute or after it) and
+    `none`, each with count, P&L $, on premium and win rate
+    (`capture_links.for_trade` and `timing`);
+  - `follow_through`: for planned trades, whether the plan's invalidation
+    alert (`level_alert` with `plan_role` invalidation, found through the time
+    stop saved under the plan's client id, else the copilot invalidation armed
+    within 10 minutes of the plan) fired between the entry and the last exit,
+    and whether the trade was fully closed within 15 minutes of it
+    (`out_15m`, `held_past_15m`, `expired`), with up to 6 rows; and the time
+    stops due that week (`plan_time_stop`): due, sent, skipped and what
+    followed each sent ping (`exit_habits.follow_up`), up to 6 rows;
+  - `alerts`: phone alerts sent for the week's trades, by kind, what followed
+    them and the $ against closing at each alert's mark;
+  - `habits`: the four exit habits over the week's closed long options
+    (`exit_habits.habit_flags` and `tally`) beside the baseline rate from
+    `exit_habits.build`;
+  - `exits`: the 3 best and 3 worst by P&L and by option give-back from peak
+    (trades whose path peaked above cost), as compact rows: contract, entry
+    and exit (New York), P&L $ and %, give-back, plan timing or none, and a
+    one-line note (peak and give-back, invalidation, alerts, hold). A trade
+    shows once per ranking.
+- The model leads with planned vs unplanned and follow-through, names at most
+  one or two things to practice next week grounded in a count, says plainly
+  when the sample is too small, and proposes a memory only if the owner
+  states a lesson.
+- The review is held under 5,800 characters: over that, it drops the
+  provenance labels, the time-stop rows, the follow-through rows, then trims
+  the give-back and P&L rankings to two each, drops the notes, and finally
+  the give-back ranking, marking itself `trimmed`. Totals, planned vs
+  unplanned and the follow-through counts always stay. One failing section
+  reads `unavailable`.
+- No trade, fill, account, plan or investigation id is returned. Research
+  jobs never get the tool (`research_job.JOB_TOOLS` is an allowlist), and
+  "What changed?" leaves it out of an investigation's evidence times.
+- Fixture mode serves a simulated week marked `simulated`; replay says it is
+  unavailable. The fake model answers "review my week" (and "review my week
+  of YYYY-MM-DD") by calling the tool and writing a short scripted review.
+- Tests: `backend/tests/test_copilot_week_review.py`,
+  `frontend/e2e/review-my-week.spec.ts`.
+
 ## Confirm a plan
 
 When asked for a plan, the model may call `propose_plan` (at most two per
@@ -465,6 +552,9 @@ nothing exists until the owner confirms.
     (at most 80) and `size_note` (at most 120).
   - Like a watch, the symbol needs a current price in the turn's evidence,
     and a plan whose price is already past its invalidation is refused.
+  - The saved plan's capture context carries the investigation id, so when the
+    fill arrives and the owner links it from the link ping's confirm page, that
+    page offers "Open its investigation".
   - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
     thesis, entry and invalidation prices, time stop and size as editable
     fields with phone-sized tap targets. Under the time stop it shows when it

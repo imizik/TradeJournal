@@ -53,7 +53,7 @@ export const TIMING_LABEL: Record<CaptureTiming, string> = { pre_entry: "Before 
  * The chart as it stood when the plan was saved, from what the page already
  * held (no market-data request). `unavailable` says why there is none.
  */
-export type CaptureContext = { state: "unavailable"; reason: string } | {
+export type CaptureContext = { state: "unavailable"; reason: string; investigation_id?: string } | {
   state: "captured"; symbol: string; panel: string; interval: string; session: string; visible_range: { from: number; to: number } | null;
   last_candle: { time: number; close: number } | null;
   price: { value: number | null; source: string; at: number | null; stale: boolean };
@@ -98,6 +98,16 @@ export const fetchReview = () => call<CaptureReview>("/charts/captures/review");
 export const linkCapture = (id: string, tradeId: string) => call<Capture>(`/charts/captures/${id}/link`, json("POST", { trade_id: tradeId }));
 export const unlinkCapture = (id: string) => call<Capture>(`/charts/captures/${id}/unlink`, { method: "POST" });
 export const saveTracking = (on: boolean, accounts: string[]) => call<{ since: number | null; accounts: string[] }>("/charts/captures/tracking", json("PUT", { on, accounts }));
+/** A plan suggested for (or linked to) the position on the one-tap link page. `investigation_id`: the Copilot Lab
+ * investigation a plan card saved it from, when known. */
+export type LinkPlan = { capture_id: string; setup: string; mode: Capture["mode"]; wording: string | null; note: string | null;
+  received_at: number; timing: CaptureTiming; investigation_id: string | null };
+export type PlanLinkPage = {
+  trade: { id: string; ticker: string; contract: string; status: string; opened: string; fill: string; opened_at: number; opened_at_reliable: boolean };
+  candidates: LinkPlan[]; linked: LinkPlan[]; plan_path: string;
+};
+/** What the link ping opens (`/plans/link?trade=`): the position and the plans suggested for it. */
+export const fetchPlanLink = (tradeId: string) => call<PlanLinkPage>(`/trades/${encodeURIComponent(tradeId)}/plan-link`);
 export const fetchTradePlans = (tradeId: string) => call<{ captures: Capture[] }>(`/charts/captures/for-trade/${tradeId}`);
 export const markNotTaken = (id: string) => call<Capture>(`/charts/captures/${id}/not-taken`, { method: "POST" });
 export const addCaptureNote = (id: string, kind: CaptureNote["kind"], text: string) => call<Capture>(`/charts/captures/${id}/notes`, json("POST", { kind, text }));

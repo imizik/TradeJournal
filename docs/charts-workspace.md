@@ -1844,6 +1844,13 @@ A saved plan is tied to the trade it was for by the user; nothing links itself.
   devices linking at once from both succeeding. A linked plan cannot be marked
   not taken until it is unlinked. A linked plan unlinks from the strip, and every link
   and unlink is kept as history.
+- **One tap from the phone.** When a new position's fill has suggested plans,
+  the plan ping (with `PLAN_NUDGE_ENABLED`) is a link ping that opens
+  `/plans/link?trade=<id>` (`components/PlanLinkConfirm.tsx`, owner only): the
+  position, each suggested plan with its timing, one big **Link** per plan
+  (the same link route and rules as here) and **Not this plan**, which links
+  nothing and offers **Plan it now**. See the
+  [feature map](agent/feature-map.md), "Plan pings for new positions".
 - **Timing.** Compares when the server received the complete plan (UTC) with
   the trade's first entry, a New York minute. A plan received before that
   minute began is **Before entry**. One received inside the minute, or for an

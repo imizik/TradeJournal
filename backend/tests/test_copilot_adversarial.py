@@ -42,7 +42,7 @@ CLEAN = {"unseen_citations": [], "unread_evidence_refs": [], "after_evidence_tim
 JOB_SAFE = {"get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
             "get_saved_research", "get_chart_context"}
 NEVER_IN_JOBS = {"propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories", "get_owner_context",
-                 "get_trade_review"}
+                 "get_trade_review", "get_week_review"}
 
 
 @pytest.fixture(autouse=True)

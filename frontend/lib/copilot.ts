@@ -253,6 +253,19 @@ export type OpenThreads = {
   as_of: string | null;
 };
 export const getOpenThreads = (signal?: AbortSignal) => request<OpenThreads>("/copilot/threads", { signal });
+/** One armed copilot plan on the lab home's Plans board (``GET /copilot/plans``), nearest to a trigger first. A level
+ * is ``armed`` (with its distance from ``last`` when a price was read) or ``hit`` (``hit_at``, epoch seconds); null when
+ * that alert was never set or was deleted. */
+export type PlanBoardLevel = { price: number; condition: string; interval: string | null; state: "armed" | "hit";
+  distance_usd?: number; distance_pct?: number; hit_at?: number | null };
+export type PlanBoardRow = {
+  investigation_id: string; symbol: string; direction: "long" | "short" | null; thesis: string | null; last: number | null;
+  entry: PlanBoardLevel | null; invalidation: PlanBoardLevel | null;
+  time_stop: { text: string; due_at: number; state: string } | null;
+  position: "in_position" | "closed" | "fill_to_link" | "waiting";
+};
+export type PlansBoard = { plans: PlanBoardRow[]; quotes_at: number | null; quote_issue: string | null };
+export const getPlansBoard = (signal?: AbortSignal) => request<PlansBoard>("/copilot/plans", { signal });
 /** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
 export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
 
@@ -317,10 +330,12 @@ export const listTimeStops = (investigationId: string, signal?: AbortSignal) =>
 /** A confirmed plan is the owner's pre-trade plan: the existing capture route, discretionary, named "Copilot plan", so
  * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
  * save returns the first plan instead of making a second. */
-export const savePlanCapture = (body: { client_id: string; underlying: string; account_id: string; side: CaptureSide; wording: string; note: string }) =>
+export const savePlanCapture = ({ investigation_id, ...body }: { client_id: string; underlying: string; account_id: string; side: CaptureSide;
+  wording: string; note: string; investigation_id: string | null }) =>
   request<Capture>("/charts/captures", { method: "POST", body: JSON.stringify({
     ...body, client_captured_at: Date.now(), mode: "discretionary", setup_label: "Copilot plan",
-    context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card." }, image: false }) });
+    // The investigation rides in the context, so the one-tap link page can open it after linking.
+    context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card.", ...(investigation_id ? { investigation_id } : {}) }, image: false }) });
 export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });
 /** A confirmed memory is saved through the existing Jo memory store as the owner's own statement (they edited and
  * confirmed the words), active at once, with the investigation it came from as its reference. */
