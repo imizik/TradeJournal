@@ -1820,3 +1820,29 @@ class ResearchJob(SQLModel, table=True):
     next_attempt_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+
+
+class ThesisWatchTrigger(SQLModel, table=True):
+    """One thesis-watch trigger (``engine/thesis_watch.py``, docs/copilot-lab.md § Thesis watch): a new headline, a
+    move since an investigation's evidence or the prior close, or earnings within two trading days, for a symbol the
+    owner has a thesis on. Written once per dedupe key, so a restart never fires it twice; delivery is an outbox on
+    the same row (``sending`` before the ping goes out, then ``sent``, ``failed`` or ``skipped`` with a reason)."""
+
+    __tablename__ = "thesis_watch_trigger"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    symbol: str = Field(index=True)
+    kind: str  # news | move | earnings
+    dedupe_key: str = Field(sa_column=Column(String, nullable=False, unique=True))
+    investigation_id: Optional[uuid.UUID] = Field(default=None, index=True)  # the open investigation it re-checks
+    memory_id: Optional[uuid.UUID] = None  # the thesis memory, when there is no investigation
+    held: bool = Field(default=False)  # the symbol was an open position when it fired
+    day: str = Field(index=True)  # New York date it fired on
+    fired_at: datetime = Field(default_factory=utc_now_naive)
+    text: str  # the ping's body: the headline, the move or the earnings date; third-party text is data only
+    detail_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))  # url, pct, reference, basis, date
+    path: str  # the deep link the ping opens
+    delivery: str = Field(default="skipped", index=True)  # sending | sent | failed | skipped
+    reason: Optional[str] = None  # why skipped or failed
+    message_id: Optional[str] = None  # ntfy's receipt: accepted, not shown
+    reassess_job_id: Optional[uuid.UUID] = None  # the research_job queued for it, when the queue is on
