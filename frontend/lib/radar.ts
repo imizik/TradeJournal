@@ -63,6 +63,11 @@ export const rateEvent = (id: string, rating: RadarRating) =>
   });
 
 const NY = "America/New_York";
+// A phone alert's tap: /radar?event=<id>[&rate=<rating>]. Only a saved event id shape and a known rating are honored.
+export const radarEventId = (value: string | null): string | null => value && /^[A-Za-z0-9._-]{1,120}$/.test(value) ? value : null;
+export const radarRating = (value: string | null): RadarRating | null =>
+  RATINGS.some((r) => r.value === value) ? (value as RadarRating) : null;
+
 export const nyTime = (iso: string, seconds = false) =>
   new Date(iso).toLocaleTimeString("en-US", { timeZone: NY, hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}) });
 

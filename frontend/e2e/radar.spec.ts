@@ -117,6 +117,23 @@ for (const [status, line] of [["none_found", "No news found — cause unknown"],
 }
 
 
+test("a Radar phone alert tap opens the event and its Useful action saves the rating", async ({ page, request }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/radar?event=${EVENT}&rate=useful`);
+  // The tap is the rating: saved before the event shows, then dropped from the address so a reload cannot repeat it.
+  await expect(page.getByRole("region", { name: "Original evidence" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Useful", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const address = new URL(page.url());
+  expect(address.searchParams.get("rate")).toBeNull();
+  expect(address.searchParams.get("event")).toBe(EVENT);
+  expect((await (await request.get(`${API}/radar/events/${EVENT}`)).json()).rating).toBe("useful");
+  await page.screenshot({ path: test.info().outputPath("radar-alert-tap-phone.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});
+
+
 test("Radar navigation context rejects invalid dates and keeps return links internal", () => {
   const query = new URLSearchParams({ radar_symbol: "NVDA", radar_session: "2026-10-20",
     radar_at: "2026-10-20T15:12:00Z", radar_group: "AI & compute", radar_groups: "all", return: "https://example.com" });

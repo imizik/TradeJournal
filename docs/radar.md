@@ -6,7 +6,8 @@ curated groups moving together, each saved with its evidence, how complete the
 recording was, and a chart link. Isaac selected it on October 21, 2026
 ([priorities](product-roadmap.md#selected-priorities--october-11-2026)).
 
-It is not a leaderboard. It sends no phone alerts, never trades, and does not
+It is not a leaderboard. Phone pings are off unless `RADAR_ALERTS_ENABLED=true`
+([Phone alerts](#phone-alerts-off-by-default)); it never trades and does not
 involve Jo.
 
 ## Build sequence
@@ -33,6 +34,9 @@ involve Jo.
 6. **Premarket pilot (built, off, record-only):**
    `backend/app/engine/radar_premarket.py`. See
    [Premarket pilot](#premarket-pilot-record-only).
+7. **Phone alerts (built, off):** `backend/app/engine/radar_alerts.py`, one
+   ntfy ping per new event when `RADAR_ALERTS_ENABLED=true`. See
+   [Phone alerts](#phone-alerts-off-by-default).
 
 ## Recorder
 
@@ -168,6 +172,53 @@ calibration: a 15-minute window (two extra events a session, about 15 minutes
 earlier, one of which faded within 8 minutes) and a lower sector threshold
 (3.0–4.0 added 1–13 sector events a session that mostly repeated the SPY story
 against a flat sector ETF).
+
+### Why the live store had zero events (October 25, 2026)
+
+On October 25 the feed showed two recorded sessions (October 22 and 23, 390
+and 391 passes, 168 of 169 symbols quoted) and no events, and `/radar/proof`
+said "No Radar events recorded yet". A fresh read-only snapshot of the VPS
+file (SQLite backup API over a `mode=ro` connection) replayed through the
+deployed v0 rules writes the 7 and 9 events in the table above, so the rules,
+the store and the feed are fine and the thresholds were reached. The cause is
+timing: the v0 rules merged at 14:15 ET on October 23 (#422) and the VPS
+installed them at 14:40 ET, mid-session (`Deployed 8161f5fc` in the
+autodeploy journal). Detection then ran for the last 80 minutes of October 23
+and found nothing new in that stretch: all nine of the day's events had
+started by 10:44 ET, a detector switched on mid-session reads only the
+current pass and never backfills (by design), and a replay started at 14:40 ET
+also writes 0 events. October 24–25 are a weekend. The first session recorded
+with detection live from the open is Monday October 26; on sessions like the
+two recorded, v0 writes 7–9 events a day.
+
+What the two sessions actually contained, every 30-minute reading with the
+2% own-move floor held (stock × pass; groups need 4 members with data and 60%
+agreement):
+
+| Reading | Oct 22 | Oct 23 |
+| --- | --- | --- |
+| stock vs SPY ≥ 2 points | 790 readings, 67 symbols | 642, 60 |
+| ≥ 3 | 165, 25 | 178, 27 |
+| ≥ 4 | 33, 10 | 55, 10 |
+| **≥ 4.5 (v0)** | 14, 5 | 28, 8 |
+| ≥ 5 | 6, 2 | 11, 7 |
+| ≥ 6 | 2, 1 | 0 |
+| group median vs SPY ≥ 1.5 points | 148 readings, 17 groups | 130, 11 |
+| **≥ 2.0 (v0)** | 35, 9 | 47, 7 |
+| ≥ 2.5 | 5, 3 | 23, 3 |
+| ≥ 3 | 0 | 16, 3 |
+| stock vs sector ≥ 4.5 without the same ≥ 4.5 vs SPY | 1 | 8 |
+
+Largest per symbol: LAD +7.8, MRK −5.5, LCID +4.8, CIFR −4.7, DDOG −4.5 on
+October 22; DECK +5.6, CRDO +5.4, ASTS +5.4, WULF −5.3, CRWD +5.1, CIFR −5.1,
+NET +5.0, APLD −4.6 on October 23. No v0 threshold went unreached: the stock
+and group rules fired in the replay, and the sector rule's 4.5 points were
+crossed on 1 and 8 single readings but never on three consecutive passes
+(hence 0 sector events). Nothing reached 8 points vs SPY or a group median of
+4. Coverage: 144 of 146 stocks were usable on at least 90% of passes (AN
+82–84%, HUM 92–95%); WBD never returned a quote on either day and is the one
+symbol always missing. No rules change was made: v0 stays, and v1 is still
+due after the October 26 close with three live sessions and Isaac's ratings.
 
 ### Outcome scoring
 
@@ -444,6 +495,58 @@ on precision under 40%, more than 40 names a session, or failed scans on 3 or
 more sessions. Passing earns a screen section next; phone alerts remain a
 separate decision.
 
+## Phone alerts (off by default)
+
+Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
+on is Isaac's call (a new phone alert is an activation). With it on, the
+recorder (`backend/app/engine/radar_runner.py`) hands each pass's newly
+written events to `backend/app/engine/radar_alerts.py`, which sends one ntfy
+notification per event the same minute, on the `NTFY_URL` topic and
+`ALERT_APP_URL` position alerts use:
+
+- **Title:** the event's own numbers, `Radar: LAD +5.3% vs SPY +0.1%` for a
+  stock (its 30-minute change and the benchmark's), `Radar: Neoclouds and AI
+  hosting −2.4% vs SPY (6 of 7 down)` for a group (median member vs SPY).
+  **Body:** the feed's one-line summary and the time first seen
+  (`… · 10:09 AM ET`).
+- **Tap:** opens `/radar?event=<id>`, the saved event expanded, with its Open
+  chart, Ask copilot and Plan a trade buttons and the four rating buttons; the
+  page switches to the event's session when it is not the default one.
+- **Actions Useful and Not useful:** open `/radar?event=<id>&rate=useful` or
+  `&rate=irrelevant`; the page saves that rating once through the existing
+  `POST /radar/events/{event_id}/feedback` (the tap is the rating, as the plan
+  link ping works), then drops `rate` from the address so a reload cannot
+  repeat it. No new server route, token or public ingress. "Not useful" is
+  saved as `irrelevant`; the card is open, so "Already knew" or "Too late" is
+  one more tap and the latest rating wins. ntfy shows three actions: Open app,
+  Useful, Not useful.
+- **Only a new event pings.** Revisions (extended, faded, reversed) never do.
+  Regular hours only: the recorder detects only inside the session and sends
+  pending pings only on a pass.
+- **Caps:** at most `RADAR_ALERTS_DAILY_CAP` (default 8) a session and one per
+  stock or group an hour. An event past a cap is recorded `skipped` with the
+  reason and never sent later; it still appears in the feed.
+- **Outbox:** table `radar_alert` in the journal database (`RadarAlert` in
+  `backend/app/models.py`, additive migration
+  `backend/alembic/versions/b9e4d2a7c1f3_add_radar_alerts.py`), not the Radar
+  file, which stays append-only and alert-free. One row per event (unique
+  event id); delivery `pending`, `sending`, `sent`, `expired` (not sent within
+  15 minutes: a late Radar ping is a stale read), `unknown` (a send that may
+  have reached ntfy is never resent) or `skipped`. `sent` means ntfy accepted
+  it, not that the phone showed it. A failing ping never affects the recorded
+  pass or its events.
+- **Proof:** `GET /radar/proof` adds `alerted` (events with a `sent` or
+  `unknown` ping, with their ratings) so alerted events can be read apart
+  from events only seen in the feed; `/proof` shows the line, not part of the
+  verdict.
+
+Switching on: add `RADAR_ALERTS_ENABLED=true` (and `RADAR_ALERTS_DAILY_CAP` if
+not 8) to `/etc/tradejournal/backend.env` and restart
+`tradejournal-api.service`; ntfy must already be set up (`alerts.env`). Tests:
+`backend/tests/test_radar_alerts.py` (trigger, caps, delivery states),
+`backend/tests/test_radar_proof.py` (alerted counts) and the tap in
+`frontend/e2e/radar.spec.ts`.
+
 ## Social buzz (studied, not built)
 
 An October 24 desk study looked at adding a Reddit/X/Stocktwits attention signal
@@ -456,9 +559,9 @@ test after the premarket pilot is scored. See
 The recorder is off unless both variables are set in the VPS `backend.env`
 (set since October 22 with Isaac's OK). The v0 rules have no flag of their own:
 wherever the recorder runs, detection runs with it and writes events to the
-screen. Nothing here sends phone alerts; those wait for a pilot. The premarket
-pilot has its own `RADAR_PREMARKET_ENABLED`, off by default; turning it on is
-Isaac's call.
+screen. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
+([Phone alerts](#phone-alerts-off-by-default)), and the premarket pilot its
+own `RADAR_PREMARKET_ENABLED`, also off; turning either on is Isaac's call.
 
 
 ### Movers to Charts navigation
