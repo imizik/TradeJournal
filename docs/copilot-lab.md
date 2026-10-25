@@ -2,9 +2,12 @@
 
 An owner-only experiment: does a Claude conversation embedded in TradeJournal
 help the owner's research workflow more than hosted Trader Jo? It is a
-read-only sparring partner. It does not monitor, alert, trade, or save plans.
+read-only sparring partner. It never trades, and it saves a plan, alert,
+revisit or memory only when the owner confirms a proposal card (below). Its
+background research queue and its phone pings are off by default.
 Trader Jo, follow-ups, price watches, Shadow and MCP work are separate and
-untouched.
+untouched, except that a confirmed memory is saved as one of Jo's memories
+(`POST /jo/memories`).
 
 ## What runs
 
