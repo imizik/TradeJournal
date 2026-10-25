@@ -6,7 +6,8 @@ import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { Bot, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import PlanATrade from "@/components/copilot/PlanATrade";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -147,6 +148,14 @@ function MoreButton({ open, onOpen, trouble }: { open: boolean; onOpen: () => vo
   );
 }
 
+/** The phone's thumb-reachable "Plan a trade": a lit tab beside Charts, owner-only and only while the lab is on. */
+function PlanTab() {
+  return <PlanATrade className="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-sky-300 hover:text-sky-200">
+    <span className="flex h-6 w-9 items-center justify-center rounded-full bg-sky-500 text-white"><Crosshair className="h-4 w-4" aria-hidden /></span>
+    <span><span className="sr-only">Plan a trade</span><span aria-hidden>Plan</span></span>
+  </PlanATrade>;
+}
+
 function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
@@ -266,7 +275,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
               <Pending corner />
             </Link>
           );
-        })}
+        }).flatMap((tab, i) => i === 1 ? [tab, <PlanTab key="plan" />] : [tab])}
         <MoreTab open={menuOpen} onOpen={() => setMenuOpen(true)} owner={owner} />
       </nav>
 

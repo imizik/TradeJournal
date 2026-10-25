@@ -7,6 +7,7 @@ import {
   recordVisit, radarSession, type RadarDetail, type RadarFeed, type RadarFeedEvent, type RadarNews, type RadarRating,
 } from "@/lib/radar";
 import AskCopilot from "@/components/copilot/AskCopilot";
+import PlanATrade from "@/components/copilot/PlanATrade";
 import RadarMovers from "@/components/RadarMovers";
 import { cn } from "@/lib/utils";
 
@@ -127,6 +128,7 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
         ))}
       </section>
       <div className="flex flex-wrap items-center gap-2">
+        <PlanATrade symbol={symbol} line={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
         <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary">
           Open chart · {symbol}
         </Link>

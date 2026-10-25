@@ -30,6 +30,7 @@ import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
 import CopilotPanel from "@/components/copilot/CopilotPanel";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
+import PlanATrade, { PLAN_BUTTON } from "@/components/copilot/PlanATrade";
 import { radarChartContext, radarReturnHref, nyTime, type RadarChartContext, type RadarGroup } from "@/lib/radar";
 import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
@@ -1876,6 +1877,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const planButton = !isMacroSymbol(symbol) && <button aria-label="Plan trade" aria-haspopup="dialog" aria-expanded={!!plan} title="Plan trade: what you are taking and your plan, before you enter (Alt+P)" onClick={openPlan}
     className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={named}>Plan trade</span></button>;
 
+  // The copilot's "Plan a trade", beside the symbol: what this chart shows goes with it, unsent.
+  const planAt = selected?.last ?? latestCandle?.close;
+  const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}
+    className={`${PLAN_BUTTON} ${narrow ? "h-11 px-2.5" : "h-7 px-2.5"}`} />;
+
   const alerts = [
     current?.context_pending && <p key="context" role="status" aria-label="Chart context loading" className="text-xs text-amber-300">
       {requestFailed ? "Supporting charts and context could not refresh." : "Loading supporting charts, levels and journal context…"}
@@ -1912,6 +1918,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
           <button type="submit" aria-label="Load symbol" className={`${plain(false)} ${tap}`}><ArrowUpRight size={14} /></button>
         </form>
         <LiveQuote live={live} quote={selected} candle={latestCandle} market={market} />
+        {planATrade}
         {/* A phone keeps the dock's buttons beside the quote; the intervals get a row of their own that scrolls sideways. */}
         {narrow ? <div className="ml-auto flex shrink-0 items-center">{dockTabs}</div> : sep}
         <div role="group" aria-label="Main chart interval" className={`flex items-center ${narrow ? "min-w-0 basis-full overflow-x-auto" : ""}`}>

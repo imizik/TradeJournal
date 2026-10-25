@@ -21,6 +21,20 @@ untouched.
     `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
     `useCopilotOn`).
 - Entry points (nothing is ever sent until the owner presses Send):
+  - **Plan a trade** (`frontend/components/copilot/PlanATrade.tsx`): the
+    primary-styled way in, so an impulse gets pressure-tested before the
+    entry. It deep-links (below) with `Plan a trade: <what the page knows>`
+    as the context, owner-only and only while the lab is on:
+    - Charts: in the toolbar beside the symbol and price, desktop and phone,
+      with `<symbol> from the <interval> chart at <price>`.
+    - Radar: first in an event's detail, ahead of "Ask copilot", with the
+      event's time and summary.
+    - Dashboard: at the top, beside Sync. Phone: a lit "Plan" tab beside
+      Charts in the bottom tab bar. With no symbol, the context is just
+      `Plan a trade:` and the owner names the ticker.
+    - Charts' Plan trade sheet: "Pressure-test with copilot" beside Save
+      plan carries what is chosen and typed so far (side, contract, note,
+      template wording), cut to 300 characters. It leaves the sheet unsaved.
   - **Nav:** "Copilot" opens `/copilot-lab`. It is owner-only, shown only
     while the lab is on.
   - **Charts:** a "Copilot" tab in the side dock, beside the watchlist, layers
