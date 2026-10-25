@@ -95,6 +95,15 @@ size/risk notes as questions for the trader). When it has a concrete price level
 revisiting, also propose that step with propose_plan (at most two per answer): the owner sees it as a card with \
 Confirm and Dismiss. Always end a plan by stating clearly that nothing is saved or active until the owner confirms \
 a card: you cannot create alerts or research jobs yourself.
+- When the owner says they want to trade something, or their message carries the "Plan a trade:" context, pressure-test \
+the idea before proposing anything. Ask only for what is missing (why now, where it is wrong, how long they mean to hold), in \
+one short question at most. Challenge it with the chart, the group comparison and their own history and habits from \
+the owner context. If they are vague ("yolo NBIS calls"), do not interrogate them: draft concrete levels from \
+get_chart_context (an entry trigger at a level, an invalidation on the other side of it) and say what you assumed. Then \
+propose exactly one propose_plan kind=trade_plan, which counts toward the two proposals an answer may make: their \
+thesis in a sentence, the entry trigger, the invalidation, a time stop, and a size note only if they gave one. \
+"Not worth a trade" is still a complete answer; then propose no plan. Confirming the card saves it as their \
+pre-trade plan and arms its entry and invalidation alerts; nothing exists until they confirm it.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
 - You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: propose_plan only \
@@ -348,6 +357,20 @@ class FakeAdapter:
                                              "interpretation": "Simulated: bring this up when it bears on a decision."}}],
                                  "tool_use", _zero_usage(), self.model)
             return
+        if "plan a trade" in lower:
+            calls = self._trade_plan_calls(symbol, last, results) if allow_tools else []
+            if calls:
+                content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
+                           for i, (n, a) in enumerate(calls)]
+                yield "final", Round(content, "tool_use", _zero_usage(), self.model)
+                return
+            text = self._trade_plan_text(symbol, results)
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "plan" in lower and allow_tools and (calls := self._plan_calls(symbol, last, results)):
             content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
                        for i, (n, a) in enumerate(calls)]
@@ -428,6 +451,37 @@ class FakeAdapter:
         return [("propose_plan", {"kind": "watch", "symbol": symbol, "condition": "crosses", "price": round(price * 0.98, 2),
                                   "label": f"{symbol} 2% below the last price", "why": "A break here would mean the bounce failed."}),
                 ("propose_plan", {"kind": "revisit", "question": f"Is {symbol} still lagging its group?", "horizon_days": 1})]
+
+    @staticmethod
+    def _trade_plan_calls(symbol: str, last: dict, results: dict) -> list[tuple[str, dict]]:
+        """"Plan a trade" reads the quote and the 5m chart, then proposes one long-calls plan: entry on a 5m close above
+        the nearest level overhead, invalidation through the nearest level below (2% either side without levels)."""
+        if isinstance(last["content"], str):
+            return [("get_quotes", {"symbols": [symbol]}), ("get_chart_context", {"symbol": symbol, "timeframe": "5m"})]
+        price = ((results.get("get_quotes") or {}).get("prices") or {}).get(symbol)
+        if "propose_plan" in results or not price:
+            return []
+        levels = (results.get("get_chart_context") or {}).get("levels") or {}
+        above, below = (levels.get("above") or [{}])[0].get("high"), (levels.get("below") or [{}])[0].get("low")
+        entry, stop = round(above or price * 1.02, 2), round(below or price * 0.98, 2)
+        return [("propose_plan", {"kind": "trade_plan", "symbol": symbol, "direction": "long", "instrument": "calls",
+                                  "contract": "nearest weekly, first strike above entry",
+                                  "thesis": f"{symbol} reclaims the level overhead with its group, so the bounce has room.",
+                                  "entry_trigger": {"condition": "closes_beyond", "price": entry, "interval": "5m"},
+                                  "invalidation": {"condition": "crosses", "price": stop},
+                                  "time_stop": "out by 15:30 if the entry has not worked", "size_note": "one starter, no adds"})]
+
+    @staticmethod
+    def _trade_plan_text(symbol: str, results: dict) -> str:
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        plan = (results.get("propose_plan") or {}).get("proposal") or {}
+        if plan.get("kind") != "trade_plan":
+            return head + f"I couldn't read a current {symbol} price, so I won't draft levels for it."
+        return head + (f"**{symbol} plan (draft)**: you didn't give levels, so I drafted them from the 5m chart.\n\n"
+                       f"- Why now: only if it reclaims {plan['entry_trigger']['price']} on a 5m close; it is {plan['last']} now.\n"
+                       f"- Where it's wrong: through {plan['invalidation']['price']}, the level below.\n"
+                       "- How long: out by 15:30 if it has not worked; your audit's worst holds ran from an hour to the close.\n\n"
+                       "Edit the card if my levels are off. **Nothing is saved or armed until you confirm it.**")
 
     @staticmethod
     def _write(symbol: str, lower: str, results: dict) -> str:
@@ -528,6 +582,9 @@ def _summary(name: str, data: dict) -> str:
         p = data.get("proposal") or {}
         if p.get("kind") == "memory":
             return f"proposed memory ({p.get('memory_kind')}{', ' + p['symbol'] if p.get('symbol') else ''}): {p.get('text')}"[:160]
+        if p.get("kind") == "trade_plan":
+            return (f"proposed plan: {p.get('symbol')} {p.get('direction')} {p.get('instrument')}, entry "
+                    f"{p['entry_trigger']['price']}, invalidation {p['invalidation']['price']}")[:160]
         return (f"proposed watch: {p.get('symbol')} {p.get('condition')} {p.get('price')}" if p.get("kind") == "watch"
                 else f"proposed revisit in {p.get('horizon_days')} d")[:160]
     if name == "get_investigation_changes":

@@ -1,5 +1,6 @@
 import { apiUrl } from "./api";
 import type { AlertsPayload } from "./alerts";
+import type { Capture, CaptureSide } from "./captures";
 
 export type CopilotStatus =
   | { enabled: false; reason: string }
@@ -38,7 +39,12 @@ export type Proposal = { id: string } & (
   | { kind: "watch"; symbol: string; condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null;
       label: string; why: string; last?: number; as_of?: string | number | null }
   | { kind: "revisit"; question: string; horizon_days: number }
-  | { kind: "memory"; memory_kind: "statement" | "thesis" | "preference" | "lesson"; symbol: string | null; text: string; interpretation?: string });
+  | { kind: "memory"; memory_kind: "statement" | "thesis" | "preference" | "lesson"; symbol: string | null; text: string; interpretation?: string }
+  | { kind: "trade_plan"; symbol: string; direction: "long" | "short"; instrument: "stock" | "calls" | "puts"; contract: string | null;
+      thesis: string; entry_trigger: PlanLevel; invalidation: PlanLevel; time_stop: string | null; size_note: string | null;
+      last?: number; as_of?: string | number | null });
+export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
+export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
 export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
 
@@ -268,6 +274,18 @@ export const createWatch = (investigationId: string, watch: Extract<Proposal, { 
   request<AlertsPayload>("/charts/alerts", { method: "POST", body: JSON.stringify({
     symbol: watch.symbol, price: watch.price, reference, condition: watch.condition, interval: watch.interval, session: "regular",
     source_kind: "copilot", source_id: investigationId, label: watch.label }) });
+/** One of a confirmed plan's level alerts: an ordinary alert, marked as coming from this investigation, like a watch. */
+export const createPlanAlert = (investigationId: string, symbol: string, level: PlanLevel, reference: number, label: string) =>
+  request<AlertsPayload>("/charts/alerts", { method: "POST", body: JSON.stringify({
+    symbol, price: level.price, reference, condition: level.condition, interval: level.interval, session: "regular",
+    source_kind: "copilot", source_id: investigationId, label }) });
+/** A confirmed plan is the owner's pre-trade plan: the existing capture route, discretionary, named "Copilot plan", so
+ * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
+ * save returns the first plan instead of making a second. */
+export const savePlanCapture = (body: { client_id: string; underlying: string; account_id: string; side: CaptureSide; wording: string; note: string }) =>
+  request<Capture>("/charts/captures", { method: "POST", body: JSON.stringify({
+    ...body, client_captured_at: Date.now(), mode: "discretionary", setup_label: "Copilot plan",
+    context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card." }, image: false }) });
 export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });
 /** A confirmed memory is saved through the existing Jo memory store as the owner's own statement (they edited and
  * confirmed the words), active at once, with the investigation it came from as its reference. */

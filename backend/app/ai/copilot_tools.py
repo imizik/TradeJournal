@@ -23,6 +23,11 @@ MAX_SAVED = 5
 
 _SYMBOL_SCHEMA = {"type": "string", "description": "US stock or ETF ticker, e.g. NBIS"}
 
+_LEVEL_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["condition", "price"],
+                 "properties": {"condition": {"type": "string", "enum": ["touches", "crosses", "closes_beyond"]},
+                                "price": {"type": "number", "description": "The level, positive"},
+                                "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"}}}
+
 TOOLS: list[dict] = [
     {
         "name": "get_group_comparison",
@@ -148,9 +153,16 @@ TOOLS: list[dict] = [
                        "remembering across conversations: `memory_kind` (statement, thesis, preference or lesson), "
                        "`text` (their words or a faithful paraphrase, at most 400 characters), optional "
                        "`interpretation` (what it should change about how you work, at most 300) and optional `symbol` "
-                       "when it is about one. The owner edits the text and confirms; nothing is remembered until then.",
+                       "when it is about one. The owner edits the text and confirms; nothing is remembered until then. "
+                       "kind=trade_plan: one whole plan for a trade the owner wants to take: `symbol`, `direction` (long "
+                       "= expects up, short = expects down), `instrument` (stock; calls only when long; puts only when "
+                       "short), optional `contract` hint (strike/expiry as text, at most 40), `thesis` (at most 300), "
+                       "`entry_trigger` and `invalidation` (each {condition, price, interval for closes_beyond}; a long's "
+                       "invalidation is below its entry, a short's above), optional `time_stop` (at most 80, e.g. \"out by "
+                       "15:30\") and `size_note` (at most 120). The owner edits and confirms it; Confirm saves it as their "
+                       "pre-trade plan and arms the entry and invalidation alerts.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["kind"],
-                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit", "memory"]},
+                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit", "memory", "trade_plan"]},
                                         "symbol": _SYMBOL_SCHEMA,
                                         "condition": {"type": "string", "enum": ["touches", "crosses", "closes_beyond"]},
                                         "price": {"type": "number", "description": "The level, positive"},
@@ -159,7 +171,12 @@ TOOLS: list[dict] = [
                                         "question": {"type": "string"},
                                         "horizon_days": {"type": "integer", "description": "1-30, default 1"},
                                         "memory_kind": {"type": "string", "enum": ["statement", "thesis", "preference", "lesson"]},
-                                        "text": {"type": "string"}, "interpretation": {"type": "string"}}},
+                                        "text": {"type": "string"}, "interpretation": {"type": "string"},
+                                        "direction": {"type": "string", "enum": ["long", "short"]},
+                                        "instrument": {"type": "string", "enum": ["stock", "calls", "puts"]},
+                                        "contract": {"type": "string"}, "thesis": {"type": "string"},
+                                        "entry_trigger": _LEVEL_SCHEMA, "invalidation": _LEVEL_SCHEMA,
+                                        "time_stop": {"type": "string"}, "size_note": {"type": "string"}}},
     },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
@@ -187,14 +204,62 @@ MEMORY_SYMBOL = re.compile(r"^[A-Z]{1,6}(\.[A-Z])?$")  # jo_briefing_common.Symb
 MEMORY_TEXT, MEMORY_INTERPRETATION = 400, 300
 
 
-def _proposal(args: dict) -> dict:
+# A plan's view and what expresses it: the capture side the owner's Confirm saves (captures.SIDES).
+PLAN_SIDES = {("long", "stock"): "buy_stock", ("short", "stock"): "short_stock", ("long", "calls"): "buy_calls",
+              ("short", "puts"): "buy_puts"}
+
+
+def _level(args: dict, key: str = "") -> dict:
+    """A price level as an alert takes it: condition, a positive finite price, and an interval only for closes_beyond."""
     from app.engine import level_alerts
+    name = f"{key}: " if key else ""
+    condition = args.get("condition")
+    if condition not in level_alerts.CONDITIONS:
+        raise ToolInputError(f"{name}condition must be touches, crosses or closes_beyond")
+    price = args.get("price")
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or not 0 < price < 1_000_000:
+        raise ToolInputError(f"{name}price must be a positive number")
+    interval = args.get("interval")
+    if condition == "closes_beyond":
+        if interval not in level_alerts.CLOSE_INTERVALS:
+            raise ToolInputError(f"{name}closes_beyond needs interval 1m, 3m, 5m, 15m, 30m, 1h or 4h")
+    elif interval is not None:
+        raise ToolInputError(f"{name}interval is only for closes_beyond")
+    return {"condition": condition, "price": round(float(price), 4), "interval": interval}
+
+
+def _trade_plan(args: dict) -> dict:
+    direction, instrument = args.get("direction"), args.get("instrument")
+    if direction not in ("long", "short") or instrument not in ("stock", "calls", "puts"):
+        raise ToolInputError("direction must be long or short, and instrument stock, calls or puts")
+    if (direction, instrument) not in PLAN_SIDES:
+        raise ToolInputError("calls express a long view and puts a short one")
+    levels = {}
+    for key in ("entry_trigger", "invalidation"):
+        level = args.get(key)
+        if not isinstance(level, dict) or set(level) - {"condition", "price", "interval"}:
+            raise ToolInputError(f"{key} must be an object with condition, price and (for closes_beyond) interval")
+        levels[key] = _level(level, key)
+    entry, stop = levels["entry_trigger"]["price"], levels["invalidation"]["price"]
+    if (direction == "long" and not stop < entry) or (direction == "short" and not stop > entry):
+        raise ToolInputError(f"a {direction} plan's invalidation must be {'below' if direction == 'long' else 'above'} its entry")
+    out = {"kind": "trade_plan", "symbol": _symbol(args.get("symbol")), "direction": direction, "instrument": instrument,
+           "contract": None, "thesis": _text(args, "thesis", 300), **levels, "time_stop": None, "size_note": None}
+    for key, most in (("contract", 40), ("time_stop", 80), ("size_note", 120)):
+        if args.get(key) is not None:
+            out[key] = _text(args, key, most)
+    return out
+
+
+def _proposal(args: dict) -> dict:
     kind = args.get("kind")
     keys = {"watch": {"kind", "symbol", "condition", "price", "interval", "label", "why"},
             "revisit": {"kind", "question", "horizon_days"},
-            "memory": {"kind", "memory_kind", "symbol", "text", "interpretation"}}.get(kind)
+            "memory": {"kind", "memory_kind", "symbol", "text", "interpretation"},
+            "trade_plan": {"kind", "symbol", "direction", "instrument", "contract", "thesis", "entry_trigger", "invalidation",
+                           "time_stop", "size_note"}}.get(kind)
     if keys is None:
-        raise ToolInputError("kind must be watch, revisit or memory")
+        raise ToolInputError("kind must be watch, revisit, memory or trade_plan")
     if set(args) - keys:
         raise ToolInputError(f"unexpected arguments for {kind}: {sorted(set(args) - keys)}")
     if kind == "memory":
@@ -214,20 +279,11 @@ def _proposal(args: dict) -> dict:
         if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
             raise ToolInputError("horizon_days must be 1-30")
         return {"kind": "revisit", "question": _text(args, "question", 500), "horizon_days": days}
-    condition = args.get("condition")
-    if condition not in level_alerts.CONDITIONS:
-        raise ToolInputError("condition must be touches, crosses or closes_beyond")
-    price = args.get("price")
-    if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or not 0 < price < 1_000_000:
-        raise ToolInputError("price must be a positive number")
-    interval = args.get("interval")
-    if condition == "closes_beyond":
-        if interval not in level_alerts.CLOSE_INTERVALS:
-            raise ToolInputError("closes_beyond needs interval 1m, 3m, 5m, 15m, 30m, 1h or 4h")
-    elif interval is not None:
-        raise ToolInputError("interval is only for closes_beyond")
-    return {"kind": "watch", "symbol": _symbol(args.get("symbol")), "condition": condition, "price": round(float(price), 4),
-            "interval": interval, "label": _text(args, "label", level_alerts.LABEL_MAX), "why": _text(args, "why", 300)}
+    if kind == "trade_plan":
+        return _trade_plan(args)
+    from app.engine import level_alerts
+    return {"kind": "watch", "symbol": _symbol(args.get("symbol")), **_level(args),
+            "label": _text(args, "label", level_alerts.LABEL_MAX), "why": _text(args, "why", 300)}
 
 
 def validate(name: str, args: Any) -> dict:
@@ -627,12 +683,19 @@ def propose(evidence, proposal: dict) -> dict:
     if proposal["kind"] == "memory":
         return {"state": "ok", "proposal": proposal,
                 "note": "Shown to the owner as a card with the text to edit and confirm. Nothing is remembered until they confirm."}
-    if proposal["kind"] == "watch":
+    if proposal["kind"] in ("watch", "trade_plan"):
         quote = evidence.get_quotes([proposal["symbol"]])
         last = (quote.get("prices") or {}).get(proposal["symbol"])
         if not isinstance(last, (int, float)) or last <= 0:
             raise ToolInputError(f"no current price for {proposal['symbol']}, so it cannot be watched")
+        if proposal["kind"] == "trade_plan":
+            stop = proposal["invalidation"]["price"]
+            if (proposal["direction"] == "long" and last <= stop) or (proposal["direction"] == "short" and last >= stop):
+                raise ToolInputError(f"{proposal['symbol']} is at {last}, already past the invalidation at {stop}")
         proposal = {**proposal, "last": last, "as_of": quote.get("fetched_at")}
+    if proposal["kind"] == "trade_plan":
+        return {"state": "ok", "proposal": proposal,
+                "note": "Shown to the owner as a plan card to edit and confirm. Nothing is saved or armed until they confirm."}
     return {"state": "ok", "proposal": proposal,
             "note": "Shown to the owner as a card to confirm or dismiss. Nothing is saved or active until they confirm."}
 
