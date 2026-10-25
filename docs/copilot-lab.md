@@ -464,9 +464,11 @@ nothing exists until the owner confirms.
     and a plan whose price is already past its invalidation is refused.
   - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
     thesis, entry and invalidation prices, time stop and size as editable
-    fields with phone-sized tap targets. Confirm runs three parts, each with
-    its own result; a failed part says why and offers a retry of that part
-    only:
+    fields with phone-sized tap targets. Under the time stop it shows when it
+    would ping, read by the server (`GET /copilot/time-stops/preview`), or
+    "Kept as a note" when the words hold no time. Confirm runs three parts
+    (four with a time stop it can read), each with its own result; a failed
+    part says why and offers a retry of that part only:
     - **Pre-trade plan:** the existing `POST /charts/captures`, mode
       `discretionary`, side from direction and instrument (`buy_stock`,
       `short_stock`, `buy_calls`, `buy_puts`), `setup_label` "Copilot plan",
@@ -480,10 +482,50 @@ nothing exists until the owner confirms.
     - **Entry alert** and **Invalidation alert:** exactly as a watch confirms:
       a fresh `GET /copilot/quote`, then `POST /charts/alerts` with
       `source_kind="copilot"`, the investigation id and the labels
-      "NBIS entry: …" and "NBIS invalidation: …". They run only once the plan
-      is saved, and an invalidation the fresh price has already crossed is
-      refused rather than armed on the wrong side. Without alert support the
-      card says so and Confirm saves only the plan.
+      "NBIS entry: …" and "NBIS invalidation: …", plus `plan_role` (`entry` or
+      `invalidation`, a nullable `level_alert` column only a `copilot` alert
+      may carry). They run only once the plan is saved, and an invalidation
+      the fresh price has already crossed is refused rather than armed on the
+      wrong side. Without alert support the card says so and Confirm saves
+      only the plan.
+    - **Time stop:** `POST /copilot/time-stops` with the card's client id (a
+      retry returns the first row), the investigation id, the symbol and the
+      words, re-read on the server and saved in `plan_time_stop`
+      (`backend/app/engine/plan_time_stops.py`).
+  - **Follow-through.** A plan's pings name the plan:
+    - When its entry or invalidation alert fires, the phone says
+      "NBIS hit your 95.90 entry trigger. Still valid? Tap to check." or
+      "NBIS broke your 92.30 invalidation. Your plan says out." The tap opens
+      `/copilot-lab?investigation=<id>&context=…`: the investigation, with
+      the owner's question ("My entry trigger hit at 95.90 (10:41). Is the
+      plan still valid? Check the chart and group now.") in the message box,
+      unsent. Delivery is the level alerts' own outbox. A copilot watch with
+      no role keeps the plain level message. The open P&L is not added: no
+      mark is stored for it, and reading one at send time would add a quote
+      call to the alert path.
+    - The **time stop** is read as a clock time (`out by 15:30`, `15:30`,
+      `3:30pm`; a bare 1-8 o'clock is the afternoon) at the next regular
+      session that still has it ahead, today when it can be; a length in
+      minutes or hours (`45m`, `2h`, up to 6½ hours) from the Confirm, no
+      later than today's close and only while today's session is open; or a
+      number of days (`2 days`, up to 30) as that many trading days ahead at
+      15:30 ET (half an hour before an early close). The market calendar is
+      published only through the current month, so a day count landing in a
+      later month skips weekends but not that month's holidays or early
+      closes; the preview shows the date. A time outside regular hours, a
+      length that reads as a candle or an offset ("5m closes under 92", "10
+      minutes before the close"), or words with neither stay a note in the
+      plan's wording.
+    - At its time, if a position in the symbol whose first entry came after
+      the plan is still open (Webull left out), one ntfy ping says
+      "NBIS time stop: you planned to be out by 15:30." and opens the trade.
+      Otherwise it is recorded `skipped` and nothing is sent. Delivery is at
+      most once, as plan nudges': a send that may have reached ntfy is
+      `unknown` and never resent, and one not judged or sent within 15
+      minutes of its time `expired`. It runs on the level alert monitor's
+      loop only while `PLAN_TIME_STOPS_ENABLED=true` (default off); the card
+      and the routes work either way and say when pings are off.
+    - Tests: `backend/tests/test_plan_follow_through.py`.
   - Fixture demo: "plan a trade" in the owner's words makes the fake model
     read the quote and the 5m chart and propose a long-calls plan (entry on a
     5m close above the nearest level overhead, invalidation through the
@@ -491,11 +533,15 @@ nothing exists until the owner confirms.
   - Browser proof: `frontend/e2e/copilot-trade-plan.spec.ts`.
 - **Linked activity:** under an open investigation, the lab lists its level
   alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
-  (armed, or fired with a time and price), and its revisit jobs. Both come
-  from their own routes; there is no new store.
+  (armed, or fired with a time and price; a plan's as "Entry · armed/hit" and
+  "Invalidation · armed/hit"), its plan time stops (pending, sent, skipped
+  with why, not sent, or may have sent) and its revisit jobs, each from its
+  own route (`GET /copilot/time-stops?investigation=<id>` for time stops).
 - Proposal cards live in the conversation on screen, not in the saved
   transcript. A confirmed step remains as linked activity.
-- `/copilot-lab?investigation=<id>` opens that saved investigation.
+- `/copilot-lab?investigation=<id>` opens that saved investigation with
+  "What changed?" ready; with `&context=…` (a plan alert's link) that text is
+  ready instead.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 

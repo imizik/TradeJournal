@@ -18,6 +18,8 @@ export type LevelAlert = {
   id: string; symbol: string; price: number; created_on: string; condition: AlertCondition; interval: Interval | null;
   session: "regular" | "extended"; direction: "up" | "down"; source_kind: "level" | "drawing" | "auto"; source_id: string | null;
   label: string; state: "active" | "fired"; armed_at: number; event: AlertEvent | null;
+  /** One of a confirmed copilot plan's levels. */
+  plan_role?: "entry" | "invalidation" | null;
 };
 /** Every alert, and whether this server can send to the phone. */
 export type AlertsPayload = { alerts: LevelAlert[]; phone: boolean };

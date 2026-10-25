@@ -197,7 +197,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 }) {
   const panel = variant === "panel";
   const { owner } = useAppAccess();
-  const opening = link?.context ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
+  const opening = link?.context && !link.investigation ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || "NBIS");
@@ -296,7 +296,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         if (controller.signal.aborted) return;
         open(saved);
         // From an alert's link: the question is ready, but a turn costs money, so it is not sent.
-        if (link?.investigation) setDraft(whatChangedPrompt(saved.id));
+        // A plan alert's link carries the owner's own question instead.
+        if (link?.investigation) setDraft(link.context || whatChangedPrompt(saved.id));
       }).catch(() => remember(null));
     }).catch(error => {
       if (!controller.signal.aborted) setStatusError(error instanceof Error ? error.message : "Copilot Lab is unavailable.");
