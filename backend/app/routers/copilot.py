@@ -10,6 +10,7 @@ as soon as it is transcribed and never logged.
 import asyncio
 from datetime import datetime
 import json
+import logging
 import time
 from typing import Literal
 
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.ai import copilot
-from app.database import get_session
+from app.database import engine, get_session
 from app.engine import captures, spoken_tickers, transcribe
 from app.engine import copilot_investigations as investigations
 from app.engine.chart_math import ET
@@ -117,6 +118,16 @@ def threads():
     if held["state"] == "ok":
         held.update(count=pack["positions"].get("count", 0),
                     positions=[{k: row[k] for k in THREAD_POSITION_FIELDS if k in row} for row in held["positions"]])
+    if investigations_["state"] == "ok" and investigations_["investigations"]:
+        # The last few thesis-watch triggers for each open investigation (docs/copilot-lab.md § Thesis watch).
+        try:
+            from app.engine import thesis_watch
+            with Session(engine) as db:
+                recent = thesis_watch.recent_for(db, [r["id"] for r in investigations_["investigations"]])
+            for row in investigations_["investigations"]:
+                row["watch"] = recent.get(row["id"], [])
+        except Exception:  # the triggers are extra; the threads stand
+            logging.getLogger(__name__).warning("Open threads: thesis watch triggers unavailable", exc_info=True)
     return {"positions": held, "investigations": investigations_, "watches": watches, "as_of": pack.get("as_of")}
 
 

@@ -1177,6 +1177,61 @@ for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
     API key is also in the env, which proves the key never reaches Claude
     Code.
 
+## Thesis watch
+
+When new information touches something the owner has a thesis on, the app
+tells him once and offers the re-check (`backend/app/engine/thesis_watch.py`,
+table `thesis_watch_trigger`). Off unless the private backend environment sets
+`THESIS_WATCH_ENABLED=true`; it runs as its own task in the API process, every
+15 minutes inside the regular session and once at 08:00 New York on a trading
+day, and nothing runs when the flag is off.
+
+- **Watched set:** symbols with an active thesis memory, the open copilot
+  investigations' symbols and the open positions (Webull left out), held
+  symbols first, then investigations newest first, then theses newest first,
+  at most 25.
+- **Reads per pass:** one batched news read for the watched set (the Alpaca
+  feed through `eligible_headlines`), one batched quote read (the chart feed),
+  and earnings from the events cache only. Nothing here is a market read the
+  app does not already make.
+- **Triggers:** a new eligible headline for the symbol since the last pass
+  (deduped by URL, a catalyst headline first); a move of
+  `THESIS_WATCH_MOVE_PCT` (default 4) or more since the open investigation's
+  latest evidence as-of (that day's cached minute bars; the prior close when
+  the day is not cached; no move at all while the evidence is from today, since
+  the owner just read that price), or since the prior close for a thesis or
+  position with no investigation; earnings inside two trading days.
+- **One ping:** `New on NBIS since your thesis`, the headline, the move or the
+  earnings date in the body, at most one per symbol per day and
+  `THESIS_WATCH_DAILY_CAP` (default 4) a day; the rest are recorded `skipped`
+  with the reason. Each trigger is written once by its dedupe key, so a
+  restart never fires it twice; a skipped one is keyed to its day, so a cap or
+  a missing ntfy does not swallow a signal that is still true tomorrow.
+  Delivery is an outbox on the row (`sending`, then `sent`, `failed` or
+  `skipped`). A failed push is never retried: it may still have landed.
+  Headline text is third-party data, cleaned of control characters; it is
+  plain text in the ping and quoted in the prepared question, never an
+  instruction anywhere.
+- **Tap:** opens the investigation with the What-changed question prepared
+  and unsent (`/copilot-lab?investigation=<id>&context=New since my thesis:
+  "…". What changed? Use get_investigation_changes for investigation <id> and
+  say whether it still holds.`, at most 300 characters), or, for a thesis with
+  no investigation, `/copilot-lab?symbol=X&context=New since my thesis: "…".
+  Does it still hold?`. The investigation is the owner's own latest open one
+  for the symbol; a research job's output stands in only when he has none, and
+  is never reassessed itself.
+- **Research queue:** with `RESEARCH_QUEUE_ENABLED=true`, a fired trigger
+  with an investigation also queues one `reassess` job through the queue
+  (`reassess:<id>:<day>`, the same key as its stale-investigation trigger, so
+  one a day; the queue's budget applies when it runs). The queue's own result
+  ping is the only other notification.
+- **Lab home:** each open investigation on the Open threads row lists its
+  last three triggers (`watch` on `GET /copilot/threads`: kind, text, time and
+  delivery state).
+
+Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
+quotes, bars and earnings).
+
 ## Before a live API test
 
 1. The owner approves the spend. A billing refusal is reported as "API credits

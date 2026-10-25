@@ -17,7 +17,13 @@ const THREADS = {
   ] },
   investigations: { state: "ok", investigations: [
     { id: INV, source: "copilot", symbol: "NBIS", title: "Is the NBIS recovery real?", status: "open",
-      conclusion: "Group is confirming; the symbol lags.", updated_at: "2026-10-22T19:05:00Z" },
+      conclusion: "Group is confirming; the symbol lags.", updated_at: "2026-10-22T19:05:00Z",
+      // Thesis watch: the last triggers for this investigation, newest first (docs/copilot-lab.md § Thesis watch).
+      watch: [
+        { kind: "news", text: "Nebius wins $3B Meta deal (Benzinga, 09:52)", fired_at: "2026-10-23T13:55:00Z", delivery: "sent", reason: null, path: `/copilot-lab?investigation=${INV}` },
+        { kind: "move", text: "NBIS +4.1% since your investigation's evidence (Oct 22 15:05 NY): 101 → 105.1", fired_at: "2026-10-23T14:15:00Z",
+          delivery: "skipped", reason: "already told today", path: `/copilot-lab?investigation=${INV}` },
+      ] },
     { id: "22222222-2222-4222-8222-222222222222", source: "research_job", symbol: "CRWV", title: "CRWV capacity deal terms",
       status: "open", updated_at: "2026-10-22T16:30:00Z" },
   ] },
@@ -76,6 +82,11 @@ test("Open threads shows what is live, sends nothing on open, and one button ask
   await expect(home).toContainText("CRWV closes beyond 135 (15m) · CRWV clears the gap");
   await expect(home.getByRole("link", { name: "NBIS · Is the NBIS recovery real?" })).toHaveAttribute("href", `/copilot-lab?investigation=${INV}`);
   await expect(home).toContainText("Group is confirming; the symbol lags.");
+  const since = home.getByRole("list", { name: "New since Is the NBIS recovery real?" });
+  await expect(since).toContainText("News · Nebius wins $3B Meta deal (Benzinga, 09:52)");
+  await expect(since).toContainText("Move · NBIS +4.1% since your investigation's evidence (Oct 22 15:05 NY): 101 → 105.1");
+  await expect(since).toContainText("skipped (already told today)");
+  await expect(since).not.toContainText("sent"); // a delivered ping needs no state
   await expect(home.getByRole("link", { name: "CRWV · research · CRWV capacity deal terms" })).toBeVisible();
   await expect(home).toContainText("reassess · queued · NBIS · Has the financing overhang cleared?");
   await page.waitForTimeout(300);
