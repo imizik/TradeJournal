@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type LevelHistory, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,16 @@ type Result = { state: "idle" | "working" | "done" | "failed"; text: string };
 const PART_LABEL: Record<Part, string> = { plan: "Pre-trade plan", entry: "Entry alert", invalidation: "Invalidation alert", timeStop: "Time stop" };
 const IDLE: Result = { state: "idle", text: "" };
 const field = "w-full rounded border bg-background px-2 py-2 text-base text-foreground disabled:opacity-60 sm:text-sm";
+/** The invalidation study's approval-only wording candidates: why a level's history is evidence beside the card, never a rule. */
+export const EVIDENCE_NOT_RULE_URL =
+  "https://github.com/imizik/TradeJournal/blob/main/backend/reports/invalidation_study_2026-10-25.md#defaults-the-copilot-could-suggest--approval-only";
+
+/** One line of the owner's own history at the drafted invalidation, e.g. "12 of 31 past NBIS trades crossed −2.1% while held; 5 recovered; median −18% from there." */
+export function historyText(h: LevelHistory): string {
+  const signed = (n: number, digits: number) => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(digits)}%`;
+  const median = h.median_from_cross_pct === null ? "" : `; median ${signed(h.median_from_cross_pct, 0)} from there`;
+  return `${h.crossed} of ${h.trades} past ${h.symbol} trades crossed ${signed(h.distance_pct, 1)} while held; ${h.recovered} recovered${median}.`;
+}
 
 /**
  * The copilot's whole trade plan (propose_plan kind=trade_plan). The owner edits it; Confirm saves it as their pre-trade
@@ -20,8 +30,8 @@ const field = "w-full rounded border bg-background px-2 py-2 text-base text-fore
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
  * Nothing is saved or armed before Confirm.
  */
-export default function TradePlanCard({ plan, investigationId, alertsSupported, onDone }: {
-  plan: TradePlan; investigationId: string | null; alertsSupported: boolean; onDone(): void;
+export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, onDone }: {
+  plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null; onDone(): void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [thesis, setThesis] = useState(plan.thesis);
@@ -139,6 +149,17 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           <input value={stop} onChange={e => setStop(e.target.value)} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
         </label>
       </div>
+      {history && (
+        <p aria-label="Your history at this level" className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Your history at this level: </span>
+          {Number(stop) === history.level ? (
+            <>
+              {historyText(history)}{history.small && " Too few trades to weigh."}{history.simulated && " (Simulated.)"}{" "}
+              <a href={EVIDENCE_NOT_RULE_URL} target="_blank" rel="noreferrer" className="underline hover:text-foreground">why this is evidence, not a rule</a>
+            </>
+          ) : "you changed the invalidation; re-ask the copilot to refresh it."}
+        </p>
+      )}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">Time stop</span>
         <input value={timeStop} onChange={e => setTimeStop(e.target.value.slice(0, 80))} placeholder="e.g. out by 15:30" disabled={locked} className={cn(field, "min-h-11")} />

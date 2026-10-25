@@ -116,6 +116,12 @@ propose exactly one propose_plan kind=trade_plan, which counts toward the two pr
 thesis in a sentence, the entry trigger, the invalidation, a time stop, and a size note only if they gave one. \
 "Not worth a trade" is still a complete answer; then propose no plan. Confirming the card saves it as their \
 pre-trade plan and arms its entry and invalidation alerts; nothing exists until they confirm it.
+- Before you propose a trade_plan, call get_level_history for the drafted invalidation (the symbol, its price as level, \
+side below for a long or above for a short, the entry trigger as entry) and once more with minutes when the time stop is a \
+length of time. Say in one sentence what the owner's own history shows there, with the counts: how many past trades crossed \
+that far, how many recovered, the median option P&L from there. Never call a level validated, proven or recommended: the \
+invalidation study found no level or time stop that holds up as a default, so this is evidence to weigh, not a rule. When \
+fewer than 10 trades are counted, say the sample is too small to weigh.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
 - You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: propose_plan only \
@@ -528,7 +534,8 @@ class FakeAdapter:
         levels = (results.get("get_chart_context") or {}).get("levels") or {}
         above, below = (levels.get("above") or [{}])[0].get("high"), (levels.get("below") or [{}])[0].get("low")
         entry, stop = round(above or price * 1.02, 2), round(below or price * 0.98, 2)
-        return [("propose_plan", {"kind": "trade_plan", "symbol": symbol, "direction": "long", "instrument": "calls",
+        return [("get_level_history", {"symbol": symbol, "level": stop, "side": "below", "entry": entry}),
+                ("propose_plan", {"kind": "trade_plan", "symbol": symbol, "direction": "long", "instrument": "calls",
                                   "contract": "nearest weekly, first strike above entry",
                                   "thesis": f"{symbol} reclaims the level overhead with its group, so the bounce has room.",
                                   "entry_trigger": {"condition": "closes_beyond", "price": entry, "interval": "5m"},
@@ -543,7 +550,8 @@ class FakeAdapter:
             return head + f"I couldn't read a current {symbol} price, so I won't draft levels for it."
         return head + (f"**{symbol} plan (draft)**: you didn't give levels, so I drafted them from the 5m chart.\n\n"
                        f"- Why now: only if it reclaims {plan['entry_trigger']['price']} on a 5m close; it is {plan['last']} now.\n"
-                       f"- Where it's wrong: through {plan['invalidation']['price']}, the level below.\n"
+                       f"- Where it's wrong: through {plan['invalidation']['price']}, the level below. "
+                       f"{level_history_sentence(results.get('get_level_history') or {})}\n"
                        "- How long: out by 15:30 if it has not worked; your audit's worst holds ran from an hour to the close.\n\n"
                        "Edit the card if my levels are off. **Nothing is saved or armed until you confirm it.**")
 
@@ -664,6 +672,10 @@ def _summary(name: str, data: dict) -> str:
         pnl = ("" if value is None else f" {value:+,.2f} $") + (" open" if t.get("status") == "open" else "")
         return (f"{t.get('contract')}{pnl} · plan {(data.get('plan') or {}).get('state', 'unavailable')} · "
                 f"{(data.get('alerts') or {}).get('sent', 0)} alerts")[:160]
+    if name == "get_level_history":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        return level_history_sentence(data).removeprefix("Your history: ").split(". Evidence")[0][:160]
     if name == "get_week_review":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]
@@ -680,6 +692,39 @@ def _summary(name: str, data: dict) -> str:
     return ""
 
 
+def level_history_sentence(data: dict) -> str:
+    """One sentence on what the owner's history shows at the drafted level or time mark, counts included; the scripted
+    model's wording, and the shape the system prompt asks the real model for."""
+    if data.get("state") != "ok":
+        return "Your history at this level could not be read."
+    n = (data.get("sample") or {}).get("trades", 0)
+    symbol = data.get("symbol")
+    if data.get("kind") == "time":
+        part = data.get("held_past") or {}
+        head = f"{part.get('trades')} of {n} past {symbol} trades were still held {data['asked']['minutes']} min in"
+        median = part.get("median_pnl_from_mark_pct")
+    else:
+        part = data.get("crossed") or {}
+        head = f"{part.get('trades')} of {part.get('of', n)} past {symbol} trades crossed {data['asked']['distance_pct']:+.1f}% while held"
+        median = part.get("median_pnl_from_cross_pct")
+    tail = f"; {part.get('recovered_to_breakeven')} recovered to breakeven"
+    if median is not None:
+        tail += f"; median {median:+.0f}% from there"
+    small = " Only " + str(n) + " trades: too small a sample to weigh." if (data.get("sample") or {}).get("small") else ""
+    return f"Your history: {head}{tail}. Evidence to weigh, not a rule.{small}"
+
+
+def level_history_card(data: dict) -> dict | None:
+    """The compact row the plan card shows under its invalidation (never ids): the counts and the distance asked."""
+    if data.get("state") != "ok" or data.get("kind") != "level":
+        return None
+    part, asked = data.get("crossed") or {}, data.get("asked") or {}
+    return {"symbol": data.get("symbol"), "level": asked.get("level"), "side": asked.get("side"),
+            "distance_pct": asked.get("distance_pct"), "trades": part.get("of"), "crossed": part.get("trades"),
+            "recovered": part.get("recovered_to_breakeven"), "median_from_cross_pct": part.get("median_pnl_from_cross_pct"),
+            "small": bool((data.get("sample") or {}).get("small")), "simulated": bool(data.get("simulated"))}
+
+
 async def _run_tool(evidence, block: dict, cfg: Settings) -> tuple[dict, dict]:
     started = time.monotonic()
     name = block.get("name", "")
@@ -691,6 +736,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings) -> tuple[dict, dict]:
         prov = copilot_tools.provenance(name, data, evidence.label)
         if name == "propose_plan":
             event["proposal"] = {"id": block["id"], **data["proposal"]}
+        if name == "get_level_history" and (card := level_history_card(data)):
+            event["history"] = card
         # The marker leads the result so it survives truncation and the model cannot mistake fixture data for real.
         sent = {**SIMULATED_MARKER, **data} if evidence.label == "fixture" else data
         result = {"type": "tool_result", "tool_use_id": block["id"], "content": copilot_tools.bounded(sent)}

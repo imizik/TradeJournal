@@ -242,6 +242,35 @@ class FixtureEvidence:
                     "practice next week, grounded in these counts.",
         }
 
+    def get_level_history(self, symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
+                          entry: float | None = None, lookback_days: int = 180) -> dict:
+        """SIMULATED: shaped like ``copilot_review.level_history`` for 31 closed NBIS calls, 12 of which crossed a level
+        2.2% under their entry while held (5 recovered, median -18% from the cross); or 14 still held at a time mark."""
+        from app.ai.copilot_review import HISTORY_NOTE, HISTORY_PROVENANCE, TIME_PROVENANCE
+        base = {"state": "ok", "as_of": AT, "simulated": True, "symbol": symbol,
+                "window": {"days": lookback_days, "since": "2026-04-27"},
+                "sample": {"trades": 31, "small": False}}
+        if minutes is not None:
+            return {**base, "kind": "time", "asked": {"minutes": minutes}, "provenance": TIME_PROVENANCE,
+                    "held_past": {"trades": 14, "of": 31, "pct": 45.2, "recovered_to_breakeven": 4, "recovery_known": 13,
+                                  "median_pnl_from_mark_pct": -9.5, "valued": 13},
+                    "pnl": {"held_past": {"trades": 14, "pnl_usd": -612.0, "win_rate_pct": 28.6},
+                            "out_before": {"trades": 17, "pnl_usd": 388.0, "win_rate_pct": 52.9}},
+                    "coverage": {"no_option_bars": 1},
+                    "units": "Simulated; percentages are percent, P&L in $.", "note": HISTORY_NOTE}
+        reference = entry if entry is not None else 94.35
+        distance = round((level - reference) / reference * 100, 2) if level is not None else -2.2
+        return {**base, "kind": "level",
+                "asked": {"level": level, "side": side, "entry": reference, "entry_from": "planned" if entry is not None else "current",
+                          "distance_pct": distance},
+                "provenance": HISTORY_PROVENANCE,
+                "crossed": {"trades": 12, "of": 31, "pct": 38.7, "recovered_to_breakeven": 5, "recovery_known": 11,
+                            "median_pnl_from_cross_pct": -18.0, "valued": 11},
+                "pnl": {"crossed": {"trades": 12, "pnl_usd": -740.0, "win_rate_pct": 25.0},
+                        "not_crossed": {"trades": 19, "pnl_usd": 515.0, "win_rate_pct": 57.9}},
+                "coverage": {"no_entry_price": 0, "no_bars": 0, "no_option_bars": 1},
+                "units": "Simulated; percentages are percent, P&L in $.", "note": HISTORY_NOTE}
+
     def get_trade_review(self, trade_id: str) -> dict:
         """SIMULATED: shaped like ``copilot_review.trade_review`` for a closed NBIS call that gave back its gain, or, for
         ``OPEN_REVIEW_ID``, for the open NBIS call ``get_positions`` shows."""

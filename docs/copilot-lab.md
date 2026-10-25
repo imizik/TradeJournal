@@ -161,7 +161,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call fourteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call fifteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
   investigation changes (below), the chart and book tools below (including the
   trade review and the week review), and the owner context pack for another symbol (Owner
@@ -191,6 +191,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     (`backend/app/ai/copilot_review.py`; Review a trade or position, below).
   - `get_week_review(week_start?)` reviews one trading week (Review my week,
     below).
+  - `get_level_history(symbol, level, side, entry?, lookback_days?)` or
+    `(symbol, minutes, lookback_days?)` replays the owner's own closed trades
+    in the symbol at a level like the one being drafted (Your history at this
+    level, below).
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -204,10 +208,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     Webull is left out (dormant).
   - The fixture serves simulated versions. In replay, the chart is
     unavailable (the snapshot has no bars) and so is the book.
-  - Research jobs never get `get_positions`, `get_trades`, `get_memories` or
-    `get_trade_review`: a job reads untrusted pages and can fetch URLs, which
-    could carry the book out. Those four aren't even registered for a job;
-    `get_chart_context` is allowed.
+  - Research jobs never get `get_positions`, `get_trades`, `get_memories`,
+    `get_trade_review`, `get_week_review` or `get_level_history`: a job reads
+    untrusted pages and can fetch URLs, which could carry the book out. Those
+    aren't even registered for a job; `get_chart_context` is allowed.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
   validated (ticker pattern, at most 8 symbols, no extra keys).
@@ -491,6 +495,76 @@ model to call:
   of YYYY-MM-DD") by calling the tool and writing a short scripted review.
 - Tests: `backend/tests/test_copilot_week_review.py`,
   `frontend/e2e/review-my-week.spec.ts`.
+
+## Your history at this level
+
+The setup playbook: when the copilot drafts a trade plan, the card shows what
+happened at a level like its invalidation in the owner's own past trades, as
+evidence beside the card, never as a rule. Codex's
+[invalidation study](../backend/reports/invalidation_study_2026-10-25.md)
+(October 25, 2026) replayed 1,528 closed long option trades against session
+extremes, opening ranges, VWAP, prior-day extremes, the nearest automatic
+level, fixed 1/2/3% moves and 15/30/60/120-minute marks, and found
+[no level or time stop that holds up as a default](../backend/reports/invalidation_study_2026-10-25.md#what-holds-up-and-what-does-not):
+every mean-return interval includes zero, several flip sign between halves,
+15- and 30-minute exits are harmful, and rebounds after a cross are common. Its
+three wording candidates are
+[for the owner's approval only](../backend/reports/invalidation_study_2026-10-25.md#defaults-the-copilot-could-suggest--approval-only);
+the system prompt does not adopt them, and the card's history line links to
+that section as "why this is evidence, not a rule".
+
+- `get_level_history(symbol, level, side, entry?, lookback_days?)` (read-only,
+  provenance `saved`; `copilot_review.level_history`). `side` is `below` (a
+  long's invalidation; counts the owner's closed long calls) or `above` (a
+  short's; long puts). The level is matched by **distance**, not price: the
+  drafted level's percent from `entry` (the planned entry trigger; the current
+  chart-feed price when omitted, and `unavailable` when there is none) is set
+  the same percent from each past trade's own entry underlying price (the
+  fill's enrichment or its market context, as the path metrics read it). Over
+  the owner's trades opened in the last `lookback_days` (30-365, default 180;
+  Webull out) it replays the underlying's minute bars from entry to exit from
+  the on-disk cache the path metrics filled (`fetch_minute_bars_for_date`,
+  cache only, never the network; windows over 10 days are skipped like the
+  path metrics) and returns:
+  - `sample`: trades counted and `counted` (long calls, long puts or long
+    options); fewer than 10 is `small`, with a note that it is too small to
+    weigh;
+  - `crossed`: how many crossed the level while held (a low under it, or a
+    high over it, in a completed bar between the entry and exit minutes), of
+    how many had bars; of those, `recovered_to_breakeven` (the option's later
+    minute close at or above the average entry premium before the exit, out of
+    `recovery_known`) and `median_pnl_from_cross_pct` (the option's P&L from
+    its first recorded mark at the cross to the actual exit, in percent of
+    that mark, over `valued`), from the contract's minute bars in the window
+    the path metrics cached (`_option_bars_cache_path`; None when not cached);
+  - `pnl`: the journal's realized P&L, count and win rate for `crossed` and
+    `not_crossed`;
+  - `coverage`: trades with no entry price, no cached bars or no cached option
+    bars; `provenance`, `units` and a fixed `note`: "Your own past trades at a
+    similar distance; the invalidation study found no level that holds up as
+    a default. Evidence to weigh, not a rule."
+- With `minutes` (5-1440) instead of a level, the same for a time mark:
+  `held_past` (trades still held then, what the option did from there,
+  recovery) and `pnl` split `held_past` / `out_before`, over long calls and
+  puts alike.
+- No trade, fill or account identifier is returned. Never given to research
+  jobs; part of `BOOK_CONTEXT_TOOLS`, so "what changed" leaves it out.
+  Simulated in the fixture (31 NBIS calls, 12 crossed), unavailable in replay.
+- The system prompt has the model call it for the drafted invalidation (and
+  once more with `minutes` when the time stop is a length of time) before it
+  proposes a `trade_plan`, say in one sentence what the owner's history shows
+  there with the counts, never call a level validated, proven or recommended,
+  and say the sample is too small to weigh under 10 trades. The scripted
+  `fake` model does the same and quotes the sentence under "Where it's wrong".
+- The turn's `tool` event for a successful level read carries `history`: the
+  symbol, level, side, distance, counts and medians (`copilot.level_history_card`,
+  never ids). The plan card (`TradePlanCard.tsx`) shows the row whose level is
+  the plan's invalidation under that field as "Your history at this level:
+  12 of 31 past NBIS trades crossed −3.8% while held; 5 recovered; median −18%
+  from there", with the link above. When the owner edits the invalidation the
+  line says to re-ask the copilot rather than refetching on every keystroke; a
+  reloaded investigation has no row (evidence references keep no results).
+  The Evidence strip labels the read "Your history here".
 
 ## Confirm a plan
 

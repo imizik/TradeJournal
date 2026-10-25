@@ -159,6 +159,28 @@ TOOLS: list[dict] = [
                                                                       "omit for the latest week with closed trades"}}},
     },
     {
+        "name": "get_level_history",
+        "description": "What the owner's own closed long option trades in a symbol did at a level like the one being "
+                       "drafted: the level is set the same percent from each past trade's entry as `level` is from "
+                       "`entry` (the planned entry trigger; the current price when omitted), on `side` (below for a "
+                       "long's invalidation, above for a short's), and the underlying's recorded minute bars are replayed "
+                       "from entry to exit. Reports trades counted, how many crossed it while held, how many of those "
+                       "recovered to breakeven before the exit, the median option P&L from the cross to the actual exit, "
+                       "and realized P&L split by crossed vs not. With `minutes` instead of `level`, the same for a time "
+                       "mark after the entry (trades still held then, what followed). Journal facts over the last "
+                       "`lookback_days` (30-365, default 180). Evidence to weigh beside a plan, never a validated level: "
+                       "the invalidation study found no level or time stop that holds up as a default.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "level": {"type": "number", "description": "The drafted price level, positive"},
+                                        "side": {"type": "string", "enum": ["below", "above"],
+                                                 "description": "below: crossed when the low goes under it; above: when the high goes over it"},
+                                        "entry": {"type": "number", "description": "The planned entry price the level's distance is measured from; "
+                                                                                   "omit for the current price"},
+                                        "minutes": {"type": "integer", "description": "Instead of a level: a time mark, minutes after the entry (5-1440)"},
+                                        "lookback_days": {"type": "integer", "description": "30-365, default 180"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -302,6 +324,38 @@ def _proposal(args: dict) -> dict:
             "label": _text(args, "label", level_alerts.LABEL_MAX), "why": _text(args, "why", 300)}
 
 
+def _level_history(args: dict) -> dict:
+    """get_level_history: a ticker, either a positive finite level with its side or a time mark in minutes, an optional
+    planned entry and a lookback of 30-365 days (default 180)."""
+    from app.ai import copilot_review
+    out = {"symbol": _symbol(args.get("symbol"))}
+    level, minutes = args.get("level"), args.get("minutes")
+    if (level is None) == (minutes is None):
+        raise ToolInputError("give either level (with side) or minutes, not both")
+    if minutes is not None:
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or not 5 <= minutes <= 1440:
+            raise ToolInputError("minutes must be a whole number from 5 to 1440")
+        if args.get("side") is not None:
+            raise ToolInputError("side goes with level, not minutes")
+        out["minutes"] = minutes
+    else:
+        if isinstance(level, bool) or not isinstance(level, (int, float)) or not math.isfinite(level) or level <= 0:
+            raise ToolInputError("level must be a positive price")
+        if args.get("side") not in ("below", "above"):
+            raise ToolInputError("side must be below or above")
+        out["level"], out["side"] = round(float(level), 4), args["side"]
+    entry = args.get("entry")
+    if entry is not None:
+        if isinstance(entry, bool) or not isinstance(entry, (int, float)) or not math.isfinite(entry) or entry <= 0:
+            raise ToolInputError("entry must be a positive price")
+        out["entry"] = round(float(entry), 4)
+    days = args.get("lookback_days", copilot_review.DEFAULT_HISTORY_DAYS)
+    if isinstance(days, bool) or not isinstance(days, int) or not copilot_review.MIN_HISTORY_DAYS <= days <= copilot_review.MAX_HISTORY_DAYS:
+        raise ToolInputError(f"lookback_days must be {copilot_review.MIN_HISTORY_DAYS}-{copilot_review.MAX_HISTORY_DAYS}")
+    out["lookback_days"] = days
+    return out
+
+
 def validate(name: str, args: Any) -> dict:
     """The tool's arguments, normalized, or ToolInputError. Unknown keys are refused."""
     if name not in TOOL_NAMES:
@@ -348,6 +402,8 @@ def validate(name: str, args: Any) -> dict:
         if not date(2020, 1, 1) <= day <= date.today() + timedelta(days=7):
             raise ToolInputError("week_start must be a date from 2020 to this week")
         return {"week_start": day.isoformat()}
+    if name == "get_level_history":
+        return _level_history(args)
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -495,7 +551,8 @@ def _iso(value) -> str | None:
 CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
-BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review"})
+BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
+                                "get_level_history"})
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -667,6 +724,11 @@ class LiveEvidence:
         from app.ai import copilot_review
         return copilot_review.week_review(week_start)
 
+    def get_level_history(self, symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
+                          entry: float | None = None, lookback_days: int = 180) -> dict:
+        from app.ai import copilot_review
+        return copilot_review.level_history(symbol, level=level, side=side, minutes=minutes, entry=entry, lookback_days=lookback_days)
+
 
 PROVENANCE = {
     "get_group_comparison": ("Radar recorded passes (Tradier sampled trades)", "recorded"),
@@ -689,6 +751,8 @@ PROVENANCE = {
                          "saved"),
     "get_week_review": ("Journal week: closed trades, captured plans and their alerts and time stops · phone alerts and exit "
                         "habits (TradeJournal)", "saved"),
+    "get_level_history": ("Journal closed trades in the symbol replayed over cached minute bars at the drafted level or time mark "
+                          "(TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

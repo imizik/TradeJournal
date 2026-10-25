@@ -19,7 +19,11 @@ const PLAN = { id: "p1", kind: "trade_plan", symbol: "NBIS", direction: "long", 
   entry_trigger: { condition: "closes_beyond", price: 95.9, interval: "5m" }, invalidation: { condition: "crosses", price: 92.3, interval: null },
   time_stop: "out by 15:30 if the entry has not worked", size_note: "one starter, no adds", last: 94.35, as_of: "2026-10-24T14:00:00Z" };
 const sse = (events: object[]) => events.map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+// The turn's get_level_history result for the drafted invalidation: the owner's own past trades at that distance, shown under the field.
+const HISTORY = { symbol: "NBIS", level: 92.3, side: "below", distance_pct: -3.75, trades: 31, crossed: 12, recovered: 5, median_from_cross_pct: -18, small: false, simulated: false };
 const TURN = sse([
+  { type: "tool", id: "h1", name: "get_level_history", status: "ok", summary: "12 of 31 past NBIS trades crossed -3.8% while held", ms: 1,
+    input: { symbol: "NBIS", level: 92.3, side: "below", entry: 95.9, lookback_days: 180 }, provenance: { source: "Journal closed trades", kind: "saved", as_of: null }, history: HISTORY },
   { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed plan", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
   { type: "proposal", ...PLAN },
   { type: "text", delta: "NBIS plan (draft). Nothing is saved or armed until you confirm it." },
@@ -90,7 +94,17 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   await expect(card.getByLabel("Invalidation (crosses)")).toHaveValue("92.3");
   expect(server.posts).toEqual([]); // nothing until Confirm
 
+  // The owner's own history at the drafted invalidation, from the turn's evidence: counts and a link, never a rule.
+  const history = card.getByLabel("Your history at this level");
+  await expect(history).toHaveText("Your history at this level: 12 of 31 past NBIS trades crossed −3.8% while held; 5 recovered; median −18% from there. why this is evidence, not a rule");
+  const why = history.getByRole("link", { name: "why this is evidence, not a rule" });
+  await expect(why).toHaveAttribute("href", /invalidation_study_2026-10-25\.md#defaults-the-copilot-could-suggest--approval-only$/);
+  await expect(why).toHaveAttribute("target", "_blank");
+  await expect(page.locator("summary").filter({ hasText: "Evidence" })).toContainText("Your history here · saved");
+
   await card.getByLabel("Invalidation (crosses)").fill("96");
+  // An edited level is not refetched on every keystroke: the line asks for a fresh turn instead.
+  await expect(history).toHaveText("Your history at this level: you changed the invalidation; re-ask the copilot to refresh it.");
   await expect(card.getByRole("alert")).toHaveText("A long plan's invalidation must be below its entry.");
   await expect(card.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await card.getByLabel("Invalidation (crosses)").fill("92.1");
