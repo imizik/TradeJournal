@@ -1,0 +1,22 @@
+{
+  "name": "Stocks-in-play ORB proxy: frozen RVOL 2.0",
+  "family": "opening_range_breakout",
+  "params": {"range_minutes": 5, "stop_at": "range", "sides": "both"},
+  "timeframe": 5,
+  "exits": {
+    "target_r": null,
+    "max_sessions": 1,
+    "max_minutes": null,
+    "breakeven_r": null,
+    "trail_r": null,
+    "stall_minutes": null,
+    "stall_r": null
+  },
+  "costs": {"slippage_ticks": 1.0, "slippage_bps": 1.0, "tick_size": 0.01},
+  "window": null,
+  "limits": {"max_entries": 2, "max_losses": 2, "max_loss_r": null},
+  "filters": [{"feature": "rvol", "min": 2.0}],
+  "model": null,
+  "tickers": "core",
+  "notes": "Frozen from research/notes/evidence-review-2026-10.md and the owner's October 25 request; op-998d19a73d. Preparation only: not a reservation, evaluation, paper authorization or live activation. Existing core universe/default costs; no threshold sweep. Live Factory ledger and attempt budget remain authoritative."
+}

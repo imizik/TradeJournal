@@ -75,8 +75,10 @@ python scripts/strategy_factory.py ledger     # every candidate, its verdict, an
 ```
 
 `run` never touches the network. It builds regular-session bars per ticker
-and timeframe from the local SIP minute cache once, into
-`backend/data/factory/bars/`. A spec already in the ledger is not run again
+and timeframe from the local SIP minute cache into
+`backend/data/factory/bars/`. Source dates are cut before file reads, and memory
+and disk caches are scoped by cutoff. Earlier stages cannot reuse later-stage
+or legacy unbounded caches. A spec already in the ledger is not run again
 (`--rerun` forces it, and it is still counted once). `--no-exam` stops before
 the holdout. Each run writes `report.txt` and one trades file per period it
 was allowed to see (`trades_discovery.csv`, `trades_confirm.csv`,
@@ -492,3 +494,10 @@ Decided with the user on 2026-10-02.
   random sample.
 - Weekly clustering approximates how the names move together; a two-session
   hold can cross into the next week.
+
+
+The isolated research branch also provides a frozen single-candidate intake in
+`backend/scripts/factory_search.py`; see [its preparation and approval boundaries](../research/CONTINUOUS_SEARCH.md#frozen-single-candidate-intake-preparation-october-25).
+Inspection is read-only. Execution still requires separate owner approval and a
+counted attempt through the official supervisor; neither this documentation nor
+an infrastructure merge authorizes a run.

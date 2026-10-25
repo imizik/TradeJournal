@@ -397,16 +397,83 @@ def persist_research():
     subprocess.run(['git', 'push', 'origin', 'factory/ledger'], cwd=ROOT, check=True, timeout=60)
 
 
-def tick(force=False):
+FROZEN_ORB_ID = 'op-998d19a73d'
+
+
+def require_checkout():
     if ROOT != Path('/Users/user/TradeJournal-factory'):
         raise RuntimeError('Search runs only in the Mac factory checkout')
     if subprocess.check_output(['git', 'branch', '--show-current'], cwd=ROOT, text=True).strip() != 'factory/ledger':
         raise RuntimeError('Live search requires factory/ledger')
+
+
+def requested_candidate(path):
+    """Only the preregistered default ORB + RVOL 2.0; never a new proposal."""
+    spec = validate(json.loads(Path(path).read_text()))
+    expected = rules.parse_spec({'family': 'opening_range_breakout',
+                                 'filters': [{'feature': 'rvol', 'min': 2.0}]})
+    if rules.canonical(spec) != rules.canonical(expected) or rules.spec_id(spec) != FROZEN_ORB_ID:
+        raise ValueError('Requested spec must be frozen ORB op-998d19a73d, unchanged')
+    return spec
+
+
+def ledger_snapshot():
+    # Missing authoritative history must never become a fresh zero-count ledger.
+    raw = LEDGER.read_bytes()
+    records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    return records, hashlib.sha256(raw).hexdigest()
+
+
+def intake_state(spec, records, ledger_sha256, now):
+    night = night_key(now)
+    budget = OUT / f'{night}-seconds.json'
+    reservations = sum(r.get('search_night') == night and r.get('attempt_state') == 'reserved' for r in records)
+    if not budget.exists() and (reservations or any(OUT.glob(f'{night}-*'))):
+        raise ValueError('Missing Factory time budget for an already-used window')
+    used = json.loads(budget.read_text()) if budget.exists() else 0
+    if type(used) is not int or not 0 <= used <= SECONDS_CAP:
+        raise ValueError('Invalid Factory time budget')
+    count = len(latest(records))
+    return dict(candidate_id=rules.spec_id(spec), ledger_sha256=ledger_sha256,
+                already_counted=rules.spec_id(spec) in latest(records), prior_candidates=count,
+                next_attempt=None if rules.spec_id(spec) in latest(records) else count + 1, window=night, reserved_attempts=reservations,
+                attempt_cap=NIGHT_CAP, used_seconds=used, seconds_cap=SECONDS_CAP,
+                evaluation_seconds=min(900, SECONDS_CAP - used),
+                within_search_hours=not 6 <= now.hour < 22)
+
+
+def inspect_spec(path):
+    """Read-only receipt, not a reservation or permission to evaluate.
+
+    No locks are created, jobs recovered, models called, results published or
+    bars loaded. Execution rechecks the ledger and budget under both locks.
+    """
+    require_checkout()
+    spec = requested_candidate(path)
+    records, digest = ledger_snapshot()
+    state = intake_state(spec, records, digest, datetime.now(ET))
+    state['mode'] = 'inspection_only'
+    state['week_lock_present'] = (DEFAULT_OUT / 'week.lock').exists()
+    state['evaluation_authorized'] = False
+    return state
+
+
+def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha256=None):
+    require_checkout()
+    requested = None
+    if spec_path is not None:
+        requested = requested_candidate(spec_path)
+        if authorize_spec != FROZEN_ORB_ID or not isinstance(expected_ledger_sha256, str) or len(expected_ledger_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_ledger_sha256):
+            raise ValueError('Frozen intake requires explicit candidate acknowledgement and inspected ledger SHA-256')
+    elif authorize_spec is not None or expected_ledger_sha256 is not None:
+        raise ValueError('Candidate acknowledgement requires --spec')
     OUT.mkdir(parents=True, exist_ok=True)
     with (OUT / 'writer.lock').open('a') as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            if requested is not None:
+                raise RuntimeError('Factory writer is busy')
             return
         # Share the weekly wrapper's exclusion. Stale locks are only reclaimed
         # when owned by this search and its PID is provably absent.
@@ -414,18 +481,35 @@ def tick(force=False):
         if lock.exists():
             owner = lock / 'search-pid'
             if not owner.exists():
+                if requested is not None:
+                    raise RuntimeError('Factory weekly writer is busy')
                 return
             try:
                 os.kill(int(owner.read_text()), 0)
+                if requested is not None:
+                    raise RuntimeError('Factory search writer is busy')
                 return
             except ProcessLookupError:
                 owner.unlink()
                 lock.rmdir()
         lock.mkdir()
         (lock / 'search-pid').write_text(str(os.getpid()))
+        dirty = requested is None  # scheduled search retains its existing persistence behavior
         try:
             now = datetime.now(ET)
-            records = read_ledger(LEDGER)
+            if requested is not None:
+                records, digest = ledger_snapshot()
+                if digest != expected_ledger_sha256:
+                    raise RuntimeError('Factory ledger changed since inspection; inspect again')
+                state = intake_state(requested, records, digest, now)
+                if state['already_counted']:
+                    raise RuntimeError('Candidate already counted; no retries or renamed equivalents')
+                if not force and not state['within_search_hours']:
+                    raise RuntimeError('Outside search hours; no attempt reserved')
+                if state['reserved_attempts'] >= NIGHT_CAP or state['evaluation_seconds'] < 60:
+                    raise RuntimeError('Factory attempt or time budget exhausted')
+            else:
+                records = read_ledger(LEDGER)
             # Recover atomic result files written before parent interruption;
             # never rerun reserved IDs or reopen any exam.
             for job in OUT.glob('*.job.json'):
@@ -434,13 +518,15 @@ def tick(force=False):
                 if found and found.get('attempt_state') == 'reserved':
                     result = job.with_suffix('.result.json')
                     done = json.loads(result.read_text()) if result.exists() else {**found, 'attempt_state': 'interrupted', 'verdict': 'interrupted'}
+                    dirty = True
                     append(done)
                     records.append(done)
                     proposal(done)
             reconcile_proposals(records)
-            for night in sorted({r['search_night'] for r in records if r.get('search_night')}):
-                if night != night_key(now) or (6 <= now.hour < 22):
-                    notify(records, night)
+            if requested is None:
+                for night in sorted({r['search_night'] for r in records if r.get('search_night')}):
+                    if night != night_key(now) or (6 <= now.hour < 22):
+                        notify(records, night)
             if not force and 6 <= now.hour < 22:
                 return
             night = night_key(now)
@@ -461,41 +547,48 @@ def tick(force=False):
                 tmp = budget.with_suffix('.tmp')
                 tmp.write_text(json.dumps(used))
                 tmp.replace(budget)
-            ideas = []
-            idea_origin = 'codex-plan'
-            try:
-                ideas = codex_ideas(records, night, reserve_seconds, handle.fileno())
-            except Exception as exc:
-                print('Codex proposal unavailable (bounded fallback continues):', type(exc).__name__, flush=True)
-            if not ideas:
-                idea_origin = 'claude-plan'
-                try:
-                    if not (OUT / f'{night}-claude-started').exists():
-                        reserve_seconds(IDEA_SECONDS)
-                    ideas = claude_ideas(records, night, handle.fileno())
-                except Exception as exc:
-                    print('Claude proposal unavailable (random search continues):', type(exc).__name__, flush=True)
-                    (OUT / f'{night}-claude-failure.txt').write_text(type(exc).__name__ + '\n')
             seen = set(latest(records))
-            rng = random.Random(os.urandom(16))
-            chosen = None
-            for raw in ideas + [sample(rng) for _ in range(100)]:
+            if requested is not None:
+                # Selection only: everything below uses the official reservation,
+                # budget, worker timeout and completion path. No model/fallback.
+                if rules.spec_id(requested) in seen:
+                    raise RuntimeError('Candidate already counted')
+                chosen, origin = requested, 'owner-frozen-spec'
+            else:
+                ideas = []
+                idea_origin = 'codex-plan'
                 try:
-                    spec = validate(raw)
-                except (ValueError, TypeError) as exc:
-                    if raw in ideas:
-                        refusal = {'at': datetime.now(ET).isoformat(), 'origin': idea_origin,
-                                   'reason': str(exc), 'spec': raw}
-                        with (OUT / f'{night}-proposal-rejections.jsonl').open('a') as log:
-                            log.write(json.dumps(refusal) + '\n')
-                        print(f'{idea_origin} proposal rejected: {exc}', flush=True)
-                    continue
-                if rules.spec_id(spec) not in seen:
-                    chosen = spec
-                    origin = idea_origin if raw in ideas else 'random'
-                    break
-            if chosen is None:
-                raise RuntimeError('No distinct valid proposal')
+                    ideas = codex_ideas(records, night, reserve_seconds, handle.fileno())
+                except Exception as exc:
+                    print('Codex proposal unavailable (bounded fallback continues):', type(exc).__name__, flush=True)
+                if not ideas:
+                    idea_origin = 'claude-plan'
+                    try:
+                        if not (OUT / f'{night}-claude-started').exists():
+                            reserve_seconds(IDEA_SECONDS)
+                        ideas = claude_ideas(records, night, handle.fileno())
+                    except Exception as exc:
+                        print('Claude proposal unavailable (random search continues):', type(exc).__name__, flush=True)
+                        (OUT / f'{night}-claude-failure.txt').write_text(type(exc).__name__ + '\n')
+                rng = random.Random(os.urandom(16))
+                chosen = None
+                for raw in ideas + [sample(rng) for _ in range(100)]:
+                    try:
+                        spec = validate(raw)
+                    except (ValueError, TypeError) as exc:
+                        if raw in ideas:
+                            refusal = {'at': datetime.now(ET).isoformat(), 'origin': idea_origin,
+                                       'reason': str(exc), 'spec': raw}
+                            with (OUT / f'{night}-proposal-rejections.jsonl').open('a') as log:
+                                log.write(json.dumps(refusal) + '\n')
+                            print(f'{idea_origin} proposal rejected: {exc}', flush=True)
+                        continue
+                    if rules.spec_id(spec) not in seen:
+                        chosen = spec
+                        origin = idea_origin if raw in ideas else 'random'
+                        break
+                if chosen is None:
+                    raise RuntimeError('No distinct valid proposal')
             timeout = min(900, SECONDS_CAP - used)
             if timeout < 60:
                 return
@@ -504,6 +597,7 @@ def tick(force=False):
             reservation = dict(id=ident, name=chosen.name, source='continuous-search', spec=rules.canonical(chosen),
                 recorded=now.isoformat(), code=code_version(), verdict='reserved', attempt_state='reserved',
                 reached_confirmation=False, search_night=night, prior_candidates=len(seen), search_origin=origin, timeout_seconds=timeout)
+            dirty = True
             job = OUT / f'{ident}.job.json'
             job.write_text(json.dumps(reservation))
             spec_path = ROOT / 'research/specs' / f'search-{ident}.json'
@@ -530,19 +624,37 @@ def tick(force=False):
             proposal(result)
         finally:
             try:
-                persist_research()
+                if dirty:
+                    persist_research()
             finally:
                 (lock / 'search-pid').unlink(missing_ok=True)
                 lock.rmdir()
 
 
-if __name__ == '__main__':
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tick', action='store_true')
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument('--tick', action='store_true')
+    actions.add_argument('--worker')
+    actions.add_argument('--inspect-spec', type=Path, help='read-only intake receipt; never reserves or evaluates')
     parser.add_argument('--force', action='store_true', help='one acceptance run outside nightly hours')
-    parser.add_argument('--worker')
-    args = parser.parse_args()
-    if args.worker:
+    parser.add_argument('--spec', type=Path, help='only the frozen ORB spec; no fallback proposals')
+    parser.add_argument('--authorize-spec', help='explicit candidate ID acknowledgement; requires separate owner approval')
+    parser.add_argument('--expect-ledger-sha256', help='ledger digest from the read-only inspection')
+    args = parser.parse_args(argv)
+    if (args.force or args.spec is not None or args.authorize_spec is not None or args.expect_ledger_sha256 is not None) and not args.tick:
+        parser.error('execution arguments require --tick')
+    if args.spec is not None and (args.authorize_spec != FROZEN_ORB_ID or args.expect_ledger_sha256 is None):
+        parser.error('--spec requires --authorize-spec op-998d19a73d and --expect-ledger-sha256')
+    if args.spec is None and (args.authorize_spec is not None or args.expect_ledger_sha256 is not None):
+        parser.error('candidate acknowledgement requires --spec')
+    if args.inspect_spec:
+        print(json.dumps(inspect_spec(args.inspect_spec), sort_keys=True))
+    elif args.worker:
         worker(args.worker)
-    elif args.tick:
-        tick(args.force)
+    else:
+        tick(args.force, args.spec, args.authorize_spec, args.expect_ledger_sha256)
+
+
+if __name__ == '__main__':
+    main()
