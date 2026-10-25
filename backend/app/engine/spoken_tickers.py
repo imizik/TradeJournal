@@ -25,7 +25,8 @@ LETTERS = {
 }
 COMMON = {"a", "be", "see", "sea", "eye", "oh", "are", "you", "why", "tea", "pea", "es", "queue", "ex"}
 # First words of company names that are ordinary English; only the full name maps for these.
-NAME_STOP = {"advanced", "applied", "arm", "coherent", "constellation", "core", "digital", "elastic", "western"}
+NAME_STOP = {"advanced", "alphabet", "amazon", "applied", "arm", "cipher", "coherent", "constellation", "core", "digital",
+             "elastic", "intel", "micron", "palo", "western"}
 SYMBOL = re.compile(r"[A-Z]{1,6}")
 WORD = re.compile(r"[A-Za-z]+")
 JOIN = re.compile(r"[\s.,-]*")  # what may sit between the letters of a spelled-out symbol
@@ -85,7 +86,8 @@ def prompt_for(known: frozenset[str], traded_first: list[str] = (), limit: int =
 def _letter(word: str, run: int) -> str | None:
     """A single letter or a letter's name, as that letter; a common word counts only in a run of three or more."""
     if len(word) == 1:
-        return word.upper()
+        # "a" and "I" are words too: "it a I think" is not AI.
+        return None if word.lower() in ("a", "i") and run < 3 else word.upper()
     bare = word.lower()
     if bare in COMMON and run < 3:
         return None

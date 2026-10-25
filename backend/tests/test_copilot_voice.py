@@ -106,6 +106,8 @@ KNOWN = spoken_tickers.known_symbols(["TQQQ"])
     ("Nebius is breaking out", "NBIS is breaking out"),
     ("applied digital puts", "APLD puts"),
     ("C-R-W-V and palantir", "CRWV and PLTR"),
+    ("Intel Corporation? no, Micron Technology", "Intel Corporation? no, MU"),
+    ("I B M", "IBM"),
     ("T-Q-Q-Q", "TQQQ"),  # a traded ticker outside Radar
 ])
 def test_spoken_tickers_map_to_known_symbols(heard, expected):
@@ -114,7 +116,8 @@ def test_spoken_tickers_map_to_known_symbols(heard, expected):
 
 @pytest.mark.parametrize("heard", [
     "I see you are why", "applied to everything", "the setup isn't coherent", "a b", "em you",
-    "X-Y-Z-Q is not a symbol", "SPY puts", "spy on the open",
+    "X-Y-Z-Q is not a symbol", "SPY puts", "spy on the open", "Any intel on the market today", "the amazon of chips",
+    "what is the micron range", "Is it a I think so",
 ])
 def test_unclear_speech_is_left_as_heard(heard):
     assert spoken_tickers.map_tickers(heard, KNOWN) == (heard, [])

@@ -47,8 +47,11 @@ export function useVoiceInput({ status, disabled, onText }: {
   const [autoSend, setAutoSend] = useState(() => {
     try { return typeof window === "undefined" || window.localStorage.getItem(AUTO_SEND_KEY) !== "off"; } catch { return true; }
   });
-  const flags = useRef({ phase: "idle" as Phase, mode: "hold" as "hold" | "tap", released: false, cancelled: false, started: 0, x: 0, y: 0 });
+  // ``take`` numbers each press; a cancel, a new press or closing the panel moves it on, so anything a superseded
+  // take finishes later (the microphone arriving, the recorder stopping, a transcription) is dropped.
+  const flags = useRef({ phase: "idle" as Phase, mode: "hold" as "hold" | "tap", released: false, take: 0, started: 0, x: 0, y: 0 });
   const media = useRef<{ stop(): void; abort(): void; timer: number } | null>(null);
+  const pending = useRef<AbortController | null>(null);
   const deliver = useRef(onText);
   useEffect(() => { deliver.current = onText; });
   const configured = status?.enabled === true && status.capabilities?.transcriber?.configured === true;
@@ -62,17 +65,23 @@ export function useVoiceInput({ status, disabled, onText }: {
   const autoSendRef = useRef(autoSend);
   useEffect(() => { autoSendRef.current = autoSend; });
 
-  const finish = async (input: { audio: Blob; ms: number } | { text: string }) => {
+  const finish = async (take: number, input: { audio: Blob; ms: number } | { text: string }) => {
     if ("text" in input && !input.text.trim()) { fail("Didn’t catch anything. Hold the mic and try again, or type."); return; }
     go("transcribing");
+    const controller = new AbortController();
+    pending.current = controller;
     let text: string;
     try {
-      text = (await transcribeSpeech(input)).text.trim();
+      text = (await transcribeSpeech(input, controller.signal)).text.trim();
     } catch (error) {
+      if (take !== flags.current.take) return;
       // The browser already heard the words; only the ticker clean-up failed.
       if ("text" in input) text = input.text.trim();
       else { fail(error instanceof Error ? error.message : "Transcription failed. Try again, or type."); return; }
+    } finally {
+      if (pending.current === controller) pending.current = null;
     }
+    if (take !== flags.current.take) return;  // cancelled, or the panel closed, while it was transcribing
     if (!text) { fail("Didn’t catch anything. Hold the mic and try again, or type."); return; }
     go("idle");
     setMessage("");
@@ -85,37 +94,45 @@ export function useVoiceInput({ status, disabled, onText }: {
     if (ms >= CLIP_MS) media.current?.stop();  // the 30-second limit sends what was said
   }, 100);
 
-  const startServer = async () => {
+  const startServer = async (take: number) => {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
+      if (take !== flags.current.take) return;
       const denied = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError");
       fail(denied ? DENIED : "No microphone could be opened. Type the message instead.");
       return;
     }
-    if (flags.current.cancelled) { stream.getTracks().forEach(track => track.stop()); go("idle"); return; }
+    const close = () => stream.getTracks().forEach(track => track.stop());
+    if (take !== flags.current.take) { close(); return; }
     const type = recordingType();
-    const recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+    let recorder: MediaRecorder;
+    try {
+      recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+      recorder.start(250);
+    } catch {
+      close();
+      fail("This browser could not record from the microphone. Type the message instead.");
+      return;
+    }
     const chunks: Blob[] = [];
     recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
     recorder.onstop = () => {
-      stream.getTracks().forEach(track => track.stop());
-      if (media.current) window.clearInterval(media.current.timer);
-      media.current = null;
-      if (flags.current.cancelled) { go("idle"); return; }
+      close();
+      if (media.current?.abort === abort) { window.clearInterval(media.current.timer); media.current = null; }
+      if (take !== flags.current.take) return;
       if (!chunks.length) { fail("Recording stopped before any sound was captured. Try again."); return; }
       const ms = Math.min(CLIP_MS, Math.round(performance.now() - flags.current.started));
-      void finish({ audio: new Blob(chunks, { type: recorder.mimeType || type || "audio/webm" }), ms });
+      void finish(take, { audio: new Blob(chunks, { type: recorder.mimeType || type || "audio/webm" }), ms });
     };
+    const abort = () => { if (recorder.state !== "inactive") recorder.stop(); };
     flags.current.started = performance.now();
-    media.current = { stop: () => { if (recorder.state !== "inactive") recorder.stop(); },
-      abort: () => { flags.current.cancelled = true; if (recorder.state !== "inactive") recorder.stop(); }, timer: timer() };
-    recorder.start(250);
+    media.current = { stop: abort, abort, timer: timer() };
     afterStart();
   }
 
-  const startBrowser = () => {
+  const startBrowser = (take: number) => {
     const Recognizer = browserRecognition();
     if (!Recognizer) { fail("This browser cannot listen here. Type the message instead."); return; }
     const recognition = new Recognizer();
@@ -128,22 +145,22 @@ export function useVoiceInput({ status, disabled, onText }: {
       for (let i = event.resultIndex; i < event.results.length; i++) if (event.results[i].isFinal) heard.push(event.results[i][0].transcript);
     };
     recognition.onerror = event => {
+      if (take !== flags.current.take) return;
       if (event.error === "not-allowed" || event.error === "service-not-allowed") { denied = true; fail(DENIED); }
     };
+    const abort = () => recognition.abort();
     recognition.onend = () => {
-      if (media.current) window.clearInterval(media.current.timer);
-      media.current = null;
-      if (denied) return;
-      if (flags.current.cancelled) { go("idle"); return; }
-      void finish({ text: heard.join(" ").trim() });
+      if (media.current?.abort === abort) { window.clearInterval(media.current.timer); media.current = null; }
+      if (denied || take !== flags.current.take) return;
+      void finish(take, { text: heard.join(" ").trim() });
     };
     recognition.onstart = () => {
-      if (flags.current.cancelled) { recognition.abort(); return; }
+      if (take !== flags.current.take) { recognition.abort(); return; }
       flags.current.started = performance.now();
       if (media.current) media.current.timer = timer();
       afterStart();
     };
-    media.current = { stop: () => recognition.stop(), abort: () => { flags.current.cancelled = true; recognition.abort(); }, timer: 0 };
+    media.current = { stop: () => recognition.stop(), abort, timer: 0 };
     try { recognition.start(); } catch { media.current = null; fail("This browser cannot listen here. Type the message instead."); }
   }
 
@@ -155,16 +172,18 @@ export function useVoiceInput({ status, disabled, onText }: {
 
   const start = (how: "hold" | "tap") => {
     if (!engine || disabled || ["asking", "recording", "transcribing"].includes(flags.current.phase)) return;
-    Object.assign(flags.current, { released: false, cancelled: false });
+    const take = ++flags.current.take;
+    flags.current.released = false;
     switchMode(how); setMessage(""); setElapsed(0); setLeaving(false);
     go("asking");
-    if (engine === "server") void startServer(); else startBrowser();
+    if (engine === "server") void startServer(take); else startBrowser(take);
   }
   const stop = () => { media.current?.stop(); };
+  /** Drops the take: a microphone still on its way is put down unused when it arrives, a transcription is ignored. */
   const cancel = () => {
-    flags.current.cancelled = true;
-    if (media.current) media.current.abort();
-    else if (flags.current.phase === "asking") return;  // dropped when the microphone arrives
+    flags.current.take += 1;
+    pending.current?.abort();
+    if (media.current) { window.clearInterval(media.current.timer); media.current.abort(); media.current = null; }
     go("idle");
     setLeaving(false);
   }
@@ -182,12 +201,14 @@ export function useVoiceInput({ status, disabled, onText }: {
   useEffect(() => {
     const state = flags.current;
     const holder = media;
+    const transcribing = pending;
     const hidden = () => { if (document.hidden && holder.current) latest.current.cancel(); };
     document.addEventListener("visibilitychange", hidden);
     return () => {
       document.removeEventListener("visibilitychange", hidden);
-      // Closing the panel mid-clip drops it; nothing is uploaded unasked.
-      state.cancelled = true;
+      // Closing the panel mid-clip or mid-transcription drops it; nothing is uploaded or sent unasked.
+      state.take += 1;
+      transcribing.current?.abort();
       if (holder.current) { window.clearInterval(holder.current.timer); holder.current.abort(); }
     };
   }, []);
@@ -213,10 +234,15 @@ export function useVoiceInput({ status, disabled, onText }: {
         if (flags.current.mode === "hold" && Math.hypot(event.clientX - flags.current.x, event.clientY - flags.current.y) > CANCEL_PX) cancel();
         else release();
       }}
-      onPointerCancel={() => { if (flags.current.mode === "hold") cancel(); }}
+      onPointerCancel={() => {
+        // A first-use permission prompt can take the touch: keep listening and let a tap stop it.
+        if (flags.current.mode === "hold" && flags.current.phase === "asking") flags.current.released = true;
+        else if (flags.current.mode === "hold") cancel();
+      }}
       onKeyDown={event => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
+        if (event.repeat) return;  // a held key is not a second tap
         if (listening) stop(); else start("tap");
       }}
       onContextMenu={event => event.preventDefault()}
@@ -260,7 +286,7 @@ export function useVoiceInput({ status, disabled, onText }: {
           setAutoSend(event.target.checked);
           try { window.localStorage.setItem(AUTO_SEND_KEY, event.target.checked ? "on" : "off"); } catch { /* this visit only */ }
         }} />
-      Send spoken messages right away
+      Auto-send what I say
     </label>
   );
 

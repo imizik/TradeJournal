@@ -28,7 +28,7 @@ untouched.
     panel drops the clip unsent. A clip stops at 30 seconds and is
     transcribed. A live timer shows while it listens. A refused microphone
     says how to allow it.
-  - "Send spoken messages right away" (default on, remembered in this
+  - "Auto-send what I say" (default on, remembered in this
     browser) sends the words as soon as they are transcribed, after anything
     already in the box. Off, or while a turn is running, the words wait in
     the box with "Review the message, then Send."

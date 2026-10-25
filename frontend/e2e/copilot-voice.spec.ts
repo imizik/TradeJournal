@@ -91,7 +91,7 @@ async function hold(page: Page, ms = 700) {
   return { box, release: () => page.mouse.up() };
 }
 
-const autoSend = (page: Page) => page.getByLabel("Send spoken messages right away");
+const autoSend = (page: Page) => page.getByLabel("Auto-send what I say");
 
 test("hold, release: the words go straight out with auto-send on (the default)", async ({ page }) => {
   const seen = await lab(page);
