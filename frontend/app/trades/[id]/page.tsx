@@ -102,6 +102,9 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
     return <div className="text-center text-muted-foreground">Loading...</div>;
   }
 
+  // Owner-only, lab on, open positions: the lab prefilled to talk through the decision now.
+  const askHref = copilotOn && trade.status === "open" ? copilotLabHref(trade.ticker, `Review this position: ${trade.id}`) : undefined;
+
   const handleReviewClick = async () => {
     setReviewLoading(true);
     setReviewError(null);
@@ -145,9 +148,12 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
         {copilotOn && trade.status !== "open" && <Link href={copilotLabHref(trade.ticker, `Review this trade: ${trade.id}`)}
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Review with copilot</Link>}
+        {/* From a position alert the selected alert carries this as its primary action instead. */}
+        {askHref && !alert && <Link href={askHref}
+          className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Ask copilot about this position</Link>}
       </div>
 
-      {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} symbol={trade.ticker} status={trade.status} />}
+      {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} symbol={trade.ticker} status={trade.status} askHref={askHref} />}
       {/* An alert asks you to review your exit plan, so the plan follows it rather than the summary. */}
       {alert && planSection}
 
