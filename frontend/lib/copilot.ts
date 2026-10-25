@@ -15,6 +15,14 @@ export type CopilotStatus =
 export type ToolEvent = {
   type: "tool"; id: string; name: string; status: "running" | "ok" | "error"; input?: Record<string, unknown>;
   summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
+  /** get_level_history only: the counts the plan card shows under its invalidation (never ids). */
+  history?: LevelHistory;
+};
+
+/** What the owner's own past trades in the symbol did at a level the same distance from their entry: evidence, not a rule. */
+export type LevelHistory = {
+  symbol: string; level: number; side: "below" | "above"; entry: number; distance_pct: number; trades: number; crossed: number;
+  recovered: number; median_from_cross_pct: number | null; small: boolean; simulated: boolean;
 };
 
 export type TurnMetrics = {

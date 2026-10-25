@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, listInvestigations, streamTurn, toSaved,
-  updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type ToolEvent, type TurnMetrics,
+  updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type ToolEvent, type TradePlan, type TurnMetrics,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { X } from "lucide-react";
@@ -34,8 +34,15 @@ const TOOL_LABEL: Record<string, string> = {
   get_symbol_events: "Earnings", get_quotes: "Quotes", get_saved_research: "Saved research", propose_plan: "Proposal", get_investigation_changes: "What changed",
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
-  get_week_review: "Week review",
+  get_week_review: "Week review", get_level_history: "Your history here",
 };
+
+/** The turn's get_level_history result for the plan's drafted invalidation, when the model asked for it. */
+function historyFor(tools: ToolEvent[], plan: TradePlan): LevelHistory | null {
+  const row = tools.find(t => t.name === "get_level_history" && t.status === "ok" && t.history
+    && t.history.symbol === plan.symbol && t.history.level === plan.invalidation.price);
+  return row?.history ?? null;
+}
 
 function inline(text: string) {
   return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
@@ -559,7 +566,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null}
-                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+                history={historyFor(message.tools ?? [], proposal)} alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
             ) : (
               <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />

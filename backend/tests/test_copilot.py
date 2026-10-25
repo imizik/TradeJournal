@@ -984,7 +984,7 @@ def test_plan_a_trade_reads_the_chart_and_proposes_one_plan_card_that_saves_noth
     with Session(engine) as db:
         before = (len(db.exec(select(TradeCapture)).all()), len(db.exec(select(LevelAlert)).all()))
     events = _turn([{"role": "user", "content": "Context: Plan a trade: yolo NBIS calls"}], copilot.FakeAdapter(0))
-    assert {e["name"] for e in events if e["type"] == "tool"} == {"owner_context", "get_quotes", "get_chart_context", "propose_plan"}
+    assert {e["name"] for e in events if e["type"] == "tool"} == {"owner_context", "get_quotes", "get_chart_context", "get_level_history", "propose_plan"}
     [card] = [e for e in events if e["type"] == "proposal"]
     assert (card["kind"], card["symbol"], card["direction"], card["instrument"]) == ("trade_plan", "NBIS", "long", "calls")
     # Levels drafted from the 5m chart: a close above the level overhead, out through the level below.

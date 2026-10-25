@@ -608,3 +608,239 @@ def shed_week(review: dict) -> dict:
         step()
         review["trimmed"] = True
     return review
+
+
+# --------------------------------------------------------------------------- your history at this level
+
+MAX_HISTORY_DAYS = 365
+MIN_HISTORY_DAYS = 30
+DEFAULT_HISTORY_DAYS = 180
+SMALL_HISTORY = 10  # fewer counted trades than this and the result says the sample is too small
+MARK_GRACE_MINUTES = 5  # the option mark for a cross or a time mark may come from a bar up to this much later
+HISTORY_NOTE = ("Your own past trades at a similar distance; the invalidation study found no level that holds up as a "
+                "default. Evidence to weigh, not a rule.")
+HISTORY_PROVENANCE = {
+    "sample": "measured: the owner's closed long option trades in the symbol inside the window (Webull out)",
+    "crossed": "measured: the underlying's recorded minute bars replayed from entry to exit, the level set the same "
+               "percent from each trade's own entry; recovery and the P&L from there from the option's recorded minute bars",
+    "pnl": "measured: the journal's realized P&L, split by whether the level was crossed while held",
+}
+TIME_PROVENANCE = {
+    "sample": HISTORY_PROVENANCE["sample"],
+    "held_past": "measured: trades still held at the time mark; the option's recorded minute bars from there to the exit",
+    "pnl": "measured: the journal's realized P&L, split by whether the trade was still held at the time mark",
+}
+
+
+def _history_trades(db, symbol: str, since: datetime) -> list:
+    """Closed long option trades in ``symbol`` opened since ``since`` (New York wall clock), Webull left out, with
+    their fills; the entry underlying price as the path metrics read it (the fill's enrichment, else the market context)."""
+    from sqlmodel import select
+    from app.models import Account, Fill, FillMarketContext, Trade, TradeFill
+    webull = list(db.exec(select(Account.id).where(Account.broker == "webull")).all())
+    query = select(Trade).where(Trade.ticker == symbol, Trade.instrument_type == "option",
+                                Trade.status.in_(("closed", "expired")), Trade.closed_at.is_not(None), Trade.opened_at >= since)
+    if webull:
+        query = query.where(Trade.account_id.not_in(webull))
+    trades = db.exec(query.order_by(Trade.opened_at)).all()
+    rows = []
+    for trade in trades:
+        fills = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(TradeFill.trade_id == trade.id)).all()
+        entries = [f for f in fills if f.side in ("buy_to_open", "sell_to_open", "buy")]
+        if not entries or any(f.side != "buy_to_open" for f in entries):
+            continue  # long options only: a short option's adverse side is the other way round
+        first = min(entries, key=lambda f: (f.executed_at, str(f.id)))
+        context = db.get(FillMarketContext, first.id)
+        entry_price = (float(context.entry_underlying_price) if context is not None and context.entry_underlying_price
+                       else float(first.underlying_price_at_fill) if first.underlying_price_at_fill else None)
+        rows.append({"trade": trade, "fills": fills, "entry_price": entry_price})
+    return rows
+
+
+def _cached_minute_bars(ticker: str, day: date) -> list[dict]:
+    """The underlying's minute bars for one day from the on-disk cache the path metrics filled; never the network."""
+    from app.engine.alpaca import fetch_minute_bars_for_date
+    return fetch_minute_bars_for_date([ticker], day, cache_only=True).get(ticker, [])
+
+
+def _cached_option_bars(trade) -> list[dict] | None:
+    """The contract's minute bars over the trade, from the window the path metrics cached; None when not cached."""
+    from app.engine.alpaca import _option_bars_cache_path
+    from app.engine.occ import occ_symbol
+    from app.engine.trade_path import ET
+    if not trade.expiration or trade.strike is None or not trade.option_type:
+        return None
+    symbol = occ_symbol(trade.ticker, trade.expiration, trade.option_type, float(trade.strike))
+    if not symbol:
+        return None
+    path = _option_bars_cache_path(symbol, "1Min", trade.opened_at.replace(tzinfo=ET), trade.closed_at.replace(tzinfo=ET))
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def _underlying_path(row: dict, bars):
+    """The underlying's completed minute bars held through the trade (entry and exit minutes out, as the path metrics
+    read them), or None when the window is too long or no bar is cached."""
+    from app.engine.indicators import bars_to_df
+    from app.engine.trade_path import ET, MAX_PATH_WINDOW_DAYS, UTC, _date_range
+    trade = row["trade"]
+    if (trade.closed_at.date() - trade.opened_at.date()).days + 1 > MAX_PATH_WINDOW_DAYS:
+        return None
+    all_bars = [b for day in _date_range(trade.opened_at.date(), trade.closed_at.date()) for b in bars(trade.ticker, day)]
+    if not all_bars:
+        return None
+    df = bars_to_df(all_bars)
+    opened, closed = trade.opened_at.replace(tzinfo=ET).astimezone(UTC), trade.closed_at.replace(tzinfo=ET).astimezone(UTC)
+    df = df[(df.index > opened) & (df.index + timedelta(minutes=1) <= closed)]
+    return None if df.empty else df
+
+
+def _option_marks(row: dict, option_bars):
+    """The option's minute closes per contract (x100) while held, or None when they are not cached."""
+    from app.engine.indicators import bars_to_df
+    from app.engine.trade_path import ET, UTC
+    trade = row["trade"]
+    bars = option_bars(trade)
+    if not bars:
+        return None
+    df = bars_to_df(bars)
+    opened, closed = trade.opened_at.replace(tzinfo=ET).astimezone(UTC), trade.closed_at.replace(tzinfo=ET).astimezone(UTC)
+    df = df[(df.index >= opened) & (df.index + timedelta(minutes=1) <= closed)]
+    return None if df.empty else df
+
+
+def _from_mark(row: dict, marks, at) -> dict:
+    """What the option did from the first mark at or after ``at``: the P&L to the actual exit in percent of that mark,
+    and whether a later close reached breakeven (the average entry premium) before the exit. Unknown parts are None."""
+    trade = row["trade"]
+    out = {"from_mark_pct": None, "recovered": None}
+    if marks is None or trade.avg_exit_premium is None:
+        return out
+    later = marks[(marks.index >= at) & (marks.index <= at + timedelta(minutes=MARK_GRACE_MINUTES))]
+    if later.empty:
+        return out
+    mark = float(later["close"].iloc[0]) * 100
+    if mark > 0:
+        out["from_mark_pct"] = round((float(trade.avg_exit_premium) - mark) / mark * 100, 1)
+    after = marks[marks.index > later.index[0]]
+    out["recovered"] = bool((after["close"] * 100 >= float(trade.avg_entry_premium)).any()) if not after.empty else None
+    return out
+
+
+def _median(values: list[float]) -> float | None:
+    import statistics
+    return round(statistics.median(values), 1) if values else None
+
+
+def _split(rows: list[dict]) -> dict:
+    pnl = [float(r["trade"].realized_pnl or 0) for r in rows]
+    return {"trades": len(rows), "pnl_usd": round(sum(pnl), 2), "win_rate_pct": _rate(sum(p > 0 for p in pnl), len(rows))}
+
+
+def _level_pass(rows: list[dict], side: str, distance_pct: float, bars, option_bars) -> tuple[dict, dict, dict]:
+    crossed, clear, coverage = [], [], {"no_entry_price": 0, "no_bars": 0, "no_option_bars": 0}
+    for row in rows:
+        if row["entry_price"] is None:
+            coverage["no_entry_price"] += 1
+            continue
+        path = _underlying_path(row, bars)
+        if path is None:
+            coverage["no_bars"] += 1
+            continue
+        target = row["entry_price"] * (1 + distance_pct / 100)
+        hit = path[path["low"] < target] if side == "below" else path[path["high"] > target]
+        if hit.empty:
+            clear.append(row)
+            continue
+        marks = _option_marks(row, option_bars)
+        if marks is None:
+            coverage["no_option_bars"] += 1
+        crossed.append({**row, **_from_mark(row, marks, hit.index[0])})
+    recovery = [r["recovered"] for r in crossed if r["recovered"] is not None]
+    valued = [r["from_mark_pct"] for r in crossed if r["from_mark_pct"] is not None]
+    eligible = len(crossed) + len(clear)
+    part = {"trades": len(crossed), "of": eligible, "pct": _rate(len(crossed), eligible),
+            "recovered_to_breakeven": sum(recovery), "recovery_known": len(recovery),
+            "median_pnl_from_cross_pct": _median(valued), "valued": len(valued)}
+    return part, {"crossed": _split(crossed), "not_crossed": _split(clear)}, coverage
+
+
+def _time_pass(rows: list[dict], minutes: int, option_bars) -> tuple[dict, dict, dict]:
+    from app.engine.trade_path import ET, UTC
+    held, out, coverage = [], [], {"no_option_bars": 0}
+    for row in rows:
+        trade = row["trade"]
+        if trade.hold_duration_mins is None or trade.hold_duration_mins <= minutes:
+            out.append(row)
+            continue
+        marks = _option_marks(row, option_bars)
+        if marks is None:
+            coverage["no_option_bars"] += 1
+        at = trade.opened_at.replace(tzinfo=ET).astimezone(UTC) + timedelta(minutes=minutes)
+        held.append({**row, **_from_mark(row, marks, at)})
+    recovery = [r["recovered"] for r in held if r["recovered"] is not None]
+    valued = [r["from_mark_pct"] for r in held if r["from_mark_pct"] is not None]
+    part = {"trades": len(held), "of": len(rows), "pct": _rate(len(held), len(rows)),
+            "recovered_to_breakeven": sum(recovery), "recovery_known": len(recovery),
+            "median_pnl_from_mark_pct": _median(valued), "valued": len(valued)}
+    return part, {"held_past": _split(held), "out_before": _split(out)}, coverage
+
+
+def _current_price(symbol: str) -> float | None:
+    from app.engine.chart_feed import chart_feed
+    rows, _, _ = chart_feed.quote_rows([symbol])
+    for row in rows:
+        if row.get("symbol") == symbol and isinstance(row.get("last"), (int, float)) and row["last"] > 0:
+            return float(row["last"])
+    return None
+
+
+def level_history(symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
+                  entry: float | None = None, lookback_days: int = DEFAULT_HISTORY_DAYS, session=None,
+                  bars=_cached_minute_bars, option_bars=_cached_option_bars, now: datetime | None = None) -> dict:
+    """What the owner's own closed long option trades in ``symbol`` did at a level the same percent from their entry
+    as ``level`` is from ``entry`` (the planned entry, else the current price) on ``side``, or at a time mark
+    ``minutes`` after the entry. Minute bars come from the cache the path metrics filled; nothing is fetched."""
+    from sqlmodel import Session
+    from app.database import engine
+    from app.engine.analytics import wall_time
+    now = now or datetime.now(UTC)
+    since = wall_time(now) - timedelta(days=lookback_days)
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        rows = _history_trades(db, symbol, since.replace(tzinfo=None))
+    # A level below is a long call's adverse side and a level above a long put's; a time mark is the same for both.
+    kept = "long options" if minutes is not None else "long calls" if side == "below" else "long puts"
+    if minutes is None:
+        rows = [r for r in rows if r["trade"].option_type == ("call" if side == "below" else "put")]
+    n = len(rows)
+    result = {"state": "ok", "as_of": copilot_book._now(), "symbol": symbol,
+              "window": {"days": lookback_days, "since": since.date().isoformat()},
+              "sample": {"trades": n, "counted": kept, "small": n < SMALL_HISTORY,
+                         **({"note": f"Only {n} closed {kept} trades in {symbol} in the window: too small to weigh."}
+                            if n < SMALL_HISTORY else {})}}
+    if minutes is not None:
+        result["kind"] = "time"
+        result["asked"] = {"minutes": minutes}
+        result["held_past"], result["pnl"], result["coverage"] = _time_pass(rows, minutes, option_bars)
+        result["provenance"] = TIME_PROVENANCE
+    else:
+        reference = entry if entry is not None else _section(lambda: {"last": _current_price(symbol)}).get("last")
+        if reference is None:
+            return {"state": "unavailable", "symbol": symbol,
+                    "reason": f"No current {symbol} price to measure the level's distance from; pass the planned entry.",
+                    "note": HISTORY_NOTE}
+        distance_pct = round((level - reference) / reference * 100, 2)
+        if (side == "below") != (distance_pct < 0):
+            return {"state": "unavailable", "symbol": symbol,
+                    "reason": f"{level} is not {side} the entry {reference}, so there is no distance to match past trades on.",
+                    "note": HISTORY_NOTE}
+        result["kind"] = "level"
+        result["asked"] = {"level": level, "side": side, "entry": reference, "entry_from": "planned" if entry is not None else "current",
+                           "distance_pct": distance_pct}
+        result["crossed"], result["pnl"], result["coverage"] = _level_pass(rows, side, distance_pct, bars, option_bars)
+        result["provenance"] = HISTORY_PROVENANCE
+    result["units"] = ("Percentages are percent. P&L in $. median_pnl is the option's P&L from the first recorded mark at the "
+                       "cross or the time mark to the actual exit, in percent of that mark. recovered_to_breakeven counts "
+                       "trades whose option later closed at or above the average entry premium before the exit, out of "
+                       "recovery_known.")
+    result["note"] = HISTORY_NOTE
+    return result
