@@ -1,4 +1,4 @@
-"""Speech to text for voice captures (Charts C3.5): one configured provider.
+"""Speech to text for voice captures (Charts C3.5) and the copilot's hold-to-talk: one configured provider.
 
 The provider is Whisper run on this server through ``faster-whisper``: no
 account, no per-clip charge, and the audio never leaves TradeJournal. The
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -71,14 +72,16 @@ def _load():
         return _model
 
 
-def transcribe(path: Path) -> str:
-    """The words in one clip, as heard. Raises TranscriptionError."""
+def transcribe(path: Path, prompt: str | None = None) -> str:
+    """The words in one clip, as heard. ``prompt`` is vocabulary Whisper should expect (ticker symbols), not text
+    it may insert. Raises TranscriptionError."""
     if not status().configured:
         raise TranscriptionError(status().note)
     started = time.monotonic()
     try:
         model = _load()
-        segments, _ = model.transcribe(str(path), beam_size=5, vad_filter=True, condition_on_previous_text=False)
+        segments, _ = model.transcribe(str(path), beam_size=5, vad_filter=True, condition_on_previous_text=False,
+                                       initial_prompt=prompt or None)
         words = []
         for segment in segments:
             if time.monotonic() - started > TIME_LIMIT:
@@ -90,3 +93,18 @@ def transcribe(path: Path) -> str:
         log.exception("Transcription failed for %s", path.name)
         raise TranscriptionError(f"The speech-to-text engine could not read this clip: {exc}") from exc
     return " ".join(word for word in words if word)
+
+
+def transcribe_bytes(data: bytes, extension: str, prompt: str | None = None) -> str:
+    """The words in one clip held in memory (the copilot's hold-to-talk). The audio sits in a temporary file only
+    while Whisper reads it and is deleted afterwards, whatever happens."""
+    if not status().configured:
+        raise TranscriptionError(status().note)
+    handle, name = tempfile.mkstemp(prefix="clip-", suffix=f".{extension}")
+    path = Path(name)
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+        return transcribe(path, prompt)
+    finally:
+        path.unlink(missing_ok=True)

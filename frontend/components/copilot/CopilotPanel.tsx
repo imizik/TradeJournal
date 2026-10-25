@@ -12,6 +12,7 @@ import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
+import { useVoiceInput } from "@/components/copilot/VoiceInput";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -202,6 +203,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || "NBIS");
   const [messages, setMessages] = useState<LabMessage[]>([]);
   const [draft, setDraft] = useState(opening);
+  const [spoken, setSpoken] = useState(false); // the draft ends with words just heard, waiting for review
+  const box = useRef<HTMLTextAreaElement | null>(null);
   // The page symbol the owner chose not to follow; a later change offers again.
   const [kept, setKept] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -380,6 +383,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     typed.current = false;
     setMessages(current => [...current, { role: "user", content }, { role: "assistant", content: "", tools: [] }]);
     setDraft("");
+    setSpoken(false);
     setBusy(true);
     const controller = new AbortController();
     abort.current = controller;
@@ -434,6 +438,17 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   // The question a deeper job starts from: the latest one asked here, without its pasted context line.
   const topic = (messages.filter(m => m.role === "user").at(-1)?.content.replace(/^Context: [^\n]*\n+/, "").trim() || current?.title || "").slice(0, 500);
+
+  // Spoken words join whatever is in the box (a context line, or what was typed) and, with auto-send on and no turn
+  // running, go straight out; otherwise they wait in the box for a look and Send.
+  const voice = useVoiceInput({ status, disabled: status?.enabled !== true, onText: (text, now) => {
+    const next = `${draft}${draft && !/\s$/.test(draft) ? " " : ""}${text}`.slice(0, 4000);
+    typed.current = true;
+    if (now && !busy) { void send(next); return; }
+    setDraft(next);
+    setSpoken(true);
+    box.current?.focus();
+  } });
 
   const enabled = status?.enabled === true;
   // Beside another page the panel is the owner's, and only while the lab is on: otherwise it is not there at all.
@@ -554,15 +569,25 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         <div ref={end} />
       </div>
 
-      <form onSubmit={e => { e.preventDefault(); void send(draft); }} className={cn("flex items-end gap-2", panel && "sticky bottom-0 bg-[#121924] py-1")}>
-        <textarea value={draft} onChange={e => { typed.current = true; setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
+      <div className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1")}>
+      {voice.banner}
+      <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex items-end gap-2">
+        <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
           placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
           className="min-h-[2.75rem] min-w-0 flex-1 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
         {busy
           ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
           : <button type="submit" disabled={!enabled || !draft.trim()} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
+        {voice.button}
       </form>
+      {voice.available && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3">
+          {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}
+          {voice.setting}
+        </div>
+      )}
+      </div>
     </div>
   );
 }

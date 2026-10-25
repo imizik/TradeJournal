@@ -93,6 +93,12 @@ def sniff_audio(data: bytes) -> str:
     return kind
 
 
+def check_clip_ms(audio_ms: int | None) -> None:
+    """The browser's own measure of a clip, when it sent one, within the 30-second limit (and a little slack)."""
+    if audio_ms is not None and not 0 < audio_ms <= CLIP_MS + 1500:
+        raise CaptureError("Clips are limited to 30 seconds.")
+
+
 def sniff_image(data: bytes) -> str:
     if not data:
         raise CaptureError("The chart image is empty.")
@@ -317,8 +323,7 @@ def save(db: Session, capture: TradeCapture, audio: bytes | None = None, audio_m
         return existing, False
     if audio is not None:
         capture.audio_type = sniff_audio(audio)
-        if audio_ms is not None and not 0 < audio_ms <= CLIP_MS + 1500:
-            raise CaptureError("Clips are limited to 30 seconds.")
+        check_clip_ms(audio_ms)
         capture.audio_ms = audio_ms
         capture.audio_bytes = len(audio)
         capture.audio_sha256 = hashlib.sha256(audio).hexdigest()

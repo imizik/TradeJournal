@@ -1,10 +1,11 @@
-"""Owner-only Copilot Lab (docs/copilot-lab.md): status, open threads, one streamed, read-only conversation turn, and
-saved investigations.
+"""Owner-only Copilot Lab (docs/copilot-lab.md): status, open threads, one streamed, read-only conversation turn,
+hold-to-talk transcription, and saved investigations.
 
 Off unless ``COPILOT_ENABLED=true``. Owner-only through the access middleware
 (no route is in an assistant grant) and the frontend proxy. Prompts and answers
 are never logged; only per-turn metrics are. A conversation is stored only as a
-saved investigation the page writes: text transcript and evidence references.
+saved investigation the page writes: text transcript and evidence references. A spoken message's audio is deleted
+as soon as it is transcribed and never logged.
 """
 import asyncio
 from datetime import datetime
@@ -12,13 +13,14 @@ import json
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
+from app.engine import captures, spoken_tickers, transcribe
 from app.engine import copilot_investigations as investigations
 from app.engine.chart_math import ET
 
@@ -43,7 +45,9 @@ def status():
     if not cfg.enabled:
         return {"enabled": False, "reason": "Copilot Lab is off. Set COPILOT_ENABLED=true on the private backend to try it."}
     out = cfg.public()
-    out["capabilities"] = {"copilot_alerts": copilot_alerts_supported()}
+    speech = transcribe.status()
+    out["capabilities"] = {"copilot_alerts": copilot_alerts_supported(),
+                           "transcriber": {"configured": speech.configured, "provider": speech.provider}}
     if cfg.evidence == "replay":
         try:
             out["replay"] = copilot.evidence_for(cfg).describe()
@@ -148,6 +152,41 @@ async def chat(body: ChatBody):
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+# --------------------------------------------------------------------------- hold-to-talk
+
+@router.post("/transcribe")
+async def transcribe_message(audio: UploadFile | None = File(None), audio_ms: int | None = Form(None),
+                             text: str | None = Form(None, max_length=4000), session: Session = Depends(get_session)):
+    """A spoken message as text for the composer, spoken tickers written as symbols. ``audio`` (a 30-second clip at
+    most, as for voice plans) goes through this server's transcriber and is deleted; ``text`` is what the browser's
+    own speech recognition heard, when the server has no transcriber, and only has its tickers mapped."""
+    _enabled()
+    if (audio is None) == (text is None):
+        raise HTTPException(422, "Send either a recording or the browser's transcript.")
+    traded = spoken_tickers.traded(session)
+    known = spoken_tickers.known_symbols(traded)
+    provider = "browser"
+    if audio is not None:
+        speech = transcribe.status()
+        if not speech.configured:
+            raise HTTPException(503, speech.note.replace(" Recordings are saved and can be played back.", " Type the message instead."))
+        data = await audio.read(captures.AUDIO_MAX + 1)
+        try:
+            kind = captures.sniff_audio(data)
+            captures.check_clip_ms(audio_ms)
+        except captures.CaptureError as exc:
+            raise HTTPException(413 if len(data) > captures.AUDIO_MAX else 422, str(exc)) from None
+        try:
+            text = await asyncio.to_thread(transcribe.transcribe_bytes, data, captures.AUDIO_TYPES[kind],
+                                           spoken_tickers.prompt_for(known, traded))
+        except transcribe.TranscriptionError as exc:
+            raise HTTPException(502, str(exc)) from None
+        provider = speech.provider
+    heard = (text or "").strip()
+    mapped, tickers = spoken_tickers.map_tickers(heard, known)
+    return {"text": mapped, "heard": heard, "tickers": tickers, "provider": provider}
 
 
 # --------------------------------------------------------------------------- saved investigations
