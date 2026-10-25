@@ -135,14 +135,22 @@ def test_migration_chain_has_one_head_and_tradingview_round_trips(tmp_path):
         index["name"]
         for index in inspector.get_indexes("tradingview_alert")
     } == EXPECTED_INDEXES
+    assert "practice_replay_attempt" in inspector.get_table_names()
+    assert {index["name"] for index in inspector.get_indexes("practice_replay_attempt")} == {
+        "ix_practice_replay_attempt_created_at",
+        "ix_practice_replay_attempt_operation_id",
+        "ix_practice_replay_attempt_scenario_id",
+    }
 
     _alembic(database_path, "downgrade", PREVIOUS_HEAD)
     tables_after_downgrade = set(inspect(engine).get_table_names())
     assert "tradingview_alert" not in tables_after_downgrade
+    assert "practice_replay_attempt" not in tables_after_downgrade
     assert "strategy_definition" in tables_after_downgrade
 
     _alembic(database_path, "upgrade", "head")
     assert "tradingview_alert" in inspect(engine).get_table_names()
+    assert "practice_replay_attempt" in inspect(engine).get_table_names()
 
 
 def test_day_journal_migration_round_trips_without_touching_existing_data(tmp_path):

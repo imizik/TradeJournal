@@ -1,13 +1,13 @@
 """One-tap plan linking (additive): a plan nudge row's kind, no_plan or link.
 
 Revision ID: d4f8b2c6e1a9
-Revises: c7e3a9f1d5b2
+Revises: c2f8a1d4e6b9
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "d4f8b2c6e1a9"
-down_revision = "c7e3a9f1d5b2"
+down_revision = "c2f8a1d4e6b9"
 branch_labels = None
 depends_on = None
 

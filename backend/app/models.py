@@ -405,6 +405,21 @@ class DecisionEvent(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class PracticeReplayAttempt(SQLModel, table=True):
+    """Durable personal replay state; sealed fixture material is server-only JSON."""
+
+    __tablename__ = "practice_replay_attempt"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_practice_replay_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: uuid.UUID = Field(index=True)
+    scenario_id: str = Field(index=True)
+    state_json: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ChartSettingsRecord(SQLModel, table=True):
     """The Charts workspace every browser shares: levels, watchlist, intervals,
     indicators and layout, as one JSON document the frontend validates. The
