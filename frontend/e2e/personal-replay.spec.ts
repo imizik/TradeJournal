@@ -213,3 +213,65 @@ test("resuming an uncertain start clears only its matching retry operation", asy
   await expect(page).not.toHaveURL(original);
   await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
 });
+
+for (const mutation of ["choice", "reveal"] as const) {
+  test(`a delayed ${mutation} response cannot replace the attempt selected with Back`, async ({ page, request }) => {
+    const original = await create(request);
+    for (const checkpoint_id of ["first-look", "later-look"]) {
+      await request.post(`${API}/practice/replay/attempts/${original.attempt_id}/choice`, { data: { checkpoint_id, decision: "hold" } });
+      await request.post(`${API}/practice/replay/attempts/${original.attempt_id}/reveal`, { data: { checkpoint_id } });
+    }
+    await page.goto(`/practice/replay?attempt=${original.attempt_id}`);
+    await page.getByRole("button", { name: "Try this scenario again with new choices" }).click();
+    await expect(page.getByText("Checkpoint 1 of 2", { exact: true })).toBeVisible();
+    if (mutation === "reveal") await choose(page, "Hold");
+    let release!: () => void;
+    let committed!: () => void;
+    const waitForRelease = new Promise<void>(resolve => { release = resolve; });
+    const waitForCommit = new Promise<void>(resolve => { committed = resolve; });
+    await page.route(`**/practice/replay/attempts/*/${mutation}`, async route => {
+      const response = await route.fetch();
+      committed();
+      await waitForRelease;
+      await route.fulfill({ response });
+    }, { times: 1 });
+    if (mutation === "choice") {
+      await page.getByRole("button", { name: "Hold", exact: true }).click();
+      await page.getByRole("button", { name: "Save my choice", exact: true }).click();
+    } else await page.getByRole("button", { name: "Reveal what happened next", exact: true }).click();
+    await waitForCommit;
+    await page.goBack();
+    await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
+    const response = page.waitForResponse(res => res.url().endsWith(`/${mutation}`));
+    release();
+    await response;
+    // A further read lets React process the released mutation before the assertion.
+    await page.getByTestId("replay-comparison").getByText("Practice versus history").click();
+    await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`attempt=${original.attempt_id}$`));
+  });
+}
+
+test("a delayed start cannot navigate away from the owner's newer destination", async ({ page }) => {
+  await page.goto("/practice");
+  await page.getByRole("link", { name: "Open a replay" }).click();
+  let release!: () => void;
+  let committed!: () => void;
+  const waitForRelease = new Promise<void>(resolve => { release = resolve; });
+  const waitForCommit = new Promise<void>(resolve => { committed = resolve; });
+  await page.route("**/practice/replay/attempts", async route => {
+    const response = await route.fetch();
+    committed();
+    await waitForRelease;
+    await route.fulfill({ response });
+  }, { times: 1 });
+  await page.getByRole("button", { name: "Start replay", exact: true }).click();
+  await waitForCommit;
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Daily Practice", exact: true })).toBeVisible();
+  const response = page.waitForResponse(res => res.url().endsWith("/practice/replay/attempts"));
+  release();
+  await response;
+  await page.getByRole("heading", { name: "Daily Practice", exact: true }).click();
+  await expect(page).toHaveURL(/\/practice$/);
+});

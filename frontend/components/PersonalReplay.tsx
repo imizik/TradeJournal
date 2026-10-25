@@ -31,6 +31,7 @@ export default function PersonalReplay() {
 
   const loadAttempt = useCallback(async (id: string) => {
     const version = ++readVersion.current;
+    setBusy(false);
     setAttemptLoading(true);
     setDecision(null);
     setRationale("");
@@ -58,7 +59,7 @@ export default function PersonalReplay() {
     void listReplayScenarios().then(data => { if (active) setScenarios(data.scenarios); })
       .catch(err => { if (active) setError(err instanceof Error ? err.message : "Replay scenarios could not be loaded."); });
     if (initialAttemptId) void Promise.resolve().then(() => { if (active) return loadAttempt(initialAttemptId); });
-    else void Promise.resolve().then(() => { if (active) { setAttempt(null); setAttemptLoading(false); } });
+    else void Promise.resolve().then(() => { if (active) { setAttempt(null); setAttemptLoading(false); setBusy(false); setError(""); setDecision(null); setRationale(""); } });
     return () => { active = false; readVersion.current += 1; };
   }, [initialAttemptId, loadAttempt]);
 
@@ -73,7 +74,7 @@ export default function PersonalReplay() {
   }, [revealTransition]);
 
   async function start() {
-    readVersion.current += 1;
+    const version = ++readVersion.current;
     setDecision(null); setRationale("");
     setBusy(true); setError("");
     let key: string | null = null;
@@ -82,32 +83,39 @@ export default function PersonalReplay() {
       let operationId = sessionStorage.getItem(key);
       if (!operationId) { operationId = crypto.randomUUID(); sessionStorage.setItem(key, operationId); }
       const next = await startReplayAttempt(operationId);
+      if (version !== readVersion.current) return;
       sessionStorage.removeItem(key);
       setAttempt(next);
       history.pushState({}, "", `/practice/replay?attempt=${encodeURIComponent(next.attempt_id)}`);
-    } catch (err) { setError(err instanceof Error ? err.message : "Replay could not start. Retry safely with the same request."); }
-    finally { setBusy(false); }
+    } catch (err) { if (version === readVersion.current) setError(err instanceof Error ? err.message : "Replay could not start. Retry safely with the same request."); }
+    finally { if (version === readVersion.current) setBusy(false); }
   }
 
   async function saveChoice(event: React.FormEvent) {
     event.preventDefault();
-    if (!attempt?.checkpoint) return;
+    if (!attempt?.checkpoint || !decision) return;
+    const version = ++readVersion.current;
     setBusy(true); setError("");
     try {
-      if (!decision) return;
       const next = await saveReplayChoice(attempt.attempt_id, attempt.checkpoint.id, decision, rationale);
+      if (version !== readVersion.current) return;
       setAttempt(next);
       setRationale("");
-    } catch (err) { setError(err instanceof Error ? err.message : "Choice may not have saved. Reload this replay before retrying."); }
-    finally { setBusy(false); }
+    } catch (err) { if (version === readVersion.current) setError(err instanceof Error ? err.message : "Choice may not have saved. Reload this replay before retrying."); }
+    finally { if (version === readVersion.current) setBusy(false); }
   }
 
   async function reveal() {
     if (!attempt?.checkpoint || !attempt.choice) return;
+    const version = ++readVersion.current;
     setBusy(true); setError("");
-    try { setAttempt(await revealReplayCheckpoint(attempt.attempt_id, attempt.checkpoint.id)); setDecision(null); }
-    catch (err) { setError(err instanceof Error ? err.message : "The reveal could not be loaded."); }
-    finally { setBusy(false); }
+    try {
+      const next = await revealReplayCheckpoint(attempt.attempt_id, attempt.checkpoint.id);
+      if (version !== readVersion.current) return;
+      setAttempt(next); setDecision(null);
+    }
+    catch (err) { if (version === readVersion.current) setError(err instanceof Error ? err.message : "The reveal could not be loaded."); }
+    finally { if (version === readVersion.current) setBusy(false); }
   }
 
   const checkpoint = attempt?.checkpoint;
