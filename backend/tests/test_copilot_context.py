@@ -134,7 +134,8 @@ def test_the_pack_puts_the_symbol_first_and_labels_every_section(db):
     assert call["plan"]["setup"] == "Group recovery" and call["plan"]["wording"].startswith("Buy the first higher low")
     assert "92.50" in call["plan"]["wording"] and "account_label" not in text  # the owner's words stay whole; the label never joins them
     stock = held["positions"][1]
-    assert "held_minutes" not in stock and "giveback" not in stock and stock["days_held"] == 9
+    opened = TODAY - timedelta(days=9)  # whole days on the real clock: 8 before 10:05 New York, 9 after
+    assert "held_minutes" not in stock and "giveback" not in stock and stock["days_held"] == (datetime.now(UTC) - opened).days
 
     assert pack["history"]["closed_trades"] == 1 and pack["history"]["wins"] == 0 and pack["history"]["realized_usd"] == -50.0
     assert [t["pnl_usd"] for t in pack["history"]["recent"]] == [-50.0] and "account" not in pack["history"]["recent"][0]
