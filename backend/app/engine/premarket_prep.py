@@ -377,11 +377,14 @@ class PremarketPreps:
             row = db.get(PremarketPrep, row_id)
             if row is None or row.delivery != "preparing":
                 return  # given up meanwhile: never sent late
-            row.investigation_id = _save(db, row.day, question, written)
-            row.body, row.fallback = "\n".join(written), error is not None
-            row.last_error = None if error is None else f"Copilot turn failed: {error}"[:500]
-            row.delivery = "pending"
+            investigation_id = _save(db, row.day, question, written)
+            # Only a prep still preparing is queued: one given up meanwhile stays expired.
+            queued = db.exec(update(PremarketPrep).where(PremarketPrep.id == row_id, PremarketPrep.delivery == "preparing").values(
+                delivery="pending", investigation_id=investigation_id, body="\n".join(written), fallback=error is not None,
+                last_error=None if error is None else f"Copilot turn failed: {error}"[:500]))
             db.commit()
+            if queued.rowcount != 1:
+                return
         log.info("Pre-market prep ready (%s)", "raw facts" if error else "copilot")
 
     # ------------------------------------------------------------ deliver
