@@ -253,6 +253,19 @@ export type OpenThreads = {
   as_of: string | null;
 };
 export const getOpenThreads = (signal?: AbortSignal) => request<OpenThreads>("/copilot/threads", { signal });
+/** One armed copilot plan on the lab home's Plans board (``GET /copilot/plans``), nearest to a trigger first. A level
+ * is ``armed`` (with its distance from ``last`` when a price was read) or ``hit`` (``hit_at``, epoch seconds); null when
+ * that alert was never set or was deleted. */
+export type PlanBoardLevel = { price: number; condition: string; interval: string | null; state: "armed" | "hit";
+  distance_usd?: number; distance_pct?: number; hit_at?: number | null };
+export type PlanBoardRow = {
+  investigation_id: string; symbol: string; direction: "long" | "short" | null; thesis: string | null; last: number | null;
+  entry: PlanBoardLevel | null; invalidation: PlanBoardLevel | null;
+  time_stop: { text: string; due_at: number; state: string } | null;
+  position: "in_position" | "closed" | "fill_to_link" | "waiting";
+};
+export type PlansBoard = { plans: PlanBoardRow[]; quotes_at: number | null; quote_issue: string | null };
+export const getPlansBoard = (signal?: AbortSignal) => request<PlansBoard>("/copilot/plans", { signal });
 /** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
 export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
 

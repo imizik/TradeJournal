@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
+import PlansBoard from "@/components/copilot/PlansBoard";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import { asOfText, getOpenThreads, WHAT_MATTERS_PROMPT, type OpenThreads, type ThreadPosition, type ThreadWatch } from "@/lib/copilot";
 import { cn } from "@/lib/utils";
@@ -145,9 +146,14 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
 }
 
 /** Stable, so the memoized panel does not re-render for it. */
-const home = (actions: HomeActions) => <OpenThreadsBlock {...actions} />;
+const home = (actions: HomeActions) => (
+  <div className="space-y-3">
+    <PlansBoard open={actions.open} />
+    <OpenThreadsBlock {...actions} />
+  </div>
+);
 
-/** The full-page Copilot Lab: the same conversation as the side panels, with Recent, the symbol, deep links and Open threads. */
+/** The full-page Copilot Lab: the same conversation as the side panels, with Recent, the symbol, deep links, Plans and Open threads. */
 export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
   return <CopilotPanel variant="page" link={link} home={home} />;
 }
