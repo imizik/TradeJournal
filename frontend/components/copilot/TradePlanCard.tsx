@@ -59,7 +59,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const note = [`Thesis: ${thesis.trim()}`, plan.contract && `Contract: ${plan.contract}.`, "From a Copilot Lab plan card."]
     .filter(Boolean).join(" ").slice(0, 500);
 
-  async function run(part: Part) {
+  async function run(part: Part): Promise<boolean> {
     setResults(r => ({ ...r, [part]: { state: "working", text: "" } }));
     try {
       let text: string;
@@ -72,20 +72,30 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         const quote = await freshQuote(plan.symbol);
         if (!quote.fresh || quote.last === null) throw new Error(`The latest ${plan.symbol} quote is stale or missing, so it was not set.`);
         if (quote.last === level.price) throw new Error(`${plan.symbol} is at ${level.price} now, so the alert has no side to wait on.`);
+        // An invalidation already crossed would arm on the wrong side and wait for the move back.
+        if (part === "invalidation" && (long ? quote.last < level.price : quote.last > level.price))
+          throw new Error(`${plan.symbol} is at ${quote.last}, already past the invalidation at ${level.price}, so it was not set.`);
         await createPlanAlert(investigationId!, plan.symbol, level, quote.last, `${plan.symbol} ${part}: ${levelText(level)}`.slice(0, 60));
         text = `Set: ${plan.symbol} ${levelText(level)}.`;
         onDone();
       }
       setResults(r => ({ ...r, [part]: { state: "done", text } }));
+      return true;
     } catch (failure) {
       setResults(r => ({ ...r, [part]: { state: "failed", text: failure instanceof Error ? failure.message : "Not done." } }));
+      return false;
     }
+  }
+
+  /** The plan first: its alerts are armed only once it is saved, so a failed save leaves nothing armed without a plan. */
+  async function savePlanThenAlerts() {
+    if (!(await run("plan"))) return;
+    for (const part of parts.slice(1)) if (results[part].state !== "done") await run(part);
   }
 
   async function confirm() {
     if (!ready || started) return;
-    await run("plan");
-    for (const part of parts.slice(1)) await run(part);
+    await savePlanThenAlerts();
   }
 
   const locked = started;
@@ -135,11 +145,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
             return (
               <li key={part} className="flex flex-wrap items-center gap-2 text-xs">
                 <span className={cn("font-medium", r.state === "done" ? "text-emerald-300" : r.state === "failed" ? "text-amber-300" : "text-muted-foreground")}>
-                  {PART_LABEL[part]}: {r.state === "done" ? "done" : r.state === "failed" ? "failed" : r.state === "working" ? "working…" : "waiting"}
+                  {PART_LABEL[part]}: {r.state === "done" ? "done" : r.state === "failed" ? "failed" : r.state === "working" ? "working…" : "waits for the plan"}
                 </span>
                 {r.text && <span className={r.state === "failed" ? "text-amber-300" : "text-muted-foreground"}>{r.text}</span>}
                 {r.state === "failed" && (
-                  <button type="button" onClick={() => void run(part)} disabled={busy}
+                  <button type="button" onClick={() => void (part === "plan" ? savePlanThenAlerts() : run(part))} disabled={busy}
                     className="min-h-11 rounded border px-3 py-1 text-foreground disabled:opacity-40">Retry {PART_LABEL[part].toLowerCase()}</button>
                 )}
               </li>

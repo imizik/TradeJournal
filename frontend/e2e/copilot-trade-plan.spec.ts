@@ -27,7 +27,8 @@ const TURN = sse([
     tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
 ]);
 
-type Server = { alerts: object[]; posts: { path: string; body: Record<string, unknown> }[]; failAlert?: (body: Record<string, unknown>) => boolean };
+type Server = { alerts: object[]; posts: { path: string; body: Record<string, unknown> }[]; failAlert?: (body: Record<string, unknown>) => boolean;
+  failCapture?: boolean; last?: number };
 
 async function lab(page: Page, server: Server, { alertsSupported = true, defaultAccount = ROTH as string | null } = {}) {
   const post = (path: string, route: Route) => server.posts.push({ path, body: route.request().postDataJSON() });
@@ -37,12 +38,13 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: record }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: route.request().method() === "PUT" ? { ...record, revision: 2 } : record }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: true, daily_budget_usd: 2, spent_today_usd: 0 } }));
-  await page.route("**/copilot/quote?*", (route) => route.fulfill({ json: { symbol: "NBIS", last: 94.35, trade_time: 1, fetched_at: 1, age_s: 2, issue: null, fresh: true } }));
+  await page.route("**/copilot/quote?*", (route) => route.fulfill({ json: { symbol: "NBIS", last: server.last ?? 94.35, trade_time: 1, fetched_at: 1, age_s: 2, issue: null, fresh: true } }));
   await page.route("**/charts/captures/setup", (route) => route.fulfill({ json: {
     accounts: [{ id: ROTH, label: "Roth IRA ··8267", broker: "robinhood" }, { id: "00000000-0000-0000-0000-000000000002", label: "Individual", broker: "robinhood" }],
     default_account_id: defaultAccount, templates: [], max_templates: 3, transcriber: { configured: false, provider: "off", note: "" } } }));
   await page.route("**/charts/captures", (route) => {
     post("captures", route);
+    if (server.failCapture) return route.fulfill({ status: 503, json: { detail: "The database is busy." } });
     return route.fulfill({ status: 201, json: { id: "c1", ...route.request().postDataJSON() } });
   });
   await page.route("**/charts/alerts", (route) => {
@@ -128,6 +130,33 @@ test("a partial failure names the failed part and retries only that part", async
   await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
   expect(posts(server, "captures")).toHaveLength(1); // the plan was not saved twice
   expect(posts(server, "alerts").map((b) => b.label)).toEqual(["NBIS entry: 5m close beyond 95.9", "NBIS invalidation: crosses 92.3", "NBIS invalidation: crosses 92.3"]);
+});
+
+test("a failed plan save arms nothing until its retry succeeds", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [], failCapture: true };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await card.getByRole("button", { name: "Confirm" }).click();
+  const results = card.getByRole("list", { name: "Plan results" });
+  await expect(results).toContainText("Pre-trade plan: failed");
+  await expect(results).toContainText("The database is busy.");
+  await expect(results).toContainText("Entry alert: waits for the plan");
+  expect(posts(server, "alerts")).toEqual([]);
+  server.failCapture = false;
+  await card.getByRole("button", { name: "Retry pre-trade plan" }).click();
+  await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
+  expect(posts(server, "alerts")).toHaveLength(2);
+});
+
+test("an invalidation already crossed by Confirm is not armed on the wrong side", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [], last: 92.0 };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await card.getByRole("button", { name: "Confirm" }).click();
+  const results = card.getByRole("list", { name: "Plan results" });
+  await expect(results).toContainText("Invalidation alert: failed");
+  await expect(results).toContainText("NBIS is at 92, already past the invalidation at 92.3, so it was not set.");
+  expect(posts(server, "alerts").map((b) => b.label)).toEqual(["NBIS entry: 5m close beyond 95.9"]);
 });
 
 test("without alert support Confirm saves only the plan; with no default account it asks which", async ({ page }) => {

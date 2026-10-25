@@ -373,7 +373,9 @@ nothing exists until the owner confirms.
     - **Entry alert** and **Invalidation alert:** exactly as a watch confirms:
       a fresh `GET /copilot/quote`, then `POST /charts/alerts` with
       `source_kind="copilot"`, the investigation id and the labels
-      "NBIS entry: …" and "NBIS invalidation: …". Without alert support the
+      "NBIS entry: …" and "NBIS invalidation: …". They run only once the plan
+      is saved, and an invalidation the fresh price has already crossed is
+      refused rather than armed on the wrong side. Without alert support the
       card says so and Confirm saves only the plan.
   - Fixture demo: "plan a trade" in the owner's words makes the fake model
     read the quote and the 5m chart and propose a long-calls plan (entry on a
