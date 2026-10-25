@@ -159,7 +159,11 @@ asyncio task beside the chart stream, not a job: its durable state is the
 `level_alert` and `level_alert_event` rows (progress, one row per firing, and
 a delivery outbox claimed by an update), so an API restart resumes it without
 a `job_run`. `LEVEL_ALERTS_AUTOSTART=false` keeps it off, as the test suite
-does. TradingView already has its own database claim/recovery
+does. Copilot Lab's research queue (`research_queue.QueueRunner`, off unless
+`RESEARCH_QUEUE_ENABLED=true`) is likewise an API-owned asyncio task, not a
+job: its state is the `research_job` rows, and a job left running by a
+shutdown or crash goes back to the queue when the runner starts again
+([research queue](../copilot-lab.md#research-queue)). TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
 now provides systemd services for the six lanes and the private API/frontend.
