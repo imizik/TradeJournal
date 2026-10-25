@@ -131,7 +131,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   check); route tests: `tests/test_copilot_plans.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
-  beside Charts or Radar) shows what is live above the conversation:
+  beside Charts or Radar) shows what is live above the conversation. A deep
+  link that brings a prepared question (`?context=…`: a Radar row, a ping, the
+  plan streak chip) opens on that question without Plans or Open threads, so
+  the message box and Send stay on a phone's first screen:
   - positions: symbol, instrument, unrealized %, give-back state, and days to
     expiry (options) or time held (stocks);
   - armed alerts: symbol, condition, price, label;

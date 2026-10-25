@@ -155,5 +155,7 @@ const home = (actions: HomeActions) => (
 
 /** The full-page Copilot Lab: the same conversation as the side panels, with Recent, the symbol, deep links, Plans and Open threads. */
 export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
-  return <CopilotPanel variant="page" link={link} home={home} />;
+  // A deep link with a prepared question (a ping, a Radar row, a chip) opens on that question alone, so the composer and
+  // Send stay on a phone's first screen instead of under Plans and Open threads.
+  return <CopilotPanel variant="page" link={link} home={link?.context && !link.investigation ? undefined : home} />;
 }
