@@ -1,7 +1,7 @@
 """Persist bounded personal synthetic replay attempts.
 
 Revision ID: c2f8a1d4e6b9
-Revises: b2c9e4f7a1d3
+Revises: c7e3a9f1d5b2
 """
 from typing import Sequence, Union
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c2f8a1d4e6b9"
-down_revision: Union[str, None] = "b2c9e4f7a1d3"
+down_revision: Union[str, None] = "c7e3a9f1d5b2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

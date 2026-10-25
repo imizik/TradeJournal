@@ -201,14 +201,16 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     from app.engine.stock_watch import enabled as stock_watch_enabled
     from app.engine.position_alerts import PositionAlerts, enabled as position_alerts_enabled
     from app.engine.plan_nudges import PlanNudges, enabled as plan_nudges_enabled
+    from app.engine.plan_time_stops import PlanTimeStops, enabled as plan_time_stops_enabled
 
     paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
     scanner = SetupScanner(engine, chart_feed, chart_calendar, options_chain, clock=time.time,
                            paper_enabled=scanner_enabled()) if scanner_enabled() or stock_watch_enabled() else None
     positions = PositionAlerts(engine, chart_calendar, clock=time.time) if position_alerts_enabled() else None
     nudges = PlanNudges(engine, chart_calendar, clock=time.time) if plan_nudges_enabled() else None
+    time_stops = PlanTimeStops(engine, chart_calendar, clock=time.time) if plan_time_stops_enabled() else None
     monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper,
-                                scanner=scanner, positions=positions, nudges=nudges)
+                                scanner=scanner, positions=positions, nudges=nudges, time_stops=time_stops)
     stream.attach(monitor)
     await monitor.start()
     app_.state.level_alerts = monitor
@@ -433,6 +435,8 @@ app.include_router(market_reads_router.router, prefix="/jo/market-reads", tags=[
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
 from app.routers import copilot as copilot_router  # owner-only lab; handlers refuse unless COPILOT_ENABLED=true
 app.include_router(copilot_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import plan_time_stops as plan_time_stops_router  # owner-only; pings only when PLAN_TIME_STOPS_ENABLED=true
+app.include_router(plan_time_stops_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import research_jobs as research_jobs_router  # owner-only research queue; runner off by default
 app.include_router(research_jobs_router.router, prefix="/copilot/research-jobs", tags=["copilot lab"])
 

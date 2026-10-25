@@ -56,7 +56,7 @@ function PositionNow({ tradeId }: { tradeId: string }) {
   </div>;
 }
 
-export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: { tradeId: string; alertId?: string; symbol: string; status: string }) {
+export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, askHref }: { tradeId: string; alertId?: string; symbol: string; status: string; askHref?: string }) {
   const [body, setBody] = useState<Body | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -84,6 +84,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: {
     <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{alertId ? "Position alert" : "Phone alerts"}</h2>
     {alertId && !body && <p role="status">{failed ? "This alert could not be loaded. Reload the page to try again." : "Loading the selected alert…"}</p>}
     {alertId && body && !selected && <p role="status">This alert is unavailable for this position. It may have been removed or the link may be incorrect.</p>}
+    {alertId && (failed || (body && !selected)) && askHref && status === "open" && <Link href={askHref}
+      className="mt-2 inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">Ask copilot about this position</Link>}
     {selected && <div data-testid="selected-position-alert" className="space-y-3">
       <div>
         <h3 className="text-base font-semibold">{KIND[selected.kind]}</h3>
@@ -103,8 +105,12 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status }: {
         {status !== "open" && <> This position is now {status}.</>}
       </p>
       {status === "open" && <PositionNow tradeId={tradeId} />}
-      <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
-        className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
+      <div className="flex flex-wrap gap-2">
+        {askHref && status === "open" && <Link href={askHref}
+          className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90">Ask copilot about this position</Link>}
+        <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
+          className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
+      </div>
       <p className="text-xs text-muted-foreground">Delivery: {DELIVERY[selected.delivery]}.</p>
     </div>}
     {body?.enabled && body.watch && !alertId && <p className="text-muted-foreground">

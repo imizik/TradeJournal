@@ -17,6 +17,7 @@ final ``LATENESS`` seconds after it closes; its close is what Tradier's
 """
 
 from datetime import date, datetime
+from urllib.parse import quote, urlencode
 
 from app.engine.chart_adjust import factor_before
 from app.engine.chart_math import ET
@@ -76,6 +77,25 @@ def _clock(stamp: float, seconds: bool = True) -> str:
     moment = datetime.fromtimestamp(stamp, ET)
     text = moment.strftime("%I:%M:%S %p" if seconds else "%I:%M %p").lstrip("0")
     return f"{text} ET"
+
+
+PLAN_ROLES = ("entry", "invalidation")
+
+
+def plan_message(symbol: str, role: str, investigation: str, event: dict) -> tuple[str, str, str]:
+    """A confirmed copilot plan's entry trigger or invalidation: title, body, and the investigation's link with the
+    owner's question prefilled (``/copilot-lab?investigation=…&context=…``; the lab never sends it on its own)."""
+    level, at = _price(event["level"]), datetime.fromtimestamp(event["event_at"], ET).strftime("%H:%M")
+    if role == "entry":
+        title, body = f"{symbol} entry trigger hit", f"{symbol} hit your {level} entry trigger. Still valid? Tap to check."
+        ask = f"My entry trigger hit at {level} ({at}). Is the plan still valid? Check the chart and group now."
+    else:
+        title, body = f"{symbol} invalidation broke", f"{symbol} broke your {level} invalidation. Your plan says out."
+        ask = f"My invalidation broke at {level} ({at}). My plan says out. Check the chart and group now."
+    late = event["detected_at"] - event["event_at"]
+    if late > 120:
+        body += f" Noticed {round(late / 60)} min after it happened."
+    return title, body, "/copilot-lab?" + urlencode({"investigation": investigation, "context": ask}, quote_via=quote)
 
 
 def message(alert: dict, event: dict) -> tuple[str, str]:

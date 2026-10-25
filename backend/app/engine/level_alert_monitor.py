@@ -66,12 +66,13 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
-                 positions=None, nudges=None):
+                 positions=None, nudges=None, time_stops=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.positions = positions  # Open-trade give-back and expiry alerts, when POSITION_ALERTS_ENABLED
         self.nudges = nudges  # Unplanned-entry plan nudges, when PLAN_NUDGE_ENABLED
+        self.time_stops = time_stops  # Copilot plans' time stops, when PLAN_TIME_STOPS_ENABLED
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -144,11 +145,18 @@ class LevelAlertMonitor:
                             finally:
                                 await asyncio.to_thread(self.positions.deliver)
                     finally:
-                        if self.nudges is not None:
-                            try:
-                                await asyncio.to_thread(self.nudges.run)
-                            finally:
-                                await asyncio.to_thread(self.nudges.deliver)
+                        try:
+                            if self.nudges is not None:
+                                try:
+                                    await asyncio.to_thread(self.nudges.run)
+                                finally:
+                                    await asyncio.to_thread(self.nudges.deliver)
+                        finally:
+                            if self.time_stops is not None:
+                                try:
+                                    await asyncio.to_thread(self.time_stops.run)
+                                finally:
+                                    await asyncio.to_thread(self.time_stops.deliver)
 
     async def _run_alerts(self) -> None:
         await self._record_found()
@@ -371,15 +379,23 @@ class LevelAlertMonitor:
                 event.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
                 return
-            title, body = level_alerts.message(
-                {"symbol": alert.symbol, "condition": alert.condition, "interval": alert.interval, "direction": alert.direction, "label": alert.label},
-                {"level": event.level, "price": event.price, "event_at": _epoch(event.event_at), "source": event.source,
-                 "bar_time": event.bar_time, "detected_at": _epoch(event.detected_at)})
+            fired = {"level": event.level, "price": event.price, "event_at": _epoch(event.event_at), "source": event.source,
+                     "bar_time": event.bar_time, "detected_at": _epoch(event.detected_at)}
+            investigation = _uuid(alert.source_id) if alert.source_kind == "copilot" else None
+            if investigation and alert.plan_role in level_alerts.PLAN_ROLES:
+                # One of a confirmed plan's levels: the message names the plan, and the tap opens its investigation
+                # with the question ready (never sent on its own).
+                title, body, path = level_alerts.plan_message(alert.symbol, alert.plan_role, investigation, fired)
+            else:
+                title, body = level_alerts.message(
+                    {"symbol": alert.symbol, "condition": alert.condition, "interval": alert.interval, "direction": alert.direction, "label": alert.label},
+                    fired)
+                # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
+                path = f"/copilot-lab?investigation={investigation}" if investigation else None
             event.attempts += 1
             try:
-                if alert.source_kind == "copilot" and _uuid(alert.source_id):
-                    # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
-                    ntfy.publish(title, body, path=f"/copilot-lab?investigation={_uuid(alert.source_id)}", direct_click=True)
+                if path:
+                    ntfy.publish(title, body, path=path, direct_click=True)
                 else:
                     ntfy.publish(title, body, path="/charts")
             except ntfy.NtfyError as exc:
@@ -419,7 +435,7 @@ def alert_rows(db: Session, limit: int = 50) -> list[dict]:
         rows.append({
             "id": str(alert.id), "symbol": alert.symbol, "price": alert.price, "created_on": alert.created_on.isoformat(),
             "condition": alert.condition, "interval": alert.interval, "session": alert.session, "direction": alert.direction,
-            "source_kind": alert.source_kind, "source_id": alert.source_id, "label": alert.label, "state": alert.state,
+            "source_kind": alert.source_kind, "source_id": alert.source_id, "label": alert.label, "plan_role": alert.plan_role, "state": alert.state,
             "armed_at": int(_epoch(alert.armed_at)),
             "event": None if event is None else {
                 "level": event.level, "price": event.price, "source": event.source, "event_at": int(_epoch(event.event_at)),
@@ -431,7 +447,7 @@ def alert_rows(db: Session, limit: int = 50) -> list[dict]:
 
 
 def create_alert(db: Session, *, symbol: str, price: float, reference: float, condition: str, interval: str | None,
-                 session: str, source_kind: str, source_id: str | None, label: str, now: float) -> LevelAlert:
+                 session: str, source_kind: str, source_id: str | None, label: str, now: float, plan_role: str | None = None) -> LevelAlert:
     """Validate and save one alert. Raises ValueError with what the user should read."""
     way = level_alerts.direction(reference, price)
     if way is None:
@@ -453,7 +469,7 @@ def create_alert(db: Session, *, symbol: str, price: float, reference: float, co
         if (other.symbol, other.condition, other.interval, other.created_on) == (symbol, condition, interval, today) and abs(other.price - price) < 1e-6:
             raise ValueError("This alert is already set.")
     alert = LevelAlert(symbol=symbol, price=price, created_on=today, condition=condition, interval=interval, session=session,
-                       direction=way, source_kind=source_kind, source_id=source_id, label=label[:level_alerts.LABEL_MAX],
+                       direction=way, source_kind=source_kind, source_id=source_id, label=label[:level_alerts.LABEL_MAX], plan_role=plan_role,
                        created_at=_utc(now), armed_at=_utc(now))
     db.add(alert)
     db.commit()

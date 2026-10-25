@@ -28,7 +28,10 @@ const TURN = sse([
 ]);
 
 type Server = { alerts: object[]; posts: { path: string; body: Record<string, unknown> }[]; failAlert?: (body: Record<string, unknown>) => boolean;
-  failCapture?: boolean; last?: number };
+  failCapture?: boolean; last?: number; stops?: object[]; reads?: Record<string, object> };
+// The server's reading of a time stop; anything not listed stays a note.
+const DUE = Date.UTC(2026, 9, 24, 19, 30) / 1000;
+const READ = (server: Server, text: string) => server.reads?.[text] ?? { due_at: null, reason: "No time or length in it, so it stays a note.", enabled: true };
 
 async function lab(page: Page, server: Server, { alertsSupported = true, defaultAccount = ROTH as string | null } = {}) {
   const post = (path: string, route: Route) => server.posts.push({ path, body: route.request().postDataJSON() });
@@ -46,6 +49,15 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     post("captures", route);
     if (server.failCapture) return route.fulfill({ status: 503, json: { detail: "The database is busy." } });
     return route.fulfill({ status: 201, json: { id: "c1", ...route.request().postDataJSON() } });
+  });
+  await page.route("**/copilot/time-stops/preview?*", (route) =>
+    route.fulfill({ json: READ(server, new URL(route.request().url()).searchParams.get("text") ?? "") }));
+  await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: server.stops ?? [], enabled: false } }));
+  await page.route("**/copilot/time-stops", (route) => {
+    post("time-stops", route);
+    const body = route.request().postDataJSON();
+    server.stops = [{ id: "t1", symbol: body.symbol, text: body.text, due_at: DUE, delivery: "scheduled", trade_id: null, error: null, delivered_at: null }];
+    return route.fulfill({ status: 201, json: { time_stops: server.stops, enabled: false } });
   });
   await page.route("**/charts/alerts", (route) => {
     if (route.request().method() !== "POST") return route.fulfill({ json: { alerts: server.alerts, phone: true } });
@@ -102,10 +114,11 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   expect(typeof capture.client_id).toBe("string");
   expect(posts(server, "alerts")).toEqual([
     { symbol: "NBIS", price: 95.9, reference: 94.35, condition: "closes_beyond", interval: "5m", session: "regular",
-      source_kind: "copilot", source_id: INV, label: "NBIS entry: 5m close beyond 95.9" },
+      source_kind: "copilot", source_id: INV, label: "NBIS entry: 5m close beyond 95.9", plan_role: "entry" },
     { symbol: "NBIS", price: 92.1, reference: 94.35, condition: "crosses", interval: null, session: "regular",
-      source_kind: "copilot", source_id: INV, label: "NBIS invalidation: crosses 92.1" },
+      source_kind: "copilot", source_id: INV, label: "NBIS invalidation: crosses 92.1", plan_role: "invalidation" },
   ]);
+  expect(posts(server, "time-stops")).toEqual([]); // a time stop the server does not read as a time stays a note
   await expect(card.getByLabel("Thesis")).toBeDisabled(); // the saved plan is what the card shows now
   await expect(page.getByRole("region", { name: "Linked to this investigation" })).toContainText("NBIS invalidation: crosses 92.1");
 });
@@ -192,4 +205,67 @@ test("the plan card fits a 375 px phone with large tap targets, and Dismiss remo
   await card.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByRole("region", { name: "Proposed trade plan" })).toHaveCount(0);
   expect(server.posts).toEqual([]);
+});
+
+test("a time stop read as a time is previewed before Confirm and set as a timed ping; other words stay a note", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [], reads: {
+    "out by 15:30 if the entry has not worked": { due_at: DUE, when: "today 15:30 ET", enabled: false },
+    "2 days": { due_at: DUE + 2 * 86400, when: "Mon Oct 26, 15:30 ET", enabled: false } } };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  const reading = card.getByLabel("When it pings");
+  await expect(reading).toHaveText("Pings today 15:30 ET if you hold NBIS then, from an entry after this plan. Time-stop pings are off on this server for now.");
+  await card.getByLabel("Time stop").fill("when it feels wrong");
+  await expect(reading).toHaveText("Kept as a note: No time or length in it, so it stays a note.");
+  await card.getByLabel("Time stop").fill("2 days");
+  await expect(reading).toContainText("Pings Mon Oct 26, 15:30 ET if you hold NBIS then");
+  await card.screenshot({ path: test.info().outputPath("time-stop-preview.png") });
+  expect(server.posts).toEqual([]); // reading the words saves nothing
+
+  await card.getByRole("button", { name: "Confirm" }).click();
+  const results = card.getByRole("list", { name: "Plan results" });
+  await expect(results).toContainText("Time stop: done");
+  await expect(results).toContainText("Set for Mon Oct 26, 15:30 ET.");
+  await expect(card.getByRole("status")).toHaveText("Plan confirmed.");
+  const [stop] = posts(server, "time-stops");
+  expect(stop).toMatchObject({ investigation_id: INV, symbol: "NBIS", text: "2 days" });
+  expect(stop.client_id).toBe(posts(server, "captures")[0].client_id); // one card, one plan, one time stop
+  expect(posts(server, "captures")[0].wording).toContain("Time stop: 2 days.");
+
+  const linked = page.getByRole("region", { name: "Linked to this investigation" });
+  await expect(linked).toContainText("Entry · armed");
+  await expect(linked).toContainText("Invalidation · armed");
+  await expect(linked).toContainText("Time stop · pending");
+  await expect(linked).toContainText("Time-stop pings are off on this server.");
+});
+
+test("a plan alert's link opens its investigation with the question ready, and the linked activity shows what fired", async ({ page }) => {
+  const fired = { level: 95.9, price: 95.93, source: "stream", event_at: DUE - 4 * 3600, detected_at: DUE - 4 * 3600, delivery: "sent", attempts: 1, delivered_at: DUE - 4 * 3600, error: null };
+  const plan = { symbol: "NBIS", created_on: "2026-10-24", session: "regular", source_kind: "copilot", source_id: INV, armed_at: 1, interval: null };
+  const server: Server = { alerts: [
+    { ...plan, id: "a1", price: 95.9, condition: "crosses", direction: "up", label: "NBIS entry: crosses 95.9", plan_role: "entry", state: "fired", event: fired },
+    { ...plan, id: "a2", price: 92.3, condition: "crosses", direction: "down", label: "NBIS invalidation: crosses 92.3", plan_role: "invalidation", state: "active", event: null },
+    { ...plan, id: "a3", price: 97, condition: "touches", direction: "up", label: "Copilot watch", plan_role: null, state: "active", event: null },
+  ], posts: [], stops: [
+    { id: "t1", symbol: "NBIS", text: "out by 15:30", due_at: DUE, delivery: "sent", trade_id: "t", error: null, delivered_at: DUE },
+    { id: "t2", symbol: "NBIS", text: "2 days", due_at: DUE, delivery: "skipped", trade_id: null, error: "No open NBIS position opened after the plan, so nothing was sent.", delivered_at: null },
+  ] };
+  const chats: string[] = [];
+  page.on("request", (request) => { if (request.url().endsWith("/copilot/chat")) chats.push(request.url()); });
+  await lab(page, server);
+  const ask = "My entry trigger hit at 95.90 (10:41). Is the plan still valid? Check the chart and group now.";
+  await page.goto(`/copilot-lab?investigation=${INV}&context=${encodeURIComponent(ask)}`);
+  await expect(page.getByText("NBIS plan (draft).")).toBeVisible();
+  await expect(page.getByLabel("Message")).toHaveValue(ask);
+  const linked = page.getByRole("region", { name: "Linked to this investigation" });
+  await expect(linked).toContainText("Entry · hit");
+  await expect(linked).toContainText("fired");
+  await expect(linked).toContainText("Invalidation · armed");
+  await expect(linked).toContainText("Alert · armed"); // a plain copilot watch keeps its own wording
+  await expect(linked).toContainText("Time stop · sent");
+  await expect(linked).toContainText("Time stop · skipped");
+  await expect(linked).toContainText("No open NBIS position opened after the plan, so nothing was sent.");
+  await linked.screenshot({ path: test.info().outputPath("plan-linked-activity.png") });
+  await page.waitForTimeout(300);
+  expect(chats).toEqual([]); // the question waits: a turn costs money
 });

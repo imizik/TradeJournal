@@ -22,11 +22,13 @@ def configured() -> bool:
     return bool(os.environ.get("NTFY_URL", "").strip())
 
 
-def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...] = ("bell",), path: str = "", direct_click: bool = False) -> str | None:
+def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...] = ("bell",), path: str = "", direct_click: bool = False,
+            more: tuple[tuple[str, str], ...] = ()) -> str | None:
     """Send one notification; raises ``NtfyError`` when ntfy did not accept it.
     Tapping the notification opens it in ntfy, where the full text shows; ``path``
     is appended to ``ALERT_APP_URL`` for an "Open app" button on the notification.
-    Position alerts opt into ``direct_click`` to open that same URL on tap.
+    Position alerts opt into ``direct_click`` to open that same URL on tap, and ``more`` adds (label, path)
+    buttons after it (ntfy shows at most three).
     Returns ntfy's message ID when its reply carries one: proof ntfy accepted it, not that a phone showed it."""
     url = os.environ.get("NTFY_URL", "").strip()
     if not url:
@@ -34,7 +36,8 @@ def publish(title: str, message: str, *, priority: int = 4, tags: tuple[str, ...
     target = urlsplit(url)
     body: dict = {"topic": target.path.strip("/"), "title": title, "message": message, "priority": priority, "tags": list(tags)}
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        body["actions"] = [{"action": "view", "label": "Open app", "url": app_url.rstrip("/") + path}]
+        body["actions"] = [{"action": "view", "label": label, "url": app_url.rstrip("/") + link}
+                           for label, link in (("Open app", path), *more)]
         if direct_click:
             body["click"] = app_url.rstrip("/") + path
     headers = {"Content-Type": "application/json"}

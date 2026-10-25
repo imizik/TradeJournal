@@ -8,7 +8,7 @@ untouched.
 
 ## What runs
 
-- `GET /copilot/status` and `POST /copilot/chat` (Server-Sent Events) in
+- `GET /copilot/status`, `POST /copilot/chat` (Server-Sent Events) and `POST /copilot/transcribe` in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
   (`frontend/components/copilot/CopilotLab.tsx`). It is in the nav ("Copilot") only for the owner while the lab is on.
 - One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
@@ -20,6 +20,36 @@ untouched.
   - The nav, every panel and every Ask copilot button share one
     `/copilot/status` read per page load (`lib/copilot.ts` `copilotStatus`,
     `useCopilotOn`).
+- **Hold to talk** (`frontend/components/copilot/VoiceInput.tsx`, every
+  variant): a 44 px mic beside Send, shown only while the lab is on and
+  something can listen.
+  - Press and hold to talk, release to transcribe. A short tap switches to
+    tap-to-stop. Sliding off the button, Cancel, a hidden page or closing the
+    panel drops the clip unsent. A clip stops at 30 seconds and is
+    transcribed. A live timer shows while it listens. A refused microphone
+    says how to allow it.
+  - "Auto-send what I say" (default on, remembered in this
+    browser) sends the words as soon as they are transcribed, after anything
+    already in the box. Off, or while a turn is running, the words wait in
+    the box with "Review the message, then Send."
+  - `POST /copilot/transcribe` (owner-only like every `/copilot` route)
+    takes either `audio` (with `audio_ms`), capped like voice plans at
+    3 MB and 30 seconds, or `text`. Audio goes to the voice-plan Whisper
+    transcriber (`app/engine/transcribe.py` `transcribe_bytes`). Whisper is
+    primed with the owner's most-traded tickers, then Radar's. The clip
+    sits in a temporary file only while it is read. Neither audio nor words
+    are logged or stored. `text` is what the browser's own recognition
+    heard: when `GET /copilot/status`
+    `capabilities.transcriber.configured` is false the page uses
+    `webkitSpeechRecognition`/`SpeechRecognition` instead (iOS Safari has
+    it). With neither, there is no mic. An unconfigured server answers 503
+    with the reason.
+  - Spoken tickers (`app/engine/spoken_tickers.py`): "N-B-I-S", "en bee eye
+    ess", "en bis", "N-BIS" and company names ("Nebius", "applied digital")
+    become the symbol when it is in Radar's universe or the owner's traded
+    tickers. Names come from the AI buildout seed. A phrase changes only
+    when exactly one known symbol fits, so "I see you are why" and
+    "coherent" stay as heard.
 - Entry points (nothing is ever sent until the owner presses Send):
   - **Plan a trade** (`frontend/components/copilot/PlanATrade.tsx`): the
     primary-styled way in, so an impulse gets pressure-tested before the
@@ -61,7 +91,11 @@ untouched.
     characters) in the message box.
   - **Trade page:** a closed trade offers "Review with copilot" next to
     "Open on chart", which deep-links with `Review this trade: <trade id>` as
-    the context (Review a closed trade, below).
+    the context; an open one offers "Ask copilot about this position" with
+    `Review this position: <trade id>` (Review a trade or position, below).
+  - **Position alerts:** with the lab on, each position alert push carries an
+    "Ask copilot" action beside "Open app" that deep-links with the alert's
+    context (Review a trade or position, below).
   - **Phone:** the off-by-default unplanned-entry nudge deep-links here with
     `Plan this position: …` when a new position has no plan (see the
     [feature map](agent/feature-map.md), "Unplanned-entry plan nudge").
@@ -126,8 +160,8 @@ untouched.
   - `get_trades(symbol, limit ≤ 10)` lists recent closed trades in one symbol,
     newest first: entry and exit time and price, P&L in $ and percent of the
     premium paid, hold time and up to 4 tags of at most 24 characters.
-  - `get_trade_review(trade_id)` reviews one closed trade
-    (`backend/app/ai/copilot_review.py`; Review a closed trade, below).
+  - `get_trade_review(trade_id)` reviews one closed trade or open position
+    (`backend/app/ai/copilot_review.py`; Review a trade or position, below).
   - Journal times (`opened_at`, entry and exit) are New York wall-clock times,
     emitted with their offset (for example `-04:00` in summer, `-05:00` in
     winter), never as UTC. Days held count from that moment. Option marks
@@ -184,8 +218,8 @@ untouched.
   position). "Nothing here changes the plan" and "not worth a trade" are
   complete answers.
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
-  context block (below); memory proposals (Confirm a plan); closed-trade
-  reviews (Review a closed trade); plans, and pressure-testing a trade the
+  context block (below); memory proposals (Confirm a plan); trade and
+  position reviews (Review a trade or position); plans, and pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
@@ -297,18 +331,25 @@ Background research jobs get neither this tool nor `propose_plan`. They read
 untrusted pages and can fetch URLs, so injected text must not make them read
 another investigation by id.
 
-## Review a closed trade
+## Review a trade or position
 
 On a closed (or expired) trade's page, while the lab is on, **Review with
 copilot** opens `/copilot-lab?symbol=<ticker>&context=Review this trade: <trade
-id>`. The message box holds `Context: Review this trade: <id>`, unsent; the
-owner sends it, adding a question if they like. The system prompt asks the
-model to call:
+id>`. On an open trade's page **Ask copilot about this position** opens it with
+`Review this position: <trade id>`: the primary action inside the selected
+alert a position alert's link opens (`TradePhoneAlerts.tsx`), a header link
+otherwise. The position alert push itself carries an **Ask copilot** ntfy
+action next to Open app (both need `ALERT_APP_URL`; this one also
+`COPILOT_ENABLED=true`), whose context adds what the alert saw, e.g.
+`Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
+(at most 300 characters, `position_alerts.ask_copilot_path`). The message box
+holds the context, unsent; the owner sends it, adding a question if they like.
+The system prompt asks the model to call:
 
 - `get_trade_review(trade_id)` (read-only, provenance `saved`). The id is
-  checked as a UUID; an unknown id is refused, and an open or Webull trade
-  reads `unavailable`. It returns, each section labelled like the owner
-  context pack:
+  checked as a UUID; an unknown id is refused, and a Webull trade reads
+  `unavailable`. For a closed trade it returns, each section labelled like the
+  owner context pack:
   - `trade` (measured): contract, account label, quantity, entry and exit
     (New York wall clock with its offset), prices, premium paid, P&L in $ and
     %, hold minutes, status, expired worthless, and how many entry and exit
@@ -328,7 +369,19 @@ model to call:
     only;
   - `comparison` (measured): the symbol's latest four other closed trades, as
     `get_trades` shows them, without the account.
-- Then the model compares what the plan assumed with what happened, keeps
+- For an open position it returns `trade` (no exit or P&L yet), `plan`,
+  `alerts` (what followed so far: `still_open` until the contracts close) and
+  `comparison`, plus `now`: the mark and open P&L in $ and % through
+  `copilot_book.position_rows` (the dashboard's quote engine; a missing quote
+  says so), minutes and days held (calendar time, weekends included), days
+  to expiry and expires-today, the give-back
+  watch's peak gain, the $ given back from it and its state, and the latest
+  alert (kind, time, gain at the alert). No `path` or `habits` until it
+  closes. The prompt asks the model to lead with the decision now (the fourth
+  question: thesis vs position), compare with the plan's invalidation and
+  time stop if one was captured, and never tell the owner to sell or hold as
+  an order.
+- Then, for a closed trade, the model compares what the plan assumed with what happened, keeps
   thesis apart from execution, says when one trade cannot support a lesson,
   and proposes a memory only if the owner states one.
 - The review is held under 5,800 characters (inside a tool result's 6,000):
@@ -339,12 +392,15 @@ model to call:
   owner's own message. Research jobs never get the tool, and "What changed?"
   leaves it out of an investigation's evidence times, as it does the owner
   context.
-- Fixture mode serves a simulated review marked `simulated`; replay says it is
-  unavailable (the journal now would show what happened after the frozen
-  moment). The fake model answers "review this trade" with a UUID by calling
-  the tool and writing a short scripted comparison.
+- Fixture mode serves a simulated review marked `simulated` (the open NBIS
+  call for `copilot_fixture.OPEN_REVIEW_ID`, a closed one for any other id);
+  replay says it is unavailable (the journal now would show what happened
+  after the frozen moment). The fake model answers "review this trade" or
+  "review this position" with a UUID by calling the tool and writing a short
+  scripted comparison or decision-now summary.
 - Tests: `backend/tests/test_copilot_review.py`,
-  `frontend/e2e/copilot-review.spec.ts`.
+  `backend/tests/test_position_alerts.py` (the push action),
+  `frontend/e2e/copilot-review.spec.ts`, `frontend/e2e/position-copilot.spec.ts`.
 
 ## Confirm a plan
 
@@ -408,9 +464,11 @@ nothing exists until the owner confirms.
     and a plan whose price is already past its invalidation is refused.
   - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
     thesis, entry and invalidation prices, time stop and size as editable
-    fields with phone-sized tap targets. Confirm runs three parts, each with
-    its own result; a failed part says why and offers a retry of that part
-    only:
+    fields with phone-sized tap targets. Under the time stop it shows when it
+    would ping, read by the server (`GET /copilot/time-stops/preview`), or
+    "Kept as a note" when the words hold no time. Confirm runs three parts
+    (four with a time stop it can read), each with its own result; a failed
+    part says why and offers a retry of that part only:
     - **Pre-trade plan:** the existing `POST /charts/captures`, mode
       `discretionary`, side from direction and instrument (`buy_stock`,
       `short_stock`, `buy_calls`, `buy_puts`), `setup_label` "Copilot plan",
@@ -424,10 +482,50 @@ nothing exists until the owner confirms.
     - **Entry alert** and **Invalidation alert:** exactly as a watch confirms:
       a fresh `GET /copilot/quote`, then `POST /charts/alerts` with
       `source_kind="copilot"`, the investigation id and the labels
-      "NBIS entry: …" and "NBIS invalidation: …". They run only once the plan
-      is saved, and an invalidation the fresh price has already crossed is
-      refused rather than armed on the wrong side. Without alert support the
-      card says so and Confirm saves only the plan.
+      "NBIS entry: …" and "NBIS invalidation: …", plus `plan_role` (`entry` or
+      `invalidation`, a nullable `level_alert` column only a `copilot` alert
+      may carry). They run only once the plan is saved, and an invalidation
+      the fresh price has already crossed is refused rather than armed on the
+      wrong side. Without alert support the card says so and Confirm saves
+      only the plan.
+    - **Time stop:** `POST /copilot/time-stops` with the card's client id (a
+      retry returns the first row), the investigation id, the symbol and the
+      words, re-read on the server and saved in `plan_time_stop`
+      (`backend/app/engine/plan_time_stops.py`).
+  - **Follow-through.** A plan's pings name the plan:
+    - When its entry or invalidation alert fires, the phone says
+      "NBIS hit your 95.90 entry trigger. Still valid? Tap to check." or
+      "NBIS broke your 92.30 invalidation. Your plan says out." The tap opens
+      `/copilot-lab?investigation=<id>&context=…`: the investigation, with
+      the owner's question ("My entry trigger hit at 95.90 (10:41). Is the
+      plan still valid? Check the chart and group now.") in the message box,
+      unsent. Delivery is the level alerts' own outbox. A copilot watch with
+      no role keeps the plain level message. The open P&L is not added: no
+      mark is stored for it, and reading one at send time would add a quote
+      call to the alert path.
+    - The **time stop** is read as a clock time (`out by 15:30`, `15:30`,
+      `3:30pm`; a bare 1-8 o'clock is the afternoon) at the next regular
+      session that still has it ahead, today when it can be; a length in
+      minutes or hours (`45m`, `2h`, up to 6½ hours) from the Confirm, no
+      later than today's close and only while today's session is open; or a
+      number of days (`2 days`, up to 30) as that many trading days ahead at
+      15:30 ET (half an hour before an early close). The market calendar is
+      published only through the current month, so a day count landing in a
+      later month skips weekends but not that month's holidays or early
+      closes; the preview shows the date. A time outside regular hours, a
+      length that reads as a candle or an offset ("5m closes under 92", "10
+      minutes before the close"), or words with neither stay a note in the
+      plan's wording.
+    - At its time, if a position in the symbol whose first entry came after
+      the plan is still open (Webull left out), one ntfy ping says
+      "NBIS time stop: you planned to be out by 15:30." and opens the trade.
+      Otherwise it is recorded `skipped` and nothing is sent. Delivery is at
+      most once, as plan nudges': a send that may have reached ntfy is
+      `unknown` and never resent, and one not judged or sent within 15
+      minutes of its time `expired`. It runs on the level alert monitor's
+      loop only while `PLAN_TIME_STOPS_ENABLED=true` (default off); the card
+      and the routes work either way and say when pings are off.
+    - Tests: `backend/tests/test_plan_follow_through.py`.
   - Fixture demo: "plan a trade" in the owner's words makes the fake model
     read the quote and the 5m chart and propose a long-calls plan (entry on a
     5m close above the nearest level overhead, invalidation through the
@@ -435,11 +533,15 @@ nothing exists until the owner confirms.
   - Browser proof: `frontend/e2e/copilot-trade-plan.spec.ts`.
 - **Linked activity:** under an open investigation, the lab lists its level
   alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
-  (armed, or fired with a time and price), and its revisit jobs. Both come
-  from their own routes; there is no new store.
+  (armed, or fired with a time and price; a plan's as "Entry · armed/hit" and
+  "Invalidation · armed/hit"), its plan time stops (pending, sent, skipped
+  with why, not sent, or may have sent) and its revisit jobs, each from its
+  own route (`GET /copilot/time-stops?investigation=<id>` for time stops).
 - Proposal cards live in the conversation on screen, not in the saved
   transcript. A confirmed step remains as linked activity.
-- `/copilot-lab?investigation=<id>` opens that saved investigation.
+- `/copilot-lab?investigation=<id>` opens that saved investigation with
+  "What changed?" ready; with `&context=…` (a plan alert's link) that text is
+  ready instead.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 

@@ -32,9 +32,12 @@ class AlertCreate(BaseModel):
     source_kind: str = Field(pattern="^(level|drawing|auto|copilot)$")  # copilot: confirmed in the Copilot Lab, source_id = its investigation
     source_id: str | None = Field(default=None, max_length=80)
     label: str = Field(default="", max_length=120)
+    plan_role: str | None = Field(default=None, pattern="^(entry|invalidation)$")  # one of a confirmed copilot plan's levels
 
     @model_validator(mode="after")
     def copilot_needs_its_investigation(self):
+        if self.plan_role is not None and self.source_kind != "copilot":
+            raise ValueError("Only a Copilot Lab plan's alert has a plan role.")
         # Its notification links to /copilot-lab?investigation=<source_id>: only a real investigation id goes there.
         if self.source_kind == "copilot":
             try:
@@ -77,7 +80,8 @@ def add_alert(body: AlertCreate, request: Request, db: Session = Depends(get_ses
     _positive(body.price, body.reference)
     try:
         create_alert(db, symbol=symbol, price=body.price, reference=body.reference, condition=body.condition, interval=body.interval,
-                     session=body.session, source_kind=body.source_kind, source_id=body.source_id, label=body.label.strip(), now=time.time())
+                     session=body.session, source_kind=body.source_kind, source_id=body.source_id, label=body.label.strip(), now=time.time(),
+                     plan_role=body.plan_role)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
     _changed(request)
