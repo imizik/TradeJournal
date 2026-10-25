@@ -154,12 +154,124 @@ def test_a_linked_plan_means_no_nudge(engine, world):
     assert nudges(engine) == []
 
 
-def test_a_suggested_plan_means_no_nudge(engine, world):
+def test_a_suggested_plan_sends_a_link_ping_not_a_nudge(engine, world, monkeypatch):
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw)))
     clock, nudger = world
-    plan(engine, utc("09:58"))  # captured two minutes before the entry, not linked yet
+    plan(engine, utc("09:58"), setup_label="Group recovery")  # captured two minutes before the entry, not linked yet
     buy(engine, "10:00")
     tick(clock, nudger, "10:05")
-    assert nudges(engine) == []
+    [row] = nudges(engine)
+    assert (row.kind, row.delivery) == ("link", "pending")
+    nudger.deliver()
+    with Session(engine) as db:
+        trade_id = db.exec(select(Trade.id)).one()
+        assert capture_links.for_trade(db, trade_id) == []  # the ping links nothing: the owner's tap does
+    [(title, body, kw)] = sent
+    assert title == "NBIS 10/23 100C filled"
+    assert body == 'Link it to your plan "Group recovery" (captured 9:58)? Tap to confirm.'
+    assert kw["path"] == f"/plans/link?trade={trade_id}" and kw["direct_click"] is True
+    # Once per position: the next pass sends nothing more of either kind.
+    tick(clock, nudger, "10:10")
+    nudger.deliver()
+    assert len(nudges(engine)) == 1 and len(sent) == 1
+
+
+def test_several_suggested_plans_say_how_many(engine, world, monkeypatch):
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw)))
+    clock, nudger = world
+    plan(engine, utc("09:57"), setup_label="Group recovery")
+    plan(engine, utc("09:59"), setup_label="Copilot plan")
+    plan(engine, utc("09:30"), setup_label="Too early")  # outside the window: not a candidate
+    buy(engine, "10:00")
+    tick(clock, nudger, "10:05")
+    nudger.deliver()
+    [(_, body, _)] = sent
+    assert body == "2 of your saved plans match it. Tap to choose the one to link."
+
+
+def test_a_link_ping_whose_plan_was_linked_meanwhile_is_skipped(engine, world, monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **kw: pytest.fail("sent after the owner linked it"))
+    clock, nudger = world
+    capture = plan(engine, utc("09:58"))
+    buy(engine, "10:00")
+    tick(clock, nudger, "10:05")
+    with Session(engine) as db:
+        capture_links.link(db, db.get(TradeCapture, capture.id), db.exec(select(Trade.id)).one())
+    nudger.deliver()
+    [row] = nudges(engine)
+    assert row.delivery == "skipped" and "linked or set aside" in row.last_error
+
+
+def test_link_pings_share_the_cap_and_leave_webull_out(engine, world, monkeypatch):
+    monkeypatch.setenv("PLAN_NUDGE_DAILY_CAP", "1")
+    clock, nudger = world
+    plan(engine, utc("09:58"))
+    buy(engine, "10:00")
+    buy(engine, "10:01", ticker="CRWV", side="buy", qty=10, price=120)  # no plan: a nudge, but past the cap
+    with Session(engine) as db:
+        db.add(TradeCapture(client_id="wb", received_at=utc("09:58"), account_id=WEBULL, account_label="Webull", underlying="NBIS",
+                            side="buy_calls", instrument="option", mode="discretionary", context_state="unavailable", image_state="unavailable"))
+        db.commit()
+    buy(engine, "10:00", account=WEBULL)
+    tick(clock, nudger, "10:05")
+    rows = nudges(engine)
+    assert sorted((r.ticker, r.kind, r.delivery) for r in rows) == [("CRWV", "no_plan", "skipped"), ("NBIS", "link", "pending")]
+    assert all(r.account_id == ROTH for r in rows)
+
+
+def _link_client(engine):
+    app = FastAPI()
+    app.include_router(position_alerts_router.router, prefix="/trades")
+
+    def session():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_session] = session
+    return TestClient(app)
+
+
+def test_the_link_page_lists_the_position_and_its_plans_with_only_the_ids_it_needs(engine, world):
+    inv = "7d3f1b2a-0000-4000-8000-000000000abc"
+    first = plan(engine, utc("09:58"), setup_label="Copilot plan", note="Thesis: holds the group.",
+                 context_json=f'{{"state":"unavailable","investigation_id":"{inv}"}}')
+    second = plan(engine, utc("10:00"), setup_label="Group recovery")
+    buy(engine, "10:00")
+    with Session(engine) as db:
+        trade_id = db.exec(select(Trade.id)).one()
+    client = _link_client(engine)
+    body = client.get(f"/trades/{trade_id}/plan-link").json()
+    assert body["trade"] == {"id": str(trade_id), "ticker": "NBIS", "contract": "NBIS 10/23/26 100C", "status": "open", "opened": "opened",
+                             "fill": "2 at $3.10", "opened_at": int(at("10:00")), "opened_at_reliable": True}
+    assert [(c["capture_id"], c["setup"], c["timing"], c["investigation_id"]) for c in body["candidates"]] == [
+        (str(first.id), "Copilot plan", "pre_entry", inv), (str(second.id), "Group recovery", "unverified", None)]
+    assert body["linked"] == [] and body["plan_path"].startswith("/copilot-lab?symbol=NBIS&context=Plan%20this%20position")
+    # No account, fill or client ids: only the trade, plan and investigation ids the page links with.
+    text = str(body)
+    for stray in (str(ROTH), first.client_id, "gmail:"):
+        assert stray not in text
+    assert set(body["candidates"][0]) == {"capture_id", "setup", "mode", "wording", "note", "received_at", "timing", "investigation_id"}
+    # Linked through the existing route: the page then shows it linked and offers nothing to link.
+    with Session(engine) as db:
+        capture_links.link(db, db.get(TradeCapture, first.id), trade_id)
+    after = client.get(f"/trades/{trade_id}/plan-link").json()
+    assert after["candidates"] == [] and [c["capture_id"] for c in after["linked"]] == [str(first.id)]
+    assert client.get(f"/trades/{UUID(int=999)}/plan-link").status_code == 404
+
+
+def test_the_link_page_route_is_owner_only():
+    from app.access_manifest import DOMAIN_ROUTES
+    from app.engine import access
+
+    operation = "GET /trades/{trade_id}/plan-link"
+    assert operation in DOMAIN_ROUTES
+    for granted in (access.JOURNAL_PATHS, access.MARKET_PATHS, access.PRACTICE_PATHS, access.SAMPLE_WRITER_PATHS, *access.SERVICE_PATHS.values()):
+        assert operation not in granted
 
 
 def test_a_plan_marked_not_taken_does_not_cover_it(engine, world):

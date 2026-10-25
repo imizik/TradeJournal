@@ -80,7 +80,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     try {
       let text: string;
       if (part === "plan") {
-        await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note });
+        await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note, investigation_id: investigationId });
         text = "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.";
       } else if (part === "timeStop") {
         await saveTimeStop(clientId.current, investigationId!, plan.symbol, stopText);

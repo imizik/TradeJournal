@@ -317,10 +317,12 @@ export const listTimeStops = (investigationId: string, signal?: AbortSignal) =>
 /** A confirmed plan is the owner's pre-trade plan: the existing capture route, discretionary, named "Copilot plan", so
  * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
  * save returns the first plan instead of making a second. */
-export const savePlanCapture = (body: { client_id: string; underlying: string; account_id: string; side: CaptureSide; wording: string; note: string }) =>
+export const savePlanCapture = ({ investigation_id, ...body }: { client_id: string; underlying: string; account_id: string; side: CaptureSide;
+  wording: string; note: string; investigation_id: string | null }) =>
   request<Capture>("/charts/captures", { method: "POST", body: JSON.stringify({
     ...body, client_captured_at: Date.now(), mode: "discretionary", setup_label: "Copilot plan",
-    context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card." }, image: false }) });
+    // The investigation rides in the context, so the one-tap link page can open it after linking.
+    context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card.", ...(investigation_id ? { investigation_id } : {}) }, image: false }) });
 export const listAlerts = (signal?: AbortSignal) => request<AlertsPayload>("/charts/alerts", { signal });
 /** A confirmed memory is saved through the existing Jo memory store as the owner's own statement (they edited and
  * confirmed the words), active at once, with the investigation it came from as its reference. */

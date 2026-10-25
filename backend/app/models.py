@@ -584,8 +584,9 @@ class PositionAlert(SQLModel, table=True):
 
 
 class PlanNudge(SQLModel, table=True):
-    """One unplanned-entry phone nudge (``engine/plan_nudges.py``), written once per
-    position: the unique position anchor keeps a restart or a second process from
+    """One plan phone ping for a new position (``engine/plan_nudges.py``): the
+    unplanned-entry nudge, or the one-tap link ping when a saved plan is suggested
+    for it. Written once per position: the unique position anchor keeps a restart or a second process from
     recording it twice. Delivery is an outbox on the same row, as position alerts are."""
 
     __tablename__ = "plan_nudge"
@@ -597,6 +598,8 @@ class PlanNudge(SQLModel, table=True):
     account_id: uuid.UUID
     source_key: str = Field(index=True)  # the first entry fill's source identity
     trade_id: uuid.UUID  # the trade when it fired (trades are rebuilt; read by source_key)
+    # no_plan: plan it now; link: a saved plan is suggested for it, tap to link (the owner's tap is the link)
+    kind: str = Field(default="no_plan", sa_column_kwargs={"server_default": "no_plan"})
     ticker: str
     contract: str  # e.g. "NBIS 11/21/26 100C"
     side: str  # the first entry's opening side
