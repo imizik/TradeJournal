@@ -45,7 +45,9 @@ def initialize(directory, *, saved=True, peer=None):
     os.environ.update(
         DATABASE_URL=url, MIGRATION_DATABASE_URL=url, PYTHON_DOTENV_DISABLED="1"
     )
-    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    # Config() with no file name, as conftest.py does: alembic.ini's fileConfig() would disable every logger already
+    # created in this pytest worker, and a later caplog test in the same worker would see nothing.
+    config = Config()
     config.set_main_option(
         "script_location", str(Path(__file__).resolve().parents[1] / "alembic")
     )

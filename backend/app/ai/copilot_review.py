@@ -320,8 +320,7 @@ WEEK_PROVENANCE = {
     "planned": "measured: the week's trades by whether a plan was captured and linked, and when (owner-said plans, measured timing)",
     "follow_through": "measured: planned trades against their plan's invalidation alert and the fills; the plan's time stops and what followed",
     "alerts": "measured: phone alerts sent for the week's trades and what the fills show happened after each",
-    "pings": "measured: every phone ping the app's notification policy judged that week, by kind: sent or held, and whether the "
-             "fills or a plan link show it was acted on",
+    "pings": "measured: the week's pings by kind, sent or held, and acted on (fills or a plan link)",
     "habits": "measured: the behavior audit's four exit habits this week against the trades before alerts went live; associations, not rules",
     "exits": "measured: the week's best and worst exits by option give-back from peak and by P&L",
 }
@@ -512,7 +511,7 @@ def _week_pings(db, start: datetime, end: datetime) -> dict:
     from app.engine import capture_links, notification_policy
     out = notification_policy.week_summary(db, capture_links.entry_utc(start), capture_links.entry_utc(end))
     if not out["sent"] and not out["held"]:
-        return {"state": "not_applicable", "reason": "No phone pings were judged that week."}
+        return {"state": "not_applicable", "reason": "No pings."}
     return out
 
 
@@ -602,6 +601,7 @@ def _week_steps(review: dict):
                 for row in ((review.get("exits") or {}).get(key) or {}).get(side, []):
                     row.pop("note", None)
     follow = review.get("follow_through") or {}
+    yield lambda: (review.get("pings") or {}).pop("then", None)
     yield lambda: review.pop("provenance", None)
     yield lambda: (follow.get("time_stops") or {}).pop("rows", None)
     yield lambda: follow.pop("hits", None)

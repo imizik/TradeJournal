@@ -1,13 +1,13 @@
 """Notification policy (additive): one row per copilot-side phone ping and its decision.
 
 Revision ID: f3b7d1e9a2c4
-Revises: e5a9c3d7f2b4
+Revises: b9e4d2a7c1f3
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "f3b7d1e9a2c4"
-down_revision = "e5a9c3d7f2b4"
+down_revision = "b9e4d2a7c1f3"
 branch_labels = None
 depends_on = None
 

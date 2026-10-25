@@ -12,7 +12,7 @@ from app.engine import radar_proof
 from app.engine.chart_math import ET
 from app.engine.radar_proof import brief_timing, movers_timing, verdict
 from app.engine.radar_store import RadarStore
-from app.models import MorningBriefingPacket, MorningBriefingRecord
+from app.models import MorningBriefingPacket, MorningBriefingRecord, RadarAlert
 from app.routers import radar
 from tests.test_browser_access import boundary  # noqa: F401  (the shared access fixture)
 
@@ -142,6 +142,15 @@ def test_build_over_a_seeded_store(tmp_path, db):
     # AAA on the 22nd was briefed that morning; on the 21st Radar had it a day before the brief. The redacted CCC brief is ignored.
     assert out["brief"] == {"radar_first": 2, "brief_first": 1, "not_in_brief": 1}
     assert out["verdict"]["verdict"] == "not_enough_data" and out["verdict"]["rated"] == 2
+    assert out["alerted"] == {"events": 0, "ratings": {"useful": 0, "already_knew": 0, "too_late": 0, "irrelevant": 0, "unrated": 0}}
+
+    # Phone pings: a sent (or unknown) ping counts the event as alerted; a skipped or pending one does not.
+    for event_id, delivery in (("e1", "sent"), ("e2", "unknown"), ("e3", "skipped"), ("e5", "pending")):
+        db.add(RadarAlert(event_id=event_id, session_date=DAY, rule_version="radar-rules-v0", kind="relative_to_spy", subject="AAA",
+                          title="Radar: AAA", body="b", first_seen_at=datetime(2026, 10, 22, 14), delivery=delivery))
+    db.commit()
+    out = radar_proof.build(RadarStore(tmp_path / "radar.sqlite", read_only=True), db, UNIVERSE)
+    assert out["alerted"] == {"events": 2, "ratings": {"useful": 1, "already_knew": 0, "too_late": 1, "irrelevant": 0, "unrated": 0}}
 
 
 def test_build_with_no_events(tmp_path, db):
