@@ -215,6 +215,9 @@ missing history/budget, time and attempt caps, both locks, reservation-before-
 launch, all-attempt counting, failure/restart behavior and unchanged scheduled
 selection. It forbids real model, provider, evaluation, notification and git
 operations. `test_strategy_factory.py` covers physical stage isolation and the
-frozen spec identity with synthetic bars. These fixtures do not establish live
+frozen spec identity with synthetic bars. The S1 research family is registered
+by the research CLI, not the shared engine, preserving Studio's frozen runtime
+dependency set. Test imports restore CLI environment changes and never load
+the real backend environment file. These fixtures do not establish live
 adoption, process recovery under every host failure, strategy performance or
 paper/live execution readiness.

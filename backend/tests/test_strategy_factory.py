@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import random
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -503,3 +504,23 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
     assert len(computed) == 10
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {"changed000.json"}
+
+
+def test_research_family_registration_stays_out_of_frozen_engine():
+    import subprocess
+
+    code = """
+import sys
+from app.engine import factory_rules
+assert 's1_research' not in factory_rules.FAMILIES
+assert 'app.engine.factory_search_family' not in sys.modules
+import strategy_factory
+from app.engine.factory_search_family import ScannerFamily
+assert factory_rules.FAMILIES['s1_research'] is ScannerFamily
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=BACKEND,
+        env={**os.environ, "PYTHONPATH": str(BACKEND / "scripts")},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -1,12 +1,16 @@
 """Offline opportunity pilot: causal packets, frozen choices and hidden outcomes."""
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 from datetime import date
 import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-import factory_opportunities as op
+# CLI bootstrap must not leak provider settings into other test modules.
+with patch("dotenv.dotenv_values", return_value={}), patch.dict(os.environ):
+    import factory_opportunities as op
 from tests.test_factory import bar
 from app.engine.factory_data import Series, Split
 

@@ -93,6 +93,10 @@ from app.engine.factory_rules import (  # noqa: E402
     spec_id,
 )
 from app.engine.market_map import ET, Bar, bars_from_alpaca, resample  # noqa: E402
+from app.engine.factory_search_family import ScannerFamily  # noqa: E402
+
+# Research CLI registration stays outside the shared/frozen Studio engine.
+FAMILIES["s1_research"] = ScannerFamily
 
 RESEARCH = REPO_ROOT / "research"
 LEDGER = RESEARCH / "ledger.jsonl"

@@ -1,6 +1,8 @@
 """Frozen intake through the official supervisor, with invented ledger/jobs only."""
 import fcntl
 import json
+import os
+from unittest.mock import patch
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +11,9 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-import factory_search as search  # noqa: E402
+# CLI bootstrap must not leak provider settings into other test modules.
+with patch("dotenv.dotenv_values", return_value={}), patch.dict(os.environ):
+    import factory_search as search
 
 SPEC = Path(__file__).resolve().parents[2] / 'research/specs/opening_range_breakout_rvol2_v1.json'
 
