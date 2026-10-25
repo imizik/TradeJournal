@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, Loader2, Mic, Pencil, Plus, Settings2, Square, Trash2, X } from "lucide-react";
 import { addTemplate, CaptureRejected, chartImage, CLIP_MS, editTemplate, FAVORITE_SIDES, MORE_SIDES, newClientId, OPTION_SIDES, outboxDurable, recordingType, removeTemplate, saveDefaultAccount, send, SIDE_LABEL } from "@/lib/captures";
 import type { Capture, CaptureBody, CaptureContext, CaptureSetup, CaptureSide, OutboxItem } from "@/lib/captures";
+import PlanATrade from "@/components/copilot/PlanATrade";
 
 /** What the chart can give a plan at the moment it is saved: its state and its picture. */
 export type ChartSnapshot = { context: CaptureContext; canvas: HTMLCanvasElement | null; imageNote: string };
@@ -230,6 +231,10 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
   const sideButton = (value: CaptureSide) => <button key={value} type="button" aria-pressed={side === value} onClick={() => { setSide(value); setError(""); }}
     className={`rounded-md border px-2.5 text-xs ${narrow ? "min-h-11" : "min-h-8"} ${side === value ? "border-sky-400 bg-sky-400/15 text-sky-100" : "border-slate-700 text-slate-300 hover:bg-slate-800"}`}>{SIDE_LABEL[value]}</button>;
   const accountLabel = accounts.find((row) => row.id === account)?.label;
+  // What has been chosen and typed so far, for the copilot to argue with before the entry (cut to the link's limit).
+  const optionSide = !!side && OPTION_SIDES.has(side);
+  const typed = [symbol, side && SIDE_LABEL[side], optionSide && strike && `${strike} strike`, optionSide && expiration && `exp ${expiration}`, quantity && `qty ${quantity}`,
+    note.trim() && `Note: ${note.trim()}`, chosen ? `${chosen.setup_label}: ${chosen.wording}` : discretionary && "Discretionary, no explicit plan"].filter(Boolean).join(" · ");
   const transcriber = setup?.transcriber;
 
   const panel = <div ref={dialog} role="dialog" aria-modal="true" aria-label="Plan trade" tabIndex={-1} onKeyDown={onKey}
@@ -314,6 +319,9 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
       {error && <p role="alert" className="text-[11px] leading-4 text-amber-300">{error}</p>}
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">{accountLabel ? `${symbol} · ${accountLabel}` : `${symbol} · no account chosen`}</span>
+        {/* Enter on the link follows it rather than saving the plan. */}
+        <span data-own-enter className="contents"><PlanATrade symbol={symbol} line={`pressure-test my plan before I enter. ${typed}`} title="Open the copilot with this plan to argue with it before you enter. Nothing is sent until you press Send."
+          className={`inline-flex shrink-0 items-center rounded-md border border-sky-500/60 px-3 text-xs font-medium text-sky-200 hover:bg-sky-500/15 ${narrow ? "h-11" : "h-8"}`}>Pressure-test with copilot</PlanATrade></span>
         {stuck ? <button type="button" data-own-enter onClick={() => void deliver(stuck)} disabled={saving} className={`inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-3 text-xs font-medium text-amber-100 hover:bg-amber-500/30 ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}Retry</button>
           : <button type="button" data-own-enter onClick={() => void submit()} disabled={!canSave} title={canSave ? "Save plan (Enter)" : "Choose what you are taking and a plan"}
             className={`inline-flex items-center gap-1.5 rounded-md bg-sky-500 px-3 text-xs font-medium text-white hover:bg-sky-400 disabled:bg-slate-700 disabled:text-slate-400 ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}{saving ? "Saving…" : "Save plan"}</button>}

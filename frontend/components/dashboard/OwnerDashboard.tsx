@@ -6,6 +6,7 @@ import { getPositionMarketValue } from "@/lib/dashboard";
 import { closedInPeriod, recentCloses, weekStart } from "@/lib/dashboardSummary";
 import { money } from "@/lib/format";
 import DashboardActions from "@/components/DashboardActions";
+import PlanATrade from "@/components/copilot/PlanATrade";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
 import DataFreshness from "./DataFreshness";
@@ -31,7 +32,8 @@ type OwnerProps = {
 export function OwnerDashboardShell({ today, journal, attention }: { today: string; journal: ReactNode; attention: ReactNode }) {
   return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
     <header>
-      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1><DashboardActions /></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1>
+        <div className="flex flex-wrap items-center gap-2"><PlanATrade /><DashboardActions /></div></div>
       <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
     </header>
     <JoTodayLine today={today} />
