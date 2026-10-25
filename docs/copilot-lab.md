@@ -142,7 +142,8 @@ untouched.
   complete answers.
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
   context block (below); memory proposals (Confirm a plan); closed-trade
-  reviews (Review a closed trade); plans; SIMULATED;
+  reviews (Review a closed trade); plans, and pressure-testing a trade the
+  owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
 Tests pin the sentences other guards depend on (`tests/test_copilot_book.py`
@@ -297,7 +298,7 @@ model to call:
 ## Confirm a plan
 
 When asked for a plan, the model may call `propose_plan` (at most two per
-answer; one for a memory). The tool validates the proposal and writes nothing. The lab streams
+answer; one for a memory and one for a trade plan). The tool validates the proposal and writes nothing. The lab streams
 it as a `proposal` event and shows a card with **Confirm** and **Dismiss**;
 nothing exists until the owner confirms.
 
@@ -336,6 +337,49 @@ nothing exists until the owner confirms.
   and no alert support. The memory joins the owner context pack and
   `get_memories` from the next turn. `jo_briefing_common` is untouched: the
   memory store's schema, kinds and sources are the same as Jo's.
+- **Trade plan:** one whole plan for a trade the owner wants to take, the
+  card the "plan before you enter" loop ends in. When the owner says they
+  want to trade something, or the message starts with "Plan a trade" (the
+  front door's prefill), the system prompt has the model pressure-test it
+  first: ask only for what is missing (why now, where it is wrong, how long),
+  challenge it with the chart, the group comparison and the owner context
+  (their history and habits), and when they are vague ("yolo NBIS calls")
+  draft levels from `get_chart_context` rather than interrogate them. Then it
+  proposes one `trade_plan` (or says it is not worth a trade):
+  - `symbol`; `direction` (`long` = expects up, `short` = expects down);
+    `instrument` (`stock`, `calls` only when long, `puts` only when short);
+    an optional `contract` hint (text, at most 40); `thesis` (at most 300);
+    `entry_trigger` and `invalidation`, each a level as a watch takes it
+    (`condition`, positive `price`, `interval` for `closes_beyond`), a long's
+    invalidation below its entry and a short's above; optional `time_stop`
+    (at most 80) and `size_note` (at most 120).
+  - Like a watch, the symbol needs a current price in the turn's evidence,
+    and a plan whose price is already past its invalidation is refused.
+  - The card (`frontend/components/copilot/TradePlanCard.tsx`) shows the
+    thesis, entry and invalidation prices, time stop and size as editable
+    fields with phone-sized tap targets. Confirm runs three parts, each with
+    its own result; a failed part says why and offers a retry of that part
+    only:
+    - **Pre-trade plan:** the existing `POST /charts/captures`, mode
+      `discretionary`, side from direction and instrument (`buy_stock`,
+      `short_stock`, `buy_calls`, `buy_puts`), `setup_label` "Copilot plan",
+      `wording` built from the levels, time stop and size, and `note` holding
+      the thesis and contract hint, on the capture default account (or the
+      only one; the card asks when neither exists). A discretionary capture may
+      carry its own setup name and wording for this (`captures.build`). One
+      client id per card, so a retried save never makes a second plan. Capture
+      linking then suggests it for the trade when the fill arrives, and the
+      owner context pack and `get_trade_review` show it.
+    - **Entry alert** and **Invalidation alert:** exactly as a watch confirms:
+      a fresh `GET /copilot/quote`, then `POST /charts/alerts` with
+      `source_kind="copilot"`, the investigation id and the labels
+      "NBIS entry: …" and "NBIS invalidation: …". Without alert support the
+      card says so and Confirm saves only the plan.
+  - Fixture demo: "plan a trade" in the owner's words makes the fake model
+    read the quote and the 5m chart and propose a long-calls plan (entry on a
+    5m close above the nearest level overhead, invalidation through the
+    nearest one below).
+  - Browser proof: `frontend/e2e/copilot-trade-plan.spec.ts`.
 - **Linked activity:** under an open investigation, the lab lists its level
   alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
   (armed, or fired with a time and price), and its revisit jobs. Both come

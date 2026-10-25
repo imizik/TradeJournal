@@ -279,6 +279,10 @@ def build(db: Session, body: dict, *, mode_override: str | None = None) -> Trade
         raise CaptureError("Choose a template, or use Discretionary.")
     if mode == "discretionary" and template is not None:
         raise CaptureError("A discretionary plan has no template.")
+    # A discretionary plan may name itself and carry its own wording (a Copilot Lab plan card does); a template's are its own.
+    label = words = None
+    if mode == "discretionary" and (body.get("setup_label") or body.get("wording")):
+        label, words = _clean_template(str(body.get("setup_label") or ""), str(body.get("wording") or ""))
     context = body.get("context")
     context_text = json.dumps(context, separators=(",", ":")) if isinstance(context, dict) else "{}"
     if len(context_text) > CONTEXT_MAX:
@@ -288,7 +292,7 @@ def build(db: Session, body: dict, *, mode_override: str | None = None) -> Trade
         client_id=client_id, received_at=datetime.utcnow(), client_captured_at=_utc(body.get("client_captured_at")),
         account_id=account.id, account_label=account_label(account), underlying=symbol, side=side, instrument=SIDES[side],
         mode=mode, template_id=template.id if template else None, template_revision=template.revision if template else None,
-        setup_label=template.setup_label if template else None, wording=template.wording if template else None, note=note,
+        setup_label=template.setup_label if template else label, wording=template.wording if template else words, note=note,
         strike=_number(body.get("strike"), "strike") if SIDES[side] == "option" else None,
         expiration=_expiration(body.get("expiration")) if SIDES[side] == "option" else None,
         quantity=_number(body.get("quantity"), "quantity"),

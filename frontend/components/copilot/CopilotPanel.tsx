@@ -11,6 +11,7 @@ import { useAppAccess } from "@/components/AccessProvider";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
+import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -164,7 +165,7 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
       )}
       {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
       {status.backend === "plan" && !status.plan_configured && <span className="text-rose-300">Plan token or Agent SDK not set up</span>}
-      {!compact && <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed watch, revisit or memory exists only once you confirm it</span>}
+      {!compact && <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed plan, watch, revisit or memory exists only once you confirm it</span>}
     </p>
   );
 }
@@ -528,7 +529,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
-            {message.proposals?.map(proposal => (
+            {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
+              <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null}
+                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+            ) : (
               <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
             ))}

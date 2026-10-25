@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { createWatch, enqueueRevisit, freshQuote, operationId, saveMemory, type Proposal } from "@/lib/copilot";
+import { createWatch, enqueueRevisit, freshQuote, operationId, saveMemory, type PlanLevel, type Proposal } from "@/lib/copilot";
 
 const CONDITION: Record<string, string> = { touches: "touches", crosses: "crosses", closes_beyond: "closes beyond" };
 const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -10,13 +10,19 @@ const number = (value: number) => value.toLocaleString("en-US", { maximumFractio
 export function proposalText(proposal: Proposal): string {
   if (proposal.kind === "memory") return `${proposal.memory_kind}${proposal.symbol ? ` · ${proposal.symbol}` : ""}`;
   if (proposal.kind === "revisit") return `Research again in ${proposal.horizon_days} day${proposal.horizon_days === 1 ? "" : "s"}: ${proposal.question}`;
-  const close = proposal.condition === "closes_beyond" ? `${proposal.interval} close beyond` : CONDITION[proposal.condition];
-  return `${proposal.symbol} ${close} ${number(proposal.price)}`;
+  if (proposal.kind === "trade_plan") return `${proposal.symbol} ${proposal.direction} ${proposal.instrument}`;
+  return `${proposal.symbol} ${levelText(proposal)}`;
 }
+
+/** "crosses", "5m close beyond". */
+export const conditionText = (level: Pick<PlanLevel, "condition" | "interval">) =>
+  level.condition === "closes_beyond" ? `${level.interval} close beyond` : CONDITION[level.condition];
+/** "crosses 92.3", "5m close beyond 95.9". */
+export const levelText = (level: Pick<PlanLevel, "condition" | "price" | "interval">) => `${conditionText(level)} ${number(level.price)}`;
 
 /** A proposal from the model: nothing exists until the owner presses Confirm. */
 export default function ProposalCard({ proposal, investigationId, alertsSupported, onDone }: {
-  proposal: Proposal; investigationId: string | null; alertsSupported: boolean; onDone(): void;
+  proposal: Exclude<Proposal, { kind: "trade_plan" }>; investigationId: string | null; alertsSupported: boolean; onDone(): void;
 }) {
   const [phase, setPhase] = useState<"open" | "confirming" | "done" | "dismissed">("open");
   const [note, setNote] = useState<string | null>(null);
