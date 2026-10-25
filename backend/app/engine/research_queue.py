@@ -535,10 +535,14 @@ def gate(job_id: str, push: dict, session: Session | None = None):
 
 
 def mark_delivered(ticket, session: Session | None = None) -> None:
+    """Never raises: the ping went out, and the job's own ``sent`` record must follow whatever this bookkeeping does."""
     from app.engine import notification_policy
-    with _session(session) as db:
-        notification_policy.delivered(db, ticket, time.time())
-        db.commit()
+    try:
+        with _session(session) as db:
+            notification_policy.delivered(db, ticket, time.time())
+            db.commit()
+    except Exception:  # noqa: BLE001
+        log.warning("Research ping delivery could not be recorded on the notification policy", exc_info=True)
 
 
 def record_delivery(job_id: str, *, status: str, message_id: str | None = None, error: str | None = None,

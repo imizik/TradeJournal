@@ -14,6 +14,7 @@ const TONE: Record<ResearchJob["status"], string> = {
 
 const PING: Record<NonNullable<ResearchJob["notify"]>["status"], string> = {
   sent: "phone ping sent", sending: "phone ping sending", skipped: "no phone ping", failed: "phone ping failed",
+  held: "phone ping held by the notification policy",
 };
 
 /** A finished job's materiality and what happened to its phone ping. Read-only. */

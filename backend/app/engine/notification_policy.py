@@ -36,7 +36,10 @@ Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
 ``over_cap``), so the owner can see what was held back (the Dashboard Plans
 card's "held back today" line; each held sender row reads ``held`` with the
 reason). A database problem in the gate never holds a ping: the sender is told
-to send.
+to send. Known limit: a ``sent`` record whose send kept failing until the sender
+expired it stays ``sent`` without ``delivered_at``; it still counts toward the
+cap and the window (fewer pings, never more), and any text merged into it is
+recorded ``merged`` but never reaches the phone.
 
 ``ALERT_POLICY_ENABLED`` defaults to **true**: the policy only ever reduces
 pings, each sender's own switch still decides whether it runs at all, and a
