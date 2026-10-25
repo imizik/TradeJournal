@@ -15,12 +15,13 @@ only; nothing here is a market read the app does not already do. Three triggers:
   with no investigation;
 - ``earnings``: the next report inside two trading days.
 
-A trigger is written once per dedupe key, so a restart never fires it twice. One ping per symbol per day and
-``THESIS_WATCH_DAILY_CAP`` (default 4) a day; the rest are recorded ``skipped``. The ping opens the investigation with
+A trigger is written once per dedupe key, so a restart never fires it twice; a skipped one is keyed to its day, so
+the same signal can still be told on a later day. One ping per symbol per day and ``THESIS_WATCH_DAILY_CAP``
+(default 4) a day; the rest are recorded ``skipped``. The ping opens the investigation with
 the What-changed question prepared and unsent, or the lab on the symbol for a thesis with no investigation. With
 ``RESEARCH_QUEUE_ENABLED=true`` a fired trigger with an investigation also queues one ``reassess`` job through the
 research queue (its budget and its one-a-day key); the queue's own result ping is the only other notification.
-Headline text is third-party data: it is cleaned and goes into the ping body and the prepared question as text,
+Headline text is third-party data: it is cleaned, quoted in the prepared question and plain in the ping body,
 never anywhere as an instruction.
 """
 from __future__ import annotations
@@ -165,6 +166,12 @@ def _evidence_as_of(record: CopilotInvestigation) -> datetime | None:
                 moment = None
         elif isinstance(value, str):
             moment = stamp(value)
+            if moment is None:  # a naive ISO time: the lab writes UTC
+                try:
+                    parsed = datetime.fromisoformat(value)
+                    moment = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+                except ValueError:
+                    moment = None
         if moment is not None and (latest is None or moment > latest):
             latest = moment
     return latest
@@ -191,11 +198,13 @@ def watched_set(db: Session, limit: int = MAX_SYMBOLS) -> list[Watched]:
     open_records = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.status == "open",
                                                              col(CopilotInvestigation.symbol).is_not(None))
                            .order_by(col(CopilotInvestigation.updated_at).desc())).all()
-    for record in open_records:
+    # The owner's own latest open investigation is the one the ping re-checks; a research job's output (a
+    # reassessment's result) stands in only when he has none, and is never reassessed itself.
+    for record in sorted(open_records, key=lambda r: r.source != "copilot"):
         row = entry(record.symbol.upper())
-        if row.investigation is None:  # the newest open investigation is the one the ping re-checks
+        if row.investigation is None:
             as_of = _evidence_as_of(record)
-            row.investigation = {"id": str(record.id), "as_of": as_of,
+            row.investigation = {"id": str(record.id), "source": record.source, "as_of": as_of,
                                  "as_of_text": as_of.astimezone(ET).strftime("%b %-d %H:%M") if as_of else None}
             row.reasons.append("investigation")
     for memory in jo_briefing.memories(db, status="active", limit=200):
@@ -222,8 +231,8 @@ def prepared_question(row: Watched, text: str) -> str:
         tail = f". What changed? Use get_investigation_changes for investigation {row.investigation['id']} and say whether it still holds."
     else:
         tail = ". Does it still hold?"
-    room = CONTEXT_MAX - len("New since my thesis: ") - len(tail)
-    return f"New since my thesis: {_trim(text, max(20, room)).rstrip('.')}{tail}"
+    room = CONTEXT_MAX - len('New since my thesis: ""') - len(tail)
+    return f'New since my thesis: "{_trim(text, max(20, room)).rstrip(".")}"{tail}'
 
 
 def deep_link(row: Watched, text: str) -> str:
@@ -310,7 +319,13 @@ class ThesisWatch:
         candidates += self._earnings_candidates(rows, today, result["issues"])
         with Session(self.engine) as db:
             for candidate in candidates:
-                outcome = self._record(db, candidate, today, now)
+                try:
+                    outcome = self._record(db, candidate, today, now)
+                except Exception as exc:  # noqa: BLE001 - one trigger's failure must not lose the others this pass
+                    db.rollback()
+                    log.exception("Thesis watch could not record %s for %s", candidate.kind, candidate.row.symbol)
+                    result["issues"].append(f"{candidate.kind} {candidate.row.symbol} not recorded: {type(exc).__name__}")
+                    continue
                 if outcome is None:
                     continue
                 (result["fired"] if outcome["delivery"] in ("sent", "failed") else result["skipped"]).append(outcome)
@@ -343,11 +358,14 @@ class ThesisWatch:
 
     def _reference(self, row: Watched, quote: dict, today: date) -> tuple[float | None, str, str]:
         """(reference price, basis key, wording). An investigation's evidence as-of uses that day's cached minute
-        bars when the day is complete and stored; otherwise the prior close."""
+        bars when the day is complete and stored, else the prior close. Evidence from today has no reference: the
+        owner just read that price, so a move since the prior close would only repeat what he saw."""
         inv = row.investigation
         if inv and inv.get("as_of") is not None:
             as_of = inv["as_of"]
             day = as_of.astimezone(ET).date()
+            if day >= today:
+                return None, "", ""
             if day < today:
                 try:
                     bars = self.bars(row.symbol, day) or []
@@ -433,10 +451,13 @@ class ThesisWatch:
         """Write the trigger once (its key is unique), decide its delivery, send, and record the outcome.
         Returns the row's view, or None when the key was already written."""
         from app.engine import ntfy
-        if db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.dedupe_key == candidate.key)).first() is not None:
-            return None
         row = candidate.row
         day = today.isoformat()
+        # A delivered (or attempted) trigger keeps its key for good; a skipped one keeps it for the day only, so a
+        # cap or a missing ntfy does not swallow the signal when the same thing is still true tomorrow.
+        skipped_key = f"{candidate.key}#skipped:{day}"
+        if db.exec(select(ThesisWatchTrigger).where(col(ThesisWatchTrigger.dedupe_key).in_((candidate.key, skipped_key)))).first() is not None:
+            return None
         attempted = db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.day == day,
                                                             col(ThesisWatchTrigger.delivery).in_(("sending", "sent", "failed")))).all()
         reason = None
@@ -447,7 +468,7 @@ class ThesisWatch:
         elif not ntfy.configured():
             reason = "ntfy not configured"
         trigger = ThesisWatchTrigger(
-            symbol=row.symbol, kind=candidate.kind, dedupe_key=candidate.key,
+            symbol=row.symbol, kind=candidate.kind, dedupe_key=skipped_key if reason else candidate.key,
             investigation_id=uuid.UUID(row.investigation["id"]) if row.investigation else None,
             memory_id=uuid.UUID(row.memory_id) if row.memory_id and not row.investigation else None,
             held=row.held, day=day, fired_at=now.replace(tzinfo=None), text=candidate.text[:TEXT_MAX + 60],
@@ -467,7 +488,7 @@ class ThesisWatch:
             trigger.delivery = "sent"
         except Exception as exc:  # noqa: BLE001 - recorded, never retried: a failed push may still have been delivered
             trigger.delivery, trigger.reason = "failed", f"{type(exc).__name__}: {exc}"[:300]
-        if row.investigation and self._queue_enabled():
+        if row.investigation and row.investigation.get("source") == "copilot" and self._queue_enabled():
             trigger.reassess_job_id = self._queue_reassess(row.investigation["id"], candidate, day, db)
         db.add(trigger)
         db.commit()

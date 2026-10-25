@@ -230,7 +230,7 @@ def test_a_new_headline_pings_once_with_the_what_changed_link_and_dedupes_by_url
                            "path": phone.sent[0]["path"], "direct_click": True}]
     path, query = link(phone.sent[0]["path"])
     assert path == "/copilot-lab" and query["investigation"] == saved
-    assert query["context"].startswith("New since my thesis: Nebius wins $3B deal with Meta (Benzinga, 09:52). What changed? Use get_investigation_changes for investigation ")
+    assert query["context"].startswith('New since my thesis: "Nebius wins $3B deal with Meta (Benzinga, 09:52)". What changed? Use get_investigation_changes for investigation ')
     assert query["context"].endswith(f"{saved} and say whether it still holds.") and len(query["context"]) <= 300
     [row] = triggers(engine)
     assert row.delivery == "sent" and row.message_id == "msg-1" and str(row.investigation_id) == saved and row.memory_id is None
@@ -248,7 +248,7 @@ def test_a_thesis_with_no_investigation_links_the_symbol_with_the_question_prepa
     watch.run_once()
     path, query = link(phone.sent[0]["path"])
     assert path == "/copilot-lab" and query["symbol"] == "APLD" and "investigation" not in query
-    assert query["context"].startswith("New since my thesis: Applied Digital xxx") and query["context"].endswith("…. Does it still hold?")
+    assert query["context"].startswith('New since my thesis: "Applied Digital xxx') and query["context"].endswith('…". Does it still hold?')
     assert len(query["context"]) <= 300
     [row] = triggers(engine)
     assert row.memory_id == UUID(memory) and row.investigation_id is None and not row.held
@@ -404,6 +404,66 @@ def test_with_the_research_queue_on_a_fired_trigger_queues_one_reassess_job_a_da
         assert len(db.exec(select(ResearchJob)).all()) == 2
         assert str(db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.kind == "move")).one().reassess_job_id) == \
             str(db.exec(select(ResearchJob).where(ResearchJob.dedupe_key == f"reassess:{saved}:2026-10-23")).one().id)
+
+
+def test_a_skipped_move_or_earnings_comes_back_another_day_but_a_told_one_does_not(engine, world):
+    watch, readers, phone, clock = world
+    saved = investigate(engine, "NBIS", as_of=at("14:30", date(2026, 10, 19)).isoformat())
+    readers.bars[("NBIS", date(2026, 10, 19))] = [{"time": int(at("14:30", date(2026, 10, 19)).timestamp()), "close": 100.0}]
+    readers.quotes["NBIS"] = {"last": 105.0, "previous_close": 104.0}
+    readers.earnings = {"NBIS": "2026-10-23"}
+    readers.articles = [article("NBIS", "News first", "https://benzinga.com/f", at("09:50"))]
+    result = watch.run_once()  # the news ping takes the day; the move and the earnings are skipped
+    assert [f["kind"] for f in result["fired"]] == ["news"] and sorted(s["kind"] for s in result["skipped"]) == ["earnings", "move"]
+    assert {t.dedupe_key for t in triggers(engine) if t.delivery == "skipped"} == {
+        f"move:NBIS:evidence:{saved}:2026-10-19T18:30:00+00:00#skipped:2026-10-21", "earnings:NBIS:2026-10-23#skipped:2026-10-21"}
+    clock.now = at("10:15")
+    assert watch.run_once()["skipped"] == []  # the same day: written once
+    clock.now = at("10:00", date(2026, 10, 23))
+    watch._last_pass, readers.articles = None, []
+    result = watch.run_once()  # still +5% since that evidence: told now; earnings today takes the next day's one ping
+    assert [f["text"] for f in result["fired"]] == ["NBIS +5.0% since your investigation's evidence (Oct 19 14:30 NY): 100 → 105"]
+    assert [(s["kind"], s["reason"]) for s in result["skipped"]] == [("earnings", "already told today")]
+    clock.now = at("10:00", date(2026, 10, 26))
+    watch._last_pass = None
+    assert watch.run_once()["fired"] == [] and watch.run_once() is None  # told once for this evidence; nothing new
+
+
+def test_an_investigation_saved_today_has_no_move_reference_yet(engine, world):
+    watch, readers, phone, clock = world
+    investigate(engine, "NBIS", as_of=at("09:45").isoformat())  # the owner just read the price: no "since the prior close"
+    readers.quotes["NBIS"] = {"last": 106.0, "previous_close": 100.0}
+    assert watch.run_once()["fired"] == [] and triggers(engine) == []
+
+
+def test_the_owner_s_own_investigation_is_preferred_and_a_research_output_is_never_reassessed(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("RESEARCH_QUEUE_ENABLED", "true")
+    with Session(engine) as db:
+        own = inv.create(inv.InvestigationFields(title="NBIS thesis", symbol="NBIS"), session=db)["id"]
+        output = inv.save_research_result(title="Reassess: NBIS thesis", symbol="NBIS", findings={"summary": "holds"}, session=db)["id"]
+        only_output = inv.save_research_result(title="CRWV deal", symbol="CRWV", findings={"summary": "terms"}, session=db)["id"]
+    with Session(engine) as db:
+        rows = {r.symbol: r for r in thesis_watch.watched_set(db)}
+    assert rows["NBIS"].investigation["id"] == own and rows["CRWV"].investigation["id"] == only_output
+    readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n", at("09:50")), article("CRWV", "CoreWeave news", "https://benzinga.com/c", at("09:50"))]
+    watch.run_once()
+    with Session(engine) as db:
+        jobs = db.exec(select(ResearchJob)).all()
+    assert [j.dedupe_key for j in jobs] == [f"reassess:{own}:2026-10-21"]  # the research output is re-checked by tap only
+    assert link(phone.sent[1]["path"])[1]["investigation"] == only_output
+
+
+def test_one_trigger_s_failure_does_not_lose_the_others(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    thesis(engine, "APLD")
+    thesis(engine, "NBIS")
+    readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n", at("09:50")), article("APLD", "Applied news", "https://benzinga.com/a", at("09:50"))]
+    real = watch._queue_reassess
+    monkeypatch.setattr(thesis_watch, "deep_link", lambda row, text: (_ for _ in ()).throw(RuntimeError("boom")) if row.symbol == "NBIS" else f"/copilot-lab?symbol={row.symbol}")
+    result = watch.run_once()
+    assert result["issues"] == ["news NBIS not recorded: RuntimeError"] and [f["symbol"] for f in result["fired"]] == ["APLD"]
+    assert [t.symbol for t in triggers(engine)] == ["APLD"] and real is watch._queue_reassess
 
 
 # --------------------------------------------------------------------------- the lab's Open threads row
