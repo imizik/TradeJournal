@@ -24,6 +24,7 @@ from sqlmodel import select
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
 TODAY = datetime.now(ET).replace(hour=10, minute=5, second=0, microsecond=0)  # a journal wall clock, this morning
 NOW = TODAY + timedelta(minutes=48)
+STOCK_OPENED = NOW.astimezone(UTC) - timedelta(days=9)
 EXPIRY = (NOW + timedelta(days=12)).date()
 SECRETS = ("8267", "4242", "RH-55501234", "WB-99887766", str(ROTH), str(WEBULL))
 
@@ -57,7 +58,7 @@ def db(monkeypatch):
         session.add_all([
             fill(1, "NBIS", "buy_to_open", 2, 310, TODAY.replace(tzinfo=None), **call),          # open today: 2 calls at $3.10
             # Nine elapsed days, including when the interval crosses a DST change.
-            fill(2, "CRWV", "buy", 10, 120, (NOW.astimezone(UTC) - timedelta(days=9)).astimezone(ET).replace(tzinfo=None)),
+            fill(2, "CRWV", "buy", 10, 120, STOCK_OPENED.astimezone(ET).replace(tzinfo=None)),
             fill(3, "CRWV", "buy", 5, 100, TODAY.replace(tzinfo=None) - timedelta(days=20)),     # closed: +$50
             fill(4, "CRWV", "sell", 5, 110, TODAY.replace(tzinfo=None) - timedelta(days=20, hours=-5)),
             fill(5, "NBIS", "buy_to_open", 1, 200, TODAY.replace(tzinfo=None) - timedelta(days=3), **call),  # closed red
@@ -173,8 +174,7 @@ def test_days_held_uses_context_clock_at_elapsed_day_boundary(db, monkeypatch, m
 
     monkeypatch.setattr(copilot_book, "datetime", LaterWallClock)
     monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda _: None)
-    opened = (TODAY - timedelta(days=9)).astimezone(UTC)
-    as_of = opened + timedelta(days=9, minutes=minutes_from_boundary)
+    as_of = STOCK_OPENED + timedelta(days=9, minutes=minutes_from_boundary)
     pack = copilot_context.owner_context("CRWV", session=db, now=as_of)
     stock = next(row for row in pack["positions"]["positions"] if row["symbol"] == "CRWV")
     assert stock["days_held"] == expected_days
