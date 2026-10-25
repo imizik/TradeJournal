@@ -63,7 +63,9 @@ test("phone title bar: a compact chip, a 44px tap target, no sideways scroll", a
   await page.screenshot({ path: test.info().outputPath("plan-streak-phone.png"), animations: "disabled" });
   // The menu carries it too, for the charts page whose title bar gives its height to the chart.
   await page.getByRole("button", { name: /Open menu/ }).click();
-  await expect(page.getByRole("dialog", { name: "Menu" }).getByTestId("plan-streak-full")).toHaveText(/4 planned/);
+  const menuChip = page.getByRole("dialog", { name: "Menu" }).getByTestId("plan-streak-menu");
+  await expect(menuChip).toHaveText("4 planned");
+  expect((await menuChip.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });
 
 test("hidden until tracking is on or a plan exists", async ({ page }) => {

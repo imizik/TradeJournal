@@ -249,7 +249,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-foreground">Trade Journal</h2>
                 {owner && <SyncStatusLine />}
-                {owner && <PlanStreakChip onNavigate={() => setMenuOpen(false)} />}
+                {owner && <PlanStreakChip variant="menu" onNavigate={() => setMenuOpen(false)} />}
                 {/* The charts page hides the phone title bar; the Sync drawer stays reachable here. */}
                 {owner && <div className="mt-2 -ml-2"><SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => { setMenuOpen(false); setPanelOpen(true); }} /></div>}
               </div>

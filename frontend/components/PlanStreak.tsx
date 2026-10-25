@@ -76,16 +76,16 @@ function describe(s: PlanStreak): string {
 
 /**
  * The nav's plan streak chip, owner-only and hidden until tracking is on or a plan exists.
- * ``full`` sits in the sidebar and the phone menu, ``compact`` in the phone title bar, ``rail`` in the charts rail.
+ * ``full`` sits in the sidebar, ``menu`` in the phone menu, ``compact`` in the phone title bar, ``rail`` in the charts rail.
  */
-export default function PlanStreakChip({ variant = "full", onNavigate }: { variant?: "full" | "compact" | "rail"; onNavigate?: () => void }) {
+export default function PlanStreakChip({ variant = "full", onNavigate }: { variant?: "full" | "menu" | "compact" | "rail"; onNavigate?: () => void }) {
   const { owner } = useAppAccess();
   const data = useSyncExternalStore(owner ? subscribe : noop, owner ? read : none, none);
   if (!owner || !data?.show) return null;
   const lit = data.current > 0;
   const label = describe(data);
   // The rail and the phone title bar carry the count alone; the label says the rest.
-  const text = variant !== "full" ? `${data.current}`
+  const text = variant === "rail" || variant === "compact" ? `${data.current}`
     : lit ? `${data.current} planned`
     : !data.last_break ? "0 planned"
     : `0 planned · last: ${data.last_break.short} ${at(data.last_break.entry_time)}`;
@@ -93,7 +93,8 @@ export default function PlanStreakChip({ variant = "full", onNavigate }: { varia
     <Link href={REVIEW_WEEK} onClick={onNavigate} aria-label={label} title={variant === "rail" ? undefined : label} data-testid={`plan-streak-${variant}`}
       className={cn("flex shrink-0 items-center gap-1 rounded-md text-[11px] font-medium tabular-nums transition-colors hover:bg-secondary hover:text-foreground",
         lit ? "text-foreground" : "text-muted-foreground",
-        variant === "rail" ? "h-10 w-10 justify-center" : variant === "compact" ? "h-11 min-w-11 justify-center px-2" : "mt-1 -ml-1 min-w-0 max-w-full px-1 py-0.5")}>
+        variant === "rail" ? "h-10 w-10 justify-center" : variant === "compact" ? "h-11 min-w-11 justify-center px-2"
+          : variant === "menu" ? "mt-1 -ml-2 min-h-11 min-w-0 max-w-full px-2" : "mt-1 -ml-1 min-w-0 max-w-full px-1 py-0.5")}>
       <Flame aria-hidden className={cn("h-3.5 w-3.5 shrink-0", lit ? "text-amber-400" : "text-muted-foreground")} />
       <span className="truncate">{text}</span>
     </Link>
