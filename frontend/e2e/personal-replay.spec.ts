@@ -252,9 +252,17 @@ for (const mutation of ["choice", "reveal"] as const) {
   });
 }
 
-test("a delayed start cannot navigate away from the owner's newer destination", async ({ page }) => {
-  await page.goto("/practice");
-  await page.getByRole("link", { name: "Open a replay" }).click();
+test("a delayed start cannot navigate away from the owner's newer destination", async ({ page, request }) => {
+  const original = await create(request);
+  for (const checkpoint_id of ["first-look", "later-look"]) {
+    await request.post(`${API}/practice/replay/attempts/${original.attempt_id}/choice`, { data: { checkpoint_id, decision: "hold" } });
+    await request.post(`${API}/practice/replay/attempts/${original.attempt_id}/reveal`, { data: { checkpoint_id } });
+  }
+  await page.goto(`/practice/replay?attempt=${original.attempt_id}`);
+  await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
+  // Stay within the replay route: cross-document navigation may cancel fetch
+  // before there is any late response to exercise.
+  await page.evaluate(() => history.pushState({}, "", "/practice/replay"));
   let release!: () => void;
   let committed!: () => void;
   const waitForRelease = new Promise<void>(resolve => { release = resolve; });
@@ -268,10 +276,10 @@ test("a delayed start cannot navigate away from the owner's newer destination", 
   await page.getByRole("button", { name: "Start replay", exact: true }).click();
   await waitForCommit;
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "Daily Practice", exact: true })).toBeVisible();
+  await expect(page.getByText("Replay complete", { exact: true })).toBeVisible();
   const response = page.waitForResponse(res => res.url().endsWith("/practice/replay/attempts"));
   release();
   await response;
-  await page.getByRole("heading", { name: "Daily Practice", exact: true }).click();
-  await expect(page).toHaveURL(/\/practice$/);
+  await page.getByTestId("replay-comparison").getByText("Practice versus history").click();
+  await expect(page).toHaveURL(new RegExp(`attempt=${original.attempt_id}$`));
 });
