@@ -1,0 +1,166 @@
+"""The Copilot Lab's Plans board: each confirmed copilot plan that is still armed, nearest to a trigger first.
+
+A plan is what a plan card's Confirm left behind for one investigation: its
+entry and invalidation level alerts (``plan_role``, ``source_kind="copilot"``,
+``source_id`` = the investigation), its time stop and its pre-trade plan
+capture. Several plans in one investigation show as its latest: the parts made
+within ``PLAN_WINDOW`` before the newest one. The capture is the time stop's
+(they share the card's ``client_id``), else the newest "Copilot plan" capture
+for the symbol in that window.
+
+A plan is on the board while an alert is armed, its time stop is pending or
+the fill linked to its capture is an open position. Once its alerts have fired
+or been deleted and nothing is open it drops off, and still shows in its
+investigation (``LinkedActivity``). Read-only; the only id out is the
+investigation's. Last prices come from one batched quote read.
+"""
+
+from datetime import timedelta
+import uuid
+
+from sqlmodel import Session, select
+
+from app.engine import capture_links
+from app.engine.position_alerts import _epoch
+from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, TradeCapture
+
+PLAN_WINDOW = timedelta(minutes=10)
+PLAN_LABEL = "Copilot plan"  # the setup label the plan card saves its capture with
+LONG_SIDES = {"buy_stock", "buy_calls", "sell_puts"}
+THESIS_CHARS = 160
+
+
+def _thesis(note: str | None) -> str | None:
+    """The thesis from the note the plan card writes: ``Thesis: … [Contract: ….] From a Copilot Lab plan card.``"""
+    text = (note or "").strip()
+    if not text.startswith("Thesis: "):
+        return None
+    text = text[len("Thesis: "):]
+    for tail in (" Contract: ", " From a Copilot Lab plan card."):
+        if (cut := text.rfind(tail)) >= 0:
+            text = text[:cut]
+    return text.strip()[:THESIS_CHARS] or None
+
+
+def _level(alert: LevelAlert | None, last: float | None) -> dict | None:
+    if alert is None:
+        return None
+    out = {"price": alert.price, "condition": alert.condition, "interval": alert.interval,
+           "state": "armed" if alert.state == "active" else "hit"}
+    if alert.state == "active":
+        if last:
+            out.update(distance_usd=round(alert.price - last, 2), distance_pct=round((alert.price - last) / last * 100, 2))
+    else:
+        out["hit_at"] = int(_epoch(alert.fired_at)) if alert.fired_at else None
+    return out
+
+
+def _position(capture: TradeCapture | None, links: dict, suggested: dict) -> str:
+    """in_position | closed | fill_to_link (an open trade the capture is suggested for) | waiting (no fill yet)."""
+    if capture is None:
+        return "waiting"
+    link = links.get(capture.id, {}).get("link")
+    if link and link.get("trade_id"):
+        return "in_position" if link.get("status") == "open" else "closed"
+    if any(trade.get("status") == "open" for trade in suggested.get(capture.id, [])):
+        return "fill_to_link"
+    return "waiting"
+
+
+def _quotes(symbols: list[str]) -> tuple[dict[str, float], float | None, str | None]:
+    from app.engine.chart_feed import ChartFeedError, chart_feed
+    if not symbols:
+        return {}, None, None
+    try:
+        rows, fetched_at, issue = chart_feed.quote_rows(symbols)
+    except ChartFeedError as exc:
+        return {}, None, str(exc)
+    last = {r["symbol"]: r["last"] for r in rows if isinstance(r.get("last"), (int, float)) and r["last"] > 0}
+    return last, fetched_at, issue
+
+
+def board(db: Session) -> dict:
+    alerts = db.exec(select(LevelAlert).where(LevelAlert.source_kind == "copilot", LevelAlert.plan_role.is_not(None),
+                                              LevelAlert.source_id.is_not(None))).all()
+    stops = db.exec(select(PlanTimeStop)).all()
+    parts: dict[str, dict] = {}
+    for alert in alerts:
+        parts.setdefault(alert.source_id, {"alerts": [], "stops": []})["alerts"].append(alert)
+    for stop in stops:
+        parts.setdefault(stop.investigation_id, {"alerts": [], "stops": []})["stops"].append(stop)
+
+    plans = []
+    for investigation_id, found in parts.items():
+        newest = max([a.created_at for a in found["alerts"]] + [s.created_at for s in found["stops"]])
+        since = newest - PLAN_WINDOW
+        recent = sorted((a for a in found["alerts"] if a.created_at >= since), key=lambda a: a.created_at)
+        entry = next((a for a in reversed(recent) if a.plan_role == "entry"), None)
+        invalidation = next((a for a in reversed(recent) if a.plan_role == "invalidation"), None)
+        stop = max((s for s in found["stops"] if s.created_at >= since), key=lambda s: s.created_at, default=None)
+        symbol = (entry or invalidation or stop).symbol
+        plans.append({"investigation_id": investigation_id, "symbol": symbol, "entry": entry, "invalidation": invalidation,
+                      "stop": stop, "since": since, "newest": newest})
+
+    # The pre-trade plan each one saved, in two reads.
+    by_client = {c.client_id: c for c in db.exec(select(TradeCapture).where(
+        TradeCapture.client_id.in_([p["stop"].client_id for p in plans if p["stop"]]))).all()} if plans else {}
+    labelled = db.exec(select(TradeCapture).where(TradeCapture.setup_label == PLAN_LABEL, TradeCapture.mode == "discretionary",
+                                                  TradeCapture.underlying.in_({p["symbol"] for p in plans}))).all() if plans else []
+    for plan in plans:
+        capture = by_client.get(plan["stop"].client_id) if plan["stop"] else None
+        if capture is None:
+            capture = max((c for c in labelled if c.underlying == plan["symbol"] and plan["since"] <= c.received_at <= plan["newest"]),
+                          key=lambda c: c.received_at, default=None)
+        plan["capture"] = capture
+    captures = [p["capture"] for p in plans if p["capture"] is not None]
+    links = capture_links.link_rows(db, captures)
+
+    live = []
+    for plan in plans:
+        plan["position"] = _position(plan["capture"], links, {})
+        armed = any(a is not None and a.state == "active" for a in (plan["entry"], plan["invalidation"]))
+        pending = plan["stop"] is not None and plan["stop"].delivery == "scheduled"
+        if armed or pending or plan["position"] == "in_position":
+            live.append(plan)
+    # Only a plan still on the board asks whether an unlinked open trade looks like its fill.
+    waiting = [p["capture"] for p in live if p["capture"] is not None and p["position"] == "waiting"]
+    suggested = capture_links.suggestions(db, waiting)
+    for plan in live:
+        plan["position"] = _position(plan["capture"], links, suggested)
+
+    last, fetched_at, issue = _quotes(sorted({p["symbol"] for p in live}))
+    titles = {str(i.id): i.title for i in db.exec(select(CopilotInvestigation).where(
+        CopilotInvestigation.id.in_([_uuid(p["investigation_id"]) for p in live if _uuid(p["investigation_id"])]))).all()} if live else {}
+    rows = []
+    for plan in live:
+        price, capture, stop = last.get(plan["symbol"]), plan["capture"], plan["stop"]
+        if capture is not None:
+            direction = "long" if capture.side in LONG_SIDES else "short"
+        elif plan["entry"] and plan["invalidation"]:
+            direction = "long" if plan["entry"].price > plan["invalidation"].price else "short"
+        else:
+            direction = None
+        rows.append({
+            "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": direction,
+            "thesis": _thesis(capture.note if capture else None) or titles.get(plan["investigation_id"]),
+            "last": price, "entry": _level(plan["entry"], price), "invalidation": _level(plan["invalidation"], price),
+            "time_stop": {"text": stop.text, "due_at": int(_epoch(stop.due_at)),
+                          "state": "pending" if stop.delivery == "scheduled" else stop.delivery} if stop else None,
+            "position": plan["position"],
+        })
+    rows.sort(key=_nearest)
+    return {"plans": rows, "quotes_at": fetched_at, "quote_issue": issue}
+
+
+def _uuid(value: str) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
+
+
+def _nearest(row: dict) -> tuple:
+    """Nearest armed trigger first (by %), then plans waiting on a time stop by its time, then the rest."""
+    gaps = [abs(level["distance_pct"]) for level in (row["entry"], row["invalidation"]) if level and "distance_pct" in level]
+    stop = row["time_stop"]["due_at"] if row["time_stop"] and row["time_stop"]["state"] == "pending" else None
+    return (min(gaps) if gaps else float("inf"), stop if stop is not None else float("inf"), row["symbol"], row["investigation_id"])

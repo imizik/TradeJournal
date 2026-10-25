@@ -102,6 +102,28 @@ untouched.
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
+- **Plans**, at the top of the lab page's home, above Open threads (same
+  conditions: page only, lab on, nothing open or sent). One row per confirmed
+  copilot plan that is still armed: its entry or invalidation alert is armed,
+  its time stop is pending, or the fill linked to its pre-trade plan is an open
+  position. Each row shows the symbol and direction, the thesis in one line,
+  the last price, the distance to the entry and to the invalidation in % and
+  $ (or "hit at 10:41" once fired), the time stop, and the fill: in position,
+  fill to link (a matching open trade not yet linked to the plan), or waiting
+  for entry. Rows sort nearest to an armed trigger first; a tap opens the
+  plan's investigation in place. It reads `GET /copilot/plans`
+  (`app/engine/copilot_plans.py`): the `plan_role` alerts and time stops by
+  investigation, the plan capture (the time stop's `client_id`, else the
+  newest "Copilot plan" capture for the symbol made with them), its capture
+  link, and one batched quote read (`chart_feed.quote_rows`, as
+  `GET /copilot/quote`). An investigation with several plans shows its latest:
+  the parts made within ten minutes of the newest. The only id out is the
+  investigation's. It refreshes every minute while the page is visible. A plan
+  whose alerts have all fired or been deleted and with no open position drops
+  off, and still shows in its investigation (Linked to this investigation).
+  With nothing armed it says so beside the **Plan a trade** button. Browser
+  proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
+  check); route tests: `tests/test_copilot_plans.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation:

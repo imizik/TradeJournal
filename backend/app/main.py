@@ -435,6 +435,8 @@ from app.routers import copilot as copilot_router  # owner-only lab; handlers re
 app.include_router(copilot_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import plan_time_stops as plan_time_stops_router  # owner-only; pings only when PLAN_TIME_STOPS_ENABLED=true
 app.include_router(plan_time_stops_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import copilot_plans as copilot_plans_router  # owner-only Plans board on the lab home
+app.include_router(copilot_plans_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import research_jobs as research_jobs_router  # owner-only research queue; runner off by default
 app.include_router(research_jobs_router.router, prefix="/copilot/research-jobs", tags=["copilot lab"])
 
