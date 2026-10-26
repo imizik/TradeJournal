@@ -2,7 +2,7 @@
 
 Every copilot-side sender (open-trade alerts, plan nudges and link pings, plan
 time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-the automatic week review, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
+the automatic week review, Watch your day, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
 own expiry. Right before it hands a message to ``ntfy`` it asks this module one
 question, ``decide``: **send now, merge, or hold**. ``ntfy.py`` stays a
 transport. Jo's senders (Codex) are not gated here.
@@ -31,7 +31,7 @@ The policy, in the order it is applied:
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (and the
   90-minute last-day alert) > ``entry`` > ``hold_hour`` > ``nudge`` / ``link`` >
-  ``prep`` (and ``week_review``, ranked with it) > ``radar_event`` > ``thesis_watch`` > ``research``.
+  ``prep`` (and ``week_review`` and ``day_replay``, ranked with it) > ``radar_event`` > ``thesis_watch`` > ``research``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
 ``over_cap``), so the owner can see what was held back (the Dashboard Plans
@@ -75,7 +75,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "radar_event",
             "thesis_watch", "research")
-ALIASES = {"expiry_first": "time_stop", "link": "nudge", "no_plan": "nudge", "week_review": "prep"}
+ALIASES = {"expiry_first": "time_stop", "link": "nudge", "no_plan": "nudge", "week_review": "prep", "day_replay": "prep"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
 LOW_PRIORITY = 6  # ranks from here (nudge/link, prep, Radar, thesis watch, research) are held first
@@ -260,7 +260,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour",
             "time_stop": "time stop", "entry": "entry trigger", "invalidation": "invalidation", "nudge": "plan nudge",
-            "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review",
+            "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research"}.get(kind, kind)
 
 

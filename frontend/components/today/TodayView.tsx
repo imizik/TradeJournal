@@ -11,6 +11,7 @@ import { apiUrl } from "@/lib/api";
 import { copilotLabHref } from "@/lib/copilot";
 import { money } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import WatchDayLink from "@/components/replay/WatchDayLink";
 
 // GET /today (backend/app/routers/today.py): every section is built on its own; a failed one reads { state: "unavailable" }.
 type Unavailable = { state: "unavailable" };
@@ -194,6 +195,7 @@ export default function TodayView() {
       {body && <p className="text-xs text-muted-foreground" data-testid="today-as-of">As of {clock(body.as_of)} ET</p>}
       {body && error && <p className="text-xs text-amber-300">Not refreshed</p>}
       {body?.quote_issue && <p className="text-xs text-amber-300">Prices: {body.quote_issue}</p>}
+      {body && <WatchDayLink from={body.day} className="ml-auto inline-flex h-9 items-center gap-1.5 self-center rounded-md border px-3 text-sm font-medium hover:bg-muted/30" />}
     </div>
     {error && !body ? <p role="status" className="text-sm text-amber-300">Today could not load: {error}</p>
       : !body ? <p role="status" className="text-sm text-muted-foreground">Reading what matters now…</p>
