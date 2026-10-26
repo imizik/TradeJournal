@@ -22,7 +22,8 @@ SIDE = {"long": "call", "short": "put"}
 UNITS = ("Premiums are per share as quoted (bid, ask, mid); per_contract is per share x the contract's multiplier. "
          "spread_pct is (ask - bid) / mid. to_strike_pct is the strike's distance from the price; breakeven_move_pct is "
          "the move the underlying needs by expiry to break even paying the ask. Open interest is OCC's previous-close "
-         "figure; volume is today's so far.")
+         "figure; volume is today's so far. spot is the quote service's last price (cached up to a minute), read with "
+         "the chains; as_of is the oldest chain's read time.")
 NOTE = ("Real contracts to compare against the horizon, not a recommendation: present the trade-offs and let the owner "
         "choose. Delta and implied volatility are unavailable here and must not be estimated.")
 

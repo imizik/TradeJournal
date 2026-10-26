@@ -38,8 +38,9 @@ const TOOL_LABEL: Record<string, string> = {
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
 };
 
-/** The turn's latest get_option_candidates result for the plan's symbol and view, when the model asked for it. */
+/** The turn's latest get_option_candidates result for an options plan's symbol and view, when the model asked for it. */
 function candidatesFor(tools: ToolEvent[], plan: TradePlan): OptionCandidates | null {
+  if (plan.instrument === "stock") return null;
   const row = [...tools].reverse().find(t => t.name === "get_option_candidates" && t.status === "ok" && t.candidates
     && t.candidates.symbol === plan.symbol && t.candidates.direction === plan.direction);
   return row?.candidates ?? null;
@@ -580,7 +581,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin}
-                history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+                history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}
+                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
             ) : (
               <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
