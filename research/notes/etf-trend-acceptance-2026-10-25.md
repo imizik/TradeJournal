@@ -5,6 +5,11 @@ requested this packet; no evaluation, attempt or activation is authorized.
 This refines the [proposed design](strategy-research-path-2026-10-25.md), not the
 Factory protocol. No market price payloads or protected outcomes were opened.
 
+**October 26 decision update:** the [experiment decision packet](etf-trend-experiment-decision-2026-10-26.md)
+supersedes the proposed oldest-eligible selection and unspecified cash reference
+below. Its fixed roster and modeled-account assumptions are for review, not
+adopted rules. The fixture milestone is complete; more infrastructure is parked.
+
 ## Acceptance decision
 
 **GO for specification and synthetic accounting preparation; NO-GO for historical
