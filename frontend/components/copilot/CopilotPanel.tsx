@@ -3,10 +3,11 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt,
+  IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
 } from "@/lib/copilot";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import { useAppAccess } from "@/components/AccessProvider";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
@@ -96,6 +97,9 @@ function Evidence({ tools }: { tools: ToolEvent[] }) {
             </span>
           );
         })}
+        {tools.flatMap(tool => tool.looked_at ?? []).length > 0 && (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-foreground/80">Looked at: {tools.flatMap(tool => tool.looked_at ?? []).join(", ")}</span>
+        )}
         <span className="group-open:hidden">▸</span>
       </summary>
       <ul className="mt-1.5 space-y-1 border-l pl-3 text-muted-foreground">
@@ -104,6 +108,7 @@ function Evidence({ tools }: { tools: ToolEvent[] }) {
             <span className="text-foreground">{TOOL_LABEL[tool.name] ?? tool.name}</span>
             {tool.input ? ` (${Object.values(tool.input).flat().join(", ")})` : ""}: {tool.summary ?? tool.status}
             {tool.provenance && <> · {tool.provenance.source} · as of {asOfText(tool.provenance.as_of)}</>}
+            {tool.looked_at?.length ? <> · looked at the {tool.looked_at.join(" and ")}</> : null}
             {tool.ms !== undefined && <> · {tool.ms} ms</>}
           </li>
         ))}
@@ -198,8 +203,9 @@ function StatusLine({ status, error, model, onModel }: { status: CopilotStatus |
   );
 }
 
-/** ``origin``: what prompted the conversation (a Radar event, a ping, a page's Plan a trade); a confirmed plan records it. */
-export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null };
+/** ``origin``: what prompted the conversation (a Radar event, a ping, a page's Plan a trade); a confirmed plan records it.
+ * ``image``: a screenshot the phone's share sheet stored, attached to the first message and not sent. */
+export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null; image?: string | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
@@ -236,7 +242,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // The conversation's origin, from its link; a new or another investigation is the lab's own.
   const [origin, setOrigin] = useState<CaptureOrigin>(() => planOrigin(link?.origin, link?.context));
   const [messages, setMessages] = useState<LabMessage[]>([]);
-  const [draft, setDraft] = useState(opening);
+  const [draft, setDraft] = useState(link?.image ? `${opening}${IMAGE_PREFILL}` : opening);
+  // Screenshots for the next message: the server's id and this browser's thumbnail.
+  const [attached, setAttached] = useState<{ id: string; url: string }[]>(() => link?.image ? [{ id: link.image, url: imageUrl(link.image) }] : []);
+  const [attaching, setAttaching] = useState<{ state: "busy" | "error"; message?: string } | null>(null);
+  const picker = useRef<HTMLInputElement | null>(null);
   const [spoken, setSpoken] = useState(false); // the draft ends with words just heard, waiting for review
   const box = useRef<HTMLTextAreaElement | null>(null);
   // The page symbol the owner chose not to follow; a later change offers again.
@@ -410,7 +420,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol) {
-    const content = text.trim();
+    const shots = attached;
+    const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
     if (!content || busy || !status?.enabled) return;
     // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
     // 40,000 in all): the newest whole pairs are kept, long answers clipped, a failed empty answer left out.
@@ -420,12 +431,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       const [question, answer] = [messages[i - 1], messages[i]];
       if (question.role === "user" && answer.role === "assistant") {
         if (answer.content.trim())
-          pairs.push([{ role: "user", content: question.content.slice(0, MAX_CHARS) },
+          pairs.push([{ role: "user", content: spokenText(question).slice(0, MAX_CHARS) },
             { role: "assistant", content: clip(answer.content) }]);
         i -= 2;
       } else i -= 1;
     }
-    const history: { role: "user" | "assistant"; content: string }[] = [{ role: "user", content }];
+    const history: { role: "user" | "assistant"; content: string }[] = [{ role: "user", content: spokenText({ content, images: shots.map(s => s.url) }) }];
     let total = content.length;
     for (const pair of pairs) {
       const size = pair[0].content.length + pair[1].content.length;
@@ -436,8 +447,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     turns.current += 1;
     running.current = true;
     typed.current = false;
-    setMessages(current => [...current, { role: "user", content }, { role: "assistant", content: "", tools: [] }]);
+    setMessages(current => [...current, { role: "user", content, ...(shots.length ? { images: shots.map(s => s.url) } : {}) },
+      { role: "assistant", content: "", tools: [] }]);
     setDraft("");
+    setAttached([]);
     setSpoken(false);
     setBusy(true);
     const controller = new AbortController();
@@ -456,7 +469,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         });
         else if (event.type === "error") update(last => ({ ...last, error: { code: event.code, message: event.message } }));
         else if (event.type === "done") update(last => ({ ...last, progress: undefined, metrics: event.metrics }));
-      }, controller.signal, model);
+      }, controller.signal, model, shots.map(s => s.id));
     } catch (error) {
       update(last => ({ ...last, error: controller.signal.aborted ? { code: "stopped", message: "Stopped." }
         : { code: "network", message: error instanceof Error && error.message ? "Copilot Lab could not be reached." : "Copilot Lab failed." } }));
@@ -467,6 +480,35 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       abort.current = null;
     }
   }
+
+  /** Screenshots from the picker (the phone's camera roll or camera): stored by the server for the next message. With no
+   * words of the owner's own in the box yet, the box gets a starting question. */
+  async function attach(files: File[]) {
+    const room = files.slice(0, MAX_IMAGES - attached.length);
+    if (!room.length) return;
+    setAttaching({ state: "busy" });
+    try {
+      for (const file of room) {
+        const stored = await uploadImage(file);
+        setAttached(list => [...list, { id: stored.id, url: URL.createObjectURL(file) }].slice(0, MAX_IMAGES));
+      }
+      setAttaching(null);
+      setDraft(current => current.replace(/^Context: [^\n]*\n+/, "").trim() ? current : `${current}${IMAGE_PREFILL}`);
+    } catch (error) {
+      setAttaching({ state: "error", message: error instanceof Error ? error.message : "The screenshot could not be attached." });
+    }
+  }
+
+  // A shared screenshot's thumbnail from this browser's own copy: the server deletes it once the turn that sends it ends.
+  useEffect(() => {
+    const id = link?.image;
+    if (!id) return;
+    const controller = new AbortController();
+    fetch(imageUrl(id), { cache: "no-store", signal: controller.signal }).then(r => r.ok ? r.blob() : Promise.reject(new Error("gone")))
+      .then(blob => { const url = URL.createObjectURL(blob); setAttached(list => list.map(a => a.id === id ? { ...a, url } : a)); })
+      .catch(() => { if (!controller.signal.aborted) { setAttached(list => list.filter(a => a.id !== id)); setAttaching({ state: "error", message: "The shared screenshot is no longer stored; attach it again." }); } });
+    return () => controller.abort();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount only; the page remounts the lab per deep link
 
   function startNew() {
     if (busy) return;
@@ -621,7 +663,15 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
-          <div key={i} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded bg-primary/10 px-3 py-2 text-sm text-foreground">{message.content}</div>
+          <div key={i} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded bg-primary/10 px-3 py-2 text-sm text-foreground">
+            {message.images?.length ? (
+              <span className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
+                {message.images.map((src, j) => <img key={j} src={src} alt="Shared screenshot" className="max-h-32 rounded border" />)}
+              </span>
+            ) : null}
+            {message.content}
+          </div>
         ) : (
           <div key={i} className="max-w-[95%]">
             {message.content ? <Prose text={message.content} /> : !message.error && !message.metrics && (
@@ -645,6 +695,22 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
       <div className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1")}>
       {voice.banner}
+      {(attached.length > 0 || attaching) && (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Attached screenshots">
+          {attached.map(shot => (
+            <span key={shot.id} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL or the private API */}
+              <img src={shot.url} alt="Attached screenshot" className="h-14 w-auto max-w-[8rem] rounded border object-cover" />
+              <button type="button" onClick={() => setAttached(list => list.filter(a => a.id !== shot.id))} disabled={busy}
+                aria-label="Remove screenshot" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground hover:text-foreground">
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          {attaching?.state === "busy" && <span className="text-xs text-muted-foreground">Attaching…</span>}
+          {attaching?.state === "error" && <span role="alert" className="text-xs text-rose-300">{attaching.message}</span>}
+        </div>
+      )}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex items-end gap-2">
         <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
@@ -652,7 +718,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           className="min-h-[2.75rem] min-w-0 flex-1 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
         {busy
           ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
-          : <button type="submit" disabled={!enabled || !draft.trim()} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
+          : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
+        <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
+          onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border text-muted-foreground hover:text-foreground disabled:opacity-40">
+          {attaching?.state === "busy" ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+        </button>
+        <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Screenshot file" data-testid="copilot-image-input"
+          onChange={e => { void attach([...(e.target.files ?? [])]); e.target.value = ""; }} />
         {voice.button}
       </form>
       {voice.available && (
