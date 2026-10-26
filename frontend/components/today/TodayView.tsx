@@ -52,8 +52,8 @@ function Row({ href, label, children, testId }: { href: string | null; label?: s
 }
 
 /** One section: a heading with its count. Empty, it is just that line; failed, it says so and the rest stand. */
-function Section({ title, count, unavailable = false, note, children, tone }: {
-  title: string; count: number; unavailable?: boolean; note?: ReactNode; children?: ReactNode; tone?: string;
+function Section({ title, count, unavailable = false, note, children, tone, alert }: {
+  title: string; count: number; unavailable?: boolean; note?: ReactNode; children?: ReactNode; tone?: string; alert?: ReactNode;
 }) {
   const empty = !unavailable && count === 0;
   return <section aria-label={title} data-testid="today-section" data-empty={empty || undefined} className={cn("min-w-0 rounded-lg border bg-card", empty && "bg-card/50")}>
@@ -65,6 +65,8 @@ function Section({ title, count, unavailable = false, note, children, tone }: {
     {unavailable
       ? <p role="status" className="px-4 pb-3 text-sm text-amber-300">Could not read this right now.</p>
       : !empty && children && <div className="px-4 pb-4">{children}</div>}
+    {/* A part that failed says so even when the rest of the section is empty. */}
+    {!unavailable && alert && <div className="px-4 pb-3">{alert}</div>}
   </section>;
 }
 
@@ -112,7 +114,8 @@ function NewSince({ section, lab }: { section: Today["new"]; lab: boolean }) {
   const count = (radar?.count ?? 0) + (thesis?.count ?? 0) + (prep ? 1 : 0);
   const failed = [!radar && "Radar", !thesis && "thesis watch", !ok(section.prep) && "pre-market prep"].filter(Boolean);
   const note = radar?.state === "off" ? "Radar off" : undefined;
-  return <Section title="New since you looked" count={count} note={note}>
+  const alert = failed.length > 0 && <p role="status" className="text-xs text-amber-300">Could not read {failed.join(", ")} right now.</p>;
+  return <Section title="New since you looked" count={count} note={note} alert={alert}>
     <ul className="grid gap-2">
       {prep && <Row testId="today-prep-row" label="Open today's pre-market prep" href={lab ? prep.path : null}>
         <p className="text-xs font-medium text-muted-foreground">Pre-market prep{prep.fallback ? " · raw facts" : ""} {clock(prep.at)}</p>
@@ -130,7 +133,6 @@ function NewSince({ section, lab }: { section: Today["new"]; lab: boolean }) {
           <p className="break-words text-sm">{row.summary}</p>
         </Row>))}
     </ul>
-    {failed.length > 0 && <p role="status" className="mt-2 text-xs text-amber-300">Could not read {failed.join(", ")} right now.</p>}
   </Section>;
 }
 

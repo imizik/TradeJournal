@@ -132,12 +132,13 @@ test("on a phone: Today is the first tab, rows are thumb-sized, nothing scrolls 
 
 test("an empty day collapses every section to its count; a failed section says so and the rest stand", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await today(page, { ...EMPTY, held: { state: "unavailable" } });
+  await today(page, { ...EMPTY, held: { state: "unavailable" }, new: { ...EMPTY.new, thesis: { state: "unavailable" } } });
   for (const name of ["Act now", "Plans near a trigger", "New since you looked"]) {
     await expect(section(page, name)).toHaveAttribute("data-empty", "true");
     await expect(section(page, name).getByTestId("today-count")).toHaveText("0");
   }
   await expect(section(page, "New since you looked")).toContainText("Radar off");
+  await expect(section(page, "New since you looked")).toContainText("Could not read thesis watch right now.");
   await expect(page.locator("[data-testid$='-row']")).toHaveCount(0);
   await expect(section(page, "Held back")).toContainText("Could not read this right now.");
   await expect(page.getByTestId("today-week")).toContainText("0 of 0 entries planned");
