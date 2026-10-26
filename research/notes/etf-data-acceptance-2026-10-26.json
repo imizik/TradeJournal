@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "purpose": "Bounded no-return data-acceptance audit; not a candidate evaluation",
+  "audit_date": "2026-10-26",
+  "evidence_compiled_at_utc": "2026-10-26T14:42:05Z",
+  "specification": {
+    "path": "research/notes/etf-trend-experiment-decision-2026-10-26.md",
+    "commit": "cab7b930243577d23e39a72afe0d09c6054dd7ab",
+    "rules_changed": false,
+    "registered_candidate": false
+  },
+  "decision": {
+    "status": "FAIL_ACCEPTANCE",
+    "evaluation_eligible": false,
+    "measured_strategy_performance": null,
+    "reason_codes": [
+      "CASH_ARCHIVE_ACCESS_UNVERIFIED",
+      "HISTORICAL_KNOWN_AT_UNVERIFIED",
+      "DATED_IDENTITY_UNACCEPTED",
+      "CORPORATE_ACTION_COMPLETENESS_UNACCEPTED",
+      "EXECUTION_MINUTE_COVERAGE_UNACCEPTED",
+      "REGULAR_SESSION_MARK_SEMANTICS_UNVERIFIED"
+    ],
+    "next_action": "Park acquisition and implementation; resolve the listed prerequisites before any separately approved evaluation."
+  },
+  "scope": {
+    "symbols": [
+      "SPY",
+      "EFA",
+      "EEM",
+      "IEF"
+    ],
+    "start": "2016-01-01",
+    "end": "2024-09-30",
+    "price_feed_requested": "sip",
+    "currency": "USD",
+    "symbol_mapping_asof": "2024-09-30",
+    "protected_period_payloads_requested": false,
+    "strategy_signals_computed": false,
+    "strategy_returns_computed": false,
+    "candidate_attempts_spent": 0,
+    "production_writes": 0
+  },
+  "daily_request": {
+    "symbols": [
+      "SPY",
+      "EFA",
+      "EEM",
+      "IEF"
+    ],
+    "days": 5,
+    "hours": 0,
+    "minutes": 30,
+    "timeframe": "1Day",
+    "limit": 10000,
+    "start": "2016-01-01T00:00:00-05:00",
+    "end": "2024-09-30T23:59:59-04:00",
+    "sort": "asc",
+    "feed": "sip",
+    "currency": "USD",
+    "asof": "2024-09-30",
+    "tz": "America/New_York"
+  },
+  "calendar": {
+    "source": "Alpaca connected get_calendar",
+    "start": "2016-01-01",
+    "end": "2024-09-30",
+    "session_count": 2200,
+    "first_session": "2016-01-04",
+    "last_session": "2024-09-30",
+    "year_counts": {
+      "2016": 252,
+      "2017": 251,
+      "2018": 251,
+      "2019": 252,
+      "2020": 253,
+      "2021": 252,
+      "2022": 251,
+      "2023": 250,
+      "2024": 188
+    },
+    "independent_exchange_calendar_crosscheck": false,
+    "session_dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7",
+    "session_dates_hash_encoding": "UTF-8 sorted YYYY-MM-DD dates joined with newline, including final newline"
+  },
+  "daily_coverage": {
+    "status": "PASS_DATE_COVERAGE_ONLY",
+    "expected_records_per_symbol": 2200,
+    "total_records_received": 8800,
+    "expected_month_end_dates": 105,
+    "by_symbol": {
+      "SPY": {
+        "count": 2200,
+        "unique_dates": 2200,
+        "first": "2016-01-04",
+        "last": "2024-09-30",
+        "missing_dates": [],
+        "unexpected_dates": [],
+        "duplicate_count": 0,
+        "basic_value_check": "finite OHLCV/trade_count/vwap; positive low/vwap; open/close within low-high; nonnegative volume/count",
+        "invalid_dates": [],
+        "invalid_count": 0,
+        "received_month_ends": 105
+      },
+      "EFA": {
+        "count": 2200,
+        "unique_dates": 2200,
+        "first": "2016-01-04",
+        "last": "2024-09-30",
+        "missing_dates": [],
+        "unexpected_dates": [],
+        "duplicate_count": 0,
+        "basic_value_check": "finite OHLCV/trade_count/vwap; positive low/vwap; open/close within low-high; nonnegative volume/count",
+        "invalid_dates": [],
+        "invalid_count": 0,
+        "received_month_ends": 105
+      },
+      "EEM": {
+        "count": 2200,
+        "unique_dates": 2200,
+        "first": "2016-01-04",
+        "last": "2024-09-30",
+        "missing_dates": [],
+        "unexpected_dates": [],
+        "duplicate_count": 0,
+        "basic_value_check": "finite OHLCV/trade_count/vwap; positive low/vwap; open/close within low-high; nonnegative volume/count",
+        "invalid_dates": [],
+        "invalid_count": 0,
+        "received_month_ends": 105
+      },
+      "IEF": {
+        "count": 2200,
+        "unique_dates": 2200,
+        "first": "2016-01-04",
+        "last": "2024-09-30",
+        "missing_dates": [],
+        "unexpected_dates": [],
+        "duplicate_count": 0,
+        "basic_value_check": "finite OHLCV/trade_count/vwap; positive low/vwap; open/close within low-high; nonnegative volume/count",
+        "invalid_dates": [],
+        "invalid_count": 0,
+        "received_month_ends": 105
+      }
+    },
+    "missing_session_count": 0,
+    "duplicate_date_count": 0,
+    "unexpected_date_count": 0,
+    "known_at": null,
+    "regular_session_close_semantics_verified": false,
+    "adjustment": "Connector offers no adjustment argument; REST documentation defaults to raw. No independent reconciliation performed.",
+    "raw_http_pagination_receipt_available": false,
+    "date_set_matches_calendar": true,
+    "not_proven": [
+      "historical correctness of price values",
+      "official or regular-session closing marks",
+      "complete distributions and split adjustment reconciliation",
+      "original availability or revisions",
+      "independent calendar correctness",
+      "replay rights"
+    ]
+  },
+  "execution_coverage": {
+    "status": "UNAVAILABLE",
+    "expected_monthly_decision_sessions": 92,
+    "first_decision_session": "2017-02-01",
+    "last_decision_session": "2024-09-03",
+    "successful_session_queries": 0,
+    "failed_probe": {
+      "symbols": [
+        "SPY",
+        "EFA",
+        "EEM",
+        "IEF"
+      ],
+      "timeframe": "1Min",
+      "start": "2017-02-01T09:35:00-05:00",
+      "end": "2017-02-01T09:35:59-05:00",
+      "feed": "sip",
+      "asof": "2024-09-30",
+      "limit": 100,
+      "error_code": "UNAVAILABLE",
+      "error": "McpServerError: Connection timed out."
+    },
+    "remaining_sessions_not_queried": 91,
+    "missing_bars": null
+  },
+  "identity": {
+    "status": "UNAVAILABLE_CURRENT_REFERENCE_AND_UNACCEPTED_HISTORY",
+    "expected_cusips": {
+      "SPY": "78462F103",
+      "EFA": "464287465",
+      "EEM": "464287234",
+      "IEF": "464287440"
+    },
+    "expected_ids_source": "Fixed proposal; not current observations from this audit",
+    "asset_request_counts": {
+      "SPY": 2,
+      "EFA": 1,
+      "EEM": 1,
+      "IEF": 1
+    },
+    "successful_asset_reads": 0,
+    "error_code": "UNAVAILABLE",
+    "dated_identity_accepted": false
+  },
+  "corporate_actions": {
+    "status": "UNAVAILABLE",
+    "request": {
+      "start": "2016-01-01",
+      "end": "2024-09-30",
+      "symbols": [
+        "SPY",
+        "EFA",
+        "EEM",
+        "IEF"
+      ],
+      "limit": 1000,
+      "sort": "asc"
+    },
+    "attempts": 2,
+    "successful_reads": 0,
+    "error_code": "UNAVAILABLE",
+    "records_received": null,
+    "pagination_complete": null,
+    "historical_known_at": null,
+    "limitations": [
+      "Date filter is process-date, not ex/effective date.",
+      "Connector lacks explicit page_token and data_quality controls.",
+      "A successful bounded response would still require completeness and late-processing reconciliation."
+    ]
+  },
+  "cash_reference": {
+    "status": "UNACCEPTED",
+    "name": "S&P U.S. Treasury Bill 0-3 Month Index",
+    "currency": "USD",
+    "return_type": "total_return",
+    "exact_vendor_series_id": null,
+    "candidate_series_id": "SPBDUB3T",
+    "candidate_id_evidence": "Indexed official directory search snippet only; direct PDF fetch returned HTTP 404. Not accepted as verified mapping.",
+    "archive_service": "S&P DJI historical index levels via API/FTP/SPICE subscription",
+    "entitlement_verified": false,
+    "archive_retrieved": false,
+    "coverage": null,
+    "original_publication_times_available": null,
+    "by_0800_availability_verified": false,
+    "known_at": null,
+    "calendar": "Methodology describes SIFMA fixed-income business days; not independently reconciled to ETF month-end endpoints.",
+    "fallback_used": false,
+    "subscription_purchased": false,
+    "sources": [
+      "https://www.spglobal.com/spdji/en/indices/fixed-income/sp-us-treasury-bill-0-3-month-index/",
+      "https://www.spglobal.com/spdji/en/documents/methodologies/methodology-sp-global-bill-index-series.pdf",
+      "https://www.spglobal.com/spdji/en/landing/topic/api-data-solutions/",
+      "https://www.spice-indices.com/"
+    ]
+  },
+  "settlement": {
+    "status": "NOT_AUDITED",
+    "historical_calendar_accepted": false,
+    "reason": "Acquisition stopped after mandatory prerequisites failed; no portfolio accounting or settlement calculation performed."
+  },
+  "transport": {
+    "connected_market_data_calls": 10,
+    "successful_calls": 2,
+    "connection_timeouts": 8,
+    "recovery": "One repeat of SPY reference and the corporate-action request after diagnosed connection timeouts; no further retries.",
+    "new_credentials_used": false,
+    "standalone_rest_audit_run": false,
+    "standalone_access": "ALPACA_API_KEY and ALPACA_API_SECRET absent from this process; worktree backend/.env absent. Other checkouts and connector secrets were not searched."
+  },
+  "provenance": {
+    "daily_payload_sha256": "d8efddf02f41c8fd22b1b1cb2eac244aa1536737bd6657da2f702c93f441c2f4",
+    "calendar_payload_sha256": "614393cbd8d067ee733b1bd75e5e0ed032d197d3df7d5db3d99a3d00c7311a9f",
+    "hash_encoding": "UTF-8 JSON.stringify of parsed connector structuredContent for daily, and JSON.parse(structuredContent.result) for calendar; preserves insertion order; not raw HTTP bytes.",
+    "price_values_displayed_in_audit_output": false,
+    "price_values_used_only_for_basic_shape_checks": true,
+    "raw_price_archive_saved_to_repository": false,
+    "exact_retrieval_timestamps_recorded": false,
+    "known_at": null,
+    "limitation": "Only metadata receipts and response fingerprints are committed. Exact-version replay is not established; future refetches may differ."
+  },
+  "controls": {
+    "factory_ledger_unchanged": true,
+    "existing_budget_files_unchanged": 4,
+    "new_budget_files": 0,
+    "factory_search_launchd_status": "unloaded",
+    "strategy_factory_launchd_status": "unloaded",
+    "gate_changes": false,
+    "live_execution_activated": false,
+    "broker_orders": 0,
+    "proof": "SHA-256 comparison with prior state receipt; both launchctl print calls returned service-not-found."
+  }
+}

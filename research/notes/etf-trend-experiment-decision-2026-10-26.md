@@ -5,6 +5,11 @@ one research case for review, not a registered Factory candidate or a tradable
 strategy. Merging this document does not adopt a protocol, consume an attempt,
 authorize data acquisition or activate anything.
 
+**Subsequent authorized data review:** the [bounded acceptance audit](etf-data-acceptance-2026-10-26.md)
+passed daily date coverage but failed overall acceptance. The fixed cash archive,
+dated identity/actions, execution observations and historical availability remain
+unaccepted. The proposed rules below are unchanged; no evaluation was authorized.
+
 ## Decision
 
 **NO-GO for a validating run under the current Factory protocol. Park further
