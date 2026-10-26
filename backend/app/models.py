@@ -590,7 +590,7 @@ class PositionAlert(SQLModel, table=True):
     detected_at: datetime = Field(default_factory=datetime.utcnow)
     # Frozen optional Radar context at detection; legacy alerts remain null.
     context_snapshot_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
-    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | held (notification policy)
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
     claimed_at: Optional[datetime] = None
@@ -652,7 +652,7 @@ class PlanNudge(SQLModel, table=True):
     price: float  # share-weighted entry price, in the fill's units (per contract for options)
     opened_at: datetime  # the first entry fill, a New York wall clock
     detected_at: datetime = Field(default_factory=datetime.utcnow)
-    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | skipped
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired | unknown | skipped | held
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
     claimed_at: Optional[datetime] = None
@@ -676,7 +676,7 @@ class PlanTimeStop(SQLModel, table=True):
     text: str  # the owner's words, e.g. "out by 15:30"
     due_at: datetime  # UTC
     created_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: the plan's Confirm
-    delivery: str = Field(default="scheduled", index=True)  # scheduled | pending | sending | sent | skipped | expired | unknown
+    delivery: str = Field(default="scheduled", index=True)  # scheduled | pending | sending | sent | skipped | expired | unknown | held
     trade_id: Optional[uuid.UUID] = None  # the open position it pinged about
     detected_at: Optional[datetime] = None  # UTC: when it came due and was judged
     attempts: int = 0
@@ -701,12 +701,46 @@ class PremarketPrep(SQLModel, table=True):
     investigation_id: Optional[str] = None  # the saved copilot investigation the ping opens
     fallback: bool = False  # the copilot turn failed: the ping carries the raw facts
     body: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
-    delivery: str = Field(default="preparing", index=True)  # preparing | pending | sending | sent | expired | unknown
+    delivery: str = Field(default="preparing", index=True)  # preparing | pending | sending | sent | expired | unknown | held
     attempts: int = 0
     next_attempt_at: Optional[datetime] = None
     claimed_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+class PhonePing(SQLModel, table=True):
+    """One copilot-side phone ping as the notification policy judged it
+    (``engine/notification_policy.py``): the sender's own row (``sender`` plus
+    ``source_id``, unique, so a retry reuses the record), the position it is
+    anchored to, the decision (``sent`` means handed to the sender to send;
+    ``merged``, ``suppressed`` and ``over_cap`` were held) and, once the fills
+    arrive, what the owner did next (``then``). Additive: every sender keeps its
+    own outbox row; this is the one place every ping and every hold is listed."""
+
+    __tablename__ = "phone_ping"
+    __table_args__ = (
+        UniqueConstraint("sender", "source_id", name="uq_phone_ping_source"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sender: str  # position_alerts | plan_nudges | plan_time_stops | level_alerts | research | premarket_prep
+    source_id: str  # the sender's own row id
+    kind: str  # expiry_final | invalidation | giveback | expiry_first | time_stop | entry | hold_hour | nudge | link | prep | research
+    rank: int  # the kind's place in the priority order, 0 first
+    symbol: Optional[str] = None
+    anchor: Optional[str] = Field(default=None, index=True)  # the position: "<account id>:<first entry fill's source key>"
+    trade_id: Optional[uuid.UUID] = None  # the trade when it was judged (trades are rebuilt; the anchor is the identity)
+    decision: str = Field(index=True)  # sent | merged | suppressed | over_cap
+    reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    title: str
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    merged_into: Optional[uuid.UUID] = None  # the earlier ping this one's text rides with
+    decided_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # UTC
+    delivered_at: Optional[datetime] = None  # UTC: ntfy accepted it (or the send may have reached the phone)
+    then: Optional[str] = None  # entered | no_entry | closed | trimmed | held | linked | not_linked | unmatched
+    then_minutes: Optional[int] = None  # minutes from the ping to the fill or link that answered it
+    judged_at: Optional[datetime] = None  # UTC: when ``then`` was decided from the fills
 
 
 class CaptureTemplate(SQLModel, table=True):

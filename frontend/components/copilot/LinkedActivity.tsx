@@ -25,7 +25,9 @@ export default function LinkedActivity({ investigationId, refreshKey }: { invest
       (alert.source_kind as string) === "copilot" && alert.source_id === investigationId))).catch(() => { /* shown when readable */ });
     listResearchJobs(controller.signal, investigationId).then(payload => setJobs(payload.jobs.filter(job =>
       job.kind === "reassess" && job.input.investigation_id === investigationId))).catch(() => { /* shown when readable */ });
-    listTimeStops(investigationId, controller.signal).then(setStops).catch(() => { /* shown when readable */ });
+    // An abort while the body is read resolves null (request() swallows the body error): keep the last good read.
+    listTimeStops(investigationId, controller.signal).then(payload => { if (payload && !controller.signal.aborted) setStops(payload); })
+      .catch(() => { /* shown when readable */ });
     return () => controller.abort();
   }, [investigationId, refreshKey]);
   if (!alerts.length && !jobs.length && !stops.time_stops.length) return null;

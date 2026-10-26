@@ -25,7 +25,9 @@ is recorded ``skipped`` and not nudged later. Delivery is at-most-once, as
 position alerts': a send that may have reached ntfy is ``unknown`` and never
 resent, and a ping not sent within ``EXPIRE_SECONDS`` or before the close is
 dropped. A link ping whose plans were all linked or set aside before it went out
-is skipped.
+is skipped. Right before the send, ``notification_policy.decide`` may hold it
+(``held``, with the reason): the shared daily cap, or a ping for the same
+position moments earlier.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -41,7 +43,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import capture_links, ntfy
+from app.engine import capture_links, notification_policy, ntfy
 from app.engine.captures import epoch
 from app.engine.chart_journal import contract_label, stamp
 from app.engine.chart_math import ET, session_windows
@@ -255,12 +257,20 @@ class PlanNudges:
                 title, body, path = link_message(label, plans, trade.id)
             else:
                 title, body, path = message(nudge, label)
+            ticket = notification_policy.decide(
+                db, sender="plan_nudges", source_id=str(nudge.id), kind="link" if nudge.kind == "link" else "nudge", title=title, body=body,
+                now=now, anchor=notification_policy.anchor(nudge.account_id, nudge.source_key), symbol=nudge.ticker, trade_id=nudge.trade_id)
+            if ticket.held:
+                nudge.delivery, nudge.last_error = "held", ticket.reason
+                db.commit()
+                return
             nudge.attempts += 1
             try:
-                ntfy.publish(title, body, priority=4, tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
+                ntfy.publish(title, body + ticket.append, priority=4, tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     nudge.delivery, nudge.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                    notification_policy.delivered(db, ticket, now)
                 else:
                     nudge.delivery, nudge.last_error = "pending", str(exc)
                     nudge.next_attempt_at = _utc(now + BACKOFF[min(nudge.attempts, len(BACKOFF)) - 1])
@@ -268,6 +278,7 @@ class PlanNudges:
                 log.warning("Plan nudge delivery failed (attempt %d): %s", nudge.attempts, exc)
                 return
             nudge.delivery, nudge.delivered_at, nudge.last_error = "sent", _utc(self.clock()), None
+            notification_policy.delivered(db, ticket, now)
             db.commit()
 
 

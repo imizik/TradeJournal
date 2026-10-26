@@ -491,6 +491,9 @@ model to call:
     followed each sent ping (`exit_habits.follow_up`), up to 6 rows;
   - `alerts`: phone alerts sent for the week's trades, by kind, what followed
     them and the $ against closing at each alert's mark;
+  - `pings`: every phone ping the [notification policy](#phone-ping-policy)
+    judged that week (`notification_policy.week_summary`): sent, held, judged
+    and acted on, overall and by kind;
   - `habits`: the four exit habits over the week's closed long options
     (`exit_habits.habit_flags` and `tally`) beside the baseline rate from
     `exit_habits.build`;
@@ -736,6 +739,48 @@ nothing exists until the owner confirms.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 
+## Phone ping policy
+
+One policy for the app's own phone pings (`backend/app/engine/notification_policy.py`),
+so an invalidation ping, a give-back alert, a time stop and the one-hour alert cannot
+all hit one position within minutes. Jo's senders (Codex) are not gated.
+
+- **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
+  plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
+  research results) calls `notification_policy.decide` right before it hands a
+  message to ntfy, and keeps its own at-most-once delivery and expiry. `ntfy.py`
+  stays a transport. A new sender (Radar) adopts it by calling the same function.
+- **Daily cap:** at most `PING_DAILY_CAP` (default 12) pings a New York day across
+  every kind. The priority order keeps the cap from dropping what matters:
+  last-day final > invalidation > give-back > time stop (and the 90-minute
+  last-day alert) > entry trigger > hold-hour > nudge/link > prep > research.
+  The first three are never over the cap; the last three are held once only
+  3 slots are left.
+- **Quiet window:** a second ping anchored to the same position within
+  `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
+  a different kind whose predecessor is still being resent (its send failed) is
+  `merged`, its text appended to that resend; otherwise it is `suppressed`. A
+  more important kind is never held by the window, and a last-day final or an
+  invalidation is never held by it at all (a second plan's invalidation in the
+  same symbol is its own message).
+- **Record:** every decision is one `phone_ping` row (`sent`, `merged`,
+  `suppressed`, `over_cap`, with the reason). A held sender row reads `held`
+  with the same reason on the trade page's phone-alert list; the Dashboard Plans
+  card shows `Held back today: 3 pings (2 plan nudge, 1 one-hour)`. A gate that
+  cannot read or write its table tells the sender to send.
+- **Acted on:** a pass on the level alert monitor's loop writes, from the fills
+  and the plan links as they arrive and never by guessing, what followed each
+  delivered ping: an entry trigger, an entry fill in the symbol within 30
+  minutes; an invalidation, time stop or open-trade alert, the position closed
+  or trimmed within 15 minutes; a nudge or link ping, a plan linked within 30
+  minutes. The trade page shows it per ping (`then: closed in 6 min`) and
+  [Review my week](#review-my-week) counts it by kind.
+- **Activation:** `ALERT_POLICY_ENABLED` defaults to **true**. It only ever reduces
+  pings, every sender keeps its own switch, and a held ping is recorded rather
+  than lost, so there is nothing to prove before switching it on; `false` passes
+  everything through (still recorded). Settings in the table below.
+- Tests: `backend/tests/test_notification_policy.py`.
+
 ## Pre-market prep
 
 One phone ping each trading morning with what the owner already holds and has
@@ -815,6 +860,9 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). For `plan` it is Claude Code's API-equivalent estimate (`max_budget_usd`); nothing is billed. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
+| `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
+| `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
+| `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |

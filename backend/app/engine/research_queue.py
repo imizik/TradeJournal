@@ -34,6 +34,7 @@ import logging
 import math
 import os
 import re
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -524,6 +525,26 @@ def plan_notification(job_id: str, record: dict, cfg: QueueSettings, session: Se
         return {"title": subject[:200], "message": (summary[:400] or reason), "path": f"/copilot-lab?investigation={saved['id']}"}
 
 
+def gate(job_id: str, push: dict, session: Session | None = None):
+    """The app-wide notification policy's answer for this ping (``engine/notification_policy.py``): the shared daily cap
+    holds research pings first. A held ping is recorded ``held`` with the reason and never retried."""
+    from app.engine import notification_policy
+    with _session(session) as db:
+        return notification_policy.decide(db, sender="research", source_id=job_id, kind="research", title=push["title"],
+                                          body=push["message"], now=time.time())
+
+
+def mark_delivered(ticket, session: Session | None = None) -> None:
+    """Never raises: the ping went out, and the job's own ``sent`` record must follow whatever this bookkeeping does."""
+    from app.engine import notification_policy
+    try:
+        with _session(session) as db:
+            notification_policy.delivered(db, ticket, time.time())
+            db.commit()
+    except Exception:  # noqa: BLE001
+        log.warning("Research ping delivery could not be recorded on the notification policy", exc_info=True)
+
+
 def record_delivery(job_id: str, *, status: str, message_id: str | None = None, error: str | None = None,
                     session: Session | None = None) -> dict:
     with _session(session) as db:
@@ -620,11 +641,15 @@ class QueueRunner:
             push = await asyncio.to_thread(plan_notification, job["id"], record, self.cfg)
             if push is None:
                 return await asyncio.to_thread(get, job["id"])
+            ticket = await asyncio.to_thread(gate, job["id"], push)
+            if ticket.held:
+                return await asyncio.to_thread(record_delivery, job["id"], status="held", error=ticket.reason)
             try:
-                message_id = await asyncio.to_thread(ntfy.publish, push["title"], push["message"], path=push["path"],
+                message_id = await asyncio.to_thread(ntfy.publish, push["title"], push["message"] + ticket.append, path=push["path"],
                                                      direct_click=True)
             except Exception as exc:  # noqa: BLE001 - ntfy refused or was unreachable: recorded, the job stays done
                 return await asyncio.to_thread(record_delivery, job["id"], status="failed", error=f"{type(exc).__name__}: {exc}")
+            await asyncio.to_thread(mark_delivered, ticket)
             return await asyncio.to_thread(record_delivery, job["id"], status="sent", message_id=message_id)
         except Exception:  # noqa: BLE001 - never let a ping problem fail a finished job
             log.exception("Research job ping failed")

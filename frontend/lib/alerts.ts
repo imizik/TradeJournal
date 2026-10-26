@@ -12,7 +12,7 @@ import type { Interval } from "./charts";
 export type AlertCondition = "touches" | "crosses" | "closes_beyond";
 export type AlertEvent = {
   level: number; price: number; source: "stream" | "minute_bars" | "closed_bar"; event_at: number; detected_at: number;
-  delivery: "pending" | "sending" | "sent" | "expired"; attempts: number; delivered_at: number | null; error: string | null;
+  delivery: "pending" | "sending" | "sent" | "expired" | "held"; attempts: number; delivered_at: number | null; error: string | null;
 };
 export type LevelAlert = {
   id: string; symbol: string; price: number; created_on: string; condition: AlertCondition; interval: Interval | null;
@@ -47,6 +47,7 @@ export function alertText(alert: Pick<LevelAlert, "condition" | "interval" | "di
 export function deliveryText(event: AlertEvent, phone: boolean): string {
   if (event.delivery === "sent") return `Sent to phone ${event.delivered_at ? `${etTime(event.delivered_at)} ET` : ""}`.trim();
   if (event.delivery === "expired") return "Not sent: over six hours late";
+  if (event.delivery === "held") return event.error ?? "Not sent: held by the notification policy";
   if (!phone) return "Not sent: phone alerts are not set up on this server";
   return event.attempts ? `Retrying phone message (${event.attempts} tries)` : "Sending to phone…";
 }

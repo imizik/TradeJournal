@@ -51,20 +51,24 @@ test("switched on: the watch state and each alert's delivery read plainly at pho
   await section.screenshot({ path: test.info().outputPath("trade-phone-alerts-phone.png") });
 });
 
-test("an unplanned-entry nudge reads as its own row, and a capped one says why it was not sent", async ({ page }) => {
+test("an unplanned-entry nudge reads as its own row with what followed, and a capped or held one says why it was not sent", async ({ page }) => {
   const trade = await openAapl(page);
   const at = Date.parse("2026-10-21T14:03:00Z") / 1000;
   const nudge = { kind: "plan_nudge", contract: "AAPL 10/23/26 230C", entry: "2 at $3.10", detected_at: at, contracts: 2, mark: null, bid: null,
     gain: null, gain_pct: null, peak_gain: null, peak_gain_pct: null, error: null };
   await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
     enabled: false, watch: null,
-    alerts: [{ ...nudge, id: "n1", delivery: "sent", delivered_at: at + 2 }, { ...nudge, id: "n2", detected_at: at + 60, delivery: "skipped", delivered_at: null }],
+    alerts: [{ ...nudge, id: "n1", delivery: "sent", delivered_at: at + 2, policy: "sent", then: "plan linked in 6 min" },
+      { ...nudge, id: "n2", detected_at: at + 60, delivery: "skipped", delivered_at: null },
+      { ...nudge, id: "n3", detected_at: at + 120, delivery: "held", delivered_at: null, policy: "over_cap",
+        error: "Not sent: 12 pings already went out today (cap 12). The last 3 of 12 are kept for position and plan pings." }],
   } }));
   await page.goto(`/trades/${trade.id}`);
   const section = page.getByTestId("trade-phone-alerts");
-  await expect(section).toContainText("No plan yet: plan nudge · Oct 21, 2026, 10:03 AM ET · accepted by ntfy; phone display unconfirmed");
+  await expect(section).toContainText("No plan yet: plan nudge · Oct 21, 2026, 10:03 AM ET · accepted by ntfy; phone display unconfirmed · then: plan linked in 6 min");
   await expect(section).toContainText("Opened 2 at $3.10 with no plan linked or suggested");
   await expect(section).toContainText("not sent: today's nudge limit was reached");
+  await expect(section).toContainText("10:05 AM ET · Not sent: 12 pings already went out today (cap 12). The last 3 of 12 are kept for position and plan pings.");
   await expect(section).not.toContainText("no live quote");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await section.screenshot({ path: test.info().outputPath("trade-plan-nudge-phone.png") });

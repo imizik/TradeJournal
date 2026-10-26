@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import level_alerts, ntfy
+from app.engine import level_alerts, notification_policy, ntfy
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -66,13 +66,14 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
-                 positions=None, nudges=None, time_stops=None, prep=None):
+                 positions=None, nudges=None, time_stops=None, prep=None, follow_ups=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.positions = positions  # Open-trade give-back and expiry alerts, when POSITION_ALERTS_ENABLED
         self.nudges = nudges  # Unplanned-entry plan nudges, when PLAN_NUDGE_ENABLED
         self.time_stops = time_stops  # Copilot plans' time stops, when PLAN_TIME_STOPS_ENABLED
+        self.follow_ups = follow_ups  # notification_policy.FollowUps: what the owner did after each ping
         self.prep = prep  # The copilot's pre-market prep ping, when PREMARKET_PREP_ENABLED
         self.stream = stream
         self.feed = feed
@@ -160,11 +161,15 @@ class LevelAlertMonitor:
                                     finally:
                                         await asyncio.to_thread(self.time_stops.deliver)
                             finally:
-                                if self.prep is not None:
-                                    try:
-                                        await asyncio.to_thread(self.prep.run)  # claims only; the prep runs on its own thread
-                                    finally:
-                                        await asyncio.to_thread(self.prep.deliver)
+                                try:
+                                    if self.prep is not None:
+                                        try:
+                                            await asyncio.to_thread(self.prep.run)  # claims only; the prep runs on its own thread
+                                        finally:
+                                            await asyncio.to_thread(self.prep.deliver)
+                                finally:
+                                    if self.follow_ups is not None:
+                                        await asyncio.to_thread(self.follow_ups.run)
 
     async def _run_alerts(self) -> None:
         await self._record_found()
@@ -390,10 +395,20 @@ class LevelAlertMonitor:
             fired = {"level": event.level, "price": event.price, "event_at": _epoch(event.event_at), "source": event.source,
                      "bar_time": event.bar_time, "detected_at": _epoch(event.detected_at)}
             investigation = _uuid(alert.source_id) if alert.source_kind == "copilot" else None
+            ticket = None
             if investigation and alert.plan_role in level_alerts.PLAN_ROLES:
                 # One of a confirmed plan's levels: the message names the plan, and the tap opens its investigation
-                # with the question ready (never sent on its own).
+                # with the question ready (never sent on its own). The notification policy may hold it (the daily cap,
+                # or a ping for the same position moments earlier); an invalidation is never over the cap.
                 title, body, path = level_alerts.plan_message(alert.symbol, alert.plan_role, investigation, fired)
+                anchor, trade_id = notification_policy.symbol_anchor(db, alert.symbol)
+                ticket = notification_policy.decide(db, sender="level_alerts", source_id=str(event.id), kind=alert.plan_role, title=title,
+                                                    body=body, now=now, anchor=anchor, symbol=alert.symbol, trade_id=trade_id)
+                if ticket.held:
+                    event.delivery, event.last_error = "held", ticket.reason
+                    db.commit()
+                    return
+                body += ticket.append
             else:
                 title, body = level_alerts.message(
                     {"symbol": alert.symbol, "condition": alert.condition, "interval": alert.interval, "direction": alert.direction, "label": alert.label},
@@ -414,6 +429,8 @@ class LevelAlertMonitor:
                 log.warning("Level alert delivery failed (attempt %d): %s", event.attempts, exc)
                 return
             event.delivery, event.delivered_at, event.last_error = "sent", _utc(self.clock()), None
+            if ticket is not None:
+                notification_policy.delivered(db, ticket, now)
             db.commit()
 
 

@@ -51,6 +51,9 @@ plus ``raw_email_id``), as saved-advice links are, so a trade rebuild does not
 re-send anything. Delivery is at-most-once: a send that may have reached ntfy
 is recorded ``unknown`` and never resent, and an alert not sent within
 ``EXPIRE_SECONDS`` is dropped, since a late give-back alert is wrong advice.
+Right before the send, ``notification_policy.decide`` may hold it (``held``, with
+the reason): the daily cap or a ping for the same position moments earlier.
+Last-day final and give-back alerts are never over the cap.
 """
 
 from datetime import UTC, date, datetime
@@ -66,7 +69,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import ntfy, position_alert_context
+from app.engine import notification_policy, ntfy, position_alert_context
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -446,13 +449,22 @@ class PositionAlerts:
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None)
             more = _ask_copilot(alert)
+            ticket = notification_policy.decide(
+                db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,
+                anchor=notification_policy.anchor(alert.account_id, alert.source_key), symbol=(alert.contract or "").split(" ")[0],
+                trade_id=alert.trade_id)
+            if ticket.held:
+                alert.delivery, alert.last_error = "held", ticket.reason
+                db.commit()
+                return
             alert.attempts += 1
             try:
-                ntfy.publish(title, body, priority=priority, tags=("warning",),
+                ntfy.publish(title, body + ticket.append, priority=priority, tags=("warning",),
                              path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                    notification_policy.delivered(db, ticket, now)
                 else:
                     alert.delivery, alert.last_error = "pending", str(exc)
                     alert.next_attempt_at = _utc(now + BACKOFF[min(alert.attempts, len(BACKOFF)) - 1])
@@ -460,6 +472,7 @@ class PositionAlerts:
                 log.warning("Open-trade alert delivery failed (attempt %d): %s", alert.attempts, exc)
                 return
             alert.delivery, alert.delivered_at, alert.last_error = "sent", _utc(self.clock()), None
+            notification_policy.delivered(db, ticket, now)
             db.commit()
 
     def _close(self, now: float) -> float | None:

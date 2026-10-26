@@ -320,6 +320,7 @@ WEEK_PROVENANCE = {
     "planned": "measured: the week's trades by whether a plan was captured and linked, and when (owner-said plans, measured timing)",
     "follow_through": "measured: planned trades against their plan's invalidation alert and the fills; the plan's time stops and what followed",
     "alerts": "measured: phone alerts sent for the week's trades and what the fills show happened after each",
+    "pings": "measured: the week's pings by kind, sent or held, and acted on (fills or a plan link)",
     "habits": "measured: the behavior audit's four exit habits this week against the trades before alerts went live; associations, not rules",
     "exits": "measured: the week's best and worst exits by option give-back from peak and by P&L",
 }
@@ -505,6 +506,15 @@ def _week_alerts(rows: list[dict]) -> dict:
             "rule": "vs_closing_at_alert_usd > 0 means what was done after the alerts beat closing at each alert's mark"}
 
 
+def _week_pings(db, start: datetime, end: datetime) -> dict:
+    """The week's phone pings (``notification_policy.week_summary``): the week is New York wall clock, the pings UTC."""
+    from app.engine import capture_links, notification_policy
+    out = notification_policy.week_summary(db, capture_links.entry_utc(start), capture_links.entry_utc(end))
+    if not out["sent"] and not out["held"]:
+        return {"state": "not_applicable", "reason": "No pings."}
+    return out
+
+
 def _week_habits(db, rows: list[dict]) -> dict:
     from app.engine import exit_habits
     longs = [{"flags": r["flags"], "realized_pnl": r["pnl"]} for r in rows if r["flags"]]
@@ -568,6 +578,7 @@ def week_review(week_start: str | None = None, session=None) -> dict:
             "planned": {key: {"label": label, **_bucket([r for r in rows if r["plan"] == key])} for key, label in BUCKETS},
             "follow_through": _section(lambda: _follow_through(db, rows, start, end)),
             "alerts": _section(lambda: _week_alerts(rows)),
+            "pings": _section(lambda: _week_pings(db, start, end)),
             "habits": _section(lambda: _week_habits(db, rows)),
             "exits": _section(lambda: _exits(rows)),
             "units": "P&L in $; pnl_on_premium_pct is P&L over premium paid, in percent; win rates in percent. Times are "
@@ -590,6 +601,7 @@ def _week_steps(review: dict):
                 for row in ((review.get("exits") or {}).get(key) or {}).get(side, []):
                     row.pop("note", None)
     follow = review.get("follow_through") or {}
+    yield lambda: (review.get("pings") or {}).pop("then", None)
     yield lambda: review.pop("provenance", None)
     yield lambda: (follow.get("time_stops") or {}).pop("rows", None)
     yield lambda: follow.pop("hits", None)

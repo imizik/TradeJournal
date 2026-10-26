@@ -512,6 +512,15 @@ carry only a title and the first line of an error, never fills or P&L.
 [Automatic deployment](#automatic-deployment) reports each deploy, hold and
 failure to the same topic.
 
+The API's own copilot-side pings (open-position alerts, plan nudges and link
+pings, plan time stops, a plan's entry and invalidation alerts, pre-market prep,
+research results) pass one [notification policy](../docs/copilot-lab.md#phone-ping-policy)
+before ntfy: `ALERT_POLICY_ENABLED` (default `true`, since it only reduces
+pings), `PING_DAILY_CAP` (default 12 a New York day; last-day final,
+invalidation and give-back are never over it) and `PING_QUIET_MINUTES` (default
+10, per position). Each sender's own switch below still decides whether it runs
+at all; Jo's senders are not gated. Held pings are recorded, never lost silently.
+
 Level alerts set on the charts (Charts C5.1) go to the same topic: the API
 service reads `alerts.env` too (optional, as above) and sends each firing
 itself, with the symbol, the level, the price and the time.
