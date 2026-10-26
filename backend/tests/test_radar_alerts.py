@@ -10,7 +10,7 @@ from app.engine import ntfy, radar_alerts, radar_runner, tradier
 from app.engine.radar_alerts import RadarAlerts, message
 from app.engine.radar_runner import RadarRunner
 from app.engine.tradier import TradierQuote
-from app.models import RadarAlert
+from app.models import PhonePing, RadarAlert
 from tests.test_radar_rules import DAY, OPEN, PATHS, UNIVERSE, Calendar, _iso, _store_with, steps
 
 EVENT = "rv0-2030-01-15-spy-aaa-up-1"
@@ -38,7 +38,8 @@ def engine():
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_DAILY_CAP", "ALERT_APP_URL", "COPILOT_ENABLED"):
+    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_DAILY_CAP", "ALERT_APP_URL", "COPILOT_ENABLED", "ALERT_POLICY_ENABLED",
+                 "PING_DAILY_CAP", "PING_QUIET_MINUTES"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
 
@@ -244,3 +245,69 @@ def test_a_stale_claim_is_unknown_and_never_resent(engine, monkeypatch):
     sent_to(monkeypatch, sent)
     alerts.deliver()
     assert sent == [] and rows(engine)[0].delivery == "unknown"
+
+
+# ------------------------------------------------------------ the notification policy
+
+def pings(engine) -> list[PhonePing]:
+    with Session(engine) as db:
+        return db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()
+
+
+def test_a_sent_alert_is_recorded_on_the_notification_policy(engine, monkeypatch):
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts = _pending(engine, Clock(at(30)))
+    alerts.deliver()
+    assert len(sent) == 1 and rows(engine)[0].delivery == "sent"
+    [ping] = pings(engine)
+    assert (ping.sender, ping.kind, ping.decision, ping.anchor, ping.symbol) == ("radar_alerts", "radar_event", "sent", "symbol:AAA", "AAA")
+    assert ping.source_id == str(rows(engine)[0].id) and ping.delivered_at is not None
+
+
+def test_over_the_shared_cap_the_alert_is_held_and_never_sent_later(engine, monkeypatch):
+    monkeypatch.setenv("PING_DAILY_CAP", "3")  # every slot is reserved for position and plan pings
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(30))
+    alerts = _pending(engine, clock)
+    alerts.deliver()
+    [row] = rows(engine)
+    assert sent == [] and row.delivery == "held" and row.last_error.startswith("Not sent: 0 pings already went out today (cap 3).")
+    assert [p.decision for p in pings(engine)] == ["over_cap"]
+    clock.now = at(31)
+    alerts.deliver()
+    assert sent == [] and rows(engine)[0].delivery == "held"
+
+
+def test_inside_the_quiet_window_it_is_held_and_a_held_alert_does_not_use_up_its_own_caps(engine, monkeypatch):
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(30))
+    with Session(engine) as db:  # an entry trigger for AAA two minutes earlier
+        db.add(PhonePing(sender="level_alerts", source_id="entry-1", kind="entry", rank=4, symbol="AAA", anchor="symbol:AAA",
+                         title="t", body="b", decided_at=radar_alerts._utc(at(28)), delivered_at=radar_alerts._utc(at(28)), decision="sent"))
+        db.commit()
+    alerts = _pending(engine, clock)
+    alerts.deliver()
+    assert sent == [] and rows(engine)[0].delivery == "held" and "quiet window 10 min" in rows(engine)[0].last_error
+    # Twenty minutes later the hourly cap does not count the held one, and the window is over: sent.
+    clock.now = at(50)
+    [again] = alerts.record([_event("e2", "AAA", 50)])
+    assert again.delivery == "pending"
+    alerts.deliver()
+    assert [p["title"] for p in sent] == ["Radar: AAA +5.0% vs SPY +0.1%"] and rows(engine)[1].delivery == "sent"
+    # The alerts' own caps still hold: a third AAA event inside the hour is skipped and never reaches the gate.
+    clock.now = at(60)
+    [third] = alerts.record([_event("e3", "AAA", 60)])
+    assert third.delivery == "skipped" and "one an hour" in third.last_error
+    assert [p.decision for p in pings(engine) if p.sender == "radar_alerts"] == ["suppressed", "sent"]
+
+
+def test_a_group_event_is_anchored_to_its_group(engine, monkeypatch):
+    sent_to(monkeypatch, [])
+    alerts = RadarAlerts(engine, clock=Clock(at(30)))
+    alerts.record([_event("g1", "AAA", 30, kind="group_move", group="Test group")])
+    alerts.deliver()
+    [ping] = pings(engine)
+    assert (ping.anchor, ping.symbol, ping.decision) == ("group:Test group", None, "sent")

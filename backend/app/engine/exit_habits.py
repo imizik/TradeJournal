@@ -249,6 +249,31 @@ def _num(value) -> float | None:
     return None if value is None else float(value)
 
 
+def long_rows(db: Session, trades: list[Trade], fills_of: dict) -> list[dict]:
+    """The closed long-option trades among ``trades`` (every entry a ``buy_to_open``) as the rows ``habit_flags`` reads.
+    ``fills_of`` maps each trade id to its fills (``role``, ``side``, ``id``, ``executed_at``)."""
+    closed = [t for t in trades if t.status in ("closed", "expired")]
+    entries = {t.id: [f for f in fills_of.get(t.id, ()) if f["role"] == "entry"] for t in closed}
+    longs = [t for t in closed if entries[t.id] and all(f["side"] == "buy_to_open" for f in entries[t.id])]
+    first = {t.id: min(entries[t.id], key=lambda f: (f["executed_at"], str(f["id"])))["id"] for t in longs}
+    ids = [t.id for t in longs]
+    paths = {p.trade_id: p for p in db.exec(select(TradePathMetrics).where(TradePathMetrics.trade_id.in_(ids))).all()} if ids else {}
+    contexts = {c.fill_id: c.realized_pnl_today_before for c in db.exec(
+        select(FillMarketContext).where(FillMarketContext.fill_id.in_(list(first.values())))).all()} if first else {}
+    rows = []
+    for t in longs:
+        path = paths.get(t.id)
+        rows.append({
+            "id": t.id, "realized_pnl": _num(t.realized_pnl), "hold_duration_mins": t.hold_duration_mins,
+            "opened_at": wall_time(t.opened_at), "closed_at": wall_time(t.closed_at) if t.closed_at else None,
+            "expired_worthless": t.expired_worthless, "pnl_pct": _num(t.pnl_pct),
+            "peak_pct": _num(path.option_mfe_pct) if path else None,
+            "peak_dollars": _num(path.option_peak_unrealized_pnl) if path else None,
+            "day_pnl_before": _num(contexts.get(first[t.id])),
+        })
+    return rows
+
+
 def build(db: Session, go_live: date = GO_LIVE) -> dict:
     trades = db.exec(select(Trade).where(Trade.instrument_type == "option")).all()
     by_id = {t.id: t for t in trades}
@@ -263,26 +288,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         trade_of_source[(row.account_id, row.raw_email_id)] = row.trade_id
         trade_of_source[(row.account_id, str(row.id))] = row.trade_id
 
-    closed = [t for t in trades if t.status in ("closed", "expired")]
-    entries = {t.id: [f for f in fills_of[t.id] if f["role"] == "entry"] for t in closed}
-    longs = [t for t in closed if entries[t.id] and all(f["side"] == "buy_to_open" for f in entries[t.id])]
-    first = {t.id: min(entries[t.id], key=lambda f: (f["executed_at"], str(f["id"])))["id"] for t in longs}
-    ids = [t.id for t in longs]
-    paths = {p.trade_id: p for p in db.exec(select(TradePathMetrics).where(TradePathMetrics.trade_id.in_(ids))).all()} if ids else {}
-    contexts = {c.fill_id: c.realized_pnl_today_before for c in db.exec(
-        select(FillMarketContext).where(FillMarketContext.fill_id.in_(list(first.values())))).all()} if first else {}
-    rows = []
-    for t in longs:
-        path = paths.get(t.id)
-        rows.append({
-            "id": t.id, "realized_pnl": _num(t.realized_pnl), "hold_duration_mins": t.hold_duration_mins,
-            "opened_at": wall_time(t.opened_at), "closed_at": wall_time(t.closed_at) if t.closed_at else None,
-            "expired_worthless": t.expired_worthless,
-            "peak_pct": _num(path.option_mfe_pct) if path else None,
-            "peak_dollars": _num(path.option_peak_unrealized_pnl) if path else None,
-            "day_pnl_before": _num(contexts.get(first[t.id])),
-        })
-    out = scorecard(rows, go_live)
+    out = scorecard(long_rows(db, trades, fills_of), go_live)
 
     out["verdict"] = verdict(out)
     # Every sent alert counts toward the follow-up tally; only the newest ALERTS_SHOWN are listed.

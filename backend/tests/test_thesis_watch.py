@@ -9,10 +9,10 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine import copilot_investigations as inv
-from app.engine import jo_briefing, research_queue, thesis_watch
+from app.engine import jo_briefing, notification_policy, research_queue, thesis_watch
 from app.engine.chart_math import ET
 from app.engine.thesis_watch import ThesisWatch
-from app.models import Account, Fill, ResearchJob, ThesisWatchTrigger
+from app.models import Account, Fill, PhonePing, ResearchJob, ThesisWatchTrigger
 from app.routers.fills import _rebuild_trades
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
@@ -82,7 +82,8 @@ class Phone:
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("THESIS_WATCH_ENABLED", "THESIS_WATCH_MOVE_PCT", "THESIS_WATCH_DAILY_CAP", "RESEARCH_QUEUE_ENABLED"):
+    for name in ("THESIS_WATCH_ENABLED", "THESIS_WATCH_MOVE_PCT", "THESIS_WATCH_DAILY_CAP", "RESEARCH_QUEUE_ENABLED",
+                 "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/trade-journal")
 
@@ -520,3 +521,69 @@ def test_the_threads_route_carries_each_open_investigation_s_triggers(monkeypatc
     [row] = body["investigations"]["investigations"]
     assert [(w["kind"], w["text"], w["delivery"]) for w in row["watch"]] == [("news", "Nebius news (Benzinga, 09:50)", "sent")]
     assert set(body) == {"positions", "investigations", "watches", "as_of"}
+
+
+# --------------------------------------------------------------------------- the notification policy
+
+def pings(engine):
+    with Session(engine) as db:
+        return db.exec(select(PhonePing).order_by(PhonePing.decided_at)).all()
+
+
+def test_a_sent_trigger_is_recorded_on_the_notification_policy(engine, world):
+    watch, readers, phone, clock = world
+    investigate(engine, "NBIS")
+    readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n1", at("09:55"))]
+    watch.run_once()
+    [row] = triggers(engine)
+    [ping] = pings(engine)
+    assert len(phone.sent) == 1 and row.delivery == "sent"
+    assert (ping.sender, ping.source_id, ping.kind, ping.decision) == ("thesis_watch", str(row.id), "thesis_watch", "sent")
+    assert (ping.anchor, ping.symbol, ping.title) == ("symbol:NBIS", "NBIS", "New on NBIS since your thesis") and ping.delivered_at is not None
+
+
+def test_over_the_shared_cap_a_trigger_is_held_keyed_to_its_day_and_does_not_use_up_the_symbol_s_day(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    investigate(engine, "NBIS")
+    monkeypatch.setenv("PING_DAILY_CAP", "3")  # every slot is reserved for position and plan pings
+    readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n1", at("09:55"))]
+    result = watch.run_once()
+    [row] = triggers(engine)
+    assert phone.sent == [] and result["fired"] == [] and [s["delivery"] for s in result["skipped"]] == ["held"]
+    assert row.delivery == "held" and row.reason.startswith("Not sent: 0 pings already went out today (cap 3).")
+    assert row.dedupe_key == "news:NBIS:https://benzinga.com/n1#skipped:2026-10-21"
+    assert [p.decision for p in pings(engine)] == ["over_cap"]
+    # Not told, so the symbol's one ping a day is still there for the next headline once the cap allows it.
+    monkeypatch.delenv("PING_DAILY_CAP")
+    clock.now = at("10:15")
+    readers.articles = [article("NBIS", "Nebius more news", "https://benzinga.com/n2", at("10:10"))]
+    assert [f["delivery"] for f in watch.run_once()["fired"]] == ["sent"] and len(phone.sent) == 1
+
+
+def test_inside_the_quiet_window_after_a_position_ping_the_trigger_is_held(engine, world):
+    watch, readers, phone, clock = world
+    hold(engine, "NBIS")
+    investigate(engine, "NBIS")
+    with Session(engine) as db:
+        anchor, trade_id = notification_policy.symbol_anchor(db, "NBIS")
+        db.add(PhonePing(sender="position_alerts", source_id="giveback-1", kind="giveback", rank=2, symbol="NBIS", anchor=anchor,
+                         trade_id=trade_id, title="t", body="b", decided_at=datetime(2026, 10, 21, 13, 57),
+                         delivered_at=datetime(2026, 10, 21, 13, 57), decision="sent"))
+        db.commit()
+    assert not anchor.startswith("symbol:")  # anchored to the open position, as the position's own pings are
+    readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n1", at("09:55"))]
+    watch.run_once()
+    [row] = triggers(engine)
+    assert phone.sent == [] and row.delivery == "held" and "give-back ping went out 3 min earlier" in row.reason
+    assert [p.decision for p in pings(engine) if p.sender == "thesis_watch"] == ["suppressed"]
+
+
+def test_the_watch_s_own_caps_still_hold_before_the_gate(engine, world, monkeypatch):
+    watch, readers, phone, clock = world
+    monkeypatch.setenv("THESIS_WATCH_DAILY_CAP", "1")
+    for symbol in ("A", "B"):
+        thesis(engine, symbol)
+    readers.articles = [article(s, f"{s} news", f"https://benzinga.com/{s}", at("09:50")) for s in "AB"]
+    result = watch.run_once()
+    assert len(phone.sent) == 1 and [s["reason"] for s in result["skipped"]] == ["daily cap reached"]
+    assert [p.decision for p in pings(engine)] == ["sent"]  # the capped one never reached the gate

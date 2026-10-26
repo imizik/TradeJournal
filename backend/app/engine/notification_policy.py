@@ -2,7 +2,7 @@
 
 Every copilot-side sender (open-trade alerts, plan nudges and link pings, plan
 time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-the automatic week review, research results) keeps its own outbox, its own at-most-once delivery and its
+the automatic week review, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
 own expiry. Right before it hands a message to ``ntfy`` it asks this module one
 question, ``decide``: **send now, merge, or hold**. ``ntfy.py`` stays a
 transport. Jo's senders (Codex) are not gated here.
@@ -27,11 +27,11 @@ The policy, in the order it is applied:
   across every kind. The priority order keeps the cap from dropping what
   matters: last-day final, invalidation and give-back are never over cap; the
   last ``RESERVED`` slots under the cap are kept for position and plan pings,
-  so nudges, prep and research are held first.
+  so nudges, prep, Radar, thesis watch and research are held first.
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (and the
   90-minute last-day alert) > ``entry`` > ``hold_hour`` > ``nudge`` / ``link`` >
-  ``prep`` (and ``week_review``, ranked with it) > ``research``.
+  ``prep`` (and ``week_review``, ranked with it) > ``radar_event`` > ``thesis_watch`` > ``research``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
 ``over_cap``), so the owner can see what was held back (the Dashboard Plans
@@ -73,11 +73,12 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "research")
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "radar_event",
+            "thesis_watch", "research")
 ALIASES = {"expiry_first": "time_stop", "link": "nudge", "no_plan": "nudge", "week_review": "prep"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
-LOW_PRIORITY = 6  # ranks from here (nudge/link, prep, research) are held first
+LOW_PRIORITY = 6  # ranks from here (nudge/link, prep, Radar, thesis watch, research) are held first
 RESERVED = 3  # slots under the cap kept for ranks below LOW_PRIORITY
 HELD = ("merged", "suppressed", "over_cap")
 RUN_SECONDS = 30
@@ -260,7 +261,7 @@ def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour",
             "time_stop": "time stop", "entry": "entry trigger", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review",
-            "research": "research"}.get(kind, kind)
+            "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research"}.get(kind, kind)
 
 
 def delivered(db: Session, ticket: Ticket, now: float) -> None:
