@@ -1,0 +1,10 @@
+{
+  "family": "opening_range_breakout",
+  "name": "Stocks-in-play ORB proxy: frozen RVOL 2.0",
+  "filters": [
+    {
+      "feature": "rvol",
+      "min": 2.0
+    }
+  ]
+}
