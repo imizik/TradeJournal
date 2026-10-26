@@ -41,6 +41,7 @@ export function useSpeakAnswer({ ready, turn, message, busy, listening, disabled
   const supported = ready && synth() !== null;
 
   const live = useRef({ on, rate, listening, message });
+  const reading = useRef<SpeechSynthesisUtterance | null>(null); // held so it is not collected mid-sentence
   useEffect(() => { live.current = { on, rate, listening, message }; });
 
   // Cancelling ends the utterance with an error event, which clears ``speaking``.
@@ -58,7 +59,9 @@ export function useSpeakAnswer({ ready, turn, message, busy, listening, disabled
     if (voice) utterance.voice = voice;
     utterance.lang = voice?.lang ?? "en-US";
     utterance.rate = pace;
-    utterance.onend = utterance.onerror = () => setSpeaking(false);
+    // A cancelled answer's late error must not clear the state of the one that replaced it.
+    utterance.onend = utterance.onerror = () => { if (reading.current === utterance) { reading.current = null; setSpeaking(false); } };
+    reading.current = utterance;
     setSpeaking(true);
     speech.speak(utterance);
   }, [turn]);

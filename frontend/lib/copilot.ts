@@ -157,6 +157,7 @@ export function rememberSpeakRate(rate: number) {
 
 const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice" };
 const SCALE: Record<string, string> = { k: "thousand", K: "thousand", M: "million", B: "billion" };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SIGN: Record<string, string> = { "+": "plus ", "-": "minus ", "−": "minus " };
 
 /** One line of an answer as it should sound: markdown gone, prices in dollars, tickers spelled ("N B I S"). */
@@ -164,6 +165,8 @@ function speakLine(line: string): string {
   return line
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "")
     .replace(/\*\*|__|`/g, "").replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?=[^\w*]|$)/g, "$1$2")
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (date: string, year: string, month: string, day: string) =>
+      Number(month) >= 1 && Number(month) <= 12 ? `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}` : date)
     .replace(/(\d)\s*[–—-]\s*(?=\$?\d)/g, "$1 to ")
     .replace(/([+\-−]?)\$(\d[\d,]*)(?:\.(\d+))?(?:\s?([kKMB])\b)?/g, (_, sign: string, whole: string, decimals: string | undefined, scale: string | undefined) => {
       const dollars = whole.replace(/,/g, "");

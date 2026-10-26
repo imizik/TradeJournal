@@ -20,8 +20,8 @@ test.describe("what is spoken", () => {
   });
 
   test("option contracts, ranges, cents, losses, links and code", () => {
-    expect(speechText({ content: "Buy the `NBIS 95C` if it holds $100–$102. Premium $0.85; P&L -$1,234 on $2.5M. See [the news](https://example.com/a)." }))
-      .toBe("Buy the N B I S 95 call if it holds 100 dollars to 102 dollars. Premium 85 cents; P and L minus 1234 dollars on 2.5 million dollars. See the news.");
+    expect(speechText({ content: "Buy the `NBIS 95C` if it holds $100–$102. Premium $0.85; P&L -$1,234 on $2.5M. See [the news](https://example.com/a). Earnings 2026-10-29." }))
+      .toBe("Buy the N B I S 95 call if it holds 100 dollars to 102 dollars. Premium 85 cents; P and L minus 1234 dollars on 2.5 million dollars. See the news. Earnings October 29, 2026.");
   });
 
   test("cards close with one sentence; an empty answer says its error; a stopped one says nothing", () => {
