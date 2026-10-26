@@ -14,7 +14,8 @@ A ``Chart`` is one of three pictures:
   against SPY over a Radar event's window.
 - **rows** (``rows``): horizontal bars, one per line, e.g. open positions by days to expiry.
 
-``render`` is cached by a content hash, so a ping's retries reuse its picture. ``layout`` returns where
+``render`` is cached by a content hash, so a ping's retries reuse its picture. ``frame`` draws one frame of a replay
+clip (``day_replay``: the day's bars up to a minute on a fixed axis, with a clock) and ``apng`` encodes the frames. ``layout`` returns where
 everything was placed, for tests and for checking that nothing fell off the picture.
 """
 
@@ -27,6 +28,7 @@ import hashlib
 import json
 import struct
 import threading
+from typing import Callable
 import zlib
 
 import numpy as np
@@ -225,8 +227,13 @@ class _Canvas:
                 self.pixels[y[keep], x[keep]] = INDEX[tone]
 
     def dot(self, x: float, y: float, radius: int, tone: str) -> None:
-        yy, xx = np.ogrid[:HEIGHT, :WIDTH]
-        self.pixels[(xx - x) ** 2 + (yy - y) ** 2 <= radius * radius] = INDEX[tone]
+        # Only the dot's square is tested (a replay draws thousands of dots); the pixels are the same as testing them all.
+        top, left = max(int(np.floor(y - radius)), 0), max(int(np.floor(x - radius)), 0)
+        bottom, right = min(int(np.ceil(y + radius)) + 1, HEIGHT), min(int(np.ceil(x + radius)) + 1, WIDTH)
+        if top >= bottom or left >= right:
+            return
+        yy, xx = np.ogrid[top:bottom, left:right]
+        self.pixels[top:bottom, left:right][(xx - x) ** 2 + (yy - y) ** 2 <= radius * radius] = INDEX[tone]
 
     def text(self, x: float, y: float, text: str, tone: str, scale: int = 2, *, kind: str = "text", backdrop: bool = False) -> dict:
         """Draw ``text`` with its top-left at (x, y); returns the label's placed box."""
@@ -352,19 +359,26 @@ def _bars(canvas: _Canvas, chart: Chart, mode: str) -> None:
         i = int(np.searchsorted(times, stamp, side="right")) - 1
         return x_of_index(min(max(i, 0), n - 1))
 
+    _plot(canvas, chart, mode, [(x_of_index(i), b) for i, b in enumerate(bars)], step, x_of_time, y_of)
+    _time_axis(canvas, int(times[0]), int(times[-1]))
+
+
+def _plot(canvas: _Canvas, chart: Chart, mode: str, columns: list[tuple[float, dict]], step: float,
+          x_of_time: Callable[[int], float], y_of: Callable[[float], float]) -> None:
+    """The bars (``columns``: each bar's x), levels, times and marks, on axes the caller chose."""
+    x0, y0, x1, y1 = PLOT
     for level in chart.levels:
         canvas.hline(x0, x1, y_of(level.price), level.tone, 2, level.dashed)
     for when in chart.times:
         canvas.vline(x_of_time(when.time), y0, y1, when.tone, 2, dashed=True)
     if mode == "candles":
         body = max(1, int(step * 0.7))
-        for i, b in enumerate(bars):
+        for cx, b in columns:
             tone = "up" if b["close"] >= b["open"] else "down"
-            cx = x_of_index(i)
             canvas.rect(cx, y_of(b["high"]), cx, y_of(b["low"]), tone)
             canvas.rect(cx - body // 2, y_of(max(b["open"], b["close"])), cx - body // 2 + body - 1, y_of(min(b["open"], b["close"])), tone)
     else:
-        canvas.polyline([(x_of_index(i), y_of(b["close"])) for i, b in enumerate(bars)], "blue", 2)
+        canvas.polyline([(cx, y_of(b["close"])) for cx, b in columns], "blue", 2)
     for when in chart.times:  # labels after the candles so they stay readable
         x = x_of_time(when.time)
         text = fit(when.label, 2, 200)
@@ -380,7 +394,71 @@ def _bars(canvas: _Canvas, chart: Chart, mode: str) -> None:
             left = min(max(x - text_width(text, 2) / 2, x0), x1 - text_width(text, 2))
             canvas.text(left, y + 12 if below else y - 26, text, mark.tone, 2, kind="mark", backdrop=True)
     _gutter(canvas, [(y_of(lv.price), lv.label, lv.tone) for lv in chart.levels], "level")
-    _time_axis(canvas, int(times[0]), int(times[-1]))
+
+
+# ------------------------------------------------------------------ replay frames
+
+
+def frame(chart: Chart, *, start: int, end: int, low: float, high: float, slot: int = 60) -> np.ndarray:
+    """One frame of a replay clip (``day_replay``): ``chart``'s bars as ``slot``-second candles on a fixed time axis
+    ``start``..``end`` and a fixed price range ``low``..``high``, so every frame of a clip lines up and the day fills in
+    from the left. ``note`` is the clock, drawn large at the top right. The palette pixels (HEIGHT x WIDTH), uncached;
+    ``apng`` encodes a list of them."""
+    canvas = _Canvas()
+    x0, _, x1, _ = PLOT
+    clock = fit(chart.note, 3, 200) if chart.note else ""
+    room = WIDTH - 2 * LEFT - (text_width(clock, 3) + 16 if clock else 0)
+    canvas.text(LEFT, 14, fit(chart.title, 3, room), "text", 3, kind="title")
+    if clock:
+        canvas.text(WIDTH - LEFT - text_width(clock, 3), 14, clock, "text", 3, kind="note")
+    canvas.hline(0, WIDTH - 1, 44, "grid", 1)
+    slots = max(1, -(-(end - start) // slot))
+    step = (x1 - x0 - 8) / slots
+
+    def x_of_slot(i: int) -> float:
+        return x0 + 4 + step * (min(max(i, 0), slots - 1) + 0.5)
+
+    def x_of_time(stamp: int) -> float:
+        return x_of_slot((int(stamp) - start) // slot)
+
+    candles: dict[int, dict] = {}
+    for b in sorted(chart.bars, key=lambda b: b["time"]):
+        i = (int(b["time"]) - start) // slot
+        if not 0 <= i < slots:
+            continue
+        c = candles.get(i)
+        if c is None:
+            candles[i] = {"time": b["time"], "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"]}
+        else:
+            c["high"], c["low"], c["close"] = max(c["high"], b["high"]), min(c["low"], b["low"]), b["close"]
+    _plot(canvas, chart, "candles", [(x_of_slot(i), c) for i, c in sorted(candles.items())], step, x_of_time, _scale(low, high))
+    _time_axis(canvas, start, end)
+    return canvas.pixels
+
+
+def apng(frames: list[np.ndarray], fps: float) -> bytes:
+    """``frames`` (palette pixels of one size) as an animated PNG at ``fps``, looping. Every frame is whole (no
+    deltas), so a player can decode any one on its own, and the bytes depend only on the pixels."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    height, width = frames[0].shape
+    delay = (max(1, round(1000 / fps)), 1000)
+    palette = b"".join(bytes(PALETTE[name]) for name in NAMES)
+    out = [b"\x89PNG\r\n\x1a\n", chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0)),
+           chunk(b"acTL", struct.pack(">II", len(frames), 0)), chunk(b"PLTE", palette)]
+    seq = 0
+    for i, pixels in enumerate(frames):
+        out.append(chunk(b"fcTL", struct.pack(">IIIIIHHBB", seq, width, height, 0, 0, *delay, 0, 0)))
+        seq += 1
+        data = zlib.compress(np.hstack([np.zeros((height, 1), dtype=np.uint8), pixels]).tobytes(), 6)
+        if i == 0:
+            out.append(chunk(b"IDAT", data))
+        else:
+            out.append(chunk(b"fdAT", struct.pack(">I", seq) + data))
+            seq += 1
+    out.append(chunk(b"IEND", b""))
+    return b"".join(out)
 
 
 def _series(canvas: _Canvas, chart: Chart) -> None:
