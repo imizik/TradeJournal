@@ -16,7 +16,7 @@ Per group: trades, P&L, mean and median return on premium paid (``pnl_pct``), wi
 counted as excluded.
 
 **Verdict** (modelled on ``exit_habits.verdict``): ``not_enough_data`` by default; it needs ``MIN_TRADES`` counted
-trades in each group. ``helping`` when the planned group's mean return on premium beats the unplanned group's by at
+trades in each group, over at least ``MIN_DAYS`` entry days. ``helping`` when the planned group's mean return on premium beats the unplanned group's by at
 least ``Z`` standard errors and its green-to-red rate is not higher; ``not_helping`` when it is worse by the same
 margin. The standard error is the day-clustered one for a difference of means: trades are grouped by their New York
 entry day (trades on one day are not independent, which is why the behavior audit resamples by trading day), with
@@ -39,6 +39,7 @@ from app.models import Account, CaptureLink, Fill, Trade, TradeCapture, TradeFil
 
 GO_LIVE = date(2026, 10, 25)  # the pre-trade plan card on the Plans board
 MIN_TRADES = 20
+MIN_DAYS = 5  # entry days the two groups span: with fewer, a clustered error is too rough to call anything
 Z = 2.0
 GROUPS = (
     ("planned", "Plan saved before the entry", True),
@@ -94,16 +95,16 @@ def verdict(rows: list[dict]) -> dict:
     unplanned = [r for r in by["unplanned"] if r.get("pnl_pct") is not None]
     rule = (f"Helping: at least {MIN_TRADES} trades in each group, the planned trades' mean return on premium higher than "
             f"the unplanned trades' by {Z:g} standard errors (clustered by entry day), and their green-to-red rate not "
-            f"higher. Not helping: lower by the same margin. Late plans are shown, not counted.")
+            f"higher, over at least {MIN_DAYS} entry days. Not helping: lower by the same margin. Late plans are shown, not counted.")
     out = {"verdict": "not_enough_data", "rule": rule, "planned": len(planned), "unplanned": len(unplanned),
            "difference_pct": None, "se_pct": None, "days": None, "caveat": CAVEAT}
     if len(planned) < MIN_TRADES or len(unplanned) < MIN_TRADES:
         return {**out, "reason": f"{len(planned)} planned and {len(unplanned)} unplanned of {MIN_TRADES} each needed."}
     diff, se, days = clustered_difference(planned, unplanned)
     out.update(difference_pct=round(100 * diff, 2), se_pct=None if se is None else round(100 * se, 2), days=days)
-    if se is None:
-        return {**out, "reason": "Every trade is from one day, so there is no spread to judge a difference by."}
-    if se <= 0:
+    if days < MIN_DAYS:
+        return {**out, "reason": f"The trades span {days} entry day{'' if days == 1 else 's'} of {MIN_DAYS} needed."}
+    if se is None or se <= 0:
         return {**out, "reason": "The returns do not vary from day to day, so there is no spread to judge a difference by."}
     if diff <= -Z * se:
         return {**out, "verdict": "not_helping",

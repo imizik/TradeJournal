@@ -99,7 +99,9 @@ def test_the_standard_error_is_clustered_by_entry_day():
                                             [{"day": a, "pnl_pct": 0.2}, {"day": b, "pnl_pct": 0.0}])
     assert apart[0] == pytest.approx(0.1) and apart[1] == pytest.approx(0.2)  # sqrt(2/1 * (0.1² + 0.1²))
     single = [{**r, "day": a} for r in rows("planned", [0.3, 0.4]) + rows("unplanned", [0.0, 0.1])]
-    assert "one day" in plan_proof.card(single)["verdict"]["reason"]
+    assert plan_proof.card(single)["verdict"]["reason"] == "The trades span 1 entry day of 5 needed."
+    four = [{**r, "day": date(2026, 10, 26 + i % 4)} for i, r in enumerate(rows("planned", [0.3, 0.4]) + rows("unplanned", [0.0, 0.1]))]
+    assert plan_proof.card(four)["verdict"]["reason"] == "The trades span 4 entry days of 5 needed."
 
 
 # ------------------------------------------------------------------ database + endpoint
