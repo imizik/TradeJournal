@@ -502,6 +502,13 @@ Decided with the user on 2026-10-02.
 
 The isolated research branch also provides a frozen single-candidate intake in
 `backend/scripts/factory_search.py`; see [its preparation and approval boundaries](../research/CONTINUOUS_SEARCH.md#frozen-single-candidate-intake-preparation-october-25).
+
+The research branch's [fixed ETF exploratory intake](../research/CONTINUOUS_SEARCH.md#fixed-etf-exploratory-intake-preparation-october-26)
+uses the same attempted-ID ledger, locks and budgets for a separately approved
+portfolio screen. It is excluded from scheduled selection and cannot produce a
+confirmation/exam pass. Its pinned 2016–September 2024 inputs and portfolio
+comparison do not change the trade-level gates above. Implementation/merge alone
+authorizes no evaluation, attempt, schedule or live execution.
 Inspection is read-only. Execution still requires separate owner approval and a
 counted attempt through the official supervisor; neither this documentation nor
 an infrastructure merge authorizes a run.
