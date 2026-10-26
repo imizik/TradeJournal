@@ -379,8 +379,9 @@ is verifiable rather than hopeful.
   which is never merged; main's copy is the state when the factory was
   merged. `scripts/strategy_factory.py` refuses to write the default ledger
   from any other branch.
-- Every judged candidate stays in the ledger, pass or fail, and counts toward
-  the confirmation bar, as do the hand-research lines. Deleting or rewriting a
+- Every distinct attempted ID stays in the research ledger and counts toward
+  the confirmation bar, including screen failures, interrupted reservations
+  and hand research. Multiple records of the same ID count once. Deleting or rewriting a
   line lowers the bar for every later idea; never do it.
 - Each stage loads only its own data: the screen through 2024-09-30,
   confirmation through 2026-03-31, the holdout only for a candidate that

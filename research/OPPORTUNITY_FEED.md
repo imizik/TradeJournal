@@ -35,8 +35,8 @@ backend/.venv/bin/python backend/scripts/factory_opportunities.py build
 ```
 
 It acquires the existing search/weekly writer locks and reserves up to 900
-seconds from the current two-hour time cap. Successful runtime replaces the
-reservation; interrupted runtime stays consumed. It reuses already tried IDs
+seconds from the shared process-time cap (24 hours per window since October 16).
+Successful runtime replaces the reservation; interrupted runtime stays consumed. It reuses already tried IDs
 rather than resetting/counting them again. The frozen batch cannot be replaced.
 
 The batch is under `backend/data/factory/opportunities/pilot-20261015-v2/`.

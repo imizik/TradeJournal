@@ -1088,8 +1088,3 @@ def spec_id(spec: Spec) -> str:
     """A short, stable id for the rules: the same rules get the same id whatever they are called."""
     text = json.dumps(canonical(spec), sort_keys=True, separators=(",", ":"))
     return spec.family[:2] + "-" + hashlib.sha256(text.encode()).hexdigest()[:10]
-
-
-# Mac research-only family: retained on factory/ledger, never merged.
-from app.engine.factory_search_family import ScannerFamily
-FAMILIES["s1_research"] = ScannerFamily

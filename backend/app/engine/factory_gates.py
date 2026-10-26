@@ -729,7 +729,7 @@ def ledger_record(ev: Evaluation, recorded: datetime, code: str, cache_through: 
 
 
 def prior_candidates(records: Iterable[Mapping], excluding: str | None = None) -> int:
-    """Distinct candidates, hand research included, that have reached the confirmation stage."""
+    """All distinct attempted IDs, including hand research and reservations."""
     return len({r["id"] for r in records if r["id"] != excluding})
 
 

@@ -57,7 +57,10 @@ to independent math with a read-only cache adapter.
 `scripts/backtest_market_map.py` fetches the bars and hands them in. So were
 the strategy factory's `app.engine.factory_*` modules: `factory_gates.evaluate`
 reaches bars only through the loader `scripts/strategy_factory.py` passes it,
-which is also what keeps each stage from loading data it may not see.
+which is also what keeps each stage from loading data it may not see. The
+research-only `factory_search_family` adapter and supplied-data `scanner_rules`
+are also protected by this import policy; no provider or database import is
+allowed through their dependency chain.
 
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend only.
 Both bind to loopback.
@@ -105,8 +108,8 @@ as `bin/claude`, asks Claude on the owner's Claude plan token, never API
 credits, and the reviews are saved to the production database
 (`app/jobs/plan_reviews.py`, `deploy/README.md`).
 
-Two scheduled processes run off the server, neither touching a database (the
-first is started by launchd on the development Mac):
+The following off-server workflows do not touch a database. Activation notes
+are historical records, not a current scheduler-health check:
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
@@ -114,6 +117,15 @@ first is started by launchd on the development Mac):
   on the Claude plan token, never API credits, and writes only to that
   branch, which is never merged (`docs/strategy-factory.md`). The direct
   Anthropic API call remains only behind an explicit `--use-api`.
+- The research-only continuous supervisor (`backend/scripts/factory_search.py`)
+  runs in the Mac `factory/ledger` checkout, sharing writer locks with the weekly
+  run. It reserves each attempt before starting a bounded worker; all distinct
+  IDs count, including failures and interruptions. Frozen ORB intake is optional
+  manual preparation: inspection is read-only; execution requires separate owner
+  authorization and matching identity/ledger digest. See
+  [continuous search](../../research/CONTINUOUS_SEARCH.md). The offline
+  [opportunity pilot](../../research/OPPORTUNITY_FEED.md) uses sealed sequential
+  cards and a separate local choice record; it is not a Factory pass or live S1.
 - The weekly documentation drift pass, a Claude Code routine in Anthropic's
   cloud on the Claude plan (claude.ai/code/routines, "Weekly docs drift
   pass"), started every Saturday from a fresh clone of `main`. Once 20 code

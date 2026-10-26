@@ -3,6 +3,10 @@
 Runs only in `/Users/user/TradeJournal-factory`, branch `factory/ledger`.
 This branch is never merged and no unproven strategy PR is created.
 
+The schedule/activation statements below record October 15–16, not a current
+service-health check or authorization to resume. This October 25 PR performs
+preparation and synthetic tests only; no evaluation or attempt is authorized.
+
 `backend/scripts/factory_search.py --tick` runs at most one new candidate.
 launchd calls it every five minutes with `--force`, enabled by Isaac on
 October 15 to continue searching during the day as well as at night. Isaac
@@ -134,3 +138,86 @@ already consumed candidate IDs, batch markers and seconds are retained. The
 five-minute launchd cadence, single-writer exclusion, per-process deadlines,
 ChatGPT-plan Codex preference, sanitized feedback and every statistical gate
 are unchanged. The increased caps apply to the active and future windows.
+
+## Frozen single-candidate intake (preparation, October 25)
+
+The optional manual intake accepts only the canonical default
+`opening_range_breakout` with `rvol >= 2.0`, ID `op-998d19a73d`, in
+`research/specs/opening_range_breakout_rvol2_v1.json`. It does not change its
+rules, core universe, costs, acceptance gates, protected dates or attempt budget.
+This is infrastructure on the research branch, not an unproven strategy release
+or a reason to merge `factory/ledger` into application `main`.
+
+**No evaluation is authorized by this change, its merge, or an inspection.**
+The authoritative Mac checkout is not updated or restarted by this PR. Before
+adopting the code there, verify the search remains paused. Do not resume launchd,
+run an acceptance tick, or spend a new attempt as part of code preparation.
+The loader fix is included here because the old BarStore physically read later
+source files before trimming the returned Series. Bounded requests now filter
+source dates before reads and isolate both memory and disk caches by cutoff;
+the research branch's scanner `MINUTE_LOADER` hook is preserved.
+
+Once the reviewed code has been adopted in the authoritative checkout, this is
+the read-only inspection command (run from that checkout):
+
+```bash
+backend/.venv/bin/python backend/scripts/factory_search.py \
+  --inspect-spec research/specs/opening_range_breakout_rvol2_v1.json
+```
+
+It returns only candidate identity, whether that identity is already counted,
+all-distinct-ID count, prospective next attempt number, ledger SHA-256, current
+window/caps/time budget, search-hours status and whether a weekly lock exists.
+The next attempt is null for an already-counted candidate. No outcomes, free-text
+ledger notes or protected-period metrics are exposed. Inspection creates no
+locks/directories, recovers no jobs, calls no model/provider/worker, publishes no
+message, reserves no time/attempt and writes no ledger. It is a momentary snapshot,
+not a lock acquisition or an eligibility/approval guarantee. A missing ledger,
+malformed budget or absent budget for a window with recorded activity is refused.
+
+A **separately owner-approved** future evaluation must use the same supervisor:
+`--tick --spec <frozen-spec-path> --authorize-spec op-998d19a73d
+--expect-ledger-sha256 <fresh-inspection-digest>`. These flags make the intent
+explicit; they are not an external approval system and cannot grant owner
+permission. The ordinary search-hours guard still applies; existing `--force`
+can bypass only that clock guard, with all budgets and locks retained.
+
+The requested path acquires the existing writer flock and weekly exclusion,
+rechecks the inspected ledger digest, duplicate identity, current caps and
+remaining time, then uses the existing reservation/job/worker/completion path.
+It does not call Codex, Claude or random proposal fallback, and does not send
+unrelated nightly notifications. Existing result recovery and proposal evidence
+handling remain in the official workflow. Scheduled `--tick` behavior is retained.
+Renames, retries of reserved/interrupted/failed IDs, variants, stale receipts,
+busy locks and insufficient budgets cannot substitute another candidate.
+Refusals before recovery/reservation do not invoke git persistence or alter the
+ledger/time budget. Existing interrupted reservations still count. A launch or
+evaluation failure does not make the candidate retryable.
+
+One authorized requested tick can start at most one worker, with the same maximum
+900-second timeout, inherited writer lock, durable ledger reservation before
+launch and all-prior-distinct-ID multiplicity count. The worker and statistical
+gates are unchanged: it cannot reach confirmation or the exam by a new path.
+Do not use the standalone application CLI, a scratch backtest or the replay demo
+to bypass this counted evaluation.
+
+Preparation evidence: the authoritative checkout was clean at
+`a285a8340525e0c37421f80b9642baabf0bf0d41`; its ledger still contained 82 distinct
+IDs, with no `op-998d19a73d`, and SHA-256
+`0e1a959e540a25597b38a55dca8f453641aa2359fd312397a69b2ccb7fb3e47e`.
+This is a dated metadata observation, not a reusable approval receipt or proof
+that attempt 83 will remain available. No real data evaluation was performed.
+
+`backend/tests/test_factory_intake.py` runs the real supervisor with invented
+ledgers, temporary budget/job files and fake workers. It checks read-only
+inspection, exact-spec admission, duplicate/refusal states, stale digests,
+missing history/budget, time and attempt caps, both locks, reservation-before-
+launch, all-attempt counting, failure/restart behavior and unchanged scheduled
+selection. It forbids real model, provider, evaluation, notification and git
+operations. `test_strategy_factory.py` covers physical stage isolation and the
+frozen spec identity with synthetic bars. The S1 research family is registered
+by the research CLI, not the shared engine, preserving Studio's frozen runtime
+dependency set. Test imports restore CLI environment changes and never load
+the real backend environment file. These fixtures do not establish live
+adoption, process recovery under every host failure, strategy performance or
+paper/live execution readiness.

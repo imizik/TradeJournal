@@ -56,6 +56,8 @@ PURE_MODULES = {
     # handed, and the gates reach data only through the loader they are given.
     "app.engine.factory_data",
     "app.engine.factory_rules",
+    "app.engine.factory_search_family",  # research adapter; injected minute loader only
+    "app.engine.scanner_rules",  # computations over supplied bars/chains/quotes
     "app.engine.factory_model",
     "app.engine.factory_gates",
     "app.engine.factory_brief",
@@ -203,3 +205,12 @@ def test_a_pure_module_importing_the_database_engine_is_named() -> None:
 def test_a_clean_graph_reports_nothing() -> None:
     graph = _graph(("app.engine.strategy_lab", "app.engine.strategy_metrics"))
     assert impurities(graph) == {}
+
+
+@pytest.mark.parametrize("module", ["app.engine.factory_search_family", "app.engine.scanner_rules"])
+@pytest.mark.parametrize("forbidden", ["httpx", "app.database"])
+def test_research_adapter_dependencies_remain_protected(module, forbidden) -> None:
+    graph = _graph(("app.engine.factory_rules", module), (module, forbidden))
+    found = impurities(graph)
+    assert found[module] == f"{module} -> {forbidden}"
+    assert found["app.engine.factory_rules"] == f"app.engine.factory_rules -> {module} -> {forbidden}"

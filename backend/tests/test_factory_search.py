@@ -1,11 +1,15 @@
 """Focused search gates and restart primitives, no provider/network calls."""
 import json
+import os
+from unittest.mock import patch
 import random
 import sys
 from pathlib import Path
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-import factory_search as search
+# CLI bootstrap must not leak provider settings into other test modules.
+with patch("dotenv.dotenv_values", return_value={}), patch.dict(os.environ):
+    import factory_search as search
 from app.engine.factory_gates import prior_candidates, required_t
 
 

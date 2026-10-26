@@ -229,6 +229,11 @@ see the [prototype notes](../level2-synthetic-prototype.md) and
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
+- Research-branch `factory_search.py` — continuous supervisor and optional frozen
+  ORB intake; `test_factory_search.py` and `test_factory_intake.py` cover locks,
+  budget/attempt accounting and refusals with synthetic workers.
+  `factory_opportunities.py` and `test_factory_opportunities.py` cover the
+  sealed offline selection pilot. Neither workflow grants live execution.
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
   minute bars it needs (the only step that calls Alpaca); `week` is the weekly
