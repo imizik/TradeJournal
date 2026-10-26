@@ -157,3 +157,12 @@ test("with the lab off the page still reads, and copilot links are left out", as
   await expect(page.getByTestId("today").getByRole("link", { name: "Plan a trade" })).toHaveCount(0);
   await expect(page.getByTestId("today").getByRole("link", { name: "Review my week" })).toHaveCount(0);
 });
+
+// The frontend proxy forwards only known first path segments; "today" was missing when the screen first shipped, so
+// production showed "Request failed (404)" while the backend answered. This one goes through the real proxy, unstubbed.
+test("the frontend proxy forwards GET /today to the backend", async ({ page }) => {
+  const response = await page.request.get("/api/backend/today");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("application/json");
+  expect(Object.keys(await response.json()).length).toBeGreaterThan(0);
+});
