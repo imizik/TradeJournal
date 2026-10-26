@@ -85,7 +85,7 @@ Things worth knowing before you touch a page:
   Google OAuth consent screen links to it; keep it true to what the Gmail
   integration does.
 - Phone layout: below `md` the sidebar in `components/Nav.tsx` is replaced by a
-  tab bar fixed at the bottom (Dashboard, Charts, a **Plan** tab for the owner while the
+  tab bar fixed at the bottom (Today for the owner, Dashboard for an assistant, Charts, a **Plan** tab for the owner while the
   Copilot Lab is on, Daily Review, Trades, and More,
   which opens the slide-out menu with every `navItems` page and the Sync
   drawer) and a slim title bar, hidden on `/charts` so the chart starts
