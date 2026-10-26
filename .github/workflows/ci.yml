@@ -146,17 +146,23 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      # Three shards of the ordinary suite, plus one runner for the
+      # Five shards of the ordinary suite, plus one runner for the
       # authenticated and sample-decision suites, which used to run after
-      # shard 1 and made it the long pole.
+      # shard 1 and made it the long pole. Playwright splits by test count in
+      # file order, and charts.spec.ts alone is about nine minutes, so with
+      # three shards the first ran 10-11 minutes; five keep each near 8.
       matrix:
         include:
-          - shard: "1/3"
+          - shard: "1/5"
             artifact: one
-          - shard: "2/3"
+          - shard: "2/5"
             artifact: two
-          - shard: "3/3"
+          - shard: "3/5"
             artifact: three
+          - shard: "4/5"
+            artifact: four
+          - shard: "5/5"
+            artifact: five
           - shard: access
             artifact: access
     steps:
