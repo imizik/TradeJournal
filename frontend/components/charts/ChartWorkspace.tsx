@@ -4,7 +4,7 @@ import { useChartSession, type ChartResponse } from "@/lib/chartSession";
 import Link from "next/link";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, MessagesSquare, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, MessagesSquare, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Target, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
 import DockSection from "./DockSection";
 import TradeCard from "./TradeCard";
@@ -32,6 +32,9 @@ import CopilotPanel, { type PanelActions } from "@/components/copilot/CopilotPan
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade, { PLAN_BUTTON, planContext } from "@/components/copilot/PlanATrade";
 import CopilotLoop from "./CopilotLoop";
+import PlanFromDrawing, { planThisName, StartPlan, type PlanAsk } from "./PlanFromDrawing";
+import { listAlerts, PLAN_CONFIRMED, type PlanConfirmed } from "@/lib/copilot";
+import { drawnPlan, pairLevels, pairText, planMessage, planSource, type PlanPair } from "@/lib/drawPlan";
 import { radarChartContext, radarReturnHref, nyTime, type RadarChartContext, type RadarGroup } from "@/lib/radar";
 import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
@@ -316,6 +319,8 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const [levelLabel, setLevelLabel] = useState("");
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Draw the plan: the main chart symbol's last two price levels drawn or selected, and whether their roles are swapped.
+  const [picks, setPicks] = useState<{ symbol: string; ids: string[]; swap: boolean }>({ symbol: "", ids: [], swap: false });
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const [dock, setDock] = useState<{ open: boolean; tab: DockTab }>({ open: true, tab: "watchlist" });
   // A phone's dock: a sheet over the charts, closed until asked for.
@@ -1033,6 +1038,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     showGroup("drawings"); // a new drawing is never placed out of sight
     setSelection({ symbol: target, id: drawing.id, panel });
     setFresh(kind === "note" ? drawing.id : null);
+    if (panel === "main") notePick(target, drawing);
   };
   /**
    * A drawing dragged (new points, on the chart's basis, so dated today) or
@@ -1153,14 +1159,14 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const openMenu = (target: string, panel: string) => (request: MenuRequest) => {
     if (tool) { setTool(null); return; }
     setEntry(NO_ENTRY);
-    if (request.id) { setSelection({ symbol: target, id: request.id, panel }); setFresh(null); }
+    if (request.id) { setSelection({ symbol: target, id: request.id, panel }); setFresh(null); if (panel === "main") notePickId(target, request.id); }
     setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, auto: request.auto ?? null, reset: request.reset });
   };
   const copyPrice = async (value: number) => {
     const text = value.toFixed(2);
     setNotice(await copyText(text) ? `Copied ${text}` : `Could not copy. The price is ${text}.`);
   };
-  const select = (target: string, panel: string) => (id: string | null) => { setSelection(id ? { symbol: target, id, panel } : null); setFresh(null); };
+  const select = (target: string, panel: string) => (id: string | null) => { setSelection(id ? { symbol: target, id, panel } : null); setFresh(null); if (id && panel === "main") notePickId(target, id); };
   const chooseTool = (next: Tool) => { if (isMacroSymbol(symbol)) return; setTool((current) => current === next ? null : next); setSelection(null); setDrawError(""); };
   // A dragged level saves the price it was dropped at, dated today: that is the basis the chart shows.
   const moveLevel = (target: string, id: string, value: number) => {
@@ -1291,6 +1297,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     if (existing.length >= MAX_LEVELS) { setLevelError(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
     const level = cleanLevel({ id: crypto.randomUUID(), price: value, label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}`, drawn_on: todayNewYork() })!;
     editItems({ symbol: target, layer: "levels", before: null, after: level, index: existing.length });
+    notePick(target, level);
     setTool(null); setLevelPrice(""); setLevelLabel("");
     showGroup("levels"); // a new level is never saved out of sight
   };
@@ -1452,11 +1459,83 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
   const narrow = width < WIDE;
+  // Draw the plan: the last two price levels drawn or selected on the main chart (a level, a ray or a zone), and
+  // whether the owner swapped which is the entry. "Plan this" sends them to the dock's copilot as an unsent message.
+  const drawLast = selected?.last ?? latestCandle?.close ?? null;
+  const planItem = (target: string, id: string): PriceLevel | Drawing | undefined => (visibleLevels.get(target) ?? NO_LEVELS).find((row) => row.id === id)
+    ?? (visibleDrawings.get(target) ?? NO_DRAWINGS).find((row) => row.id === id);
+  const notePick = (target: string, item: PriceLevel | Drawing) => {
+    if (!planSource(item, null)) return; // a trend line or a note has no single price
+    setPicks((p) => {
+      const kept = p.symbol === target ? p.ids.filter((id) => id !== item.id) : [];
+      const ids = [...kept, item.id].slice(-2);
+      return { symbol: target, ids, swap: p.symbol === target && ids.length === p.ids.length && ids.every((id) => p.ids.includes(id)) && p.swap };
+    });
+  };
+  const notePickId = (target: string, id: string) => { const item = planItem(target, id); if (item) notePick(target, item); };
+  const pickedSources = picks.symbol === symbol && copilotOn && !isMacroSymbol(symbol)
+    ? picks.ids.map((id) => planItem(symbol, id)).filter((item): item is PriceLevel | Drawing => !!item).map((item) => planSource(item, drawLast)!) : [];
+  const planPair: PlanPair | null = pickedSources.length === 2 ? pairLevels(pickedSources[0], pickedSources[1], drawLast, picks.swap)
+    : pickedSources.length === 1 ? pairLevels(pickedSources[0], null, drawLast) : null;
+  const swapPlan = () => setPicks((p) => ({ ...p, swap: !p.swap }));
+  // The plan last asked for, so a confirmed plan card can label the levels it came from.
+  const planAsked = useRef<{ symbol: string; pair: PlanPair } | null>(null);
+  const [planAsk, setPlanAsk] = useState<PlanAsk | null>(null);
+  const planThis = () => {
+    if (!planPair) return;
+    planAsked.current = { symbol, pair: planPair };
+    setPlanAsk({ text: planMessage(symbol, settings.intervals[0], drawLast, planPair), plan: drawnPlan(planPair), n: Date.now() });
+    showDock("copilot");
+  };
+  const planStarted = useCallback((n: number) => setPlanAsk((ask) => ask?.n === n ? null : ask), []);
+  /**
+   * A plan card confirmed from a "Plan this": each of its prices labels the drawn level at that price ("Entry
+   * trigger", "Invalidation"), or the level drawn for that role, moved to the plan's price; a ray or a zone keeps its
+   * shape and gets a labelled level beside it. One undo step. Its alerts' bells are read at once.
+   */
+  const labelPlan = (confirmed: PlanConfirmed) => {
+    const asked = planAsked.current;
+    const want = asked && drawnPlan(asked.pair);
+    if (!asked || !want || !confirmed.drawn || asked.symbol !== confirmed.symbol || want.side !== confirmed.drawn.side
+      || want.trigger !== confirmed.drawn.trigger || want.invalidation !== confirmed.drawn.invalidation) return;
+    planAsked.current = null;
+    const target = asked.symbol;
+    let rows = settings.levels[target] ?? [];
+    const edits: ItemEdit[] = [];
+    const used = new Set<string>();
+    const drawnSources = [asked.pair.trigger, asked.pair.invalidation].filter((source) => !!source) as NonNullable<PlanPair["trigger"]>[];
+    for (const [label, value, own] of [["Entry trigger", confirmed.entry, asked.pair.trigger], ["Invalidation", confirmed.invalidation, asked.pair.invalidation]] as const) {
+      const source = drawnSources.find((one) => !used.has(one.id) && Math.abs(one.price - value) < 0.005) ?? (own && !used.has(own.id) ? own : null);
+      if (source) used.add(source.id);
+      const index = source?.kind === "level" ? rows.findIndex((row) => row.id === source.id) : -1;
+      if (index >= 0) {
+        const before = rows[index];
+        const moved = Math.abs(source!.price - value) >= 0.005;
+        const after = cleanLevel({ ...before, label, ...(moved ? { price: value, drawn_on: todayNewYork() } : {}) })!;
+        edits.push({ symbol: target, layer: "levels", before, after, index });
+        rows = rows.map((row) => row.id === after.id ? after : row);
+      } else if (rows.length < MAX_LEVELS) {
+        const after = cleanLevel({ id: crypto.randomUUID(), price: value, label, drawn_on: todayNewYork() })!;
+        edits.push({ symbol: target, layer: "levels", before: null, after, index: rows.length });
+        rows = [...rows, after];
+      }
+    }
+    if (edits.length) { editItems(edits.length === 1 ? edits[0] : { symbol: target, layer: "batch", edits, name: "plan levels" }); showGroup("levels"); }
+    listAlerts().then((data) => setAlertEdit({ at: Date.now() / 1000, data })).catch(() => undefined);
+  };
+  const latestLabelPlan = useRef(labelPlan);
+  useEffect(() => { latestLabelPlan.current = labelPlan; });
+  useEffect(() => {
+    const confirmed = (event: Event) => latestLabelPlan.current((event as CustomEvent<PlanConfirmed>).detail);
+    window.addEventListener(PLAN_CONFIRMED, confirmed);
+    return () => window.removeEventListener(PLAN_CONFIRMED, confirmed);
+  }, []);
   // Above the conversation: the symbol's position, armed plans and what is new, and "Plan a trade" with what this chart
   // shows, read at the press so the chart's refreshes never re-render the panel.
   const planLine = useRef<() => string>(() => "");
   const loopStrip = useCallback((actions: PanelActions) => isMacroSymbol(symbol) ? null
-    : <CopilotLoop key={symbol} symbol={symbol} narrow={narrow} actions={actions} context={() => planLine.current()} />, [symbol, narrow]);
+    : <><StartPlan ask={planAsk} actions={actions} onStarted={planStarted} />
+      <CopilotLoop key={symbol} symbol={symbol} narrow={narrow} actions={actions} context={() => planLine.current()} /></>, [symbol, narrow, planAsk, planStarted]);
   const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} strip={loopStrip} />;
   // A desktop and full screen fill their box: the main chart takes the height
   // the smaller charts leave, measured by the browser, not estimated (C7.3).
@@ -1705,6 +1784,9 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     <div role="group" aria-label="Drawing tools" className={`flex items-center ${narrow ? "" : "flex-col gap-0.5"}`}>
       {TOOLS.map(([kind, Icon]) => <button key={kind} aria-label={`Draw ${TOOL_NAMES[kind].toLowerCase()}`} aria-pressed={tool === kind} title={tool === kind ? "Cancel drawing (Esc)" : TOOL_NAMES[kind]} onClick={() => chooseTool(kind)}
         className={`${plain(tool === kind, "bg-blue-400/15 text-blue-300")} ${narrow ? "h-11 w-11" : "h-8 w-8"}`}><Icon size={14} /></button>)}
+      {copilotOn && !isMacroSymbol(symbol) && <button aria-label={planPair ? planThisName(planPair) : "Plan this"} disabled={!planPair} onClick={planThis}
+        title={planPair ? `${planThisName(planPair)}: ${pairText(planPair)}. Opens the copilot with it; nothing is sent until you press Send.` : "Plan this: draw or select two price levels (or one invalidation), then the copilot drafts the plan around them"}
+        className={`${plain(false)} ${narrow ? "h-11 w-11" : "h-8 w-8"} ${planPair ? "!text-sky-300" : ""} disabled:opacity-40`}><Target size={14} /></button>}
       <button aria-label="Magnet" aria-pressed={settings.magnet} title="Magnet: anchors snap to the nearest open, high, low or close (or hold ⌘/Ctrl)" onClick={() => setSettings((s) => ({ ...s, magnet: !s.magnet }))}
         className={`${plain(settings.magnet, "bg-amber-400/15 text-amber-300")} ${narrow ? "h-11 w-11" : "h-8 w-8"}`}><Magnet size={14} /></button>
     </div>
@@ -2015,6 +2097,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
               <PriceChart id="main" main symbol={slot.symbol} indexAsOf={feedFor(slot.symbol)?.intraday_as_of} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={isMacroSymbol(slot.symbol) ? NO_LEVELS : visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={isMacroSymbol(slot.symbol) ? NO_DRAWINGS : visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn && !isMacroSymbol(slot.symbol) ? settings.optionsLayer.nearest : null} rangeBands={rangesOn && !isMacroSymbol(slot.symbol)} vwapBands={vwapBandsOn && !isMacroSymbol(slot.symbol)} volumeCandles={settings.volumeCandles && !isMacroSymbol(slot.symbol)} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={isMacroSymbol(slot.symbol) ? NO_MARKS : alertMarks.get(slot.symbol) ?? NO_MARKS} positions={isMacroSymbol(slot.symbol) ? NO_POSITIONS : positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} liquidity={slot.symbol === symbol ? liquidity : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={isMacroSymbol(slot.symbol) ? null : tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
+                overlay={planPair && slot.symbol === symbol && picked?.panel === "main" && picks.ids.includes(picked.id) && !tool && <PlanFromDrawing pair={planPair} narrow={narrow} onPlan={planThis} onSwap={swapPlan} />}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                 onMenu={isMacroSymbol(slot.symbol) ? undefined : openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                 maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined} onPlan={narrow ? openPlan : undefined}
@@ -2112,7 +2195,8 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
-        onDelete={() => { if (menu.id) deleteItem(menu.symbol, menu.id); }} onClose={() => setMenu(null)} />}
+        onDelete={() => { if (menu.id) deleteItem(menu.symbol, menu.id); }} onClose={() => setMenu(null)}
+        plan={planPair && menu.panel === "main" && menu.symbol === symbol && !!menu.id && picks.ids.includes(menu.id) ? { name: planThisName(planPair), detail: pairText(planPair), run: planThis } : null} />}
       {notice && <div role="status" aria-label="Chart notice" className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[85] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-md border border-slate-600 bg-[#121924]/95 px-3 py-1.5 text-xs text-slate-200 shadow-xl">{notice}</div>}
       {entry.typed && <div role="status" aria-label="Interval entry" className="pointer-events-none fixed left-1/2 top-1/2 z-[75] min-w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-600 bg-[#121924]/95 px-4 py-3 text-center shadow-2xl">
         <div className="font-mono text-2xl font-medium text-slate-100">{entry.typed}<span className="text-base text-slate-500">m</span></div>
