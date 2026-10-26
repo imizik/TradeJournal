@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.engine import chart_render, day_replay, notification_policy, ntfy, ping_images
+from app.engine import chart_render, day_replay, notification_policy, ntfy
 from app.engine.chart_math import ET
 from app.engine.day_replay import DayReplays, SymbolDay
 from app.models import Account, DayReplay, Fill, LevelAlert, PhonePing
