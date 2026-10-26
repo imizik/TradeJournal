@@ -122,7 +122,7 @@ spec to compare yet. A new name cannot establish novelty or reset the count.
 Relevant source: [rules](../../backend/app/engine/factory_rules.py),
 [features](../../backend/app/engine/factory_data.py),
 [gates](../../backend/app/engine/factory_gates.py) and the
-[research workflow](../CONTINUOUS_SEARCH.md).
+[research workflow on the audited research commit](https://github.com/imizik/TradeJournal/blob/a954218f0e5c968c013d983064da79271cf68e03/research/CONTINUOUS_SEARCH.md).
 
 - `Family.on_bar`/`FeatureContext` provide price-series inputs, not an as-of
   earnings-event/estimate interface. Multi-session holding exists, but that does
