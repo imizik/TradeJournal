@@ -238,21 +238,23 @@ v0 until Isaac picks. It changes two numbers and nothing else, both chosen
 from replays of the recorded sessions:
 
 - **Two consecutive passes instead of three** (`persist_passes` 3 → 2). Alone,
-  +11 events over October 22, 23 and October 26 to 10:16 ET, none dropped, one
-  added event a quick fade (DECK, gone 11 minutes later); the shared events
-  fire a median 1 minute earlier.
-- **4.0 points vs SPY instead of 4.5** (`spy_relative_pct` 4.5 → 4.0). Alone, +6
-  events (CIFR and LCID on October 22, CRWD and CIFR on October 23, ASTS and
-  SNAP on October 26), none dropped, no quick fade. Readings of 4.0+ held 3
-  passes in a row for 4, 7 and 2 symbol-directions a session, against 2, 5 and
-  0 at 4.5.
+  +15 events over the three full sessions (October 22, 23 and 26), none
+  dropped, three of the added events quick fades (DECK on October 23, gone 11
+  minutes later; the Quantum computing and Social and ads groups on October
+  26, gone within 14 and 8 minutes); the shared events fire a median 1 minute
+  earlier.
+- **4.0 points vs SPY instead of 4.5** (`spy_relative_pct` 4.5 → 4.0). Alone,
+  +12 events (CIFR and LCID on October 22, CRWD and CIFR on October 23, ASTS,
+  SNAP, S, DDOG, ALAB, CRDO, CIFR and WULF on October 26), none dropped, no
+  quick fade, three extended. Readings of 4.0+ held 3 passes in a row for 4, 7
+  and 12 symbol-directions a session, against 2, 5 and 4 at 4.5.
 
-Together: 32 events against v0's 18 (12/13/7 against 7/9/2), 2 quick fades
-against 1, 15 extended against 11, and the morning of October 26, quiet under
-v0 (2 events by 10:16), gets 7. The October 26 events had under 15 minutes of
-passes after them (the report marks them unresolved), so the quick-fade counts
-rest on October 22 and 23 until the rerun below. Event ids start `rv1-`, so both versions'
-events can sit in one store. Considered and not chosen: a 3.5-point sector
+Together, rerun after the October 26 close: 52 events against v0's 28
+(12/13/27 against 7/9/12), 5 quick fades against 1, 19 extended against 13.
+Of the 24 events v1 adds, 3 are quick fades and 7 extended, against 1 and 13
+of v0's 28; the persistence change supplies all three quick fades. The store
+held no ratings at the rerun, so the usefulness read-out is still empty.
+Event ids start `rv1-`, so both versions' events can sit in one store. Considered and not chosen: a 3.5-point sector
 threshold (+13, mostly the SPY story again against a flat XLK, firing a few
 minutes before the SPY event; 2 quick fades), groups at 3 members (+1:
 Telehealth, "mostly HIMS") and a 1.75 group median (+5, three overlapping
