@@ -18,6 +18,7 @@ from app.ai.copilot_fixture import FixtureEvidence
 from app.ai.copilot_replay import ReplayEvidence
 from app.models import Account, Fill
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 
 ROTH, WEBULL = UUID(int=3001), UUID(int=3002)
 EXPIRY = date(2026, 11, 20)
@@ -122,7 +123,7 @@ def test_a_level_is_matched_by_distance_from_each_entry_and_the_counts_follow(db
     assert out["coverage"] == {"no_entry_price": 0, "no_bars": 0, "no_option_bars": 0}
     assert set(out["provenance"]) == set(copilot_review.HISTORY_PROVENANCE)
     text = json.dumps(out)
-    assert not any(secret in text for secret in SECRETS) and len(copilot_tools.bounded(out)) <= copilot_tools.MAX_RESULT_CHARS
+    assert not leaks(text, SECRETS) and len(copilot_tools.bounded(out)) <= copilot_tools.MAX_RESULT_CHARS
 
 
 def test_the_distance_is_what_matters_not_the_price(db):

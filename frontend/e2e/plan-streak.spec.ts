@@ -4,13 +4,18 @@ import type { PlanStreak } from "../components/PlanStreak";
 // The plan streak chip in the nav: the owner's planned-before-entry run, one tap from Review my week.
 // The streak read is stood in for, so each state is exact; nothing here saves or links a plan.
 const REVIEW = "/copilot-lab?context=Review+my+week";
-const now = Math.floor(Date.now() / 1000);
+// The browser's clock is fixed at Monday 14:30 New York, so "today" in the chip's label never depends on when CI runs.
+const NOW = new Date("2026-10-26T18:30:00Z");
+const now = NOW.getTime() / 1000;
 const STREAK: PlanStreak = {
   show: true, since: now - 86400 * 10, tracking: true, current: 4, best: 6, pending: 0,
   this_week: { planned: 5, total: 7, pending: 0, start: now - 86400 * 2 },
-  // A minute ago, so it is still today (no weekday in the label) except in the first minute after midnight New York.
-  last_break: { contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: now - 60, reason: "no_plan" },
+  last_break: { contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: now - 60, reason: "no_plan" },  // 14:29 today
 };
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(NOW);
+});
 
 async function answer(page: Page, body: PlanStreak) {
   await page.route("**/api/backend/charts/captures/streak", (route) => route.fulfill({ json: body }));
@@ -36,10 +41,13 @@ test("a broken streak names the last unplanned entry", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await answer(page, { ...STREAK, current: 0 });
   await page.goto("/");
-  // The entry was an hour ago: in the first hour after midnight New York time that is still yesterday, and the chip then names the weekday.
-  const nyDate = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York" });
-  const weekday = nyDate(STREAK.last_break!.entry_time) === nyDate(now) ? "" : "[A-Z][a-z]{2} ";
-  await expect(page.getByTestId("plan-streak-full")).toHaveText(new RegExp(`^0 planned · last: NBIS 100C ${weekday}\\d{1,2}:\\d{2}$`));
+  await expect(page.getByTestId("plan-streak-full")).toHaveText("0 planned · last: NBIS 100C 14:29");  // today: the time alone
+  // An entry before midnight New York is yesterday's, and the chip then names the weekday.
+  const yesterday = { ...STREAK.last_break!, entry_time: Date.parse("2026-10-26T03:04:00Z") / 1000 };  // Sun 23:04 New York
+  await page.unrouteAll();
+  await answer(page, { ...STREAK, current: 0, last_break: yesterday });
+  await page.reload();
+  await expect(page.getByTestId("plan-streak-full")).toHaveText("0 planned · last: NBIS 100C Sun 23:04");
   // The charts rail carries the count alone.
   await page.goto("/charts?symbol=NBIS");
   await expect(page.getByTestId("plan-streak-rail")).toHaveText("0");

@@ -16,6 +16,7 @@ from app.engine import jo_briefing, quotes
 from app.engine.quotes import OptionQuoteResult
 from app.models import Account, Fill, Tag, TradeTag
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
 LATER = date(2099, 1, 15)
@@ -61,7 +62,7 @@ def marks(monkeypatch):
 def _secret_free(out):
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
-    assert not [s for s in SECRETS if s in text]
+    assert not leaks(text, SECRETS)
     return text
 
 

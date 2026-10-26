@@ -103,7 +103,7 @@ def nudges(engine):
 
 def plan(engine, received: datetime, **fields):
     with Session(engine) as db:
-        capture = TradeCapture(client_id=str(next(n)), received_at=received, account_id=ROTH, account_label="Roth", underlying="NBIS",
+        capture = TradeCapture(client_id=f"client-{next(n)}", received_at=received, account_id=ROTH, account_label="Roth", underlying="NBIS",
                                side="buy_calls", instrument="option", mode="discretionary", wording="Out below 92.50.",
                                context_state="unavailable", image_state="unavailable", **fields)
         db.add(capture)
