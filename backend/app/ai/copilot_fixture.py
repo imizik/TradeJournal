@@ -326,3 +326,47 @@ class FixtureEvidence:
             "note": "One trade: compare the plan with what happened and keep thesis apart from execution. A single trade "
                     "rarely supports a lesson on its own.",
         }
+
+    def get_option_candidates(self, symbol: str, horizon_days: int, direction: str, budget_usd: float | None = None) -> dict:
+        """SIMULATED: an NBIS chain at 94.35 (weeklies to Nov 20, then monthlies) run through the live selection and math."""
+        from datetime import date
+        from app.ai import copilot_options
+        if symbol != "NBIS":
+            return {"symbol": symbol, "state": "unavailable", "simulated": True, "candidates": [],
+                    "reason": "The fixture has a simulated NBIS option chain only."}
+        today = date.fromisoformat(SESSION)
+        chains = simulated_chains("NBIS", 94.35, today)
+        chosen = copilot_options.pick_expirations(sorted(chains), today, horizon_days)
+        return {**copilot_options.candidates("NBIS", chosen, {d: chains[d] for d in chosen}, 94.35, today, horizon_days,
+                                             direction, budget_usd, AT), "simulated": True}
+
+
+def simulated_chains(symbol: str, spot: float, today) -> dict:
+    """SIMULATED option chains: strikes every 2.5 from 80 to 115, premiums from a fixed 75% volatility rule of thumb
+    (intrinsic value plus 0.4 x price x vol x sqrt(years), fading away from the money), 4% wide. Not market data."""
+    from datetime import date, datetime, timezone
+    from math import exp, log, sqrt
+    from app.engine.options_models import OptionChain, OptionContract
+    dates = [date(2026, 10, 23), date(2026, 10, 30), date(2026, 11, 6), date(2026, 11, 13), date(2026, 11, 20),
+             date(2026, 12, 18), date(2027, 1, 15), date(2027, 3, 19)]
+    fetched = datetime.fromisoformat(AT.replace("Z", "+00:00")).astimezone(timezone.utc)
+    out = {}
+    for expiry in dates:
+        years = max((expiry - today).days, 0.3) / 365
+        scale = 0.75 * sqrt(years)
+        contracts = []
+        for i in range(15):
+            strike = 80 + 2.5 * i
+            for kind in ("call", "put"):
+                intrinsic = max(spot - strike, 0) if kind == "call" else max(strike - spot, 0)
+                mid = max(intrinsic + 0.4 * spot * scale * exp(-0.5 * (log(strike / spot) / scale) ** 2), 0.05)
+                half = max(0.02 * mid, 0.025)
+                occ = f"{symbol}{expiry:%y%m%d}{kind[0].upper()}{round(strike * 1000):08d}"
+                contracts.append(OptionContract(
+                    symbol=occ, underlying=symbol, root=symbol, expiration=expiry, option_type=kind, strike=strike, multiplier=100,
+                    bid=round(max(mid - half, 0), 2), ask=round(mid + half, 2), last=round(mid, 2), bid_size=10, ask_size=10,
+                    volume=int(400 * exp(-abs(strike - spot) / 6)), open_interest=int(3000 * exp(-abs(strike - spot) / 10)),
+                    bid_time=fetched, ask_time=fetched, trade_time=fetched, iv=None, iv_smoothed=None, delta=None, gamma=None,
+                    theta=None, vega=None, greeks_updated_at=None))
+        out[expiry] = OptionChain(symbol, expiry, "simulated", fetched, tuple(contracts))
+    return out

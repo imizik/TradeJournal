@@ -18,7 +18,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, AsyncIterator
 
 from app.ai import copilot_tools
@@ -127,6 +127,11 @@ length of time. Say in one sentence what the owner's own history shows there, wi
 that far, how many recovered, the median option P&L from there. Never call a level validated, proven or recommended: the \
 invalidation study found no level or time stop that holds up as a default, so this is evidence to weigh, not a rule. When \
 fewer than 10 trades are counted, say the sample is too small to weigh.
+- When the owner names an option or a horizon, or before you propose a trade_plan on options, call get_option_candidates \
+(the symbol, the horizon in days, the direction, their budget if they gave one) and compare 2-3 of its contracts against \
+the horizon: a thesis in weeks through a contract that expires in days is a mismatch to name. Premium, spread and \
+break-even move are the numbers to quote, with the chain's as-of. Never recommend a specific contract as advice: present \
+the trade-offs and let them choose.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
 - You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: propose_plan only \
@@ -415,6 +420,22 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        horizon = re.search(r"\b(\d{1,3})[\s-]*(days?|weeks?|wks?|months?)\b", lower)
+        if horizon and any(w in lower for w in ("which strike", "which expiry", "calls", "puts")):
+            if isinstance(last["content"], str) and allow_tools:
+                days = int(horizon.group(1)) * {"d": 1, "w": 7, "m": 30}[horizon.group(2)[0]]
+                args = {"symbol": symbol, "horizon_days": min(max(days, 1), 365),
+                        "direction": "short" if "puts" in lower and "calls" not in lower else "long"}
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_option_candidates",
+                                       "input": args}], "tool_use", _zero_usage(), self.model)
+                return
+            text = self._options(results.get("get_option_candidates") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "plan" in lower and allow_tools and (calls := self._plan_calls(symbol, last, results)):
             content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
                        for i, (n, a) in enumerate(calls)]
@@ -542,6 +563,30 @@ class FakeAdapter:
         lines.append(f"- To practice next week: {practice}." + (" It is on the card below to edit and confirm." if proposed else ""))
         if (data.get("sample") or {}).get("small"):
             lines.append(f"- Small sample: {data['sample']['trades']} trades cannot show that a habit changed.")
+        return head + "\n".join(lines)
+
+    @staticmethod
+    def _options(data: dict) -> str:
+        """A scripted comparison: the contract nearest the money in each expiry, against the horizon."""
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if data.get("state") not in ("ok", "partial") or not data.get("candidates"):
+            return head + f"I couldn't read option candidates: {data.get('reason') or 'the chain was not readable'}."
+        horizon = data["horizon_days"]
+        lines = [f"**{data['symbol']} {data['side']} against a {horizon}-day horizon** "
+                 f"({'simulated chain' if data.get('simulated') else 'chain'} as of {data.get('as_of')}; {data['symbol']} {data['spot']})."]
+        for expiry in data["expiries"]:
+            rows = [r for r in data["candidates"] if r["expiry"] == expiry["expiry"]]
+            if not rows:
+                continue
+            r = min(rows, key=lambda r: abs(r["to_strike_pct"]))
+            cost = r["per_contract"]["ask"] if isinstance(r["per_contract"], dict) else None
+            fit = ("expires before your horizon: a mismatch to name" if r["days"] < horizon
+                   else "covers the horizon" if expiry["role"] == "first_at_or_after" else "runs past the horizon, for more premium")
+            lines.append(f"- {expiry['expiry']} ({r['days']} d) {r['strike']:g} {r['type']}: ${r['ask']} ask"
+                         + (f" (${cost:,.0f} a contract)" if cost is not None else "")
+                         + f", spread {r['spread_pct']}%, needs {r['breakeven_move_pct']:+.1f}% by expiry to break even; {fit}.")
+        lines.append("Delta and implied volatility are unavailable here, so I haven't estimated them. These are trade-offs, "
+                     "not a recommendation: the contract is your pick.")
         return head + "\n".join(lines)
 
     @staticmethod
@@ -718,6 +763,11 @@ def _summary(name: str, data: dict) -> str:
         t, p = data.get("totals") or {}, data.get("planned") or {}
         return (f"week of {(data.get('week') or {}).get('start')}: {t.get('trades')} trades {t.get('pnl_usd', 0):+,.2f} $ · planned "
                 + "/".join(str((p.get(k) or {}).get("trades", 0)) for k in ("pre_entry", "late_or_unverified", "none")))[:160]
+    if name == "get_option_candidates":
+        if data.get("state") not in ("ok", "partial"):
+            return (data.get("reason") or "unavailable")[:160]
+        return (f"{len(data.get('candidates', []))} {data.get('side')} across {len(data.get('expiries', []))} expiries "
+                f"for a {data.get('horizon_days')}-day horizon")[:160]
     if name == "get_saved_research":
         return f"{len(data.get('items', []))} saved"
     if name in ("owner_context", "get_owner_context"):
@@ -750,6 +800,21 @@ def level_history_sentence(data: dict) -> str:
     return f"Your history: {head}{tail}. Evidence to weigh, not a rule.{small}"
 
 
+def option_candidates_card(data: dict) -> dict | None:
+    """What the plan card offers as a pick list for its contract: each candidate's short label ("Nov 13 '26 95C", within
+    the plan's 40 characters), its days to expiry and its ask per contract."""
+    if data.get("state") not in ("ok", "partial") or not data.get("candidates"):
+        return None
+    picks = []
+    for r in data["candidates"]:
+        expiry = date.fromisoformat(r["expiry"])
+        cost = r["per_contract"]["ask"] if isinstance(r.get("per_contract"), dict) else None
+        picks.append({"label": f"{expiry:%b} {expiry.day} '{expiry:%y} {r['strike']:g}{r['type'][0].upper()}",
+                      "days": r["days"], "ask_contract": cost})
+    return {"symbol": data.get("symbol"), "direction": data.get("direction"), "simulated": bool(data.get("simulated")),
+            "picks": picks}
+
+
 def level_history_card(data: dict) -> dict | None:
     """The compact row the plan card shows under its invalidation (never ids): the counts and the distance asked."""
     if data.get("state") != "ok" or data.get("kind") != "level":
@@ -780,6 +845,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
             event["proposal"] = {"id": block["id"], **data["proposal"]}
         if name == "get_level_history" and (card := level_history_card(data)):
             event["history"] = card
+        if name == "get_option_candidates" and (picks := option_candidates_card(data)):
+            event["candidates"] = picks
         # The marker leads the result so it survives truncation and the model cannot mistake fixture data for real.
         sent = {**SIMULATED_MARKER, **data} if evidence.label == "fixture" else data
         result = {"type": "tool_result", "tool_use_id": block["id"], "content": copilot_tools.bounded(sent)}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type LevelHistory, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type LevelHistory, type OptionCandidates, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
@@ -30,13 +30,17 @@ export function historyText(h: LevelHistory): string {
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
  * Nothing is saved or armed before Confirm.
  */
-export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, origin, onDone }: {
+export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, candidates = null, origin, onDone }: {
   plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null;
+  /** The turn's option candidates, offered as a pick list for the contract beside the copilot's own wording. */
+  candidates?: OptionCandidates | null;
   /** What prompted the conversation; the saved plan records it (docs/copilot-lab.md § Origin). */
   origin?: CaptureOrigin; onDone(): void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [thesis, setThesis] = useState(plan.thesis);
+  const [contract, setContract] = useState(plan.contract ?? "");
+  const picks = (candidates?.picks ?? []).filter(p => p.label !== plan.contract);
   const [entry, setEntry] = useState(String(plan.entry_trigger.price));
   const [stop, setStop] = useState(String(plan.invalidation.price));
   const [timeStop, setTimeStop] = useState(plan.time_stop ?? "");
@@ -84,7 +88,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
 
   const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`,
     timeStop.trim() && `Time stop: ${timeStop.trim()}.`, size.trim() && `Size: ${size.trim()}.`].filter(Boolean).join(" ").slice(0, 400);
-  const note = [`Thesis: ${thesis.trim()}`, plan.contract && `Contract: ${plan.contract}.`, "From a Copilot Lab plan card."]
+  const note = [`Thesis: ${thesis.trim()}`, contract && `Contract: ${contract}.`, "From a Copilot Lab plan card."]
     .filter(Boolean).join(" ").slice(0, 500);
 
   async function run(part: Part): Promise<boolean> {
@@ -136,8 +140,24 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   return (
     <section aria-label="Proposed trade plan" className="mt-2 space-y-2 rounded border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
       <p className="font-medium text-foreground">
-        Proposed trade plan · {plan.symbol} · {SIDE_LABEL[side]}{plan.contract ? ` · ${plan.contract}` : ""}
+        Proposed trade plan · {plan.symbol} · {SIDE_LABEL[side]}{contract ? ` · ${contract}` : ""}
       </p>
+      {picks.length > 0 && (
+        <label className="block space-y-1">
+          <span className="text-xs text-muted-foreground">Contract</span>
+          <select value={contract} onChange={e => setContract(e.target.value)} disabled={locked} className={cn(field, "min-h-11")}>
+            <option value={plan.contract ?? ""}>{plan.contract ? `${plan.contract} (as drafted)` : "None named"}</option>
+            {picks.map(p => (
+              <option key={p.label} value={p.label}>
+                {p.label} · {p.days}d{p.ask_contract !== null ? ` · $${p.ask_contract.toLocaleString("en-US")} ask` : ""}
+              </option>
+            ))}
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            From the option chain{candidates?.simulated ? " (simulated)" : ""}: trade-offs to weigh, not a recommendation.
+          </span>
+        </label>
+      )}
       {plan.last !== undefined && <p className="text-xs text-muted-foreground">{plan.symbol} was {plan.last} when this was drafted.</p>}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">Thesis</span>

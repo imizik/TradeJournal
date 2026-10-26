@@ -17,6 +17,14 @@ export type ToolEvent = {
   summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
   /** get_level_history only: the counts the plan card shows under its invalidation (never ids). */
   history?: LevelHistory;
+  /** get_option_candidates only: the contracts the plan card offers as a pick list for its contract. */
+  candidates?: OptionCandidates;
+};
+
+/** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to expiry, ask per contract. */
+export type OptionCandidates = {
+  symbol: string; direction: "long" | "short"; simulated: boolean;
+  picks: { label: string; days: number; ask_contract: number | null }[];
 };
 
 /** What the owner's own past trades in the symbol did at a level the same distance from their entry: evidence, not a rule. */
