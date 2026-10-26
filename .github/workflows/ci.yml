@@ -143,7 +143,9 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A floor for a slow runner: about 8 minutes of tests plus setup that
+    # has taken 12 minutes when a mirror or install crawls.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       # Five shards of the ordinary suite, plus one runner for the
@@ -200,9 +202,30 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
+      # Chromium's system packages come from the Ubuntu mirror on every run,
+      # and a slow mirror once took ten minutes for 26 MB (PR 508). Keep apt's
+      # downloads in a cached directory: apt then fetches only what changed.
+      - name: Keep apt downloads where the cache can reach them
+        id: apt
+        run: |
+          mkdir -p ~/.cache/apt-archives/partial
+          printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' "$HOME/.cache/apt-archives" \
+            | sudo tee /etc/apt/apt.conf.d/99-cached-archives
+          echo "os=$ImageOS" >> "$GITHUB_OUTPUT"
+          echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+
+      - name: Cache browser system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apt-archives
+          key: playwright-apt-${{ steps.apt.outputs.os }}-${{ steps.apt.outputs.version }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: playwright-apt-${{ steps.apt.outputs.os }}-
+
       - name: Install browser
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: |
+          npx playwright install --with-deps chromium
+          sudo chown -R "$USER" ~/.cache/apt-archives
 
       # Playwright seeds the database, starts the backend and a fresh frontend
       # build on 8099/3099, and asserts real values reach the DOM. This is the
