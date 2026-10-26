@@ -197,3 +197,13 @@ def test_archived_split_sentinel_automatically_checked(data):
     result = audit(fetch, '2008-07-01', '2008-08-15')
     assert result['expected_events_checked'] == [{'symbol':'EEM','ex_date':'2008-07-24','kind':'forward_splits'}]
     assert result['issues'][0]['reason'] == 'expected_event_not_observed'
+
+
+def test_duplicate_of_conflicting_version_is_ignored(data):
+    changed = deepcopy(data['pages'][0]['corporate_actions']['cash_dividends'][0])
+    changed['rate'] = '2.00'
+    data['pages'][1]['corporate_actions']['cash_dividends'] = [changed, deepcopy(changed)]
+    result, _ = run(data)
+    assert len(result['actions']) == 2
+    assert result['exact_duplicates_ignored'] == 1
+    assert sum(i['reason'] == 'conflicting_action_id' for i in result['issues']) == 1

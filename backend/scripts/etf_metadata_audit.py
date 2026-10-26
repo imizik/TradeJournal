@@ -87,12 +87,13 @@ def audit(fetch, start: str, end: str, *, expected=None, clock=utc_now) -> dict:
                 fingerprint = digest({"kind": kind, "raw": row})
                 if isinstance(action_id, str) and action_id:
                     if action_id in by_id:
-                        if by_id[action_id] == fingerprint:
+                        if fingerprint in by_id[action_id]:
                             duplicates += 1
                             continue
                         issues.append({"reason": "conflicting_action_id", "id": action_id})
+                        by_id[action_id].add(fingerprint)
                     else:
-                        by_id[action_id] = fingerprint
+                        by_id[action_id] = {fingerprint}
                 else:
                     issues.append({"reason": "missing_action_id", "page": page_index})
                 symbol = row.get("symbol")
