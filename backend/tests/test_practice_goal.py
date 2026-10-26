@@ -12,8 +12,7 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import select
 
 from app.ai import copilot, copilot_review, copilot_tools, research_job
 from app.ai.copilot_fixture import FixtureEvidence
