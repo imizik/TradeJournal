@@ -309,7 +309,7 @@ class FixtureEvidence:
                      "option_giveback_from_peak_usd": 234.0, "underlying_peak_pct": 2.4, "underlying_worst_pct": -1.9},
             "plan": {"state": "ok", "setup": "Group recovery", "side": "buy_calls", "mode": "discretionary",
                      "wording": "Simulated: buy the first higher low after the neoclouds turn; out below 92.50 or if NBIS loses the open.",
-                     "captured_at": "2026-10-20T13:58:00Z", "timing": "pre_entry"},
+                     "captured_at": "2026-10-20T13:58:00Z", "timing": "pre_entry", "image": "available"},
             "alerts": {"state": "ok", "sent": 1, "shown": 1, "alerts": [
                 {"kind": "giveback", "at": "2026-10-20T15:48:00Z", "contracts_open": 2.0, "mark": 320.0, "gain_usd": 20.0,
                  "gain_pct": 3.2, "peak_gain_usd": 124.0, "peak_gain_pct": 20.0, "then": "closed_later",
@@ -326,6 +326,19 @@ class FixtureEvidence:
             "note": "One trade: compare the plan with what happened and keep thesis apart from execution. A single trade "
                     "rarely supports a lesson on its own.",
         }
+
+    def review_images(self, trade_id: str) -> list[tuple[str, bytes]]:
+        """SIMULATED: a drawn stand-in for the closed review's plan chart (a dark panel, a rising line, a red level)."""
+        import numpy as np
+        from app.ai import copilot_images
+        if trade_id == OPEN_REVIEW_ID:
+            return []
+        pixels = np.full((360, 640, 3), (18, 21, 28), np.uint8)
+        pixels[250:253] = (220, 60, 60)  # the plan's invalidation
+        for x in range(40, 600):
+            y = int(300 - (x - 40) * 0.35 + 12 * np.sin(x / 25))
+            pixels[y - 1:y + 2, x] = (60, 200, 120)
+        return [("plan chart", copilot_images.encode_rgb(pixels).jpeg)]
 
     def get_option_candidates(self, symbol: str, horizon_days: int, direction: str, budget_usd: float | None = None) -> dict:
         """SIMULATED: an NBIS chain at 94.35 (weeklies to Nov 20, then monthlies) run through the live selection and math."""

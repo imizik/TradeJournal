@@ -1,11 +1,12 @@
 """Owner-only Copilot Lab (docs/copilot-lab.md): status, open threads, one streamed, read-only conversation turn,
-hold-to-talk transcription, and saved investigations.
+hold-to-talk transcription, shared screenshots, and saved investigations.
 
 Off unless ``COPILOT_ENABLED=true``. Owner-only through the access middleware
 (no route is in an assistant grant) and the frontend proxy. Prompts and answers
 are never logged; only per-turn metrics are. A conversation is stored only as a
 saved investigation the page writes: text transcript and evidence references. A spoken message's audio is deleted
-as soon as it is transcribed and never logged.
+as soon as it is transcribed and never logged. A shared screenshot is kept, processed, for one turn: deleted when
+that turn ends, or after 24 hours if it is never sent.
 """
 import asyncio
 from datetime import datetime
@@ -15,11 +16,11 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from app.ai import copilot
+from app.ai import copilot, copilot_images
 from app.database import engine, get_session
 from app.engine import captures, spoken_tickers, transcribe
 from app.engine import copilot_investigations as investigations
@@ -39,6 +40,8 @@ class ChatBody(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=24)
     symbol: str | None = Field(None, pattern=r"^[A-Z][A-Z0-9.\-]{0,9}$")
     model: str | None = Field(None, pattern=r"^[a-z0-9][a-z0-9.\-]{0,60}$")  # one of GET /status's ``models``
+    # Screenshots from POST /images, sent with the last message and deleted when the turn ends.
+    image_ids: list[str] = Field(default_factory=list, max_length=copilot_images.MAX_PER_TURN)
 
 
 @router.get("/status")
@@ -153,16 +156,22 @@ async def chat(body: ChatBody):
     except copilot.CopilotError as exc:
         raise HTTPException(503, exc.message)
     history = [m.model_dump() for m in body.messages]
+    try:
+        images = [copilot_images.block(copilot_images.load(i)) for i in dict.fromkeys(body.image_ids)]
+    except copilot_images.ImageError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     async def events():
         try:
             now = datetime.now(ET)
             # The plan backend's SDK runs its own tool loop, so it supplies the whole turn.
-            turn = (adapter.run_turn(history, body.symbol, cfg, evidence, now) if hasattr(adapter, "run_turn")
-                    else copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now))
+            turn = (adapter.run_turn(history, body.symbol, cfg, evidence, now, images=images) if hasattr(adapter, "run_turn")
+                    else copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now, images=images))
             async for event in turn:
                 yield f"event: {event['type']}\ndata: {json.dumps(event, default=str)}\n\n"
         finally:
+            for image_id in body.image_ids:
+                copilot_images.delete(image_id)
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
 
@@ -203,6 +212,32 @@ async def transcribe_message(audio: UploadFile | None = File(None), audio_ms: in
     heard = (text or "").strip()
     mapped, tickers = spoken_tickers.map_tickers(heard, known)
     return {"text": mapped, "heard": heard, "tickers": tickers, "provider": provider}
+
+
+# --------------------------------------------------------------------------- shared screenshots
+
+@router.post("/images", status_code=201)
+async def upload_image(image: UploadFile = File(...)):
+    """A screenshot for the next turn (8 MB at most; PNG, JPEG or WebP), stored processed: metadata stripped, the longest
+    side 1568 px, JPEG. Its id goes in POST /chat's ``image_ids``; it is deleted when that turn ends, or after a day."""
+    _enabled()
+    data = await image.read(copilot_images.MAX_IN + 1)
+    if len(data) > copilot_images.MAX_IN:
+        raise HTTPException(413, "The image is larger than 8 MB.")
+    try:
+        return await asyncio.to_thread(copilot_images.store, data)
+    except copilot_images.ImageError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.get("/images/{image_id}")
+def get_image(image_id: str):
+    """A stored screenshot, for the panel's thumbnail when it arrived from the phone's share sheet."""
+    _enabled()
+    try:
+        return Response(copilot_images.load(image_id), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    except copilot_images.ImageError as exc:
+        raise HTTPException(404, str(exc)) from None
 
 
 # --------------------------------------------------------------------------- saved investigations

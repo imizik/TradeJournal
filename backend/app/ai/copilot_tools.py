@@ -779,6 +779,10 @@ class LiveEvidence:
         except copilot_review.ReviewNotFound:
             raise ToolInputError("no trade in the journal has that id") from None
 
+    def review_images(self, trade_id: str) -> list[tuple[str, bytes]]:
+        from app.ai import copilot_review
+        return copilot_review.review_images(trade_id)
+
     def get_week_review(self, week_start: str | None = None) -> dict:
         from app.ai import copilot_review
         return copilot_review.week_review(week_start)

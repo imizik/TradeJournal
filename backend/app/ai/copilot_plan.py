@@ -103,6 +103,23 @@ def prompt_for(history: list[dict], symbol: str | None, now: datetime, replay: b
     return text + last["content"]
 
 
+def mcp_content(content: str | list[dict]) -> list[dict]:
+    """A tool result as MCP content: its text, and a trade review's plan chart as an MCP image block."""
+    from app.ai import copilot_images
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [copilot_images.mcp_block(b) if b["type"] == "image" else {"type": "text", "text": b["text"]} for b in content]
+
+
+def prompt_stream(text: str, images: list[dict]):
+    """The prompt as one streamed user message with the owner's screenshots as image blocks ahead of its text: Claude
+    Code takes Messages API content in stream-json input, where a plain string prompt carries text only."""
+    async def stream():
+        yield {"type": "user", "session_id": "", "parent_tool_use_id": None,
+               "message": {"role": "user", "content": [*images, {"type": "text", "text": text}]}}
+    return stream()
+
+
 def _usage(raw: dict | None) -> dict:
     raw = raw or {}
     return {k: int(raw.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
@@ -173,7 +190,7 @@ class PlanAdapter:
                 await queue.put(("event", event))
                 if (proposal := copilot.proposal_event(event)) is not None:
                     await queue.put(("event", proposal))
-                return {"content": [{"type": "text", "text": result["content"]}], "is_error": bool(result.get("is_error"))}
+                return {"content": mcp_content(result["content"]), "is_error": bool(result.get("is_error"))}
 
             return sdk.tool(name, spec["description"], spec["input_schema"],
                             annotations=sdk.ToolAnnotations(readOnlyHint=True))(handler)
@@ -181,12 +198,13 @@ class PlanAdapter:
         return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=[make(t) for t in copilot_tools.TOOLS])
 
     async def run_turn(self, history: list[dict], symbol: str | None, cfg: copilot.Settings, evidence,
-                       now: datetime) -> AsyncIterator[dict]:
-        """Stream one turn as UI events: text, tool, error, done (always last, with metrics)."""
+                       now: datetime, images: list[dict] | None = None) -> AsyncIterator[dict]:
+        """Stream one turn as UI events: text, tool, error, done (always last, with metrics). ``images``: the owner's
+        shared screenshots as image blocks, as for ``copilot.run_turn``."""
         sdk = self.sdk
         started = time.monotonic()
         queue: asyncio.Queue = asyncio.Queue()
-        state = {"calls": 0}
+        state = {"calls": 0, "images": len(images or [])}
         metrics: dict[str, Any] = {"backend": "plan", "evidence": cfg.evidence, "model": cfg.model,
                                    "first_text_ms": None, "rounds": 0, "tool_calls": []}
         usage = _usage(None)
@@ -207,7 +225,8 @@ class PlanAdapter:
                 import anyio
                 # An anyio deadline, so the SDK's shielded close still stops Claude Code on timeout.
                 with anyio.fail_after(cfg.turn_timeout_s):
-                    async for message in sdk.query(prompt=prompt_for(history, symbol, now, replay, owner_block),
+                    prompt = prompt_for(history, symbol, now, replay, owner_block)
+                    async for message in sdk.query(prompt=prompt_stream(prompt, images) if images else prompt,
                                                    options=self.options(self.server(evidence, queue, state))):
                         await queue.put(("message", message))
             except TimeoutError:

@@ -22,6 +22,8 @@ export type ToolEvent = {
   history?: LevelHistory;
   /** get_option_candidates only: the contracts the plan card offers as a pick list for its contract. */
   candidates?: OptionCandidates;
+  /** get_trade_review only: the images it showed the model ("plan chart"). */
+  looked_at?: string[];
 };
 
 /** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to expiry, ask per contract. */
@@ -67,7 +69,8 @@ export type Proposal = { id: string } & (
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
-export type LabMessage = { role: "user" | "assistant"; content: string; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
+/** ``images``: an owner message's screenshot thumbnails (this browser only; the saved text carries SHARED_MARKER). */
+export type LabMessage = { role: "user" | "assistant"; content: string; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
 
 /** One status read per page load, shared by the nav, the panels and every Ask copilot button. Only an answer is
  * kept: a failed read is tried again by the next caller. */
@@ -112,10 +115,11 @@ export function rememberModel(model: string | null) {
 }
 
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
-  onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null) {
+  onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, imageIds: string[] = []) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}) }), signal, cache: "no-store",
+    body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}), ...(imageIds.length ? { image_ids: imageIds } : {}) }),
+    signal, cache: "no-store",
   });
   if (!response.ok || !response.body) {
     let detail = `Copilot request failed (${response.status}).`;
@@ -188,9 +192,34 @@ export const updateInvestigation = (id: string, revision: number, fields: Invest
 
 /** What is saved: the text of each message and, per answer, which tools it used and how old their data was.
  * A proposal is not evidence, so propose_plan is left out. */
+// --------------------------------------------------------------------------- screenshots
+
+/** What a message that carried a screenshot says in history and the saved transcript; the image itself is never kept. */
+export const SHARED_MARKER = "[shared a screenshot]";
+/** The message ready in the box when a screenshot arrives with no words of the owner's own. */
+export const IMAGE_PREFILL = "Here is my chart. What do you see, and what would the plan be?";
+export const MAX_IMAGES = 2;
+export type SharedImage = { id: string; width: number; height: number; bytes: number };
+export const imageUrl = (id: string) => apiUrl(`/copilot/images/${encodeURIComponent(id)}`);
+/** A message's text as history and the saved transcript carry it: marked when it carried a screenshot. */
+export const spokenText = (m: Pick<LabMessage, "content" | "images">) => m.images?.length ? `${SHARED_MARKER} ${m.content}` : m.content;
+
+/** One screenshot for the next turn: processed and kept by the server for that turn (a day at most). */
+export async function uploadImage(file: Blob): Promise<SharedImage> {
+  const form = new FormData();
+  form.append("image", file, file instanceof File ? file.name : "screenshot");
+  const response = await fetch(apiUrl("/copilot/images"), { method: "POST", body: form, cache: "no-store" });
+  if (!response.ok) {
+    let detail = `The screenshot could not be attached (${response.status}).`;
+    try { const body = await response.json(); if (typeof body?.detail === "string") detail = body.detail; } catch { /* keep the status */ }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
-    transcript: messages.map(m => ({ role: m.role, content: m.content })),
+    transcript: messages.map(m => ({ role: m.role, content: spokenText(m) })),
     evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan")
       .map(t => ({ tool: t.name, as_of: t.provenance!.as_of, kind: t.provenance!.kind, message: i }))),
   };
@@ -264,16 +293,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
  * with it is the owner's question, ready in the message box (a plan alert's tap). */
-export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[]; plan?: string | string[] }) {
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[]; plan?: string | string[]; image?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
   const investigation = one(params.investigation).trim();
   const origin = readOrigin(one(params.origin));
+  // A screenshot the phone's share sheet stored (app/share-target): attached, not sent.
+  const image = /^[0-9a-f]{32}$/.test(one(params.image)) ? one(params.image) : null;
   if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin, plan: null };
   // An origin alone (a prep ping with no investigation) still starts a conversation that records it.
-  if (!symbol && !context && !origin) return null;
-  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin, plan: readDrawn(one(params.plan)) };
+  if (!symbol && !context && !origin && !image) return null;
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin, plan: readDrawn(one(params.plan)), image };
 }
 
 // --------------------------------------------------------------------------- research queue
