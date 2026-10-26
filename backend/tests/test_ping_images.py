@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 import hashlib
 import json
 import struct
+import threading
 import time
 from uuid import UUID, uuid4
 import zlib
@@ -224,13 +225,19 @@ def test_a_refused_picture_sends_the_text_alone_and_an_unreachable_server_does_n
 
 
 def test_a_slow_failing_or_switched_off_picture_never_holds_the_ping(monkeypatch):
+    release, finished = threading.Event(), threading.Event()
+
     def slow():
-        time.sleep(1)
+        release.wait(30)  # a builder that cannot finish until the test lets it
+        finished.set()
         return plan_chart()
 
-    started = time.perf_counter()
-    assert ping_images.picture(slow, budget=0.2) is None
-    assert time.perf_counter() - started < 0.6
+    try:
+        assert ping_images.picture(slow, budget=0.2) is None
+        assert not finished.is_set()  # the budget gave up on the picture; it did not wait for it
+    finally:
+        release.set()
+    assert finished.wait(5)
     assert ping_images.picture(lambda: 1 / 0) is None
     assert ping_images.picture(lambda: None) is None
     assert ping_images.picture(None) is None
@@ -390,14 +397,25 @@ def test_a_picture_send_that_may_have_arrived_is_unknown_and_never_resent_as_tex
 
 def test_a_slow_picture_costs_at_most_the_budget_and_the_ping_goes_as_text(engine, monkeypatch):
     phone = Phone(monkeypatch)
+    release, finished = threading.Event(), threading.Event()
+
+    def slow_bars(symbol):
+        release.wait(30)  # the bar read cannot finish until the ping has gone out
+        finished.set()
+        return minute_bars()
+
     monkeypatch.setattr(ping_images, "BUDGET_SECONDS", 0.3)
-    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: time.sleep(1) or minute_bars())
+    monkeypatch.setattr(ping_images, "today_bars", slow_bars)
     trade_id, key = buy(engine, "10:00")
     position_alert(engine, trade_id, key)
-    started = time.perf_counter()
-    PositionAlerts(engine, Calendar(), clock=lambda: at("11:01"), quotes=lambda s: {}).deliver()
-    assert time.perf_counter() - started < 0.9
-    assert [s["image"] for s in phone.sent] == [None] and image_states(engine) == {"position_alerts": "none"}
+    try:
+        PositionAlerts(engine, Calendar(), clock=lambda: at("11:01"), quotes=lambda s: {}).deliver()
+        # The ping was handed to ntfy as text while the picture was still being read: the budget, not the read, decided.
+        assert not finished.is_set()
+        assert [s["image"] for s in phone.sent] == [None] and image_states(engine) == {"position_alerts": "none"}
+    finally:
+        release.set()
+    assert finished.wait(5)
 
 
 def test_a_picture_that_failed_with_a_5xx_is_retried_as_text(engine, bars, monkeypatch):
