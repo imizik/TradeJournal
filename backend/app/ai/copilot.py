@@ -97,11 +97,16 @@ as the fourth question frames it: has anything changed the thesis, or only the p
 invalidation and time stop if one was captured, and say so when none was. Never tell them to sell or hold as an order; \
 say what each choice means and leave the decision to them.
 - When the owner asks to review their week, or their message carries the "Review my week" context, call \
-get_week_review (no week_start unless they name a week). Lead with planned vs unplanned (trades with a plan captured before \
+get_week_review (no week_start unless they name a week). When its practice section has an active goal, open with the \
+practice score in one sentence (this week's count against the target, and last week's), describing what was done and never \
+characterizing the owner. Then comes the review itself. Lead with planned vs unplanned (trades with a plan captured before \
 the entry, late, or none, and how each did) and the plans' follow-through (invalidation hit while held and out within 15 \
 minutes or not, time stops), then alerts, habits against the baseline and the best and worst exits. Name at most one or two \
-things to practice next week, each grounded in a count from the review. Say plainly when the sample is too small to show a \
-change. Propose a memory only if the owner states a lesson.
+things to practice next week, each grounded in a count from the review. After the review, propose exactly one of them with \
+propose_plan kind=practice when the counts support it: the measure from the fixed set that scores it, a target only when the \
+counts suggest one, and as why the count it rests on, which you also say in the answer. It counts toward the two proposals an \
+answer may make. Propose no practice when the week is too small (sample.small, fewer than 10 closed trades) or no fixed \
+measure fits. Say plainly when the sample is too small to show a change. Propose a memory only if the owner states a lesson.
 - If asked to make a plan, you may propose a concise conditional plan (thesis, trigger, invalidation, what to watch, \
 size/risk notes as questions for the trader). When it has a concrete price level to watch or a question worth \
 revisiting, also propose that step with propose_plan (at most two per answer): the owner sees it as a card with \
@@ -374,7 +379,15 @@ class FakeAdapter:
                 yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_week_review",
                                        "input": {"week_start": named.group(1)} if named else {}}], "tool_use", _zero_usage(), self.model)
                 return
-            text = self._week(results.get("get_week_review") or {})
+            week = results.get("get_week_review") or {}
+            practice = self._practice(week)
+            asked = any(b.get("name") == "propose_plan" for m in messages if m["role"] == "assistant" and isinstance(m["content"], list)
+                        for b in m["content"])
+            if practice and allow_tools and not asked:  # after the review is read: one practice card, then the text
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "propose_plan", "input": practice}],
+                                     "tool_use", _zero_usage(), self.model)
+                return
+            text = self._week(week, proposed="propose_plan" in results)
             for piece in re.findall(r"\S+\s*", text):
                 if self.delay_s:
                     await asyncio.sleep(self.delay_s)
@@ -485,7 +498,23 @@ class FakeAdapter:
         return head + "\n".join(lines)
 
     @staticmethod
-    def _week(data: dict) -> str:
+    def _practice(data: dict) -> dict | None:
+        """The scripted week's one practice proposal, from its counts; none for a small week."""
+        if data.get("state") != "ok" or (data.get("sample") or {}).get("small"):
+            return None
+        follow, planned, t = data.get("follow_through") or {}, data.get("planned") or {}, data.get("totals") or {}
+        if follow.get("held_past_15m"):
+            return {"kind": "practice", "text": "Exit within 15 minutes when my plan's invalidation breaks.",
+                    "measure": "exit_at_invalidation", "target": 1,
+                    "why": f"{follow['held_past_15m']} of {follow['invalidation_hit_while_held']} invalidation hits this week were "
+                           "held past 15 minutes."}
+        if (planned.get("none") or {}).get("trades"):
+            return {"kind": "practice", "text": "Capture a plan before every entry.", "measure": "plan_before_entry", "target": 1,
+                    "why": f"{planned['none']['trades']} of {t.get('trades')} trades this week had no plan."}
+        return None
+
+    @staticmethod
+    def _week(data: dict, proposed: bool = False) -> str:
         head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") != "ok":
             return head + f"I couldn't review that week: {data.get('reason') or 'the review was not readable'}."
@@ -493,7 +522,12 @@ class FakeAdapter:
 
         def money(v) -> str:
             return "?" if v is None else f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
-        lines = [f"**Week of {week['start']}**: {t['trades']} trades, {money(t['pnl_usd'])}, win rate {t['win_rate_pct']}%."]
+        lines = []
+        practiced = data.get("practice") or {}
+        if practiced.get("state") == "ok":
+            now, before = practiced["this_week"], practiced["last_week"]
+            lines.append(f"**Practice** ({practiced['goal']['label']}): {now['text']} this week, {before['text']} the week before.")
+        lines.append(f"**Week of {week['start']}**: {t['trades']} trades, {money(t['pnl_usd'])}, win rate {t['win_rate_pct']}%.")
         lines.append("- Planned vs unplanned: " + "; ".join(
             f"{b['label'].lower()} {b['trades']} ({money(b['pnl_usd'])})" for b in planned.values()) + ".")
         if follow.get("state") == "ok":
@@ -505,7 +539,7 @@ class FakeAdapter:
         lines.append(f"- Phone alerts: {alerts.get('sent', 0)} sent; then {then}.")
         practice = ("being out within 15 minutes when the invalidation breaks" if follow.get("held_past_15m")
                     else "capturing the plan before the entry" if planned["none"]["trades"] else "the same plan-first routine")
-        lines.append(f"- To practice next week: {practice}.")
+        lines.append(f"- To practice next week: {practice}." + (" It is on the card below to edit and confirm." if proposed else ""))
         if (data.get("sample") or {}).get("small"):
             lines.append(f"- Small sample: {data['sample']['trades']} trades cannot show that a habit changed.")
         return head + "\n".join(lines)
@@ -654,6 +688,8 @@ def _summary(name: str, data: dict) -> str:
         p = data.get("proposal") or {}
         if p.get("kind") == "memory":
             return f"proposed memory ({p.get('memory_kind')}{', ' + p['symbol'] if p.get('symbol') else ''}): {p.get('text')}"[:160]
+        if p.get("kind") == "practice":
+            return f"proposed practice ({p.get('measure')}): {p.get('text')}"[:160]
         if p.get("kind") == "trade_plan":
             return (f"proposed plan: {p.get('symbol')} {p.get('direction')} {p.get('instrument')}, entry "
                     f"{p['entry_trigger']['price']}, invalidation {p['invalidation']['price']}")[:160]
@@ -725,12 +761,18 @@ def level_history_card(data: dict) -> dict | None:
             "small": bool((data.get("sample") or {}).get("small")), "simulated": bool(data.get("simulated"))}
 
 
-async def _run_tool(evidence, block: dict, cfg: Settings) -> tuple[dict, dict]:
+async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = None) -> tuple[dict, dict]:
+    """One tool call. ``turn`` is the turn's own state: a second practice proposal in one answer is refused."""
     started = time.monotonic()
     name = block.get("name", "")
     event = {"type": "tool", "id": block.get("id"), "name": name}
+    claimed = False
     try:
         args = copilot_tools.validate(name, block.get("input"))
+        if name == "propose_plan" and args["kind"] == "practice" and turn is not None:
+            if turn.get("practice"):
+                raise copilot_tools.ToolInputError("one practice proposal per answer")
+            turn["practice"] = claimed = True  # set before the first await, so calls gathered in one round see it
         event["input"] = args
         data = await asyncio.wait_for(asyncio.to_thread(copilot_tools.call, evidence, name, args), cfg.tool_timeout_s)
         prov = copilot_tools.provenance(name, data, evidence.label)
@@ -752,6 +794,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings) -> tuple[dict, dict]:
         log.warning("copilot tool %s failed: %s", name, type(exc).__name__)
         result = {"type": "tool_result", "tool_use_id": block["id"], "is_error": True, "content": "Evidence source unavailable."}
         event.update(status="error", summary="unavailable")
+    if claimed and event.get("status") != "ok":
+        turn["practice"] = False  # a practice that failed after validation leaves the answer's one slot free
     event["ms"] = round((time.monotonic() - started) * 1000)
     return result, event
 
@@ -820,6 +864,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                                "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
                                "max_silence_ms": 0, "rounds": 0, "tool_calls": []}
     calls = 0
+    turn: dict = {}  # per-turn state for _run_tool (one practice proposal per answer)
     last_seen = 0
 
     def elapsed() -> int:
@@ -883,7 +928,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     seen()
                 for block in runnable:
                     yield {"type": "tool", "id": block.get("id"), "name": block.get("name"), "status": "running"}
-                ran = await asyncio.gather(*(_run_tool(evidence, b, cfg) for b in runnable))
+                ran = await asyncio.gather(*(_run_tool(evidence, b, cfg, turn) for b in runnable))
                 results = [r for r, _ in ran] + [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
                                                   "content": "Tool-call budget for this turn is used up."} for b in refused]
                 for _, event in ran:

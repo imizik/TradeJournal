@@ -198,9 +198,15 @@ TOOLS: list[dict] = [
                        "`entry_trigger` and `invalidation` (each {condition, price, interval for closes_beyond}; a long's "
                        "invalidation is below its entry, a short's above), optional `time_stop` (at most 80, e.g. \"out by "
                        "15:30\") and `size_note` (at most 120). The owner edits and confirms it; Confirm saves it as their "
-                       "pre-trade plan and arms the entry and invalidation alerts.",
+                       "pre-trade plan and arms the entry and invalidation alerts. kind=practice (after a week review only, at most one "
+                       "per answer): one thing to practice next week, `text` in plain words (at most 200), `measure` (one the "
+                       "app can score: plan_before_entry, exit_at_invalidation, respond_to_giveback_15m, "
+                       "no_trade_after_hour_red, no_opening_while_green, max_trades_per_day), optional `target` (a share above "
+                       "0 and at most 1; for max_trades_per_day the daily cap, a whole number, required) and `why` (at most "
+                       "300, citing the week's count it rests on). The owner edits and confirms it; Confirm makes it the one "
+                       "active practice goal that next week's review scores.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["kind"],
-                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit", "memory", "trade_plan"]},
+                         "properties": {"kind": {"type": "string", "enum": ["watch", "revisit", "memory", "trade_plan", "practice"]},
                                         "symbol": _SYMBOL_SCHEMA,
                                         "condition": {"type": "string", "enum": ["touches", "crosses", "closes_beyond"]},
                                         "price": {"type": "number", "description": "The level, positive"},
@@ -214,7 +220,11 @@ TOOLS: list[dict] = [
                                         "instrument": {"type": "string", "enum": ["stock", "calls", "puts"]},
                                         "contract": {"type": "string"}, "thesis": {"type": "string"},
                                         "entry_trigger": _LEVEL_SCHEMA, "invalidation": _LEVEL_SCHEMA,
-                                        "time_stop": {"type": "string"}, "size_note": {"type": "string"}}},
+                                        "time_stop": {"type": "string"}, "size_note": {"type": "string"},
+                                        "measure": {"type": "string", "enum": ["plan_before_entry", "exit_at_invalidation",
+                                                                               "respond_to_giveback_15m", "no_trade_after_hour_red",
+                                                                               "no_opening_while_green", "max_trades_per_day"]},
+                                        "target": {"type": "number", "description": "practice: a share 0-1, or the daily cap for max_trades_per_day"}}},
     },
 ]
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
@@ -289,15 +299,28 @@ def _trade_plan(args: dict) -> dict:
     return out
 
 
+def _practice(args: dict) -> dict:
+    """One practice goal for next week: plain words, a measure the app can score, an optional target, and why."""
+    from app.engine import practice_goal
+    try:
+        target = practice_goal.check_target(args.get("measure"), args.get("target"))
+    except practice_goal.PracticeError as exc:
+        raise ToolInputError(str(exc)) from None
+    return {"kind": "practice", "text": _text(args, "text", practice_goal.TEXT_MAX), "measure": args["measure"],
+            "label": practice_goal.label(args["measure"], target), "target": target,
+            "why": _text(args, "why", practice_goal.WHY_MAX)}
+
+
 def _proposal(args: dict) -> dict:
     kind = args.get("kind")
     keys = {"watch": {"kind", "symbol", "condition", "price", "interval", "label", "why"},
             "revisit": {"kind", "question", "horizon_days"},
             "memory": {"kind", "memory_kind", "symbol", "text", "interpretation"},
             "trade_plan": {"kind", "symbol", "direction", "instrument", "contract", "thesis", "entry_trigger", "invalidation",
-                           "time_stop", "size_note"}}.get(kind)
+                           "time_stop", "size_note"},
+            "practice": {"kind", "text", "measure", "target", "why"}}.get(kind)
     if keys is None:
-        raise ToolInputError("kind must be watch, revisit, memory or trade_plan")
+        raise ToolInputError("kind must be watch, revisit, memory, trade_plan or practice")
     if set(args) - keys:
         raise ToolInputError(f"unexpected arguments for {kind}: {sorted(set(args) - keys)}")
     if kind == "memory":
@@ -319,6 +342,8 @@ def _proposal(args: dict) -> dict:
         return {"kind": "revisit", "question": _text(args, "question", 500), "horizon_days": days}
     if kind == "trade_plan":
         return _trade_plan(args)
+    if kind == "practice":
+        return _practice(args)
     from app.engine import level_alerts
     return {"kind": "watch", "symbol": _symbol(args.get("symbol")), **_level(args),
             "label": _text(args, "label", level_alerts.LABEL_MAX), "why": _text(args, "why", 300)}
@@ -790,6 +815,9 @@ def propose(evidence, proposal: dict) -> dict:
             if (proposal["direction"] == "long" and last <= stop) or (proposal["direction"] == "short" and last >= stop):
                 raise ToolInputError(f"{proposal['symbol']} is at {last}, already past the invalidation at {stop}")
         proposal = {**proposal, "last": last, "as_of": quote.get("fetched_at")}
+    if proposal["kind"] == "practice":
+        return {"state": "ok", "proposal": proposal,
+                "note": "Shown to the owner as a practice card to edit and confirm. Nothing is saved until they confirm."}
     if proposal["kind"] == "trade_plan":
         return {"state": "ok", "proposal": proposal,
                 "note": "Shown to the owner as a plan card to edit and confirm. Nothing is saved or armed until they confirm."}

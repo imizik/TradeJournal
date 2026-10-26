@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import PlansBoard from "@/components/copilot/PlansBoard";
-import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
+import { PracticeLine, WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import { asOfText, getOpenThreads, WHAT_MATTERS_PROMPT, type OpenThreads, type ThreadPosition, type ThreadWatch, type ThreadWatchTrigger } from "@/lib/copilot";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +76,7 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
           Review my week
         </button>
       </div>
+      <PracticeLine className="text-xs text-sky-200/80 sm:text-right" />
       {error ? <p className="text-muted-foreground">Open threads unavailable: {error}</p>
         : !threads ? <p className="text-muted-foreground">Reading what is open…</p> : (
           <div className="grid gap-3 sm:grid-cols-2">
