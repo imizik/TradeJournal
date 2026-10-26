@@ -71,7 +71,24 @@ read remains late; never invent the intended receipt time.
    input_id and the recovered latest parent. main/alternative are exactly
    {text,supporting_refs,contradicting_refs}; invalidation is exactly
    {text,evidence_refs}. Include change_summary. model_id stays null unless
-   actually known. On a parent conflict, stop and record it; never guess or fork.
+   actually known. A confirmed refusal permits at most ONE repair/resubmission
+   for this run, retaining the SAME operation_id; never guess or fork:
+   - `invalid_content`: correct the named field/rule without inventing evidence.
+   - `parent_conflict`, `input_unavailable`, `input_not_current_session`: call
+     market_watch_snapshot once again. Stop if no current-session input is
+     available. Reconsider the entire view, evidence, change_summary, forecasts,
+     correction target and message intent against the new snapshot/context;
+     use its input_id and latest parent. Never merely replace previous_read_id.
+     If the latest read already has this operation_id, do not submit again;
+     report the existing read and its actual receipt time instead.
+   - `operation_conflict`: this ID already committed different content. Stop;
+     never change the ID to bypass it. Only the EXACT original fields can
+     recover its receipt. Do not claim the rejected replacement was saved.
+   For a timeout, `ledger_unavailable` or notice-handoff failure, retry EXACT
+   fields once as in step 2; never treat uncertain persistence as a confirmed
+   refusal or edit content. `ledger_state_invalid` requires owner investigation.
+   If recovery fails, stop and record the exact error and coverage gap. Do not
+   start another repair cycle. A recovered late read remains late.
    Before submitting, check EVERY supporting_refs, contradicting_refs and
    evidence_refs list: each permits at most 10 pointers, all resolving inside
    the returned snapshot (not the response envelope). Prefer a shared parent
@@ -92,8 +109,9 @@ read remains late; never invent the intended receipt time.
    summary problems are never a reason to skip a correction. Retries still use
    the EXACT submitted fields, including phone_summary when supplied.
    Completion requires a successful receipt with read_id and received_at.
-   A tool error or attempted call is not a saved read: record its exact error
-   in the native task result and mark the run failed, never quiet-success.
+   A tool error or attempted call is not a saved read: after the bounded recovery
+   above, record any unresolved error in the native task result and mark the run
+   failed, never quiet-success.
 8. Do not send chat for market reads or market notes. TradeJournal pushes each
    newly committed update/correction to Isaac's phone. Still save
    message_intent update/correction exactly as before. A replayed receipt never
