@@ -19,6 +19,10 @@ export default function RadarPreview() {
   }, [refresh]);
   const events = feed?.state !== "off" ? [...(feed?.events ?? [])]
     .sort((a, b) => b.first_seen_at.localeCompare(a.first_seen_at)).slice(0, 3) : [];
+  // Off: one line, so a switched-off recorder does not take a card of its own.
+  if (feed?.state === "off" && !error) return <DashboardCard title="Radar discoveries" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
+    <p className="text-sm text-muted-foreground" data-testid="radar-preview">{coverageLine(feed)}</p>
+  </DashboardCard>;
   return <DashboardCard title="Radar discoveries" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
     <div className="min-w-0 space-y-3 break-words" data-testid="radar-preview">
       {error && <p role="status" className="text-xs text-amber-300">Radar could not load.{feed && " Showing the previous snapshot; current status is unknown."}</p>}

@@ -36,7 +36,10 @@ test("a broken streak names the last unplanned entry", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await answer(page, { ...STREAK, current: 0 });
   await page.goto("/");
-  await expect(page.getByTestId("plan-streak-full")).toHaveText(/^0 planned · last: NBIS 100C \d{1,2}:\d{2}$/);
+  // The entry was an hour ago: in the first hour after midnight New York time that is still yesterday, and the chip then names the weekday.
+  const nyDate = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York" });
+  const weekday = nyDate(STREAK.last_break!.entry_time) === nyDate(now) ? "" : "[A-Z][a-z]{2} ";
+  await expect(page.getByTestId("plan-streak-full")).toHaveText(new RegExp(`^0 planned · last: NBIS 100C ${weekday}\\d{1,2}:\\d{2}$`));
   // The charts rail carries the count alone.
   await page.goto("/charts?symbol=NBIS");
   await expect(page.getByTestId("plan-streak-rail")).toHaveText("0");

@@ -70,6 +70,13 @@ export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: Exi
   </div>;
 }
 
+const VERDICT: Record<ExitHabitsBody["verdict"]["verdict"], { label: string; tone: string }> = {
+  helping: { label: "Helping", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
+  not_helping: { label: "Not helping", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
+  not_enough_data: { label: "Not enough data", tone: "border-border bg-muted text-muted-foreground" },
+};
+
+/** The dashboard's one line on the alerts: the verdict and its reason. The habits, alerts and sample live on /proof. */
 export default function ExitHabits() {
   const [body, setBody] = useState<ExitHabitsBody | null>(null);
   const [error, setError] = useState(false);
@@ -80,8 +87,14 @@ export default function ExitHabits() {
       .then(setBody).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, []);
-  return <DashboardCard title="Exit habits" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
-    {body ? <ExitHabitsView body={body} />
-      : <p role="status" className={`text-sm ${error ? "text-amber-300" : "text-muted-foreground"}`}>{error ? "Exit habits could not load." : "Loading exit habits…"}</p>}
+  const verdict = body ? VERDICT[body.verdict.verdict] : null;
+  return <DashboardCard title="Exit habits" action={<Link href="/proof" className={dashboardLink}>Proof →</Link>}>
+    <div data-testid="exit-habits" className="min-w-0 break-words text-sm">
+      {body && verdict ? <p className="flex flex-wrap items-center gap-2" data-testid="exit-habits-verdict">
+          <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
+          <span>{body.verdict.reason}</span>
+        </p>
+        : <p role="status" className={error ? "text-amber-300" : "text-muted-foreground"}>{error ? "Exit habits could not load." : "Loading exit habits…"}</p>}
+    </div>
   </DashboardCard>;
 }
