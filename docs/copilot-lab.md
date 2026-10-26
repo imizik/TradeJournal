@@ -1036,6 +1036,18 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   or trimmed within 15 minutes; a nudge or link ping, a plan linked within 30
   minutes. The trade page shows it per ping (`then: closed in 6 min`) and
   [Review my week](#review-my-week) counts it by kind.
+- **Pictures:** after the policy says send, each sender attaches a small chart
+  (`backend/app/engine/ping_images.py`, drawn by `chart_render.py`): a plan's
+  trigger or invalidation shows the last 90 minutes with the plan's levels and
+  the fill, an open-trade alert the entry, peak and now, a time stop the day with
+  the stop time, a nudge or link ping the fill, Radar the stock against its
+  benchmark, thesis watch the move from its reference, pre-market prep the open
+  options by days to expiry. The PNG goes to ntfy as the attachment; a picture
+  that fails, finds no bars or takes over 2 seconds, or that ntfy refuses, leaves
+  the ping as text, never later or dropped; a retry after a failed send goes as
+  text. The picture never changes a decision;
+  `phone_ping.image` records `attached`, `none` or `off`. `PING_IMAGES_ENABLED`
+  (default true) turns pictures off without touching the pings.
 - **Activation:** `ALERT_POLICY_ENABLED` defaults to **true**. It only ever reduces
   pings, every sender keeps its own switch, and a held ping is recorded rather
   than lost, so there is nothing to prove before switching it on; `false` passes

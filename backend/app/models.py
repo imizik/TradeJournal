@@ -766,6 +766,7 @@ class PhonePing(SQLModel, table=True):
     delivered_at: Optional[datetime] = None  # UTC: ntfy accepted it (or the send may have reached the phone)
     then: Optional[str] = None  # entered | no_entry | closed | trimmed | held | linked | not_linked | unmatched
     then_minutes: Optional[int] = None  # minutes from the ping to the fill or link that answered it
+    image: Optional[str] = None  # attached | none (sent as text alone) | off (PING_IMAGES_ENABLED=false); engine/ping_images.py
     judged_at: Optional[datetime] = None  # UTC: when ``then`` was decided from the fills
 
 

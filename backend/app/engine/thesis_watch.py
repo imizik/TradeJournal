@@ -499,9 +499,19 @@ class ThesisWatch:
             db.add(trigger)
             db.commit()
             return self._view(trigger)
-        publish = self._publish or ntfy.publish
+        from app.engine import ping_images
         try:
-            trigger.message_id = publish(title_for(row.symbol), candidate.text + ticket.append, path=trigger.path, direct_click=True)
+            if self._publish is not None:
+                trigger.message_id = self._publish(title_for(row.symbol), candidate.text + ticket.append, path=trigger.path, direct_click=True)
+            else:
+                # The ping's chart: today with the price the move is measured from.
+                basis = str(candidate.detail.get("basis") or "")
+                image = ping_images.picture(ping_images.thesis(
+                    title_for(row.symbol), row.symbol, candidate.detail.get("reference"),
+                    "since evidence" if basis.startswith("evidence:") else "since close" if basis else "", now.timestamp()))
+                trigger.message_id, image_state = ping_images.publish(title_for(row.symbol), candidate.text + ticket.append, image,
+                                                                      path=trigger.path, direct_click=True)
+                ping_images.record(db, ticket, image_state)
             trigger.delivery = "sent"
         except Exception as exc:  # noqa: BLE001 - recorded, never retried: a failed push may still have been delivered
             trigger.delivery, trigger.reason = "failed", f"{type(exc).__name__}: {exc}"[:300]
