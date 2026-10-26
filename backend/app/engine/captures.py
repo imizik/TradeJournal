@@ -45,6 +45,10 @@ AUDIO_MIN = 1_000  # anything smaller holds no usable speech
 CLIP_MS = 30_000
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+# What prompted a plan (docs/copilot-lab.md § Origin). A plan saved without one was the owner's own idea.
+ORIGIN_KINDS = ("radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual")
+ORIGIN_REF = re.compile(r"^[A-Za-z0-9:._-]{1,80}$")
+ORIGIN_TEXT_MAX = 300
 
 # What each upload may be, by its first bytes, never by the browser's word alone.
 AUDIO_TYPES = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav"}
@@ -53,6 +57,23 @@ IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
 class CaptureError(ValueError):
     """A request the user can fix; the message says how."""
+
+
+def origin(body: dict) -> tuple[str, str | None, str | None]:
+    """(kind, ref, text) from the submission's ``origin``; none given is ``manual``. Raises CaptureError."""
+    given = body.get("origin")
+    if given is None or given == "":
+        return "manual", None, None
+    if not isinstance(given, dict):
+        raise CaptureError("The plan's origin is not readable.")
+    kind = str(given.get("kind") or "")
+    if kind not in ORIGIN_KINDS:
+        raise CaptureError("The plan's origin is not one this app knows.")
+    ref = str(given.get("ref") or "").strip() or None
+    if ref is not None and not ORIGIN_REF.fullmatch(ref):
+        raise CaptureError("The plan's origin reference is not readable.")
+    text = re.sub(r"\s+", " ", str(given.get("text") or "")).strip()[:ORIGIN_TEXT_MAX] or None
+    return kind, ref, text
 
 
 def storage_root() -> Path:
@@ -294,7 +315,9 @@ def build(db: Session, body: dict, *, mode_override: str | None = None) -> Trade
     if len(context_text) > CONTEXT_MAX:
         raise CaptureError("The chart snapshot is too large.")
     context_state = "captured" if isinstance(context, dict) and context.get("state") == "captured" else "unavailable"
+    origin_kind, origin_ref, origin_text = origin(body)
     return TradeCapture(
+        origin_kind=origin_kind, origin_ref=origin_ref, origin_text=origin_text,
         client_id=client_id, received_at=datetime.utcnow(), client_captured_at=_utc(body.get("client_captured_at")),
         account_id=account.id, account_label=account_label(account), underlying=symbol, side=side, instrument=SIDES[side],
         mode=mode, template_id=template.id if template else None, template_revision=template.revision if template else None,
@@ -428,6 +451,7 @@ def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
             "template_revision": capture.template_revision, "setup_label": capture.setup_label, "wording": capture.wording,
             "note": capture.note, "strike": capture.strike, "expiration": capture.expiration.isoformat() if capture.expiration else None,
             "quantity": capture.quantity, "context_state": capture.context_state, "context": context,
+            "origin": {"kind": capture.origin_kind, "ref": capture.origin_ref, "text": capture.origin_text} if capture.origin_kind else None,
             "image": {"state": capture.image_state, "note": capture.image_note, "bytes": capture.image_bytes},
             "audio": {"type": capture.audio_type, "ms": capture.audio_ms, "bytes": capture.audio_bytes} if capture.audio_type else None,
             "transcript": _transcript(capture, jobs.get(capture.transcript_job_id)),

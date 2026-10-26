@@ -153,7 +153,7 @@ function MoreButton({ open, onOpen, trouble }: { open: boolean; onOpen: () => vo
 
 /** The phone's thumb-reachable "Plan a trade": a lit tab beside Charts, owner-only and only while the lab is on. */
 function PlanTab() {
-  return <PlanATrade className="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-sky-300 hover:text-sky-200">
+  return <PlanATrade origin="manual" className="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-sky-300 hover:text-sky-200">
     <span className="flex h-6 w-9 items-center justify-center rounded-full bg-sky-500 text-white"><Crosshair className="h-4 w-4" aria-hidden /></span>
     <span><span className="sr-only">Plan a trade</span><span aria-hidden>Plan</span></span>
   </PlanATrade>;

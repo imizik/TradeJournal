@@ -199,6 +199,8 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
       context: shot.context, image: !!image,
       image_note: image ? shot.imageNote : shot.context.state === "captured" ? "The chart image could not be made." : undefined,
       audio_ms: voice?.ms,
+      // A typed plan on the chart came from the chart; a spoken one is the owner's own (the server's default).
+      ...(voice ? {} : { origin: { kind: "chart" as const } }),
     };
     const item: OutboxItem = { client_id: clientId.current, kind: voice ? "voice" : "plan", body, audio: voice?.blob, image: image ?? undefined, created_at: Date.now(), error: "" };
     await deliver(item);
@@ -320,7 +322,7 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">{accountLabel ? `${symbol} · ${accountLabel}` : `${symbol} · no account chosen`}</span>
         {/* Enter on the link follows it rather than saving the plan. */}
-        <span data-own-enter className="contents"><PlanATrade symbol={symbol} line={`pressure-test my plan before I enter. ${typed}`} title="Open the copilot with this plan to argue with it before you enter. Nothing is sent until you press Send."
+        <span data-own-enter className="contents"><PlanATrade symbol={symbol} origin="chart" line={`pressure-test my plan before I enter. ${typed}`} title="Open the copilot with this plan to argue with it before you enter. Nothing is sent until you press Send."
           className={`inline-flex shrink-0 items-center rounded-md border border-sky-500/60 px-3 text-xs font-medium text-sky-200 hover:bg-sky-500/15 ${narrow ? "h-11" : "h-8"}`}>Pressure-test with copilot</PlanATrade></span>
         {stuck ? <button type="button" data-own-enter onClick={() => void deliver(stuck)} disabled={saving} className={`inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-3 text-xs font-medium text-amber-100 hover:bg-amber-500/30 ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}Retry</button>
           : <button type="button" data-own-enter onClick={() => void submit()} disabled={!canSave} title={canSave ? "Save plan (Enter)" : "Choose what you are taking and a plan"}

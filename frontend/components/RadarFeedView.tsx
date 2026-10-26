@@ -128,11 +128,14 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
         ))}
       </section>
       <div className="flex flex-wrap items-center gap-2">
-        <PlanATrade symbol={symbol} line={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
+        {detail.plans?.planned && <span aria-label="Plan marks" className="flex gap-1 text-[11px] font-medium">
+          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">Planned</span>
+          {detail.plans.traded && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300">Traded</span>}</span>}
+        <PlanATrade symbol={symbol} origin="radar_event" originRef={event.event_id} line={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
         <Link href={`/charts?symbol=${encodeURIComponent(symbol)}`} className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary">
           Open chart · {symbol}
         </Link>
-        <AskCopilot drawer symbol={symbol} context={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
+        <AskCopilot drawer symbol={symbol} origin={{ kind: "radar_event", ref: event.event_id }} context={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
       </div>
       <div role="group" aria-label="Was this useful?" className="space-y-1.5">
         <p className="text-xs text-muted-foreground">Was this useful? {rating ? "Your saved answer is highlighted." : "Not rated yet."}</p>

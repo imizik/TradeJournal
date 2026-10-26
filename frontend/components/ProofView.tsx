@@ -11,6 +11,8 @@ import { ExitHabitsView, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitH
 type Verdict = "helping" | "not_helping" | "not_enough_data";
 type RadarProof = { state: string; reason: string | null; rule_version?: string | null; sessions?: number; events?: number;
   alerted?: { events: number; ratings: Record<string, number> };
+  /** Events a pre-trade plan names as its origin, and those whose plan was traded. */
+  plans?: { planned: number; traded: number };
   stock_events?: number; group_events?: number; ratings?: Record<string, number>; movers?: Record<string, number>;
   median_lead_minutes?: number | null; brief?: Record<string, number>;
   verdict?: { verdict: Verdict; reason: string; rule: string; rated: number; timed: number; useful_share: number | null; ahead_share: number | null } };
@@ -90,6 +92,7 @@ function RadarProofCard() {
         <p className="text-xs text-muted-foreground">{body.events} event{body.events === 1 ? "" : "s"} over {body.sessions} session{body.sessions === 1 ? "" : "s"} of {body.rule_version}: {body.stock_events} stock, {body.group_events} group (groups are rated, not timed).</p>
         <Counts title="Your ratings" rows={RATING} counts={body.ratings ?? {}} />
         {body.alerted && <p className="text-xs text-muted-foreground">Sent to your phone as Radar alerts: {body.alerted.events} ({body.alerted.ratings.useful ?? 0} rated useful). Shown apart from events only seen in the feed; not part of the verdict.</p>}
+        {body.plans && <p className="text-xs text-muted-foreground">Led to a pre-trade plan: {body.plans.planned}; to a trade: {body.plans.traded}. Not part of the verdict.</p>}
         <Counts title="Stock events vs Movers top 10" rows={MOVERS} counts={body.movers ?? {}} />
         {body.median_lead_minutes != null && <p className="text-xs text-muted-foreground">When Radar was first, it led Movers by a median {body.median_lead_minutes} min.</p>}
         <Counts title="Stock events vs the morning brief" rows={BRIEF} counts={body.brief ?? {}} />

@@ -235,6 +235,7 @@ def test_a_new_headline_pings_once_with_the_what_changed_link_and_dedupes_by_url
     [row] = triggers(engine)
     assert row.delivery == "sent" and row.message_id == "msg-1" and str(row.investigation_id) == saved and row.memory_id is None
     assert row.dedupe_key == "news:NBIS:https://benzinga.com/a/1" and row.reassess_job_id is None  # the queue is off
+    assert query["origin"] == f"thesis_watch:{row.id}"  # a plan made from the ping records its trigger
     # The same headline again (a restart's lookback) is written nowhere and sent nowhere.
     clock.now = at("10:15")
     readers.articles.append(article("NBIS", "Nebius wins $3B deal with Meta", "https://benzinga.com/a/1", at("09:52")))
@@ -460,7 +461,7 @@ def test_one_trigger_s_failure_does_not_lose_the_others(engine, world, monkeypat
     thesis(engine, "NBIS")
     readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n", at("09:50")), article("APLD", "Applied news", "https://benzinga.com/a", at("09:50"))]
     real = watch._queue_reassess
-    monkeypatch.setattr(thesis_watch, "deep_link", lambda row, text: (_ for _ in ()).throw(RuntimeError("boom")) if row.symbol == "NBIS" else f"/copilot-lab?symbol={row.symbol}")
+    monkeypatch.setattr(thesis_watch, "deep_link", lambda row, text, *_: (_ for _ in ()).throw(RuntimeError("boom")) if row.symbol == "NBIS" else f"/copilot-lab?symbol={row.symbol}")
     result = watch.run_once()
     assert result["issues"] == ["news NBIS not recorded: RuntimeError"] and [f["symbol"] for f in result["fired"]] == ["APLD"]
     assert [t.symbol for t in triggers(engine)] == ["APLD"] and real is watch._queue_reassess

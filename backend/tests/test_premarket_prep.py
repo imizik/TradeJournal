@@ -214,6 +214,7 @@ def test_it_preps_once_saves_an_investigation_and_pings_the_first_two_lines(engi
     path = urlsplit(kw["path"])
     assert path.path == "/copilot-lab" and kw["direct_click"] is True
     investigation_id = parse_qs(path.query)["investigation"][0]
+    assert parse_qs(path.query)["origin"] == [f"premarket_prep:{investigation_id}"]  # a plan made from it records the prep
     with Session(engine) as db:
         saved = db.get(CopilotInvestigation, UUID(investigation_id))
         assert saved.title == "Pre-market prep 2026-10-26" and saved.source == "copilot" and saved.status == "open"
