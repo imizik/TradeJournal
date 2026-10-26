@@ -166,6 +166,13 @@ def test_a_clip_over_the_cap_halves_its_rate_then_its_size():
     assert frames_of(small.png)[0].shape == (small.height, small.width)
 
 
+def test_a_stale_plan_far_from_the_day_is_left_out():
+    far = day_replay.PlanLine(at("09:00", FRI - timedelta(days=20)), "invalidation", 40.0)
+    day = SymbolDay("NBIS", FRI, tuple(session_bars()), (), (), (nbis_day().plan[0], far))
+    (_, _, low, _), frames = day_replay.charts(day, Calendar())
+    assert low > 90 and [lv.label for lv in frames[-1][1].levels] == ["TRIG 101.00"]
+
+
 def test_no_bars_no_clip():
     assert day_replay.clip(SymbolDay("NBIS", FRI, (), (day_replay.Fill(at("10:00"), True, 100.0),)), Calendar()) is None
 
@@ -343,7 +350,11 @@ def test_at_1620_the_day_is_built_once_and_one_ping_opens_it(engine, storage, mo
     replays = job(engine, clock)
     replays.run()
     assert rows(engine) == [] and phone.sent == []
+    clock.now = at("18:20")  # past its window: waits for the next day
+    replays.run()
+    assert rows(engine) == []
     clock.now = at("16:20")
+    replays._last_run = 0
     replays.run()
     (row,) = rows(engine)
     assert (row.day, row.delivery, row.symbols, row.fills, row.pings) == (FRI, "sent", "NBIS,SPY", 3, 2)

@@ -1120,7 +1120,8 @@ No model call; it runs whether or not the lab is on.
   for a full session.
 - **When:** at 16:20 New York on a trading day, claimed once (`day_replay.day`
   is unique, additive migration `b7d3f1a9c5e2`), built on its own thread. A day
-  with no fill is `skipped`: nothing built or sent.
+  with no fill is `skipped`: nothing built or sent. A day not claimed by 18:20
+  waits for the next, and fills that arrive after the claim are not in the clips.
 - **Ping:** one, "Watch your day: NBIS, SPY · 3 fills, 2 pings", with the
   first clip's last frame as its picture, through `notification_policy.decide`
   (kind `day_replay`, ranked with the prep). A tap opens `/replay/<date>`.

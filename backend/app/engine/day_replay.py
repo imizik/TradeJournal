@@ -3,7 +3,7 @@
 **The clip.** For each symbol with a fill on the day (Webull left out while it is dormant), ``FRAMES`` frames
 (``FPS`` a second, so about 30 seconds) of the regular session (widened to take in a fill outside it) drawn by
 ``chart_render.frame``: the day's bars up to the frame's minute as 3-minute candles on a fixed axis, the confirmed
-plan's trigger and invalidation lines from when they were armed, each fill as a BUY or SELL dot as it happens (a
+plan's trigger and invalidation lines from when they were armed (one far outside the day's prices left out), each fill as a BUY or SELL dot as it happens (a
 stock at its price, an option on the underlying at the fill's minute), a PING line when a phone ping for the symbol
 went out, and the clock in the corner. Frame ``i`` shows everything before ``times[i]``.
 
@@ -24,7 +24,8 @@ A day is kept ``KEEP_DAYS`` and then deleted; the private API serves it to the o
 day the day is claimed once (``DayReplay.day`` is unique), the clips are built on a worker thread, and a day with no
 fill is recorded ``skipped`` with nothing built or sent. Otherwise one ping, "Watch your day: NBIS, SPY · 3 fills,
 2 pings", goes through ``notification_policy.decide`` (kind ``day_replay``, ranked with the prep) and opens
-``/replay/<date>``. Delivery is at-most-once, as the week review's.
+``/replay/<date>``. A day not claimed by 18:20 waits for the next; fills that arrive after the claim are not in the
+clips. Delivery is at-most-once, as the week review's.
 """
 
 from __future__ import annotations
@@ -64,6 +65,7 @@ MIN_FRAMES = 30
 KEEP_DAYS = 14
 RUN_SECONDS = 30
 AT = 16 * 60 + 20
+WINDOW_MINUTES = 120  # a day not claimed by 18:20 (the flag switched on, or the API down) waits for the next
 PREPARE_SECONDS = 10 * 60
 EXPIRE_SECONDS = 2 * 60 * 60
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
@@ -202,13 +204,17 @@ def charts(day: SymbolDay, calendar=None, count: int = FRAMES) -> tuple[tuple[in
     shown = sorted((b for b in day.bars if start <= b["time"] < end), key=lambda b: b["time"])
     fills = [(f, f.price if f.price is not None else _price_at(shown, f.time)) for f in day.fills]
     prices = [p for b in shown for p in (b["low"], b["high"])] + [p for _, p in fills if p is not None]
-    prices += [line.price for line in day.plan]
+    plan = day.plan
+    if prices:  # a stale plan far from the day's prices would flatten the candles: left out
+        span = max(max(prices) - min(prices), max(prices) * 0.01)
+        plan = tuple(line for line in plan if min(prices) - span <= line.price <= max(prices) + span)
+    prices += [line.price for line in plan]
     low, high = (min(prices), max(prices)) if prices else (0.0, 1.0)
     title = f"{day.symbol} {day.day:%b} {day.day.day}"
     out = []
     for t in frame_times(start, end, count):
         levels = {}
-        for line in day.plan:  # the latest plan's line of each role armed by now
+        for line in plan:  # the latest plan's line of each role armed by now
             if line.since < t:
                 levels[line.role] = line
         out.append((t, Chart(
@@ -387,7 +393,7 @@ class DayReplays:
         if not enabled():
             return
         moment = datetime.fromtimestamp(now, ET)
-        if moment.hour * 60 + moment.minute < AT or not _trading_day(self.calendar, moment.date()):
+        if not AT <= moment.hour * 60 + moment.minute < AT + WINDOW_MINUTES or not _trading_day(self.calendar, moment.date()):
             return
         with Session(self.engine) as db:
             if db.exec(select(DayReplay.id).where(DayReplay.day == moment.date())).first():
