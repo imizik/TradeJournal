@@ -221,3 +221,84 @@ dependency set. Test imports restore CLI environment changes and never load
 the real backend environment file. These fixtures do not establish live
 adoption, process recovery under every host failure, strategy performance or
 paper/live execution readiness.
+
+## Fixed ETF exploratory intake (preparation, October 26)
+
+After the input reconciliation in PR #523, the owner approved the smallest
+counted integration. **This implementation and its merge authorize no historical
+screen, attempt, checkout adoption, schedule change or live execution.** Only
+invented inputs were used for preparation tests. Both schedules stay paused.
+
+`backend/scripts/factory_etf.py` pins the [ETF/BIL proposal](notes/etf-bil-exploratory-screen-proposal-2026-10-26.md)
+as canonical case `etf-c4c308ecc58fc194`. It admits only the reviewed input
+manifest `d2f07d938cc66ee7d8fb1fbc155a82823dd5a9574e3fb0e3bd5ecae66c736c43`:
+SPY/EFA/EEM/IEF/BIL, January 2016–September 2024, 2,200 complete common sessions.
+It has no CLI or alternate candidate/period/cost/input-pin switches. The saved
+snapshot's revised-history assumptions and unknown original publication times
+remain explicit; this is exploratory evidence, never a Factory gate pass.
+
+Once reviewed code adoption in the authoritative checkout is separately
+approved, the read-only inspection is:
+
+```bash
+backend/.venv/bin/python backend/scripts/factory_search.py \
+  --inspect-etf-bundle /Users/user/Documents/TradeJournalResearch/etf-bil-inputs-2026-10-26-v1
+```
+
+Inspection hashes archived bytes and returns only the fixed candidate/input/code
+identities, existing ledger digest/count, duplicate status, budget and lock
+metadata. It does not parse prices into calculation inputs, compute returns,
+recover jobs, reserve an attempt or publish anything. There is no provider call.
+The four-file code fingerprint covers the supervisor, ETF adapter, shared CLI
+and portfolio calculator. It supplements the recorded Git commit.
+
+An explicitly owner-approved run uses `--tick --etf-bundle <same-bundle>` with
+`--authorize-spec etf-c4c308ecc58fc194`, `--expect-ledger-sha256 <fresh-receipt>`
+and `--expect-code-sha256 <fresh-receipt>`. Flags acknowledge a separate approval;
+they do not grant it. The existing `--force` bypasses only the time-of-day guard.
+The scheduled search cannot select this case, and ORB intake stays unchanged.
+
+This manual path uses the existing writer flock, weekly exclusion, time budget,
+candidate cap, fsynced ledger reservation and at-most-900-second child. All prior
+distinct IDs count, including failed/interrupted attempts. The ETF ID excludes
+bundle paths, labels, code and source versions. Any prior record of this fixed
+case/family blocks it, including renamed IDs; unstructured historical notes
+still require the owner's duplicate/equivalence review before authorization.
+There is no model proposal or fallback case. Missing/changed inputs, stale
+receipts, busy locks and exhausted budgets refuse before reservation.
+
+The ETF child rechecks its exact live reservation, inherited writer descriptor,
+owning supervisor, code/input hashes and one-start marker before loading sessions.
+It validates the pinned calendar and explicit action vectors, then calls only
+the existing pure portfolio calculator. No minute-bar store, provider, random
+baseline, confirmation/exam evaluator or broker is called. A changed input after
+reservation consumes the attempt as a failure. Existing failure/time accounting
+is retained; an interrupted supervisor retains the full reserved timeout.
+
+Output is `research/reports/etf-c4c308ecc58fc194-exploratory.json`, retained by the
+existing research persistence path. It includes both fixed cost cases, all three
+NAV paths, aligned monthly returns, CAGR, drawdown, traded notional, fees, BIL
+weights and the fixed continuation criterion. The ledger records its hash and
+summary with verdict `exploratory_only`, `reached_confirmation=false`, and no
+gate/period fields. A favorable continuation criterion does not mean validation.
+These records still increase the global attempted-ID count but are excluded
+from scheduled model feedback and live-proposal generation.
+
+Normal completion and restart recovery validate the same reservation/artifact
+binding. Missing results become interrupted; malformed/mismatched results become
+failed. Neither starts another ETF child. A direct worker call without its
+supervisor and counted reservation is refused. No result or signal from actual
+market inputs has been computed during this preparation.
+
+`backend/tests/test_factory_etf.py` exercises the real supervisor/child logic
+with invented input pins, temporary ledgers and fake process transport, plus one
+native child-process check of inherited locking and supervisor identity. It covers
+admission, stale hashes, protected-date refusal, budget/lock exclusion, durable
+reservation, failure charges, duplicate/retry refusal, one-start behavior,
+completion corruption and restart recovery. Existing ORB/scheduled-search tests
+remain intact. These are software checks, not live process-adoption proof.
+
+Next: review/merge the integration, approve clean checkout adoption and obtain a
+fresh inspection, then separately authorize one bounded screen. The first
+economic result must precede further execution/options infrastructure. No new
+variants, statistical gates or protected-period access are introduced here.

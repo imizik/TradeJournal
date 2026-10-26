@@ -266,12 +266,19 @@ original archive. That candidate needs review under the proposed revised-history
 assumptions; it does not prove original publication-time availability or adopt
 a new protocol.
 
-Remaining before any historical screen: review the frozen input candidate, then
-connect the calculator to the **existing** Factory reservation, locks, budget
-and bounded child, followed by explicit one-run authorization. The current
-ORB-only intake and all frozen gates remain unchanged. There is no enabled ETF
-evaluation command, new ledger, schedule, live execution or consumed candidate
-attempt in this slice.
+After PR #523 merged, the owner approved the
+[counted manual integration](../CONTINUOUS_SEARCH.md#fixed-etf-exploratory-intake-preparation-october-26).
+It pins this case as `etf-c4c308ecc58fc194` and the reconciled input manifest,
+using the **existing** Factory reservation, locks, budget and bounded child.
+Scheduled search cannot select it; the manual path requires explicit candidate,
+fresh ledger and code acknowledgements. Its result can only be exploratory and
+cannot enter confirmation/exam gates.
+
+Remaining before any historical screen: review the integration, approve adoption
+in the clean authoritative checkout, inspect fresh metadata and separately
+authorize one run. No historical calculation, reservation, runtime adoption,
+schedule change or live execution occurred during implementation. All frozen
+statistical gates and the primary economic question remain unchanged.
 
 [bil]: https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil
 [bars]: https://docs.alpaca.markets/us/reference/stockbars

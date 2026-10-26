@@ -34,6 +34,7 @@ from app.engine.factory_data import ET, LEVEL_FEATURES  # noqa: E402 — bootstr
 from app.engine.factory_brief import catalog, spec_changes, SPEC_FORMAT  # noqa: E402 — bootstrap SIP and the local environment first
 from app.engine.factory_gates import evaluate, ledger_record, report, HOLDOUT_START  # noqa: E402 — bootstrap SIP and the local environment first
 from strategy_factory import AlpacaCache, BarStore, LEDGER, DEFAULT_OUT, read_ledger, code_version, publish  # noqa: E402 — bootstrap SIP and the local environment first
+import factory_etf as etf  # noqa: E402 — research-only manual intake; never a catalog family
 
 OUT = DEFAULT_OUT / 'search'
 NIGHT_CAP = 288
@@ -78,7 +79,8 @@ def safe_digest(records):
                     'failed_checks': [text for text, passed in r.get('gates', {}).get('screen', {}).get('checks', []) if not passed]},
             periods={k: v for k, v in r.get('periods', {}).items()
             if k in ('discovery', 'confirm_a', 'confirm_b', 'confirm', 'confirm_x3')})
-            for r in latest(records).values() if r.get('spec')]
+            for r in latest(records).values() if r.get('spec')
+            and r.get('evaluation_kind') != etf.KIND and r['spec'].get('family') != etf.KIND]
 
 
 def idea_prompt(records):
@@ -316,12 +318,14 @@ def validate(raw):
     return spec
 
 
-def worker(path):
+def worker(path, writer_fd=None):
     global STORE
     job = json.loads(Path(path).read_text())
     # This deadline survives termination of the supervising launchd tick.
     signal.signal(signal.SIGALRM, signal.SIG_DFL)
     signal.alarm(job.get('timeout_seconds', 900))
+    if job.get('evaluation_kind') == etf.KIND:
+        return etf_worker(Path(path), job, writer_fd)
     spec = rules.from_canonical(job['spec'])
     STORE = BarStore(AlpacaCache(), DEFAULT_OUT, lambda s: print(s, flush=True))
     # Existing April-2026 holdout is larger than four weeks; never shrink it.
@@ -335,6 +339,59 @@ def worker(path):
     temporary.write_text(json.dumps(record))
     temporary.replace(destination)
     Path(path).with_suffix('.report.txt').write_text(report(ev))
+
+
+def etf_worker(path, job, writer_fd):
+    """Reserved child only; a direct --worker invocation cannot launch a screen."""
+    require_checkout()
+    if (writer_fd is None or path != OUT / f'{etf.ID}.job.json'
+            or job.get('id') != etf.ID or job.get('spec') != etf.SPEC
+            or job.get('attempt_state') != 'reserved' or job.get('verdict') != 'reserved'
+            or job.get('input_manifest_sha256') != etf.MANIFEST_SHA256
+            or job.get('code_sha256') != etf.code_digest(ROOT)
+            or job.get('reached_confirmation') is not False
+            or type(job.get('timeout_seconds')) is not int
+            or not 60 <= job['timeout_seconds'] <= 900):
+        raise ValueError('ETF worker requires its exact counted reservation and code')
+    held, expected = os.fstat(writer_fd), (OUT / 'writer.lock').stat()
+    if (held.st_dev, held.st_ino) != (expected.st_dev, expected.st_ino):
+        raise ValueError('ETF worker did not inherit the Factory writer lock')
+    fcntl.flock(writer_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if int((DEFAULT_OUT / 'week.lock/search-pid').read_text()) != os.getppid():
+        raise ValueError('ETF worker requires the owning supervisor')
+    records, _ = ledger_snapshot()
+    if latest(records).get(etf.ID) != job:
+        raise ValueError('ETF worker reservation is absent, changed or already consumed')
+    # Exclusive marker prevents replay while a reservation still says reserved.
+    with path.with_suffix('.started').open('x') as handle:
+        handle.write(datetime.now(ET).isoformat())
+        handle.flush()
+        os.fsync(handle.fileno())
+    _, raw = etf.verified_bundle(job['input_bundle'])
+    artifact, summary = etf.calculate_artifact(raw, job['code_sha256'])
+    output = etf.artifact_path(ROOT)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open('xb') as handle:
+        handle.write(artifact)
+        handle.flush()
+        os.fsync(handle.fileno())
+    result = {**job, 'attempt_state': 'completed', 'verdict': 'exploratory_only',
+              'exploration': {**summary, 'artifact': str(output.relative_to(ROOT)),
+                              'artifact_sha256': etf.digest(artifact)}}
+    etf.validate_result(result, job, ROOT)
+    destination = path.with_suffix('.result.json')
+    temporary = destination.with_suffix('.tmp')
+    temporary.write_bytes(etf.encoded(result))
+    temporary.replace(destination)
+
+
+def completed_result(path, reservation):
+    if reservation.get('evaluation_kind') == etf.KIND:
+        try:
+            return etf.validate_result(json.loads(path.read_text()), reservation, ROOT)
+        except (ValueError, KeyError, TypeError, OSError):
+            return {**reservation, 'attempt_state': 'failed', 'verdict': 'evaluation_error'}
+    return json.loads(path.read_text())
 
 
 def summary(records, night):
@@ -370,7 +427,7 @@ def notify(records, night):
 
 
 def proposal(record):
-    if record.get('verdict') == 'passed':
+    if record.get('verdict') == 'passed' and record.get('evaluation_kind') != etf.KIND:
         path = ROOT / 'research/reports' / f"s1-v3-proposal-{record['id']}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix('.tmp')
@@ -389,7 +446,8 @@ def reconcile_proposals(records):
 def persist_research():
     paths = [LEDGER, *ROOT.glob('research/specs/search-*.json'),
              *ROOT.glob('research/reports/*-continuous.json'),
-             *ROOT.glob('research/reports/s1-v3-proposal-*.json')]
+             *ROOT.glob('research/reports/s1-v3-proposal-*.json'),
+             *ROOT.glob('research/reports/etf-*-exploratory.json')]
     subprocess.run(['git', 'add', '--', *map(str, paths)], cwd=ROOT, check=True)
     changed = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=ROOT).returncode
     if changed:
@@ -424,7 +482,7 @@ def ledger_snapshot():
     return records, hashlib.sha256(raw).hexdigest()
 
 
-def intake_state(spec, records, ledger_sha256, now):
+def intake_state(spec, records, ledger_sha256, now, *, identifier=None):
     night = night_key(now)
     budget = OUT / f'{night}-seconds.json'
     reservations = sum(r.get('search_night') == night and r.get('attempt_state') == 'reserved' for r in records)
@@ -434,9 +492,11 @@ def intake_state(spec, records, ledger_sha256, now):
     if type(used) is not int or not 0 <= used <= SECONDS_CAP:
         raise ValueError('Invalid Factory time budget')
     count = len(latest(records))
-    return dict(candidate_id=rules.spec_id(spec), ledger_sha256=ledger_sha256,
-                already_counted=rules.spec_id(spec) in latest(records), prior_candidates=count,
-                next_attempt=None if rules.spec_id(spec) in latest(records) else count + 1, window=night, reserved_attempts=reservations,
+    identifier = identifier or rules.spec_id(spec)
+    counted = etf.already_counted(records) if identifier == etf.ID else identifier in latest(records)
+    return dict(candidate_id=identifier, ledger_sha256=ledger_sha256,
+                already_counted=counted, prior_candidates=count,
+                next_attempt=None if counted else count + 1, window=night, reserved_attempts=reservations,
                 attempt_cap=NIGHT_CAP, used_seconds=used, seconds_cap=SECONDS_CAP,
                 evaluation_seconds=min(900, SECONDS_CAP - used),
                 within_search_hours=not 6 <= now.hour < 22)
@@ -458,10 +518,35 @@ def inspect_spec(path):
     return state
 
 
-def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha256=None):
+def inspect_etf_bundle(path):
     require_checkout()
+    etf.verified_bundle(path)
+    records, digest = ledger_snapshot()
+    state = intake_state(None, records, digest, datetime.now(ET), identifier=etf.ID)
+    state.update(mode='inspection_only', evaluation_authorized=False,
+                 input_bundle=str(Path(path).resolve()), input_manifest_sha256=etf.MANIFEST_SHA256,
+                 code_sha256=etf.code_digest(ROOT), evaluation_kind=etf.KIND,
+                 week_lock_present=(DEFAULT_OUT / 'week.lock').exists())
+    return state
+
+
+def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha256=None,
+         etf_bundle=None, expected_code_sha256=None):
+    require_checkout()
+    is_etf = etf_bundle is not None
     requested = None
-    if spec_path is not None:
+    if is_etf:
+        if (spec_path is not None or authorize_spec != etf.ID
+                or not isinstance(expected_code_sha256, str)
+                or expected_code_sha256 != etf.code_digest(ROOT)
+                or not isinstance(expected_ledger_sha256, str) or len(expected_ledger_sha256) != 64
+                or any(c not in '0123456789abcdef' for c in expected_ledger_sha256)):
+            raise ValueError('ETF intake requires explicit candidate, code and ledger acknowledgement')
+        etf.verified_bundle(etf_bundle)
+        requested = etf.SPEC
+    elif expected_code_sha256 is not None:
+        raise ValueError('Code acknowledgement requires --etf-bundle')
+    elif spec_path is not None:
         requested = requested_candidate(spec_path)
         if authorize_spec != FROZEN_ORB_ID or not isinstance(expected_ledger_sha256, str) or len(expected_ledger_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_ledger_sha256):
             raise ValueError('Frozen intake requires explicit candidate acknowledgement and inspected ledger SHA-256')
@@ -501,13 +586,19 @@ def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha25
                 records, digest = ledger_snapshot()
                 if digest != expected_ledger_sha256:
                     raise RuntimeError('Factory ledger changed since inspection; inspect again')
-                state = intake_state(requested, records, digest, now)
+                state = intake_state(requested, records, digest, now, identifier=etf.ID if is_etf else None)
                 if state['already_counted']:
                     raise RuntimeError('Candidate already counted; no retries or renamed equivalents')
                 if not force and not state['within_search_hours']:
                     raise RuntimeError('Outside search hours; no attempt reserved')
                 if state['reserved_attempts'] >= NIGHT_CAP or state['evaluation_seconds'] < 60:
                     raise RuntimeError('Factory attempt or time budget exhausted')
+                if is_etf:
+                    etf.verified_bundle(etf_bundle)
+                    if expected_code_sha256 != etf.code_digest(ROOT):
+                        raise RuntimeError('ETF code changed since inspection')
+                    if etf.artifact_path(ROOT).exists() or list(OUT.glob(f'{etf.ID}.job*')):
+                        raise RuntimeError('Existing ETF job/artifact requires audit; no retry')
             else:
                 records = read_ledger(LEDGER)
             # Recover atomic result files written before parent interruption;
@@ -517,7 +608,7 @@ def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha25
                 found = latest(records).get(reservation['id'])
                 if found and found.get('attempt_state') == 'reserved':
                     result = job.with_suffix('.result.json')
-                    done = json.loads(result.read_text()) if result.exists() else {**found, 'attempt_state': 'interrupted', 'verdict': 'interrupted'}
+                    done = completed_result(result, found) if result.exists() else {**found, 'attempt_state': 'interrupted', 'verdict': 'interrupted'}
                     dirty = True
                     append(done)
                     records.append(done)
@@ -551,9 +642,9 @@ def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha25
             if requested is not None:
                 # Selection only: everything below uses the official reservation,
                 # budget, worker timeout and completion path. No model/fallback.
-                if rules.spec_id(requested) in seen:
+                if (etf.ID if is_etf else rules.spec_id(requested)) in seen:
                     raise RuntimeError('Candidate already counted')
-                chosen, origin = requested, 'owner-frozen-spec'
+                chosen, origin = requested, 'owner-frozen-etf' if is_etf else 'owner-frozen-spec'
             else:
                 ideas = []
                 idea_origin = 'codex-plan'
@@ -593,18 +684,25 @@ def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha25
             if timeout < 60:
                 return
             reserve_seconds(timeout)
-            ident = rules.spec_id(chosen)
-            reservation = dict(id=ident, name=chosen.name, source='continuous-search', spec=rules.canonical(chosen),
+            ident = etf.ID if is_etf else rules.spec_id(chosen)
+            canonical = etf.SPEC if is_etf else rules.canonical(chosen)
+            reservation = dict(id=ident, name='Fixed ETF/BIL exploration' if is_etf else chosen.name, source='continuous-search', spec=canonical,
                 recorded=now.isoformat(), code=code_version(), verdict='reserved', attempt_state='reserved',
                 reached_confirmation=False, search_night=night, prior_candidates=len(seen), search_origin=origin, timeout_seconds=timeout)
+            if is_etf:
+                reservation.update(evaluation_kind=etf.KIND, input_bundle=str(Path(etf_bundle).resolve()),
+                                   input_manifest_sha256=etf.MANIFEST_SHA256, code_sha256=expected_code_sha256)
             dirty = True
             job = OUT / f'{ident}.job.json'
             job.write_text(json.dumps(reservation))
             spec_path = ROOT / 'research/specs' / f'search-{ident}.json'
-            spec_path.write_text(json.dumps({'family': chosen.family, 'name': chosen.name, **spec_changes(rules.canonical(chosen))}, indent=2) + '\n')
+            spec_path.write_text(json.dumps(canonical if is_etf else {'family': chosen.family, 'name': chosen.name, **spec_changes(canonical)}, indent=2) + '\n')
             append(reservation)
             print(f'{now.isoformat()} reserved {ident}; K={len(seen)+1}; {origin}', flush=True)
-            process = subprocess.Popen([sys.executable, __file__, '--worker', str(job)], start_new_session=True, pass_fds=(handle.fileno(),))
+            command = [sys.executable, __file__]
+            if is_etf:
+                command += ['--writer-fd', str(handle.fileno())]
+            process = subprocess.Popen([*command, '--worker', str(job)], start_new_session=True, pass_fds=(handle.fileno(),))
             started = time.monotonic()
             try:
                 result_code = process.wait(timeout=timeout)
@@ -616,7 +714,7 @@ def tick(force=False, spec_path=None, authorize_spec=None, expected_ledger_sha25
             budget.write_text(json.dumps(used))
             result_path = job.with_suffix('.result.json')
             if result_code == 0 and result_path.exists():
-                result = json.loads(result_path.read_text())
+                result = completed_result(result_path, reservation)
             else:
                 result = {**reservation, 'attempt_state': 'failed', 'verdict': 'evaluation_error'}
             append(result)
@@ -637,23 +735,37 @@ def main(argv=None):
     actions.add_argument('--tick', action='store_true')
     actions.add_argument('--worker')
     actions.add_argument('--inspect-spec', type=Path, help='read-only intake receipt; never reserves or evaluates')
+    actions.add_argument('--inspect-etf-bundle', type=Path, help='hash-only frozen ETF input/ledger/code receipt; no evaluation')
     parser.add_argument('--force', action='store_true', help='one acceptance run outside nightly hours')
-    parser.add_argument('--spec', type=Path, help='only the frozen ORB spec; no fallback proposals')
+    candidates = parser.add_mutually_exclusive_group()
+    candidates.add_argument('--spec', type=Path, help='only the frozen ORB spec; no fallback proposals')
+    candidates.add_argument('--etf-bundle', type=Path, help='manual fixed ETF exploration; separate owner approval required')
     parser.add_argument('--authorize-spec', help='explicit candidate ID acknowledgement; requires separate owner approval')
     parser.add_argument('--expect-ledger-sha256', help='ledger digest from the read-only inspection')
+    parser.add_argument('--expect-code-sha256', help='ETF code digest from inspection')
+    parser.add_argument('--writer-fd', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if (args.force or args.spec is not None or args.authorize_spec is not None or args.expect_ledger_sha256 is not None) and not args.tick:
+    if (args.force or args.spec is not None or args.etf_bundle is not None or args.authorize_spec is not None or args.expect_ledger_sha256 is not None or args.expect_code_sha256 is not None) and not args.tick:
         parser.error('execution arguments require --tick')
+    if args.writer_fd is not None and not args.worker:
+        parser.error('inherited writer descriptor requires --worker')
     if args.spec is not None and (args.authorize_spec != FROZEN_ORB_ID or args.expect_ledger_sha256 is None):
         parser.error('--spec requires --authorize-spec op-998d19a73d and --expect-ledger-sha256')
-    if args.spec is None and (args.authorize_spec is not None or args.expect_ledger_sha256 is not None):
-        parser.error('candidate acknowledgement requires --spec')
+    if args.etf_bundle is not None and (args.authorize_spec != etf.ID or args.expect_ledger_sha256 is None or args.expect_code_sha256 is None):
+        parser.error('ETF intake requires candidate, ledger and code acknowledgement')
+    if args.etf_bundle is None and args.expect_code_sha256 is not None:
+        parser.error('code acknowledgement requires --etf-bundle')
+    if args.spec is None and args.etf_bundle is None and (args.authorize_spec is not None or args.expect_ledger_sha256 is not None):
+        parser.error('candidate acknowledgement requires --spec or --etf-bundle')
     if args.inspect_spec:
         print(json.dumps(inspect_spec(args.inspect_spec), sort_keys=True))
+    elif args.inspect_etf_bundle:
+        print(json.dumps(inspect_etf_bundle(args.inspect_etf_bundle), sort_keys=True))
     elif args.worker:
-        worker(args.worker)
+        worker(args.worker, args.writer_fd)
     else:
-        tick(args.force, args.spec, args.authorize_spec, args.expect_ledger_sha256)
+        tick(args.force, args.spec, args.authorize_spec, args.expect_ledger_sha256,
+             args.etf_bundle, args.expect_code_sha256)
 
 
 if __name__ == '__main__':
