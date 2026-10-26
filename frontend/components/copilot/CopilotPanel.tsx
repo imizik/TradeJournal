@@ -302,6 +302,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
   function open(saved: Investigation) {
+    lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMessages(fromSaved(saved));
     setSymbol(saved.symbol ?? "");
     setCurrent(saved);
@@ -454,13 +455,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (lookOnSend.current && look && shots.length < MAX_IMAGES) {
       lookOnSend.current = false;
       running.current = true; // a second press while the chart is read sends nothing
+      setBusy(true); // nor can another conversation open under it
       setAttaching({ state: "busy" });
       try {
         const { image } = await look();
         const stored = await uploadImage(image);
         shots = [...shots, { id: stored.id, url: URL.createObjectURL(image) }];
-      } catch { /* the words still go out: the chart is context, not the question */ }
-      setAttaching(null);
+        setAttaching(null);
+      } catch { // the words still go out: the chart is context, not the question
+        setAttaching({ state: "error", message: "The chart could not be attached, so your message went without it." });
+      }
       running.current = false;
     }
     lookOnSend.current = false;

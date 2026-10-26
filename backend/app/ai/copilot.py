@@ -936,6 +936,10 @@ def _summary(name: str, data: dict) -> str:
                     f"{p['entry_trigger']['price']}, invalidation {p['invalidation']['price']}")[:160]
         return (f"proposed watch: {p.get('symbol')} {p.get('condition')} {p.get('price')}" if p.get("kind") == "watch"
                 else f"proposed revisit in {p.get('horizon_days')} d")[:160]
+    if name == "get_moment":
+        bar, news, fills = data.get("bar") or {}, data.get("news") or {}, data.get("fills") or {}
+        return (f"{data.get('timeframe')} {bar['t']} C {bar.get('c')} · " if bar else f"{data.get('state')} · ") + \
+            f"{len(news.get('articles') or [])} headlines · {len(fills.get('fills') or [])} fills"
     if name == "get_investigation_changes":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]

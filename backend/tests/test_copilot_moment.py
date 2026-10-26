@@ -264,6 +264,7 @@ def test_the_fixture_moment_is_simulated_and_anchored():
     result, event = asyncio.run(copilot._run_tool(FixtureEvidence(), {"id": "t", "name": "get_moment", "input": at}, _cfg()))
     data = json.loads(result["content"])
     assert event["status"] == "ok" and event["provenance"]["kind"] == "simulated" and data["simulated"] is True
+    assert event["summary"].startswith("5m ") and event["summary"].endswith("2 headlines · 1 fills")
     assert data["bar"]["t"].endswith("10:40") and len(data["window"]["rows"]) == 25 and data["fills"]["fills"][0]["side"] == "buy_to_open"
     assert [a["minutes_from_moment"] for a in data["news"]["articles"]] == [-18, 7]  # the 150-minute-old one is outside the hour
     assert len(result["content"]) <= copilot_tools.MAX_RESULT_CHARS

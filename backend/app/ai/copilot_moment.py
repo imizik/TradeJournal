@@ -126,7 +126,7 @@ def news_near(articles: list[dict], at: datetime, *, cutoff: datetime | None = N
     found.sort(key=lambda f: f[0])
     rows = [{"headline": str(a.get("headline") or "")[:160], "publisher": str(a.get("publisher") or "")[:40] or None,
              "published_at": when.astimezone(ET).isoformat(timespec="minutes"), "minutes_from_moment": _minutes_from(when, at),
-             "tickers": (a.get("tickers") or [])[:4], **({"url": _url(a.get("url"))} if _url(a.get("url")) else {})}
+             "tickers": [str(t)[:12] for t in (a.get("tickers") or [])[:4]], **({"url": _url(a.get("url"))} if _url(a.get("url")) else {})}
             for _, when, a in found[:MAX_NEWS]]
     return {"state": state, "window_minutes": NEWS_MINUTES, "count": len(found), "articles": sorted(rows, key=lambda r: r["published_at"]),
             "note": UNTRUSTED}
