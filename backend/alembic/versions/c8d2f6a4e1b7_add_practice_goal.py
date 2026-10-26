@@ -1,13 +1,13 @@
 """Practice goal (additive): the one thing the owner chose to practice, scored by the week review.
 
 Revision ID: c8d2f6a4e1b7
-Revises: f3b7d1e9a2c4
+Revises: c4e8a2f6d1b9
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "c8d2f6a4e1b7"
-down_revision = "f3b7d1e9a2c4"
+down_revision = "c4e8a2f6d1b9"
 branch_labels = None
 depends_on = None
 

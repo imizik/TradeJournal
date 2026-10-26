@@ -116,7 +116,7 @@ export default function PlansCard() {
         : !body ? <p role="status" className="text-sm text-muted-foreground">Reading your positions…</p>
         : !body.positions.length ? <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm text-muted-foreground">Nothing open.</p>
-          <PlanATrade className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
+          <PlanATrade origin="dashboard" className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
         </div>
         : <ul className="grid min-w-0 gap-2 lg:grid-cols-2">{body.positions.map(row => <Row key={row.trade_id} row={row} />)}</ul>}
       {body && heldBackText(body.held_back_today) && <p data-testid="plans-card-held-back" className="mt-2 text-xs text-muted-foreground"

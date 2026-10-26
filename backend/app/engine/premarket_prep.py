@@ -310,7 +310,9 @@ def _save(db: Session, day: date, question: str, written: list[str]) -> str:
 def message(row: PremarketPrep) -> tuple[str, str, str]:
     """Title, body (the first two lines) and the app path the notification opens."""
     shown = (row.body or "").splitlines()[:BODY_LINES]
-    path = f"/copilot-lab?investigation={row.investigation_id}" if row.investigation_id else "/copilot-lab"
+    # ``origin``: a plan made from the prep records it (docs/copilot-lab.md § Origin).
+    path = (f"/copilot-lab?investigation={row.investigation_id}&origin=premarket_prep:{row.investigation_id}"
+            if row.investigation_id else "/copilot-lab?origin=premarket_prep")
     return TITLE, "\n".join(shown) or TITLE, path
 
 

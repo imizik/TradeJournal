@@ -13,6 +13,8 @@ Scope: every event of the newest rule version (versions are never pooled).
 - **Morning brief:** the stock as an opportunity or item in a saved, unredacted briefing within
   ``BRIEF_DAYS`` days: ``brief_first`` (on or before the event's day), ``radar_first`` (only after),
   ``not_in_brief``. Shown, not part of the verdict: a brief names at most a handful of stocks.
+- **Planned and traded:** the events a pre-trade plan names as its origin (``TradeCapture.origin_kind``
+  ``radar_event``), and those whose plan is linked to a trade. Shown, not part of the verdict.
 - **Alerted:** the events a Radar phone ping reached (``RadarAlert`` rows ``sent``, or ``unknown``, which
   may have reached the phone), with their ratings, apart from events only seen in the feed. Shown, not
   part of the verdict.
@@ -27,7 +29,7 @@ from sqlmodel import Session, select
 from app.engine.radar_comparison import epoch
 from app.engine.radar_movers import build_movers
 from app.engine.radar_store import RATINGS, RadarStore
-from app.models import MorningBriefingPacket, MorningBriefingRecord, RadarAlert
+from app.models import CaptureLink, MorningBriefingPacket, MorningBriefingRecord, RadarAlert, TradeCapture
 
 STOCK_KINDS = ("relative_to_spy", "relative_to_sector")
 USABLE = ("ok", "partial")
@@ -105,6 +107,22 @@ def alerted_events(db: Session, event_ids: list[str]) -> set[str]:
                                                          RadarAlert.delivery.in_(("sent", "unknown")))).all())
 
 
+def planned_events(db: Session, event_ids: list[str]) -> dict[str, dict]:
+    """For each of ``event_ids`` that a plan names as its origin: ``planned`` and whether one of those plans is linked to a
+    trade (``traded``)."""
+    if not event_ids:
+        return {}
+    plans = db.exec(select(TradeCapture.id, TradeCapture.origin_ref).where(TradeCapture.origin_kind == "radar_event",
+                                                                          TradeCapture.origin_ref.in_(event_ids))).all()
+    linked = set(db.exec(select(CaptureLink.capture_id).where(CaptureLink.capture_id.in_([p for p, _ in plans]),
+                                                             CaptureLink.unlinked_at.is_(None))).all()) if plans else set()
+    out: dict[str, dict] = {}
+    for capture_id, event_id in plans:
+        mark = out.setdefault(event_id, {"planned": True, "traded": False})
+        mark["traded"] = mark["traded"] or capture_id in linked
+    return out
+
+
 def build(store: RadarStore, db: Session, universe: dict) -> dict:
     events = store.events()
     newest = max(events, key=lambda e: epoch(e["first_seen_at"]), default=None)
@@ -114,6 +132,7 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
     ratings = Counter(latest.get(e["event_id"], "unrated") for e in events)
     alerted = alerted_events(db, [e["event_id"] for e in events])
     alerted_ratings = Counter(latest.get(event_id, "unrated") for event_id in alerted)
+    planned = planned_events(db, [e["event_id"] for e in events])
     briefs = briefed_symbols(db)
     stocks = [e for e in events if e["kind"] in STOCK_KINDS]
     timeline_of = {}
@@ -136,5 +155,6 @@ def build(store: RadarStore, db: Session, universe: dict) -> dict:
         "median_lead_minutes": median(leads) if leads else None,
         "brief": {k: brief[k] for k in ("radar_first", "brief_first", "not_in_brief")},
         "alerted": {"events": len(alerted), "ratings": {r: alerted_ratings[r] for r in (*RATINGS, "unrated")}},
+        "plans": {"planned": len(planned), "traded": sum(m["traded"] for m in planned.values())},
         "verdict": verdict(ratings, timing),
     }

@@ -1745,6 +1745,12 @@ except the option mark, which is asked for from a card.
 **Plan trade** records what you are taking and your plan before you enter. It
 never recommends a trade and never sends an order.
 
+Each plan records what prompted it (`origin_kind`, `origin_ref`,
+`origin_text`): a plan typed in this sheet is `chart`, a voice plan `manual`,
+and a Copilot Lab plan card's carries the lab link's origin, such as a Radar
+event. The trade page shows it as "From: …". See
+[Origin](copilot-lab.md#origin).
+
 - **Opening it.** Use the **Plan trade** button in the toolbar (on a phone,
   **Plan** in the main chart's own bar, or **Plan trade** in the empty chart
   area while candles are loading or unavailable) or **Alt+P**. Alt+P matches the key's position, so

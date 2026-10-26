@@ -35,7 +35,7 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
   return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
     <header>
       <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1>
-        <div className="flex flex-wrap items-center gap-2"><PlanATrade /><ReviewMyWeek practice /><DashboardActions /></div></div>
+        <div className="flex flex-wrap items-center gap-2"><PlanATrade origin="dashboard" /><ReviewMyWeek practice /><DashboardActions /></div></div>
       <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
     </header>
     <JoTodayLine today={today} />

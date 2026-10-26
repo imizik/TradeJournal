@@ -847,6 +847,11 @@ class TradeCapture(SQLModel, table=True):
     transcribed_at: Optional[datetime] = None
     transcript_job_id: Optional[uuid.UUID] = None
     not_taken_at: Optional[datetime] = None  # "Did not take trade"
+    # What prompted the plan (docs/copilot-lab.md § Origin): radar_event | thesis_watch | premarket_prep | chart |
+    # dashboard | copilot | manual; the Radar event, thesis-watch trigger or investigation id; and the context line.
+    origin_kind: Optional[str] = Field(default=None, index=True)
+    origin_ref: Optional[str] = Field(default=None, index=True)
+    origin_text: Optional[str] = None
 
 
 class CaptureLink(SQLModel, table=True):
