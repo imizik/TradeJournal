@@ -1,11 +1,12 @@
 """Replay a Radar store's recorded sessions through the alert rules and print what they would have written.
 
 Read-only: opens the file in SQLite read-only mode and writes nothing. Uses the current tracked list
-(``app/data/radar_universe.json``) for stock kinds, sectors and groups. ``--set name=value`` overrides one
-``radar_rules.V0`` threshold for this run only (e.g. ``--set spy_relative_pct=3.5 --set windows=15,30``);
-frozen rules change only with a new rule version.
+(``app/data/radar_universe.json``) for stock kinds, sectors and groups. ``--rules v1`` picks the rule version
+(default v0); ``--set name=value`` overrides one of its thresholds for this run only (e.g.
+``--set spy_relative_pct=3.5 --set windows=15,30``); frozen rules change only with a new rule version.
+``scripts/radar_rules_report.py`` compares versions session by session.
 
-    python scripts/radar_replay.py /abs/path/radar.sqlite [--session 2026-10-22] [--set ...] [--quiet]
+    python scripts/radar_replay.py /abs/path/radar.sqlite [--rules v1] [--session 2026-10-22] [--set ...] [--quiet]
 """
 import argparse
 from collections import Counter
@@ -18,19 +19,19 @@ from app.engine.chart_math import ET
 from app.engine.radar_store import RadarStore, load_universe
 
 
-def _thresholds(overrides: list[str]) -> radar_rules.Thresholds:
-    types = {f.name: f.type for f in fields(radar_rules.Thresholds)}
+def _thresholds(overrides: list[str], base: radar_rules.Thresholds = radar_rules.V0) -> radar_rules.Thresholds:
+    types = {f.name: f.type for f in fields(radar_rules.Thresholds) if f.name != "version"}
     values = {}
     for item in overrides:
         name, _, raw = item.partition("=")
         if name not in types:
             raise SystemExit(f"unknown threshold {name!r}; one of {', '.join(types)}")
-        current = getattr(radar_rules.V0, name)
+        current = getattr(base, name)
         if isinstance(current, tuple):
             values[name] = tuple(int(v) for v in raw.split(","))
         else:
             values[name] = type(current)(raw)
-    return replace(radar_rules.V0, **values)
+    return replace(base, **values)
 
 
 def _time(value: str) -> str:
@@ -49,13 +50,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("store", type=Path)
     parser.add_argument("--session", action="append", help="YYYY-MM-DD; repeatable; default every session")
+    parser.add_argument("--rules", default="v0", choices=sorted({v.rsplit("-", 1)[1] for v in radar_rules.VERSIONS}))
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument("--quiet", action="store_true", help="counts only")
     args = parser.parse_args()
-    thresholds = _thresholds(args.set)
+    thresholds = _thresholds(args.set, radar_rules.thresholds_for(args.rules))
     store = RadarStore(args.store.resolve(), read_only=True)
     universe = load_universe()
-    print(f"{radar_rules.RULE_VERSION} {thresholds}")
+    print(f"{thresholds.version} {thresholds}")
     for session in sorted(args.session or store.sessions()):
         saved = replay_session(store, universe, session, thresholds)
         counts = Counter(f"{e['kind']}/{e['direction']}" for e, _ in saved)

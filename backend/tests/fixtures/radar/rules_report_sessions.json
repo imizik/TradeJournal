@@ -1,0 +1,23 @@
+{
+  "about": "Invented sessions for tests/test_radar_rules_report.py: price paths as [minute, price] steps from 100 (prev close 100), one pass a minute from 09:31 ET. Ratings name the v0 events the live recorder would have saved.",
+  "universe": {
+    "version": "radar-universe-test",
+    "symbols": [
+      {"symbol": "SPY", "kind": "etf", "benchmark": true},
+      {"symbol": "XLK", "kind": "etf", "benchmark": true},
+      {"symbol": "AAA", "kind": "stock", "benchmark": false, "sector": "XLK"},
+      {"symbol": "BBB", "kind": "stock", "benchmark": false, "sector": "XLK"},
+      {"symbol": "CCC", "kind": "stock", "benchmark": false, "sector": "XLK"},
+      {"symbol": "DDD", "kind": "stock", "benchmark": false, "sector": "XLK"}
+    ],
+    "groups": []
+  },
+  "sessions": [
+    {"date": "2030-01-15", "minutes": 70, "paths": {"AAA": [[35, 106.0]], "BBB": [[35, 104.2]]}},
+    {"date": "2030-01-16", "minutes": 60, "paths": {"CCC": [[35, 94.0]], "DDD": [[35, 106.0], [37, 100.0]]}}
+  ],
+  "ratings": [
+    {"event_id": "rv0-2030-01-15-spy-aaa-up-1", "rating": "useful"},
+    {"event_id": "rv0-2030-01-16-spy-ccc-down-1", "rating": "irrelevant"}
+  ]
+}
