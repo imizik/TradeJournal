@@ -77,7 +77,8 @@ def _watch(db: Session, trade) -> tuple[str | None, dict | None]:
     return giveback, ({"kind": sent[-1]["kind"], "at": sent[-1]["detected_at"]} if sent else None)
 
 
-def positions(db: Session) -> dict:
+def positions(db: Session, quotes=None) -> dict:
+    """``quotes`` replaces the one batched quote read (the Today screen shares one read across readers)."""
     now = _now()
     pairs, total = copilot_book.position_rows(db, limit=MAX_ROWS)
     planned = {}
@@ -87,7 +88,7 @@ def positions(db: Session) -> dict:
             planned[trade.id] = min(linked, key=lambda c: c.received_at)
     parts = {trade_id: _plan_parts(db, capture) for trade_id, capture in planned.items()}
     symbols = sorted({inv.symbol for inv, _stop in parts.values() if inv is not None and inv.state == "active"})
-    last, fetched_at, issue = copilot_plans._quotes(symbols)
+    last, fetched_at, issue = (quotes or copilot_plans._quotes)(symbols)
 
     rows = []
     for trade, row in pairs:
