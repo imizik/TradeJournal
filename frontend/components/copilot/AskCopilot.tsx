@@ -4,19 +4,25 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import CopilotPanel from "@/components/copilot/CopilotPanel";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { CONTEXT_MAX, copilotLabHref } from "@/lib/copilot";
+import { CONTEXT_MAX, copilotLabHref, type LinkOrigin } from "@/lib/copilot";
 
 const BUTTON = "inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary";
 
 /** "Ask copilot", prefilled with the symbol and a context line; nothing is sent. A link into the lab, or with ``drawer``
  * the same panel opened in place over the page (full screen on a phone). Owner-only, and nothing while the lab is off. */
-export default function AskCopilot({ symbol, context, className, drawer = false }: { symbol: string; context?: string; className?: string; drawer?: boolean }) {
+export default function AskCopilot({ symbol, context, className, drawer = false, origin = null }: {
+  symbol: string; context?: string; className?: string; drawer?: boolean;
+  /** What prompted the conversation; a plan confirmed in it records it (docs/copilot-lab.md § Origin). */
+  origin?: LinkOrigin | null;
+}) {
   const on = useCopilotOn();
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const prefill = (context ?? "").trim().slice(0, CONTEXT_MAX);
-  const link = useMemo(() => ({ symbol, context: prefill, investigation: null }), [symbol, prefill]);
+  const originKey = origin ? `${origin.kind}:${origin.ref ?? ""}` : "";
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the origin's value, not its object
+  const link = useMemo(() => ({ symbol, context: prefill, investigation: null, origin }), [symbol, prefill, originKey]);
 
   // Escape closes; focus moves into the drawer and back to the button that opened it.
   useEffect(() => {
@@ -29,7 +35,7 @@ export default function AskCopilot({ symbol, context, className, drawer = false 
   }, [open]);
 
   if (!on) return null;
-  if (!drawer) return <Link href={copilotLabHref(symbol, context)} className={className ?? BUTTON}>Ask copilot · {symbol}</Link>;
+  if (!drawer) return <Link href={copilotLabHref(symbol, context, origin)} className={className ?? BUTTON}>Ask copilot · {symbol}</Link>;
   return (
     <>
       <button ref={opener} type="button" onClick={() => setOpen(true)} aria-expanded={open} className={className ?? BUTTON}>Ask copilot · {symbol}</button>

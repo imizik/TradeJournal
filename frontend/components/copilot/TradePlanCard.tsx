@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type LevelHistory, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
-import { fetchSetup, newClientId, SIDE_LABEL, type CaptureSetup, type CaptureSide } from "@/lib/captures";
+import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
 
@@ -30,8 +30,10 @@ export function historyText(h: LevelHistory): string {
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
  * Nothing is saved or armed before Confirm.
  */
-export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, onDone }: {
-  plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null; onDone(): void;
+export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, origin, onDone }: {
+  plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null;
+  /** What prompted the conversation; the saved plan records it (docs/copilot-lab.md § Origin). */
+  origin?: CaptureOrigin; onDone(): void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [thesis, setThesis] = useState(plan.thesis);
@@ -90,7 +92,9 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     try {
       let text: string;
       if (part === "plan") {
-        await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note, investigation_id: investigationId });
+        await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note, investigation_id: investigationId,
+          // The lab's own plans point at their investigation.
+          origin: !origin || (origin.kind === "copilot" && !origin.ref) ? { kind: "copilot", ref: investigationId, text: origin?.text ?? null } : origin });
         text = "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.";
       } else if (part === "timeStop") {
         await saveTimeStop(clientId.current, investigationId!, plan.symbol, stopText);

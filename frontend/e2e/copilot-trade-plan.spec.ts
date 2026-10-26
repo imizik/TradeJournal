@@ -129,6 +129,7 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
     wording: "Entry: 5m close beyond 95.9. Invalidation: crosses 92.1. Time stop: out by 15:30. Size: one starter, no adds.",
     note: "Thesis: Neoclouds turn and NBIS reclaims the prior-day low. Contract: Nov 21 100C. From a Copilot Lab plan card.",
     context: { state: "unavailable", reason: "Saved from a Copilot Lab plan card." },
+    origin: { kind: "copilot", ref: INV, text: null }, // the lab's own conversation, by its investigation
   });
   expect(typeof capture.client_id).toBe("string");
   expect(posts(server, "alerts")).toEqual([

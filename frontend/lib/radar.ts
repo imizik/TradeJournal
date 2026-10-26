@@ -38,6 +38,8 @@ export type RadarFeed = {
 };
 export type RadarDetail = {
   event: RadarEvent; revisions: RadarRevision[]; rating: RadarRating | null; news: RadarNews | null; news_checks: RadarNews[];
+  /** Whether a pre-trade plan names this event as its origin, and whether it was traded; absent from an older backend. */
+  plans?: { planned: boolean; traded: boolean };
 };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {

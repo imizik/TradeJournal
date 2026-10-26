@@ -1,6 +1,6 @@
 import { apiUrl } from "./api";
 import type { AlertsPayload } from "./alerts";
-import type { Capture, CaptureSide } from "./captures";
+import type { Capture, CaptureOrigin, CaptureSide, OriginKind } from "./captures";
 
 export type CopilotStatus =
   | { enabled: false; reason: string }
@@ -186,25 +186,45 @@ const SYMBOL_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 export const whatChangedPrompt = (investigationId: string) =>
   `What changed? Use get_investigation_changes for investigation ${investigationId}, then compare it with fresh group, peer, news and quote reads, and say whether the saved conclusion still holds.`;
 
-export function copilotLabHref(symbol: string, context?: string) {
+export function copilotLabHref(symbol: string, context?: string, origin?: LinkOrigin | null) {
   const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
   if (context?.trim()) query.set("context", context.trim().slice(0, CONTEXT_MAX));
+  if (origin) query.set("origin", originParam(origin));
   return `/copilot-lab?${query}`;
 }
+
+/** What prompted a plan, carried by a deep link as `origin=<kind>[:<ref>]` (docs/copilot-lab.md § Origin). */
+export type LinkOrigin = { kind: OriginKind; ref: string | null };
+const ORIGIN_KINDS: readonly OriginKind[] = ["radar_event", "thesis_watch", "premarket_prep", "chart", "dashboard", "copilot", "manual"];
+const ORIGIN_REF_RE = /^[A-Za-z0-9:._-]{1,80}$/;
+export const originParam = (origin: LinkOrigin) => origin.ref ? `${origin.kind}:${origin.ref}` : origin.kind;
+/** `kind` or `kind:ref`; anything else is dropped. */
+export function readOrigin(value: string): LinkOrigin | null {
+  const at = value.indexOf(":");
+  const kind = (at < 0 ? value : value.slice(0, at)).trim() as OriginKind;
+  const ref = at < 0 ? "" : value.slice(at + 1).trim();
+  if (!ORIGIN_KINDS.includes(kind) || (ref && !ORIGIN_REF_RE.test(ref))) return null;
+  return { kind, ref: ref || null };
+}
+/** The plan card's origin: the conversation's link, with the context line it opened on; else the lab itself. */
+export const planOrigin = (origin: LinkOrigin | null | undefined, context?: string): CaptureOrigin =>
+  origin ? { ...origin, text: context?.trim() || null } : { kind: "copilot", ref: null, text: null };
 
 /** The deep link's values, or null when there is none; an invalid symbol is dropped. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
  * with it is the owner's question, ready in the message box (a plan alert's tap). */
-export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[] }) {
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
   const investigation = one(params.investigation).trim();
-  if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase() };
-  if (!symbol && !context) return null;
-  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null };
+  const origin = readOrigin(one(params.origin));
+  if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin };
+  // An origin alone (a prep ping with no investigation) still starts a conversation that records it.
+  if (!symbol && !context && !origin) return null;
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin };
 }
 
 // --------------------------------------------------------------------------- research queue
@@ -342,7 +362,7 @@ export const listTimeStops = (investigationId: string, signal?: AbortSignal) =>
  * capture linking suggests it for the trade when the fill arrives. ``clientId`` is minted once per card, so a retried
  * save returns the first plan instead of making a second. */
 export const savePlanCapture = ({ investigation_id, ...body }: { client_id: string; underlying: string; account_id: string; side: CaptureSide;
-  wording: string; note: string; investigation_id: string | null }) =>
+  wording: string; note: string; investigation_id: string | null; origin: CaptureOrigin }) =>
   request<Capture>("/charts/captures", { method: "POST", body: JSON.stringify({
     ...body, client_captured_at: Date.now(), mode: "discretionary", setup_label: "Copilot plan",
     // The investigation rides in the context, so the one-tap link page can open it after linking.

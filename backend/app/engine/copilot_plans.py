@@ -79,7 +79,8 @@ def _quotes(symbols: list[str]) -> tuple[dict[str, float], float | None, str | N
     return last, fetched_at, issue
 
 
-def board(db: Session) -> dict:
+def board(db: Session, quotes=None) -> dict:
+    """``quotes`` replaces the one batched quote read (the Today screen shares one read across readers)."""
     alerts = db.exec(select(LevelAlert).where(LevelAlert.source_kind == "copilot", LevelAlert.plan_role.is_not(None),
                                               LevelAlert.source_id.is_not(None))).all()
     stops = db.exec(select(PlanTimeStop)).all()
@@ -128,7 +129,7 @@ def board(db: Session) -> dict:
     for plan in live:
         plan["position"] = _position(plan["capture"], links, suggested)
 
-    last, fetched_at, issue = _quotes(sorted({p["symbol"] for p in live}))
+    last, fetched_at, issue = (quotes or _quotes)(sorted({p["symbol"] for p in live}))
     titles = {str(i.id): i.title for i in db.exec(select(CopilotInvestigation).where(
         CopilotInvestigation.id.in_([_uuid(p["investigation_id"]) for p in live if _uuid(p["investigation_id"])]))).all()} if live else {}
     rows = []

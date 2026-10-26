@@ -1,6 +1,7 @@
 "use client";
 
-import { audioUrl, captureTime, captureTitle, imageUrl, TIMING_LABEL } from "@/lib/captures";
+import Link from "next/link";
+import { audioUrl, captureTime, captureTitle, imageUrl, originLine, TIMING_LABEL } from "@/lib/captures";
 import type { Capture } from "@/lib/captures";
 
 /**
@@ -11,10 +12,13 @@ import type { Capture } from "@/lib/captures";
 export default function PlanSummary({ capture }: { capture: Capture }) {
   const link = capture.link && !capture.link.unresolved ? capture.link : null;
   const transcript = capture.transcript;
+  const from = originLine(capture);
   return <article aria-label={`${captureTitle(capture)} plan`} className="space-y-1 text-[11px] text-slate-300">
     <p><span className="font-medium text-slate-100">{captureTitle(capture)}</span> <span className="text-slate-500">· received {captureTime(capture.received_at)}</span>
       {link?.timing && <> · <span className={link.timing === "pre_entry" ? "text-emerald-300" : "text-amber-300"}>{TIMING_LABEL[link.timing]}</span></>}
       {link?.method === "manual" && <span className="text-slate-500"> · linked by hand</span>}</p>
+    {from && <p aria-label="Plan origin"><span className="text-slate-500">From: </span>{from.href
+      ? <Link href={from.href} className="text-sky-300 hover:underline">{from.text}</Link> : from.text}</p>}
     {capture.mode === "discretionary" && <p className="text-slate-400">Discretionary: no explicit plan was recorded.</p>}
     {capture.wording && <p className="whitespace-pre-wrap"><span className="text-slate-500">{capture.setup_label}: </span>{capture.wording}</p>}
     {capture.note && <p className="whitespace-pre-wrap"><span className="text-slate-500">Note: </span>{capture.note}</p>}

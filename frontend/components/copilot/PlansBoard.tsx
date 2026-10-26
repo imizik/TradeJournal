@@ -101,7 +101,7 @@ export default function PlansBoard({ open }: { open(id: string): void }) {
         : !board.plans.length ? (
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-muted-foreground">No armed plans. Plan the next one before you enter.</p>
-            <PlanATrade className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
+            <PlanATrade origin="copilot" className={`${PLAN_BUTTON} h-11 w-full sm:ml-auto sm:w-auto`} />
           </div>
         ) : (
           <ul className="space-y-2">

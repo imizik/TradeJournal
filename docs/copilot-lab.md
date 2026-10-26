@@ -148,6 +148,36 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   read for the distance, and `position_alerts.for_trade`. The only id out is
   each row's trade id. Browser proof: `frontend/e2e/dashboard-plans-card.spec.ts`
   (with a 375 px phone check); route tests: `tests/test_plan_positions.py`.
+- **Today** (`/today`, `components/today/TodayView.tsx`): the owner's phone
+  landing page, the first phone tab and ahead of Dashboard in the sidebar
+  (Dashboard stays in the phone's More menu). One column, top to bottom, each
+  section collapsed to its count when empty:
+  - **Act now**: open positions within 1% of an armed invalidation (or past a
+    hit one), expiring today, with the give-back alert fired, or with a time
+    stop due within 30 minutes.
+  - **Plans near a trigger**: armed plans not yet in a position within 1% of
+    their entry or invalidation.
+  - **New since you looked**: Radar events since the last Radar visit,
+    thesis-watch triggers fired today and today's pre-market prep.
+  - **Held back**: pings the notification policy held today (merged, quiet
+    window or over the cap), with their text.
+  - **Your week so far**: this week's planned/total entries and the streak.
+  - Then **Plan a trade** and **Review my week**.
+
+  A position row opens its review (`Review this position: <trade id>`), a plan
+  or trigger or prep its investigation, a Radar event `/radar?event=<id>`. It
+  shows its as-of time and refreshes every minute while visible. While the lab
+  is off the page still reads; a position opens its trade page instead and the
+  other copilot links and both buttons are left out. It reads one owner-only
+  `GET /today` (`app/routers/today.py`) that composes the readers above in
+  process (`copilot_plans.board`, then `plan_positions.positions`, sharing one
+  batched quote read), the Radar feed reader, `ThesisWatchTrigger`,
+  `PremarketPrep`, `PhonePing` and `plan_streak.streak`. Each section stands
+  alone: one that fails reads `unavailable` and the rest stand. Read-only: it
+  records no Radar visit and sends nothing. The only ids out are the trade,
+  Radar event and investigation ids its rows link to. Browser proof:
+  `frontend/e2e/today.spec.ts` (375 and 1440 px); route tests:
+  `tests/test_today.py`.
 - **Open threads**, the lab page's home. While the lab is on, no
   investigation is open and nothing has been sent, the page (not the panel
   beside Charts or Radar) shows what is live above the conversation. A deep
@@ -738,6 +768,38 @@ nothing exists until the owner confirms.
   ready instead.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
+
+## Origin
+
+Every pre-trade plan records what prompted it, so a trade can be traced back to
+the observation behind it (the end goal's step 5).
+
+- **On the plan.** `TradeCapture` has `origin_kind` (`radar_event`,
+  `thesis_watch`, `premarket_prep`, `chart`, `dashboard`, `copilot`, `manual`),
+  `origin_ref` (the Radar event id, the thesis-watch trigger id or the
+  investigation id) and `origin_text` (the context line, at most 300
+  characters). `captures.build` refuses an unknown kind; a plan saved with no
+  origin is `manual`. Migration `c4e8a2f6d1b9` adds the columns (nullable:
+  older plans have none).
+- **Through the front door.** Deep links carry `origin=<kind>[:<ref>]`
+  (`copilotLabHref`, read by `readDeepLink` in `frontend/lib/copilot.ts`).
+  Radar's Plan a trade and Ask copilot pass the event id; a thesis-watch ping
+  passes its trigger id; the pre-market prep passes its investigation id;
+  Charts and the plan sheet pass `chart`, the Dashboard `dashboard`, the phone
+  tab bar `manual`. The lab keeps it with the conversation (a new or another
+  investigation is `copilot`, with the investigation id), and the plan card
+  sends it with the capture. A plan typed on the Charts plan sheet is `chart`;
+  a voice plan is `manual`.
+- **Shown.** The trade page's Pre-trade plan reads "From: Radar event, MU
+  +4.1% vs SMH, 10:41" and links to `/radar?event=<id>` or the investigation.
+  `get_trade_review` has an `origin` section: the kind, the context line in
+  words and, for a Radar event, its summary and rating from the Radar file;
+  never an id (`app/ai/copilot_origins.py`). `get_week_review` has `origins`:
+  one line of trades and P&L by origin kind (`no_plan`, and `unrecorded` for
+  plans saved before origins). Radar's event detail shows **Planned** and
+  **Traded**, and `/proof` counts events that led to a plan and to a trade
+  ([Radar](radar.md#proof-read-out)).
+- Tests: `backend/tests/test_trade_origin.py`, `frontend/e2e/trade-origin.spec.ts`.
 
 ## Phone ping policy
 

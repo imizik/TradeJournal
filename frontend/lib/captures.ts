@@ -32,6 +32,8 @@ export type Capture = {
   audio: { type: string; ms: number | null; bytes: number | null } | null;
   transcript: { status: TranscriptStatus; text: string | null; provider: string | null; error: string | null; transcribed_at: number | null } | null;
   not_taken_at: number | null; notes: CaptureNote[];
+  /** What prompted it; absent from plans saved before origins were recorded. */
+  origin?: CaptureOrigin | null;
   /** The trade this plan is linked to (C3.6), resolved now; absent from a backend older than C3.6. */
   link?: CaptureLink | null; link_history?: CaptureLink[];
 };
@@ -66,7 +68,30 @@ export type CaptureBody = {
   client_id: string; client_captured_at: number; underlying: string; account_id: string; side: CaptureSide; mode?: "template" | "discretionary";
   template_id?: string | null; template_revision?: number | null; note?: string; strike?: number | null; expiration?: string | null; quantity?: number | null;
   context: CaptureContext; image: boolean; image_note?: string; audio_ms?: number;
+  /** What prompted the plan (docs/copilot-lab.md § Origin); none sent is "manual". */
+  origin?: { kind: OriginKind; ref?: string | null; text?: string | null };
 };
+/** What prompted a plan: a Radar event, a thesis-watch ping, the pre-market prep, a page's Plan a trade, or the owner. */
+export type OriginKind = "radar_event" | "thesis_watch" | "premarket_prep" | "chart" | "dashboard" | "copilot" | "manual";
+export type CaptureOrigin = { kind: OriginKind; ref: string | null; text: string | null };
+export const ORIGIN_LABEL: Record<OriginKind, string> = {
+  radar_event: "Radar event", thesis_watch: "Thesis watch ping", premarket_prep: "Pre-market prep", chart: "Chart",
+  dashboard: "Dashboard", copilot: "Copilot Lab", manual: "Your own idea" };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** "From: Radar event, MU +4.1% vs SMH, 10:41", and where it leads: the Radar event, or the investigation. */
+export function originLine(capture: Capture): { text: string; href: string | null } | null {
+  const origin = capture.origin;
+  if (!origin) return null;
+  let words = (origin.text ?? "").replace(/^Plan a trade:\s*/i, "")
+    .replace(/\s*(What changed\?|Does it still hold\?).*$/, "").trim();
+  const radar = origin.kind === "radar_event" ? /^Radar (.+?): (.+)$/.exec(words) : null;
+  if (radar) words = `${radar[2].replace(/\.$/, "")}, ${radar[1]}`;
+  const investigation = origin.kind === "copilot" || origin.kind === "premarket_prep" ? origin.ref
+    : capture.context.state === "unavailable" ? capture.context.investigation_id ?? null : null;
+  const href = origin.kind === "radar_event" && origin.ref ? `/radar?event=${encodeURIComponent(origin.ref)}`
+    : investigation && UUID.test(investigation) ? `/copilot-lab?investigation=${investigation}` : null;
+  return { text: `${ORIGIN_LABEL[origin.kind]}${words ? `, ${words}` : ""}`, href };
+}
 
 /** The server turned the plan down; sending it again would not help. */
 export class CaptureRejected extends Error {}
