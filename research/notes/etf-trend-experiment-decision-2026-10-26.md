@@ -239,6 +239,13 @@ existing budget files matched their prior hashes, and no budget file was added.
 Both launchd jobs were confirmed unloaded. No production/database/app changes,
 broker orders, schedule changes, live activation or evaluation occurred.
 
+## Subsequent proposal for review
+
+The [ETF/BIL exploratory amendment](etf-bil-exploratory-screen-proposal-2026-10-26.md)
+documents an accessible alternative asset and simpler modeled execution. It is
+an explicit revision to this untested case, not an evaluated result, adopted
+protocol or permission to run. This earlier proposal remains as design history.
+
 [tsmom]: https://www.aqr.com/Insights/Datasets/Time-Series-Momentum-Factors-Monthly
 [everywhere]: https://images.aqr.com/-/media/AQR/Documents/Insights/Journal-Article/AQR-Trends-Everywhere_JOIM.pdf
 [cash-index]: https://www.spglobal.com/spdji/en/indices/fixed-income/sp-us-treasury-bill-0-3-month-index/

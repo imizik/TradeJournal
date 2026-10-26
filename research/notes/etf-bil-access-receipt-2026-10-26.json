@@ -1,0 +1,119 @@
+{
+  "purpose": "data_access_only_no_returns",
+  "response_directory": "/private/tmp/tj-bil-access-20261026-ideq4anw",
+  "requests": [
+    {
+      "name": "bil_raw",
+      "url": "https://data.alpaca.markets/v2/stocks/bars",
+      "params": {
+        "symbols": "BIL",
+        "timeframe": "1Day",
+        "start": "2016-01-01T00:00:00-05:00",
+        "end": "2024-09-30T23:59:59-04:00",
+        "limit": 10000,
+        "sort": "asc",
+        "feed": "sip",
+        "currency": "USD",
+        "asof": "2024-09-30",
+        "adjustment": "raw"
+      },
+      "request_started_at": "2026-10-26T15:13:07.301170+00:00",
+      "http_status": 200,
+      "response_received_at": "2026-10-26T15:13:07.589079+00:00",
+      "response_body_sha256": "7ebf790d45a269a56643703a3e095e214fe1f0b7b05376250a8c952c6c013987",
+      "response_bytes": 229553,
+      "local_response_file": "/private/tmp/tj-bil-access-20261026-ideq4anw/bil_raw.response.json",
+      "terminal_page": true,
+      "status": "received",
+      "record_count": 2200,
+      "unique_dates": 2200,
+      "first_date": "2016-01-04",
+      "last_date": "2024-09-30",
+      "basic_invalid_records": 0,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    {
+      "name": "bil_all",
+      "url": "https://data.alpaca.markets/v2/stocks/bars",
+      "params": {
+        "symbols": "BIL",
+        "timeframe": "1Day",
+        "start": "2016-01-01T00:00:00-05:00",
+        "end": "2024-09-30T23:59:59-04:00",
+        "limit": 10000,
+        "sort": "asc",
+        "feed": "sip",
+        "currency": "USD",
+        "asof": "2024-09-30",
+        "adjustment": "all"
+      },
+      "request_started_at": "2026-10-26T15:13:07.595472+00:00",
+      "http_status": 200,
+      "response_received_at": "2026-10-26T15:13:07.737743+00:00",
+      "response_body_sha256": "ed011acffd06a753cce3afd69aa4fd5c167d0969a0111a73e1ecb6f3939843be",
+      "response_bytes": 220411,
+      "local_response_file": "/private/tmp/tj-bil-access-20261026-ideq4anw/bil_all.response.json",
+      "terminal_page": true,
+      "status": "received",
+      "record_count": 2200,
+      "unique_dates": 2200,
+      "first_date": "2016-01-04",
+      "last_date": "2024-09-30",
+      "basic_invalid_records": 0,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    {
+      "name": "bil_action_spot",
+      "url": "https://data.alpaca.markets/v1/corporate-actions",
+      "params": {
+        "symbols": "BIL",
+        "start": "2023-10-01",
+        "end": "2023-11-15",
+        "limit": 1000,
+        "sort": "asc",
+        "data_quality": "all"
+      },
+      "request_started_at": "2026-10-26T15:13:07.744436+00:00",
+      "http_status": 200,
+      "response_received_at": "2026-10-26T15:13:07.792129+00:00",
+      "response_body_sha256": "dcb4b9a3f27817fc156d94526b3340d0fec97c36ee97db66c7db5655ae3efbfa",
+      "response_bytes": 535,
+      "local_response_file": "/private/tmp/tj-bil-access-20261026-ideq4anw/bil_action_spot.response.json",
+      "terminal_page": true,
+      "status": "received",
+      "action_counts": {
+        "cash_dividends": 2
+      },
+      "known_at": null,
+      "historical_completeness": "unverified_spot_check"
+    }
+  ],
+  "raw_and_adjusted_date_sets_equal": true,
+  "signals_computed": false,
+  "strategy_evaluated": false,
+  "eligible_for_evaluation": false,
+  "authorization": "Owner explicitly approved these three fixed GET requests and the two-key credential source on 2026-10-26.",
+  "credential_values_recorded": false,
+  "connector_probe": {
+    "status": "UNAVAILABLE",
+    "error": "McpServerError: Connection timed out.",
+    "request_started_at": "2026-10-26T15:07:17Z",
+    "request_finished_at": "2026-10-26T15:07:37Z",
+    "retries": 0
+  },
+  "dated_identity_verified": false,
+  "known_at": null,
+  "costs_or_strategy_returns_computed": false,
+  "coverage_comparison": {
+    "previous_four_fund_date_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7",
+    "matches_bil_raw_and_adjusted": true,
+    "earlier_receipt_pr": "https://github.com/imizik/TradeJournal/pull/515"
+  },
+  "limitations": [
+    "Raw and adjustment=all versions available; adjusted bars not certified as exact reinvested total returns.",
+    "Action coverage is a two-event 2023 processing-date spot check only.",
+    "Historical publication timing remains unknown.",
+    "Local response files are temporary, not a durable five-fund frozen dataset.",
+    "No official portfolio evaluator/intake or evaluation authorization exists."
+  ]
+}
