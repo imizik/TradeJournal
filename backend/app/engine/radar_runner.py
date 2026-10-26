@@ -9,7 +9,7 @@ through ``tradier.get_quotes_once``, at most ``MAX_REQUESTS`` per pass. A rate
 limit or transport failure ends the pass at once (recorded failed or partial);
 the next minute tries again. Nothing is retried within a pass, sent or traded
 here. After an ok or partial pass, ``radar_rules.detect`` appends new events and
-revisions (step 2), then ``radar_news.enrich`` checks headlines near recent
+revisions (step 2) under the rule version ``RADAR_RULES_VERSION`` selects (v0 by default), then ``radar_news.enrich`` checks headlines near recent
 events (PR 5), so a new event gets its news the same minute. With
 ``RADAR_ALERTS_ENABLED`` the new events also go to the phone through
 ``radar_alerts`` (off by default). None of these failures affects the recorded pass. Outside the regular session an optional
@@ -51,7 +51,8 @@ class RadarRunner:
     def __init__(self, store: RadarStore, calendar, *, universe: dict | None = None,
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
                  clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
-                 premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None):
+                 premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None,
+                 rules: radar_rules.Thresholds = radar_rules.V0):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
@@ -61,6 +62,7 @@ class RadarRunner:
         self.news = news
         self.premarket = premarket
         self.alerts = alerts  # phone pings for new events; None keeps Radar silent
+        self.rules = rules
         self._pruned_for: date | None = None
 
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
@@ -127,10 +129,10 @@ class RadarRunner:
         end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
         if end is None:
             return [], []
-        quotes = self.store.pass_quotes(radar_rules.needed_pass_ids(passes, end))
+        quotes = self.store.pass_quotes(radar_rules.needed_pass_ids(passes, end, self.rules))
         saved = [(e, self.store.revisions(e["event_id"])) for e in self.store.events(session_date)
-                 if e["rule_version"] == radar_rules.RULE_VERSION]
-        events, revisions = radar_rules.detect(self.universe, passes, end, quotes, saved)
+                 if e["rule_version"] == self.rules.version]
+        events, revisions = radar_rules.detect(self.universe, passes, end, quotes, saved, self.rules)
         written_events, written_revisions = [], []
         for event in events:
             if self.store.event(event["event_id"]) is None:
@@ -193,7 +195,7 @@ def runner_from_env() -> RadarRunner | None:
         return None
     from app.engine.chart_calendar import chart_calendar
     universe = load_universe()
-    runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe)
+    runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe, rules=radar_rules.from_env())
     if radar_alerts.enabled():
         from app.database import engine
         runner.alerts = radar_alerts.RadarAlerts(engine)

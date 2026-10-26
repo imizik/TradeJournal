@@ -149,15 +149,19 @@ event is closed; the same key can start a new event (`…-2`) only **30 minutes*
 after it closed. The opposite direction is a separate key.
 
 The numbers are module constants in `radar_rules.V0`; changing them means a new
-`RULE_VERSION`. They change at most every few days, never mid-session.
+rule version. They change at most every few days, never mid-session. A
+candidate `radar-rules-v1` sits beside v0, unused until Isaac picks it
+([Rules v1 candidate](#rules-v1-candidate-october-26-2026)).
 
 ### Calibration and replay
 
-`backend/scripts/radar_replay.py /abs/path/radar.sqlite [--session D] [--set name=value] [--quiet]`
-opens a store read-only, replays each session's passes through the rules (using
-the current tracked list for kinds, sectors and groups) and prints counts by
-kind/direction and each event's first-seen time, summary and later revisions.
-`--set` overrides one threshold for that run only. The live recorder path and
+`backend/scripts/radar_replay.py /abs/path/radar.sqlite [--rules v1] [--session D] [--set name=value] [--quiet]`
+opens a store read-only, replays each session's passes through the rules (v0
+unless `--rules` names another version; using the current tracked list for
+kinds, sectors and groups) and prints counts by kind/direction and each event's
+first-seen time, summary and later revisions. `--set` overrides one threshold
+for that run only. `backend/scripts/radar_rules_report.py` compares versions
+in a Markdown report ([below](#rules-v1-candidate-october-26-2026)). The live recorder path and
 the replay produce identical events and revisions on the same passes.
 
 v0 was set on **two recorded sessions** (October 22, full; October 23, to
@@ -226,6 +230,55 @@ crossed on 1 and 8 single readings but never on three consecutive passes
 82–84%, HUM 92–95%); WBD never returned a quote on either day and is the one
 symbol always missing. No rules change was made: v0 stays, and v1 is still
 due after the October 26 close with three live sessions and Isaac's ratings.
+
+### Rules v1 candidate (October 26, 2026)
+
+`radar-rules-v1` (`radar_rules.V1`) is a candidate, not active: the VPS keeps
+v0 until Isaac picks. It changes two numbers and nothing else, both chosen
+from replays of the recorded sessions:
+
+- **Two consecutive passes instead of three** (`persist_passes` 3 → 2). Alone,
+  +11 events over October 22, 23 and October 26 to 10:16 ET, none dropped, one
+  added event a quick fade (DECK, gone 11 minutes later); the shared events
+  fire a median 1 minute earlier.
+- **4.0 points vs SPY instead of 4.5** (`spy_relative_pct` 4.5 → 4.0). Alone, +6
+  events (CIFR and LCID on October 22, CRWD and CIFR on October 23, ASTS and
+  SNAP on October 26), none dropped, no quick fade. Readings of 4.0+ held 3
+  passes in a row for 4, 7 and 2 symbols a session, against 2, 5 and 0 at 4.5.
+
+Together: 32 events against v0's 18 (12/13/7 against 7/9/2), 2 quick fades
+against 1, 15 extended against 11, and the morning of October 26, quiet under
+v0 (2 events by 10:16), gets 7. Event ids start `rv1-`, so both versions'
+events can sit in one store. Considered and not chosen: a 3.5-point sector
+threshold (+13, mostly the SPY story again against a flat XLK, firing a few
+minutes before the SPY event; 2 quick fades), groups at 3 members (+1:
+Telehealth, "mostly HIMS") and a 1.75 group median (+5, three overlapping
+crypto/quantum groups on one quiet morning, 2 quick fades). With no ratings
+yet, a quick fade (faded or reversed within 15 minutes) is the noise proxy.
+
+The evidence is [the v1 report](../backend/reports/radar_rules_v1_2026-10-26.md),
+written by `backend/scripts/radar_rules_report.py`: read-only and offline over
+a store snapshot, it replays every session under each version (default all
+of `radar_rules.VERSIONS`, plus `--try field=value` variants of v0) and lists
+events per session by rule, each changed threshold's effect alone, the
+30-minute readings near each threshold and how long they held, the events a
+version adds or drops against v0, and, once the store has ratings, how events
+rated useful and not useful survive each version (same kind, subject and
+direction within 30 minutes). Rerun it after the October 26 close (from the
+repository root; the snapshot uses the SQLite backup API over a `mode=ro`
+connection and never writes the live file):
+
+```bash
+ssh ubuntu@100.121.251.15 "sudo python3 -c 'import sqlite3; s = sqlite3.connect(\"file:/var/lib/tradejournal/radar/radar.sqlite?mode=ro\", uri=True); d = sqlite3.connect(\"/tmp/radar-snapshot.sqlite\"); s.backup(d); d.close()' && sudo chown ubuntu /tmp/radar-snapshot.sqlite" && scp ubuntu@100.121.251.15:/tmp/radar-snapshot.sqlite /tmp/radar-snapshot.sqlite && ssh ubuntu@100.121.251.15 rm /tmp/radar-snapshot.sqlite && cd backend && .venv/bin/python scripts/radar_rules_report.py /tmp/radar-snapshot.sqlite --try sector_relative_pct=3.5 --try group_min_members=3 --try group_relative_pct=1.75 --title "Radar rules v1 candidate — October 26, 2026" --out reports/radar_rules_v1_2026-10-26.md
+```
+
+**Setting:** `RADAR_RULES_VERSION` in the VPS `backend.env` (`v0` by default,
+or `v1`; an unknown name keeps v0 and logs an error) selects the version the
+recorder runs, read at startup. Each event records its `rule_version` (the
+store's existing column and payload field), so `/radar/proof`, which scores
+only the newest version, starts over at v1 and never pools the two. Switch
+between sessions, never mid-session: a version switched on mid-session never
+backfills the morning.
 
 ### Outcome scoring
 
@@ -572,9 +625,10 @@ test after the premarket pilot is scored. See
 ## Activation boundary
 
 The recorder is off unless both variables are set in the VPS `backend.env`
-(set since October 22 with Isaac's OK). The v0 rules have no flag of their own:
-wherever the recorder runs, detection runs with it and writes events to the
-screen. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
+(set since October 22 with Isaac's OK). The rules have no on/off flag of their
+own: wherever the recorder runs, detection runs with it and writes events to the
+screen, under v0 unless `RADAR_RULES_VERSION` names v1
+([Rules v1 candidate](#rules-v1-candidate-october-26-2026)); switching is Isaac's call. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
 ([Phone alerts](#phone-alerts-off-by-default)), and the premarket pilot its
 own `RADAR_PREMARKET_ENABLED`, also off; turning either on is Isaac's call.
 

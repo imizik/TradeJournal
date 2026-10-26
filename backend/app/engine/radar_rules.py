@@ -1,4 +1,4 @@
-"""Radar step 2: the provisional alert rules ``radar-rules-v0`` (see ``docs/radar.md``).
+"""Radar step 2: the provisional alert rules ``radar-rules-v0`` and candidate ``radar-rules-v1`` (see ``docs/radar.md``).
 
 Pure functions over recorded passes. ``detect`` looks at one pass (the latest the
 caller has) and the passes its windows need, plus the session's saved events and
@@ -25,18 +25,26 @@ trade is over two minutes older than its retrieval, does not exist here: no
 event is built from it and nothing is filled in.
 
 The numbers in ``V0`` are provisional, set on the sessions listed in
-``docs/radar.md``; changing them means a new ``RULE_VERSION``.
+``docs/radar.md``; changing them means a new rule version. ``V1`` is the
+candidate chosen from the replay report (``scripts/radar_rules_report.py``):
+two consecutive passes instead of three and 4.0 points vs SPY instead of 4.5.
+``RADAR_RULES_VERSION`` (``v0`` by default) selects the one the recorder runs;
+every event carries its version and an id prefix of its own (``rv0-``, ``rv1-``).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+import logging
+import os
 import re
 from statistics import median
 from typing import Iterable
 
 from app.engine.chart_math import ET, REGULAR_OPEN
 from app.engine.radar_store import RadarEvent, RadarEventRevision, RadarEvidence
+
+log = logging.getLogger(__name__)
 
 RULE_VERSION = "radar-rules-v0"
 
@@ -60,11 +68,30 @@ class Thresholds:
     extend_step_pct: float  # stock events
     group_extend_step_pct: float
     cooldown_minutes: int
+    version: str = RULE_VERSION
 
 
 V0 = Thresholds(windows=(30,), spy_relative_pct=4.5, sector_relative_pct=4.5, own_move_floor_pct=2.0,
                 group_relative_pct=2.0, group_min_members=4, group_agreement=0.6, persist_passes=3,
                 extend_step_pct=1.5, group_extend_step_pct=1.0, cooldown_minutes=30)
+V1 = replace(V0, version="radar-rules-v1", spy_relative_pct=4.0, persist_passes=2)
+VERSIONS = {t.version: t for t in (V0, V1)}
+
+
+def thresholds_for(name: str) -> Thresholds:
+    """``v1`` or ``radar-rules-v1``; KeyError for an unknown version."""
+    name = name.strip()
+    return VERSIONS[name if name.startswith("radar-rules-") else f"radar-rules-{name}"]
+
+
+def from_env() -> Thresholds:
+    """The version ``RADAR_RULES_VERSION`` names (default ``v0``); an unknown name keeps v0 and logs."""
+    name = os.environ.get("RADAR_RULES_VERSION", "").strip() or "v0"
+    try:
+        return thresholds_for(name)
+    except KeyError:
+        log.error("Unknown RADAR_RULES_VERSION %r; Radar keeps %s", name, RULE_VERSION)
+        return V0
 
 _KIND_TAG = {"relative_to_spy": "spy", "relative_to_sector": "sector", "group_move": "group"}
 
@@ -226,8 +253,8 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
-def event_id(session_date: str, kind: str, subject: str, direction: str, n: int) -> str:
-    return f"rv0-{session_date}-{_KIND_TAG[kind]}-{_slug(subject)}-{direction}-{n}"
+def event_id(session_date: str, kind: str, subject: str, direction: str, n: int, version: str = RULE_VERSION) -> str:
+    return f"rv{version.rsplit('-v', 1)[1]}-{session_date}-{_KIND_TAG[kind]}-{_slug(subject)}-{direction}-{n}"
 
 
 def _evidence(passes, quotes, index: int, symbols: list[str]) -> list[RadarEvidence]:
@@ -252,7 +279,8 @@ def _coverage(passes, end: int, missing: list[str]) -> dict:
     return {"passes_expected": max(1, minute - REGULAR_OPEN + 1), "passes_recorded": end + 1, "symbols_missing": missing}
 
 
-def _build_event(r: _Reading, n: int, universe_version: str, passes, quotes, own_events: set[str]) -> RadarEvent:
+def _build_event(r: _Reading, n: int, universe_version: str, passes, quotes, own_events: set[str],
+                 version: str = RULE_VERSION) -> RadarEvent:
     session = passes[r.end]["session_date"]
     end_id = passes[r.end]["id"]
     ahead = "ahead of" if r.direction == "up" else "behind"
@@ -289,8 +317,8 @@ def _build_event(r: _Reading, n: int, universe_version: str, passes, quotes, own
         if r.kind == "relative_to_sector":
             measures["spy_relative_pct"] = round(d["spy_relative"], 3)
         symbols, benchmark, group, chart_symbol, missing = [sym], bench, None, sym, []
-    return {"event_id": event_id(session, r.kind, r.subject, r.direction, n), "session_date": session,
-            "rule_version": RULE_VERSION, "universe_version": universe_version, "kind": r.kind,
+    return {"event_id": event_id(session, r.kind, r.subject, r.direction, n, version), "session_date": session,
+            "rule_version": version, "universe_version": universe_version, "kind": r.kind,
             "direction": r.direction, "symbols": symbols, "benchmark": benchmark, "group": group,
             "first_seen_at": passes[r.end]["finished_at"], "summary": summary, "measures": measures,
             "evidence": evidence, "coverage": _coverage(passes, r.end, missing),
@@ -423,7 +451,7 @@ def detect(universe: dict, passes: list[dict], end: int, quotes: dict[int, dict[
                                              and abs(found[key].detail["spy_relative"]) >= t.spy_relative_pct):
             continue  # the stock is moving against SPY just as much: an SPY event says this, not a sector one
         own = {k[1] for k in states if k[0] == "relative_to_spy" and k[2] == direction and active(k)}  # same-way SPY events open now
-        event = _build_event(found[key], len(chain) + 1, passes[end]["universe_version"], passes, quotes, own)
+        event = _build_event(found[key], len(chain) + 1, passes[end]["universe_version"], passes, quotes, own, t.version)
         states.setdefault(key, []).append(_State(event, []))
         events.append(event)
     return events, revisions
