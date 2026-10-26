@@ -17,6 +17,7 @@ import JoTodayLine from "./JoTodayLine";
 import RadarPreview from "./RadarPreview";
 import ExitHabits from "./ExitHabits";
 import PlansCard from "./PlansCard";
+import WhenLab from "./WhenLab";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -89,6 +90,10 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
     return `/${search.size ? `?${search}` : ""}`;
   }
 
+  const activeOptions = <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground" title="Position quote timestamps unavailable; marks are not labeled live.">{options.length} positions · {coverage(options)} · marks not labeled live</span>}>
+    {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
+  </DashboardCard>;
+
   return <div className="min-w-0 space-y-4">
     {quoteError && <p role="alert" className="rounded-md border border-amber-500/30 px-4 py-3 text-sm text-amber-300">Some position quotes could not load. Unavailable marks are shown as —. Reload to retry.</p>}
     <section className="min-w-0 space-y-4" aria-label="Your journal">
@@ -102,13 +107,12 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
               className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</Link>)}
           </div>)}
       </div>
-      <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground" title="Position quote timestamps unavailable; marks are not labeled live.">{options.length} positions · {coverage(options)} · marks not labeled live</span>}>
-        {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
-      </DashboardCard>
+      {/* While the lab is on, the Positions card above is the one list of what is open; this table then waits inside the journal. */}
+      <WhenLab on={false}>{activeOptions}</WhenLab>
       <details className="group/journal min-w-0 rounded-lg border bg-card" data-testid="journal-details">
         <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
           <span>Journal &amp; performance</span>
-          <span className="text-xs font-normal text-muted-foreground">P&amp;L, stocks &amp; trade history · <span className="group-open/journal:hidden">Expand</span><span className="hidden group-open/journal:inline">Collapse</span></span>
+          <span className="text-xs font-normal text-muted-foreground">P&amp;L, positions &amp; trade history · <span className="group-open/journal:hidden">Expand</span><span className="hidden group-open/journal:inline">Collapse</span></span>
         </summary>
         <div className="min-w-0 space-y-4 border-t p-3 sm:p-4">
           <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
@@ -127,6 +131,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
                 <Link className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</Link></div>
             </div>
           </DashboardCard>
+          <WhenLab on>{activeOptions}</WhenLab>
           <details className="group min-w-0 rounded-lg border bg-card" data-testid="stock-holdings">
             <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
               <span>Stock Holdings <span className="ml-1 text-muted-foreground">({stocks.length})</span></span>

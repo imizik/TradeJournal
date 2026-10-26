@@ -47,7 +47,7 @@ function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
       <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
       <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[item.priority]}`} />
       <span className="min-w-0 flex-1">
-        <span className="block text-xs font-medium text-foreground">{item.title}</span>
+        <span className="block text-xs font-medium text-foreground">{item.title}{item.count && item.count > 1 && <span className="ml-1.5 rounded bg-secondary px-1 text-[11px] font-normal tabular-nums text-muted-foreground"><span aria-hidden>×{item.count}</span><span className="sr-only">{item.count} positions</span></span>}</span>
         <span className="mt-0.5 block text-xs text-muted-foreground">{item.detail}</span>
       </span>
       <span className={`shrink-0 text-[11px] tabular-nums ${CUE[item.priority]}`}>{item.when}</span>

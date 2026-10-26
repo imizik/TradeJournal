@@ -19,6 +19,8 @@ export type AttentionItem = {
   href: string;
   /** What the sort uses within a priority: an ISO date or time. */
   sortKey: string;
+  /** How many positions this one row stands for (the same contract held in several accounts); absent means one. */
+  count?: number;
 };
 
 /** How each source arrived. `null` means the request failed. */
@@ -198,7 +200,18 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
       href: `/practice?decision=${encodeURIComponent(record.id)}#saved-decisions`, sortKey: record.wait_expiry });
   }
 
-  items.sort((a, b) => ATTENTION_PRIORITY[a.priority] - ATTENTION_PRIORITY[b.priority]
+  // The same contract in two accounts raises the same item twice; one row says so instead. The row keeps the
+  // lowest ID (and its link) whatever order the positions arrived in, so the list is stable.
+  const merged = new Map<string, AttentionItem>();
+  for (const item of items) {
+    const key = `${item.priority}\u0000${item.title}\u0000${item.detail}\u0000${item.when}`;
+    const held = merged.get(key);
+    if (!held) { merged.set(key, item); continue; }
+    held.count = (held.count ?? 1) + 1;
+    if (item.id < held.id) { held.id = item.id; held.href = item.href; held.sortKey = item.sortKey; }
+  }
+  const list = [...merged.values()];
+  list.sort((a, b) => ATTENTION_PRIORITY[a.priority] - ATTENTION_PRIORITY[b.priority]
     || a.sortKey.localeCompare(b.sortKey) || a.id.localeCompare(b.id));
-  return { items, unavailable };
+  return { items: list, unavailable };
 }

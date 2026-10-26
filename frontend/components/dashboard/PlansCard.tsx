@@ -81,7 +81,7 @@ function Row({ row }: { row: PlanPosition }) {
 }
 
 /**
- * The Dashboard's Plans card: one row per open position with its P&L and the plan it was entered under (invalidation
+ * The Dashboard's Positions card (the one list of what is open while the lab is on): one row per open position with its P&L and the plan it was entered under (invalidation
  * distance, time stop countdown, give-back watch). A row opens the position review in the Copilot Lab; "Plan it" and
  * "Link plan" open the plan deep link and the one-tap link page. Refreshed every minute while the page is visible.
  */
@@ -109,8 +109,9 @@ export default function PlansCard() {
   }, [on]);
   if (!on) return null;
 
-  return <DashboardCard title="Plans" action={body && error ? <span className="text-xs text-amber-300">Not refreshed</span>
-    : body?.quote_issue ? <span className="text-xs text-amber-300">Prices: {body.quote_issue}</span> : undefined}>
+  return <DashboardCard title="Positions" action={body && error ? <span className="text-xs text-amber-300">Not refreshed</span>
+    : body?.quote_issue ? <span className="text-xs text-amber-300">Prices: {body.quote_issue}</span>
+    : body?.positions.length ? <span className="text-xs text-muted-foreground">{body.positions.length} open · each with its plan, risk and alerts</span> : undefined}>
     <div data-testid="plans-card">
       {error && !body ? <p role="status" className="text-sm text-amber-300">Plans could not load: {error}</p>
         : !body ? <p role="status" className="text-sm text-muted-foreground">Reading your positions…</p>

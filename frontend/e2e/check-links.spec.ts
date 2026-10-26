@@ -64,6 +64,7 @@ test("private journal opens saved checks without requesting the isolated advisor
   await connect(page, await nvda(page));
   await page.goto("/");
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Signals & practice" }).click();
   await page.getByRole("link", { name: "Advisor review", exact: true }).click();
   await expect(page.getByTestId("pretrade-check-row")).toHaveCount(1);
   await expect(page.getByTestId("advisor-owner-review")).toHaveCount(0);

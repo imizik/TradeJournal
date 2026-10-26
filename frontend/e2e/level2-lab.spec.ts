@@ -94,6 +94,7 @@ test("ladder, heatmap and failure states are truthful on desktop and phone", asy
   await page.getByRole("button", { name: "Reset", exact: true }).click();
   await expect(page.locator("svg rect[data-column='1']")).toHaveCount(0);
   await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("dialog", { name: "Menu" }).getByRole("button", { name: "Labs" }).click();
   await expect(page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "Level 2 lab" })).toBeVisible();
   await page.getByRole("button", { name: "Close menu" }).click();
   expect(errors).toEqual([]);

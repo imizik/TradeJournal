@@ -129,9 +129,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   With nothing armed it says so beside the **Plan a trade** button. Browser
   proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
   check); route tests: `tests/test_copilot_plans.py`.
-- **Plans card on the Dashboard** (`components/dashboard/PlansCard.tsx`),
+- **Positions card on the Dashboard** (`components/dashboard/PlansCard.tsx`),
   near the top of the owner Dashboard above Exit habits, owner-only and shown
-  only while the lab is on. One row per open position (Webull left out): the
+  only while the lab is on; it is then the Dashboard's one list of open
+  positions, and the journal's Active Options table waits inside the collapsed
+  journal section. One row per open position (Webull left out): the
   contract, open P&L in $ and %, then the plan it was entered under:
   "Invalidation 92.30 · 2.1% away" (or "hit"), "Time stop 15:30 · 41 min",
   "planned late" when the plan was saved after the fill, and the give-back

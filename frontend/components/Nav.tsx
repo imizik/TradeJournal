@@ -25,6 +25,8 @@ function Pending({ corner = false }: { corner?: boolean }) {
 
 /** Whether the charts page shows the full sidebar instead of the icon rail, on this device only (C7.3). */
 const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
+/** Which sidebar groups this device has opened; the everyday pages are always shown. */
+const NAV_GROUPS_KEY = "tradejournal.nav.groups.v1";
 
 /** The sidebar's pages; ``heading`` starts a new group (everyday pages come first, without one). */
 const navItems: { href: string; label: string; icon: typeof Bot; heading?: string }[] = [
@@ -163,40 +165,72 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const copilot = useCopilotOn(); // the owner's, and only while the lab is on
+  // The grouped pages are folded away by default; a group stays open on this device once opened,
+  // and the group holding the current page is always open.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try { setOpened(JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) ?? "{}")); } catch { /* folded */ }
+  }, []);
+  const toggle = (heading: string, open: boolean) => setOpened((current) => {
+    const next = { ...current, [heading]: open };
+    try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next)); } catch { /* this visit only */ }
+    return next;
+  });
+  const isActive = (href: string) => pathname === href || (href !== "/" && pathname.startsWith(href));
+  // Groups come from the full list, so hiding a group's first page never loses its heading.
+  const groups: { heading?: string; items: typeof navItems }[] = [];
+  for (const item of navItems) {
+    if (item.heading || !groups.length) groups.push({ heading: item.heading, items: [] });
+    groups[groups.length - 1].items.push(item);
+  }
+  const link = ({ href, label, icon: Icon }: typeof navItems[number]) => {
+    const active = isActive(href);
+    const anchor = (
+      <Link
+        href={href}
+        onClick={onNavigate}
+        // The rail shows icons only: the name is the link's label and its tooltip.
+        aria-label={rail ? label : undefined}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          // min-h-11 keeps every row a comfortable tap target on a phone.
+          rail
+            ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+            : "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          active
+            ? "bg-secondary text-foreground"
+            : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+        )}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {!rail && label}
+        <Pending corner={rail} />
+      </Link>
+    );
+    return <li key={href}>{rail ? <NavHint label={label}>{anchor}</NavHint> : anchor}</li>;
+  };
   return (
-    <ul className="space-y-1">
-      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot)).map(({ href, label, icon: Icon, heading }) => {
-        const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
-        const link = (
-            <Link
-              href={href}
-              onClick={onNavigate}
-              // The rail shows icons only: the name is the link's label and its tooltip.
-              aria-label={rail ? label : undefined}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                // min-h-11 keeps every row a comfortable tap target on a phone.
-                rail
-                  ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
-                  : "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!rail && label}
-              <Pending corner={rail} />
-            </Link>
-        );
-        return <li key={href}>
-          {heading && (rail
-            ? <div role="separator" aria-label={heading} className="my-2 border-t" />
-            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">{heading}</h2>)}
-          {rail ? <NavHint label={label}>{link}</NavHint> : link}
-        </li>;
+    <div className="space-y-1">
+      {groups.map(({ heading, items }) => {
+        const shown = items.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot));
+        if (!shown.length) return null;
+        if (rail) return <ul key={heading ?? "main"} className="space-y-1">
+          {heading && <li role="separator" aria-label={heading} className="my-2 border-t" />}
+          {shown.map(link)}
+        </ul>;
+        const open = !heading || !!opened[heading] || shown.some(item => isActive(item.href));
+        const id = heading ? `nav-group-${heading.replace(/\W+/g, "-").toLowerCase()}` : undefined;
+        return <div key={heading ?? "main"}>
+          {heading && <h2 className="pt-3">
+            <button type="button" aria-expanded={open} aria-controls={id} onClick={() => toggle(heading, !open)}
+              className="flex min-h-11 w-full items-center justify-between rounded-md px-3 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground md:min-h-8">
+              {heading}<ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-90")} aria-hidden />
+            </button>
+          </h2>}
+          {open && <ul id={id} className="space-y-1">{shown.map(link)}</ul>}
+        </div>;
       })}
-    </ul>
+    </div>
   );
 }
 

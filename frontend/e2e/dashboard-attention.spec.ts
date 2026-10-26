@@ -107,6 +107,21 @@ test("a give-back alert stays listed for the rest of its day while the position 
     .toEqual(["giveback:g", "alert:price"]);
 });
 
+test("the same contract in two accounts is one row that says how many", () => {
+  const rows = [option("roth", "AAPL", "2026-10-14"), option("indiv", "AAPL", "2026-10-14"), option("other", "AAPL", "2026-10-14", { qtyLeft: 5 })];
+  const { items } = buildAttention(base({ rows, quotes: { roth: mark(null), indiv: mark(null), other: mark(1) }, earnings: { AAPL: earnings("2026-10-13") } }));
+  const ids = items.map((item) => item.id);
+  // "has no price" twice becomes one row keeping the lowest ID; the third position differs (open count) so its expiry row stands alone.
+  expect(ids).toEqual(["no-price:indiv", "earnings:indiv", "expiring:indiv", "expiring:other"]);
+  const byId = Object.fromEntries(items.map((item) => [item.id, item]));
+  expect(byId["no-price:indiv"]).toMatchObject({ count: 2, href: "/trades/indiv", title: "AAPL 100C 10/14 has no price" });
+  expect(byId["expiring:indiv"].count).toBe(2);
+  expect(byId["expiring:other"].count).toBeUndefined();
+  expect(byId["earnings:indiv"].count).toBe(3);
+  // Whatever order the positions arrive in, the same rows.
+  expect(buildAttention(base({ rows: [...rows].reverse(), quotes: { roth: mark(null), indiv: mark(null), other: mark(1) }, earnings: { AAPL: earnings("2026-10-13") } })).items).toEqual(items);
+});
+
 test("attention discloses failed sources instead of reading them as quiet", () => {
   const rows = [option("a", "NVDA", "2026-10-30"), option("b", "AMD", "2026-10-30")];
   const failed = buildAttention(base({ rows, quotes: {}, quoteError: true, gmail: null, jobs: null, alerts: null,
@@ -191,6 +206,7 @@ with Session(engine) as db:
     await expect(alert).toHaveAttribute("href", "/charts?symbol=SPY");
     // Seeded positions have no dated earnings source offline; the panel says so rather than staying silent.
     await expect(panel).toContainText("Could not check: Earnings dates for AAPL");
+    await expect(page.getByRole("region", { name: "Active Options" })).toBeVisible(); // the lab is off here, so the table sits at the top
     const bounds = await Promise.all([page.getByLabel("Market and discovery", { exact: true }).boundingBox(), panel.boundingBox(),
       page.getByRole("region", { name: "Active Options" }).boundingBox()]);
     expect(Math.abs(bounds[0]!.y - bounds[1]!.y)).toBeLessThan(2); // Attention beside market context on wide screens.

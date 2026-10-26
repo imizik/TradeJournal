@@ -4234,6 +4234,7 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(page).toHaveURL(/\/fills$/);
   await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Labs" }).click(); // the full sidebar's groups, folded by default
   await expect(page.getByRole("link", { name: "AI Buildout", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open menu" }).click();

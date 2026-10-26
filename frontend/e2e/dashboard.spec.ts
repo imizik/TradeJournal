@@ -81,6 +81,7 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await expect(page.getByTestId("practice-decisions")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Daily Practice", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: /^Open menu/ }).click();
+  await page.getByRole("dialog", { name: "Menu" }).getByRole("button", { name: "Signals & practice" }).click();
   await page.getByRole("link", { name: "Daily Practice", exact: true }).filter({ visible: true }).click();
   await expect(page).toHaveURL(/\/practice$/);
   await expect(page.getByTestId("practice-decisions")).toBeVisible();

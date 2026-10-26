@@ -45,7 +45,7 @@ async function dashboard(page: Page, book: unknown = BOOK, on = true) {
   return { reads: () => reads };
 }
 
-const card = (page: Page) => page.getByRole("region", { name: "Plans" });
+const card = (page: Page) => page.getByRole("region", { name: "Positions" });
 const fits = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
 
 test("one row per position: P&L, invalidation distance, time stop countdown, give-back and the unplanned actions", async ({ page }) => {

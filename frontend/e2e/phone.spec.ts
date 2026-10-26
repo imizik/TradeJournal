@@ -51,6 +51,10 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
   const menu = page.getByRole("dialog", { name: "Menu" });
   await expect(menu.getByRole("heading", { name: "Labs" })).toBeVisible();
   expect((await menu.getByRole("link").allTextContents()).slice(0, 7)).toEqual(["Today", "Dashboard", "Charts", "Daily Review", "Jo", "Trades", "Analytics"]);
+  // The grouped pages are folded by default and open from their heading.
+  await expect(menu.getByRole("link", { name: "Scanner", exact: true })).toHaveCount(0);
+  await menu.getByRole("button", { name: "Signals & practice" }).click();
+  await menu.getByRole("button", { name: "Labs" }).click();
   for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
     await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
     await expect(menu.getByRole("link", { name, exact: true })).toBeInViewport();

@@ -157,13 +157,15 @@ test("the Copilot nav item shows only while the lab is on", async ({ page }) => 
   await answered;
   await painted();
   await expect(page.getByRole("link", { name: "Radar", exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Labs" }).click(); // the group is folded by default; opened, it still has no Copilot
+  await expect(page.getByRole("link", { name: "Strategy Lab", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await stubLab(page, lab, true);
   answered = page.waitForResponse((response) => response.url().includes("/copilot/status"));
   await page.reload();
   await answered;
-  await expect(page.getByRole("link", { name: "Copilot", exact: true }).first()).toHaveAttribute("href", "/copilot-lab");
+  await expect(page.getByRole("link", { name: "Copilot", exact: true }).first()).toHaveAttribute("href", "/copilot-lab"); // Labs stays open on this device
 });
 
 test("on a 375 px phone the Charts copilot is the dock's sheet and nothing scrolls sideways", async ({ page }) => {
