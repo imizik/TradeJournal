@@ -79,7 +79,8 @@ def safe_digest(records):
                     'failed_checks': [text for text, passed in r.get('gates', {}).get('screen', {}).get('checks', []) if not passed]},
             periods={k: v for k, v in r.get('periods', {}).items()
             if k in ('discovery', 'confirm_a', 'confirm_b', 'confirm', 'confirm_x3')})
-            for r in latest(records).values() if r.get('spec') and r.get('evaluation_kind') != etf.KIND]
+            for r in latest(records).values() if r.get('spec')
+            and r.get('evaluation_kind') != etf.KIND and r['spec'].get('family') != etf.KIND]
 
 
 def idea_prompt(records):

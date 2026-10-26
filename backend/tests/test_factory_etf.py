@@ -385,6 +385,29 @@ def test_fixed_continuation_boundary_never_claims_validation(bundle, monkeypatch
     assert json.loads(artifact)['validation_status'] == 'exploratory_only'
 
 
+@pytest.mark.parametrize('state', ['reserved', 'completed', 'failed', 'interrupted'])
+@pytest.mark.parametrize('tagged', [True, False])
+def test_both_model_briefs_exclude_etf_while_global_count_retains_it(state, tagged):
+    from app.engine.factory_brief import brief, ledger_digest
+    from app.engine.factory_gates import prior_candidates, required_t
+
+    orb = search.rules.parse_spec({'family': 'opening_range_breakout'})
+    ordinary = {'id': search.rules.spec_id(orb), 'name': 'Invented ORB',
+                'spec': search.rules.canonical(orb), 'verdict': 'failed_screen'}
+    exploration = {'id': etf.ID, 'name': 'ETF_PRIVATE_EXPLORATION',
+                   'spec': etf.SPEC, 'attempt_state': state, 'verdict': 'exploratory_only',
+                   'exploration': {'secret': 'ETF_PRIVATE_EXPLORATION'}}
+    if tagged:
+        exploration['evaluation_kind'] = etf.KIND
+    records = [ordinary, exploration, dict(exploration)]
+    assert ledger_digest(records) == ledger_digest([ordinary])
+    assert search.safe_digest(records) == search.safe_digest([ordinary])
+    count = prior_candidates(records)
+    assert count == 2 and count == len(search.latest(records))
+    prompt = brief(date(2026, 10, 26), records, {}, [], 1, required_t(count + 1), count)
+    assert 'Invented ORB' in prompt and 'ETF_PRIVATE_EXPLORATION' not in prompt
+
+
 def test_real_child_inherits_lock_and_completes_invented_case(intake, bundle, monkeypatch, tmp_path):
     # Actual transport/PPID/flock/alarm; data, root, ledger and code pins remain
     # invented. Child bootstrap patches dotenv before importing the CLI.

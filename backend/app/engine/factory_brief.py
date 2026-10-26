@@ -255,10 +255,16 @@ def spec_changes(spec: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def ledger_digest(records: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Every idea in the ledger, compact. A later line for the same id replaces
-    an earlier one, keeping a hand-research summary of the same rules."""
+    """Trade-level ideas for model feedback, excluding portfolio exploration.
+
+    A later line for the same id replaces an earlier one, keeping a hand-research
+    summary of the same rules. Global attempt counting still uses all records.
+    """
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
+        if (record.get("evaluation_kind") == "etf_bil_exploratory_v1"
+                or (record.get("spec") or {}).get("family") == "etf_bil_exploratory_v1"):
+            continue
         item: dict[str, Any] = {"id": record["id"], "name": record["name"], "verdict": record["verdict"]}
         if record.get("source") == "hand research":
             item["tested"] = "by hand, before the factory existed"
