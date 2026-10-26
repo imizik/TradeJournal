@@ -232,7 +232,9 @@ action page, all HTTP 200 with terminal pagination reached. All five funds have
 code version, request metadata, response hashes and local archive location.
 Raw pages are retained in the ignored worktree data directory with read-only
 permissions; they are not committed or guaranteed to survive worktree deletion.
-Original source bytes must be retained before retiring this worktree.
+Original source bytes must be retained before retiring this worktree. The
+subsequent [reconciliation and frozen input candidate](etf-distribution-reconciliation-2026-10-26.md)
+now preserves them outside the worktree, with a matching hash receipt.
 
 | Symbol | In-window cash-dividend records | Those with blank CUSIP |
 |---|---:|---:|
@@ -257,12 +259,19 @@ the price discontinuity into a gain. This one-event check is not full archive
 acceptance. Sixty-five action records have effective dates beyond the price
 window and remain outside any future normalized evaluator input.
 
-Remaining before any historical screen: reconcile and freeze the acquired
-archive's action normalization/input receipt; then connect the
-calculator to the **existing** Factory reservation, locks, budget and bounded
-child, with an explicit one-run authorization. The current ORB-only intake and
-all frozen gates remain unchanged. There is no enabled ETF evaluation command,
-new ledger, schedule, live execution or consumed candidate attempt in this slice.
+The subsequent issuer reconciliation found three missing positive distributions,
+33 explicit BIL zero rows and seven amount precision differences. It froze a
+separate input candidate using issuer amounts consistently, preserving the
+original archive. That candidate needs review under the proposed revised-history
+assumptions; it does not prove original publication-time availability or adopt
+a new protocol.
+
+Remaining before any historical screen: review the frozen input candidate, then
+connect the calculator to the **existing** Factory reservation, locks, budget
+and bounded child, followed by explicit one-run authorization. The current
+ORB-only intake and all frozen gates remain unchanged. There is no enabled ETF
+evaluation command, new ledger, schedule, live execution or consumed candidate
+attempt in this slice.
 
 [bil]: https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil
 [bars]: https://docs.alpaca.markets/us/reference/stockbars
