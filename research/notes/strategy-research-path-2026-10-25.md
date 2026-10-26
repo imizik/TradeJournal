@@ -3,6 +3,11 @@
 October 25, 2026. Proposed research design, not a registered candidate, changed
 protocol, executable strategy or authorization to trade. No backtest was run.
 
+**October 26 decision update:** the [experiment decision packet](etf-trend-experiment-decision-2026-10-26.md)
+replaces the open-ended preparation sequence below with one fixed proposed case
+and a no-go for current validation. Further infrastructure work is parked pending
+data/design acceptance and a decision on whether bounded exploration is useful.
+
 The owner subsequently accepted multi-week holds. See the
 [data-and-accounting acceptance packet](etf-trend-acceptance-2026-10-25.md) for
 the next preparation milestone; no evaluation is authorized.
