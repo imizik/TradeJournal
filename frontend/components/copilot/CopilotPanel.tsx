@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, listInvestigations, streamTurn, toSaved,
-  planOrigin, updateInvestigation, whatChangedPrompt, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type ToolEvent, type TradePlan, type TurnMetrics,
+  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved,
+  planOrigin, updateInvestigation, whatChangedPrompt, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { X } from "lucide-react";
@@ -249,6 +249,21 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setConclusion(saved.conclusion ?? "");
     setSaveState(null);
     remember(saved.id);
+    if (saved.title.startsWith(AUTO_WEEK_REVIEW_TITLE)) void savedPractice(saved.id);
+  }
+
+  /** An automatic week review keeps the practice it proposed: its card returns under the answer until confirmed. */
+  async function savedPractice(id: string) {
+    let card: Proposal | null | undefined;
+    try { card = (await getPractice(undefined, id)).proposed; } catch { return; /* the card is extra */ }
+    if (!card) return;
+    const shown = card;
+    setMessages(list => {
+      if (latest.current.current?.id !== id) return list;  // another conversation opened meanwhile
+      const at = list.map(m => m.role).lastIndexOf("assistant");
+      if (at < 0 || list[at].proposals?.some(p => p.id === shown.id)) return list;
+      return list.map((m, i) => i === at ? { ...m, proposals: [...(m.proposals ?? []), shown] } : m);
+    });
   }
 
   /**

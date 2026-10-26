@@ -569,7 +569,7 @@ def test_native_smoke_upgrade_path_preserves_guard_and_receipts(prepared, tmp_pa
 
     smoke.upgraded_runtime(prepared.parent / "release.tar.gz", scratch, run)
     record = control.installed()
-    assert record["schema_revision"] == ["c8d2f6a4e1b7"]
+    assert record["schema_revision"] == ["d2a7e5c9f3b1"]
     assert control.ledger_revision(control.STATE / "fixture.db") == ["6b2f9d4a1c73"]
     assert len(record["ledger_migrations"]) == 1  # Refusal never records success.
     with sqlite3.connect(control.STATE / "fixture.db") as db:
