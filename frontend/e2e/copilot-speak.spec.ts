@@ -210,5 +210,7 @@ test("at 375 px the speaker is a 44 px target beside the mic, and nothing scroll
   expect(target.x + target.width).toBeLessThanOrEqual(375);
   expect(Math.abs(target.y - mic.y)).toBeLessThan(4);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  // The box keeps room to type: the buttons sit beside it here rather than wrapping under it.
+  expect((await box(page).boundingBox())!.width).toBeGreaterThanOrEqual(112);
   if (process.env.SPEAK_SHOT) await page.screenshot({ path: process.env.SPEAK_SHOT });
 });

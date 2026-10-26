@@ -769,11 +769,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <Eye size={14} /> Look at my chart
         </button>
       )}
-      <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex items-end gap-2">
+      {/* The buttons wrap under the box when a narrow dock would squeeze it below 7rem. */}
+      <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end justify-end gap-2">
         <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
           placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
-          className="min-h-[2.75rem] min-w-0 flex-1 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
+          className="min-h-[2.75rem] min-w-0 flex-1 basis-28 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
         {busy
           ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
           : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
