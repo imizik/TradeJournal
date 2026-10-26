@@ -920,15 +920,18 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 
 - **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
   plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-  research results) calls `notification_policy.decide` right before it hands a
-  message to ntfy, and keeps its own at-most-once delivery and expiry. `ntfy.py`
-  stays a transport. A new sender (Radar) adopts it by calling the same function.
+  Radar alerts, thesis watch, research results) calls `notification_policy.decide`
+  right before it hands a message to ntfy, and keeps its own at-most-once delivery,
+  caps and expiry. `ntfy.py` stays a transport. Radar alerts and thesis watch are
+  anchored per symbol (the symbol's open position when there is one; a Radar group
+  event to its group); a ping they hold is recorded `held` and counts toward
+  neither sender's own caps.
 - **Daily cap:** at most `PING_DAILY_CAP` (default 12) pings a New York day across
   every kind. The priority order keeps the cap from dropping what matters:
   last-day final > invalidation > give-back > time stop (and the 90-minute
-  last-day alert) > entry trigger > hold-hour > nudge/link > prep > research.
-  The first three are never over the cap; the last three are held once only
-  3 slots are left.
+  last-day alert) > entry trigger > hold-hour > nudge/link > prep > Radar >
+  thesis watch > research. The first three are never over the cap; the last
+  five are held once only 3 slots are left.
 - **Quiet window:** a second ping anchored to the same position within
   `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
   a different kind whose predecessor is still being resent (its send failed) is
@@ -1024,7 +1027,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `COPILOT_ENABLED` | unset (off) | `true` turns the routes on. Leave it unset in production. |
+| `COPILOT_ENABLED` | unset (off) | `true` turns the routes on. On in production since 2026-10-24 (below). |
 | `COPILOT_BACKEND` | `fake` | `fake` is a scripted stand-in that makes no API call. `anthropic` uses the Messages API and spends credits. `plan` runs on the owner's Claude plan through the Agent SDK and spends no API credits (below). |
 | `COPILOT_EVIDENCE` | `fixture` | `fixture` returns SIMULATED neocloud data; the model is told so in its context line, in a `"simulated": true` marker on every tool result and in the system prompt, and says so in its answer. `live` reads this installation's Radar, news, Tradier and quote services. `replay` reads a recorded session at a frozen moment (below). |
 | `COPILOT_REPLAY_STORE` | none | `replay` only: path to a read-only copy of a Radar store. |
@@ -1043,6 +1046,13 @@ time) is at or before the frozen moment. Fixture mode returns none.
 
 A model id the price table doesn't know (a dated id, or a fallback model the API reports) is priced at its
 known base model, otherwise at the dearest known price, so the per-turn cap always applies.
+
+**In production.** The lab is on on the VPS since October 24, 2026: `COPILOT_ENABLED=true`,
+`COPILOT_BACKEND=anthropic`, `COPILOT_EVIDENCE=live`, model from `COPILOT_MODEL`, in
+`/etc/tradejournal/backend.env` (undo copy `backend.env.before-copilot`). Five pings were switched on there
+on October 25, 2026: `PLAN_NUDGE_ENABLED` (undo copy `backend.env.before-plan-nudge`), then
+`PLAN_TIME_STOPS_ENABLED`, `PREMARKET_PREP_ENABLED`, `RADAR_ALERTS_ENABLED` and `THESIS_WATCH_ENABLED`
+(undo copy `backend.env.before-four-pings`). Every one passes through the [phone ping policy](#phone-ping-policy).
 Cost estimates use $2 / $10 per million input/output tokens for Sonnet 5.5
 ($0.20 cache read, $2.50 cache write). These are estimates only; the Anthropic
 Console is authoritative.

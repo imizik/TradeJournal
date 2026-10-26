@@ -6,7 +6,8 @@ curated groups moving together, each saved with its evidence, how complete the
 recording was, and a chart link. Isaac selected it on October 21, 2026
 ([priorities](product-roadmap.md#selected-priorities--october-11-2026)).
 
-It is not a leaderboard. Phone pings are off unless `RADAR_ALERTS_ENABLED=true`
+It is not a leaderboard. Phone pings are off unless `RADAR_ALERTS_ENABLED=true`,
+which is on on the VPS since October 25, 2026
 ([Phone alerts](#phone-alerts-off-by-default)); it never trades and does not
 involve Jo.
 
@@ -34,7 +35,7 @@ involve Jo.
 6. **Premarket pilot (built, off, record-only):**
    `backend/app/engine/radar_premarket.py`. See
    [Premarket pilot](#premarket-pilot-record-only).
-7. **Phone alerts (built, off):** `backend/app/engine/radar_alerts.py`, one
+7. **Phone alerts (built, on on the VPS since October 25, 2026):** `backend/app/engine/radar_alerts.py`, one
    ntfy ping per new event when `RADAR_ALERTS_ENABLED=true`. See
    [Phone alerts](#phone-alerts-off-by-default).
 
@@ -504,7 +505,8 @@ separate decision.
 ## Phone alerts (off by default)
 
 Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
-on is Isaac's call (a new phone alert is an activation). With it on, the
+on is Isaac's call (a new phone alert is an activation). It has been on on the
+VPS since October 25, 2026 (undo copy `backend.env.before-four-pings`). With it on, the
 recorder (`backend/app/engine/radar_runner.py`) hands each pass's newly
 written events to `backend/app/engine/radar_alerts.py`, which sends one ntfy
 notification per event the same minute, on the `NTFY_URL` topic and
@@ -531,14 +533,21 @@ notification per event the same minute, on the `NTFY_URL` topic and
   pending pings only on a pass.
 - **Caps:** at most `RADAR_ALERTS_DAILY_CAP` (default 8) a session and one per
   stock or group an hour. An event past a cap is recorded `skipped` with the
-  reason and never sent later; it still appears in the feed.
+  reason and never sent later; it still appears in the feed. A held alert
+  (below) does not count toward these caps.
+- **Notification policy:** right before the send, the app's
+  [phone ping policy](copilot-lab.md#phone-ping-policy) (kind `radar_event`,
+  below pre-market prep and above research; anchored to the stock's open
+  position, else the stock, or to the group) may hold it: the shared daily cap,
+  or the quiet window after a ping for the same position. A held alert is
+  recorded `held` with the reason and never sent later.
 - **Outbox:** table `radar_alert` in the journal database (`RadarAlert` in
   `backend/app/models.py`, additive migration
   `backend/alembic/versions/b9e4d2a7c1f3_add_radar_alerts.py`), not the Radar
   file, which stays append-only and alert-free. One row per event (unique
   event id); delivery `pending`, `sending`, `sent`, `expired` (not sent within
   15 minutes: a late Radar ping is a stale read), `unknown` (a send that may
-  have reached ntfy is never resent) or `skipped`. `sent` means ntfy accepted
+  have reached ntfy is never resent), `skipped` or `held`. `sent` means ntfy accepted
   it, not that the phone showed it. A failing ping never affects the recorded
   pass or its events.
 - **Proof:** `GET /radar/proof` adds `alerted` (events with a `sent` or

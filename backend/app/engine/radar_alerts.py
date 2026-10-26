@@ -12,7 +12,11 @@ actions; the "Open app" one ``ntfy.publish`` adds is the third.
 Only a new event pings; revisions (extended, faded, reversed) never do. The recorder calls ``record``
 inside regular hours only, right after the pass that wrote the events, then ``deliver`` every pass. Caps:
 at most ``RADAR_ALERTS_DAILY_CAP`` (default 8) a session and one per stock or group an hour; an event
-past a cap is written ``skipped`` with the reason and never sent later. Rows live in the journal
+past a cap is written ``skipped`` with the reason and never sent later. Right before the send, the app's
+notification policy (``notification_policy.decide``, kind ``radar_event``, anchored to the stock's open
+position or the stock, or to the group) may hold it: the shared daily cap or the quiet window after a ping
+for the same position. A held alert is written ``held`` with the reason, never sent later, and does not
+count toward these caps. Rows live in the journal
 database (``RadarAlert``; the Radar file stays append-only and alert-free) so ``/radar/proof`` can count
 alerted events apart from events merely seen in the feed. Delivery is the position alerts' at-most-once
 outbox: a send that may have reached ntfy is ``unknown`` and never resent, and an alert not sent within
@@ -33,7 +37,7 @@ from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import ntfy
+from app.engine import notification_policy, ntfy
 from app.engine.chart_math import ET
 from app.models import RadarAlert
 
@@ -46,7 +50,7 @@ EXPIRE_SECONDS = 15 * 60
 SUBJECT_HOUR_SECONDS = 60 * 60
 DEFAULT_DAILY_CAP = 8
 RATING_ACTIONS = (("Useful", "useful"), ("Not useful", "irrelevant"))
-COUNTED = RadarAlert.delivery != "skipped"  # rows that count toward the caps
+COUNTED = RadarAlert.delivery.not_in(("skipped", "held"))  # rows that count toward the caps
 
 
 def enabled() -> bool:
@@ -188,13 +192,25 @@ class RadarAlerts:
                 alert.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
                 return
+            if alert.kind == "group_move":
+                anchor, symbol, trade_id = f"group:{alert.subject}", None, None
+            else:
+                symbol = alert.subject
+                anchor, trade_id = notification_policy.symbol_anchor(db, symbol)
+            ticket = notification_policy.decide(db, sender="radar_alerts", source_id=str(alert.id), kind="radar_event", title=alert.title,
+                                                body=alert.body, now=now, anchor=anchor, symbol=symbol, trade_id=trade_id)
+            if ticket.held:
+                alert.delivery, alert.last_error = "held", ticket.reason
+                db.commit()
+                return
             alert.attempts += 1
             try:
-                ntfy.publish(alert.title, alert.body, priority=4, tags=("satellite",), path=event_path(alert.event_id), direct_click=True,
+                ntfy.publish(alert.title, alert.body + ticket.append, priority=4, tags=("satellite",), path=event_path(alert.event_id), direct_click=True,
                              more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS))
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
+                    notification_policy.delivered(db, ticket, now)
                 else:
                     alert.delivery, alert.last_error = "pending", str(exc)
                     alert.next_attempt_at = _utc(now + BACKOFF[min(alert.attempts, len(BACKOFF)) - 1])
@@ -202,4 +218,5 @@ class RadarAlerts:
                 log.warning("Radar alert delivery failed (attempt %d): %s", alert.attempts, exc)
                 return
             alert.delivery, alert.delivered_at, alert.last_error = "sent", _utc(self.clock()), None
+            notification_policy.delivered(db, ticket, now)
             db.commit()
