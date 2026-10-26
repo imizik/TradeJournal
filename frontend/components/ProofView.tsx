@@ -3,11 +3,13 @@ import Link from "next/link";
 
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
+import { money } from "@/lib/format";
 import { DashboardCard, dashboardLink } from "./dashboard/DashboardCard";
 import { ExitHabitsView, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitHabits";
 
-// The two proofs from the October 22 end goal, read from /analytics/exit-habits and /radar/proof.
-// Every verdict defaults to "not enough data" and shows its rule and sample. See app/engine/radar_proof.py.
+// The two proofs from the October 22 end goal, read from /analytics/exit-habits and /radar/proof, and a secondary read
+// (not a third proof), planned against unplanned trades, from /analytics/plan-proof.
+// Every verdict defaults to "not enough data" and shows its rule and sample. See app/engine/radar_proof.py and plan_proof.py.
 type Verdict = "helping" | "not_helping" | "not_enough_data";
 type RadarProof = { state: string; reason: string | null; rule_version?: string | null; sessions?: number; events?: number;
   alerted?: { events: number; ratings: Record<string, number> };
@@ -16,6 +18,12 @@ type RadarProof = { state: string; reason: string | null; rule_version?: string 
   stock_events?: number; group_events?: number; ratings?: Record<string, number>; movers?: Record<string, number>;
   median_lead_minutes?: number | null; brief?: Record<string, number>;
   verdict?: { verdict: Verdict; reason: string; rule: string; rated: number; timed: number; useful_share: number | null; ahead_share: number | null } };
+
+type HabitTally = { n: number; trades: number; pct: number | null };
+type PlanGroup = { key: "planned" | "unplanned" | "late"; label: string; in_verdict: boolean; trades: number; pnl: number;
+  mean_return_pct: number | null; median_return_pct: number | null; win_rate: number | null; habits: Record<string, HabitTally> };
+type PlanProof = { go_live: string; trades: number; groups: PlanGroup[]; caveat: string;
+  verdict: { verdict: Verdict; reason: string; rule: string; planned: number; unplanned: number; caveat: string } };
 
 const VERDICT: Record<Verdict, { label: string; tone: string }> = {
   helping: { label: "Helping", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
@@ -101,6 +109,30 @@ function RadarProofCard() {
   </DashboardCard>;
 }
 
+const points = (v: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+function PlanningProofCard() {
+  const { body, error } = useJson<PlanProof>("/analytics/plan-proof");
+  const late = body?.groups.find((g) => g.key === "late")?.trades ?? 0;
+  return <DashboardCard title="Do planned trades do better?" action={<Link href="/" className={dashboardLink}>Dashboard →</Link>}>
+    {body ? <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">A secondary read, not a third proof.</p>
+      <VerdictBlock testId="proof-planning-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
+        sample={`${body.verdict.planned} planned vs ${body.verdict.unplanned} unplanned closed long options since ${body.go_live}; ${late} with a late plan, not counted`} />
+      <p className="text-xs text-amber-300" data-testid="proof-planning-caveat">{body.caveat}</p>
+      <ul className="space-y-2">{body.groups.map((g) => <li key={g.key} className="space-y-0.5" data-testid={`plan-group-${g.key}`}>
+        <p className="text-sm">{g.label}</p>
+        <p className="flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
+          <span>{g.trades} trade{g.trades === 1 ? "" : "s"}</span><span>{money(g.pnl, { signed: true, cents: false })}</span>
+          <span>mean return {points(g.mean_return_pct)}</span><span>median {points(g.median_return_pct)}</span>
+          <span>win rate {share(g.win_rate)}</span>
+          <span>green to red {g.habits.green_to_red?.trades ? `${g.habits.green_to_red.n} of ${g.habits.green_to_red.trades}` : "—"}</span>
+        </p>
+      </li>)}</ul>
+    </div> : <Status error={error} what="Planning read" />}
+  </DashboardCard>;
+}
+
 export default function ProofView() {
-  return <div className="space-y-4"><AlertsProof /><RadarProofCard /></div>;
+  return <div className="space-y-4"><AlertsProof /><RadarProofCard /><PlanningProofCard /></div>;
 }

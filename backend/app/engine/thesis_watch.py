@@ -17,7 +17,10 @@ only; nothing here is a market read the app does not already do. Three triggers:
 
 A trigger is written once per dedupe key, so a restart never fires it twice; a skipped one is keyed to its day, so
 the same signal can still be told on a later day. One ping per symbol per day and ``THESIS_WATCH_DAILY_CAP``
-(default 4) a day; the rest are recorded ``skipped``. The ping opens the investigation with
+(default 4) a day; the rest are recorded ``skipped``. Right before the send, the app's notification policy
+(``notification_policy.decide``, kind ``thesis_watch``, anchored to the symbol's open position or the symbol) may
+hold it: the shared daily cap or the quiet window after a ping for the same position. A held trigger is recorded
+``held`` with the reason, keyed to its day as a skipped one is, and counts toward neither limit. The ping opens the investigation with
 the What-changed question prepared and unsent, or the lab on the symbol for a thesis with no investigation. With
 ``RESEARCH_QUEUE_ENABLED=true`` a fired trigger with an investigation also queues one ``reassess`` job through the
 research queue (its budget and its one-a-day key); the queue's own result ping is the only other notification.
@@ -485,12 +488,24 @@ class ThesisWatch:
             return None
         if reason:
             return self._view(trigger)
+        from app.engine import notification_policy
+        anchor, trade_id = notification_policy.symbol_anchor(db, row.symbol)
+        ticket = notification_policy.decide(db, sender="thesis_watch", source_id=str(trigger.id), kind="thesis_watch",
+                                            title=title_for(row.symbol), body=candidate.text, now=now.timestamp(), anchor=anchor,
+                                            symbol=row.symbol, trade_id=trade_id)
+        if ticket.held:
+            # Not told: keyed to the day like a skipped trigger, so the same signal can still be told tomorrow.
+            trigger.delivery, trigger.reason, trigger.dedupe_key = "held", ticket.reason, skipped_key
+            db.add(trigger)
+            db.commit()
+            return self._view(trigger)
         publish = self._publish or ntfy.publish
         try:
-            trigger.message_id = publish(title_for(row.symbol), candidate.text, path=trigger.path, direct_click=True)
+            trigger.message_id = publish(title_for(row.symbol), candidate.text + ticket.append, path=trigger.path, direct_click=True)
             trigger.delivery = "sent"
         except Exception as exc:  # noqa: BLE001 - recorded, never retried: a failed push may still have been delivered
             trigger.delivery, trigger.reason = "failed", f"{type(exc).__name__}: {exc}"[:300]
+        notification_policy.delivered(db, ticket, now.timestamp())
         if row.investigation and row.investigation.get("source") == "copilot" and self._queue_enabled():
             trigger.reassess_job_id = self._queue_reassess(row.investigation["id"], candidate, day, db)
         db.add(trigger)

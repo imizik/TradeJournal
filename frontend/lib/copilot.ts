@@ -271,7 +271,7 @@ export type ThreadPosition = {
 };
 /** One thesis-watch trigger for an open investigation: a new headline, a move since its evidence or the prior close, or
  * earnings within two trading days; ``delivery`` says whether the phone was told (sent), or why not. */
-export type ThreadWatchTrigger = { kind: "news" | "move" | "earnings"; text: string; fired_at: string; delivery: "sending" | "sent" | "failed" | "skipped"; reason?: string | null; path: string };
+export type ThreadWatchTrigger = { kind: "news" | "move" | "earnings"; text: string; fired_at: string; delivery: "sending" | "sent" | "failed" | "skipped" | "held"; reason?: string | null; path: string };
 export type ThreadInvestigation = { id: string; source: "copilot" | "research_job"; symbol?: string; title: string; status: string; conclusion?: string; updated_at: string; watch?: ThreadWatchTrigger[] };
 /** An armed level alert ("level alert") or a waiting research job ("research job (<kind>)"). */
 export type ThreadWatch = {

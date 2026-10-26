@@ -8,7 +8,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
-  test(`proof page states both verdicts with their rule and sample on ${size}`, async ({ page }) => {
+  test(`proof page states every verdict with its rule and sample on ${size}`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.setViewportSize({ width, height });
@@ -52,6 +52,18 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     const radarCard = page.getByRole("region", { name: "Does Radar find what you'd miss, early enough?" });
     await expect(radarCard).toContainText("1 event over 1 session of radar-rules-sample: 1 stock, 0 group");
     await expect(radarCard.getByText("Not rated").locator("..")).toContainText("1");
+    // Planning: a secondary read; every seeded trade predates the plan card, so nothing is claimed.
+    const planningCard = page.getByRole("region", { name: "Do planned trades do better?" });
+    await expect(planningCard).toContainText("A secondary read, not a third proof.");
+    const planning = page.getByTestId("proof-planning-verdict");
+    await expect(planning).toContainText("Not enough data");
+    await expect(planning).toContainText("0 planned and 0 unplanned of 20 each needed.");
+    await expect(planning).toContainText("Sample: 0 planned vs 0 unplanned closed long options since 2026-10-25; 0 with a late plan, not counted");
+    await expect(planning).toContainText("by 2 standard errors (clustered by entry day)");
+    await expect(page.getByTestId("proof-planning-caveat")).toContainText("Selection-biased");
+    await expect(page.getByTestId("proof-planning-caveat")).toContainText("not that planning causes it");
+    await expect(planningCard.getByTestId("plan-group-planned")).toContainText("0 trades");
+    await expect(planningCard.getByTestId("plan-group-late")).toContainText("shown, not counted");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: test.info().outputPath(`proof-${size}.png`), fullPage: true });
     expect(errors).toEqual([]);
