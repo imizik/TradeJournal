@@ -235,11 +235,13 @@ def prepared_question(row: Watched, text: str) -> str:
     return f'New since my thesis: "{_trim(text, max(20, room)).rstrip(".")}"{tail}'
 
 
-def deep_link(row: Watched, text: str) -> str:
+def deep_link(row: Watched, text: str, trigger_id: uuid.UUID | None = None) -> str:
+    """The lab, with the question ready; ``origin`` names the trigger, so a plan made from it records what prompted it."""
     question = prepared_question(row, text)
+    origin = {"origin": f"thesis_watch:{trigger_id}"} if trigger_id else {}
     if row.investigation:
-        return "/copilot-lab?" + urlencode({"investigation": row.investigation["id"], "context": question}, quote_via=quote)
-    return "/copilot-lab?" + urlencode({"symbol": row.symbol, "context": question}, quote_via=quote)
+        return "/copilot-lab?" + urlencode({"investigation": row.investigation["id"], "context": question, **origin}, quote_via=quote)
+    return "/copilot-lab?" + urlencode({"symbol": row.symbol, "context": question, **origin}, quote_via=quote)
 
 
 def title_for(symbol: str) -> str:
@@ -467,12 +469,13 @@ class ThesisWatch:
             reason = "daily cap reached"
         elif not ntfy.configured():
             reason = "ntfy not configured"
+        trigger_id = uuid.uuid4()
         trigger = ThesisWatchTrigger(
-            symbol=row.symbol, kind=candidate.kind, dedupe_key=skipped_key if reason else candidate.key,
+            id=trigger_id, symbol=row.symbol, kind=candidate.kind, dedupe_key=skipped_key if reason else candidate.key,
             investigation_id=uuid.UUID(row.investigation["id"]) if row.investigation else None,
             memory_id=uuid.UUID(row.memory_id) if row.memory_id and not row.investigation else None,
             held=row.held, day=day, fired_at=now.replace(tzinfo=None), text=candidate.text[:TEXT_MAX + 60],
-            detail_json=json.dumps(candidate.detail), path=deep_link(row, candidate.text),
+            detail_json=json.dumps(candidate.detail), path=deep_link(row, candidate.text, trigger_id),
             delivery="skipped" if reason else "sending", reason=reason)
         db.add(trigger)
         try:

@@ -104,7 +104,7 @@ def test_the_review_carries_each_section(db):
     review = copilot_review.trade_review(str(REVIEWED), session=db)
     _secret_free(review)
     assert review["state"] == "ok" and "trimmed" not in review
-    assert set(review["provenance"]) == {"trade", "path", "plan", "alerts", "habits", "comparison"}
+    assert set(review["provenance"]) == {"trade", "path", "plan", "origin", "alerts", "habits", "comparison"}
 
     t = review["trade"]
     assert t["contract"] == f"NBIS {EXPIRY.month}/{EXPIRY.day}/{EXPIRY.year % 100:02d} 100C" and t["account"] == "Robinhood Roth"
@@ -174,7 +174,7 @@ def test_an_open_position_reads_now_plan_alerts_and_comparison(db, monkeypatch):
     review = copilot_review.trade_review(str(HELD), session=db)
     text = _secret_free(review)
     assert review["state"] == "ok" and "trimmed" not in review
-    assert set(review["provenance"]) == {"trade", "now", "plan", "alerts", "comparison"} == set(copilot_review.OPEN_PROVENANCE)
+    assert set(review["provenance"]) == {"trade", "now", "plan", "origin", "alerts", "comparison"} == set(copilot_review.OPEN_PROVENANCE)
     assert "path" not in review and "habits" not in review and "order" in review["note"]
 
     t = review["trade"]

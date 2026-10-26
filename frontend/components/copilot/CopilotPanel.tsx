@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   asOfText, copilotStatus, createInvestigation, fromSaved, getInvestigation, listInvestigations, streamTurn, toSaved,
-  updateInvestigation, whatChangedPrompt, type CopilotStatus, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type ToolEvent, type TradePlan, type TurnMetrics,
+  planOrigin, updateInvestigation, whatChangedPrompt, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type ToolEvent, type TradePlan, type TurnMetrics,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { X } from "lucide-react";
@@ -13,6 +13,7 @@ import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
+import type { CaptureOrigin } from "@/lib/captures";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -179,7 +180,8 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
   );
 }
 
-export type PanelLink = { symbol: string; context: string; investigation: string | null };
+/** ``origin``: what prompted the conversation (a Radar event, a ping, a page's Plan a trade); a confirmed plan records it. */
+export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 
@@ -209,6 +211,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || "NBIS");
+  // The conversation's origin, from its link; a new or another investigation is the lab's own.
+  const [origin, setOrigin] = useState<CaptureOrigin>(() => planOrigin(link?.origin, link?.context));
   const [messages, setMessages] = useState<LabMessage[]>([]);
   const [draft, setDraft] = useState(opening);
   const [spoken, setSpoken] = useState(false); // the draft ends with words just heard, waiting for review
@@ -277,10 +281,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSymbol(target);
     if (!typed.current) setDraft(pageContext ? `Context: ${pageContext}\n\n` : "");
     remember(null);
+    setOrigin(planOrigin(null));
   }
 
   async function resume(id: string) {
     if (busy) return;
+    setOrigin(planOrigin(null));
     try { open(await getInvestigation(id)); } catch (error) {
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Could not open that investigation." });
     }
@@ -429,6 +435,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setConclusion("");
     setSaveState(null);
     remember(null);
+    setOrigin(planOrigin(null));
   }
 
   /** A new conversation about a finished research result: its symbol, and the result as the opening context. */
@@ -565,7 +572,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
-              <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null}
+              <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin}
                 history={historyFor(message.tools ?? [], proposal)} alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
             ) : (
               <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}

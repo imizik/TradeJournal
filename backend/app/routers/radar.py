@@ -246,14 +246,16 @@ def proof(db: Session = Depends(get_session)):
 
 
 @router.get("/events/{event_id}")
-def event_detail(event_id: str):
+def event_detail(event_id: str, db: Session = Depends(get_session)):
     store = _require_store()
     event = store.event(event_id)
     if event is None:
         raise HTTPException(404, "Radar event not found")
     checks = [_news_block(c) for c in store.news_checks(event_id)]
+    # Whether a pre-trade plan names this event as its origin, and whether that plan was traded (docs/radar.md).
+    plans = radar_proof.planned_events(db, [event_id]).get(event_id, {"planned": False, "traded": False})
     return {"event": event, "revisions": store.revisions(event_id), "rating": store.latest_ratings().get(event_id),
-            "news": checks[-1] if checks else None, "news_checks": checks}
+            "news": checks[-1] if checks else None, "news_checks": checks, "plans": plans}
 
 
 @router.post("/visits")

@@ -739,6 +739,38 @@ nothing exists until the owner confirms.
 - Conditional plans and follow-ups (Jo) are not touched.
 - Browser proof: `frontend/e2e/copilot-plan.spec.ts`.
 
+## Origin
+
+Every pre-trade plan records what prompted it, so a trade can be traced back to
+the observation behind it (the end goal's step 5).
+
+- **On the plan.** `TradeCapture` has `origin_kind` (`radar_event`,
+  `thesis_watch`, `premarket_prep`, `chart`, `dashboard`, `copilot`, `manual`),
+  `origin_ref` (the Radar event id, the thesis-watch trigger id or the
+  investigation id) and `origin_text` (the context line, at most 300
+  characters). `captures.build` refuses an unknown kind; a plan saved with no
+  origin is `manual`. Migration `c4e8a2f6d1b9` adds the columns (nullable:
+  older plans have none).
+- **Through the front door.** Deep links carry `origin=<kind>[:<ref>]`
+  (`copilotLabHref`, read by `readDeepLink` in `frontend/lib/copilot.ts`).
+  Radar's Plan a trade and Ask copilot pass the event id; a thesis-watch ping
+  passes its trigger id; the pre-market prep passes its investigation id;
+  Charts and the plan sheet pass `chart`, the Dashboard `dashboard`, the phone
+  tab bar `manual`. The lab keeps it with the conversation (a new or another
+  investigation is `copilot`, with the investigation id), and the plan card
+  sends it with the capture. A plan typed on the Charts plan sheet is `chart`;
+  a voice plan is `manual`.
+- **Shown.** The trade page's Pre-trade plan reads "From: Radar event, MU
+  +4.1% vs SMH, 10:41" and links to `/radar?event=<id>` or the investigation.
+  `get_trade_review` has an `origin` section: the kind, the context line in
+  words and, for a Radar event, its summary and rating from the Radar file;
+  never an id (`app/ai/copilot_origins.py`). `get_week_review` has `origins`:
+  one line of trades and P&L by origin kind (`no_plan`, and `unrecorded` for
+  plans saved before origins). Radar's event detail shows **Planned** and
+  **Traded**, and `/proof` counts events that led to a plan and to a trade
+  ([Radar](radar.md#proof-read-out)).
+- Tests: `backend/tests/test_trade_origin.py`, `frontend/e2e/trade-origin.spec.ts`.
+
 ## Phone ping policy
 
 One policy for the app's own phone pings (`backend/app/engine/notification_policy.py`),

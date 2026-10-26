@@ -14,7 +14,8 @@ exist. For a closed trade:
   and what followed each (``exit_habits.follow_up``);
 - ``habits``: this trade against the behavior audit's four exit habits
   (``exit_habits.habit_flags``), closed long options only;
-- ``comparison``: the symbol's latest other closed trades (``copilot_book.trades``).
+- ``comparison``: the symbol's latest other closed trades (``copilot_book.trades``);
+- ``origin``: what prompted the plan (``copilot_origins.trade_origin``), never an id.
 
 For an open position the same ``trade`` (no exit yet), ``plan``, ``alerts`` (what
 followed so far) and ``comparison``, plus ``now``: the current mark and open P&L
@@ -27,8 +28,9 @@ latest week with a closed trade) from the same per-trade pieces: totals, trades
 by plan timing (pre-entry, late or unverified, none), the plans' follow-through
 (their invalidation alert firing while held and the exit after it; time stops
 due and what followed), phone alerts and their follow-up, the four habits this
-week against the baseline (``exit_habits``), and the best and worst exits by
-option give-back and by P&L.
+week against the baseline (``exit_habits``), the best and worst exits by
+option give-back and by P&L, and trades by what prompted their plan
+(``copilot_origins.week_origins``).
 
 Read-only. The trade id comes in from the owner's UI and never goes back out:
 no trade, fill, account or broker id is returned, and an account appears only by
@@ -41,7 +43,7 @@ import uuid
 from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 
-from app.ai import copilot_book
+from app.ai import copilot_book, copilot_origins
 
 MAX_REVIEW_CHARS = 5800  # inside copilot_tools.MAX_RESULT_CHARS, so a review is never cut mid-JSON
 MAX_ALERTS = 6
@@ -55,6 +57,7 @@ PROVENANCE = {
     "alerts": "measured: phone alerts sent for this position and what the fills show happened after each",
     "habits": "measured: the behavior audit's four exit habits for this one trade; associations, not rules",
     "comparison": "measured: the symbol's latest other closed trades",
+    "origin": "owner said: what prompted the plan (copilot_origins)",
 }
 OPEN_PROVENANCE = {
     "trade": "measured: the journal's reconstructed open position and its fills so far",
@@ -62,6 +65,7 @@ OPEN_PROVENANCE = {
     "plan": PROVENANCE["plan"],
     "alerts": "measured: phone alerts sent for this position and what the fills show since each",
     "comparison": PROVENANCE["comparison"],
+    "origin": PROVENANCE["origin"],
 }
 
 
@@ -249,6 +253,7 @@ def trade_review(trade_id: str, session=None) -> dict:
                 "state": "ok", "as_of": copilot_book._now(), "provenance": OPEN_PROVENANCE, "trade": about,
                 "now": _section(lambda: _now(db, trade)),
                 "plan": _section(lambda: _plan(db, trade)),
+                "origin": _section(lambda: copilot_origins.trade_origin(db, trade)),
                 "alerts": _section(lambda: _alerts(db, trade, fills)),
                 "comparison": _section(lambda: _comparison(db, trade)),
                 "units": "Option prices are per contract as the journal stores them (premium x 100); stock prices per share. "
@@ -268,6 +273,7 @@ def trade_review(trade_id: str, session=None) -> dict:
             },
             "path": _section(lambda: _path(db, trade)),
             "plan": _section(lambda: _plan(db, trade)),
+            "origin": _section(lambda: copilot_origins.trade_origin(db, trade)),
             "alerts": _section(lambda: _alerts(db, trade, fills)),
             "habits": _section(lambda: _habits(db, trade, fills)),
             "comparison": _section(lambda: _comparison(db, trade)),
@@ -306,7 +312,7 @@ def shed(review: dict) -> dict:
 
 # --------------------------------------------------------------------------- the week
 
-MAX_WEEK_CHARS = MAX_REVIEW_CHARS
+MAX_WEEK_CHARS = MAX_REVIEW_CHARS + 100  # room for the origins line; still inside copilot_tools.MAX_RESULT_CHARS
 EXITS_SHOWN = 3
 FOLLOW_SHOWN = 6
 TIME_STOPS_SHOWN = 6
@@ -576,6 +582,8 @@ def week_review(week_start: str | None = None, session=None) -> dict:
             "totals": {**_bucket(rows), "expired_worthless": sum(bool(r["trade"].expired_worthless) for r in rows),
                        "accounts": sorted({r["account"] for r in rows})},
             "planned": {key: {"label": label, **_bucket([r for r in rows if r["plan"] == key])} for key, label in BUCKETS},
+            # Trades by what prompted their plan, with P&L (count, then $).
+            "origins": _section(lambda: {"state": "ok", "line": copilot_origins.week_origins(db, trades)}).get("line", "unavailable"),
             "follow_through": _section(lambda: _follow_through(db, rows, start, end)),
             "alerts": _section(lambda: _week_alerts(rows)),
             "pings": _section(lambda: _week_pings(db, start, end)),

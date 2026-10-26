@@ -11,7 +11,7 @@ const ON = {
   key_configured: false, tools: [], limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 },
 };
 const STEP: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };
-const plan = (context: string, symbol = "") => `/copilot-lab?${new URLSearchParams({ symbol, context })}`;
+const plan = (context: string, symbol = "", origin = "") => `/copilot-lab?${new URLSearchParams({ symbol, context, ...(origin ? { origin } : {}) })}`;
 
 /** Candles for whatever the chart asks for, and a quote at 94.35. */
 function workspace(url: string): ChartData {
@@ -79,7 +79,7 @@ test("Charts' header plans the chart's symbol, interval and price, unsent", asyn
   await page.goto("/charts?symbol=NBIS");
   const toolbar = page.locator(`header[aria-label="Chart toolbar"]`);
   const link = toolbar.getByRole("link", { name: "Plan a trade" });
-  await expect(link).toHaveAttribute("href", plan("Plan a trade: NBIS from the 5m chart at 94.35", "NBIS"));
+  await expect(link).toHaveAttribute("href", plan("Plan a trade: NBIS from the 5m chart at 94.35", "NBIS", "chart"));
   await page.screenshot({ path: test.info().outputPath("plan-a-trade-charts-1440.png") });
   await page.setViewportSize({ width: 1380, height: 700 });
   expect((await toolbar.boundingBox())!.height).toBeLessThan(48); // a laptop still gets one row of controls
@@ -94,7 +94,7 @@ test("Radar's event detail offers Plan a trade ahead of Ask copilot", async ({ p
   await labOn(page);
   await openMuEvent(page);
   const link = page.getByTestId("radar-event").getByRole("link", { name: "Plan a trade" });
-  await expect(link).toHaveAttribute("href", /^\/copilot-lab\?symbol=MU&context=Plan\+a\+trade%3A\+Radar\+.+MU\+up\+4\.1%25/);
+  await expect(link).toHaveAttribute("href", /^\/copilot-lab\?symbol=MU&context=Plan\+a\+trade%3A\+Radar\+.+MU\+up\+4\.1%25.*&origin=radar_event%3A.+$/);
   const [plan, ask] = await Promise.all([link.boundingBox(), page.getByRole("button", { name: "Ask copilot · MU" }).boundingBox()]);
   expect(plan!.x).toBeLessThan(ask!.x);
 });
@@ -104,11 +104,11 @@ test("the Dashboard's top and the phone tab bar open the lab to name the ticker"
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const top = page.getByTestId("owner-dashboard").getByRole("link", { name: "Plan a trade" });
-  await expect(top).toHaveAttribute("href", plan("Plan a trade:"));
+  await expect(top).toHaveAttribute("href", plan("Plan a trade:", "", "dashboard"));
   expect(await top.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)"); // primary, not a bare link
   await page.setViewportSize({ width: 375, height: 812 });
   const tab = page.getByRole("navigation", { name: "Main tabs" }).getByRole("link", { name: "Plan a trade" });
-  await expect(tab).toHaveAttribute("href", plan("Plan a trade:"));
+  await expect(tab).toHaveAttribute("href", plan("Plan a trade:", "", "manual"));
   await page.screenshot({ path: test.info().outputPath("plan-a-trade-dashboard-375.png") });
   await tab.click();
   await expect(page.getByLabel("Message")).toHaveValue(/Plan a trade:/);

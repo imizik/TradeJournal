@@ -68,6 +68,12 @@ events with 40%+ useful and, over 10+ timed stock events, 50%+ where Movers did
 not already have it; otherwise not helping, and below either sample, not enough
 data. Rules and samples are shown on the page. See `backend/app/engine/radar_proof.py`.
 
+Beside alerted events, the read-out counts events that **led to a plan** (a
+pre-trade plan names the event as its origin) and **to a trade** (that plan is
+linked to a trade), shown on `/proof` and not part of the verdict. The event
+detail (`GET /radar/events/{id}`, field `plans`) carries the same as
+**Planned** and **Traded** marks. See [Origin](copilot-lab.md#origin).
+
 ## Feed API and screen
 
 All four routes are owner-only (assistant sessions are denied) and read-only

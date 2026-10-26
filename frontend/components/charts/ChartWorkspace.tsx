@@ -1879,7 +1879,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
   // The copilot's "Plan a trade", beside the symbol: what this chart shows goes with it, unsent.
   const planAt = selected?.last ?? latestCandle?.close;
-  const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}
+  const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} origin="chart" line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}
     className={`${PLAN_BUTTON} ${narrow ? "h-11 px-2.5" : "h-7 px-2.5"}`} />;
 
   const alerts = [
