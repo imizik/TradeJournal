@@ -1086,6 +1086,16 @@ Two kinds of image reach the model, never more than **two per turn**:
   after 24 hours (`GET /copilot/images/{id}` serves it meanwhile, for the
   share-sheet thumbnail). History and the saved transcript keep the text
   marker `[shared a screenshot]`, never the image.
+- **Look at my chart.** In the Charts dock's Copilot tab, **Look at my chart**
+  takes the main chart's canvas as drawn (the same snapshot a saved plan
+  keeps: candles, studies, fills and the owner's levels and drawings, made a
+  JPEG in the browser), uploads it through `POST /copilot/images` and sends a
+  turn at once: `Context: Charts · NBIS 5m, last 94.35, 9:40 AM–11:10 AM ET.
+  What do you see?` (the visible range once the chart has been moved; before
+  that, `as of` the latest candle's time), with the owner's own words from the
+  box instead of the question when there are some. It joins any attached
+  screenshot within the two-image cap, shows on the sent message like one, and
+  is off while the conversation is about a different symbol than the chart.
 - **The plan's chart in a trade review.** When `get_trade_review` finds a
   linked plan with a saved chart image (`TradeCapture.image_state = saved`),
   its `plan` says `image: available` and `copilot._run_tool` appends that
@@ -1113,7 +1123,8 @@ Agent SDK passes Messages API content through), and a review's plan chart as
 an MCP image block. `fake` makes no call: it acknowledges each image by its
 size in a scripted line, so the fixture and the browser spec exercise the path
 (the fixture's closed review draws a stand-in plan chart). Tests:
-`backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`.
+`backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`,
+`frontend/e2e/charts-copilot-loop.spec.ts` (Look at my chart).
 
 ## Saved investigations
 

@@ -198,3 +198,39 @@ test("on a 375 px phone the three headers fit the sheet with thumb-sized targets
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("charts-copilot-loop-375.png") });
 });
+
+test("Look at my chart sends the main chart as an image with its symbol, interval, last price and visible range", async ({ page }) => {
+  await stubLab(page, []);
+  const chats: { messages: { content: string }[]; image_ids?: string[] }[] = [];
+  const uploads: string[] = [];
+  await page.route("**/copilot/images", (route) => {
+    const body = route.request().postDataBuffer()?.toString("latin1") ?? "";
+    uploads.push(body.includes("Content-Type: image/jpeg") ? "jpeg" : "other");
+    return route.fulfill({ status: 201, json: { id: "c".repeat(32), width: 1200, height: 600, bytes: 90000 } });
+  });
+  await page.route("**/copilot/chat", (route) => {
+    chats.push(route.request().postDataJSON());
+    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: sse([{ type: "text", delta: "I see the prior day high above." }, DONE]) });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const panel = await openPanel(page);
+  await panel.getByTestId("copilot-look").click();
+  await expect(panel.getByText("I see the prior day high above.")).toBeVisible();
+  expect(uploads).toEqual(["jpeg"]);
+  expect(chats[0].image_ids).toEqual(["c".repeat(32)]);
+  // Before the chart is moved its range is not known: the latest candle's time says when.
+  expect(chats[0].messages.at(-1)!.content).toMatch(
+    /^\[shared a screenshot\] Context: Charts · MRVL 5m, last [\d,.]+, as of \d{1,2}:\d\d [AP]M ET\. What do you see\?$/);
+  await expect(panel.getByRole("img", { name: "Shared screenshot" })).toBeVisible();
+
+  // Once the chart is scrolled, the line carries the visible range.
+  const area = (await page.getByTestId("canvas-main").boundingBox())!;
+  await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
+  await page.mouse.wheel(0, -300);
+  await page.waitForTimeout(400);
+  await panel.getByTestId("copilot-look").click();
+  await expect.poll(() => chats.length).toBe(2);
+  expect(chats[1].messages.at(-1)!.content).toMatch(
+    /^\[shared a screenshot\] Context: Charts · MRVL 5m, last [\d,.]+, [\w ,:]+–[\w ,:]+\. What do you see\?$/);
+  expect(chats[1].messages.at(-1)!.content).not.toContain("as of");
+});

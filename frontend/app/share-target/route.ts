@@ -9,6 +9,8 @@ const lab = (params: Record<string, string>) =>
 /** The phone's share sheet (the manifest's share_target): the shared image is stored through POST /copilot/images, then
  * the lab opens with it attached and a question ready, nothing sent. Owner only. */
 export async function POST(request: Request) {
+  // The share sheet opens this as the user's own navigation; a form posted from another site is refused.
+  if (request.headers.get("sec-fetch-site") === "cross-site") return Response.json({ detail: "Not permitted" }, { status: 403 });
   const access = await requireAccess();
   if (!access.owner) return Response.json({ detail: "Not found" }, { status: 404 });
   let image: File | undefined;

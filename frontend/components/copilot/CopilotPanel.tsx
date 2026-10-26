@@ -7,7 +7,7 @@ import {
   type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
 } from "@/lib/copilot";
 import Link from "next/link";
-import { ImagePlus, Loader2, X } from "lucide-react";
+import { Eye, ImagePlus, Loader2, X } from "lucide-react";
 import { useAppAccess } from "@/components/AccessProvider";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
@@ -211,6 +211,8 @@ export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
  * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs. */
 export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null): void; open(id: string): void };
+/** A page's own chart for "Look at my chart" (``look``): its image and one line of what it shows. */
+export type ChartLook = { image: Blob; line: string };
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
@@ -228,10 +230,11 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * the lab on. ``link`` (a deep link, or Radar's drawer) starts a new investigation, prefilled and not sent.
  * ``home`` (page only) renders above an empty conversation while the lab is on and no investigation is open.
  * ``strip`` (panel only) renders above the conversation: the page's own view of its symbol (Charts' loop).
+ * ``look`` (panel only) offers "Look at my chart": the page's chart goes out as an image with its line, in one turn.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
-  home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode;
+  home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
 }) {
   const panel = variant === "panel";
   const { owner } = useAppAccess();
@@ -419,8 +422,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
-  async function send(text: string, about = symbol) {
-    const shots = attached;
+  async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
     if (!content || busy || !status?.enabled) return;
     // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
@@ -496,6 +498,24 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       setDraft(current => current.replace(/^Context: [^\n]*\n+/, "").trim() ? current : `${current}${IMAGE_PREFILL}`);
     } catch (error) {
       setAttaching({ state: "error", message: error instanceof Error ? error.message : "The screenshot could not be attached." });
+    }
+  }
+
+  /** "Look at my chart": the page's chart joins any attached screenshot (two at most) and goes out at once, with the
+   * owner's own words from the box when there are some. */
+  async function lookAtChart() {
+    if (!look || busy) return;
+    if (attached.length >= MAX_IMAGES) { setAttaching({ state: "error", message: "Two screenshots are attached; remove one to add the chart." }); return; }
+    setAttaching({ state: "busy" });
+    try {
+      const { image, line } = await look();
+      const stored = await uploadImage(image);
+      setAttaching(null);
+      const own = draft.replace(/^Context: [^\n]*\n+/, "").trim();
+      await send(own ? `Context: ${line}.\n\n${own}` : `Context: ${line}. What do you see?`, symbol,
+        [...attached, { id: stored.id, url: URL.createObjectURL(image) }]);
+    } catch (error) {
+      setAttaching({ state: "error", message: error instanceof Error ? error.message : "The chart could not be read." });
     }
   }
 
@@ -710,6 +730,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {attaching?.state === "busy" && <span className="text-xs text-muted-foreground">Attaching…</span>}
           {attaching?.state === "error" && <span role="alert" className="text-xs text-rose-300">{attaching.message}</span>}
         </div>
+      )}
+      {look && (
+        <button type="button" onClick={() => void lookAtChart()} data-testid="copilot-look"
+          disabled={!enabled || busy || attaching?.state === "busy" || (!!pageSymbol && symbol !== pageSymbol)}
+          title={pageSymbol && symbol !== pageSymbol ? `This conversation is about ${symbol}; the chart shows ${pageSymbol}.` : "Send the chart as you see it, with your levels, and ask what the copilot sees"}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded border px-2.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0 sm:py-1">
+          <Eye size={14} /> Look at my chart
+        </button>
       )}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex items-end gap-2">
         <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}

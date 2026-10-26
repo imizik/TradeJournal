@@ -25,7 +25,7 @@ from app.engine import captures
 
 ACCEPTED = captures.IMAGE_TYPES  # PNG, JPEG, WebP, by their first bytes
 MAX_IN = 8_000_000
-MAX_PIXELS = 50_000_000  # a decompression bomb is refused before it is decoded
+MAX_PIXELS = 16_000_000  # above any phone screenshot; a decompression bomb is refused before it is decoded
 LONGEST = 1568
 JPEG_QSCALE = 3  # ffmpeg's MJPEG scale, about quality 85
 MAX_PER_TURN = 2
@@ -87,10 +87,12 @@ def process(data: bytes) -> Image:
         raise ImageError("The image could not be read.") from None
     if frame.width * frame.height > MAX_PIXELS:
         raise ImageError("The image has too many pixels.")
-    rgba = frame.to_ndarray(format="rgba").astype(np.float32)
-    alpha = rgba[..., 3:4] / 255.0
-    rgb = (rgba[..., :3] * alpha + 255.0 * (1.0 - alpha)).round().astype(np.uint8)
-    return encode_rgb(np.ascontiguousarray(rgb))
+    if not frame.format.has_palette and not any(c.is_alpha for c in frame.format.components):  # a palette may hold alpha
+        return encode_rgb(frame.to_ndarray(format="rgb24"))
+    rgba = frame.to_ndarray(format="rgba")
+    alpha = rgba[..., 3:4].astype(np.uint16)
+    rgb = (rgba[..., :3] * alpha + 255 * (255 - alpha) + 127) // 255  # onto white, in integers
+    return encode_rgb(np.ascontiguousarray(rgb.astype(np.uint8)))
 
 
 def block(jpeg: bytes) -> dict:
