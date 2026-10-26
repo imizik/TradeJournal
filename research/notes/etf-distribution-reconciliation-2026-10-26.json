@@ -1,0 +1,254 @@
+{
+  "as_of": "2026-10-26",
+  "base_commit": "3617a9f615ba00e423b45b8203a2ec29ebf26690",
+  "boundaries": {
+    "backtest_run": false,
+    "candidate_reserved": false,
+    "evaluation_authorized": false,
+    "factory_intake_implemented": false,
+    "live_execution_enabled": false,
+    "protected_factory_outcomes_inspected": false,
+    "protocol_changed": false,
+    "schedules_resumed": false,
+    "strategy_arithmetic_run": false
+  },
+  "factory_state_sha256_unchanged": {
+    "/Users/user/TradeJournal-factory/backend/data/factory/search/2026-10-14-seconds.json": "36c5af600ee295cefbdc0b3299da50541df3661a13f6b354592b835e5c4afd7d",
+    "/Users/user/TradeJournal-factory/backend/data/factory/search/2026-10-15-seconds.json": "139d3b7ed0bad74dbfd3082a310d29dce836d287504d76b45b37a1a6a96babef",
+    "/Users/user/TradeJournal-factory/backend/data/factory/search/2026-10-16-seconds.json": "dfb34d24b5a36ba80ebc2a1a6b4437fb9b498e49488d1519938554db0892ac52",
+    "/Users/user/TradeJournal-factory/backend/data/factory/search/2026-10-25-seconds.json": "b7a56873cd771f2c446d369b649430b65a756ba278ff97ec81bb6f55b2e73569",
+    "/Users/user/TradeJournal-factory/research/ledger.jsonl": "69d265758a2400bdf90209390d6faae6531d1614788a42ffe78d6388b9578e63"
+  },
+  "kind": "etf_bil_distribution_reconciliation_receipt",
+  "manifest_sha256": "d2f07d938cc66ee7d8fb1fbc155a82823dd5a9574e3fb0e3bd5ecae66c736c43",
+  "preserved_bundle": "/Users/user/Documents/TradeJournalResearch/etf-bil-inputs-2026-10-26-v1",
+  "proposal": "etf-bil-exploratory-screen-proposal-2026-10-26.md",
+  "reconciliation": {
+    "by_fund": {
+      "BIL": {
+        "amount_differences": 0,
+        "explicit_zeros_missing": 33,
+        "issuer_cash_rows": 104,
+        "missing_positive": 0,
+        "provider_cash_rows": 71
+      },
+      "EEM": {
+        "amount_differences": 1,
+        "explicit_zeros_missing": 0,
+        "issuer_cash_rows": 18,
+        "missing_positive": 0,
+        "provider_cash_rows": 18
+      },
+      "EFA": {
+        "amount_differences": 0,
+        "explicit_zeros_missing": 0,
+        "issuer_cash_rows": 18,
+        "missing_positive": 0,
+        "provider_cash_rows": 18
+      },
+      "IEF": {
+        "amount_differences": 5,
+        "explicit_zeros_missing": 0,
+        "issuer_cash_rows": 104,
+        "missing_positive": 1,
+        "provider_cash_rows": 103
+      },
+      "SPY": {
+        "amount_differences": 1,
+        "explicit_zeros_missing": 0,
+        "issuer_cash_rows": 35,
+        "missing_positive": 2,
+        "provider_cash_rows": 33
+      }
+    },
+    "counts": {
+      "amount_precision_difference": 7,
+      "issuer_explicit_zero": 33,
+      "missing_positive": 3
+    },
+    "positive_omissions_and_amount_differences": [
+      {
+        "ex_date": "2016-03-18",
+        "issuer_amount": "1.049604",
+        "kind": "missing_positive",
+        "locator": "dividend!A9172:J9172",
+        "symbol": "SPY"
+      },
+      {
+        "ex_date": "2016-08-01",
+        "issuer_amount": "0.158313",
+        "kind": "missing_positive",
+        "locator": "distributionTableData index 122 (zero-based), totalDistribution.value",
+        "symbol": "IEF"
+      },
+      {
+        "ex_date": "2017-11-01",
+        "issuer_amount": "0.164305",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 107 (zero-based), totalDistribution.value",
+        "provider_amount": "0.1643",
+        "symbol": "IEF"
+      },
+      {
+        "ex_date": "2018-06-15",
+        "issuer_amount": "1.245568",
+        "kind": "missing_positive",
+        "locator": "dividend!A9163:J9163",
+        "symbol": "SPY"
+      },
+      {
+        "ex_date": "2020-06-01",
+        "issuer_amount": "0.122219",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 76 (zero-based), totalDistribution.value",
+        "provider_amount": "0.1222189",
+        "symbol": "IEF"
+      },
+      {
+        "ex_date": "2020-06-15",
+        "issuer_amount": "0.230289",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 13 (zero-based), totalDistribution.value",
+        "provider_amount": "0.2302889",
+        "symbol": "EEM"
+      },
+      {
+        "ex_date": "2020-06-19",
+        "issuer_amount": "1.366242",
+        "kind": "amount_precision_difference",
+        "locator": "dividend!A9155:J9155",
+        "provider_amount": "1.3662419",
+        "symbol": "SPY"
+      },
+      {
+        "ex_date": "2020-07-01",
+        "issuer_amount": "0.110052",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 75 (zero-based), totalDistribution.value",
+        "provider_amount": "0.1100519",
+        "symbol": "IEF"
+      },
+      {
+        "ex_date": "2020-10-01",
+        "issuer_amount": "0.079256",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 72 (zero-based), totalDistribution.value",
+        "provider_amount": "0.0792559",
+        "symbol": "IEF"
+      },
+      {
+        "ex_date": "2020-11-02",
+        "issuer_amount": "0.075943",
+        "kind": "amount_precision_difference",
+        "locator": "distributionTableData index 71 (zero-based), totalDistribution.value",
+        "provider_amount": "0.0759429",
+        "symbol": "IEF"
+      }
+    ],
+    "provider_blank_dividend_cusips": 114,
+    "provider_missing_record_pay_fields": 228
+  },
+  "snapshot": {
+    "actual_first_last": [
+      "2016-01-04",
+      "2024-09-30"
+    ],
+    "calendar_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7",
+    "cash_event_rows": 279,
+    "evaluation_authorized": false,
+    "explicit_zero_cash_events": 33,
+    "factory_intake_available": false,
+    "files": {
+      "freeze_inputs.py": "3b5f435b60e139fca2ffae3db57523fac05e0d8b0223e643cbe8401b4537979c",
+      "issuer/ishares-EEM-download.json": "7a6833617aa2506d6ceae5dc551c89315c5ce2a5091c260fb2048ea440d1e90b",
+      "issuer/ishares-EEM.html": "b0833cdc4c663cace6e2f622ee06a5a1c731c61ba0268cfbd111f7354d19367e",
+      "issuer/ishares-EFA-download.json": "86bd4322a8d430ef824890f461bcbb058a008a9359114509e556b1fc1c899f3e",
+      "issuer/ishares-EFA.html": "1eac62951e3144446ddf2210370b364765e89e029fcaa12fc9ba4e2e6a291431",
+      "issuer/ishares-IEF-download.json": "f301571889ecf8ebc494369d58bb33174b886d16ea165a6ab405fb7accf71426",
+      "issuer/ishares-IEF.html": "9949d9774bc9ff4d08fb7a1f62aa6fe90574041a4ba98987229a64cf1ee8ebaf",
+      "issuer/ssga-download.json": "0a9e7352b3d96cdb826ff73d5759a9167b8850c9e1cd28457001eccdec4486aa",
+      "issuer/ssga-historical-distributions.xlsx": "6b65cbf956b5d25705d08470006a0e97e6a7d2a0d5cfd08b63f6f79783b06320",
+      "normalized-actions.json": "2ec6d74624bb6ee283ef10975cd0aa68761cf3b4664ff3a0f35fb88a972e982e",
+      "provider/actions-0.json": "d567a6be3b1abfdb343de22ea373e151c243e6908c14daaa38021f1efbc32cb5",
+      "provider/bars-0.json": "9ea354b63cedce7424318960e5851f50b5ff3b70334957e21bc06d9ec30f0c69",
+      "provider/bars-1.json": "d7b075b288d826fb2bd45569692b0cf0625328bc70c30b16c1b2b3311f07ccde",
+      "provider/receipt.json": "f0c601740917dcfcb26d1f0c910933d803a8d71b52f7f098951a5555f2b5d3dd",
+      "reconciliation.json": "e346a6a385ff6a6fe87b01f574b76baf289a00f4608c4472e6901282654e89cb",
+      "sessions.jsonl": "f21b65c4fbda449825972732aa4a3ed5b6d70dc03f79d3b0fefa162b090385da"
+    },
+    "kind": "frozen_exploratory_input_candidate",
+    "known_at": null,
+    "limitations": [
+      "Revised histories retrieved October 26, 2026; not original publication-time proof.",
+      "Fixed survivor-selected fund universe; not untouched validation.",
+      "Data snapshot does not adopt a protocol, register a candidate or authorize a run."
+    ],
+    "normalization": {
+      "amount_authority": "current issuer distribution history for every fund and every event, chosen before strategy outcomes",
+      "identity": "current issuer history is mapped to its fund/ticker/CUSIP; original point-in-time identifiers not independently proved",
+      "ishares_cash": "totalDistribution.value, not income/tax components",
+      "no_event_days": "zero cash entitlement only after joining the complete supplied issuer event history; not inferred from a provider omission",
+      "split_units": "post-event shares per prior share; no same-date cash event at the sole split",
+      "ssga_cash": "DIVIDEND ($); every ST/LT gain cell in this slice is blank (not separately declared) or explicit zero; source blanks preserved"
+    },
+    "original_archive_sha256": "f0c601740917dcfcb26d1f0c910933d803a8d71b52f7f098951a5555f2b5d3dd",
+    "positive_cash_events": 246,
+    "price_window": [
+      "2016-01-01",
+      "2024-09-30"
+    ],
+    "raw_daily_records": 11000,
+    "returns_computed": false,
+    "sessions": 2200,
+    "signals_computed": false,
+    "sources": [
+      {
+        "bytes": 581216,
+        "file": "/Users/user/.codex/worktrees/609f/TradeJournal/backend/data/etf-distribution-reconciliation-20261026-v1/ssga-historical-distributions.xlsx",
+        "purpose": "distribution_metadata_reconciliation_only",
+        "request_started_at": "2026-10-26T16:50:12.788315+00:00",
+        "response_received_at": "2026-10-26T16:50:13.137672+00:00",
+        "sha256": "6b65cbf956b5d25705d08470006a0e97e6a7d2a0d5cfd08b63f6f79783b06320",
+        "source_url": "https://www.ssga.com/library-content/products/fund-data/etfs/us/spdr-etf-historical-distributions.xlsx"
+      },
+      {
+        "bytes": 1795187,
+        "file": "/Users/user/.codex/worktrees/609f/TradeJournal/backend/data/etf-distribution-reconciliation-20261026-v1/ishares-EFA.html",
+        "retrieved_at": "2026-10-26T16:54:43.988724+00:00",
+        "sha256": "1eac62951e3144446ddf2210370b364765e89e029fcaa12fc9ba4e2e6a291431",
+        "source_url": "https://www.ishares.com/us/products/239623/ishares-msci-eafe-etf"
+      },
+      {
+        "bytes": 1798191,
+        "file": "/Users/user/.codex/worktrees/609f/TradeJournal/backend/data/etf-distribution-reconciliation-20261026-v1/ishares-EEM.html",
+        "retrieved_at": "2026-10-26T16:54:44.591954+00:00",
+        "sha256": "b0833cdc4c663cace6e2f622ee06a5a1c731c61ba0268cfbd111f7354d19367e",
+        "source_url": "https://www.ishares.com/us/products/239637/ishares-msci-emerging-markets-etf"
+      },
+      {
+        "bytes": 1972915,
+        "file": "/Users/user/.codex/worktrees/609f/TradeJournal/backend/data/etf-distribution-reconciliation-20261026-v1/ishares-IEF.html",
+        "retrieved_at": "2026-10-26T16:54:45.107002+00:00",
+        "sha256": "9949d9774bc9ff4d08fb7a1f62aa6fe90574041a4ba98987229a64cf1ee8ebaf",
+        "source_url": "https://www.ishares.com/us/products/239456/ishares-710-year-treasury-bond-etf"
+      }
+    ],
+    "split_events": 1,
+    "symbols": [
+      "SPY",
+      "EFA",
+      "EEM",
+      "IEF",
+      "BIL"
+    ],
+    "version": 1
+  },
+  "status": "frozen_exploratory_input_candidate_for_review",
+  "verification": {
+    "all_saved_files_hashed": 17,
+    "independent_issuer_rows_compared": 279,
+    "independent_raw_close_matches": 11000,
+    "original_provider_pages_unchanged": true,
+    "relocated_reproduction_identical": true
+  }
+}
