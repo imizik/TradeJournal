@@ -1,0 +1,80 @@
+{
+  "kind": "invented_metadata_fixture",
+  "start": "2023-10-01",
+  "end": "2023-10-31",
+  "assets": {
+    "SPY": {
+      "id": "invented-asset-SPY",
+      "symbol": "SPY",
+      "class": "us_equity",
+      "name": "Invented SPY"
+    },
+    "EFA": {
+      "id": "invented-asset-EFA",
+      "symbol": "EFA",
+      "class": "us_equity",
+      "name": "Invented EFA"
+    },
+    "EEM": {
+      "id": "invented-asset-EEM",
+      "symbol": "EEM",
+      "class": "us_equity",
+      "name": "Invented EEM"
+    },
+    "IEF": {
+      "id": "invented-asset-IEF",
+      "symbol": "IEF",
+      "class": "us_equity",
+      "name": "Invented IEF"
+    }
+  },
+  "pages": [
+    {
+      "corporate_actions": {
+        "cash_dividends": [
+          {
+            "id": "invented-action-1",
+            "symbol": "SPY",
+            "cusip": "78462F103",
+            "ex_date": "2023-09-15",
+            "process_date": "2023-10-31",
+            "payable_date": "2023-10-31",
+            "record_date": "2023-09-18",
+            "rate": "1.00"
+          }
+        ]
+      },
+      "next_page_token": "1"
+    },
+    {
+      "corporate_actions": {
+        "cash_dividends": [
+          {
+            "id": "invented-action-1",
+            "symbol": "SPY",
+            "cusip": "78462F103",
+            "ex_date": "2023-09-15",
+            "process_date": "2023-10-31",
+            "payable_date": "2023-10-31",
+            "record_date": "2023-09-18",
+            "rate": "1.00"
+          },
+          {
+            "id": "invented-action-2",
+            "symbol": "IEF",
+            "cusip": null,
+            "ex_date": null,
+            "process_date": "2023-10-05"
+          }
+        ]
+      },
+      "next_page_token": null
+    }
+  ],
+  "expected": [
+    {
+      "symbol": "EEM",
+      "ex_date": "2023-10-03"
+    }
+  ]
+}
