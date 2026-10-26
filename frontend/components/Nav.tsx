@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
-import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -28,6 +28,7 @@ const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
 /** The sidebar's pages; ``heading`` starts a new group (everyday pages come first, without one). */
 const navItems: { href: string; label: string; icon: typeof Bot; heading?: string }[] = [
+  { href: "/today", label: "Today", icon: Sun }, // owner-only: what matters right now
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
@@ -113,8 +114,9 @@ function shownHref(href: string, owner: boolean, enabled: boolean, journal: bool
   return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
 }
 
-/** The phone tab bar's pages; everything else is under More. */
+/** The phone tab bar's pages; everything else is under More. The owner lands on Today (Dashboard stays in More); an assistant keeps Dashboard. */
 const TABS = [
+  { href: "/today", label: "Today", icon: Sun },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
@@ -268,7 +270,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
       {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
-        {TABS.filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write)).map(({ href, label, icon: Icon }) => {
+        {TABS.filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/" && access.owner)).map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}

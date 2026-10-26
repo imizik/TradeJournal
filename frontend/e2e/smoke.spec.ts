@@ -138,7 +138,7 @@ test.describe("trades", () => {
     await expect(table.getByRole("link", { name: "AAPL", exact: true }).first().locator("..")).toContainText(/AAPL 230C · [A-Z][a-z]{2} \d{1,2} '\d{2}/);
     await expect(page.getByRole("heading", { name: "Labs" })).toBeVisible();
     const nav = page.getByRole("navigation").filter({ has: page.getByRole("heading", { name: "Labs" }) });
-    expect((await nav.getByRole("link").allTextContents()).slice(0, 6)).toEqual(["Dashboard", "Charts", "Daily Review", "Jo", "Trades", "Analytics"]);
+    expect((await nav.getByRole("link").allTextContents()).slice(0, 7)).toEqual(["Today", "Dashboard", "Charts", "Daily Review", "Jo", "Trades", "Analytics"]);
     await page.screenshot({ path: test.info().outputPath("trades-desktop.png") });
     // Seed dates move with the run date, so the check is on the form, not a fixed day.
     await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();
