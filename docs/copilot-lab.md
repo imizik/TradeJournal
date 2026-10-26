@@ -53,6 +53,24 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     tickers. Names come from the AI buildout seed. A phrase changes only
     when exactly one known symbol fits, so "I see you are why" and
     "coherent" stay as heard.
+- **Read it back** (`frontend/components/copilot/SpeakAnswer.tsx`, every
+  variant): a 44 px speaker beside the mic reads each finished answer aloud
+  with the browser's own `speechSynthesis`. No server call is made. It is
+  off by default and remembered in this browser (`copilot.speak`), with a
+  Voice speed of 0.9×, 1.0× or 1.2× (`copilot.speak-rate`) beside the
+  auto-send setting. The device's default English voice reads.
+  - Speech starts when the turn's `done` event arrives, never on partial
+    text. `lib/copilot.ts` `speechText` prepares it: markdown and the
+    simulated-model head are dropped, and list items become sentences.
+    Tickers are spelled ("N B I S"), prices become dollars and `95C` becomes
+    "95 call". Tool rows and the metrics line are not part of the answer's
+    text. A card adds one closing sentence ("There is a plan card to
+    confirm."). Nothing is ever confirmed by voice.
+  - A new turn, pressing the mic (before it listens), a hidden page or
+    closing the panel stops speech at once. A tap on the speaker while it
+    reads stops that answer and leaves it on. With auto-send and the
+    speaker both on, the loop is hold to talk, hear the answer, hold again.
+    A browser without speech synthesis shows no speaker.
 - Entry points (nothing is ever sent until the owner presses Send):
   - **Plan a trade** (`frontend/components/copilot/PlanATrade.tsx`): the
     primary-styled way in, so an impulse gets pressure-tested before the

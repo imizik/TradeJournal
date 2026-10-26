@@ -131,6 +131,81 @@ export function rememberModel(model: string | null) {
   try { if (model) window.localStorage.setItem(MODEL_KEY, model); else window.localStorage.removeItem(MODEL_KEY); } catch { /* per-browser convenience only */ }
 }
 
+/** Read it back: whether this browser speaks each finished answer, and how fast. */
+export const SPEAK_KEY = "copilot.speak";
+export const SPEAK_RATE_KEY = "copilot.speak-rate";
+export const SPEAK_RATES = [0.9, 1, 1.2] as const;
+
+export function speakOn(): boolean {
+  try { return window.localStorage.getItem(SPEAK_KEY) === "on"; } catch { return false; }
+}
+
+export function rememberSpeak(on: boolean) {
+  try { if (on) window.localStorage.setItem(SPEAK_KEY, "on"); else window.localStorage.removeItem(SPEAK_KEY); } catch { /* per-browser convenience only */ }
+}
+
+export function speakRate(): number {
+  try {
+    const saved = Number(window.localStorage.getItem(SPEAK_RATE_KEY));
+    return (SPEAK_RATES as readonly number[]).includes(saved) ? saved : 1;
+  } catch { return 1; }
+}
+
+export function rememberSpeakRate(rate: number) {
+  try { if (rate === 1) window.localStorage.removeItem(SPEAK_RATE_KEY); else window.localStorage.setItem(SPEAK_RATE_KEY, String(rate)); } catch { /* per-browser convenience only */ }
+}
+
+const CARD_NAME: Record<Proposal["kind"], string> = { trade_plan: "plan", watch: "watch", revisit: "revisit", memory: "memory", practice: "practice" };
+const SCALE: Record<string, string> = { k: "thousand", K: "thousand", M: "million", B: "billion" };
+const SIGN: Record<string, string> = { "+": "plus ", "-": "minus ", "−": "minus " };
+
+/** One line of an answer as it should sound: markdown gone, prices in dollars, tickers spelled ("N B I S"). */
+function speakLine(line: string): string {
+  return line
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "")
+    .replace(/\*\*|__|`/g, "").replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?=[^\w*]|$)/g, "$1$2")
+    .replace(/(\d)\s*[–—-]\s*(?=\$?\d)/g, "$1 to ")
+    .replace(/([+\-−]?)\$(\d[\d,]*)(?:\.(\d+))?(?:\s?([kKMB])\b)?/g, (_, sign: string, whole: string, decimals: string | undefined, scale: string | undefined) => {
+      const dollars = whole.replace(/,/g, "");
+      const said = scale ? `${dollars}${decimals ? `.${decimals}` : ""} ${SCALE[scale]} dollars`
+        : decimals && Number(decimals.slice(0, 2).padEnd(2, "0")) ? (Number(dollars) ? `${dollars} dollars and ` : "")
+          + `${Number(decimals.slice(0, 2).padEnd(2, "0"))} cents` : `${dollars} dollars`;
+      return `${SIGN[sign] ?? ""}${said}`;
+    })
+    .replace(/\b(up|down)\s+[+\-−](?=\d)/gi, "$1 ")
+    .replace(/(^|[\s(])([+\-−])(?=\d)/g, (_, before: string, sign: string) => `${before}${SIGN[sign]}`)
+    .replace(/(\d),(?=\d{3}\b)/g, "$1").replace(/(\d),(?=\d{3}\b)/g, "$1")
+    .replace(/(\d)%/g, "$1 percent")
+    .replace(/(\d)R\b/g, "$1 R")
+    .replace(/\b(\d+(?:\.\d+)?)([CP])\b/g, (_, strike: string, side: string) => `${strike} ${side === "C" ? "call" : "put"}`)
+    .replace(/\$?\b([A-Z]{2,5})\b/g, (_, ticker: string) => ticker.split("").join(" "))
+    .replace(/\s*(?:→|->)\s*/g, " to ").replace(/[≈~](?=\s?\d)/g, "about ").replace(/\s*&\s*/g, " and ").replace(/\s@\s/g, " at ")
+    .replace(/[*#|>`]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** A finished answer as the phone reads it aloud: the simulated-model head skipped, list items read as sentences, and
+ * one closing sentence when cards wait to be confirmed (never confirmed by voice). Tool rows and metrics are not
+ * part of the text. An answer with no text says its error instead; a stopped turn says nothing. */
+export function speechText(message: Pick<LabMessage, "content" | "proposals" | "error">): string {
+  const sentences: string[] = [];
+  for (const block of message.content.split(/\n{2,}/)) {
+    if (/^_?\(Simulated model[\s\S]*\)_?$/.test(block.trim())) continue;
+    for (const raw of block.split("\n")) {
+      const line = speakLine(raw.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*•]\s+|\d+[.)]\s+)/, ""));
+      if (!line) continue;
+      sentences.push(/[.!?:;,]$/.test(line) ? line : `${line}.`);
+    }
+  }
+  if (!sentences.length && message.error && message.error.code !== "stopped") sentences.push(message.error.message);
+  const cards = message.proposals ?? [];
+  if (cards.length === 1) sentences.push(`There is a ${CARD_NAME[cards[0].kind]} card to confirm.`);
+  else if (cards.length > 1) {
+    const kinds = new Set(cards.map(card => card.kind));
+    sentences.push(`There are ${cards.length} ${kinds.size === 1 ? `${CARD_NAME[cards[0].kind]} ` : ""}cards to confirm.`);
+  }
+  return sentences.join(" ").replace(/\s+/g, " ").trim();
+}
+
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
   onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, imageIds: string[] = [],
   backend: Backend | null = null) {

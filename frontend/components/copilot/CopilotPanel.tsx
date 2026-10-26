@@ -12,6 +12,7 @@ import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
+import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
 import type { CaptureOrigin } from "@/lib/captures";
 import { cn } from "@/lib/utils";
@@ -273,6 +274,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // The page symbol the owner chose not to follow; a later change offers again.
   const [kept, setKept] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [answered, setAnswered] = useState(0); // turns whose done event arrived: each is read aloud when the speaker is on
   // The model for this browser's turns, when the server offers more than one; the metrics line shows what answered.
   const [model, setModel] = useState<string | null>(null);
   const [backend, setBackend] = useState<Backend | null>(null);
@@ -492,7 +494,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             tools: at < 0 ? [...tools, event] : tools.map((t, i) => i === at ? { ...t, ...event } : t) };
         });
         else if (event.type === "error") update(last => ({ ...last, error: { code: event.code, message: event.message } }));
-        else if (event.type === "done") update(last => ({ ...last, progress: undefined, metrics: event.metrics }));
+        else if (event.type === "done") { update(last => ({ ...last, progress: undefined, metrics: event.metrics })); setAnswered(n => n + 1); }
       }, controller.signal, model, shots.map(s => s.id), backend);
     } catch (error) {
       update(last => ({ ...last, error: controller.signal.aborted ? { code: "stopped", message: "Stopped." }
@@ -606,6 +608,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSpoken(true);
     box.current?.focus();
   } });
+
+  const last = messages.at(-1);
+  const speak = useSpeakAnswer({ ready: status !== null, turn: answered, message: last?.role === "assistant" ? last : null, busy, listening: voice.listening, disabled: status?.enabled !== true });
 
   const enabled = status?.enabled === true;
   // Beside another page the panel is the owner's, and only while the lab is on: otherwise it is not there at all.
@@ -779,12 +784,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         </button>
         <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Screenshot file" data-testid="copilot-image-input"
           onChange={e => { void attach([...(e.target.files ?? [])]); e.target.value = ""; }} />
-        {voice.button}
+        {/* The answer being read stops the moment the mic is pressed, before it starts listening. */}
+        <span className="contents" onPointerDownCapture={speak.stop} onKeyDownCapture={speak.stop}>{voice.button}</span>
+        {speak.button}
       </form>
-      {voice.available && (
+      {(voice.available || speak.available) && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}
-          {voice.setting}
+          <span className="flex flex-wrap items-center gap-x-3">{voice.setting}{speak.setting}</span>
         </div>
       )}
       </div>

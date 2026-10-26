@@ -37,7 +37,7 @@ const DENIED = "Microphone access is blocked. Allow it for this site in your bro
  */
 export function useVoiceInput({ status, disabled, onText }: {
   status: CopilotStatus | null; disabled: boolean; onText(text: string, send: boolean): void;
-}): { available: boolean; button: ReactNode; banner: ReactNode; setting: ReactNode } {
+}): { available: boolean; listening: boolean; button: ReactNode; banner: ReactNode; setting: ReactNode } {
   const [phase, setPhase] = useState<Phase>("idle");
   const [mode, setMode] = useState<"hold" | "tap">("hold");
   const [elapsed, setElapsed] = useState(0);
@@ -290,5 +290,5 @@ export function useVoiceInput({ status, disabled, onText }: {
     </label>
   );
 
-  return { available, button, banner, setting };
+  return { available, listening, button, banner, setting };
 }
