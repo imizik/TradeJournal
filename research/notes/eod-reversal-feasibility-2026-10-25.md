@@ -207,14 +207,16 @@ engine to work around these unresolved inputs.
 
 ## Verification and stopping point
 
-Only this memo is added. Checks cover documentation links/freshness, diff review,
+This memo and the linked research-path proposal are documentation only. Checks
+cover documentation links/freshness, diff review,
 state hashes and scheduler status. No strategy tests/evaluator, public replication
 code or protected outcomes were used. Public studies may overlap historical
 dates; that does not grant access to Factory's protected local data.
 
-The research stop is intentional: evidence has not established an eligible next
-attempt. "Keep iterating" was applied to two bounded literature alternatives,
-not optimization or repeated trials. Account-level usage percentage is unavailable;
+Further work is recorded in [A more useful next strategy experiment](strategy-research-path-2026-10-25.md):
+a source-grounded trend feasibility priority, a concrete proposed design card,
+benchmark requirements and invented accounting acceptance cases. No eligible
+next attempt has been established. Account-level usage percentage is unavailable;
 no claim of consuming exactly 25% is made.
 
 [eod]: https://academicweb.nd.edu/~zda/EOD.pdf
