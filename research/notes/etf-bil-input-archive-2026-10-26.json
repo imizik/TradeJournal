@@ -1,0 +1,257 @@
+{
+  "acquisition_code_commit": "d1cf3b50839222da8e18873fd706e2e4c2f00d2b",
+  "actual_get_requests": 3,
+  "archive_directory": "/Users/user/.codex/worktrees/609f/TradeJournal/backend/data/etf-bil-source-20261026-v1",
+  "archive_receipt_sha256": "f0c601740917dcfcb26d1f0c910933d803a8d71b52f7f098951a5555f2b5d3dd",
+  "authorized_by_owner": true,
+  "automatic_retries": 0,
+  "candidate_attempt_spent": false,
+  "daily_coverage": {
+    "BIL": {
+      "count": 2200,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    "EEM": {
+      "count": 2200,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    "EFA": {
+      "count": 2200,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    "IEF": {
+      "count": 2200,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    },
+    "SPY": {
+      "count": 2200,
+      "dates_sha256": "e146c2a83fc72017fdde4f6f4fcb4b9862e5def917e435fbe72f642a1bbed9e7"
+    }
+  },
+  "eligible_for_evaluation": false,
+  "historical_actions_complete": "unverified",
+  "issuer_reconciliation": "not_performed",
+  "kind": "etf_input_archive_unaccepted",
+  "known_at": null,
+  "metadata_review": {
+    "bil_split": {
+      "effective_date": "2017-11-30",
+      "issuer_notice": "https://www.streetinsider.com/Press%2BReleases/State%2BStreet%2BGlobal%2BAdvisors%2BAnnounces%2BETF%2BShare%2BSplits/13511071.html",
+      "new_shares": 1,
+      "old_and_new_cusip_missing": true,
+      "old_shares": 2
+    },
+    "counts": {
+      "BIL": {
+        "cash_dividends": 71,
+        "outside_price_window": 25,
+        "reverse_splits": 1
+      },
+      "EEM": {
+        "cash_dividends": 18,
+        "outside_price_window": 4
+      },
+      "EFA": {
+        "cash_dividends": 18,
+        "outside_price_window": 4
+      },
+      "IEF": {
+        "cash_dividends": 103,
+        "outside_price_window": 25
+      },
+      "SPY": {
+        "cash_dividends": 33,
+        "outside_price_window": 7
+      }
+    },
+    "distribution_completeness": "unresolved; record counts are not zero-payment evidence",
+    "in_window_conflicting_ids": 0,
+    "in_window_exact_duplicates": 0,
+    "in_window_missing_dividend_cusips": {
+      "BIL": 38,
+      "EEM": 7,
+      "EFA": 8,
+      "IEF": 47,
+      "SPY": 14
+    },
+    "in_window_nonmatching_nonempty_dividend_cusips": {},
+    "in_window_yearly_dividend_record_counts": {
+      "BIL": {
+        "2016": 2,
+        "2017": 12,
+        "2018": 12,
+        "2019": 12,
+        "2020": 5,
+        "2022": 8,
+        "2023": 12,
+        "2024": 8
+      },
+      "EEM": {
+        "2016": 2,
+        "2017": 2,
+        "2018": 2,
+        "2019": 2,
+        "2020": 2,
+        "2021": 3,
+        "2022": 2,
+        "2023": 2,
+        "2024": 1
+      },
+      "EFA": {
+        "2016": 2,
+        "2017": 2,
+        "2018": 2,
+        "2019": 2,
+        "2020": 2,
+        "2021": 3,
+        "2022": 2,
+        "2023": 2,
+        "2024": 1
+      },
+      "IEF": {
+        "2016": 11,
+        "2017": 12,
+        "2018": 12,
+        "2019": 12,
+        "2020": 12,
+        "2021": 12,
+        "2022": 12,
+        "2023": 12,
+        "2024": 8
+      },
+      "SPY": {
+        "2016": 3,
+        "2017": 4,
+        "2018": 3,
+        "2019": 4,
+        "2020": 4,
+        "2021": 4,
+        "2022": 4,
+        "2023": 4,
+        "2024": 3
+      }
+    }
+  },
+  "no_total_return_or_strategy_calculation": true,
+  "pages": [
+    {
+      "bytes": 1078187,
+      "file": "bars-0.json",
+      "http_status": 200,
+      "params": {
+        "adjustment": "raw",
+        "asof": "2024-09-30",
+        "currency": "USD",
+        "end": "2024-09-30T23:59:59-04:00",
+        "feed": "sip",
+        "limit": 10000,
+        "sort": "asc",
+        "start": "2016-01-01T00:00:00-05:00",
+        "symbols": "SPY,EFA,EEM,IEF,BIL",
+        "timeframe": "1Day"
+      },
+      "request_started_at": "2026-10-26T16:24:32.584659+00:00",
+      "response_received_at": "2026-10-26T16:24:33.103890+00:00",
+      "sha256": "9ea354b63cedce7424318960e5851f50b5ff3b70334957e21bc06d9ec30f0c69",
+      "terminal_page": false,
+      "url": "https://data.alpaca.markets/v2/stocks/bars"
+    },
+    {
+      "bytes": 113104,
+      "file": "bars-1.json",
+      "http_status": 200,
+      "params": {
+        "adjustment": "raw",
+        "asof": "2024-09-30",
+        "currency": "USD",
+        "end": "2024-09-30T23:59:59-04:00",
+        "feed": "sip",
+        "limit": 10000,
+        "page_token": "U1BZfER8MTYwMjEyOTYwMDAwMDAwMDAwMA==",
+        "sort": "asc",
+        "start": "2016-01-01T00:00:00-05:00",
+        "symbols": "SPY,EFA,EEM,IEF,BIL",
+        "timeframe": "1Day"
+      },
+      "request_started_at": "2026-10-26T16:24:33.113933+00:00",
+      "response_received_at": "2026-10-26T16:24:33.188902+00:00",
+      "sha256": "d7b075b288d826fb2bd45569692b0cf0625328bc70c30b16c1b2b3311f07ccde",
+      "terminal_page": true,
+      "url": "https://data.alpaca.markets/v2/stocks/bars"
+    },
+    {
+      "bytes": 65299,
+      "file": "actions-0.json",
+      "http_status": 200,
+      "params": {
+        "data_quality": "all",
+        "end": "2026-10-26",
+        "limit": 1000,
+        "sort": "asc",
+        "start": "2016-01-01",
+        "symbols": "SPY,EFA,EEM,IEF,BIL"
+      },
+      "request_started_at": "2026-10-26T16:24:33.246936+00:00",
+      "response_received_at": "2026-10-26T16:24:33.309132+00:00",
+      "sha256": "d567a6be3b1abfdb343de22ea373e151c243e6908c14daaa38021f1efbc32cb5",
+      "terminal_page": true,
+      "url": "https://data.alpaca.markets/v1/corporate-actions"
+    }
+  ],
+  "plan": {
+    "credential_fields": [
+      "ALPACA_API_KEY",
+      "ALPACA_API_SECRET"
+    ],
+    "credential_source": "/Users/user/TradeJournal-factory/backend/.env",
+    "evaluation_authorized": false,
+    "kind": "etf_input_acquisition_plan_only",
+    "late_metadata_policy": "Retain source archive; only effective dates through 2024-09-30 may enter a future normalized input. No post-cutoff prices.",
+    "max_requests": 12,
+    "max_response_bytes": 3000000,
+    "max_seconds": 120,
+    "requests": [
+      {
+        "max_pages": 4,
+        "name": "bars",
+        "params": {
+          "adjustment": "raw",
+          "asof": "2024-09-30",
+          "currency": "USD",
+          "end": "2024-09-30T23:59:59-04:00",
+          "feed": "sip",
+          "limit": 10000,
+          "sort": "asc",
+          "start": "2016-01-01T00:00:00-05:00",
+          "symbols": "SPY,EFA,EEM,IEF,BIL",
+          "timeframe": "1Day"
+        },
+        "url": "https://data.alpaca.markets/v2/stocks/bars"
+      },
+      {
+        "max_pages": 8,
+        "name": "actions",
+        "params": {
+          "data_quality": "all",
+          "end": "2026-10-26",
+          "limit": 1000,
+          "sort": "asc",
+          "start": "2016-01-01",
+          "symbols": "SPY,EFA,EEM,IEF,BIL"
+        },
+        "url": "https://data.alpaca.markets/v1/corporate-actions"
+      }
+    ],
+    "retries": 0,
+    "symbols": [
+      "SPY",
+      "EFA",
+      "EEM",
+      "IEF",
+      "BIL"
+    ]
+  },
+  "protection": "Action records after the price cutoff remain quarantined from future normalized evaluator inputs.",
+  "status": "acquired_unaccepted",
+  "strategy_evaluated": false
+}

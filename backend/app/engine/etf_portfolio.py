@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, localcontext
+from fractions import Fraction
 
 SYMBOLS = ("SPY", "EFA", "EEM", "IEF", "BIL")
 ZERO, ONE = Decimal(0), Decimal(1)
@@ -18,10 +19,12 @@ CUTOFF = date(2024, 9, 30)
 Vector = tuple[Decimal, ...]
 
 
-def vector(values: Vector, *, positive=False) -> None:
+def vector(values: Vector, *, positive=False, raw=False) -> None:
     if (not isinstance(values, tuple) or len(values) != len(SYMBOLS)
             or any(not isinstance(x, Decimal) or not x.is_finite() or x < 0
-                   or x > Decimal("1e12") or (positive and x == 0) for x in values)):
+                   or x > Decimal("1e12")
+                   or (raw and (x.as_tuple().exponent < -18 or len(x.as_tuple().digits) > 32))
+                   or (positive and x == 0) for x in values)):
         raise ValueError("five finite nonnegative Decimal values required")
 
 
@@ -111,9 +114,9 @@ def validate_sessions(rows: tuple[Session, ...], expected: tuple[date, ...]) -> 
             or tuple(r.day for r in rows) != expected):
         raise ValueError("missing, duplicate, unordered or out-of-window sessions")
     for row in rows:
-        vector(row.close, positive=True)
-        vector(row.distribution)
-        vector(row.split, positive=True)
+        vector(row.close, positive=True, raw=True)
+        vector(row.distribution, raw=True)
+        vector(row.split, positive=True, raw=True)
     months = [12 * d.year + d.month for d in expected]
     ends = tuple(i for i in range(len(rows)) if i == len(rows)-1 or months[i+1] != months[i])
     if len(ends) < 14 or any(months[b] - months[a] != 1 for a, b in zip(ends, ends[1:])):
@@ -131,11 +134,16 @@ def calculate(rows: tuple[Session, ...], expected: tuple[date, ...]) -> tuple[Ca
     ends = validate_sessions(rows, expected)
     with localcontext() as context:
         context.prec = 40
-        index = [(ONE,) * len(SYMBOLS)]
+        # Exact rational ratios preserve strict economic ties. A Decimal price
+        # round trip such as 13 -> 19 -> 13 can otherwise round above one.
+        index = [(Fraction(1),) * len(SYMBOLS)]
+        daily_growth = [(ONE,) * len(SYMBOLS)]
         for previous, current in zip(rows, rows[1:]):
-            index.append(tuple(v * split * (close + dividend) / old
-                               for v, split, close, dividend, old in zip(
-                                   index[-1], current.split, current.close, current.distribution, previous.close)))
+            growth = tuple(Fraction(split) * (Fraction(close) + Fraction(dividend)) / Fraction(old)
+                           for split, close, dividend, old in zip(
+                               current.split, current.close, current.distribution, previous.close))
+            index.append(tuple(v*g for v, g in zip(index[-1], growth)))
+            daily_growth.append(tuple(Decimal(g.numerator)/Decimal(g.denominator) for g in growth))
         decisions = []
         for month in range(12, len(ends)-1):
             now, old = ends[month], ends[month-12]
@@ -152,7 +160,7 @@ def calculate(rows: tuple[Session, ...], expected: tuple[date, ...]) -> tuple[Ca
                 for i in range(ends[12], len(rows)):
                     day = rows[i].day
                     if i > ends[12]:
-                        held = tuple(h * new/old for h, new, old in zip(held, index[i], index[i-1]))
+                        held = tuple(h*g for h, g in zip(held, daily_growth[i]))
                     traded = fee = ZERO
                     # Existing holdings first earn this session's return.
                     if day in targets:

@@ -151,11 +151,34 @@ def test_future_prices_cannot_change_earlier_targets_or_paths():
         assert getattr(old, name).path[:-1] == getattr(new, name).path[:-1]
 
 
+def test_bil_reverse_split_does_not_create_a_cash_alternative_gain():
+    rows, days = invented()
+    rows = change(rows, 14, symbol=4, close=200, split=".5")
+    rows = change(rows, 15, symbol=4, close=200)
+    rows = change(rows, 16, symbol=4, close=200)
+    out = calculate(rows, days)[0]
+    with localcontext() as ctx:
+        ctx.prec = 40
+        for lane in (out.active, out.bil):
+            near(lane.path[-1].nav, (1-out.cost_rate)/(1+out.cost_rate))
+
+
 def test_strict_comparator_equal_growth_stays_in_bil():
     rows, days = invented()
     rows = change(change(rows, 12, close=101), 12, symbol=4, close=101)
     out = calculate(rows, days)[0]
     assert out.decisions[0].weights == (D(0),)*4 + (D(1),)
+
+
+@pytest.mark.parametrize("ending,expected_weight", [("13", "0"), ("13.000000000000000001", ".25")])
+def test_exact_round_trip_tie_and_genuine_tiny_gain(ending, expected_weight):
+    rows, days = invented()
+    rows = tuple(replace(r, close=(D(13),)*5) for r in rows)
+    rows = change(rows, 1, close=19)
+    rows = change(rows, 12, close=ending)
+    out = calculate(rows, days)[0]
+    assert out.decisions[0].weights[0] == D(expected_weight)
+    assert out.decisions[0].weights[-1] == 1-D(expected_weight)
 
 
 def test_paired_metric_uses_all_months_and_is_not_cagr_difference():
@@ -171,7 +194,7 @@ def test_paired_metric_uses_all_months_and_is_not_cagr_difference():
     assert abs(out.annualized_increment_pp - 100*(out.active.cagr-out.passive.cagr)) > D(".01")
 
 
-@pytest.mark.parametrize("kind", ["missing", "duplicate", "order", "protected", "incomplete_warmup", "gap", "nan", "float", "zero_split"])
+@pytest.mark.parametrize("kind", ["missing", "duplicate", "order", "protected", "incomplete_warmup", "gap", "nan", "float", "zero_split", "unbounded_scale"])
 def test_calendar_and_numeric_refusals(kind):
     rows, days = invented()
     if kind == "missing":
@@ -191,7 +214,8 @@ def test_calendar_and_numeric_refusals(kind):
         rows, days = rows[:3]+rows[4:], days[:3]+days[4:]
     else:
         row = rows[3]
-        field, value = ("split", D(0)) if kind == "zero_split" else ("close", D("NaN") if kind == "nan" else 100.0)
+        bad = {"nan": D("NaN"), "float": 100.0, "unbounded_scale": D("1e-1000000"), "zero_split": D(0)}
+        field, value = ("split" if kind == "zero_split" else "close"), bad[kind]
         rows = rows[:3] + (replace(row, **{field: (value,)*5}),) + rows[4:]
     with pytest.raises(ValueError):
         validate_sessions(rows, days)

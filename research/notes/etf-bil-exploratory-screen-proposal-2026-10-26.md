@@ -181,6 +181,8 @@ cash, final liquidation, paired monthly returns, NAV, CAGR and drawdown for all
 three lanes at both cost levels. BIL weights and traded notional are recorded
 along the daily paths. Its tests use **invented prices and an invented calendar
 only**; their outputs are software checks, not strategy performance evidence.
+Signal comparisons use exact rational ratios so an exact tie cannot become a
+risk allocation through rounding; portfolio accounting uses Decimal arithmetic.
 
 The calculator accepts already-normalized per-post-event-share distributions
 and splits. It has no market loader, CLI, candidate reservation or broker path.
@@ -220,11 +222,43 @@ Even successful acquisition is marked `acquired_unaccepted` and
 `eligible_for_evaluation=false`. Daily dates must match the previously audited
 2,200-session calendar hash for every fund; this is date coverage, not issuer
 reconciliation. The request plan and refusal paths are covered by mock-transport
-tests. No credentialed acquisition was performed as part of this implementation.
-The earlier three-request approval does not cover this expanded plan.
+tests. The earlier three-request approval did not cover this expanded plan;
+the owner separately approved this exact acquisition during implementation.
 
-Remaining before any historical screen: approve and acquire the fixed archive;
-reconcile and freeze its action normalization/input receipt; then connect the
+The approved acquisition completed once in **three GETs**: two bar pages and one
+action page, all HTTP 200 with terminal pagination reached. All five funds have
+2,200 dates matching the audited calendar, for 11,000 daily bars. The
+[metadata-only receipt](etf-bil-input-archive-2026-10-26.json) records the exact
+code version, request metadata, response hashes and local archive location.
+Raw pages are retained in the ignored worktree data directory with read-only
+permissions; they are not committed or guaranteed to survive worktree deletion.
+Original source bytes must be retained before retiring this worktree.
+
+| Symbol | In-window cash-dividend records | Those with blank CUSIP |
+|---|---:|---:|
+| SPY | 33 | 14 |
+| EFA | 18 | 8 |
+| EEM | 18 | 7 |
+| IEF | 103 | 47 |
+| BIL | 71 | 38 |
+
+All nonempty dividend CUSIPs matched the expected current identifiers. There
+were no repeated/conflicting in-window action IDs. These checks do not establish
+historical identity or distribution completeness. For example, SPY has three
+records in each of 2016 and 2018, and BIL has none in 2021; those counts require
+issuer reconciliation, not a presumption of zero distributions or an automatic
+decision that every apparent gap is missing data.
+
+The BIL archive also contains a 1-for-2 reverse split effective November 30,
+2017, with blank old/new CUSIPs. The ratio and date agree with the
+[issuer's November 15, 2017 announcement, syndicated by Business Wire][bil-split].
+A synthetic reverse-split regression checks that the calculator does not turn
+the price discontinuity into a gain. This one-event check is not full archive
+acceptance. Sixty-five action records have effective dates beyond the price
+window and remain outside any future normalized evaluator input.
+
+Remaining before any historical screen: reconcile and freeze the acquired
+archive's action normalization/input receipt; then connect the
 calculator to the **existing** Factory reservation, locks, budget and bounded
 child, with an explicit one-run authorization. The current ORB-only intake and
 all frozen gates remain unchanged. There is no enabled ETF evaluation command,
@@ -233,3 +267,4 @@ new ledger, schedule, live execution or consumed candidate attempt in this slice
 [bil]: https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil
 [bars]: https://docs.alpaca.markets/us/reference/stockbars
 [actions]: https://docs.alpaca.markets/us/reference/corporateactions-1
+[bil-split]: https://www.streetinsider.com/Press%2BReleases/State%2BStreet%2BGlobal%2BAdvisors%2BAnnounces%2BETF%2BShare%2BSplits/13511071.html
