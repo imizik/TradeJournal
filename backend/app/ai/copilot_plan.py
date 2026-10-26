@@ -152,9 +152,10 @@ class PlanAdapter:
 
     def __init__(self, cfg: copilot.Settings, sdk=None, env: dict[str, str] | None = None):
         from app.environment import describe
-        if not describe().is_local:
-            raise copilot.CopilotError("plan_local_only", "The Claude plan backend is for local development and testing only "
-                                       "(the database is not local). Use COPILOT_BACKEND=anthropic with an API key elsewhere.")
+        if not describe().is_local and not cfg.plan_remote_ok:
+            raise copilot.CopilotError("plan_local_only", "The Claude plan backend runs against a hosted database only with "
+                                       "COPILOT_PLAN_REMOTE_OK=true (the owner accepts the plan's terms for this app, as for research "
+                                       "jobs). Otherwise use COPILOT_BACKEND=anthropic with an API key.")
         self.env = child_env() if env is None else env
         # Configuration first, so a missing SDK, token or binary is a 503 with its fix, never an ImportError (500).
         self.binary = preflight(self.env)

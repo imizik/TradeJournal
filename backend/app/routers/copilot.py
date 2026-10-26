@@ -20,7 +20,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from app.ai import copilot, copilot_images
+from app.ai import copilot, copilot_images, copilot_spend
 from app.database import engine, get_session
 from app.engine import captures, spoken_tickers, transcribe
 from app.engine import copilot_investigations as investigations
@@ -42,6 +42,7 @@ class ChatBody(BaseModel):
     model: str | None = Field(None, pattern=r"^[a-z0-9][a-z0-9.\-]{0,60}$")  # one of GET /status's ``models``
     # Screenshots from POST /images, sent with the last message and deleted when the turn ends.
     image_ids: list[str] = Field(default_factory=list, max_length=copilot_images.MAX_PER_TURN)
+    backend: Literal["anthropic", "plan"] | None = None  # one of GET /status's ``backends``
 
 
 @router.get("/status")
@@ -51,6 +52,10 @@ def status():
         return {"enabled": False, "reason": "Copilot Lab is off. Set COPILOT_ENABLED=true on the private backend to try it."}
     out = cfg.public()
     speech = transcribe.status()
+    try:
+        out["spend_today_usd"] = copilot_spend.spent_today()
+    except Exception:  # noqa: BLE001 - the status read must not fail on bookkeeping
+        out["spend_today_usd"] = None
     out["capabilities"] = {"copilot_alerts": copilot_alerts_supported(),
                            "transcriber": {"configured": speech.configured, "provider": speech.provider}}
     if cfg.evidence == "replay":
@@ -146,9 +151,14 @@ async def chat(body: ChatBody):
     if sum(len(m.content) for m in body.messages) > MAX_HISTORY_CHARS:
         raise HTTPException(413, "This conversation is too long for the lab; start a new one.")
     try:
-        cfg = copilot.with_model(cfg, body.model)
+        cfg = copilot.with_model(copilot.with_backend(cfg, body.backend), body.model)
     except copilot.CopilotError as exc:
         raise HTTPException(422, exc.message)
+    if cfg.backend == "anthropic":
+        spent = copilot_spend.spent_today()
+        if spent >= cfg.daily_budget_usd:
+            raise HTTPException(429, f"Today's API budget (${cfg.daily_budget_usd:.2f}) is spent: ${spent:.2f} so far. "
+                                     "Pick the Claude plan backend, or raise COPILOT_DAILY_BUDGET_USD.")
     try:
         # The plan backend asks Claude Code for its sign-in once per process; keep that off the event loop.
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
@@ -162,18 +172,23 @@ async def chat(body: ChatBody):
         raise HTTPException(422, str(exc)) from None
 
     async def events():
+        done: dict | None = None
         try:
             now = datetime.now(ET)
             # The plan backend's SDK runs its own tool loop, so it supplies the whole turn.
             turn = (adapter.run_turn(history, body.symbol, cfg, evidence, now, images=images) if hasattr(adapter, "run_turn")
                     else copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now, images=images))
             async for event in turn:
+                if event.get("type") == "done":
+                    done = event.get("metrics")
                 yield f"event: {event['type']}\ndata: {json.dumps(event, default=str)}\n\n"
         finally:
             for image_id in body.image_ids:
                 copilot_images.delete(image_id)
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
+            if done:
+                await asyncio.to_thread(copilot_spend.record, done, body.symbol)
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
