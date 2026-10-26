@@ -171,5 +171,100 @@ They should be built only if an authorized economic screen justifies the work.
 This proposal and its access receipt complete preparation for review; they do
 not claim that an eligible one-click evaluation exists today.
 
+## Subsequent preparation implementation — October 26
+
+After PR #516 merged, the owner approved continuing preparation. The
+[pure portfolio calculator](../../backend/app/engine/etf_portfolio.py) now makes
+the proposed arithmetic independently testable: fixed 12-month comparisons,
+strict ties to BIL, delayed monthly rebalancing, funded turnover costs, initial
+cash, final liquidation, paired monthly returns, NAV, CAGR and drawdown for all
+three lanes at both cost levels. BIL weights and traded notional are recorded
+along the daily paths. Its tests use **invented prices and an invented calendar
+only**; their outputs are software checks, not strategy performance evidence.
+Signal comparisons use exact rational ratios so an exact tie cannot become a
+risk allocation through rounding; portfolio accounting uses Decimal arithmetic.
+
+The calculator accepts already-normalized per-post-event-share distributions
+and splits. It has no market loader, CLI, candidate reservation or broker path.
+The caller must establish full calendar coverage, completed month boundaries,
+identity and complete action normalization first. In particular, unhandled
+capital distributions, conflicting corrections or ambiguous same-day units
+cannot become zeros. A pure callable is not an authorization boundary: it must
+not be invoked on market data outside a separately approved counted run.
+
+The [input acquirer](../../backend/scripts/etf_input_acquire.py) defaults to
+printing this fixed request plan, without reading keys or accessing the network:
+
+| Request | Fixed scope | Page cap |
+|---|---|---|
+| `GET https://data.alpaca.markets/v2/stocks/bars` | SPY/EFA/EEM/IEF/BIL; raw SIP daily; January 1, 2016–September 30, 2024; USD; asof September 30, 2024; 10,000 records/page | 4 |
+| `GET https://data.alpaca.markets/v1/corporate-actions` | Same five symbols; processing dates January 1, 2016–October 26, 2026; all action types; data_quality=all; 1,000 records/page | 8 |
+
+The later action cutoff is solely for reconciling late-processed events whose
+effective dates fall inside the proposed price interval. The source archive
+retains responses, including out-of-window action records; future normalization
+must exclude post-September-2024 effective events. No later prices are requested.
+[Alpaca's action endpoint][actions] uses process dates and does not guarantee
+original availability time. An empty or terminal response does not prove a
+complete historical action ledger.
+
+For a separately authorized acquisition, the tool selects only
+`ALPACA_API_KEY` and `ALPACA_API_SECRET` from
+`/Users/user/TradeJournal-factory/backend/.env`, the documented link to the main
+checkout environment file. It does not load app settings or interpolate other
+entries. The maximum is **12 GETs, no retries, 120 seconds per CLI invocation,
+3 MB per response**, with redirects and environment proxies disabled. No account,
+order, database or evaluation endpoints exist in the tool. It requires a new
+absolute local directory, keeps partial archives on failure, refuses overwrite,
+and records retrieval times and raw-body hashes without logging secrets.
+
+Even successful acquisition is marked `acquired_unaccepted` and
+`eligible_for_evaluation=false`. Daily dates must match the previously audited
+2,200-session calendar hash for every fund; this is date coverage, not issuer
+reconciliation. The request plan and refusal paths are covered by mock-transport
+tests. The earlier three-request approval did not cover this expanded plan;
+the owner separately approved this exact acquisition during implementation.
+
+The approved acquisition completed once in **three GETs**: two bar pages and one
+action page, all HTTP 200 with terminal pagination reached. All five funds have
+2,200 dates matching the audited calendar, for 11,000 daily bars. The
+[metadata-only receipt](etf-bil-input-archive-2026-10-26.json) records the exact
+code version, request metadata, response hashes and local archive location.
+Raw pages are retained in the ignored worktree data directory with read-only
+permissions; they are not committed or guaranteed to survive worktree deletion.
+Original source bytes must be retained before retiring this worktree.
+
+| Symbol | In-window cash-dividend records | Those with blank CUSIP |
+|---|---:|---:|
+| SPY | 33 | 14 |
+| EFA | 18 | 8 |
+| EEM | 18 | 7 |
+| IEF | 103 | 47 |
+| BIL | 71 | 38 |
+
+All nonempty dividend CUSIPs matched the expected current identifiers. There
+were no repeated/conflicting in-window action IDs. These checks do not establish
+historical identity or distribution completeness. For example, SPY has three
+records in each of 2016 and 2018, and BIL has none in 2021; those counts require
+issuer reconciliation, not a presumption of zero distributions or an automatic
+decision that every apparent gap is missing data.
+
+The BIL archive also contains a 1-for-2 reverse split effective November 30,
+2017, with blank old/new CUSIPs. The ratio and date agree with the
+[issuer's November 15, 2017 announcement, syndicated by Business Wire][bil-split].
+A synthetic reverse-split regression checks that the calculator does not turn
+the price discontinuity into a gain. This one-event check is not full archive
+acceptance. Sixty-five action records have effective dates beyond the price
+window and remain outside any future normalized evaluator input.
+
+Remaining before any historical screen: reconcile and freeze the acquired
+archive's action normalization/input receipt; then connect the
+calculator to the **existing** Factory reservation, locks, budget and bounded
+child, with an explicit one-run authorization. The current ORB-only intake and
+all frozen gates remain unchanged. There is no enabled ETF evaluation command,
+new ledger, schedule, live execution or consumed candidate attempt in this slice.
+
 [bil]: https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil
 [bars]: https://docs.alpaca.markets/us/reference/stockbars
+[actions]: https://docs.alpaca.markets/us/reference/corporateactions-1
+[bil-split]: https://www.streetinsider.com/Press%2BReleases/State%2BStreet%2BGlobal%2BAdvisors%2BAnnounces%2BETF%2BShare%2BSplits/13511071.html
