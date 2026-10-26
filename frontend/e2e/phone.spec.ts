@@ -63,14 +63,15 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
 });
 
 test("a tab bar at the bottom reaches the main pages in one tap and never covers the page's end", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/today");
   const tabs = page.getByRole("navigation", { name: "Main tabs" });
   await expect(tabs).toBeInViewport();
-  for (const name of ["Dashboard", "Charts", "Daily Review", "Trades", "More"]) {
+  for (const name of ["Today", "Charts", "Daily Review", "Trades", "More"]) {
     const target = name === "More" ? tabs.getByRole("button", { name: "Open menu" }) : tabs.getByRole("link", { name });
     expect(Math.min(...Object.values((await target.boundingBox())!).slice(2)), name).toBeGreaterThanOrEqual(44);
   }
-  await expect(tabs.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Dashboard" })).toHaveCount(0); // the owner's Dashboard is under More
   await tabs.getByRole("link", { name: "Trades" }).click();
   await expect(page).toHaveURL(/\/trades$/);
   await expect(tabs.getByRole("link", { name: "Trades" })).toHaveAttribute("aria-current", "page");
