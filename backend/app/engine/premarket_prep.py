@@ -262,8 +262,9 @@ def fallback_lines(pack: dict) -> list[str]:
     return out[:MAX_LINES]
 
 
-def _turn(text: str, now: float) -> tuple[str, str | None]:
-    """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used."""
+def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str | None]:
+    """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used. ``events``, when
+    given, collects every turn event (the week review reads its tool and proposal events)."""
     from app.ai import copilot
     cfg = copilot.settings()
     now_et = datetime.fromtimestamp(now, ET)
@@ -278,6 +279,8 @@ def _turn(text: str, now: float) -> tuple[str, str | None]:
             turn = (adapter.run_turn(history, None, cfg, evidence, now_et) if hasattr(adapter, "run_turn")
                     else copilot.run_turn(history, None, cfg, adapter, evidence, now_et))
             async for event in turn:
+                if events is not None:
+                    events.append(event)
                 if event["type"] == "text":
                     parts.append(event["delta"])
                 elif event["type"] == "error" and error is None:
@@ -292,7 +295,7 @@ def _turn(text: str, now: float) -> tuple[str, str | None]:
     except copilot.CopilotError as exc:
         return "", exc.message
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the raw facts
-        log.warning("premarket prep turn failed: %s", type(exc).__name__)
+        log.warning("scheduled copilot turn failed: %s", type(exc).__name__)
         return "", "The copilot turn failed unexpectedly."
     if error is None and not lines(answer):
         error = "The copilot wrote nothing."

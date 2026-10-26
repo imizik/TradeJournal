@@ -709,6 +709,32 @@ class PremarketPrep(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class WeekReviewAuto(SQLModel, table=True):
+    """One week's automatic Review my week (``engine/week_review_auto.py``): the
+    copilot's review, saved as an investigation, the practice it proposed (shown
+    as a card when the owner opens it) and its single phone ping. The unique
+    ``week_start`` (a Monday) is the once-a-week guard; a week with no closed
+    trade is recorded ``skipped``. Delivery is an outbox on the same row, at most
+    once, as the pre-market prep's."""
+
+    __tablename__ = "week_review_auto"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    week_start: date = Field(unique=True)
+    detected_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: when the week's review was claimed
+    investigation_id: Optional[str] = None  # the saved copilot investigation the ping opens
+    fallback: bool = False  # the copilot turn failed: the ping carries the week's facts
+    title: Optional[str] = None
+    body: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    proposal_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # the practice card, if proposed
+    delivery: str = Field(default="preparing", index=True)  # preparing | skipped | pending | sending | sent | expired | unknown | held
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class PhonePing(SQLModel, table=True):
     """One copilot-side phone ping as the notification policy judged it
     (``engine/notification_policy.py``): the sender's own row (``sender`` plus

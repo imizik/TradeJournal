@@ -569,6 +569,54 @@ model to call:
 - Tests: `backend/tests/test_copilot_week_review.py`,
   `frontend/e2e/review-my-week.spec.ts`.
 
+**Automatic.** With `WEEK_REVIEW_AUTO_ENABLED=true` (off by default; nothing
+runs while `COPILOT_ENABLED` is off) the review runs by itself once a week
+(`backend/app/engine/week_review_auto.py`, additive table `week_review_auto`,
+migration `d2a7e5c9f3b1`), so the owner never has to press the button:
+
+- **When:** at `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) on
+  the week's last trading day per the market calendar: Friday, or Thursday
+  when Friday is a holiday. The week (its Monday) is claimed once, so a
+  restart or a second process never runs it twice; a review not started by
+  midnight New York waits for the next week. A week with no closed trade
+  (the tool reads `none`) is recorded `skipped`: no turn, no ping.
+- **Turn:** one `run_turn` on the configured backend and evidence, its turn
+  budget cap included, whose owner message is the Review my week context naming
+  the week, as a Friday's Daily Review link sends it:
+  `Context: Review my week of <Monday>`. So the model calls `get_week_review`,
+  opens with the practice score while a goal is active, and proposes one
+  practice when the counts support it, exactly as above. The answer is saved as
+  an open copilot investigation titled `Week review Oct 19–Oct 23` (Monday to
+  Friday), so it shows in Open threads. A proposed practice is kept on the
+  `week_review_auto` row, and `GET /copilot/practice?investigation=<id>`
+  returns it as `proposed`, so opening that investigation shows the practice
+  card under the answer until it is confirmed (a goal saved from that
+  investigation) or a later week's review replaces it. Nothing is saved as a
+  goal until the owner confirms the card.
+- **Ping:** title `Your week: +$412 · 3 of 5 planned` (the review's P&L and
+  trades with a plan captured before the entry, of the week's closed trades);
+  body the answer's first two lines (markdown removed), then
+  `Practice (<goal>): 2 of 3 this week, 1 of 4 last week` while a goal is
+  active, then "Open to confirm next week's practice" when the turn proposed
+  one. A tap opens `/copilot-lab?investigation=<id>`. If the turn fails (an
+  error event, the budget stop included, or no text), the ping and the saved
+  record carry the week's facts instead (trades, P&L, plan timing, the
+  invalidation follow-through) under "The week's facts (the copilot turn
+  failed):", and no card is kept.
+- **Delivery:** through the [notification policy](#phone-ping-policy) as kind
+  `week_review`, ranked with the pre-market prep, and the same at-most-once
+  outbox as the prep: a send that may have reached ntfy is `unknown` and never
+  resent; a review that never finished within 15 minutes, or a ping not sent
+  within 2 hours, is `expired`; a gate hold reads `held` with its reason. It
+  runs on the level alert monitor's loop beside the prep, the review on its own
+  thread. Nothing places, changes or suggests an order.
+- Tests: `backend/tests/test_week_review_auto.py`,
+  `frontend/e2e/week-review-auto.spec.ts`.
+
+The older `/weekly-review` page (`backend/app/engine/weekly_review.py`) is a
+separate, deterministic review of three exit leaks with a rule the owner picks
+by hand; it calls no model and the automatic review does not use it.
+
 ### The practice goal
 
 The Improve step of the [end goal](product-roadmap.md#end-goal--october-22-2026):
@@ -920,18 +968,18 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 
 - **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
   plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-  Radar alerts, thesis watch, research results) calls `notification_policy.decide`
-  right before it hands a message to ntfy, and keeps its own at-most-once delivery,
-  caps and expiry. `ntfy.py` stays a transport. Radar alerts and thesis watch are
-  anchored per symbol (the symbol's open position when there is one; a Radar group
-  event to its group); a ping they hold is recorded `held` and counts toward
-  neither sender's own caps.
+  the automatic week review, Radar alerts, thesis watch, research results) calls
+  `notification_policy.decide` right before it hands a message to ntfy, and keeps
+  its own at-most-once delivery, caps and expiry. `ntfy.py` stays a transport.
+  Radar alerts and thesis watch are anchored per symbol (the symbol's open
+  position when there is one; a Radar group event to its group); a ping they
+  hold is recorded `held` and counts toward neither sender's own caps.
 - **Daily cap:** at most `PING_DAILY_CAP` (default 12) pings a New York day across
   every kind. The priority order keeps the cap from dropping what matters:
   last-day final > invalidation > give-back > time stop (and the 90-minute
-  last-day alert) > entry trigger > hold-hour > nudge/link > prep > Radar >
-  thesis watch > research. The first three are never over the cap; the last
-  five are held once only 3 slots are left.
+  last-day alert) > entry trigger > hold-hour > nudge/link > prep (and the
+  automatic week review) > Radar > thesis watch > research. The first three are
+  never over the cap; the last five are held once only 3 slots are left.
 - **Quiet window:** a second ping anchored to the same position within
   `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
   a different kind whose predecessor is still being resent (its send failed) is
@@ -1040,6 +1088,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
+| `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |
 | `TJ_CLAUDE_CONFIG_DIR` | a private temp directory | `plan` only: Claude Code's state directory, never the owner's `~/.claude` (shared with `backend/app/ai/plan_runner.py`). `TJ_CLAUDE_BIN` picks the Claude Code binary the same way. |

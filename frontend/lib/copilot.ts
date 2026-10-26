@@ -396,9 +396,13 @@ export type PracticeMeasure = "plan_before_entry" | "exit_at_invalidation" | "re
 export type PracticeScore = { week_start: string; hit: number; of: number; text: string; of_what: string; share: number | null;
   met: boolean | null; source?: string };
 export type PracticeGoal = { text: string; measure: PracticeMeasure; label: string; target: number | null; week_start: string; since: string };
-/** ``this_week`` is null until the goal's first week starts. */
-export type PracticeNow = { goal: PracticeGoal | null; this_week: PracticeScore | null };
-export const getPractice = (signal?: AbortSignal) => request<PracticeNow>("/copilot/practice", { signal });
+/** ``this_week`` is null until the goal's first week starts. ``proposed`` (only when read for an investigation): the
+ * practice card an automatic week review saved there, until it is confirmed. */
+export type PracticeNow = { goal: PracticeGoal | null; this_week: PracticeScore | null; proposed?: Proposal | null };
+export const getPractice = (signal?: AbortSignal, investigation?: string) =>
+  request<PracticeNow>(`/copilot/practice${investigation ? `?investigation=${encodeURIComponent(investigation)}` : ""}`, { signal });
+/** The automatic week review's saved investigations (``backend/app/engine/week_review_auto.py``) are titled this way. */
+export const AUTO_WEEK_REVIEW_TITLE = "Week review ";
 /** Confirming a practice card makes it the one active goal; the previous one ends. */
 export const savePractice = (body: { text: string; measure: PracticeMeasure; target: number | null; investigation_id: string | null }) =>
   request<PracticeNow>("/copilot/practice", { method: "POST", body: JSON.stringify(body) });

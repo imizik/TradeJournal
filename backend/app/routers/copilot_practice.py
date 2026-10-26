@@ -6,7 +6,7 @@ the previous active one; nothing else.
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
@@ -16,6 +16,7 @@ from app.engine import practice_goal
 from app.engine.chart_math import ET
 
 router = APIRouter()
+UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
 class PracticeBody(BaseModel):
@@ -31,9 +32,15 @@ def _enabled():
 
 
 @router.get("/practice")
-def current(db: Session = Depends(get_session)):
+def current(investigation: str | None = Query(None, pattern=UUID), db: Session = Depends(get_session)):
+    """With ``investigation``: also ``proposed``, the practice card an automatic week review saved there and the owner
+    has not confirmed (``engine/week_review_auto.py``), or null."""
     _enabled()
-    return practice_goal.current(db, datetime.now(ET).date())
+    out = practice_goal.current(db, datetime.now(ET).date())
+    if investigation is not None:
+        from app.engine import week_review_auto
+        out["proposed"] = week_review_auto.proposed(db, investigation)
+    return out
 
 
 @router.post("/practice", status_code=201)
