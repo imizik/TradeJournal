@@ -148,9 +148,6 @@ with Session(engine) as db:
     await expect(item).toContainText("Peak +$660 (+55%), +$36 (+3%) at the alert.");
     await expect(item).toHaveAttribute("href", `/trades/${seeded.trade}?alert=${seeded.alert}`);
     await panel.screenshot({ path: test.info().outputPath("dashboard-attention-giveback-phone.png"), animations: "disabled" });
-    // The Exit Habits card opens the same alert, not just its trade.
-    const habits = page.getByTestId("exit-habits").getByTestId("exit-habits-alert").filter({ hasText: "AAPL 230C" });
-    await expect(habits.getByRole("link")).toHaveAttribute("href", `/trades/${seeded.trade}?alert=${seeded.alert}`);
     await item.click();
     await expect(page.getByTestId("selected-position-alert")).toContainText("Give-back triggered");
   } finally {

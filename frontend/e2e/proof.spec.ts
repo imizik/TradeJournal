@@ -21,7 +21,29 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(alerts).toContainText("2 standard errors");
     const card = page.getByRole("region", { name: "Do position alerts help you reconsider?" });
     await expect(card).toContainText("What you did after 3 alerts");
-    await expect(card.getByTestId("exit-habits-alert")).toHaveCount(3);
+    // The habits against baseline, counts only, and each alert's follow-up (moved here from the Dashboard card).
+    await expect(card).toContainText("0 since phone alerts went live on Oct 21, against 2 before");
+    await expect(card).toContainText("Too few trades yet to read a change");
+    await expect(card).not.toContainText(/improv|grade|score/i);
+    const expired = card.getByTestId("habit-expired_worthless");
+    await expect(expired).toContainText("Since Oct 21 (0 of 30 so far)");
+    await expect(expired).toContainText("no trades");
+    await expect(expired).toContainText("1 of 2 · 50% · -$300");
+    await expect(card.getByTestId("habit-green_to_red")).toContainText("2 trades, no data"); // no path metrics in the seed
+    const rows = card.getByTestId("exit-habits-alert");
+    await expect(rows).toHaveCount(3);
+    const nvda = rows.filter({ hasText: "NVDA" });
+    await expect(nvda).toContainText("Gave back its gain");
+    await expect(nvda).toContainText("Closed within 15 min");
+    await expect(nvda).toContainText("You came out $250 better than closing at the alert."); // 5 sold at $700 vs a $650 mark
+    const tsla = rows.filter({ hasText: "TSLA" });
+    await expect(tsla).toContainText("Held an hour");
+    await expect(tsla).toContainText("Let it expire");
+    await expect(tsla).toContainText("Closing at the alert would have been $240 better.");
+    const aapl = rows.filter({ hasText: "AAPL" });
+    await expect(aapl).toContainText("Trimmed within 15 min");
+    await expect(aapl).toContainText("Still open, so there is no result yet.");
+    await expect(nvda.getByRole("link")).toHaveAttribute("href", /^\/trades\/[0-9a-f-]{36}\?alert=[0-9a-f-]{36}$/); // the alert itself, not just its trade
     // Radar: one sample event, unrated.
     const radar = page.getByTestId("proof-radar-verdict");
     await expect(radar).toContainText("Not enough data");

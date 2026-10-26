@@ -152,7 +152,8 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
   );
 }
 
-function StatusLine({ status, error, compact = false }: { status: CopilotStatus | null; error: string | null; compact?: boolean }) {
+/** The lab's backing and evidence as two chips. The page's own description says what the lab may and may not do. */
+function StatusLine({ status, error }: { status: CopilotStatus | null; error: string | null; compact?: boolean }) {
   if (error) return <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">{error}</p>;
   if (!status) return <p className="text-sm text-muted-foreground">Checking Copilot Lab…</p>;
   if (!status.enabled) return <p className="rounded border px-3 py-2 text-sm text-muted-foreground">{status.reason}</p>;
@@ -174,7 +175,6 @@ function StatusLine({ status, error, compact = false }: { status: CopilotStatus 
       )}
       {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
       {status.backend === "plan" && !status.plan_configured && <span className="text-rose-300">Plan token or Agent SDK not set up</span>}
-      {!compact && <span>Read-only · up to {status.limits.max_tool_calls} tool calls per turn · conversations are saved; a proposed plan, watch, revisit or memory exists only once you confirm it</span>}
     </p>
   );
 }

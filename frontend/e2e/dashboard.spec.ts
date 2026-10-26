@@ -49,7 +49,8 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await expect(performance.getByText("+$1,019.00", { exact: true })).toBeVisible();
   await expect(performance.getByText("4.40", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Recent Closed Trades" }).locator("tbody tr")).toHaveCount(3);
-  await expect(page.getByLabel("Import freshness", { exact: true })).toContainText("Position quote timestamps unavailable");
+  await expect(page.getByRole("region", { name: "Active Options" })).toContainText("marks not labeled live");
+  await expect(page.getByLabel("Import freshness", { exact: true })).toContainText("Gmail:");
   await expect(owner).not.toContainText("Account Equity");
   const bounds = await Promise.all([summary.boundingBox(), page.getByRole("region", { name: "Today's Session" }).boundingBox(), performance.boundingBox()]);
   expect(bounds[0]!.y + bounds[0]!.height).toBeLessThan(bounds[1]!.y);
@@ -97,46 +98,27 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   expect(errors).toEqual([]);
 });
 
-test("exit habits card shows each alert's follow-up and the four habits against baseline", async ({ page, request }) => {
+test("exit habits card states the verdict and its reason, and opens Proof", async ({ page, request }) => {
   expect((await request.post(`${API}/__test/exit-habits-seed`)).ok()).toBe(true);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
-  const card = page.getByTestId("exit-habits");
+  const card = page.getByRole("region", { name: "Exit habits" });
+  const verdict = card.getByTestId("exit-habits-verdict");
   // Every seeded trade closed long before the alerts went live: nothing to compare yet, and no trend language.
-  await expect(card).toContainText("0 since phone alerts went live on Oct 21, against 2 before");
-  await expect(card).toContainText("Too few trades yet to read a change");
+  await expect(verdict).toContainText("Not enough data");
+  await expect(verdict).toContainText("0 of 30 trades closed since the alerts went live.");
   await expect(card).not.toContainText(/improv|grade|score/i);
-  const expired = card.getByTestId("habit-expired_worthless");
-  await expect(expired).toContainText("Since Oct 21 (0 of 30 so far)");
-  await expect(expired).toContainText("no trades");
-  await expect(expired).toContainText("1 of 2 · 50% · -$300");
-  await expect(card.getByTestId("habit-green_to_red")).toContainText("2 trades, no data"); // no path metrics in the seed
-  const alerts = card.getByTestId("exit-habits-alert");
-  await expect(alerts).toHaveCount(3);
-  const nvda = alerts.filter({ hasText: "NVDA" });
-  await expect(nvda).toContainText("Gave back its gain");
-  await expect(nvda).toContainText("Closed within 15 min");
-  await expect(nvda).toContainText("You came out $250 better than closing at the alert."); // 5 sold at $700 vs a $650 mark
-  const tsla = alerts.filter({ hasText: "TSLA" });
-  await expect(tsla).toContainText("Held an hour");
-  await expect(tsla).toContainText("Let it expire");
-  await expect(tsla).toContainText("Closing at the alert would have been $240 better.");
-  const aapl = alerts.filter({ hasText: "AAPL" });
-  await expect(aapl).toContainText("Trimmed within 15 min");
-  await expect(aapl).toContainText("Still open, so there is no result yet.");
-  const link = nvda.getByRole("link");
-  await expect(link).toHaveAttribute("href", /^\/trades\/[0-9a-f-]{36}\?alert=[0-9a-f-]{36}$/); // the alert itself, not just its trade
+  await expect(card.getByTestId("exit-habits-alert")).toHaveCount(0); // the habits and alert rows live on /proof
   await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-desktop.png") });
-  await page.screenshot({ path: test.info().outputPath("dashboard-exit-habits-page-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await card.scrollIntoViewIfNeeded();
   await card.screenshot({ path: test.info().outputPath("dashboard-exit-habits-phone.png") });
-  await link.click();
-  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]{36}\?alert=[0-9a-f-]{36}$/);
-  await expect(page.getByTestId("selected-position-alert")).toContainText("Give-back triggered");
+  await card.getByRole("link", { name: "Proof →" }).click();
+  await expect(page).toHaveURL(/\/proof$/);
+  await expect(page.getByTestId("proof-alerts-verdict")).toContainText("Not enough data");
   expect(errors).toEqual([]);
 });
 

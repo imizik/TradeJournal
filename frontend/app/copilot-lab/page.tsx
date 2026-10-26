@@ -12,7 +12,7 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
         <h1 className="text-lg font-semibold text-foreground">Copilot Lab</h1>
-        <p className="text-sm text-muted-foreground">An experimental research conversation with read-only evidence. No orders. A watch or a revisit it proposes is created only when you confirm it.</p>
+        <p className="text-sm text-muted-foreground">Research on read-only evidence. No orders; a plan, watch or revisit exists only once you confirm it.</p>
       </div>
       <CopilotLab key={JSON.stringify(link)} link={link} />
     </div>

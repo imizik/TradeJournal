@@ -34,9 +34,8 @@ type OwnerProps = {
 export function OwnerDashboardShell({ today, journal, attention }: { today: string; journal: ReactNode; attention: ReactNode }) {
   return <div className="min-w-0 space-y-4" data-testid="owner-dashboard">
     <header>
-      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Dashboard <span className="text-sm font-normal text-muted-foreground">{today} ET</span></h1>
         <div className="flex flex-wrap items-center gap-2"><PlanATrade /><ReviewMyWeek /><DashboardActions /></div></div>
-      <p className="mt-1 text-sm text-muted-foreground">Market context, opportunities, then your journal · {today} ET</p>
     </header>
     <JoTodayLine today={today} />
     <PlansCard />
@@ -93,9 +92,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
   return <div className="min-w-0 space-y-4">
     {quoteError && <p role="alert" className="rounded-md border border-amber-500/30 px-4 py-3 text-sm text-amber-300">Some position quotes could not load. Unavailable marks are shown as —. Reload to retry.</p>}
     <section className="min-w-0 space-y-4" aria-label="Your journal">
-      <div><h2 className="text-base font-semibold">Your journal</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Filters apply to journal positions, Attention position checks and performance. The saved briefing and Radar keep their own scope.</p>
-      </div>
+      <h2 className="text-base font-semibold">Your journal</h2>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Dashboard filters">
         {[{ name: "account" as const, label: "Account", choices: [{ value: "all", label: "All accounts" }, ...accountOptions.map((a) => ({ value: a.type, label: a.name }))] },
           { name: "type" as const, label: "Type", choices: [{ value: "all", label: "All types" }, { value: "option", label: "Options" }, { value: "stock", label: "Stocks" }] }].map(({ name, label, choices }) =>
@@ -105,7 +102,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
               className={`inline-flex min-h-11 items-center rounded-md px-2.5 text-xs sm:min-h-8 ${(params[name] ?? "all") === choice.value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{choice.label}</Link>)}
           </div>)}
       </div>
-      <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
+      <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground" title="Position quote timestamps unavailable; marks are not labeled live.">{options.length} positions · {coverage(options)} · marks not labeled live</span>}>
         {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
       </DashboardCard>
       <details className="group/journal min-w-0 rounded-lg border bg-card" data-testid="journal-details">
