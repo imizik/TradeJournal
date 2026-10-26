@@ -19,6 +19,7 @@ from app.engine.chart_math import ET
 from app.models import (Account, Fill, FillMarketContext, PositionAlert, PositionWatch, Trade, TradeCapture, TradeFill,
                         TradePathMetrics)
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 
 ROTH, WEBULL = UUID(int=1001), UUID(int=1002)
 DAY = (datetime.now() - timedelta(days=3)).replace(hour=10, minute=5, second=0, microsecond=0)  # a journal wall clock
@@ -94,7 +95,7 @@ def _secret_free(out) -> str:
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
     ids = {str(UUID(int=n)) for n in range(1, 13)}
-    assert not [s for s in (*SECRETS, *ids) if s in text], text
+    assert not leaks(text, (*SECRETS, *ids)), text
     assert "trade_id" not in text and "fill_id" not in text and "account_label" not in text
     return text
 
@@ -208,7 +209,7 @@ def test_an_open_position_without_a_quote_says_so(db, monkeypatch):
 
 def test_webull_and_unknown_trades_are_not_reviewed(db):
     webull = copilot_review.trade_review(str(UUID(int=9)), session=db)
-    assert webull["state"] == "unavailable" and "Webull" in webull["reason"] and "4242" not in json.dumps(webull)
+    assert webull["state"] == "unavailable" and "Webull" in webull["reason"] and not leaks(json.dumps(webull), ["4242"])
     with pytest.raises(copilot_review.ReviewNotFound):
         copilot_review.trade_review(str(uuid.uuid4()), session=db)
 

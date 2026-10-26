@@ -24,6 +24,7 @@ from app.engine.quotes import OptionQuoteResult
 from app.engine.symbol_info_tradier import symbol_events
 from app.models import Account, CopilotInvestigation, Fill, LevelAlert, PlanTimeStop, PositionWatch, PremarketPrep, TradeFill
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
 INV = "55555555-5555-4555-8555-555555555555"
@@ -168,7 +169,7 @@ def test_the_pack_holds_positions_plans_earnings_time_stops_and_the_streak(engin
     with Session(engine) as db:
         pack = build_pack(db, at("08:30"))
     text = json.dumps(pack, default=str)
-    assert not [s for s in SECRETS if s in text] and "trade_id" not in text and "TSLA" not in text
+    assert not leaks(text, SECRETS) and "trade_id" not in text and "TSLA" not in text
     held = pack["positions"]
     assert held["count"] == 2 and [p["symbol"] for p in held["positions"]] == ["NBIS", "CRWV"]  # expiring first
     nbis = held["positions"][0]

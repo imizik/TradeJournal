@@ -18,6 +18,7 @@ from app.engine import capture_links, position_alerts
 from app.models import (Account, Fill, LevelAlert, LevelAlertEvent, PlanTimeStop, PositionAlert, Trade, TradeCapture, TradeFill,
                         TradePathMetrics)
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 
 ROTH, WEBULL = UUID(int=2001), UUID(int=2002)
 TUE, WED, THU = datetime(2026, 10, 20, 10, 5), datetime(2026, 10, 21, 9, 50), datetime(2026, 10, 22, 13, 0)
@@ -124,7 +125,7 @@ def _secret_free(out) -> str:
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS and json.loads(text) == json.loads(json.dumps(out, default=str))
     ids = {str(UUID(int=n)) for n in range(1, 15)}
-    assert not [s for s in (*SECRETS, *ids) if s in text], text
+    assert not leaks(text, (*SECRETS, *ids)), text
     assert "trade_id" not in text and "fill_id" not in text and "client_id" not in text and "investigation" not in text.replace(
         "invalidation", "")
     return text

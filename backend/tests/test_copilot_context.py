@@ -19,6 +19,7 @@ from app.engine.level_alert_monitor import create_alert
 from app.engine.quotes import OptionQuoteResult
 from app.models import Account, Fill, PositionAlert, PositionWatch, ResearchJob, Trade, TradeCapture, TradeFill
 from app.routers.fills import _rebuild_trades
+from tests.secret_scan import leaks
 from sqlmodel import select
 
 ROTH, WEBULL = UUID(int=1), UUID(int=2)
@@ -120,7 +121,7 @@ def _seed_world(db):
 
 def _secret_free(pack) -> str:
     text = json.dumps(pack, default=str, separators=(",", ":"))
-    assert not [s for s in SECRETS if s in text], text
+    assert not leaks(text, SECRETS), text
     assert "trade_id" not in text and "fill_id" not in text
     return text
 
