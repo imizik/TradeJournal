@@ -199,6 +199,9 @@ test("on a 375 px phone the three headers fit the sheet with thumb-sized targets
   await page.screenshot({ path: test.info().outputPath("charts-copilot-loop-375.png") });
 });
 
+const LINE = "Context: Charts · MRVL 5m, last [\\d,.]+";
+const CLOCK = "\\d{1,2}:\\d\\d [AP]M";
+
 test("Look at my chart sends the main chart as an image with its symbol, interval, last price and visible range", async ({ page }) => {
   await stubLab(page, []);
   const chats: { messages: { content: string }[]; image_ids?: string[] }[] = [];
@@ -218,19 +221,22 @@ test("Look at my chart sends the main chart as an image with its symbol, interva
   await expect(panel.getByText("I see the prior day high above.")).toBeVisible();
   expect(uploads).toEqual(["jpeg"]);
   expect(chats[0].image_ids).toEqual(["c".repeat(32)]);
-  // Before the chart is moved its range is not known: the latest candle's time says when.
-  expect(chats[0].messages.at(-1)!.content).toMatch(
-    /^\[shared a screenshot\] Context: Charts · MRVL 5m, last [\d,.]+, as of \d{1,2}:\d\d [AP]M ET\. What do you see\?$/);
+  // The chart reports its visible range once it moves, and opening the dock can already move it: until then the latest
+  // candle's time says when. Either way the line names the symbol, interval and last price.
+  const first = chats[0].messages.at(-1)!.content;
+  expect(first).toMatch(new RegExp(`^\\[shared a screenshot\\] ${LINE}, (as of ${CLOCK} ET|${CLOCK}–${CLOCK} ET)\\. What do you see\\?$`));
   await expect(panel.getByRole("img", { name: "Shared screenshot" })).toBeVisible();
 
-  // Once the chart is scrolled, the line carries the visible range.
+  // Zoomed, the chart reports a new range after its own short debounce: look again until the line carries it.
   const area = (await page.getByTestId("canvas-main").boundingBox())!;
   await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
   await page.mouse.wheel(0, -300);
-  await page.waitForTimeout(400);
-  await panel.getByTestId("copilot-look").click();
-  await expect.poll(() => chats.length).toBe(2);
-  expect(chats[1].messages.at(-1)!.content).toMatch(
-    /^\[shared a screenshot\] Context: Charts · MRVL 5m, last [\d,.]+, [\w ,:]+–[\w ,:]+\. What do you see\?$/);
-  expect(chats[1].messages.at(-1)!.content).not.toContain("as of");
+  await expect(async () => {
+    const sent = chats.length;
+    await panel.getByTestId("copilot-look").click();
+    await expect.poll(() => chats.length).toBe(sent + 1);
+    const line = chats.at(-1)!.messages.at(-1)!.content;
+    expect(line).toMatch(new RegExp(`^\\[shared a screenshot\\] ${LINE}, ${CLOCK}–${CLOCK} ET\\. What do you see\\?$`));
+    expect(line).not.toBe(first);
+  }).toPass({ timeout: 10_000 });
 });
