@@ -18,10 +18,10 @@ export const planContext = (line = "") => `Plan a trade: ${line.replace(/\s+/g, 
  * (``origin``, kept by a confirmed plan), so an idea is pressure-tested before the entry. Nothing is sent until the owner presses Send. Owner-only,
  * and nothing while the lab is off.
  */
-export default function PlanATrade({ symbol = "", line, origin, originRef = null, className, title, children }: {
+export default function PlanATrade({ symbol = "", line, origin = "manual", originRef = null, className, title, children }: {
   symbol?: string; line?: string; className?: string; title?: string; children?: ReactNode;
-  /** What prompts this plan (docs/copilot-lab.md § Origin): the placement's kind, and Radar's event id. */
-  origin: OriginKind; originRef?: string | null;
+  /** What prompts this plan (docs/copilot-lab.md § Origin): the placement's kind, and Radar's event id. Unset: the owner's own idea. */
+  origin?: OriginKind; originRef?: string | null;
 }) {
   const on = useCopilotOn();
   if (!on) return null;
