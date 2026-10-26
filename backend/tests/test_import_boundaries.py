@@ -61,6 +61,7 @@ PURE_MODULES = {
     "app.engine.factory_model",
     "app.engine.factory_gates",
     "app.engine.factory_brief",
+    "app.engine.etf_portfolio",  # supplied normalized data only; no executable intake
     "app.engine.research_studio",  # stop-free supplied-snapshot observations
     "app.engine.research_studio_data",  # explicit cache-only files; no provider/DB/environment
     "app.engine.research_studio_analysis",  # supplied discovery outcomes and joint blocks

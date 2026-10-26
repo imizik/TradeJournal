@@ -171,5 +171,65 @@ They should be built only if an authorized economic screen justifies the work.
 This proposal and its access receipt complete preparation for review; they do
 not claim that an eligible one-click evaluation exists today.
 
+## Subsequent preparation implementation — October 26
+
+After PR #516 merged, the owner approved continuing preparation. The
+[pure portfolio calculator](../../backend/app/engine/etf_portfolio.py) now makes
+the proposed arithmetic independently testable: fixed 12-month comparisons,
+strict ties to BIL, delayed monthly rebalancing, funded turnover costs, initial
+cash, final liquidation, paired monthly returns, NAV, CAGR and drawdown for all
+three lanes at both cost levels. BIL weights and traded notional are recorded
+along the daily paths. Its tests use **invented prices and an invented calendar
+only**; their outputs are software checks, not strategy performance evidence.
+
+The calculator accepts already-normalized per-post-event-share distributions
+and splits. It has no market loader, CLI, candidate reservation or broker path.
+The caller must establish full calendar coverage, completed month boundaries,
+identity and complete action normalization first. In particular, unhandled
+capital distributions, conflicting corrections or ambiguous same-day units
+cannot become zeros. A pure callable is not an authorization boundary: it must
+not be invoked on market data outside a separately approved counted run.
+
+The [input acquirer](../../backend/scripts/etf_input_acquire.py) defaults to
+printing this fixed request plan, without reading keys or accessing the network:
+
+| Request | Fixed scope | Page cap |
+|---|---|---|
+| `GET https://data.alpaca.markets/v2/stocks/bars` | SPY/EFA/EEM/IEF/BIL; raw SIP daily; January 1, 2016–September 30, 2024; USD; asof September 30, 2024; 10,000 records/page | 4 |
+| `GET https://data.alpaca.markets/v1/corporate-actions` | Same five symbols; processing dates January 1, 2016–October 26, 2026; all action types; data_quality=all; 1,000 records/page | 8 |
+
+The later action cutoff is solely for reconciling late-processed events whose
+effective dates fall inside the proposed price interval. The source archive
+retains responses, including out-of-window action records; future normalization
+must exclude post-September-2024 effective events. No later prices are requested.
+[Alpaca's action endpoint][actions] uses process dates and does not guarantee
+original availability time. An empty or terminal response does not prove a
+complete historical action ledger.
+
+For a separately authorized acquisition, the tool selects only
+`ALPACA_API_KEY` and `ALPACA_API_SECRET` from
+`/Users/user/TradeJournal-factory/backend/.env`, the documented link to the main
+checkout environment file. It does not load app settings or interpolate other
+entries. The maximum is **12 GETs, no retries, 120 seconds per CLI invocation,
+3 MB per response**, with redirects and environment proxies disabled. No account,
+order, database or evaluation endpoints exist in the tool. It requires a new
+absolute local directory, keeps partial archives on failure, refuses overwrite,
+and records retrieval times and raw-body hashes without logging secrets.
+
+Even successful acquisition is marked `acquired_unaccepted` and
+`eligible_for_evaluation=false`. Daily dates must match the previously audited
+2,200-session calendar hash for every fund; this is date coverage, not issuer
+reconciliation. The request plan and refusal paths are covered by mock-transport
+tests. No credentialed acquisition was performed as part of this implementation.
+The earlier three-request approval does not cover this expanded plan.
+
+Remaining before any historical screen: approve and acquire the fixed archive;
+reconcile and freeze its action normalization/input receipt; then connect the
+calculator to the **existing** Factory reservation, locks, budget and bounded
+child, with an explicit one-run authorization. The current ORB-only intake and
+all frozen gates remain unchanged. There is no enabled ETF evaluation command,
+new ledger, schedule, live execution or consumed candidate attempt in this slice.
+
 [bil]: https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil
 [bars]: https://docs.alpaca.markets/us/reference/stockbars
+[actions]: https://docs.alpaca.markets/us/reference/corporateactions-1
