@@ -128,9 +128,10 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 # ------------------------------------------------------------------ the gate
 
 def test_the_priority_order_and_what_the_cap_never_drops():
-    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "research")] == list(range(9))
+    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep",
+                                     "radar_event", "thesis_watch", "research")] == list(range(11))
     assert policy.rank("expiry_first") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
-    assert policy.rank("radar_something") == 9  # an unknown kind goes last
+    assert policy.rank("radar_something") == 11  # an unknown kind goes last
     assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600
 
 
