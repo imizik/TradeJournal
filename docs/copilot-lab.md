@@ -1094,6 +1094,45 @@ prep; Jo's morning briefing (`/morning`) is separate and untouched.
   Nothing places, changes or suggests an order.
 - Tests: `backend/tests/test_premarket_prep.py`.
 
+## Watch your day
+
+At the close, a short replay clip of today for each symbol the owner traded,
+scrubbed by thumb on `/replay/<date>` (`backend/app/engine/day_replay.py`,
+`backend/app/routers/replay.py`, `frontend/components/replay/ReplayView.tsx`).
+No model call; it runs whether or not the lab is on.
+
+- **Clip:** per symbol with a fill that day (Webull left out while dormant),
+  300 frames at 10 a second (30 seconds) of the regular session, widened to
+  take in a fill outside it. `chart_render.frame` draws each at 720×360 on a
+  fixed time and price axis: the bars up to the frame's minute as 3-minute
+  candles, the confirmed plan's trigger and invalidation from when they were
+  armed, each fill as a BUY or SELL dot as it happens (an option's on the
+  underlying at its minute), a PING line when a phone ping for the symbol went
+  out, and the clock in the corner. Bars come from storage only: the stored
+  session, or for today the chart feed's minutes the chart and ping pictures
+  already read.
+- **Format:** an animated PNG (`chart_render.apng`), not a GIF: the dark theme
+  is already an 11-colour palette, so APNG keeps it exactly with no
+  quantising. Every frame is whole, so the page cuts the file into frames
+  (`frontend/lib/apng.ts`) and draws the chosen one to a canvas under a range
+  input; a browser cannot seek an animated `<img>`. A clip over 8 MB keeps every
+  other frame, then halves the picture, until it fits. About 0.6 s and 0.8 MB
+  for a full session.
+- **When:** at 16:20 New York on a trading day, claimed once (`day_replay.day`
+  is unique, additive migration `b7d3f1a9c5e2`), built on its own thread. A day
+  with no fill is `skipped`: nothing built or sent.
+- **Ping:** one, "Watch your day: NBIS, SPY · 3 fills, 2 pings", with the
+  first clip's last frame as its picture, through `notification_policy.decide`
+  (kind `day_replay`, ranked with the prep). A tap opens `/replay/<date>`.
+  At-most-once delivery as the week review's.
+- **Kept:** files under `<CAPTURE_STORAGE_DIR>/day-replay/<date>/` for 14 days,
+  then deleted. `GET /replay`, `GET /replay/{date}` and
+  `GET /replay/{date}/{symbol}` are owner only and carry no ids. Today shows
+  "Watch today" and a trade page "Watch the day" while a clip of it is kept.
+- **Activation:** off unless `DAY_REPLAY_ENABLED=true`; it runs on the level
+  alert monitor's loop. Tests: `backend/tests/test_day_replay.py`,
+  `frontend/e2e/replay.spec.ts`.
+
 ## The copilot can see
 
 Two kinds of image reach the model, never more than **two per turn**:
@@ -1205,6 +1244,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
+| `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |
 | `TJ_CLAUDE_CONFIG_DIR` | a private temp directory | `plan` only: Claude Code's state directory, never the owner's `~/.claude` (shared with `backend/app/ai/plan_runner.py`). `TJ_CLAUDE_BIN` picks the Claude Code binary the same way. |
