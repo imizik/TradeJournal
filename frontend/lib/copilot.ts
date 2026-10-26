@@ -222,7 +222,8 @@ export function readDeepLink(params: { symbol?: string | string[]; context?: str
   const investigation = one(params.investigation).trim();
   const origin = readOrigin(one(params.origin));
   if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin };
-  if (!symbol && !context) return null;
+  // An origin alone (a prep ping with no investigation) still starts a conversation that records it.
+  if (!symbol && !context && !origin) return null;
   return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin };
 }
 
