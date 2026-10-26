@@ -85,7 +85,7 @@ export function originLine(capture: Capture): { text: string; href: string | nul
   let words = (origin.text ?? "").replace(/^Plan a trade:\s*/i, "")
     .replace(/\s*(What changed\?|Does it still hold\?).*$/, "").trim();
   const radar = origin.kind === "radar_event" ? /^Radar (.+?): (.+)$/.exec(words) : null;
-  if (radar) words = `${radar[2]}, ${radar[1]}`;
+  if (radar) words = `${radar[2].replace(/\.$/, "")}, ${radar[1]}`;
   const investigation = origin.kind === "copilot" || origin.kind === "premarket_prep" ? origin.ref
     : capture.context.state === "unavailable" ? capture.context.investigation_id ?? null : null;
   const href = origin.kind === "radar_event" && origin.ref ? `/radar?event=${encodeURIComponent(origin.ref)}`

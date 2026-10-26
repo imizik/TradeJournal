@@ -89,8 +89,21 @@ test("a Radar event's plan carries the event to the plan and the trade page name
   await page.route(`**/charts/captures/for-trade/${trade.id}`, (route) => route.fulfill({ json: { captures: [saved] } }));
   await page.goto(`/trades/${trade.id}`);
   const from = page.getByRole("region", { name: "Pre-trade plan" }).getByLabel("Plan origin");
-  await expect(from).toContainText(/^From: Radar event, MU .+, .+$/);
+  await expect(from).toContainText(/^From: Radar event, MU .+[^.], \d.+$/);
   await expect(from.getByRole("link")).toHaveAttribute("href", `/radar?event=${encodeURIComponent(eventId)}`);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  await page.screenshot({ path: test.info().outputPath("trade-origin-375.png") });
+  await page.getByRole("region", { name: "Pre-trade plan" }).screenshot({ path: test.info().outputPath("trade-origin-375.png") });
+
+  // Back on Radar, the event shows the marks the backend reads from plans that name it (here, the stored plan's link stands in).
+  await page.route(`**/radar/events/${encodeURIComponent(eventId)}`, async (route) => {
+    const detail = await (await route.fetch()).json();
+    expect(detail.plans).toEqual({ planned: false, traded: false }); // the e2e backend holds no plan naming it
+    return route.fulfill({ json: { ...detail, plans: { planned: true, traded: true } } });
+  });
+  await page.goto(`/radar?event=${encodeURIComponent(eventId)}`);
+  const marks = page.getByLabel("Plan marks");
+  await expect(marks).toHaveText("PlannedTraded");
+  await marks.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await page.getByTestId("radar-event").filter({ has: marks }).screenshot({ path: test.info().outputPath("radar-marks-375.png") });
 });
