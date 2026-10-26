@@ -181,6 +181,22 @@ TOOLS: list[dict] = [
                                         "lookback_days": {"type": "integer", "description": "30-365, default 180"}}},
     },
     {
+        "name": "get_option_candidates",
+        "description": "Real option contracts to compare against the owner's horizon, from the Charts page's option chains "
+                       "(Tradier): calls for direction long, puts for short, at most 8 across 2-3 expiries bracketing "
+                       "`horizon_days` (the last before it, the first at or after it, the next after), strikes from about 5% "
+                       "in the money to 10% out. Each: expiry, days to expiry, strike, bid/ask/mid per share and per contract, "
+                       "spread % of mid, open interest and volume when listed, distance to strike %, the break-even move % "
+                       "by expiry at the ask, and with `budget_usd` how many contracts it buys at the ask. Delta and implied "
+                       "volatility are unavailable (never estimate them). Quotes with as_of, not a recommendation.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "horizon_days", "direction"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "horizon_days": {"type": "integer", "description": "How long the thesis needs, in calendar days (1-365)"},
+                                        "direction": {"type": "string", "enum": ["long", "short"],
+                                                      "description": "long = expects up (calls), short = expects down (puts)"},
+                                        "budget_usd": {"type": "number", "description": "Optional: dollars to spend, positive, at most 1,000,000"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -381,6 +397,22 @@ def _level_history(args: dict) -> dict:
     return out
 
 
+def _option_candidates(args: dict) -> dict:
+    """get_option_candidates: a ticker, a horizon of 1-365 days, long or short, and an optional positive finite budget."""
+    days = args.get("horizon_days")
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+        raise ToolInputError("horizon_days must be a whole number from 1 to 365")
+    if args.get("direction") not in ("long", "short"):
+        raise ToolInputError("direction must be long or short")
+    out = {"symbol": _symbol(args.get("symbol")), "horizon_days": days, "direction": args["direction"]}
+    budget = args.get("budget_usd")
+    if budget is not None:
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or not 0 < budget <= 1_000_000:
+            raise ToolInputError("budget_usd must be a positive number of dollars, at most 1,000,000")
+        out["budget_usd"] = round(float(budget), 2)
+    return out
+
+
 def validate(name: str, args: Any) -> dict:
     """The tool's arguments, normalized, or ToolInputError. Unknown keys are refused."""
     if name not in TOOL_NAMES:
@@ -429,6 +461,8 @@ def validate(name: str, args: Any) -> dict:
         return {"week_start": day.isoformat()}
     if name == "get_level_history":
         return _level_history(args)
+    if name == "get_option_candidates":
+        return _option_candidates(args)
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -659,7 +693,7 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
         investigation["later_state"] = "Updated after the replay moment: its later status, conclusion and messages are hidden."
     else:
         investigation.update(status=record["status"], conclusion=record["conclusion"], updated_at=record["updated_at"],
-                             messages=record["message_count"], **({"summary": findings["summary"][:300]} if findings.get("summary") else {}))
+                             messages=record["message_count"], **({"summary": findings["summary"][:240]} if findings.get("summary") else {}))
     return {
         "investigation_id": investigation_id, "state": "ok", "as_of": _now(),
         "note": "Saved records: compare updated_at and the evidence as-of times with fresh reads to say what changed.",
@@ -749,6 +783,10 @@ class LiveEvidence:
         from app.ai import copilot_review
         return copilot_review.week_review(week_start)
 
+    def get_option_candidates(self, symbol: str, horizon_days: int, direction: str, budget_usd: float | None = None) -> dict:
+        from app.ai import copilot_options
+        return copilot_options.live_candidates(symbol, horizon_days, direction, budget_usd)
+
     def get_level_history(self, symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
                           entry: float | None = None, lookback_days: int = 180) -> dict:
         from app.ai import copilot_review
@@ -778,6 +816,7 @@ PROVENANCE = {
                         "habits (TradeJournal)", "saved"),
     "get_level_history": ("Journal closed trades in the symbol replayed over cached minute bars at the drafted level or time mark "
                           "(TradeJournal)", "saved"),
+    "get_option_candidates": ("Tradier option chains (Charts options feed cache) · Tradier / Alpaca quote", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

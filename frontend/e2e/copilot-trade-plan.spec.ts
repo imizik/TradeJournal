@@ -289,3 +289,44 @@ test("a plan alert's link opens its investigation with the question ready, and t
   await page.waitForTimeout(300);
   expect(chats).toEqual([]); // the question waits: a turn costs money
 });
+
+test("option candidates are an evidence row and a pick list for the plan's contract beside the drafted wording", async ({ page }) => {
+  const candidates = { symbol: "NBIS", direction: "long", simulated: false, picks: [
+    { label: "Nov 6 '26 95C", days: 14, ask_contract: 565 }, { label: "Nov 13 '26 95C", days: 21, ask_contract: 692 },
+    { label: "Nov 20 '26 95C", days: 28, ask_contract: 799 }] };
+  const turn = sse([
+    { type: "tool", id: "o1", name: "get_option_candidates", status: "ok", summary: "8 calls across 3 expiries for a 21-day horizon", ms: 1,
+      input: { symbol: "NBIS", horizon_days: 21, direction: "long" },
+      provenance: { source: "Tradier option chains (Charts options feed cache)", kind: "fetched", as_of: "2026-10-24T14:00:00Z" }, candidates },
+    { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed plan", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
+    { type: "proposal", ...PLAN },
+    { type: "text", delta: "NBIS plan (draft). Nothing is saved or armed until you confirm it." },
+    { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2,
+      tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
+  ]);
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
+  const card = await askForPlan(page);
+  await expect(page.locator("summary").filter({ hasText: "Evidence" })).toContainText("Option candidates · fetched");
+
+  const contract = card.getByLabel("Contract");
+  await expect(contract).toHaveValue("Nov 21 100C"); // the copilot's wording stays the default
+  await expect(contract.locator("option")).toHaveText(["Nov 21 100C (as drafted)", "Nov 6 '26 95C · 14d · $565 ask",
+    "Nov 13 '26 95C · 21d · $692 ask", "Nov 20 '26 95C · 28d · $799 ask"]);
+  await expect(card).toContainText("From the option chain: trade-offs to weigh, not a recommendation.");
+  await contract.selectOption("Nov 13 '26 95C");
+  await expect(card).toContainText("Proposed trade plan · NBIS · Buy calls · Nov 13 '26 95C");
+  await card.screenshot({ path: test.info().outputPath("plan-contract-picks.png") });
+  expect(server.posts).toEqual([]); // picking saves nothing
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");
+  const [capture] = posts(server, "captures");
+  expect(capture.note).toBe("Thesis: NBIS reclaims the level overhead with its group, so the bounce has room. Contract: Nov 13 '26 95C. From a Copilot Lab plan card.");
+});
+
+test("without option candidates the plan card shows no contract pick list", async ({ page }) => {
+  await lab(page, { alerts: [], posts: [] });
+  const card = await askForPlan(page);
+  await expect(card.getByLabel("Contract")).toHaveCount(0);
+});

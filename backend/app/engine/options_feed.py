@@ -45,7 +45,7 @@ from app.engine.options_implied import days_to, expected_move_levels, pressure, 
 from app.engine.options_models import OptionChain
 from app.engine.options_positioning import (DEALER_SIDE, air_pockets, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
                                             chart_levels, gamma_flip, max_pain, max_pain_missing, positioning, primary_root, scope_expirations,
-                                            years_left)
+                                            unexpired, years_left)
 
 log = logging.getLogger(__name__)
 
@@ -293,6 +293,23 @@ class OptionsFeed:
             note = "No expiration after the next report is listed yet."
         return {**base, "state": "ready" if listed else "none", "moves": moves, "earnings_note": note,
                 "message": issue if any(m["state"] == "unavailable" for m in moves) else None}
+
+    def chains(self, symbol: str, pick: Callable[[list[date]], list[date]]) -> tuple[list[Read], str | None]:
+        """The chains of the unexpired expirations ``pick`` chooses (at most ``PER_PASS``), for a reader outside the
+        chart (the copilot's option candidates): one pass under the same cache and pacing, reading what is stale first.
+        Returns what is in memory for today and why something could not be read, or None."""
+        now = self._now()
+        today = now.date()
+        with self._fetching:
+            issue = self._read_list(symbol)
+            listed = self._list(symbol)
+            if listed is None:
+                return [], issue or "Option expirations are not loaded yet."
+            live = unexpired(listed, primary_root(symbol), now, self._closes(listed[:FAST]))
+            wanted = list(dict.fromkeys(pick(live)))[:PER_PASS]
+            issue = self._read_chains(symbol, [d for d in wanted if self._chain_stale(symbol, d, FAST_TTL, today)]) or issue
+        reads = [read for d in wanted if (read := self._chain(symbol, d, today)) is not None]
+        return reads, issue if len(reads) < len(wanted) else None
 
     def refresh(self, symbol: str, scope: str, limit: int = PER_PASS) -> str | None:
         """Read the expiration list and up to ``limit`` of the scope's stale chains, nearest
