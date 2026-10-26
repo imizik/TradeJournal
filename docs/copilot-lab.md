@@ -53,6 +53,24 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     tickers. Names come from the AI buildout seed. A phrase changes only
     when exactly one known symbol fits, so "I see you are why" and
     "coherent" stay as heard.
+- **Read it back** (`frontend/components/copilot/SpeakAnswer.tsx`, every
+  variant): a 44 px speaker beside the mic reads each finished answer aloud
+  with the browser's own `speechSynthesis`. No server call is made. It is
+  off by default and remembered in this browser (`copilot.speak`), with a
+  Voice speed of 0.9×, 1.0× or 1.2× (`copilot.speak-rate`) beside the
+  auto-send setting. The device's default English voice reads.
+  - Speech starts when the turn's `done` event arrives, never on partial
+    text. `lib/copilot.ts` `speechText` prepares it: markdown and the
+    simulated-model head are dropped, and list items become sentences.
+    Tickers are spelled ("N B I S"), prices become dollars and `95C` becomes
+    "95 call". Tool rows and the metrics line are not part of the answer's
+    text. A card adds one closing sentence ("There is a plan card to
+    confirm."). Nothing is ever confirmed by voice.
+  - A new turn, pressing the mic (before it listens), a hidden page or
+    closing the panel stops speech at once. A tap on the speaker while it
+    reads stops that answer and leaves it on. With auto-send and the
+    speaker both on, the loop is hold to talk, hear the answer, hold again.
+    A browser without speech synthesis shows no speaker.
 - Entry points (nothing is ever sent until the owner presses Send):
   - **Plan a trade** (`frontend/components/copilot/PlanATrade.tsx`): the
     primary-styled way in, so an impulse gets pressure-tested before the
@@ -1142,6 +1160,46 @@ gives the frozen store's Radar reading and the headlines before the frozen
 time, with bars, fills and pings unavailable, and refuses a moment after it.
 Tests: `backend/tests/test_copilot_moment.py`, `frontend/e2e/explain-candle.spec.ts`.
 
+## Watch your day
+
+At the close, a short replay clip of today for each symbol the owner traded,
+scrubbed by thumb on `/replay/<date>` (`backend/app/engine/day_replay.py`,
+`backend/app/routers/replay.py`, `frontend/components/replay/ReplayView.tsx`).
+No model call; it runs whether or not the lab is on.
+
+- **Clip:** per symbol with a fill that day (Webull left out while dormant),
+  300 frames at 10 a second (30 seconds) of the regular session, widened to
+  take in a fill outside it. `chart_render.frame` draws each at 720×360 on a
+  fixed time and price axis: the bars up to the frame's minute as 3-minute
+  candles, the confirmed plan's trigger and invalidation from when they were
+  armed, each fill as a BUY or SELL dot as it happens (an option's on the
+  underlying at its minute), a PING line when a phone ping for the symbol went
+  out, and the clock in the corner. Bars come from storage only: the stored
+  session, or for today the chart feed's minutes the chart and ping pictures
+  already read.
+- **Format:** an animated PNG (`chart_render.apng`), not a GIF: the dark theme
+  is already an 11-colour palette, so APNG keeps it exactly with no
+  quantising. Every frame is whole, so the page cuts the file into frames
+  (`frontend/lib/apng.ts`) and draws the chosen one to a canvas under a range
+  input; a browser cannot seek an animated `<img>`. A clip over 8 MB keeps every
+  other frame, then halves the picture, until it fits. About 0.6 s and 0.8 MB
+  for a full session.
+- **When:** at 16:20 New York on a trading day, claimed once (`day_replay.day`
+  is unique, additive migration `b7d3f1a9c5e2`), built on its own thread. A day
+  with no fill is `skipped`: nothing built or sent. A day not claimed by 18:20
+  waits for the next, and fills that arrive after the claim are not in the clips.
+- **Ping:** one, "Watch your day: NBIS, SPY · 3 fills, 2 pings", with the
+  first clip's last frame as its picture, through `notification_policy.decide`
+  (kind `day_replay`, ranked with the prep). A tap opens `/replay/<date>`.
+  At-most-once delivery as the week review's.
+- **Kept:** files under `<CAPTURE_STORAGE_DIR>/day-replay/<date>/` for 14 days,
+  then deleted. `GET /replay`, `GET /replay/{date}` and
+  `GET /replay/{date}/{symbol}` are owner only and carry no ids. Today shows
+  "Watch today" and a trade page "Watch the day" while a clip of it is kept.
+- **Activation:** off unless `DAY_REPLAY_ENABLED=true`; it runs on the level
+  alert monitor's loop. Tests: `backend/tests/test_day_replay.py`,
+  `frontend/e2e/replay.spec.ts`.
+
 ## The copilot can see
 
 Two kinds of image reach the model, never more than **two per turn**:
@@ -1253,6 +1311,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
+| `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |
 | `TJ_CLAUDE_CONFIG_DIR` | a private temp directory | `plan` only: Claude Code's state directory, never the owner's `~/.claude` (shared with `backend/app/ai/plan_runner.py`). `TJ_CLAUDE_BIN` picks the Claude Code binary the same way. |

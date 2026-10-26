@@ -13,6 +13,7 @@ import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
 import TradeAdvice from "@/components/TradeAdvice";
 import TradePhoneAlerts from "@/components/TradePhoneAlerts";
+import WatchDayLink from "@/components/replay/WatchDayLink";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { copilotLabHref } from "@/lib/copilot";
 
@@ -146,6 +147,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         </span>
         {newYorkSeconds(trade.opened_at) !== null && <Link href={chartLink({ symbol: trade.ticker, from: newYorkSeconds(trade.opened_at)!, to: newYorkSeconds(trade.closed_at) ?? newYorkSeconds(trade.opened_at), trade: trade.id })}
           className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
+        {trade.opened_at && <WatchDayLink from={trade.opened_at.slice(0, 10)} to={trade.closed_at?.slice(0, 10) ?? new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })}
+          symbol={trade.ticker} label="Watch the day" />}
         {copilotOn && trade.status !== "open" && <Link href={copilotLabHref(trade.ticker, `Review this trade: ${trade.id}`)}
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Review with copilot</Link>}
         {/* From a position alert the selected alert carries this as its primary action instead. */}
