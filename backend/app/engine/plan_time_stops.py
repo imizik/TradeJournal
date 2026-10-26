@@ -252,7 +252,7 @@ class PlanTimeStops:
                 row.delivery, row.last_error = "held", ticket.reason
                 db.commit()
                 return
-            image = ping_images.picture(ping_images.prepare(db, _picture, row, title, now))
+            image = ping_images.picture(ping_images.prepare(db, _picture, row, title, now)) if row.attempts == 0 else None  # a retry goes as text
             row.attempts += 1
             try:
                 _, image_state = ping_images.publish(title, body + ticket.append, image, priority=4, tags=("hourglass",), path=path,

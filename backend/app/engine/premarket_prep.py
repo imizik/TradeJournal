@@ -433,7 +433,7 @@ class PremarketPreps:
                 row.delivery, row.last_error = "held", ticket.reason
                 db.commit()
                 return
-            image = ping_images.picture(ping_images.prepare(db, self._picture, now))
+            image = ping_images.picture(ping_images.prepare(db, self._picture, now)) if row.attempts == 0 else None  # a retry goes as text
             row.attempts += 1
             try:
                 _, image_state = ping_images.publish(title, body + ticket.append, image, priority=3, tags=("sunrise",), path=path,

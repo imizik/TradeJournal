@@ -5,7 +5,8 @@ dependency) turns pictures off without touching the pings. After the notificatio
 its picture's facts from the database in its own session through ``prepare`` (a failing read costs only the
 picture), which returns a builder; ``picture`` runs the builder (the bar reads) and the drawing on a worker thread
 with a ``BUDGET_SECONDS`` budget. A builder that fails, finds no bars, or runs past the budget gives no picture and
-the ping goes out as text: a picture never delays a ping by more than the budget and never drops one. ``publish``
+the ping goes out as text: a picture never delays a ping by more than the budget and never drops one. A retry (the
+first send failed and was surely unsent, e.g. ntfy answered the picture with a 5xx) goes as text alone. ``publish``
 sends the PNG to ntfy as the attachment (``ntfy.publish_image``); when the server refuses the attachment it sends the
 text alone. The ping's ``PhonePing`` row records ``image``: ``attached``, ``none`` (text only: no picture, or ntfy
 refused it) or ``off`` (pictures switched off). The picture never changes the policy's decision.
@@ -66,11 +67,12 @@ def prepare(db: Session, facts: Callable, *args) -> Callable[[], Chart | None] |
         return None
 
 
-def picture(build: Callable[[], Chart | None] | None, budget: float = BUDGET_SECONDS) -> bytes | None:
+def picture(build: Callable[[], Chart | None] | None, budget: float | None = None) -> bytes | None:
     """The PNG ``build`` describes, or None when pictures are off, there is no builder, it found nothing, failed, or
-    ran past ``budget`` seconds (it is left to finish on its own; its result is ignored)."""
+    ran past ``budget`` seconds, ``BUDGET_SECONDS`` by default (it is left to finish on its own; its result is ignored)."""
     if build is None or not enabled():
         return None
+    budget = BUDGET_SECONDS if budget is None else budget
 
     def run() -> bytes | None:
         chart = build()

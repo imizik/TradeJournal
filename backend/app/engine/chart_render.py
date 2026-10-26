@@ -26,6 +26,7 @@ from datetime import datetime
 import hashlib
 import json
 import struct
+import threading
 import zlib
 
 import numpy as np
@@ -141,6 +142,7 @@ class Chart:
 
 
 _cache: OrderedDict[str, tuple[bytes, dict]] = OrderedDict()
+_cache_lock = threading.Lock()  # pings draw on a small worker pool
 
 
 def render(chart: Chart) -> bytes:
@@ -155,16 +157,18 @@ def layout(chart: Chart) -> dict:
 
 def _drawn(chart: Chart) -> tuple[bytes, dict]:
     key = chart.key()
-    hit = _cache.get(key)
-    if hit is not None:
-        _cache.move_to_end(key)
-        return hit
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None:
+            _cache.move_to_end(key)
+            return hit
     canvas = _Canvas()
     placed = _draw(canvas, chart)
     result = (_png(canvas.pixels), placed)
-    _cache[key] = result
-    while len(_cache) > CACHE_SIZE:
-        _cache.popitem(last=False)
+    with _cache_lock:
+        _cache[key] = result
+        while len(_cache) > CACHE_SIZE:
+            _cache.popitem(last=False)
     return result
 
 

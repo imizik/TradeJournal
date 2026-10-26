@@ -264,7 +264,7 @@ class PlanNudges:
                 nudge.delivery, nudge.last_error = "held", ticket.reason
                 db.commit()
                 return
-            image = ping_images.picture(ping_images.prepare(db, _picture, nudge, label, now))
+            image = ping_images.picture(ping_images.prepare(db, _picture, nudge, label, now)) if nudge.attempts == 0 else None  # a retry goes as text
             nudge.attempts += 1
             try:
                 _, image_state = ping_images.publish(title, body + ticket.append, image, priority=4,

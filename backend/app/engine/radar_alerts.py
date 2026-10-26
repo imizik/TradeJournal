@@ -205,7 +205,7 @@ class RadarAlerts:
                 db.commit()
                 return
             image = ping_images.picture(ping_images.radar(alert.title, self.store, alert.event_id, alert.session_date, now)
-                                        if self.store is not None else None)
+                                        if self.store is not None and alert.attempts == 0 else None)  # a retry goes as text
             alert.attempts += 1
             try:
                 _, image_state = ping_images.publish(

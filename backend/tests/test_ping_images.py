@@ -369,6 +369,55 @@ def test_a_refused_picture_still_sends_the_text_once(engine, bars, monkeypatch):
     assert len(phone.sent) == 1 and phone.sent[0]["image"] is None and image_states(engine) == {"position_alerts": "none"}
 
 
+def test_a_picture_send_that_may_have_arrived_is_unknown_and_never_resent_as_text(engine, bars, monkeypatch):
+    texts = []
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: texts.append(a))
+
+    def put(*a, **k):
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(httpx, "put", put)
+    trade_id, key = buy(engine, "10:00")
+    alert_id = position_alert(engine, trade_id, key)
+    watcher = PositionAlerts(engine, Calendar(), clock=lambda: at("11:01"), quotes=lambda s: {})
+    watcher.deliver()
+    watcher.deliver()
+    with Session(engine) as db:
+        alert = db.get(PositionAlert, alert_id)
+        assert alert.delivery == "unknown" and alert.attempts == 1
+    assert texts == []
+
+
+def test_a_slow_picture_costs_at_most_the_budget_and_the_ping_goes_as_text(engine, monkeypatch):
+    phone = Phone(monkeypatch)
+    monkeypatch.setattr(ping_images, "BUDGET_SECONDS", 0.3)
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: time.sleep(1) or minute_bars())
+    trade_id, key = buy(engine, "10:00")
+    position_alert(engine, trade_id, key)
+    started = time.perf_counter()
+    PositionAlerts(engine, Calendar(), clock=lambda: at("11:01"), quotes=lambda s: {}).deliver()
+    assert time.perf_counter() - started < 0.9
+    assert [s["image"] for s in phone.sent] == [None] and image_states(engine) == {"position_alerts": "none"}
+
+
+def test_a_picture_that_failed_with_a_5xx_is_retried_as_text(engine, bars, monkeypatch):
+    texts = []
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: texts.append(title) or "id")
+    monkeypatch.setattr(httpx, "put", lambda *a, **k: httpx.Response(500))
+    trade_id, key = buy(engine, "10:00")
+    alert_id = position_alert(engine, trade_id, key)
+    clock = [at("11:01")]
+    watcher = PositionAlerts(engine, Calendar(), clock=lambda: clock[0], quotes=lambda s: {})
+    watcher.deliver()
+    with Session(engine) as db:
+        assert db.get(PositionAlert, alert_id).delivery == "pending" and texts == []
+    clock[0] = at("11:02")
+    watcher.deliver()
+    with Session(engine) as db:
+        assert db.get(PositionAlert, alert_id).delivery == "sent"
+    assert texts == ["SNDK 10/23/26 230C: give-back triggered"] and image_states(engine) == {"position_alerts": "none"}
+
+
 def test_pictures_off_sends_text_and_never_reads_bars(engine, bars, monkeypatch):
     monkeypatch.setenv("PING_IMAGES_ENABLED", "false")
     phone = Phone(monkeypatch)

@@ -1027,7 +1027,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   benchmark, thesis watch the move from its reference, pre-market prep the open
   options by days to expiry. The PNG goes to ntfy as the attachment; a picture
   that fails, finds no bars or takes over 2 seconds, or that ntfy refuses, leaves
-  the ping as text, never later or dropped. The picture never changes a decision;
+  the ping as text, never later or dropped; a retry after a failed send goes as
+  text. The picture never changes a decision;
   `phone_ping.image` records `attached`, `none` or `off`. `PING_IMAGES_ENABLED`
   (default true) turns pictures off without touching the pings.
 - **Activation:** `ALERT_POLICY_ENABLED` defaults to **true**. It only ever reduces

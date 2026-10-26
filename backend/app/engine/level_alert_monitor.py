@@ -424,7 +424,8 @@ class LevelAlertMonitor:
                 # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
                 path = f"/copilot-lab?investigation={investigation}" if investigation else None
             # A plan's level carries its chart (the last 90 minutes, the plan's levels and any fill); other alerts are text.
-            image = ping_images.picture(ping_images.prepare(db, _picture, alert, event, title, now)) if ticket is not None else None
+            image = (ping_images.picture(ping_images.prepare(db, _picture, alert, event, title, now))
+                     if ticket is not None and event.attempts == 0 else None)  # a retry goes as text
             image_state = "none"
             event.attempts += 1
             try:
