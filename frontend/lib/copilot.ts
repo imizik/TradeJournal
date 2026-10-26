@@ -230,12 +230,34 @@ const SYMBOL_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 export const whatChangedPrompt = (investigationId: string) =>
   `What changed? Use get_investigation_changes for investigation ${investigationId}, then compare it with fresh group, peer, news and quote reads, and say whether the saved conclusion still holds.`;
 
-export function copilotLabHref(symbol: string, context?: string, origin?: LinkOrigin | null) {
+export function copilotLabHref(symbol: string, context?: string, origin?: LinkOrigin | null, plan?: DrawnPlan | null) {
   const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
   if (context?.trim()) query.set("context", context.trim().slice(0, CONTEXT_MAX));
   if (origin) query.set("origin", originParam(origin));
+  if (plan) query.set("plan", drawnParam(plan));
   return `/copilot-lab?${query}`;
 }
+
+/** The levels the owner drew on Charts for a plan ("Plan this"): the plan card shows them beside the copilot's draft.
+ * `trigger` is null when only the invalidation was drawn. */
+export type DrawnPlan = { side: "long" | "short"; trigger: number | null; invalidation: number };
+/** `trigger:95.90,invalidation:92.30,side:long` (no trigger part when only the invalidation was drawn). */
+export const drawnParam = (plan: DrawnPlan) =>
+  [plan.trigger !== null && `trigger:${plan.trigger.toFixed(2)}`, `invalidation:${plan.invalidation.toFixed(2)}`, `side:${plan.side}`].filter(Boolean).join(",");
+/** The `plan` parameter, or null when it is not one Charts could have made. */
+export function readDrawn(value: string): DrawnPlan | null {
+  const parts = new Map(value.split(",").map(part => { const at = part.indexOf(":"); return [part.slice(0, at).trim(), part.slice(at + 1).trim()] as const; }));
+  const number = (key: string) => { const raw = parts.get(key); const n = raw && /^\d+(\.\d{1,4})?$/.test(raw) ? Number(raw) : NaN; return n > 0 ? n : null; };
+  const side = parts.get("side");
+  const invalidation = number("invalidation");
+  const trigger = parts.has("trigger") ? number("trigger") : null;
+  if ((side !== "long" && side !== "short") || invalidation === null || (parts.has("trigger") && trigger === null)) return null;
+  if (trigger !== null && (side === "long" ? trigger <= invalidation : trigger >= invalidation)) return null;
+  return { side, trigger, invalidation };
+}
+/** Sent on the window when a plan card is confirmed (its plan saved), so Charts can label the levels it was drawn from. */
+export const PLAN_CONFIRMED = "tradejournal:plan-confirmed";
+export type PlanConfirmed = { symbol: string; side: "long" | "short"; entry: number; invalidation: number; drawn: DrawnPlan | null };
 
 /** What prompted a plan, carried by a deep link as `origin=<kind>[:<ref>]` (docs/copilot-lab.md § Origin). */
 export type LinkOrigin = { kind: OriginKind; ref: string | null };
@@ -259,16 +281,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
  * with it is the owner's question, ready in the message box (a plan alert's tap). */
-export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[] }) {
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[]; plan?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
   const investigation = one(params.investigation).trim();
   const origin = readOrigin(one(params.origin));
-  if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin };
+  if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin, plan: null };
   // An origin alone (a prep ping with no investigation) still starts a conversation that records it.
   if (!symbol && !context && !origin) return null;
-  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin };
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin, plan: readDrawn(one(params.plan)) };
 }
 
 // --------------------------------------------------------------------------- research queue

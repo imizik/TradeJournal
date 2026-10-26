@@ -582,6 +582,24 @@ cd backend
   never drops a field it leaves out, so an open tab on an older build cannot
   erase drawings. Like levels, each drawing keeps the date it was drawn and
   moves with a later split.
+- **Draw the plan.** The last two price levels drawn or selected on the main
+  chart (a saved level, a horizontal ray, or a zone by its edge nearest the
+  last price; trend lines and notes do not count) can become a copilot plan,
+  owner-only while the lab is on: **Plan this** in the drawing tools, in the
+  item's right-click menu, and as a chip under the selection bar while one of
+  the two is selected (44 px with its swap on a phone). The level nearer the
+  last price is the entry trigger and the other the invalidation, so a pair
+  around the price breaks toward its nearer side, both below is a long off
+  support and both above a short into resistance; the chip's swap trades the
+  roles. One level offers **Plan this as invalidation**: a long below the
+  price, a short above it. Pressing it opens the dock's Copilot tab in place
+  with the message prefilled and unsent and the prices passed to the plan
+  card (`frontend/lib/drawPlan.ts`, `frontend/components/charts/PlanFromDrawing.tsx`;
+  [Copilot Lab](copilot-lab.md#what-runs)). When that plan card is
+  confirmed, the drawn level at each plan price is relabelled "Entry
+  trigger" or "Invalidation" (a level the draft moved is moved to the plan's
+  price; a ray or zone gets a labelled level beside it), one undo step, and
+  the plan's alerts are read at once so their bells show.
 - **Context menu (C1.3).** Right-click a chart, or hold a finger still on it
   for half a second, for its menu (`frontend/components/charts/ChartMenu.tsx`).
   A mouse opens it at the pointer; a finger opens it as a bottom sheet with

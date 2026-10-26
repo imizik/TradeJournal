@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell, BellOff, BellPlus, Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Bell, BellOff, BellPlus, Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, Plus, RotateCcw, Target, Trash2 } from "lucide-react";
 import { alertText } from "@/lib/alerts";
 import type { AlertCondition, AlertSource, LevelAlert } from "@/lib/alerts";
 import { LEVEL_LABEL_MAX, price } from "@/lib/charts";
@@ -25,6 +25,8 @@ export type MenuAlerts = { source: AlertSource | null; existing: (LevelAlert & {
 export type MenuPatch = { label?: string; color?: string; hidden?: boolean; locked?: boolean };
 export type LayerToggle = { key: string; label: string; on: boolean; toggle(): void };
 export type HiddenItem = { id: string; name: string; show(): void };
+/** Draw the plan on a level, ray or zone: "Plan this" (or "Plan this as invalidation") and the side and prices it sends. */
+export type MenuPlan = { name: string; detail: string; run(): void };
 
 const ITEM = "[role=menuitem]:not([disabled]),[role=menuitemcheckbox]:not([disabled])";
 
@@ -40,9 +42,9 @@ const ITEM = "[role=menuitem]:not([disabled]),[role=menuitemcheckbox]:not([disab
  * being edited is saved first unless Esc closed it. It renders on the body,
  * above full-screen charts and clear of the workspace's spacing.
  */
-export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, alerts, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
+export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, alerts, plan = null, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
   at: { x: number; y: number; touch: boolean }; symbol: string; price: number | null; item: MenuItem | null;
-  layers: LayerToggle[]; hidden: HiddenItem[]; alerts?: MenuAlerts;
+  layers: LayerToggle[]; hidden: HiddenItem[]; alerts?: MenuAlerts; plan?: MenuPlan | null;
   onAddLevel(price: number): void; onCopyPrice(price: number): void; onReset(): void;
   onEdit(patch: MenuPatch): void; onDuplicate(): void; onDelete(): void; onClose(): void;
 }) {
@@ -180,6 +182,8 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
         <span className="h-3.5 w-3.5 rounded-full" style={{ background: value }} /></button>)}
     </div>
     <div role="menu" aria-label={`${name} actions`} className="border-t border-slate-700/60 py-1">
+      {plan && <button role="menuitem" aria-label={`${plan.name}: ${plan.detail}`} className={`${row} text-sky-200`} title="The copilot drafts the plan around your drawn levels. Nothing is sent until you press Send."
+        onClick={() => { close(); plan.run(); }}><Target size={icon} />{plan.name}<span className="ml-auto min-w-0 truncate pl-2 text-[10px] text-slate-400">{plan.detail}</span></button>}
       <button role="menuitem" className={row} title={locked ? "Let it drag again" : "Keep it from being dragged; it still selects, restyles and deletes"} onClick={() => { commit({ locked: !locked }); close(false); }}>{locked ? <LockOpen size={icon} /> : <Lock size={icon} />}{locked ? "Unlock" : "Lock"}</button>
       <button role="menuitem" className={row} onClick={() => { commit({ hidden: true }); close(false); }}><EyeOff size={icon} />Hide</button>
       <button role="menuitem" className={row} onClick={() => { close(); onDuplicate(); }}><Copy size={icon} />Duplicate</button>
