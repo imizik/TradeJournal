@@ -10,6 +10,8 @@ export type CopilotStatus =
       fallbacks: boolean; key_configured: boolean; plan_configured: boolean; tools: string[];
       /** The models a turn may pick (the server's default first); absent on older servers. */
       models?: string[];
+      /** The backends a turn may pick (the server's default first), and today's estimated API spend against its cap. */
+      backends?: Backend[]; spend_today_usd?: number | null; daily_budget_usd?: number;
       /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. transcriber: whether hold-to-talk
        * can use this server's speech to text (else the browser's own, where it has one). */
       capabilities?: { copilot_alerts: boolean; transcriber?: { configured: boolean; provider: string } };
@@ -96,7 +98,22 @@ export function parseFrame(frame: string): CopilotEvent | null {
 }
 
 /** Stream one turn. History is text-only: the server re-reads evidence rather than trusting the browser. */
+export type Backend = "anthropic" | "plan";
 export const MODEL_KEY = "copilot.model";
+export const BACKEND_KEY = "copilot.backend";
+
+/** The backend the owner picked for their turns in this browser, when the server still offers it. */
+export function pickedBackend(status: CopilotStatus | null): Backend | null {
+  if (!status?.enabled || !status.backends || status.backends.length < 2) return null;
+  try {
+    const saved = window.localStorage.getItem(BACKEND_KEY) as Backend | null;
+    return saved && status.backends.includes(saved) ? saved : null;
+  } catch { return null; }
+}
+
+export function rememberBackend(backend: Backend | null) {
+  try { if (backend) window.localStorage.setItem(BACKEND_KEY, backend); else window.localStorage.removeItem(BACKEND_KEY); } catch { /* per-browser convenience only */ }
+}
 
 /** The model the owner picked for their turns in this browser, when the server still offers it. */
 export function pickedModel(status: CopilotStatus | null): string | null {
@@ -112,10 +129,10 @@ export function rememberModel(model: string | null) {
 }
 
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
-  onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null) {
+  onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, backend: Backend | null = null) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}) }), signal, cache: "no-store",
+    body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}), ...(backend ? { backend } : {}) }), signal, cache: "no-store",
   });
   if (!response.ok || !response.body) {
     let detail = `Copilot request failed (${response.status}).`;

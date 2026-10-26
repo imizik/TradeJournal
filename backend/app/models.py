@@ -735,6 +735,26 @@ class WeekReviewAuto(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class CopilotTurn(SQLModel, table=True):
+    """One copilot turn's model and cost (``ai/copilot_spend.py``): what answered, rounds, tokens and the estimated
+    USD, so the day's API spend can be capped and shown. Additive; it keeps no prompt or answer text."""
+
+    __tablename__ = "copilot_turn"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    started_at: datetime = Field(default_factory=utc_now_naive, index=True)
+    backend: str  # anthropic | plan | fake
+    billing: str  # api | claude_plan | none
+    model: Optional[str] = None
+    symbol: Optional[str] = None
+    rounds: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cost_usd: float = Field(default=0.0, sa_column=Column(DECIMAL_18_6, nullable=False))
+    total_ms: Optional[int] = None
+
+
 class PhonePing(SQLModel, table=True):
     """One copilot-side phone ping as the notification policy judged it
     (``engine/notification_policy.py``): the sender's own row (``sender`` plus

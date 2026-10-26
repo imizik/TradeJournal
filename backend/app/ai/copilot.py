@@ -26,10 +26,25 @@ from app.ai import copilot_tools
 
 log = logging.getLogger(__name__)
 
+
+def _journal_logging() -> None:
+    """Turn metrics are logged at INFO. Under uvicorn only its own loggers have handlers and Python's last-resort
+    handler drops anything below WARNING, so the lines never reached the server journal; give app.ai one handler."""
+    ai = logging.getLogger("app.ai")
+    if not ai.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+        ai.addHandler(handler)
+        ai.setLevel(logging.INFO)
+
+
+_journal_logging()
+
 DEFAULT_MODEL = "claude-sonnet-5-5"
 # The models the panel may pick for a turn when COPILOT_MODELS is unset; COPILOT_MODEL is always offered first.
 DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
+BACKENDS = ("anthropic", "plan")  # what a turn may pick; `fake` is only ever the default
 # Short progress notes between tool calls come back as thinking text; reasoning itself stays hidden.
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write.
@@ -171,10 +186,13 @@ class Settings:
     turn_budget_usd: float = 0.25
     plan_configured: bool = False
     models: tuple[str, ...] = (DEFAULT_MODEL,)  # what a turn may pick; self.model is always first
+    backends: tuple[str, ...] = ("fake",)  # what a turn may pick; self.backend is always first
+    plan_remote_ok: bool = False  # COPILOT_PLAN_REMOTE_OK: the plan backend on a hosted database (owner-accepted)
+    daily_budget_usd: float = 2.0  # COPILOT_DAILY_BUDGET_USD: API turns stop for the day past this estimate
 
     def public(self) -> dict:
         return {"enabled": self.enabled, "backend": self.backend, "evidence": self.evidence, "model": self.model,
-                "models": list(self.models),
+                "models": list(self.models), "backends": list(self.backends), "daily_budget_usd": self.daily_budget_usd,
                 "effort": self.effort, "fallbacks": self.fallbacks, "key_configured": self.key_configured,
                 "plan_configured": self.plan_configured,
                 "limits": {"max_rounds": self.max_rounds, "max_tool_calls": self.max_tool_calls,
@@ -188,17 +206,25 @@ def settings() -> Settings:
     evidence = os.environ.get("COPILOT_EVIDENCE", "fixture").strip().lower()
     effort = os.environ.get("COPILOT_EFFORT", "medium").strip().lower()
     model = os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    backend = backend if backend in ("fake", "anthropic", "plan") else "fake"
+    key_configured = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    plan_remote_ok = os.environ.get("COPILOT_PLAN_REMOTE_OK") == "true"
+    wanted = requested_backends()
+    plan_ready = (backend == "plan" or "plan" in wanted) and _plan_configured()
+    plan_usable = plan_ready and (plan_remote_ok or _is_local())
     return Settings(
         enabled=os.environ.get("COPILOT_ENABLED") == "true",
-        backend=backend if backend in ("fake", "anthropic", "plan") else "fake",
+        backend=backend,
+        backends=offered_backends(backend, wanted, key_configured, plan_usable),
+        plan_remote_ok=plan_remote_ok, daily_budget_usd=_float_env("COPILOT_DAILY_BUDGET_USD", 2.0),
         evidence=evidence if evidence in ("fixture", "live", "replay") else "fixture",
         model=model,
         models=offered_models(model),
         effort=effort if effort in ("low", "medium", "high") else "medium",
         fallbacks=os.environ.get("COPILOT_FALLBACKS", "default") != "off",
-        key_configured=bool(os.environ.get("ANTHROPIC_API_KEY")),
+        key_configured=key_configured,
         turn_budget_usd=_float_env("COPILOT_TURN_BUDGET_USD", 0.25),
-        plan_configured=backend == "plan" and _plan_configured(),
+        plan_configured=plan_ready,
         replay_store=os.environ.get("COPILOT_REPLAY_STORE", ""),
         replay_at=os.environ.get("COPILOT_REPLAY_AT", ""),
     )
@@ -214,6 +240,38 @@ def offered_models(default: str) -> tuple[str, ...]:
         if name and MODEL_ID.match(name) and name not in out:
             out.append(name)
     return tuple(out)
+
+
+def requested_backends() -> tuple[str, ...]:
+    """COPILOT_BACKENDS (comma-separated; unset means both): the backends the panel may offer, before availability."""
+    raw = os.environ.get("COPILOT_BACKENDS")
+    names = [b.strip().lower() for b in raw.split(",")] if raw is not None else list(BACKENDS)
+    return tuple(dict.fromkeys(b for b in names if b in BACKENDS))
+
+
+def offered_backends(default: str, wanted: tuple[str, ...], key_configured: bool, plan_usable: bool) -> tuple[str, ...]:
+    """The backends a turn may pick: the default first, then each requested one that is actually usable here
+    (anthropic needs the API key; plan needs the token, the SDK and, off a local database, COPILOT_PLAN_REMOTE_OK)."""
+    out = [default]
+    for name in wanted:
+        usable = key_configured if name == "anthropic" else plan_usable
+        if usable and name not in out:
+            out.append(name)
+    return tuple(out)
+
+
+def _is_local() -> bool:
+    from app.environment import describe
+    return describe().is_local
+
+
+def with_backend(cfg: Settings, backend: str | None) -> Settings:
+    """``cfg`` for a turn that picked ``backend``; one the server does not offer is refused."""
+    if backend is None or backend == cfg.backend:
+        return cfg
+    if backend not in cfg.backends:
+        raise CopilotError("backend_not_offered", f"The {backend} backend is not offered on this server.")
+    return dataclasses.replace(cfg, backend=backend)
 
 
 def with_model(cfg: Settings, model: str | None) -> Settings:

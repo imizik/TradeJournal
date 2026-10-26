@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt,
-  type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
+  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt,
+  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { X } from "lucide-react";
@@ -162,17 +162,34 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
 }
 
 /** The lab's backing and evidence as two chips. The page's own description says what the lab may and may not do. */
-function StatusLine({ status, error, model, onModel }: { status: CopilotStatus | null; error: string | null; compact?: boolean;
-  model: string | null; onModel: (model: string | null) => void }) {
+const BACKEND_LABEL: Record<Backend, string> = { plan: "Claude plan (no API credits)", anthropic: "Claude API (credits)" };
+
+function StatusLine({ status, error, model, onModel, backend, onBackend }: { status: CopilotStatus | null; error: string | null; compact?: boolean;
+  model: string | null; onModel: (model: string | null) => void; backend: Backend | null; onBackend: (backend: Backend | null) => void }) {
   if (error) return <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">{error}</p>;
   if (!status) return <p className="text-sm text-muted-foreground">Checking Copilot Lab…</p>;
   if (!status.enabled) return <p className="rounded border px-3 py-2 text-sm text-muted-foreground">{status.reason}</p>;
   const simulated = status.backend === "fake";
+  const effective = backend ?? status.backend;
   return (
     <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       <span className={cn("rounded px-1.5 py-0.5", simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
-        {simulated ? "Simulated model — no API calls" : status.backend === "plan" ? `Claude plan (no API credits) · ${model ?? status.model}` : `Claude API · ${model ?? status.model}`}
+        {simulated ? "Simulated model — no API calls" : effective === "plan" ? `Claude plan (no API credits) · ${model ?? status.model}` : `Claude API · ${model ?? status.model}`}
       </span>
+      {!simulated && (status.backends?.length ?? 0) > 1 && (
+        <label className="inline-flex items-center gap-1">
+          <span className="sr-only">Backend</span>
+          <select aria-label="Backend" value={effective} onChange={e => onBackend(e.target.value === status.backend ? null : e.target.value as Backend)}
+            className="min-h-11 rounded border bg-background px-1.5 text-xs text-foreground sm:min-h-0">
+            {status.backends!.map(b => <option key={b} value={b}>{BACKEND_LABEL[b]}{b === status.backend ? " (default)" : ""}</option>)}
+          </select>
+        </label>
+      )}
+      {!simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (
+        <span className={cn("rounded px-1.5 py-0.5", status.spend_today_usd >= status.daily_budget_usd ? "bg-rose-500/10 text-rose-300" : "bg-muted")}>
+          API today ${status.spend_today_usd.toFixed(2)} of ${status.daily_budget_usd.toFixed(2)}
+        </span>
+      )}
       {!simulated && (status.models?.length ?? 0) > 1 && (
         <label className="inline-flex items-center gap-1">
           <span className="sr-only">Model</span>
@@ -244,6 +261,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [busy, setBusy] = useState(false);
   // The model for this browser's turns, when the server offers more than one; the metrics line shows what answered.
   const [model, setModel] = useState<string | null>(null);
+  const [backend, setBackend] = useState<Backend | null>(null);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
   const [current, setCurrent] = useState<Current | null>(null);
@@ -337,6 +355,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       if (controller.signal.aborted) return;
       setStatus(next);
       setModel(pickedModel(next));
+      setBackend(pickedBackend(next));
       if (!next.enabled) return;
       if (panel && !link) { void follow(pageSymbol || symbol, controller.signal, true); return; }
       if (panel) return; // Radar's drawer: a new investigation from its link
@@ -456,7 +475,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         });
         else if (event.type === "error") update(last => ({ ...last, error: { code: event.code, message: event.message } }));
         else if (event.type === "done") update(last => ({ ...last, progress: undefined, metrics: event.metrics }));
-      }, controller.signal, model);
+      }, controller.signal, model, backend);
     } catch (error) {
       update(last => ({ ...last, error: controller.signal.aborted ? { code: "stopped", message: "Stopped." }
         : { code: "network", message: error instanceof Error && error.message ? "Copilot Lab could not be reached." : "Copilot Lab failed." } }));
@@ -545,7 +564,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </span>
         </div>
       )}
-      <StatusLine status={status} error={statusError} compact={panel} model={model} onModel={next => { setModel(next); rememberModel(next); }} />
+      <StatusLine status={status} error={statusError} compact={panel} model={model} onModel={next => { setModel(next); rememberModel(next); }}
+        backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
       {offer && engaged && pageSymbol && (
         <div role="status" aria-label="Symbol changed" className="flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
           <span className="text-foreground">The page is now on {pageSymbol}; this conversation is about {symbol}.</span>
