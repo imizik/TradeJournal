@@ -169,7 +169,7 @@ class PlanAdapter:
                 state["calls"] += 1
                 block = {"id": f"plan_{state['calls']}", "name": name, "input": args}
                 await queue.put(("event", {"type": "tool", "id": block["id"], "name": name, "status": "running"}))
-                result, event = await copilot._run_tool(evidence, block, cfg)
+                result, event = await copilot._run_tool(evidence, block, cfg, state)
                 await queue.put(("event", event))
                 if (proposal := copilot.proposal_event(event)) is not None:
                     await queue.put(("event", proposal))

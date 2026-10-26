@@ -552,6 +552,7 @@ def week_review(week_start: str | None = None, session=None) -> dict:
     from sqlmodel import Session, select
     from app.database import engine
     from app.engine.analytics import wall_time
+    from app.engine import practice_goal
     from app.models import Account, Trade
     with (Session(engine) if session is None else nullcontext(session)) as db:
         latest = _latest_close(db)
@@ -586,6 +587,10 @@ def week_review(week_start: str | None = None, session=None) -> dict:
             "note": "A week: lead with planned vs unplanned and the plans' follow-through; name at most one or two things "
                     "to practice next week, grounded in these counts. Counts are associations, not causes.",
         }
+        # The confirmed practice goal and its score; absent while none is active, so such a week reads as before.
+        practice = _section(lambda: practice_goal.week_section(db, start.date(), rows))
+        if practice.get("state") != "none":
+            review["practice"] = practice
     return shed_week(review)
 
 
@@ -609,6 +614,7 @@ def _week_steps(review: dict):
     yield lambda: keep("by_pnl", 2)
     yield drop_notes
     yield lambda: (review.get("exits") or {}).pop("by_giveback", None)
+    yield lambda: (review.get("practice") or {}).pop("note", None)
 
 
 def shed_week(review: dict) -> dict:
