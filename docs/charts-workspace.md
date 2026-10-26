@@ -406,7 +406,14 @@ cd backend
   opens the form; levels open when the symbol has any, alerts when one is
   waiting or a phone message failed, the journal when it has fills, and the
   person's own fold is remembered on the device. The "Phone alerts are not set
-  up" warning shows even when alerts are folded. Pressing the open tab's
+  up" warning shows even when alerts are folded. The owner's **Copilot** tab
+  (while the Copilot Lab is on) puts the same kind of folds above its
+  conversation for the main symbol: its open position, armed plans and what is
+  new since the owner looked (position open by default and forced open when its
+  invalidation is hit or give-back fired, plans folded, new open; empty ones
+  left out), with a **Plan a trade** button that fills the message box with the
+  interval, last price and nearest automatic level each side; see
+  [Copilot Lab § What runs](copilot-lab.md#what-runs). Pressing the open tab's
   button closes the dock;
   whether it is open, and on which tab, is remembered on the device (a device
   that had left the C1.4 layers panel open opens it on Layers). A status strip

@@ -83,6 +83,26 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       the owner typed is never replaced.
     - Closing a panel mid-turn (the dock tab, the sheet, Radar's drawer, or
       leaving the page) stops the turn and saves what had arrived.
+    - Above the conversation, for the chart's symbol only
+      (`frontend/components/charts/CopilotLoop.tsx`, owner-only
+      `GET /copilot/symbol/{symbol}`): its open position with the plan it was
+      entered under (contract, P&L now, invalidation distance, time stop,
+      give-back state), its armed plans not yet in a position (distance to
+      entry and invalidation), and one line of what is new on it (a Radar
+      event since the last Radar visit, or a thesis trigger fired today). Each
+      is a dock section with its count, folded per device; an empty one is
+      left out. A position opens its review (`Review this position: <trade
+      id>`), a plan its investigation, and the new line a conversation about
+      it with its origin, all in the panel and unsent. The route composes the
+      Plans board, the Plans card and the Today screen's readers in-process,
+      each section on its own (`unavailable` when its source fails), with one
+      quote read for that symbol; the tab reads it on opening and every
+      minute while open and visible.
+    - **Plan a trade** there starts a new conversation with `Context: Plan a
+      trade: <symbol> from the <interval> chart at <last price> · nearest
+      automatic levels: above …, below …` (the chart's own automatic zones, so
+      the copilot drafts levels without a chart read) and origin `chart`. The
+      toolbar's Plan a trade still opens the lab.
     - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
       the lab.
   - **Radar:** "Ask copilot" in an event's detail opens the same panel in

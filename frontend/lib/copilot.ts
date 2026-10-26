@@ -1,6 +1,7 @@
 import { apiUrl } from "./api";
 import type { AlertsPayload } from "./alerts";
 import type { Capture, CaptureOrigin, CaptureSide, OriginKind } from "./captures";
+import type { PlanPosition } from "@/components/dashboard/PlansCard";
 
 export type CopilotStatus =
   | { enabled: false; reason: string }
@@ -323,6 +324,20 @@ export type PlanBoardRow = {
 };
 export type PlansBoard = { plans: PlanBoardRow[]; quotes_at: number | null; quote_issue: string | null };
 export const getPlansBoard = (signal?: AbortSignal) => request<PlansBoard>("/copilot/plans", { signal });
+/** The Charts dock's Copilot tab for one symbol (``GET /copilot/symbol/{symbol}``): its open positions with their plans
+ * (the Dashboard Plans card's rows), its armed plans not yet in a position (the board's rows), and what is new on it.
+ * A section whose source failed reads ``unavailable``; Radar reads ``off`` while it is not running. */
+type LoopSection<T> = { state: "ok"; rows: T[] } | { state: "unavailable" };
+export type SymbolLoop = {
+  symbol: string; as_of: string;
+  positions: LoopSection<PlanPosition>; plans: LoopSection<PlanBoardRow>;
+  new: {
+    radar: { state: "ok"; count: number; rows: { event_id: string; summary: string | null; first_seen_at: string }[] } | { state: "off" | "unavailable" };
+    thesis: { state: "ok"; count: number; rows: { kind: string; text: string; fired_at: string | null }[] } | { state: "unavailable" };
+  };
+  quotes_at: number | null; quote_issue: string | null;
+};
+export const getSymbolLoop = (symbol: string, signal?: AbortSignal) => request<SymbolLoop>(`/copilot/symbol/${encodeURIComponent(symbol)}`, { signal });
 /** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
 export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
 

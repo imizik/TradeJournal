@@ -28,9 +28,10 @@ import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
-import CopilotPanel from "@/components/copilot/CopilotPanel";
+import CopilotPanel, { type PanelActions } from "@/components/copilot/CopilotPanel";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import PlanATrade, { PLAN_BUTTON } from "@/components/copilot/PlanATrade";
+import PlanATrade, { PLAN_BUTTON, planContext } from "@/components/copilot/PlanATrade";
+import CopilotLoop from "./CopilotLoop";
 import { radarChartContext, radarReturnHref, nyTime, type RadarChartContext, type RadarGroup } from "@/lib/radar";
 import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
@@ -39,7 +40,7 @@ import ToolbarMenu from "./ToolbarMenu";
 import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
-import type { ColorKey, ChartBar, ChartPanelData, ChartQuote, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import type { AutoZone, ColorKey, ChartBar, ChartPanelData, ChartQuote, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { receiveChartTick, startSymbolTiming, useQuoteTiming } from "@/lib/chartPerformance";
@@ -1437,7 +1438,6 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const latestShowDock = useRef<(tab: DockTab | null) => void>(() => undefined);
   useEffect(() => { latestShowDock.current = showDock; });
   const closeCopilot = useCallback(() => latestShowDock.current(null), []);
-  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "vwapBands") toggleVwapBands(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
@@ -1452,6 +1452,12 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
   const narrow = width < WIDE;
+  // Above the conversation: the symbol's position, armed plans and what is new, and "Plan a trade" with what this chart
+  // shows, read at the press so the chart's refreshes never re-render the panel.
+  const planLine = useRef<() => string>(() => "");
+  const loopStrip = useCallback((actions: PanelActions) => isMacroSymbol(symbol) ? null
+    : <CopilotLoop key={symbol} symbol={symbol} narrow={narrow} actions={actions} context={() => planLine.current()} />, [symbol, narrow]);
+  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} strip={loopStrip} />;
   // A desktop and full screen fill their box: the main chart takes the height
   // the smaller charts leave, measured by the browser, not estimated (C7.3).
   const fill = !narrow || immersive;
@@ -1879,6 +1885,17 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
 
   // The copilot's "Plan a trade", beside the symbol: what this chart shows goes with it, unsent.
   const planAt = selected?.last ?? latestCandle?.close;
+  useEffect(() => {
+    planLine.current = () => {
+      // The nearest automatic level each side of the price, as the chart draws them.
+      const zones = planAt == null ? [] : autoFor(symbol)?.zones ?? [];
+      const above = zones.filter((zone) => zone.low > planAt!).sort((a, b) => a.low - b.low)[0];
+      const below = zones.filter((zone) => zone.high < planAt!).sort((a, b) => b.high - a.high)[0];
+      const zone = (z: AutoZone) => `${z.low === z.high ? price(z.low) : `${price(z.low)}–${price(z.high)}`} (${z.label})`;
+      const levels = [above && `above ${zone(above)}`, below && `below ${zone(below)}`].filter(Boolean).join(", ");
+      return planContext(`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}${levels ? ` · nearest automatic levels: ${levels}` : ""}`);
+    };
+  });
   const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} origin="chart" line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}
     className={`${PLAN_BUTTON} ${narrow ? "h-11 px-2.5" : "h-7 px-2.5"}`} />;
 
