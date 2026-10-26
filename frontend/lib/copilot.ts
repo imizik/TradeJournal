@@ -51,7 +51,8 @@ export type Proposal = { id: string } & (
   | { kind: "memory"; memory_kind: "statement" | "thesis" | "preference" | "lesson"; symbol: string | null; text: string; interpretation?: string }
   | { kind: "trade_plan"; symbol: string; direction: "long" | "short"; instrument: "stock" | "calls" | "puts"; contract: string | null;
       thesis: string; entry_trigger: PlanLevel; invalidation: PlanLevel; time_stop: string | null; size_note: string | null;
-      last?: number; as_of?: string | number | null });
+      last?: number; as_of?: string | number | null }
+  | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string });
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
@@ -358,3 +359,24 @@ export const saveMemory = (memory: Extract<Proposal, { kind: "memory" }>, text: 
     operation_id: operation, kind: memory.memory_kind, symbol: memory.symbol, original_text: text,
     interpretation: memory.interpretation ?? null, source: "owner_statement",
     source_reference: investigationId ? `copilot:${investigationId}` : "copilot", status: "active", owner_confirmed: true }) });
+
+// --------------------------------------------------------------------------- the practice goal (Review my week)
+
+export type PracticeMeasure = "plan_before_entry" | "exit_at_invalidation" | "respond_to_giveback_15m" | "no_trade_after_hour_red"
+  | "no_opening_while_green" | "max_trades_per_day";
+/** One week of a goal's measure: ``hit`` of ``of`` (``text``, "2 of 3"), and whether it met the target (null without one). */
+export type PracticeScore = { week_start: string; hit: number; of: number; text: string; of_what: string; share: number | null;
+  met: boolean | null; source?: string };
+export type PracticeGoal = { text: string; measure: PracticeMeasure; label: string; target: number | null; week_start: string; since: string };
+/** ``this_week`` is null until the goal's first week starts. */
+export type PracticeNow = { goal: PracticeGoal | null; this_week: PracticeScore | null };
+export const getPractice = (signal?: AbortSignal) => request<PracticeNow>("/copilot/practice", { signal });
+/** Confirming a practice card makes it the one active goal; the previous one ends. */
+export const savePractice = (body: { text: string; measure: PracticeMeasure; target: number | null; investigation_id: string | null }) =>
+  request<PracticeNow>("/copilot/practice", { method: "POST", body: JSON.stringify(body) });
+/** "Practicing: exit at my invalidation · 2 of 3 this week" (or when it starts). */
+export function practiceLine({ goal, this_week }: PracticeNow): string | null {
+  if (!goal) return null;
+  const starts = new Date(`${goal.week_start}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+  return `Practicing: ${goal.label} · ${this_week ? `${this_week.text} this week` : `starts ${starts}`}`;
+}
