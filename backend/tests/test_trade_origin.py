@@ -1,6 +1,5 @@
 """The trade origin chain (docs/copilot-lab.md § Origin): a plan records what prompted it, the trade review and the week
 show it without ids, and Radar counts the events that led to a plan and to a trade."""
-import json
 import uuid
 from datetime import timedelta
 
