@@ -137,6 +137,7 @@ def test_the_week_carries_every_section(db):
     assert week["state"] == "ok" and "trimmed" not in week and "NBIS stock" not in text  # Webull's and last week's are out
     assert week["week"] == {"start": "2026-10-19", "end": "2026-10-23", "default": False}
     assert set(week["provenance"]) == {"totals", "planned", "follow_through", "alerts", "pings", "habits", "exits"}
+    assert "practice" not in week  # no goal confirmed
     assert week["sample"]["small"] is True and "cannot show" in week["sample"]["note"]
 
     t = week["totals"]

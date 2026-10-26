@@ -8,7 +8,8 @@ const now = Math.floor(Date.now() / 1000);
 const STREAK: PlanStreak = {
   show: true, since: now - 86400 * 10, tracking: true, current: 4, best: 6, pending: 0,
   this_week: { planned: 5, total: 7, pending: 0, start: now - 86400 * 2 },
-  last_break: { contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: now - 3600, reason: "no_plan" },
+  // A minute ago, so it is still today (no weekday in the label) except in the first minute after midnight New York.
+  last_break: { contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: now - 60, reason: "no_plan" },
 };
 
 async function answer(page: Page, body: PlanStreak) {

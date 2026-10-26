@@ -13,7 +13,7 @@ from app import models as _models  # noqa: F401  # registers all SQLModel tables
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "f1a2b3c4d5e6"
-CURRENT_HEAD = "c4e8a2f6d1b9"
+CURRENT_HEAD = "c8d2f6a4e1b7"
 DAY_JOURNAL_PARENT = "d4f1a7c3e9b2"
 
 EXPECTED_COLUMNS = {

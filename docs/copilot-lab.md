@@ -532,24 +532,73 @@ model to call:
     and exit (New York), P&L $ and %, give-back, plan timing or none, and a
     one-line note (peak and give-back, invalidation, alerts, hold). A trade
     shows once per ranking.
-- The model leads with planned vs unplanned and follow-through, names at most
-  one or two things to practice next week grounded in a count, says plainly
-  when the sample is too small, and proposes a memory only if the owner
-  states a lesson.
+  - `practice`, only while a practice goal is active (absent otherwise, so
+    such a week reads exactly as before): the goal (text, measure, its label,
+    target, first week), `practicing` (false when the reviewed week came
+    before the goal started), and `this_week` and `last_week`: `hit` of `of`
+    for that week, the share and whether it met the target (null without
+    one). See [the practice goal](#the-practice-goal).
+- The model opens with the practice score in one sentence when a goal is
+  active, never characterizing the owner; then leads with planned vs
+  unplanned and follow-through, names at most one or two things to practice
+  next week grounded in a count, and proposes exactly one of them as a
+  [practice card](#confirm-a-plan) when the counts support it and a fixed
+  measure fits, saying the count it rests on. It proposes none when the week
+  is too small (`sample.small`, under 10 closed trades). It says plainly when
+  the sample is too small, and proposes a memory only if the owner states a
+  lesson.
 - The review is held under 5,800 characters: over that, it drops the
   provenance labels, the time-stop rows, the follow-through rows, then trims
   the give-back and P&L rankings to two each, drops the notes, and finally
-  the give-back ranking, marking itself `trimmed`. Totals, planned vs
-  unplanned and the follow-through counts always stay. One failing section
-  reads `unavailable`.
+  the give-back ranking, then the practice note, marking itself `trimmed`.
+  Totals, planned vs unplanned, the follow-through counts and the practice
+  score always stay. One failing section reads `unavailable`.
 - No trade, fill, account, plan or investigation id is returned. Research
   jobs never get the tool (`research_job.JOB_TOOLS` is an allowlist), and
   "What changed?" leaves it out of an investigation's evidence times.
 - Fixture mode serves a simulated week marked `simulated`; replay says it is
   unavailable. The fake model answers "review my week" (and "review my week
-  of YYYY-MM-DD") by calling the tool and writing a short scripted review.
+  of YYYY-MM-DD") by calling the tool and writing a short scripted review;
+  for a week of 10 or more trades it first proposes one practice (exit at
+  the invalidation when a hit was held past 15 minutes, else a plan before
+  every entry when trades had none). The fixture's week has 8, so it
+  proposes none.
 - Tests: `backend/tests/test_copilot_week_review.py`,
   `frontend/e2e/review-my-week.spec.ts`.
+
+### The practice goal
+
+The Improve step of the [end goal](product-roadmap.md#end-goal--october-22-2026):
+one thing to practice, chosen from the week's counts, confirmed by the
+owner and scored the next week (`backend/app/engine/practice_goal.py`,
+additive table `practice_goal`).
+
+- A goal confirmed on a weekday counts from that week's Monday; on a weekend,
+  from the next Monday. One goal is `active` at a time.
+- Each measure is "hit of of" for one Monday-to-Friday week, New York, from
+  data the week review already reads (Webull left out):
+  - `plan_before_entry`: closed trades with a plan captured before the entry
+    (`capture_links.timing`);
+  - `exit_at_invalidation`: invalidation pings the fills could judge, acted
+    on (closed or trimmed within 15 minutes; [notification
+    policy](#phone-ping-policy)). A week with none judged falls back to the
+    plans' follow-through (invalidation hit while held, out within 15
+    minutes), and `source` says which;
+  - `respond_to_giveback_15m`: give-back alerts on the week's trades followed
+    by a close or trim within 15 minutes (`exit_habits.follow_up`);
+  - `no_trade_after_hour_red` and `no_opening_while_green`: closed long
+    options without the `held_hour_lost` or `opened_green` habit flag
+    (`exit_habits.habit_flags`); a trade missing the data is left out;
+  - `max_trades_per_day`: trading days with at most the cap of trades opened.
+- `GET /copilot/practice` (owner-only) returns the active goal and its score
+  for the week holding today (the week just ended, on a weekend), or no score
+  before its first week. The lab home shows it under Review my week and the
+  Dashboard's Review my week button carries it as a second line:
+  "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
+  Oct 26"). Nothing shows while no goal is active.
+- No id is returned to the page or the copilot. Research jobs never see it.
+- Tests: `backend/tests/test_practice_goal.py`,
+  `frontend/e2e/practice-goal.spec.ts`.
 
 ## Your history at this level
 
@@ -626,7 +675,7 @@ that section as "why this is evidence, not a rule".
 ## Confirm a plan
 
 When asked for a plan, the model may call `propose_plan` (at most two per
-answer; one for a memory and one for a trade plan). The tool validates the proposal and writes nothing. The lab streams
+answer; one for a memory, one for a trade plan and one for a practice). The tool validates the proposal and writes nothing. The lab streams
 it as a `proposal` event and shows a card with **Confirm** and **Dismiss**;
 nothing exists until the owner confirms.
 
@@ -755,6 +804,23 @@ nothing exists until the owner confirms.
     5m close above the nearest level overhead, invalidation through the
     nearest one below).
   - Browser proof: `frontend/e2e/copilot-trade-plan.spec.ts`.
+- **Practice:** after a week review, the one thing to practice next week (see
+  [Review my week](#review-my-week)): `text` (plain words, at most 200),
+  `measure` (one the app can score: `plan_before_entry`,
+  `exit_at_invalidation`, `respond_to_giveback_15m`,
+  `no_trade_after_hour_red`, `no_opening_while_green`,
+  `max_trades_per_day`), an optional `target` (a share above 0 and at most 1;
+  for `max_trades_per_day` the daily cap, a whole number from 1 to 20,
+  required) and `why` (at most 300, the week's count it rests on). At most
+  one per answer: a second is refused to the model in code
+  (`copilot._run_tool`'s per-turn state), not only by the prompt. The card
+  shows the text in an editable box, the measure ("Scored as: …") and why.
+  Confirm saves it through the owner-only `POST /copilot/practice`
+  (`backend/app/routers/copilot_practice.py`) as the one active goal; a goal
+  already active ends (`scored` once its first week is over, `dropped`
+  before). Only when the owner ticks "Remember this too" does Confirm also
+  save it through `POST /jo/memories` as a `lesson`, the way a memory card
+  does. It needs no investigation and no alert support.
 - **Linked activity:** under an open investigation, the lab lists its level
   alerts (`source_kind == "copilot"`, `source_id ==` its id) with their state
   (armed, or fired with a time and price; a plan's as "Entry · armed/hit" and

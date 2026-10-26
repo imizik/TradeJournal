@@ -743,6 +743,27 @@ class PhonePing(SQLModel, table=True):
     judged_at: Optional[datetime] = None  # UTC: when ``then`` was decided from the fills
 
 
+class PracticeGoal(SQLModel, table=True):
+    """The one thing the owner chose to practice (``engine/practice_goal.py``):
+    proposed by Review my week, edited and confirmed on its card. ``measure`` is
+    one the app can score from existing data; ``target`` is a share (0-1) or,
+    for ``max_trades_per_day``, the daily cap. One ``active`` goal at a time: a
+    new Confirm ends the last one (``scored`` once its first week is over,
+    ``dropped`` before). Additive; nothing else reads or changes it."""
+
+    __tablename__ = "practice_goal"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    text: str = Field(sa_column=Column(Text, nullable=False))
+    measure: str  # plan_before_entry | exit_at_invalidation | respond_to_giveback_15m | no_trade_after_hour_red | no_opening_while_green | max_trades_per_day
+    target: Optional[float] = None
+    week_start: date  # the Monday (New York) of the first week it is practiced
+    investigation_id: Optional[str] = None  # the review conversation it came from, when saved
+    status: str = Field(default="active", index=True)  # active | scored | dropped
+    created_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    ended_at: Optional[datetime] = None  # UTC: when a newer goal replaced it
+
+
 class CaptureTemplate(SQLModel, table=True):
     """A favorite pre-trade template (Charts C3.4): the user's setup label and
     their own invalidation/exit wording. Editing bumps ``revision``; a capture
