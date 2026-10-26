@@ -209,6 +209,14 @@ test("two drawn levels: Plan this opens the dock's copilot with them, swaps, and
 test("one drawn zone plans as the invalidation from its edge nearest the price", async ({ page, context }) => {
   const server = await fakeChartSettings(context);
   await stubLab(page);
+  // MRVL has an open investigation, which the dock's panel would resume on opening: Plan this must win over it.
+  const OPEN = "77777777-7777-4777-8777-777777777777";
+  const reads: string[] = [];
+  await page.route("**/copilot/investigations?*", (route) => { reads.push("list"); return route.fulfill({ json: { investigations: [{ id: OPEN, source: "copilot", has_findings: false,
+    title: "Older MRVL idea", symbol: "MRVL", status: "open", conclusion: null, revision: 1, message_count: 2, created_at: "2026-10-26T13:00:00Z", updated_at: "2026-10-26T13:05:00Z" }] } }); });
+  await page.route(`**/copilot/investigations/${OPEN}`, (route) => { reads.push("open"); return route.fulfill({ json: { id: OPEN, source: "copilot", title: "Older MRVL idea", symbol: "MRVL",
+    status: "open", conclusion: null, revision: 1, message_count: 2, has_findings: false, created_at: "2026-10-26T13:00:00Z", updated_at: "2026-10-26T13:05:00Z",
+    transcript: [{ role: "user", content: "Older MRVL idea" }, { role: "assistant", content: "An older answer." }], evidence: [], findings: null } }); });
   await open(page, 1440, 900);
   // A zone drawn under the price, two clicks apart.
   await page.getByRole("button", { name: "Draw rectangle zone", exact: true }).click();
@@ -224,8 +232,14 @@ test("one drawn zone plans as the invalidation from its edge nearest the price",
   await expect(chip.getByRole("button", { name: `Plan this as invalidation: Long · ${edge.toFixed(2)}` })).toBeVisible();
   await expect(chip.getByRole("button", { name: "Swap entry and invalidation" })).toHaveCount(0);
   await chip.getByRole("button", { name: /^Plan this as invalidation/ }).click();
-  await expect(message(page)).toHaveValue(`Context: Plan a trade: MRVL from the 5m chart, last ${LAST.toFixed(2)}. Invalidation ${edge.toFixed(2)} (the upper edge of my drawn zone), `
-    + "a long. Draft the entry trigger and the plan around it; argue if it is wrong.\n\n");
+  const zoneText = `Context: Plan a trade: MRVL from the 5m chart, last ${LAST.toFixed(2)}. Invalidation ${edge.toFixed(2)} (the upper edge of my drawn zone), `
+    + "a long. Draft the entry trigger and the plan around it; argue if it is wrong.\n\n";
+  await expect(message(page)).toHaveValue(zoneText);
+  // The panel's own look for the symbol's open investigation settles without replacing the plan.
+  await expect.poll(() => reads.includes("list")).toBe(true);
+  await page.waitForTimeout(1000);
+  await expect(message(page)).toHaveValue(zoneText);
+  await expect(page.getByTestId("copilot-panel").getByText("An older answer.")).toHaveCount(0);
 });
 
 test("on a 375 px phone the chip and swap are thumb-sized and the page never scrolls sideways", async ({ page, context }) => {
