@@ -628,6 +628,20 @@ successful `read_id`/`received_at` receipt before reporting completion. An
 instructed late recovery is distinct from on-time scheduled execution; task
 activation and attempted calls alone do not close that acceptance gap.
 
+Market-read save recovery: the tool distinguishes confirmed `invalid_content`,
+`parent_conflict`, `input_unavailable` and `input_not_current_session` refusals
+from an already-committed `operation_conflict`, uncertain `ledger_unavailable`
+and `ledger_state_invalid`. Validation errors name server-authored fields/rules,
+never submitted values, another actor's records or raw storage exceptions.
+The scheduled template permits one corrected resubmission with the same
+operation ID after a confirmed refusal. Parent/input recovery requires a new
+snapshot and reconsideration of the view, evidence and message intent. An
+uncertain response or failed notice handoff permits only an exact retry;
+operation conflicts never authorize a replacement ID. A receipt with `read_id`
+and `received_at` confirms persistence, not delivery or on-time coverage.
+These code/template changes do not update hosted tasks or prove that a natural
+Jo run recovered. Existing task instructions must be updated separately.
+
 The optional MW-2 event/email wakes, read-notice outboxes and market-watch
 phone-push delivery remain disabled and unconfigured. A later push activation
 must reconcile the chat route to avoid duplicate messages. No live scheduled

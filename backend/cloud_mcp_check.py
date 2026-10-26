@@ -556,7 +556,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
             except (ValueError, OSError, KeyError, TypeError, sqlite3.Error):
                 raise ToolError('Stock review/export refused; retry identical content only to recover') from None
 
-        from market_watch_ledger import MarketWatchLedger, MessageBudgetExceeded, FullMarketRequired, write_read_notice
+        from market_watch_ledger import (MarketWatchLedger, MessageBudgetExceeded, FullMarketRequired, write_read_notice,
+            InvalidSubmission, ParentConflict, OperationConflict, InputUnavailable, InputSessionMismatch)
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
 
@@ -588,6 +589,17 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
                 phone_summary: Any = None) -> dict[str, Any]:
             """Append a market read, forecasts and optional message intent; never sends anything.
             Exact retries recover the receipt; use the latest same-session read as parent.
+            A confirmed invalid_content refusal permits one corrected submission with the
+            same operation_id. For parent_conflict/input_unavailable/input_not_current_session,
+            refresh market_watch_snapshot once, reconsider the view, evidence and intent
+            against its snapshot/context, then resubmit once with the same operation_id.
+            If its latest read already has this operation_id, report that existing receipt
+            without submitting again. Allow at most one repair per run, not per error.
+            Never merely swap the parent or invent evidence. operation_conflict means stop:
+            that ID already committed; never use a new ID to bypass it. For a timeout,
+            ledger_unavailable or notice failure, retry EXACT fields once; never change
+            uncertain content. Stop after failed recovery. Only read_id plus received_at
+            confirms a save; late recovery remains late. Preserve shadow-pair ordering.
             phone_summary: optional short text (target 500-700 characters) for the phone;
             include takeaway, reason, key conditions and material limitations. Full reasoning
             belongs in main/alternative/invalidation. Unusable summaries fall back to those
@@ -608,8 +620,21 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
                     "detail": "Cannot submit a new read against IEX evidence."}
             except MessageBudgetExceeded:
                 raise ToolError("Daily message-intent budget exhausted; resubmit the read with message_intent=none") from None
-            except (ValueError, Conflict, NotFound, sqlite3.Error):
-                raise ToolError("Market read refused: invalid input, parent, content or unavailable ledger") from None
+            except InvalidSubmission as exc:
+                # Only this typed validator error contains safe server-authored fields/rules.
+                # Never expose arbitrary ValueError/SQLite text or submitted values.
+                raise ToolError(f"Market read refused [invalid_content]; not saved. {exc}. Correct once with the same operation_id; preserve evidence.") from None
+            except ParentConflict:
+                raise ToolError("Market read refused [parent_conflict]; not saved. Refresh market_watch_snapshot once; reconsider the view, evidence and message intent against its latest context, then resubmit once with the same operation_id and returned parent. Never just swap the parent.") from None
+            except (InputUnavailable, InputSessionMismatch) as exc:
+                code = "input_not_current_session" if isinstance(exc, InputSessionMismatch) else "input_unavailable"
+                raise ToolError(f"Market read refused [{code}]; not saved. Refresh market_watch_snapshot once and rebuild from its input_id, snapshot and context using the same operation_id. If unavailable, stop and report the gap.") from None
+            except OperationConflict:
+                raise ToolError("Market read refused [operation_conflict]. This operation_id already committed different content. Stop; do not change the ID or claim these submitted fields were saved. Recover the original receipt only with the EXACT original fields.") from None
+            except sqlite3.Error:
+                raise ToolError("Market read save unconfirmed [ledger_unavailable]. Retry EXACT fields and operation_id once; if still unconfirmed, stop and report the gap. Never change content or claim a save without read_id and received_at.") from None
+            except (ValueError, Conflict, NotFound):
+                raise ToolError("Market read save unconfirmed [ledger_state_invalid]. Stop and report the gap for owner investigation; no save receipt confirmed.") from None
             if config.market_watch_outbox_dir:
                 # MW-2: the app reads this notice to deliver any message; this process sends nothing.
                 try:
