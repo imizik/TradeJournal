@@ -207,3 +207,11 @@ strategy validation are not complete.
 [actions]: https://massive.com/blog/new-splits-and-dividends-endpoints
 [quotes]: https://massive.com/docs/rest/stocks/trades-quotes/quotes
 [feeds]: https://docs.alpaca.markets/us/docs/historical-stock-data-1
+
+## Follow-on fixture implementation
+
+The [fixture-only reconciler](etf-fixture-reconciler-2026-10-25.md) now checks the
+invented receipt independently, including duplicate/restart behavior. Its fixed
+eight-stage scope is explicit; unsupported corrections, closures and halts are
+refused. This closes the example-accounting milestone only. Real data acceptance,
+portfolio implementation and authorization for evaluation remain outstanding.

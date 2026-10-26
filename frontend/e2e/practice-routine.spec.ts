@@ -319,6 +319,9 @@ for (const width of [1440, 390]) test(`pending run selection and delayed reload 
 
 test("a slow queued-run refresh completes before polling again", async ({ page, request }) => {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  // Keep timer advances inside the seeded New York session, even at midnight.
+  // Install before navigation so the polling interval uses the controlled clock.
+  await page.clock.install({ time: new Date(`${day}T16:00:00Z`) });
   const fixture = seedNoProviderRun(day);
   const body = await (await request.get(`${API}/practice/runs/${fixture.runId}`)).json();
   let calls = 0;
@@ -332,7 +335,6 @@ test("a slow queued-run refresh completes before polling again", async ({ page, 
   await page.goto(`/?practice_run=${fixture.runId}`);
   const routine = page.getByTestId("practice-routine");
   await expect(routine.getByTestId("practice-run")).toContainText("QUEUED");
-  await page.clock.install();
   await page.clock.fastForward(2000);
   await expect.poll(() => calls).toBe(2);
   await expect(routine).toContainText("Loading selected run…");
