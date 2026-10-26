@@ -244,11 +244,14 @@ from replays of the recorded sessions:
 - **4.0 points vs SPY instead of 4.5** (`spy_relative_pct` 4.5 → 4.0). Alone, +6
   events (CIFR and LCID on October 22, CRWD and CIFR on October 23, ASTS and
   SNAP on October 26), none dropped, no quick fade. Readings of 4.0+ held 3
-  passes in a row for 4, 7 and 2 symbols a session, against 2, 5 and 0 at 4.5.
+  passes in a row for 4, 7 and 2 symbol-directions a session, against 2, 5 and
+  0 at 4.5.
 
 Together: 32 events against v0's 18 (12/13/7 against 7/9/2), 2 quick fades
 against 1, 15 extended against 11, and the morning of October 26, quiet under
-v0 (2 events by 10:16), gets 7. Event ids start `rv1-`, so both versions'
+v0 (2 events by 10:16), gets 7. The October 26 events had under 15 minutes of
+passes after them (the report marks them unresolved), so the quick-fade counts
+rest on October 22 and 23 until the rerun below. Event ids start `rv1-`, so both versions'
 events can sit in one store. Considered and not chosen: a 3.5-point sector
 threshold (+13, mostly the SPY story again against a flat XLK, firing a few
 minutes before the SPY event; 2 quick fades), groups at 3 members (+1:

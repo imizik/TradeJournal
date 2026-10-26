@@ -20,7 +20,7 @@ from app.engine.radar_store import RadarStore, load_universe
 
 
 def _thresholds(overrides: list[str], base: radar_rules.Thresholds = radar_rules.V0) -> radar_rules.Thresholds:
-    types = {f.name: f.type for f in fields(radar_rules.Thresholds)}
+    types = {f.name: f.type for f in fields(radar_rules.Thresholds) if f.name != "version"}
     values = {}
     for item in overrides:
         name, _, raw = item.partition("=")

@@ -75,7 +75,7 @@ def test_each_v1_change_alone_and_together(store):
     section = text.split("## What v1 changes")[1].split("##")[0]
     assert "| spy_relative_pct 4.5 → 4.0 | 3 (+1) | 1 | 0 | 0 | 0 |" in section  # BBB at 4.2 points
     assert "| persist_passes 3 → 2 | 3 (+1) | 1 | 0 | 1 | 0 |" in section  # DDD held two passes, faded the next
-    assert "| all together | 4 (+2) | 2 | 0 | 1 | 0 |" in section
+    assert "| all together | 4 (+2) | 2 | 0 | 1 | 0 | 01-15 BBB up, 01-16 DDD up |" in section
 
 
 def test_added_events_and_timing_against_v0(store):
@@ -115,6 +115,14 @@ def test_report_is_deterministic_read_only_and_written_by_the_cli(store, tmp_pat
     report.main()
     assert out.read_text() == first
     assert hashlib.sha256(store.read_bytes()).hexdigest() == digest
+
+
+def test_an_event_too_close_to_the_last_pass_is_unresolved_not_held():
+    event = {"first_seen_at": "2030-01-15T15:20:00.000Z"}
+    assert report.outcome(event, [], "2030-01-15T15:30:00.000Z") == "unresolved"
+    assert report.outcome(event, [], "2030-01-15T15:40:00.000Z") == "no revision"
+    faded = [{"status": "faded", "recorded_at": "2030-01-15T15:25:00.000Z"}]
+    assert report.outcome(event, faded, "2030-01-15T15:30:00.000Z") == "quick faded 10:25"
 
 
 def test_no_ratings_says_so(tmp_path):
