@@ -1,13 +1,13 @@
 """Copilot turn log (additive): each turn's model and estimated cost, for the daily API budget.
 
 Revision ID: e6b1c4d2a7f9
-Revises: d2a7e5c9f3b1
+Revises: a6c4e2f8b1d3
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "e6b1c4d2a7f9"
-down_revision = "d2a7e5c9f3b1"
+down_revision = "a6c4e2f8b1d3"
 branch_labels = None
 depends_on = None
 

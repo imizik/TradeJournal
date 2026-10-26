@@ -79,6 +79,8 @@ DOMAIN_ROUTES = frozenset({
     'GET /today',
     'POST /copilot/chat',
     'POST /copilot/transcribe',
+    'POST /copilot/images',
+    'GET /copilot/images/{image_id}',
     'GET /copilot/investigations',
     'POST /copilot/investigations',
     'GET /copilot/investigations/{investigation_id}',

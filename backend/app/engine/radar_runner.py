@@ -198,7 +198,7 @@ def runner_from_env() -> RadarRunner | None:
     runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe, rules=radar_rules.from_env())
     if radar_alerts.enabled():
         from app.database import engine
-        runner.alerts = radar_alerts.RadarAlerts(engine)
+        runner.alerts = radar_alerts.RadarAlerts(engine, store=runner.store)
     try:
         runner.premarket = radar_premarket.scanner_from_env(store, chart_calendar, universe)
     except Exception:  # an unusable pilot file must not turn the recorder off

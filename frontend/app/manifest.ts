@@ -15,5 +15,11 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
+    // Share a chart screenshot from another app straight into the Copilot Lab (app/share-target/route.ts), where the
+    // installed app's browser supports it (Android Chrome); elsewhere the lab's attach button does the same.
+    share_target: {
+      action: "/share-target", method: "POST", enctype: "multipart/form-data",
+      params: { files: [{ name: "image", accept: ["image/png", "image/jpeg", "image/webp", "image/*"] }] },
+    },
   };
 }

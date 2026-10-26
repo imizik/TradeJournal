@@ -28,7 +28,7 @@ import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
-import CopilotPanel, { type PanelActions } from "@/components/copilot/CopilotPanel";
+import CopilotPanel, { type ChartLook, type PanelActions } from "@/components/copilot/CopilotPanel";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade, { PLAN_BUTTON, planContext } from "@/components/copilot/PlanATrade";
 import CopilotLoop from "./CopilotLoop";
@@ -54,7 +54,7 @@ import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLO
 import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, ItemEdit, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
-import { addCaptureNote, captureTitle, fetchCaptures, fetchReview, fetchSetup, linkCapture, markNotTaken, outboxAll, retryTranscript, saveTracking, send as sendCapture, unlinkCapture } from "@/lib/captures";
+import { addCaptureNote, captureTitle, chartImage, fetchCaptures, fetchReview, fetchSetup, linkCapture, markNotTaken, outboxAll, retryTranscript, saveTracking, send as sendCapture, unlinkCapture } from "@/lib/captures";
 import LinkReview from "./LinkReview";
 import type { Capture, CaptureNote, CaptureReview, CaptureSetup, OutboxItem } from "@/lib/captures";
 import { summary } from "./SelectionBar";
@@ -1536,7 +1536,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const loopStrip = useCallback((actions: PanelActions) => isMacroSymbol(symbol) ? null
     : <><StartPlan ask={planAsk} actions={actions} onStarted={planStarted} />
       <CopilotLoop key={symbol} symbol={symbol} narrow={narrow} actions={actions} context={() => planLine.current()} /></>, [symbol, narrow, planAsk, planStarted]);
-  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} strip={loopStrip} />;
+  // "Look at my chart": the main chart as a plan saves it (snapshotFor) and one line of what it shows, read at the press.
+  const chartLook = useRef<() => Promise<ChartLook>>(() => Promise.reject(new Error("The chart is not ready.")));
+  const look = useCallback(() => chartLook.current(), []);
+  const copilotPanel = <CopilotPanel variant="panel" pageSymbol={symbol} pageContext={`Charts · ${symbol} ${settings.intervals[0]} chart`} onClose={closeCopilot} strip={loopStrip}
+    look={isMacroSymbol(symbol) ? undefined : look} />;
   // A desktop and full screen fill their box: the main chart takes the height
   // the smaller charts leave, measured by the browser, not estimated (C7.3).
   const fill = !narrow || immersive;
@@ -1976,6 +1980,19 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
       const zone = (z: AutoZone) => `${z.low === z.high ? price(z.low) : `${price(z.low)}–${price(z.high)}`} (${z.label})`;
       const levels = [above && `above ${zone(above)}`, below && `below ${zone(below)}`].filter(Boolean).join(", ");
       return planContext(`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}${levels ? ` · nearest automatic levels: ${levels}` : ""}`);
+    };
+    chartLook.current = async () => {
+      const shot = snapshotFor(symbol);
+      if (shot.context.state !== "captured") throw new Error(shot.context.reason);
+      const image = await chartImage(shot.canvas);
+      if (!image) throw new Error("The chart image could not be made.");
+      const { interval, visible_range: range, price: shown, last_candle } = shot.context;
+      const last = shown.value ?? last_candle?.close;
+      // The range is known once the chart has been moved; before that, the latest candle's time says when.
+      const days = !!range && range.to - range.from > 3 * 86400;
+      const when = range ? `, ${etTime(range.from, days)}–${etTime(range.to, days)}${days ? "" : " ET"}`
+        : last_candle ? `, as of ${etTime(last_candle.time)} ET` : "";
+      return { image, line: `Charts · ${symbol} ${interval}${last == null ? "" : `, last ${price(last)}`}${when}` };
     };
   });
   const planATrade = !isMacroSymbol(symbol) && <PlanATrade symbol={symbol} origin="chart" line={`${symbol} from the ${settings.intervals[0]} chart${planAt == null ? "" : ` at ${price(planAt)}`}`}

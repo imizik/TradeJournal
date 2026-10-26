@@ -124,7 +124,29 @@ def _plan(db, trade) -> dict:
         "wording": _trim(plan.wording), "note": _trim(plan.note), "planned_quantity": plan.quantity,
         "captured_at": copilot_book._iso(plan.received_at),
         "timing": capture_links.timing(plan.received_at, trade.opened_at),
+        # The chart the owner planned on; the copilot attaches it after this text (copilot._review_images).
+        "image": "available" if _plan_image(plan) else None,
     }.items() if v is not None}
+
+
+def _plan_image(capture):
+    """The path of the chart image saved with a plan, when there is one on disk."""
+    from app.engine import captures
+    path = captures.image_path(capture) if capture.image_state == "saved" else None
+    return path if path is not None and path.is_file() else None
+
+
+def review_images(trade_id: str, session=None) -> list[tuple[str, bytes]]:
+    """The images a trade review shows the model, labelled for the evidence row: the chart saved with the trade's plan,
+    processed by ``copilot_images``. (A server-side path chart would join it, but no chart renderer is installed.)"""
+    from sqlmodel import Session
+    from app.ai import copilot_images
+    from app.database import engine
+    from app.engine import capture_links
+    with (Session(engine) if session is None else nullcontext(session)) as db:
+        plans = capture_links.for_trade(db, uuid.UUID(trade_id))
+        path = _plan_image(min(plans, key=lambda c: c.received_at)) if plans else None
+    return [("plan chart", copilot_images.process(path.read_bytes()).jpeg)] if path else []
 
 
 def _alerts(db, trade, fills: list[dict]) -> dict:

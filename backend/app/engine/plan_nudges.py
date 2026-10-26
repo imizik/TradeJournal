@@ -43,7 +43,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import capture_links, notification_policy, ntfy
+from app.engine import capture_links, notification_policy, ntfy, ping_images
 from app.engine.captures import epoch
 from app.engine.chart_journal import contract_label, stamp
 from app.engine.chart_math import ET, session_windows
@@ -264,9 +264,11 @@ class PlanNudges:
                 nudge.delivery, nudge.last_error = "held", ticket.reason
                 db.commit()
                 return
+            image = ping_images.picture(ping_images.prepare(db, _picture, nudge, label, now)) if nudge.attempts == 0 else None  # a retry goes as text
             nudge.attempts += 1
             try:
-                ntfy.publish(title, body + ticket.append, priority=4, tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
+                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=4,
+                                                     tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     nudge.delivery, nudge.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -279,7 +281,14 @@ class PlanNudges:
                 return
             nudge.delivery, nudge.delivered_at, nudge.last_error = "sent", _utc(self.clock()), None
             notification_policy.delivered(db, ticket, now)
+            ping_images.record(db, ticket, image_state)
             db.commit()
+
+
+def _picture(db: Session, nudge: PlanNudge, label: str, now: float):
+    """The ping's chart: the last 90 minutes with the fill."""
+    return ping_images.fill_window(f"{label} · {'filled' if nudge.kind == 'link' else 'no plan'}", nudge.ticker,
+                                   ping_images.entry_fills(db, nudge.trade_id), now)
 
 
 def _draft(trade: Trade, fills, key: str, now: float) -> PlanNudge:

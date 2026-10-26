@@ -36,7 +36,7 @@ import uuid
 from sqlalchemy import or_, update
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy
+from app.engine import notification_policy, ntfy, ping_images
 from app.engine.chart_journal import stamp
 from app.engine.chart_math import ET, session_windows
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc
@@ -158,6 +158,11 @@ def message(row: PlanTimeStop) -> tuple[str, str, str]:
     return f"{row.symbol} time stop", f"{row.symbol} time stop: you planned to be out by {hhmm}.", f"/trades/{row.trade_id}"
 
 
+def _picture(db: Session, row: PlanTimeStop, title: str, now: float):
+    """The ping's chart: the day so far with the stop time and the entry."""
+    return ping_images.day_with_stop(title, row.symbol, _epoch(row.due_at), ping_images.entry_fills(db, row.trade_id), now)
+
+
 def rows(db: Session, investigation_id: str) -> list[dict]:
     found = db.exec(select(PlanTimeStop).where(PlanTimeStop.investigation_id == investigation_id)
                     .order_by(PlanTimeStop.created_at)).all()
@@ -247,9 +252,11 @@ class PlanTimeStops:
                 row.delivery, row.last_error = "held", ticket.reason
                 db.commit()
                 return
+            image = ping_images.picture(ping_images.prepare(db, _picture, row, title, now)) if row.attempts == 0 else None  # a retry goes as text
             row.attempts += 1
             try:
-                ntfy.publish(title, body + ticket.append, priority=4, tags=("hourglass",), path=path, direct_click=True)
+                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=4, tags=("hourglass",), path=path,
+                                                     direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -262,4 +269,5 @@ class PlanTimeStops:
                 return
             row.delivery, row.delivered_at, row.last_error = "sent", _utc(self.clock()), None
             notification_policy.delivered(db, ticket, now)
+            ping_images.record(db, ticket, image_state)
             db.commit()

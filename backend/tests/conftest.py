@@ -68,6 +68,8 @@ for _flag in (
     "LEVEL_ALERTS_AUTOSTART",
     "PRACTICE_AGENT_ENABLED",
     "PRACTICE_SCHEDULE_ENABLED",
+    # Ping pictures read live minute bars; tests/test_ping_images.py turns them on with stubbed bars.
+    "PING_IMAGES_ENABLED",
 ):
     os.environ[_flag] = "false"
 
