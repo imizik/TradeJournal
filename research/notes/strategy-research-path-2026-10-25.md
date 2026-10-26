@@ -3,6 +3,10 @@
 October 25, 2026. Proposed research design, not a registered candidate, changed
 protocol, executable strategy or authorization to trade. No backtest was run.
 
+The owner subsequently accepted multi-week holds. See the
+[data-and-accounting acceptance packet](etf-trend-acceptance-2026-10-25.md) for
+the next preparation milestone; no evaluation is authorized.
+
 ## Recommendation
 
 Keep the failed ORB candidate closed. Do not spend an attempt on the current

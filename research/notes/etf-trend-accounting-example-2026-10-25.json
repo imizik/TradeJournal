@@ -1,0 +1,120 @@
+{
+  "kind": "invented_accounting_example_only",
+  "version": 1,
+  "market_data_used": false,
+  "capital": "10000.00",
+  "sleeve_budget": "2500.00",
+  "fee_rate": "0.001",
+  "fee_rounding": "ROUND_HALF_UP_cents",
+  "signals": {
+    "A": [
+      "100",
+      "108"
+    ],
+    "B": [
+      "100",
+      "108"
+    ],
+    "C": [
+      "100",
+      "102"
+    ],
+    "D": [
+      "100",
+      "104"
+    ]
+  },
+  "cash_growth": "1.04",
+  "events": [
+    {
+      "id": "e0",
+      "type": "initial",
+      "cash": "10000.00",
+      "shares": 0,
+      "mark": "100",
+      "receivable": "0",
+      "nav": "10000.00"
+    },
+    {
+      "id": "e1",
+      "type": "invented_buy",
+      "intent_id": "A-buy-1",
+      "quantity": 24,
+      "ask": "100",
+      "fee": "2.40",
+      "cash": "7597.60",
+      "shares": 24,
+      "mark": "100",
+      "receivable": "0",
+      "nav": "9997.60"
+    },
+    {
+      "id": "e2",
+      "type": "rejected_intent",
+      "intent_id": "B-buy-1",
+      "reason": "missing_eligible_quote",
+      "fill": null,
+      "cash": "7597.60",
+      "shares": 24,
+      "mark": "100",
+      "receivable": "0",
+      "nav": "9997.60"
+    },
+    {
+      "id": "e3",
+      "type": "ex_dividend",
+      "per_share": "2",
+      "cash": "7597.60",
+      "shares": 24,
+      "mark": "98",
+      "receivable": "48",
+      "nav": "9997.60"
+    },
+    {
+      "id": "e4",
+      "type": "pay_dividend",
+      "cash": "7645.60",
+      "shares": 24,
+      "mark": "98",
+      "receivable": "0",
+      "nav": "9997.60"
+    },
+    {
+      "id": "e5",
+      "type": "split",
+      "new_per_old": "2",
+      "cash": "7645.60",
+      "shares": 48,
+      "mark": "49",
+      "receivable": "0",
+      "nav": "9997.60"
+    },
+    {
+      "id": "e6",
+      "type": "invented_sell",
+      "intent_id": "A-sell-2",
+      "signal": "negative_assumed",
+      "quantity": 48,
+      "bid": "49",
+      "fee": "2.35",
+      "cash": "9995.25",
+      "settled_cash": "7645.60",
+      "unsettled_sale_proceeds": "2349.65",
+      "shares": 0,
+      "mark": "49",
+      "receivable": "0",
+      "nav": "9995.25"
+    },
+    {
+      "id": "e7",
+      "type": "sale_settlement",
+      "cash": "9995.25",
+      "settled_cash": "9995.25",
+      "unsettled_sale_proceeds": "0",
+      "shares": 0,
+      "mark": "49",
+      "receivable": "0",
+      "nav": "9995.25"
+    }
+  ]
+}
