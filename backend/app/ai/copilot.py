@@ -11,6 +11,7 @@ the owner's Claude plan through the Agent SDK (``copilot_plan``).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import math
@@ -26,6 +27,9 @@ from app.ai import copilot_tools
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
+# The models the panel may pick for a turn when COPILOT_MODELS is unset; COPILOT_MODEL is always offered first.
+DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
 # Short progress notes between tool calls come back as thinking text; reasoning itself stays hidden.
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write.
@@ -166,9 +170,11 @@ class Settings:
     max_tokens: int = 4000
     turn_budget_usd: float = 0.25
     plan_configured: bool = False
+    models: tuple[str, ...] = (DEFAULT_MODEL,)  # what a turn may pick; self.model is always first
 
     def public(self) -> dict:
         return {"enabled": self.enabled, "backend": self.backend, "evidence": self.evidence, "model": self.model,
+                "models": list(self.models),
                 "effort": self.effort, "fallbacks": self.fallbacks, "key_configured": self.key_configured,
                 "plan_configured": self.plan_configured,
                 "limits": {"max_rounds": self.max_rounds, "max_tool_calls": self.max_tool_calls,
@@ -181,11 +187,13 @@ def settings() -> Settings:
     backend = os.environ.get("COPILOT_BACKEND", "fake").strip().lower()
     evidence = os.environ.get("COPILOT_EVIDENCE", "fixture").strip().lower()
     effort = os.environ.get("COPILOT_EFFORT", "medium").strip().lower()
+    model = os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
     return Settings(
         enabled=os.environ.get("COPILOT_ENABLED") == "true",
         backend=backend if backend in ("fake", "anthropic", "plan") else "fake",
         evidence=evidence if evidence in ("fixture", "live", "replay") else "fixture",
-        model=os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
+        model=model,
+        models=offered_models(model),
         effort=effort if effort in ("low", "medium", "high") else "medium",
         fallbacks=os.environ.get("COPILOT_FALLBACKS", "default") != "off",
         key_configured=bool(os.environ.get("ANTHROPIC_API_KEY")),
@@ -194,6 +202,28 @@ def settings() -> Settings:
         replay_store=os.environ.get("COPILOT_REPLAY_STORE", ""),
         replay_at=os.environ.get("COPILOT_REPLAY_AT", ""),
     )
+
+
+def offered_models(default: str) -> tuple[str, ...]:
+    """The models a turn may pick: ``default`` first, then COPILOT_MODELS (comma-separated; unset means DEFAULT_MODELS),
+    deduplicated, with anything that is not a plain model id dropped."""
+    raw = os.environ.get("COPILOT_MODELS")
+    listed = [m.strip() for m in raw.split(",")] if raw is not None else list(DEFAULT_MODELS)
+    out = [default]
+    for name in listed:
+        if name and MODEL_ID.match(name) and name not in out:
+            out.append(name)
+    return tuple(out)
+
+
+def with_model(cfg: Settings, model: str | None) -> Settings:
+    """``cfg`` for a turn that picked ``model``; a model that is not offered is refused, so the panel can only choose
+    from the list the server published."""
+    if model is None or model == cfg.model:
+        return cfg
+    if model not in cfg.models:
+        raise CopilotError("model_not_offered", f"{model} is not one of the models this server offers.")
+    return dataclasses.replace(cfg, model=model)
 
 
 def _plan_configured() -> bool:
