@@ -213,11 +213,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call fifteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call sixteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
   investigation changes (below), the chart and book tools below (including the
-  trade review and the week review), and the owner context pack for another symbol (Owner
-  context, below). It can
+  trade review and the week review), option candidates (below), and the owner
+  context pack for another symbol (Owner context, below). It can
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
@@ -264,6 +264,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     `get_trade_review`, `get_week_review` or `get_level_history`: a job reads
     untrusted pages and can fetch URLs, which could carry the book out. Those
     aren't even registered for a job; `get_chart_context` is allowed.
+    `get_option_candidates` is kept out too: the job allowlist
+    (`research_job.JOB_TOOLS`) grows only by decision.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
   validated (ticker pattern, at most 8 symbols, no extra keys).
@@ -297,8 +299,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   rejection of the three mechanical exits. The prompt says to raise one when
   the position in front of it resembles it, never to recite them.
 - **Four separate questions** for any trade idea: thesis, setup now,
-  instrument fit (expiry, strike and premium against the horizon; marks only,
-  no implied volatility or Greeks, so it says so rather than estimates), and
+  instrument fit (expiry, strike and premium against the horizon, from real
+  contracts through `get_option_candidates`; no implied volatility or Greeks,
+  so it says so rather than estimates), and
   the decision now (what changed for the thesis versus only for the
   position). "Nothing here changes the plan" and "not worth a trade" are
   complete answers.
@@ -719,6 +722,48 @@ that section as "why this is evidence, not a rule".
   keystroke; a
   reloaded investigation has no row (evidence references keep no results).
   The Evidence strip labels the read "Your history here".
+
+## Option candidates
+
+The owner often holds a longer thesis through a short-dated option, so the
+instrument question needs real contracts, not just marks of the ones held.
+
+- `get_option_candidates(symbol, horizon_days 1-365, direction long|short,
+  budget_usd?)` (read-only, provenance `fetched` with the chains' read time;
+  `backend/app/ai/copilot_options.py`). It reads the expiration list and at
+  most three chains in one pass through `options_feed.chains`, the Charts
+  page's Tradier cache and pacing (a chain is reused for a minute).
+- Expiries bracket the horizon: the last one before it, the first at or after
+  it and the next one after (weeklies are listed dates like any other); when
+  nothing listed reaches it, the longest two, with a `horizon_note`. Calls for
+  `long`, puts for `short`, the primary root only, strikes from about 5% in the
+  money to 10% out, with a usable bid and ask. At most 8: the first expiry at or
+  after the horizon gets the most, each starting at the money and spreading to
+  the window's ends.
+- Each candidate: expiry, days to expiry, strike, bid/ask/mid per share and per
+  contract (× the contract's multiplier; `unavailable` when the chain does not
+  give one), spread % of mid, open interest and volume when listed, distance to
+  strike %, the break-even move % by expiry paying the ask, and with a budget
+  how many contracts it buys at the ask. Delta and implied volatility are
+  `unavailable`: the chain carries the provider's greeks, but nothing passes
+  them on and the copilot never estimates them. The answer drops rows rather
+  than cut its JSON past 6,000 characters.
+- No price or no readable chain says so in `state` and `reason` (for example
+  "Set TRADIER_API_KEY …"); a chain missing from a pass is `partial`. Fixture
+  mode runs a simulated NBIS chain through the same selection; replay is
+  unavailable. Not in `BOOK_CONTEXT_TOOLS` (it is market data); never given to
+  research jobs.
+- The system prompt has the model call it when the owner names an option or a
+  horizon, or before a `trade_plan` on options, and compare 2-3 contracts
+  against the horizon: premium, spread and break-even move, a contract that
+  expires before the thesis named as a mismatch, and trade-offs for the owner
+  to choose from, never a recommended contract. The scripted `fake` model does
+  the same for "which strike/expiry" or "calls"/"puts" with a horizon.
+- The tool event carries `candidates` (`copilot.option_candidates_card`: a
+  short label such as "Nov 13 '26 95C", days and ask per contract). The plan
+  card offers them as a Contract pick list beside the copilot's own wording,
+  which stays the default; the pick goes into the saved plan's note. The
+  Evidence strip labels the read "Option candidates".
 
 ## Confirm a plan
 

@@ -99,6 +99,11 @@ class ReplayEvidence:
                 "reason": "Your history at a level is unavailable in replay (it reads the journal as it is now, including "
                           "trades after the frozen moment)."}
 
+    def get_option_candidates(self, symbol: str, horizon_days: int, direction: str, budget_usd: float | None = None) -> dict:
+        return {"symbol": symbol, "state": "unavailable", "candidates": [],
+                "reason": "Option chains are not in the Radar snapshot, so option candidates are unavailable in replay "
+                          "(a live read would show today's quotes, not the frozen moment's)."}
+
     def get_peer_moves(self, symbol: str) -> dict:
         return {"symbol": symbol, "state": "unavailable",
                 "reason": "Peer moves read today's quotes, so they are off in replay. Use get_group_comparison for recorded peer returns."}
