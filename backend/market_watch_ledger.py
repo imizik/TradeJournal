@@ -32,6 +32,26 @@ class MessageBudgetExceeded(ValueError):
     """The actor already reserved its discretionary messages for this session."""
 
 
+class InvalidSubmission(ValueError):
+    """Safe, server-authored validation detail; never include submitted values."""
+
+
+class ParentConflict(Conflict):
+    """The uncommitted request must be reconsidered against the latest read."""
+
+
+class OperationConflict(Conflict):
+    """This operation already committed different content; do not create a new ID."""
+
+
+class InputUnavailable(NotFound):
+    """Missing and other-actor inputs deliberately have the same response."""
+
+
+class InputSessionMismatch(ValueError):
+    """The offered input belongs to a different session."""
+
+
 def identifier(prefix):
     return prefix + '_' + str(uuid.uuid4())
 
@@ -70,46 +90,57 @@ def pointer(snapshot, ref):
 
 
 def validate_request(req, snapshot):
+    def check_text(value, field, limit=2000):
+        try:
+            text(value, field, limit)
+        except ValueError:
+            raise InvalidSubmission(f'{field}: require nonblank text within {limit} characters') from None
+
     required = {'operation_id', 'input_id', 'view', 'main', 'alternative', 'invalidation',
                 'change_summary', 'forecasts', 'message_intent', 'prompt_version'}
     optional = {'previous_read_id', 'correction_of_read_id', 'model_id', 'phone_summary'}
     if not isinstance(req, dict) or not required <= req.keys() or req.keys() - required - optional:
-        raise ValueError('Invalid submit fields')
+        raise InvalidSubmission('Invalid submit fields: use the advertised tool fields')
     if len(canonical(req)) > 16384:
-        raise ValueError('Submit exceeds 16 KiB')
+        raise InvalidSubmission('Submit exceeds 16 KiB')
     for key in ('operation_id', 'input_id', 'prompt_version'):
-        text(req[key], key, 200)
+        check_text(req[key], key, 200)
     # Presentation is optional: malformed/verbose summaries remain saved but
     # never prevent an otherwise valid read or correction from committing.
     for key in optional - {'phone_summary'}:
         if req.get(key) is not None:
-            text(req[key], key, 200)
+            check_text(req[key], key, 200)
     if req['view'] not in ('up', 'down', 'mixed', 'no_view') or req['message_intent'] not in ('none', 'update', 'correction'):
-        raise ValueError('Invalid view or message intent')
-    text(req['change_summary'], 'change_summary')
+        raise InvalidSubmission('Invalid view or message intent: view=up/down/mixed/no_view; message_intent=none/update/correction')
+    check_text(req['change_summary'], 'change_summary')
     for key, lists in [('main', ('supporting_refs', 'contradicting_refs')),
                        ('alternative', ('supporting_refs', 'contradicting_refs')),
                        ('invalidation', ('evidence_refs',))]:
         body = req[key]
         if not isinstance(body, dict) or set(body) != {'text', *lists}:
-            raise ValueError('Invalid thesis fields')
-        text(body['text'], key)
+            raise InvalidSubmission(f'{key}: require exactly text, ' + ', '.join(lists))
+        check_text(body['text'], key + '.text')
         for name in lists:
             if not isinstance(body[name], list) or len(body[name]) > 10:
-                raise ValueError('Invalid evidence references')
-            for ref in body[name]:
-                pointer(snapshot, ref)
+                raise InvalidSubmission(f'Invalid evidence references in {key}.{name}: require a list of at most 10 pointers')
+            for index, ref in enumerate(body[name]):
+                try:
+                    pointer(snapshot, ref)
+                except ValueError:
+                    raise InvalidSubmission(f'{key}.{name}[{index}]: evidence reference must resolve inside the snapshot, not the response envelope') from None
     forecasts = req['forecasts']
-    if not isinstance(forecasts, list) or len(forecasts) != 3 or {f.get('horizon') for f in forecasts if isinstance(f, dict)} != set(HORIZONS):
-        raise ValueError('Require exactly three forecast horizons')
-    for f in forecasts:
+    if (not isinstance(forecasts, list) or len(forecasts) != 3
+            or any(not isinstance(f, dict) or not isinstance(f.get('horizon'), str) for f in forecasts)
+            or {f['horizon'] for f in forecasts} != set(HORIZONS)):
+        raise InvalidSubmission('Require exactly three forecast horizons: 30m, 60m, close')
+    for index, f in enumerate(forecasts):
         if set(f) - {'horizon', 'predicate', 'probability', 'abstention_reason'} or not {'horizon', 'predicate', 'probability'} <= f.keys() or f['predicate'] != 'spy_return_lt_zero':
-            raise ValueError('Invalid forecast')
+            raise InvalidSubmission(f'forecasts[{index}]: require horizon, predicate=spy_return_lt_zero, probability; only abstention_reason is optional')
         p = f['probability']
         if p is None:
-            text(f.get('abstention_reason'), 'abstention_reason')
+            check_text(f.get('abstention_reason'), f'forecasts[{index}].abstention_reason')
         elif type(p) not in (int, float) or not 0 <= p <= 1 or f.get('abstention_reason') is not None:
-            raise ValueError('Invalid probability')
+            raise InvalidSubmission(f'forecasts[{index}]: Invalid probability; use a number in [0,1] without abstention_reason, or null with a nonblank abstention_reason')
 
 
 def quality(snapshot, now):
@@ -246,14 +277,17 @@ class MarketWatchLedger:
         actor_valid(actor)
         request_hash = digest(request)
         if len(canonical(request)) > 16384:
-            raise ValueError('Submit exceeds 16 KiB')
-        text(request.get('operation_id'), 'operation_id', 200)
+            raise InvalidSubmission('Submit exceeds 16 KiB')
+        try:
+            text(request.get('operation_id'), 'operation_id', 200)
+        except ValueError:
+            raise InvalidSubmission('operation_id: require nonblank text within 200 characters') from None
         with self.connection() as db:
             db.execute('BEGIN IMMEDIATE')
             prior = db.execute('SELECT request_sha256, record_json FROM market_watch_read WHERE actor=? AND operation_id=?', (actor, request['operation_id'])).fetchone()
             if prior:
                 if prior[0] != request_hash:
-                    raise Conflict('Operation already committed with different content')
+                    raise OperationConflict('Operation already committed with different content')
                 read = json.loads(prior[1])
                 verify(read)
                 return self.receipt(db, read, True)
@@ -261,23 +295,23 @@ class MarketWatchLedger:
             inputs = self.rows(db, TABLES[0], actor)
             inp = next((i for i in inputs if i['input_id'] == request.get('input_id')), None)
             if inp is None:
-                raise NotFound('Input unavailable for actor')
+                raise InputUnavailable('Input unavailable for actor')
             snapshot = inp['snapshot_json']
             validate_snapshot(snapshot)
             if full_market_only and snapshot['protocol_id'] != 'mw-tradier-v2':
                 raise FullMarketRequired('Full-market snapshot required')
             validate_request(request, snapshot)
             if snapshot['session_date'] != now.astimezone(ZoneInfo('America/New_York')).date().isoformat():
-                raise ValueError('Input is not current session')
+                raise InputSessionMismatch('Input is not current session')
             reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == snapshot['session_date'] and r['protocol_id'] == snapshot['protocol_id']]
             if request.get('previous_read_id') != (reads[-1]['read_id'] if reads else None):
-                raise Conflict('Latest parent required')
+                raise ParentConflict('Latest parent required')
             correction = request.get('correction_of_read_id')
             if correction and not any(r['read_id'] == correction for r in reads):
-                raise ValueError('Correction must reference earlier same-session read')
+                raise InvalidSubmission('Correction must reference earlier same-session read')
             prior_message = next((m for m in self.rows(db, TABLES[3], actor) if m['read_id'] == correction and m['kind'] == 'intent'), None) if correction else None
             if request['message_intent'] == 'correction' and not prior_message:
-                raise ValueError('Message correction requires an earlier intent')
+                raise InvalidSubmission('Message correction requires an earlier intent')
             if request['message_intent'] == 'update' and not self._context(db, actor, snapshot['session_date'])['discretionary_intents_remaining']:
                 raise MessageBudgetExceeded('Daily discretionary message-intent budget exhausted')
             read_id = identifier('mwr')
