@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import level_alerts, notification_policy, ntfy
+from app.engine import level_alerts, notification_policy, ntfy, ping_images
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -423,10 +423,13 @@ class LevelAlertMonitor:
                     fired)
                 # Confirmed in the Copilot Lab: a tap opens the investigation it came from.
                 path = f"/copilot-lab?investigation={investigation}" if investigation else None
+            # A plan's level carries its chart (the last 90 minutes, the plan's levels and any fill); other alerts are text.
+            image = ping_images.picture(ping_images.prepare(db, _picture, alert, event, title, now)) if ticket is not None else None
+            image_state = "none"
             event.attempts += 1
             try:
                 if path:
-                    ntfy.publish(title, body, path=path, direct_click=True)
+                    _, image_state = ping_images.publish(title, body, image, path=path, direct_click=True)
                 else:
                     ntfy.publish(title, body, path="/charts")
             except ntfy.NtfyError as exc:
@@ -439,7 +442,14 @@ class LevelAlertMonitor:
             event.delivery, event.delivered_at, event.last_error = "sent", _utc(self.clock()), None
             if ticket is not None:
                 notification_policy.delivered(db, ticket, now)
+                ping_images.record(db, ticket, image_state)
             db.commit()
+
+
+def _picture(db: Session, alert: LevelAlert, event: LevelAlertEvent, title: str, now: float):
+    levels = ping_images.plan_levels(db, alert.source_id) or ((alert.plan_role, event.level),)
+    _, trade_id = notification_policy.symbol_anchor(db, alert.symbol)
+    return ping_images.plan_level(title, alert.symbol, levels, _epoch(event.event_at), ping_images.entry_fills(db, trade_id), now)
 
 
 def _uuid(value: str | None) -> str | None:

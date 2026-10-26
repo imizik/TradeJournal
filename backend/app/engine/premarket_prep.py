@@ -47,7 +47,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy
+from app.engine import notification_policy, ntfy, ping_images
 from app.engine.chart_math import ET, session_windows
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc
 from app.models import PlanTimeStop, PremarketPrep
@@ -433,9 +433,11 @@ class PremarketPreps:
                 row.delivery, row.last_error = "held", ticket.reason
                 db.commit()
                 return
+            image = ping_images.picture(ping_images.prepare(db, self._picture, now))
             row.attempts += 1
             try:
-                ntfy.publish(title, body + ticket.append, priority=3, tags=("sunrise",), path=path, direct_click=True)
+                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=3, tags=("sunrise",), path=path,
+                                                     direct_click=True)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -448,4 +450,16 @@ class PremarketPreps:
                 return
             row.delivery, row.delivered_at = "sent", _utc(self.clock())
             notification_policy.delivered(db, ticket, now)
+            ping_images.record(db, ticket, image_state)
             db.commit()
+
+    def _picture(self, db: Session, now: float):
+        """One picture: the open options by days to expiry, else the first armed plan's chart."""
+        today = datetime.fromtimestamp(now, ET).date()
+        options, plan = ping_images.premarket_facts(db, today)
+        if options:
+            return ping_images.positions_strip("Pre-market · days to expiry", options)
+        if plan is None:
+            return None
+        symbol, levels = plan
+        return ping_images.armed_plan(f"Pre-market · {symbol} plan", symbol, levels, today, self.calendar)

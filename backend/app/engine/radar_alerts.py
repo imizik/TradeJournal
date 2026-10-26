@@ -37,7 +37,7 @@ from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy
+from app.engine import notification_policy, ntfy, ping_images
 from app.engine.chart_math import ET
 from app.models import RadarAlert
 
@@ -113,9 +113,10 @@ def event_path(event_id: str, rating: str | None = None) -> str:
 
 
 class RadarAlerts:
-    def __init__(self, engine, *, clock: Callable[[], float] = time.time):
+    def __init__(self, engine, *, clock: Callable[[], float] = time.time, store=None):
         self.engine = engine
         self.clock = clock
+        self.store = store  # the Radar store, for the ping's picture (the event against its benchmark); None sends text
 
     # ------------------------------------------------------------ record
 
@@ -203,10 +204,13 @@ class RadarAlerts:
                 alert.delivery, alert.last_error = "held", ticket.reason
                 db.commit()
                 return
+            image = ping_images.picture(ping_images.radar(alert.title, self.store, alert.event_id, alert.session_date, now)
+                                        if self.store is not None else None)
             alert.attempts += 1
             try:
-                ntfy.publish(alert.title, alert.body + ticket.append, priority=4, tags=("satellite",), path=event_path(alert.event_id), direct_click=True,
-                             more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS))
+                _, image_state = ping_images.publish(
+                    alert.title, alert.body + ticket.append, image, priority=4, tags=("satellite",), path=event_path(alert.event_id),
+                    direct_click=True, more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS))
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -219,4 +223,5 @@ class RadarAlerts:
                 return
             alert.delivery, alert.delivered_at, alert.last_error = "sent", _utc(self.clock()), None
             notification_policy.delivered(db, ticket, now)
+            ping_images.record(db, ticket, image_state)
             db.commit()

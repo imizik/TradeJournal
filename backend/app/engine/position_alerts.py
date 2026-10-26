@@ -69,7 +69,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, position_alert_context
+from app.engine import notification_policy, ntfy, ping_images, position_alert_context
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -457,10 +457,11 @@ class PositionAlerts:
                 alert.delivery, alert.last_error = "held", ticket.reason
                 db.commit()
                 return
+            image = ping_images.picture(ping_images.prepare(db, _picture, alert, now))
             alert.attempts += 1
             try:
-                ntfy.publish(title, body + ticket.append, priority=priority, tags=("warning",),
-                             path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
+                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=priority, tags=("warning",),
+                                                     path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
@@ -473,6 +474,7 @@ class PositionAlerts:
                 return
             alert.delivery, alert.delivered_at, alert.last_error = "sent", _utc(self.clock()), None
             notification_policy.delivered(db, ticket, now)
+            ping_images.record(db, ticket, image_state)
             db.commit()
 
     def _close(self, now: float) -> float | None:
@@ -483,6 +485,22 @@ class PositionAlerts:
         if regular is None:
             return None
         return datetime(today.year, today.month, today.day, regular[2] // 60, regular[2] % 60, tzinfo=ET).timestamp()
+
+
+PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today"}
+
+
+def _picture(db: Session, alert: PositionAlert, now: float):
+    """The ping's chart: the underlying since the entry, with the entry, the peak this loop saw and now."""
+    fills = ping_images.entry_fills(db, alert.trade_id)
+    watch = db.exec(select(PositionWatch).where(PositionWatch.account_id == alert.account_id,
+                                                PositionWatch.source_key == alert.source_key)).first()
+    peak_at = _epoch(watch.peak_at) if watch is not None and watch.peak_at is not None and alert.kind != "expiry_final" else None
+    note = " ".join(part for part in (
+        f"PEAK {alert.peak_gain_pct:+.0%}" if alert.peak_gain_pct is not None else "",
+        f"NOW {alert.gain_pct:+.0%}" if alert.gain_pct is not None else "") if part)
+    return ping_images.position(f"{alert.contract} · {PICTURE_TITLE.get(alert.kind, alert.kind)}", note,
+                                (alert.contract or "").split(" ")[0], fills.stamps[0][0] if fills.stamps else None, peak_at, fills, now)
 
 
 def for_trade(db: Session, trade: Trade) -> dict:
