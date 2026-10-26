@@ -127,10 +127,11 @@ def week_rows(db: Session, monday: date) -> list[dict]:
 def _invalidation_pings(db: Session, start: datetime, end: datetime) -> tuple[int, int]:
     from app.engine import capture_links, notification_policy
     from app.models import PhonePing
-    pings = db.exec(select(PhonePing.then).where(PhonePing.kind == "invalidation", PhonePing.decision == "sent",
+    pings = db.exec(select(PhonePing.then, PhonePing.anchor).where(PhonePing.kind == "invalidation", PhonePing.decision == "sent",
                                                  PhonePing.decided_at >= capture_links.entry_utc(start),
                                                  PhonePing.decided_at < capture_links.entry_utc(end))).all()
-    judged = [then for then in pings if then is not None and then != "unmatched"]
+    webull = tuple(f"{account}:" for account in _webull_ids(db))  # a ping's anchor is "<account id>:<source key>"
+    judged = [then for then, anchor in pings if then is not None and then != "unmatched" and not (anchor or "").startswith(webull or ("\0",))]
     return sum(then in notification_policy.ACTED for then in judged), len(judged)
 
 

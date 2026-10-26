@@ -766,12 +766,13 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
     started = time.monotonic()
     name = block.get("name", "")
     event = {"type": "tool", "id": block.get("id"), "name": name}
+    claimed = False
     try:
         args = copilot_tools.validate(name, block.get("input"))
         if name == "propose_plan" and args["kind"] == "practice" and turn is not None:
             if turn.get("practice"):
                 raise copilot_tools.ToolInputError("one practice proposal per answer")
-            turn["practice"] = True  # set before the first await, so calls gathered in one round see it
+            turn["practice"] = claimed = True  # set before the first await, so calls gathered in one round see it
         event["input"] = args
         data = await asyncio.wait_for(asyncio.to_thread(copilot_tools.call, evidence, name, args), cfg.tool_timeout_s)
         prov = copilot_tools.provenance(name, data, evidence.label)
@@ -793,6 +794,8 @@ async def _run_tool(evidence, block: dict, cfg: Settings, turn: dict | None = No
         log.warning("copilot tool %s failed: %s", name, type(exc).__name__)
         result = {"type": "tool_result", "tool_use_id": block["id"], "is_error": True, "content": "Evidence source unavailable."}
         event.update(status="error", summary="unavailable")
+    if claimed and event.get("status") != "ok":
+        turn["practice"] = False  # a practice that failed after validation leaves the answer's one slot free
     event["ms"] = round((time.monotonic() - started) * 1000)
     return result, event
 

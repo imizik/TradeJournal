@@ -22,7 +22,7 @@ from app.engine import practice_goal
 from app.models import FillMarketContext, PhonePing, PracticeGoal
 from app.routers import copilot_practice as practice_routes
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
-from tests.test_copilot_week_review import INVESTIGATION, THU, TUE, _secret_free, _seed_week, _utc, db  # noqa: F401
+from tests.test_copilot_week_review import INVESTIGATION, THU, TUE, WEBULL, _secret_free, _seed_week, _utc, db  # noqa: F401
 
 MONDAY = date(2026, 10, 19)
 GOOD = {"kind": "practice", "text": "Exit within 15 minutes when my invalidation breaks.", "measure": "exit_at_invalidation",
@@ -92,6 +92,28 @@ def test_one_practice_per_answer():
     assert [e["measure"] for e in events if e["type"] == "proposal"] == ["exit_at_invalidation"]
     assert [e["summary"] for e in events if e["type"] == "tool" and e.get("status") == "error"] == [
         "refused: one practice proposal per answer"] * 2
+
+
+def test_a_practice_that_fails_after_validation_frees_the_slot(monkeypatch):
+    real, calls = copilot_tools.propose, []
+
+    def flaky(evidence, proposal):
+        calls.append(proposal["measure"])
+        if len(calls) == 1:
+            raise RuntimeError("store hiccup")
+        return real(evidence, proposal)
+    monkeypatch.setattr(copilot_tools, "propose", flaky)
+
+    class Retries(copilot.FakeAdapter):
+        async def stream_round(self, system, messages, tools, allow_tools=True):
+            if len(messages) < 5:
+                yield "final", copilot.Round([{"type": "tool_use", "id": f"p{len(messages)}", "name": "propose_plan", "input": GOOD}],
+                                             "tool_use", copilot._zero_usage())
+                return
+            yield "final", copilot.Round([{"type": "text", "text": "ok"}], "end_turn", copilot._zero_usage())
+
+    events = _turn([{"role": "user", "content": "Review my week"}], Retries(0))
+    assert len(calls) == 2 and [e["measure"] for e in events if e["type"] == "proposal"] == ["exit_at_invalidation"]
 
 
 class BigWeek(FixtureEvidence):
@@ -223,6 +245,9 @@ def test_invalidation_pings_and_day_pnl_are_used_when_present(db):  # noqa: F811
     for fill_id, day_pnl in ((1, 0.0), (3, 120.0), (5, -40.0), (7, 80.0)):  # the long options' first entries
         db.add(FillMarketContext(fill_id=UUID(int=fill_id), data_source="test", fetched_at=datetime(2026, 10, 25),
                                  realized_pnl_today_before=day_pnl))
+    db.commit()
+    db.add(PhonePing(sender="position_alerts", source_id="webull", kind="invalidation", rank=1, decision="sent", title="t",
+                     body="b", decided_at=_utc(TUE), then="held", anchor=f"{WEBULL}:week:11"))  # dormant: left out
     db.commit()
     assert _score(db, "exit_at_invalidation", 0.5) == ("2 of 3", True, "invalidation pings")
     assert _score(db, "no_opening_while_green", 0.75) == ("2 of 4", False, None)  # CRWV and IREN opened on a green day

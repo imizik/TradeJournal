@@ -36,6 +36,7 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
   const [text, setText] = useState(proposal.kind === "memory" || proposal.kind === "practice" ? proposal.text : "");
   const [rememberToo, setRememberToo] = useState(false);
   const operation = useRef(operationId());  // one id per card: a retried Confirm replays, never duplicates
+  const practiceSaved = useRef<string | null>(null);  // the saved goal's line: a retry after a failed memory save skips it
   if (phase === "dismissed") return null;
   const watch = proposal.kind === "watch";
   const memory = proposal.kind === "memory";
@@ -50,11 +51,12 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
     setError(null);
     try {
       if (proposal.kind === "practice") {
-        const saved = await savePractice({ text: text.trim(), measure: proposal.measure, target: proposal.target, investigation_id: investigationId });
+        practiceSaved.current ??= practiceLine(await savePractice({ text: text.trim(), measure: proposal.measure, target: proposal.target,
+          investigation_id: investigationId })) ?? "Practice saved";
         // Only when ticked: the practice also becomes an approved lesson memory, through the existing memory store.
         if (rememberToo) await saveMemory({ id: proposal.id, kind: "memory", memory_kind: "lesson", symbol: null, text: text.trim() },
           text.trim(), investigationId, operation.current);
-        setNote(`${practiceLine(saved) ?? "Practice saved."}. Next week's review scores it.${rememberToo ? " Also remembered as a lesson." : ""}`);
+        setNote(`${practiceSaved.current}. Next week's review scores it.${rememberToo ? " Also remembered as a lesson." : ""}`);
       } else if (proposal.kind === "memory") {
         await saveMemory(proposal, text.trim(), investigationId, operation.current);
         setNote(`Remembered (${proposal.memory_kind}${proposal.symbol ? `, ${proposal.symbol}` : ""}). It joins your approved memories from the next turn.`);
