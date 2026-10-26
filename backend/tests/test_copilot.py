@@ -398,6 +398,33 @@ def test_chat_streams_and_validates(monkeypatch, caplog):
         assert client.post("/copilot/chat", json={"messages": [{"role": "user", "content": "x"}], "symbol": "nb is"}).status_code == 422
 
 
+def test_a_turn_can_pick_an_offered_model(monkeypatch):
+    """GET /status lists the models a turn may pick (COPILOT_MODEL first); POST /chat takes one of them as ``model``;
+    anything else is refused before an adapter is built."""
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.delenv("COPILOT_BACKEND", raising=False)
+    monkeypatch.delenv("COPILOT_MODEL", raising=False)
+    monkeypatch.setenv("COPILOT_MODELS", " claude-opus-5-5 ,claude-fable-5-1, claude-sonnet-5-5,,Bad Model!")
+    seen: list[str] = []
+    monkeypatch.setattr(copilot, "adapter_for", lambda cfg: seen.append(cfg.model) or copilot.FakeAdapter(0))
+    with TestClient(app) as client:
+        status = client.get("/copilot/status").json()
+        assert status["model"] == "claude-sonnet-5-5"
+        assert status["models"] == ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"]  # default first, junk dropped
+        turn = {"messages": [{"role": "user", "content": "x"}]}
+        assert client.post("/copilot/chat", json={**turn, "model": "claude-fable-5-1"}).status_code == 200 and seen[-1] == "claude-fable-5-1"
+        assert client.post("/copilot/chat", json=turn).status_code == 200 and seen[-1] == "claude-sonnet-5-5"
+        refused = client.post("/copilot/chat", json={**turn, "model": "gpt-9"})
+        assert refused.status_code == 422 and "not one of the models" in refused.json()["detail"] and seen[-1] == "claude-sonnet-5-5"
+        assert client.post("/copilot/chat", json={**turn, "model": "Bad Model"}).status_code == 422
+    monkeypatch.delenv("COPILOT_MODELS")
+    assert copilot.settings().models == ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+    monkeypatch.setenv("COPILOT_MODELS", "")
+    assert copilot.settings().models == ("claude-sonnet-5-5",)
+    monkeypatch.setenv("COPILOT_MODEL", "claude-opus-5-5")
+    assert copilot.settings().models[0] == "claude-opus-5-5" and "models" in copilot.settings().public()
+
+
 def test_anthropic_backend_without_key_is_an_honest_unavailable_state(monkeypatch):
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     monkeypatch.setenv("COPILOT_BACKEND", "anthropic")

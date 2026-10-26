@@ -1080,7 +1080,8 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EVIDENCE` | `fixture` | `fixture` returns SIMULATED neocloud data; the model is told so in its context line, in a `"simulated": true` marker on every tool result and in the system prompt, and says so in its answer. `live` reads this installation's Radar, news, Tradier and quote services. `replay` reads a recorded session at a frozen moment (below). |
 | `COPILOT_REPLAY_STORE` | none | `replay` only: path to a read-only copy of a Radar store. |
 | `COPILOT_REPLAY_AT` | none | `replay` only: New York time inside a recorded session, e.g. `2026-10-23T11:12`. |
-| `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic` and `plan`. |
+| `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic` and `plan`: the default for a turn. |
+| `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line under each answer shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). For `plan` it is Claude Code's API-equivalent estimate (`max_budget_usd`); nothing is billed. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |

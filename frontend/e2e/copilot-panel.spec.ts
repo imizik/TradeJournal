@@ -24,7 +24,7 @@ const record = (id: string, symbol: string, transcript: { role: string; content:
 });
 
 type Lab = {
-  saved: Map<string, ReturnType<typeof record>>; chats: { messages: { content: string }[]; symbol: string | null }[];
+  saved: Map<string, ReturnType<typeof record>>; chats: { messages: { content: string }[]; symbol: string | null; model?: string }[];
   /** Hold a symbol's investigation list, or the next turn, until the test releases it. */
   holdList?: { symbol: string; until: Promise<void> }; holdChat?: Promise<void>; posts?: { transcript: { role: string; content: string }[] }[];
 };
@@ -261,4 +261,28 @@ test("Switch waits for a turn in progress", async ({ page }) => {
   held.open();
   await expect(offer.getByRole("button", { name: "Switch to NVDA" })).toBeEnabled();
   await expect(panel.getByRole("heading", { name: "Copilot · MRVL" })).toBeVisible();
+});
+
+test("the Model picker sends the chosen model with each turn and remembers it in this browser", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  await stubLab(page, lab);
+  // A server offering three models (the picker is hidden for the simulated model and for a single-model server).
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: { ...ON, backend: "plan", plan_configured: true,
+    model: "claude-sonnet-5-5", models: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"] } }));
+  await page.goto("/copilot-lab?symbol=MRVL");
+  const picker = page.getByLabel("Model");
+  await expect(picker).toHaveValue("claude-sonnet-5-5");
+  await picker.selectOption("claude-opus-5-5");
+  await expect(page.getByText("Claude plan (no API credits) · claude-opus-5-5")).toBeVisible();
+  await page.getByLabel("Message").fill("Is MRVL leading its group?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(ANSWER)).toBeVisible();
+  expect(lab.chats[0].model).toBe("claude-opus-5-5");
+  await page.reload();
+  await expect(page.getByLabel("Model")).toHaveValue("claude-opus-5-5"); // remembered in this browser
+  await page.getByLabel("Model").selectOption("claude-sonnet-5-5"); // back to the server's default: nothing sent
+  await page.getByLabel("Message").fill("And now?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(ANSWER).last()).toBeVisible();
+  expect(lab.chats[1].model).toBeUndefined();
 });

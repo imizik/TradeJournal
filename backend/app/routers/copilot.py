@@ -38,6 +38,7 @@ class ChatMessage(BaseModel):
 class ChatBody(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=24)
     symbol: str | None = Field(None, pattern=r"^[A-Z][A-Z0-9.\-]{0,9}$")
+    model: str | None = Field(None, pattern=r"^[a-z0-9][a-z0-9.\-]{0,60}$")  # one of GET /status's ``models``
 
 
 @router.get("/status")
@@ -141,6 +142,10 @@ async def chat(body: ChatBody):
         raise HTTPException(422, "Messages must alternate, starting and ending with the trader.")
     if sum(len(m.content) for m in body.messages) > MAX_HISTORY_CHARS:
         raise HTTPException(413, "This conversation is too long for the lab; start a new one.")
+    try:
+        cfg = copilot.with_model(cfg, body.model)
+    except copilot.CopilotError as exc:
+        raise HTTPException(422, exc.message)
     try:
         # The plan backend asks Claude Code for its sign-in once per process; keep that off the event loop.
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)

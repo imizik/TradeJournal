@@ -7,6 +7,8 @@ export type CopilotStatus =
   | { enabled: true; backend: "fake" | "anthropic" | "plan"; evidence: "fixture" | "live" | "replay"; model: string; effort: string;
       replay?: { at: string; session: string; passes_before: number; last_pass_at: string } | { error: string };
       fallbacks: boolean; key_configured: boolean; plan_configured: boolean; tools: string[];
+      /** The models a turn may pick (the server's default first); absent on older servers. */
+      models?: string[];
       /** copilot_alerts: whether the level-alert route accepts a watch confirmed here. transcriber: whether hold-to-talk
        * can use this server's speech to text (else the browser's own, where it has one). */
       capabilities?: { copilot_alerts: boolean; transcriber?: { configured: boolean; provider: string } };
@@ -93,11 +95,26 @@ export function parseFrame(frame: string): CopilotEvent | null {
 }
 
 /** Stream one turn. History is text-only: the server re-reads evidence rather than trusting the browser. */
+export const MODEL_KEY = "copilot.model";
+
+/** The model the owner picked for their turns in this browser, when the server still offers it. */
+export function pickedModel(status: CopilotStatus | null): string | null {
+  if (!status?.enabled || !status.models || status.models.length < 2) return null;
+  try {
+    const saved = window.localStorage.getItem(MODEL_KEY);
+    return saved && status.models.includes(saved) ? saved : null;
+  } catch { return null; }
+}
+
+export function rememberModel(model: string | null) {
+  try { if (model) window.localStorage.setItem(MODEL_KEY, model); else window.localStorage.removeItem(MODEL_KEY); } catch { /* per-browser convenience only */ }
+}
+
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
-  onEvent: (event: CopilotEvent) => void, signal: AbortSignal) {
+  onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ messages: history, symbol }), signal, cache: "no-store",
+    body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}) }), signal, cache: "no-store",
   });
   if (!response.ok || !response.body) {
     let detail = `Copilot request failed (${response.status}).`;
