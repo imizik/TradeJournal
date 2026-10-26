@@ -28,6 +28,8 @@ _LEVEL_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["
                                 "price": {"type": "number", "description": "The level, positive"},
                                 "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"}}}
 
+MOMENT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D")  # every Charts interval but 1W
+
 TOOLS: list[dict] = [
     {
         "name": "get_group_comparison",
@@ -95,6 +97,22 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "timeframe"],
                          "properties": {"symbol": _SYMBOL_SCHEMA,
                                         "timeframe": {"type": "string", "enum": ["1m", "5m", "15m", "1h", "1D"]}}},
+    },
+    {
+        "name": "get_moment",
+        "description": "One moment on the owner's chart, anchored at a New York time: the candle holding `at` and the 12 "
+                       "either side (OHLC, volume, relative volume), VWAP through it, the nearest automatic levels as they "
+                       "stood when it opened, and the session's open/high/low so far with the prior close; Radar's recorded "
+                       "reading for the symbol at that pass (against SPY, QQQ and its group); headlines published within 60 "
+                       "minutes (untrusted text, with publish times); the owner's fills in the symbol within 30 minutes; and "
+                       "phone pings within 15 minutes (kind only). `at` is New York time (2026-10-23T10:40) or epoch seconds, "
+                       "within the last 400 days; `timeframe` defaults to 5m.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "at"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "at": {"type": "string",
+                                               "description": "The moment: New York time as ISO (2026-10-23T10:40), or epoch seconds"},
+                                        "timeframe": {"type": "string", "enum": list(MOMENT_TIMEFRAMES),
+                                                      "description": "The chart's timeframe; default 5m"}}},
     },
     {
         "name": "get_positions",
@@ -413,6 +431,39 @@ def _option_candidates(args: dict) -> dict:
     return out
 
 
+MOMENT_LOOKBACK_DAYS = 400
+
+
+def _moment(args: dict) -> dict:
+    """get_moment: a ticker, a moment (New York ISO time, or epoch seconds) in the last 400 days and not in the future,
+    and a chart timeframe (5m when omitted). The moment goes on as New York ISO time with its offset."""
+    from app.engine.chart_math import ET
+    timeframe = args.get("timeframe", "5m")
+    if timeframe not in MOMENT_TIMEFRAMES:
+        raise ToolInputError("timeframe must be one of " + ", ".join(MOMENT_TIMEFRAMES))
+    value = args.get("at")
+    try:
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise ValueError
+        if isinstance(value, str) and value.strip().isdigit():
+            value = int(value.strip())
+        if isinstance(value, str):
+            if len(value.strip()) > 40:
+                raise ValueError
+            moment = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            moment = moment.replace(tzinfo=ET) if moment.tzinfo is None else moment
+        else:
+            moment = datetime.fromtimestamp(float(value), UTC)
+    except (ValueError, OverflowError, OSError):
+        raise ToolInputError("at must be a New York time like 2026-10-23T10:40, or epoch seconds") from None
+    now = datetime.now(UTC)
+    if moment > now + timedelta(minutes=1):
+        raise ToolInputError("at is in the future")
+    if moment < now - timedelta(days=MOMENT_LOOKBACK_DAYS):
+        raise ToolInputError(f"at must be within the last {MOMENT_LOOKBACK_DAYS} days")
+    return {"symbol": _symbol(args.get("symbol")), "at": moment.astimezone(ET).isoformat(timespec="seconds"), "timeframe": timeframe}
+
+
 def validate(name: str, args: Any) -> dict:
     """The tool's arguments, normalized, or ToolInputError. Unknown keys are refused."""
     if name not in TOOL_NAMES:
@@ -444,6 +495,8 @@ def validate(name: str, args: Any) -> dict:
         if args.get("timeframe") not in ("1m", "5m", "15m", "1h", "1D"):
             raise ToolInputError("timeframe must be 1m, 5m, 15m, 1h or 1D")
         return {"symbol": _symbol(args.get("symbol")), "timeframe": args["timeframe"]}
+    if name == "get_moment":
+        return _moment(args)
     if name == "get_trade_review":
         try:
             return {"trade_id": str(uuid.UUID(str(args.get("trade_id"))))}
@@ -612,6 +665,8 @@ CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one
 # leaves them out.
 BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
                                 "get_level_history"})
+# A moment's as-of dates a past candle, not what the evidence says now: "what changed" leaves it out too.
+NOT_CURRENT_TOOLS = BOOK_CONTEXT_TOOLS | {"get_moment"}
 
 
 def investigation_changes(investigation_id: str, before: datetime | None = None) -> dict:
@@ -644,7 +699,7 @@ def investigation_changes(investigation_id: str, before: datetime | None = None)
     later = after_cutoff(record["updated_at"])
     latest: dict[str, Any] = {}  # each tool's newest as-of time among the saved evidence references
     for ref in record["evidence"]:
-        if ref.get("as_of") is None or after_cutoff(ref["as_of"]) or ref.get("tool") in BOOK_CONTEXT_TOOLS:
+        if ref.get("as_of") is None or after_cutoff(ref["as_of"]) or ref.get("tool") in NOT_CURRENT_TOOLS:
             continue
         if str(ref["as_of"]) > str(latest.get(ref["tool"], {}).get("as_of", "")):
             latest[ref["tool"]] = {"tool": ref["tool"], "as_of": ref["as_of"], "kind": ref.get("kind")}
@@ -752,6 +807,10 @@ class LiveEvidence:
         from app.ai import copilot_book
         return copilot_book.chart_context(symbol, timeframe)
 
+    def get_moment(self, symbol: str, at: str, timeframe: str = "5m") -> dict:
+        from app.ai import copilot_moment
+        return copilot_moment.live_moment(symbol, at, timeframe)
+
     def get_positions(self) -> dict:
         from app.ai import copilot_book
         return copilot_book.positions()
@@ -806,6 +865,8 @@ PROVENANCE = {
     "get_saved_research": ("Saved investigations and research results (TradeJournal)", "saved"),
     "get_investigation_changes": ("Saved investigation, its alerts and research jobs (TradeJournal)", "saved"),
     "get_chart_context": ("Charts workspace feed (Tradier today, stored sessions, automatic levels)", "fetched"),
+    "get_moment": ("Charts feed at that moment (Tradier today, stored SIP sessions, automatic levels as of the candle) · Radar "
+                   "recorded passes · Alpaca (Benzinga) / Polygon news · journal fills and phone pings (TradeJournal)", "fetched"),
     "get_positions": ("Journal open positions (fills) · Tradier marks", "fetched"),
     "get_trades": ("Journal closed trades (TradeJournal)", "saved"),
     "get_memories": ("Owner-approved Jo memories (TradeJournal)", "saved"),

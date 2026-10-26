@@ -895,12 +895,12 @@ def test_investigation_changes_fit_whole_at_every_cap():
     saved = _changes_world()
     # Every market tool that can carry an as_of (propose_plan has none; the owner context rows are the book, left out
     # below), on the longest symbol a ticker can be.
-    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan" and t["name"] not in copilot_tools.BOOK_CONTEXT_TOOLS]
+    tools = [t["name"] for t in copilot_tools.TOOLS if t["name"] != "propose_plan" and t["name"] not in copilot_tools.NOT_CURRENT_TOOLS]
     symbol = "ABCDEFGHIJ"
     inv.update(saved["id"], inv.InvestigationFields(
         title="T" * 120, symbol=symbol, conclusion="C" * 280, findings={"summary": "S" * 2000},
         evidence=[{"tool": t, "as_of": "2026-10-23T15:59:59.999999+00:00", "kind": "recorded", "message": 1}
-                  for t in (*tools, "owner_context", "get_owner_context")]), 1)
+                  for t in (*tools, "owner_context", "get_owner_context", "get_moment")]), 1)
     now = clock.time()
     with Session(engine) as db:
         for i, price in enumerate((10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5)):
@@ -920,7 +920,7 @@ def test_investigation_changes_fit_whole_at_every_cap():
     assert (len(out["alerts"]), len(out["research_jobs"]), len(out["results"])) == (
         copilot_tools.CHANGE_ALERTS, copilot_tools.CHANGE_JOBS, copilot_tools.CHANGE_RESULTS)
     assert len(out["evidence_as_of"]) == len(tools) <= copilot_tools.CHANGE_EVIDENCE
-    assert not {e["tool"] for e in out["evidence_as_of"]} & copilot_tools.BOOK_CONTEXT_TOOLS
+    assert not {e["tool"] for e in out["evidence_as_of"]} & copilot_tools.NOT_CURRENT_TOOLS
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS - 200, len(text)  # headroom for longer ids or times
     assert json.loads(text) == json.loads(json.dumps(out, default=str))

@@ -69,6 +69,24 @@ class ReplayEvidence:
                 "reason": "Chart bars are not in the Radar snapshot, so the chart is unavailable in replay. "
                           "Use get_group_comparison and get_quotes for recorded moves."}
 
+    def get_moment(self, symbol: str, at: str, timeframe: str = "5m") -> dict:
+        """The Radar reading and the headlines at a moment before the frozen time; bars, fills and pings are not in it."""
+        from app.ai import copilot_moment
+        from app.engine import symbol_info_news_feed
+        moment = datetime.fromisoformat(at)
+        head = {"symbol": symbol, "timeframe": timeframe, "at": moment.astimezone(ET).isoformat(timespec="minutes"),
+                "as_of": self.at.isoformat(timespec="minutes")}
+        if moment.timestamp() > self.now:
+            return {**head, "state": "unavailable", "reason": "That moment is after the replay's frozen time, so nothing about it can be shown."}
+        raw = symbol_info_news_feed.symbol_news.view(symbol)
+        chart = {**head, "state": "partial", "bars": {"state": "unavailable", "reason": "Chart bars are not in the Radar snapshot, so the "
+                                                                                         "candle, levels and VWAP are unavailable in replay."}}
+        book = "unavailable in replay (it reads the journal as it is now, including what came after the frozen moment)"
+        return copilot_moment.moment(chart, radar=copilot_moment.radar_at(self.store, symbol, moment),
+                                     news=copilot_moment.news_near(raw.get("articles", []), moment, cutoff=self.at),
+                                     fills={"state": "unavailable", "reason": f"The owner's fills are {book}."},
+                                     pings={"state": "unavailable", "reason": f"Phone pings are {book}."})
+
     def get_positions(self) -> dict:
         return {"state": "unavailable", "reason": "The owner's book is unavailable in replay (it would show today's holdings)."}
 

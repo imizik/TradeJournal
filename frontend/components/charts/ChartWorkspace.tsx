@@ -40,7 +40,7 @@ import { fetchSymbolOverview } from "@/lib/symbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
-import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { instrumentSettings, isMacroSymbol, instrumentPrice, instrumentTime, supportedIntervals, TECH_RETURN_KEY, readTechReturn, macroArrangement, LAYOUT_PRESETS, cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, explainCandle, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
 import type { AutoZone, ColorKey, ChartBar, ChartPanelData, ChartQuote, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
@@ -84,7 +84,8 @@ const NO_POSITIONS: (ChartPosition & { pnl: number | null })[] = [];
 /** The selected level or drawing and the panel it was selected on, which carries its bar. */
 type Selection = { symbol: string; id: string; panel: string };
 /** An open chart menu (C1.3): where it was asked for, on which panel's symbol, and the item there (`id`) or the price. */
-type OpenMenu = { at: { x: number; y: number; touch: boolean }; panel: string; symbol: string; price: number | null; id: string | null; auto: string | null; reset(): void };
+type OpenMenu = { at: { x: number; y: number; touch: boolean }; panel: string; symbol: string; price: number | null; id: string | null; auto: string | null;
+  candle: ChartBar | null; reset(): void };
 /** The chart menu's Layers: the user's own groups first, then fills and the studies. */
 const GROUP_NAMES: [keyof HiddenGroups, string][] = [["levels", "My levels"], ["drawings", "Drawings"]];
 /** Only the items a chart draws: none of a hidden group, and no item hidden on its own. */
@@ -1160,7 +1161,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     if (tool) { setTool(null); return; }
     setEntry(NO_ENTRY);
     if (request.id) { setSelection({ symbol: target, id: request.id, panel }); setFresh(null); if (panel === "main") notePickId(target, request.id); }
-    setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, auto: request.auto ?? null, reset: request.reset });
+    setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, auto: request.auto ?? null, candle: request.candle ?? null, reset: request.reset });
   };
   const copyPrice = async (value: number) => {
     const text = value.toFixed(2);
@@ -1488,6 +1489,11 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
     showDock("copilot");
   };
   const planStarted = useCallback((n: number) => setPlanAsk((ask) => ask?.n === n ? null : ask), []);
+  /** "Explain this candle": the candle's line in the Copilot dock, unsent; its Send also shows the copilot this chart. */
+  const explainThis = (bar: ChartBar) => {
+    setPlanAsk({ text: explainCandle(symbol, settings.intervals[0], bar), plan: null, chart: true, n: Date.now() });
+    showDock("copilot");
+  };
   /**
    * A plan card confirmed from a "Plan this": each of its prices labels the drawn level at that price ("Entry
    * trigger", "Invalidation"), or the level drawn for that role, moved to the plan's price; a ray or a zone keeps its
@@ -2213,7 +2219,9 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
         onDelete={() => { if (menu.id) deleteItem(menu.symbol, menu.id); }} onClose={() => setMenu(null)}
-        plan={planPair && menu.panel === "main" && menu.symbol === symbol && !!menu.id && picks.ids.includes(menu.id) ? { name: planThisName(planPair), detail: pairText(planPair), run: planThis } : null} />}
+        plan={planPair && menu.panel === "main" && menu.symbol === symbol && !!menu.id && picks.ids.includes(menu.id) ? { name: planThisName(planPair), detail: pairText(planPair), run: planThis } : null}
+        explain={menu.candle && !menu.id && menu.panel === "main" && menu.symbol === symbol && copilotOn && settings.intervals[0] !== "1W"
+          ? { detail: etTime(menu.candle.time, settings.intervals[0] === "1D"), run: () => explainThis(menu.candle!) } : null} />}
       {notice && <div role="status" aria-label="Chart notice" className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[85] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-md border border-slate-600 bg-[#121924]/95 px-3 py-1.5 text-xs text-slate-200 shadow-xl">{notice}</div>}
       {entry.typed && <div role="status" aria-label="Interval entry" className="pointer-events-none fixed left-1/2 top-1/2 z-[75] min-w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-600 bg-[#121924]/95 px-4 py-3 text-center shadow-2xl">
         <div className="font-mono text-2xl font-medium text-slate-100">{entry.typed}<span className="text-base text-slate-500">m</span></div>

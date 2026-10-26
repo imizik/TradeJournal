@@ -896,6 +896,20 @@ const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York",
 const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
 /** A moment's New York date, "2026-10-21": the key of a session's RVol baseline. */
 export const nyDay = (stamp: number) => nyDate.format(stamp * 1000);
+const nyHourMinute = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
+const lowVolume = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+/**
+ * "Explain this candle" (the candle menu): the copilot's opening line for one candle. Its New York start time (with
+ * the date when it is not today's; a daily candle by its date), OHLC, volume and RVol. The copilot reads the moment
+ * itself with get_moment.
+ */
+export function explainCandle(symbol: string, interval: Interval, bar: ChartBar): string {
+  const day = nyDay(bar.time);
+  const when = interval === "1D" ? `on ${day}` : `at ${nyHourMinute.format(bar.time * 1000)} ET${day === todayNewYork() ? "" : ` on ${day}`}`;
+  const rvol = typeof bar.rvol === "number" && !bar.extended ? `, RVol ${bar.rvol.toFixed(1)}` : "";
+  return `Explain this candle: ${symbol} ${interval} ${when} (O ${price(bar.open)} H ${price(bar.high)} L ${price(bar.low)} C ${price(bar.close)}, `
+    + `vol ${lowVolume.format(bar.volume).toLowerCase()}${rvol}). What moved it, and what did I do here?`;
+}
 export type SessionWindow = MarketDay["sessions"][number];
 /**
  * The session windows that apply at `now`: the backend's calendar day when it

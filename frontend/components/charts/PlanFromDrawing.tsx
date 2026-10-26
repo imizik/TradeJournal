@@ -7,7 +7,8 @@ import type { DrawnPlan } from "@/lib/copilot";
 import type { PlanPair } from "@/lib/drawPlan";
 
 /** What "Plan this" asks the dock's copilot: the owner's message and the levels it names. */
-export type PlanAsk = { text: string; plan: DrawnPlan; n: number };
+/** A conversation the chart starts in the dock: its context line, the drawn plan if any, and whether Send shows the chart. */
+export type PlanAsk = { text: string; plan: DrawnPlan | null; n: number; chart?: boolean };
 
 /** "Plan this", or "Plan this as invalidation" for one drawn level. */
 export const planThisName = (pair: PlanPair) => pair.trigger ? "Plan this" : "Plan this as invalidation";
@@ -42,7 +43,7 @@ export function StartPlan({ ask, actions, onStarted }: { ask: PlanAsk | null; ac
   useEffect(() => {
     if (!ask || busy || started.current === ask.n) return;
     started.current = ask.n;
-    start(ask.text, { kind: "chart", ref: null }, ask.plan);
+    start(ask.text, { kind: "chart", ref: null }, ask.plan, ask.chart);
     onStarted(ask.n);
   }, [ask, busy, start, onStarted]);
   return null;
