@@ -578,7 +578,8 @@ migration `d2a7e5c9f3b1`), so the owner never has to press the button:
   midnight New York waits for the next week. A week with no closed trade
   (the tool reads `none`) is recorded `skipped`: no turn, no ping.
 - **Turn:** one `run_turn` on the configured backend and evidence, its turn
-  budget cap included, whose owner message is the Friday button's own context,
+  budget cap included, whose owner message is the Review my week context naming
+  the week, as a Friday's Daily Review link sends it:
   `Context: Review my week of <Monday>`. So the model calls `get_week_review`,
   opens with the practice score while a goal is active, and proposes one
   practice when the counts support it, exactly as above. The answer is saved as

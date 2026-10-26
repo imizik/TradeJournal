@@ -105,7 +105,8 @@ def prompt(monday: date) -> str:
 
 
 def _money(value: float) -> str:
-    return f"{'-' if value < 0 else '+'}${abs(value):,.0f}"
+    dollars = round(value)
+    return f"{'-' if dollars < 0 else '+'}${abs(dollars):,}"
 
 
 def ping_title(review: dict) -> str:

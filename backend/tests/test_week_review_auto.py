@@ -146,6 +146,18 @@ def test_not_before_its_time_or_day(engine, phone, moment):
     assert turn.calls == [] and phone == [] and rows(engine) == []
 
 
+def test_a_late_start_runs_until_midnight_and_not_after(engine, phone):
+    turn = Turn()
+    reviews(engine, Clock(at("00:30", SAT)), turn).run()  # past midnight: waits for next week
+    assert turn.calls == [] and rows(engine) == []
+    reviews(engine, Clock(at("23:30")), turn).run()  # a restart late on Friday still runs it
+    assert len(turn.calls) == 1 and len(phone) == 1
+
+
+def test_money_rounds_before_the_sign():
+    assert [week_review_auto._money(v) for v in (412.4, -0.4, -1234.6, 0)] == ["+$412", "+$0", "-$1,235", "+$0"]
+
+
 def test_a_friday_holiday_moves_it_to_thursday(engine, phone):
     turn, closed = Turn(), Calendar(FRI)
     reviews(engine, Clock(at("16:45", FRI)), turn, closed).run()
@@ -200,6 +212,15 @@ def test_a_proposed_practice_is_kept_for_its_card_and_named_in_the_ping(engine, 
     # Confirmed from that investigation's card: it is not shown again.
     practice_goal.save(db, text=card["text"], measure=card["measure"], target=card["target"],
                        investigation_id=row.investigation_id, today=SAT)
+    assert week_review_auto.proposed(db, row.investigation_id) is None
+
+
+def test_next_weeks_review_replaces_the_card(engine, phone, db):  # noqa: F811
+    reviews(engine, Clock(at("16:45")), Turn(events=[PROPOSAL])).run()
+    [row] = rows(engine)
+    assert week_review_auto.proposed(db, row.investigation_id) is not None
+    db.add(WeekReviewAuto(week_start=date(2026, 10, 26), delivery="sent", investigation_id="55555555-5555-4555-8555-555555555555"))
+    db.commit()
     assert week_review_auto.proposed(db, row.investigation_id) is None
 
 
