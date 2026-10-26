@@ -38,12 +38,12 @@ const hhmm = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("e
 
 export const reviewHref = (row: PlanPosition) => copilotLabHref(row.symbol, `Review this position: ${row.trade_id}`);
 
-function stopText(stop: TimeStop) {
+export function stopText(stop: TimeStop) {
   if (stop.state === "pending") return `Time stop ${stop.clock} · ${stop.minutes_left ? `${stop.minutes_left} min` : "due now"}`;
   return `Time stop ${stop.clock} · ${STOP[stop.state] ?? stop.state}`;
 }
 
-function PlanLine({ row }: { row: PlanPosition }) {
+export function PlanLine({ row }: { row: PlanPosition }) {
   const plan = row.plan;
   if (!plan) return <span className="text-amber-300">No plan</span>;
   const level = plan.invalidation;

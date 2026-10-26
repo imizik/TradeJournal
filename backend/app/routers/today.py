@@ -141,14 +141,15 @@ def _plans(db: Session, quotes: SharedQuotes) -> dict:
     return {"state": "ok", "rows": rows, "armed": len(board["plans"])}
 
 
-def _radar(now: float) -> dict:
+def _radar(now: float, symbol: str | None = None) -> dict:
+    """``symbol``: only events on it (the Charts dock's loop), counted before the row cap."""
     from app.routers import radar
     store, reason = radar._store(read_only=True)
     if store is None:
         return {"state": "off", "reason": reason, "rows": [], "count": 0}
     feed = radar._read_feed(store, None, None, now)
     new = set(feed["since_last_visit"])
-    events = [e for e in feed["events"] if e["event_id"] in new]
+    events = [e for e in feed["events"] if e["event_id"] in new and (symbol is None or symbol in (e.get("symbols") or []))]
     events.sort(key=lambda e: e["first_seen_at"], reverse=True)
     rows = [{"event_id": e["event_id"], "symbol": (e.get("symbols") or [""])[0], "kind": e.get("kind"),
              "direction": e.get("direction"), "summary": e.get("summary"), "first_seen_at": e.get("first_seen_at"),
@@ -156,10 +157,12 @@ def _radar(now: float) -> dict:
     return {"state": "ok", "rows": rows, "count": len(events), "last_visit_at": feed["last_visit_at"]}
 
 
-def _thesis(db: Session, today: date) -> dict:
+def _thesis(db: Session, today: date, symbol: str | None = None) -> dict:
     from app.models import ThesisWatchTrigger
-    found = db.exec(select(ThesisWatchTrigger).where(ThesisWatchTrigger.day == today.isoformat())
-                    .order_by(ThesisWatchTrigger.fired_at.desc())).all()
+    query = select(ThesisWatchTrigger).where(ThesisWatchTrigger.day == today.isoformat())
+    if symbol is not None:
+        query = query.where(ThesisWatchTrigger.symbol == symbol)
+    found = db.exec(query.order_by(ThesisWatchTrigger.fired_at.desc())).all()
     rows = [{"symbol": t.symbol, "kind": t.kind, "text": t.text, "fired_at": _naive_iso(t.fired_at), "delivery": t.delivery,
              "path": t.path} for t in found[:MAX_ROWS]]
     return {"state": "ok", "rows": rows, "count": len(found)}

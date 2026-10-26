@@ -192,6 +192,9 @@ function StatusLine({ status, error }: { status: CopilotStatus | null; error: st
 export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
+/** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
+ * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs. */
+export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null): void; open(id: string): void };
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
@@ -208,10 +211,11 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * line, offers (never forces) a switch when the page's symbol changes, and renders nothing unless the owner has
  * the lab on. ``link`` (a deep link, or Radar's drawer) starts a new investigation, prefilled and not sent.
  * ``home`` (page only) renders above an empty conversation while the lab is on and no investigation is open.
+ * ``strip`` (panel only) renders above the conversation: the page's own view of its symbol (Charts' loop).
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
-  home?: (actions: HomeActions) => ReactNode;
+  home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode;
 }) {
   const panel = variant === "panel";
   const { owner } = useAppAccess();
@@ -461,6 +465,21 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setOrigin(planOrigin(null));
   }
 
+  /** From the page's strip: a new conversation on the page's symbol, ``context`` ready in the box and nothing sent.
+   * Words the owner typed stay under the new context line. */
+  function begin(context: string, from?: LinkOrigin | null) {
+    if (busy) return;
+    turns.current += 1; // like a send: a follow still reading drops its result rather than replacing this one
+    const own = typed.current ? draft.replace(/^Context: [^\n]*\n+/, "") : "";
+    setKept(null);
+    fresh(pageSymbol || symbol);
+    typed.current = !!own.trim();
+    setDraft(`Context: ${context}\n\n${own}`.slice(0, 4000));
+    setSpoken(false);
+    setOrigin(planOrigin(from, context));
+    box.current?.focus();
+  }
+
   /** A new conversation about a finished research result: its symbol, and the result as the opening context. */
   async function discuss(id: string) {
     if (busy) return;
@@ -549,6 +568,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           ))}
         </nav>
       )}
+
+      {panel && strip?.({ busy, start: begin, open: id => { setKept(null); void resume(id); } })}
 
       {current && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
