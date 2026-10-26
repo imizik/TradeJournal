@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt,
-  type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
+  type CopilotStatus, type DrawnPlan, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { X } from "lucide-react";
@@ -199,12 +199,12 @@ function StatusLine({ status, error, model, onModel }: { status: CopilotStatus |
 }
 
 /** ``origin``: what prompted the conversation (a Radar event, a ping, a page's Plan a trade); a confirmed plan records it. */
-export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null };
+export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null; plan?: DrawnPlan | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
  * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs. */
-export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null): void; open(id: string): void };
+export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null, plan?: DrawnPlan | null): void; open(id: string): void };
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
@@ -235,6 +235,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || "NBIS");
   // The conversation's origin, from its link; a new or another investigation is the lab's own.
   const [origin, setOrigin] = useState<CaptureOrigin>(() => planOrigin(link?.origin, link?.context));
+  // The levels the owner drew for this conversation's plan (Charts' "Plan this"), shown beside the plan card's prices.
+  const [drawn, setDrawn] = useState<DrawnPlan | null>(link?.plan ?? null);
   const [messages, setMessages] = useState<LabMessage[]>([]);
   const [draft, setDraft] = useState(opening);
   const [spoken, setSpoken] = useState(false); // the draft ends with words just heard, waiting for review
@@ -321,11 +323,13 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (!typed.current) setDraft(pageContext ? `Context: ${pageContext}\n\n` : "");
     remember(null);
     setOrigin(planOrigin(null));
+    setDrawn(null);
   }
 
   async function resume(id: string) {
     if (busy) return;
     setOrigin(planOrigin(null));
+    setDrawn(null);
     try { open(await getInvestigation(id)); } catch (error) {
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Could not open that investigation." });
     }
@@ -476,11 +480,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSaveState(null);
     remember(null);
     setOrigin(planOrigin(null));
+    setDrawn(null);
   }
 
   /** From the page's strip: a new conversation on the page's symbol, ``context`` ready in the box and nothing sent.
    * Words the owner typed stay under the new context line. */
-  function begin(context: string, from?: LinkOrigin | null) {
+  function begin(context: string, from?: LinkOrigin | null, plan?: DrawnPlan | null) {
     if (busy) return;
     turns.current += 1; // like a send: a follow still reading drops its result rather than replacing this one
     const own = typed.current ? draft.replace(/^Context: [^\n]*\n+/, "") : "";
@@ -490,6 +495,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setDraft(`Context: ${context}\n\n${own}`.slice(0, 4000));
     setSpoken(false);
     setOrigin(planOrigin(from, context));
+    setDrawn(plan ?? null);
     box.current?.focus();
   }
 
@@ -629,7 +635,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
-              <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin}
+              <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
             ) : (

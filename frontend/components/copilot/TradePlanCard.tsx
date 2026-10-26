@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, previewTimeStop, savePlanCapture, saveTimeStop, type LevelHistory, type OptionCandidates, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, savePlanCapture, saveTimeStop, type DrawnPlan, type LevelHistory, type OptionCandidates, type PlanConfirmed, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,15 @@ export function historyText(h: LevelHistory): string {
   return `${h.crossed} of ${h.trades} past ${h.symbol} trades crossed ${signed(h.distance_pct, 1)} while held; ${h.recovered} recovered${median}.`;
 }
 
+/** Under a price the owner drew on Charts: "from your drawing" while the card's price is theirs, else what they drew. */
+function FromDrawing({ name, drawn, value }: { name: string; drawn: number | null; value: string }) {
+  // Only the invalidation was drawn: the trigger is the copilot's.
+  if (drawn === null) return <span className="block text-xs text-muted-foreground">Drafted by the copilot</span>;
+  const same = Math.abs(Number(value) - drawn) < 0.005;
+  return <span aria-label={`${name} from your drawing`} className={cn("block text-xs", same ? "text-sky-300" : "text-amber-300")}>
+    {same ? "From your drawing" : `Changed from your drawing: ${drawn.toFixed(2)}`}</span>;
+}
+
 /**
  * The copilot's whole trade plan (propose_plan kind=trade_plan). The owner edits it; Confirm saves it as their pre-trade
  * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). A time stop
@@ -30,12 +39,14 @@ export function historyText(h: LevelHistory): string {
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
  * Nothing is saved or armed before Confirm.
  */
-export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, candidates = null, origin, onDone }: {
+export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, candidates = null, origin, drawn = null, onDone }: {
   plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null;
   /** The turn's option candidates, offered as a pick list for the contract beside the copilot's own wording. */
   candidates?: OptionCandidates | null;
   /** What prompted the conversation; the saved plan records it (docs/copilot-lab.md § Origin). */
-  origin?: CaptureOrigin; onDone(): void;
+  origin?: CaptureOrigin;
+  /** The levels the owner drew on Charts for this plan ("Plan this"): shown beside the prices, flagged where they differ. */
+  drawn?: DrawnPlan | null; onDone(): void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [thesis, setThesis] = useState(plan.thesis);
@@ -129,6 +140,9 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   async function savePlanThenAlerts() {
     if (!(await run("plan"))) return;
     for (const part of parts.slice(1)) if (results[part].state !== "done") await run(part);
+    // Charts labels the levels this plan was drawn from, and shows its alerts.
+    const detail: PlanConfirmed = { symbol: plan.symbol, side: plan.direction, entry: entryLevel.price, invalidation: stopLevel.price, drawn };
+    window.dispatchEvent(new CustomEvent(PLAN_CONFIRMED, { detail }));
   }
 
   async function confirm() {
@@ -173,6 +187,16 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           <input value={stop} onChange={e => setStop(e.target.value)} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
         </label>
       </div>
+      {/* Below both inputs, in their columns, so a longer caption never moves one input out of line. */}
+      {drawn && (
+        <div className="-mt-1 grid grid-cols-2 gap-2">
+          <FromDrawing name="Entry" drawn={drawn.trigger} value={entry} />
+          <FromDrawing name="Invalidation" drawn={drawn.invalidation} value={stop} />
+        </div>
+      )}
+      {drawn && drawn.side !== plan.direction && (
+        <p role="note" className="text-xs text-amber-300">You drew a {drawn.side}; this draft is a {plan.direction}.</p>
+      )}
       {history && (
         <p aria-label="Your history at this level" className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Your history at this level: </span>

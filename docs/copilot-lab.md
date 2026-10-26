@@ -103,6 +103,20 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       automatic levels: above …, below …` (the chart's own automatic zones, so
       the copilot drafts levels without a chart read) and origin `chart`. The
       toolbar's Plan a trade still opens the lab.
+    - **Plan this** (draw the plan; `frontend/components/charts/PlanFromDrawing.tsx`,
+      pairing in `frontend/lib/drawPlan.ts`): two price levels drawn or
+      selected on the main chart open this tab in place with `Context: Plan a
+      trade: <symbol> from the <interval> chart, last <price>. Entry trigger
+      <price> (my drawn level "<name>"). Invalidation <price> (my drawn
+      level). Draft the plan around these levels; argue if they are wrong.`
+      (one level: the invalidation, and the copilot drafts the trigger), with
+      origin `chart`. The drawn prices also ride along structurally, so the
+      plan card marks each price "From your drawing", or "Changed from your
+      drawing: <price>" when the draft differs, and says so when the draft's
+      side is not the one drawn. On Confirm the card tells Charts
+      (`tradejournal:plan-confirmed`), which labels the drawn levels "Entry
+      trigger" and "Invalidation" and draws the plan's alert bells; see
+      [the Charts doc](charts-workspace.md#implemented-behavior).
     - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
       the lab.
   - **Radar:** "Ask copilot" in an event's detail opens the same panel in
@@ -111,7 +125,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     closes it, and focus returns to the button.
   - **Deep link:** `/copilot-lab?symbol=X&context=<short text>` opens a new
     investigation with the symbol set and `Context: <text>` (at most 300
-    characters) in the message box.
+    characters) in the message box. `&plan=trigger:95.90,invalidation:92.30,side:long`
+    (no `trigger` part for an invalidation alone) carries drawn levels to the
+    plan card as Plan this does; a malformed one, or a long whose trigger is
+    not above its invalidation, is dropped.
   - **Trade page:** a closed trade offers "Review with copilot" next to
     "Open on chart", which deep-links with `Review this trade: <trade id>` as
     the context; an open one offers "Ask copilot about this position" with
