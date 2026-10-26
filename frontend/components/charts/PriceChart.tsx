@@ -649,7 +649,10 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
       // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
       const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, openingBars(), "reset"); } });
+      // The candle under the pointer, for "Explain this candle".
+      const time = plot ? chart.timeScale().coordinateToTime(at.x) : null;
+      const candle = typeof time === "number" ? barAt(barsRef.current, time) ?? null : null;
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, candle, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, openingBars(), "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever

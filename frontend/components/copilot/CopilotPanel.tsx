@@ -37,6 +37,7 @@ const TOOL_LABEL: Record<string, string> = {
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
+  get_moment: "That moment",
 };
 
 /** The turn's latest get_option_candidates result for an options plan's symbol and view, when the model asked for it. */
@@ -226,8 +227,9 @@ export type PanelLink = { symbol: string; context: string; investigation: string
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
- * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs. */
-export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null, plan?: DrawnPlan | null): void; open(id: string): void };
+ * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs.
+ * ``chart``: that conversation's first Send also attaches the page's chart (``look``), within the two-image cap. */
+export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null, plan?: DrawnPlan | null, chart?: boolean): void; open(id: string): void };
 /** A page's own chart for "Look at my chart" (``look``): its image and one line of what it shows. */
 export type ChartLook = { image: Blob; line: string };
 
@@ -291,6 +293,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const running = useRef(false);
   const shown = useRef(0); // messages on screen
   const typed = useRef(false); // the draft holds the owner's own words
+  const lookOnSend = useRef(false); // the next Send attaches the page's chart (a strip's start with ``chart``)
   // The newest conversation, for saving it if the panel is closed mid-turn.
   const latest = useRef<{ messages: LabMessage[]; current: Current | null; symbol: string }>({ messages: [], current: null, symbol: "" });
   useEffect(() => {
@@ -301,6 +304,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
   function open(saved: Investigation) {
+    lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMessages(fromSaved(saved));
     setSymbol(saved.symbol ?? "");
     setCurrent(saved);
@@ -356,6 +360,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     remember(null);
     setOrigin(planOrigin(null));
     setDrawn(null);
+    lookOnSend.current = false;
   }
 
   async function resume(id: string) {
@@ -448,7 +453,23 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
-    if (!content || busy || !status?.enabled) return;
+    if (!content || busy || running.current || !status?.enabled) return;
+    if (lookOnSend.current && look && shots.length < MAX_IMAGES) {
+      lookOnSend.current = false;
+      running.current = true; // a second press while the chart is read sends nothing
+      setBusy(true); // nor can another conversation open under it
+      setAttaching({ state: "busy" });
+      try {
+        const { image } = await look();
+        const stored = await uploadImage(image);
+        shots = [...shots, { id: stored.id, url: URL.createObjectURL(image) }];
+        setAttaching(null);
+      } catch { // the words still go out: the chart is context, not the question
+        setAttaching({ state: "error", message: "The chart could not be attached, so your message went without it." });
+      }
+      running.current = false;
+    }
+    lookOnSend.current = false;
     // Text-only, alternating history within the server's limits (24 messages, 4,000 characters each,
     // 40,000 in all): the newest whole pairs are kept, long answers clipped, a failed empty answer left out.
     // Paired from the end, so a transcript that opens with an unanswered question (a research result) stays aligned.
@@ -563,11 +584,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     remember(null);
     setOrigin(planOrigin(null));
     setDrawn(null);
+    lookOnSend.current = false;
   }
 
   /** From the page's strip: a new conversation on the page's symbol, ``context`` ready in the box and nothing sent.
    * Words the owner typed stay under the new context line. */
-  function begin(context: string, from?: LinkOrigin | null, plan?: DrawnPlan | null) {
+  function begin(context: string, from?: LinkOrigin | null, plan?: DrawnPlan | null, chart = false) {
     if (busy) return;
     turns.current += 1; // like a send: a follow still reading drops its result rather than replacing this one
     const own = typed.current ? draft.replace(/^Context: [^\n]*\n+/, "") : "";
@@ -578,6 +600,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setSpoken(false);
     setOrigin(planOrigin(from, context));
     setDrawn(plan ?? null);
+    lookOnSend.current = chart && !!look;
     box.current?.focus();
   }
 

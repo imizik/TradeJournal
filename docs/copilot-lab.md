@@ -135,6 +135,13 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       (`tradejournal:plan-confirmed`), which labels the drawn levels "Entry
       trigger" and "Invalidation" and draws the plan's alert bells; see
       [the Charts doc](charts-workspace.md#implemented-behavior).
+    - **Explain this candle** (the chart menu on the main chart: right-click,
+      or a long press on a phone) opens this tab in place with `Context:
+      Explain this candle: NBIS 5m at 10:41 ET (O 94.10 H 94.60 L 93.95 C
+      94.35, vol 41k, RVol 1.3). What moved it, and what did I do here?`
+      (`on <date>` after the time for an earlier session's candle) and
+      nothing sent; that conversation's first Send also attaches the chart
+      as Look at my chart does (Explain this candle, below).
     - Charts' Symbol info Overview tab also keeps its "Ask copilot" link into
       the lab.
   - **Radar:** "Ask copilot" in an event's detail opens the same panel in
@@ -268,10 +275,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call sixteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call seventeen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates, quotes, saved research,
   investigation changes (below), the chart and book tools below (including the
-  trade review and the week review), option candidates (below), and the owner
+  trade review and the week review), option candidates (below), one moment on
+  the chart (Explain this candle, below), and the owner
   context pack for another symbol (Owner context, below). It can
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
@@ -319,8 +327,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     `get_trade_review`, `get_week_review` or `get_level_history`: a job reads
     untrusted pages and can fetch URLs, which could carry the book out. Those
     aren't even registered for a job; `get_chart_context` is allowed.
-    `get_option_candidates` is kept out too: the job allowlist
-    (`research_job.JOB_TOOLS`) grows only by decision.
+    `get_option_candidates` and `get_moment` are kept out too: the job
+    allowlist (`research_job.JOB_TOOLS`) grows only by decision.
 - Limits per turn: 4 model rounds, 8 tool calls, a 10 s timeout per tool,
   120 s per turn, and 6,000 characters per tool result. Tool inputs are
   validated (ticker pattern, at most 8 symbols, no extra keys).
@@ -363,7 +371,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 - The evidence, time-labelling, pushback and untrusted-text rules; the owner
   context block (below); memory proposals (Confirm a plan); trade and
   position reviews (Review a trade or position); weekly reviews (Review my
-  week); plans, and pressure-testing a trade the
+  week); explaining a moment on the chart (Explain this candle); plans, and
+  pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
 
@@ -1111,6 +1120,45 @@ prep; Jo's morning briefing (`/morning`) is separate and untouched.
   beside the plan pings; the reads and the model turn run on their own thread.
   Nothing places, changes or suggests an order.
 - Tests: `backend/tests/test_premarket_prep.py`.
+
+## Explain this candle
+
+`get_moment(symbol, at, timeframe?)` (`backend/app/ai/copilot_moment.py`) reads
+one moment on the chart, anchored at `at`: New York time as ISO
+(`2026-10-23T10:40`; an offset or `Z` is converted) or epoch seconds, within
+the last 400 days and not in the future. `timeframe` is any Charts interval
+but 1W (1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D), default 5m. It returns:
+
+- the candle holding `at` and the 12 either side (New York time, OHLC, volume,
+  relative volume, extended-hours flag), from the Charts page's own feeds:
+  today's Tradier minutes (the workspace's cached request), an earlier
+  session's stored SIP minutes (fetched once and stored when missing), the
+  daily history for a 1D candle;
+- VWAP and its 1σ through the candle, and the session's open, high and low
+  through it (the premarket's before the open) with the prior close;
+- the nearest automatic level zones each side, recomputed by
+  `chart_levels.compute_levels` as of the candle's start, so a level that
+  formed later never shows;
+- Radar's comparison at that pass (the symbol against SPY, QQQ and its
+  group, recorded passes up to `at` in that session);
+- headlines published within 60 minutes either side (publisher, New York
+  time, minutes from the moment; untrusted text): the news feed's cached
+  week, else one bounded Alpaca read around the moment;
+- the owner's fills in the symbol within 30 minutes (side, contract,
+  quantity, price; Webull left out) and phone pings within 15 (sent
+  `phone_ping` rows and Radar pings: kind and minutes only, never their text).
+
+Provenance `fetched` with the bars' as-of; no account, trade, fill or ping id.
+The answer is trimmed to 6,000 characters, never cut (the radar's session
+window, links, then a narrower window go first). "What changed" leaves it out
+(its as-of dates a past candle). The prompt says: call it for a moment or the
+"Explain this candle:" context, say what moved it in order of evidence (a
+headline with its time, then the group and SPY, then the symbol's own level or
+VWAP), then what the owner did there and what it cannot tell, and never invent
+a cause. The fixture serves a simulated session around the asked time; replay
+gives the frozen store's Radar reading and the headlines before the frozen
+time, with bars, fills and pings unavailable, and refuses a moment after it.
+Tests: `backend/tests/test_copilot_moment.py`, `frontend/e2e/explain-candle.spec.ts`.
 
 ## Watch your day
 

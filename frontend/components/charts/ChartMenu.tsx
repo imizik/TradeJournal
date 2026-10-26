@@ -2,17 +2,18 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell, BellOff, BellPlus, Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, Plus, RotateCcw, Target, Trash2 } from "lucide-react";
+import { Bell, BellOff, BellPlus, Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, MessageSquareText, Plus, RotateCcw, Target, Trash2 } from "lucide-react";
 import { alertText } from "@/lib/alerts";
 import type { AlertCondition, AlertSource, LevelAlert } from "@/lib/alerts";
 import { LEVEL_LABEL_MAX, price } from "@/lib/charts";
-import type { AutoZone, Interval } from "@/lib/charts";
+import type { AutoZone, ChartBar, Interval } from "@/lib/charts";
 import { LEVEL_COLOR, NOTE_MAX, PALETTE, TOOL_NAMES } from "@/lib/drawings";
 import type { Drawing } from "@/lib/drawings";
 import { summary } from "./SelectionBar";
 
 /** What a right-click or long press on a chart asks for: the item there (`id`), or the chart at `price` (null off the candle pane). */
-export type MenuRequest = { clientX: number; clientY: number; touch: boolean; price: number | null; id: string | null; auto?: string | null; reset(): void };
+export type MenuRequest = { clientX: number; clientY: number; touch: boolean; price: number | null; id: string | null; auto?: string | null;
+  candle?: ChartBar | null; reset(): void };
 export type MenuItem = { layer: "levels"; level: { id: string; label: string; price: number; color?: string; hidden?: boolean; locked?: boolean } } | { layer: "drawings"; drawing: Drawing } | { layer: "auto"; zone: AutoZone };
 /**
  * Alerts on the item (C5.1): what a new one would watch (`source`, null for an
@@ -27,6 +28,8 @@ export type LayerToggle = { key: string; label: string; on: boolean; toggle(): v
 export type HiddenItem = { id: string; name: string; show(): void };
 /** Draw the plan on a level, ray or zone: "Plan this" (or "Plan this as invalidation") and the side and prices it sends. */
 export type MenuPlan = { name: string; detail: string; run(): void };
+/** "Explain this candle": the candle under the pointer (`detail`, its time) goes to the copilot's dock, unsent. */
+export type MenuExplain = { detail: string; run(): void };
 
 const ITEM = "[role=menuitem]:not([disabled]),[role=menuitemcheckbox]:not([disabled])";
 
@@ -42,9 +45,9 @@ const ITEM = "[role=menuitem]:not([disabled]),[role=menuitemcheckbox]:not([disab
  * being edited is saved first unless Esc closed it. It renders on the body,
  * above full-screen charts and clear of the workspace's spacing.
  */
-export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, alerts, plan = null, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
+export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, alerts, plan = null, explain = null, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
   at: { x: number; y: number; touch: boolean }; symbol: string; price: number | null; item: MenuItem | null;
-  layers: LayerToggle[]; hidden: HiddenItem[]; alerts?: MenuAlerts; plan?: MenuPlan | null;
+  layers: LayerToggle[]; hidden: HiddenItem[]; alerts?: MenuAlerts; plan?: MenuPlan | null; explain?: MenuExplain | null;
   onAddLevel(price: number): void; onCopyPrice(price: number): void; onReset(): void;
   onEdit(patch: MenuPatch): void; onDuplicate(): void; onDelete(): void; onClose(): void;
 }) {
@@ -192,6 +195,8 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
     {alertGroup}
   </> : view === "main" ? <div role="menu" aria-label="Chart actions" className="py-1">
     <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-500"><span className="font-semibold text-slate-300">{symbol}</span>{value !== null && <span className="ml-2 font-mono">{price(value)}</span>}</div>
+    {explain && <button role="menuitem" className={`${row} text-sky-200`} title="The copilot explains this candle: what moved it and what you did there. Nothing is sent until you press Send."
+      onClick={() => { close(); explain.run(); }}><MessageSquareText size={icon} />Explain this candle<span className="ml-auto shrink-0 pl-2 font-mono text-[10px] text-slate-400">{explain.detail}</span></button>}
     {value !== null && <>
       <button role="menuitem" className={row} onClick={() => { onAddLevel(value); close(); }}><Plus size={icon} />Add level at {price(value)}</button>
       <button role="menuitem" className={row} onClick={() => { onCopyPrice(value); close(); }}><Copy size={icon} />Copy price {price(value)}</button>

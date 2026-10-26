@@ -610,8 +610,12 @@ cd backend
   magnet applies, as it does to a placed level), **Reset chart scale** for that
   chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
   News markers, My fills and each study on every chart, plus a **Show** for each of the symbol's items
-  hidden one by one. On a price scale, a time scale or the RSI pane there is no
-  price, so only the reset and Layers appear. On a level or drawing it selects
+  hidden one by one. With the Copilot Lab on, the main chart's menu also offers
+  **Explain this candle** for the candle under the pointer (any interval but
+  1W): the dock's Copilot tab opens with that candle's time, OHLC, volume and
+  RVol as its line, nothing sent, and its Send attaches the chart
+  ([the lab doc](copilot-lab.md#explain-this-candle)). On a price scale, a time scale or the RSI pane there is no
+  price or candle, so only the reset and Layers appear. On a level or drawing it selects
   the item and offers its label (a level's name, a note's text) and color
   inline, **Lock**, **Hide**, **Duplicate** and **Delete**. A locked item still
   selects, restyles, hides and deletes, but never drags: a press on it pans

@@ -44,6 +44,9 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 # The models the panel may pick for a turn when COPILOT_MODELS is unset; COPILOT_MODEL is always offered first.
 DEFAULT_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
+# "Explain this candle: NBIS 5m at 10:40 ET" (the Charts menu's line), with "on 2026-10-23" for an earlier session.
+MOMENT = re.compile(r"(?:(?P<symbol>[A-Z][A-Z0-9.\-]{0,9}) (?P<timeframe>1m|3m|5m|15m|30m|1h|4h|1D) )?at (?P<hour>\d{1,2}):(?P<minute>\d{2}) ET"
+                    r"(?: on (?P<date>\d{4}-\d{2}-\d{2}))?")
 BACKENDS = ("anthropic", "plan")  # what a turn may pick; `fake` is only ever the default
 # Short progress notes between tool calls come back as thinking text; reasoning itself stays hidden.
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
@@ -149,6 +152,12 @@ length of time. Say in one sentence what the owner's own history shows there, wi
 that far, how many recovered, the median option P&L from there. Never call a level validated, proven or recommended: the \
 invalidation study found no level or time stop that holds up as a default, so this is evidence to weigh, not a rule. When \
 fewer than 10 trades are counted, say the sample is too small to weigh.
+- When the owner asks about a moment on the chart, or their message carries the "Explain this candle:" context, call \
+get_moment with the symbol, the candle's New York time (today unless the context gives a date) and its timeframe. Say what \
+moved it in order of evidence: a headline with its publish time, then the group and SPY from Radar, then the symbol's own \
+level or VWAP. Then say what the owner did there (their fills, any phone ping), and what you cannot tell. Never invent a \
+cause: a headline published after the candle did not move it, and with no headline, group move or level, say the cause is \
+unknown.
 - When the owner names an option or a horizon, or before you propose a trade_plan on options, call get_option_candidates \
 (the symbol, the horizon in days, the direction, their budget if they gave one) and compare 2-3 of its contracts against \
 the horizon: a thesis in weeks through a contract that expires in days is a mismatch to name. Premium, spread and \
@@ -523,6 +532,19 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        asked = MOMENT.search(prompt)
+        if "explain" in lower and (asked or "this candle" in lower):
+            if isinstance(last["content"], str) and allow_tools:
+                yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_moment",
+                                       "input": self._moment_args(symbol, asked)}], "tool_use", _zero_usage(), self.model)
+                return
+            text = self._moment(results.get("get_moment") or {})
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         if "remember" in lower and allow_tools and isinstance(last["content"], str):
             said = re.sub(r"^.*?remember\b[:,]?\s*(that\s+)?", "", prompt, count=1, flags=re.I | re.S).strip() or prompt
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "propose_plan",
@@ -588,6 +610,50 @@ class FakeAdapter:
                 await asyncio.sleep(self.delay_s)
             yield "text", piece
         yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+
+    @staticmethod
+    def _moment_args(symbol: str, asked) -> dict:
+        """The asked candle's time (today in New York unless a date is given), or now; its timeframe, else 5m."""
+        from app.engine.chart_math import ET
+        now = datetime.now(ET)
+        if not asked:
+            return {"symbol": symbol, "at": now.isoformat(timespec="minutes"), "timeframe": "5m"}
+        day = asked.group("date") or now.date().isoformat()
+        return {"symbol": asked.group("symbol") or symbol, "at": f"{day}T{int(asked.group('hour')):02d}:{asked.group('minute')}",
+                "timeframe": asked.group("timeframe") or "5m"}
+
+    @staticmethod
+    def _moment(data: dict) -> str:
+        """A scripted explanation in the prompt's order of evidence: news, the group, the level; then the owner; then the unknowns."""
+        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
+        if data.get("state") not in ("ok", "partial"):
+            return head + f"I couldn't read that moment: {data.get('reason') or 'nothing came back'}."
+        lines = []
+        bar = data.get("bar")
+        if bar:
+            lines.append(f"**{data['symbol']} {data['timeframe']} at {bar['t']} ET**: O {bar['o']} H {bar['h']} L {bar['l']} C {bar['c']}, "
+                         f"{bar['change_pct']:+.2f}%, RVol {bar['rvol'] if bar['rvol'] is not None else 'unknown'}.")
+        else:
+            lines.append(f"**{data['symbol']} at {data['at']}**: {(data.get('bars') or {}).get('reason', 'no candle to read')}")
+        news = [a for a in (data.get("news") or {}).get("articles", []) if a["minutes_from_moment"] <= 0]
+        lines.append(f"- News: \"{news[-1]['headline']}\" ({news[-1]['publisher']}, {-news[-1]['minutes_from_moment']} min before)."
+                     if news else "- News: no headline was published in the hour before it.")
+        recent = ((data.get("radar") or {}).get("recent_15m") or {}).get("rows") or []
+        moves = {r["symbol"]: r.get("change_pct") for r in recent}
+        lines.append(f"- Group: {data['symbol']} {moves.get(data['symbol'])}% against SPY {moves.get('SPY')}% over Radar's 15 minutes "
+                     f"({(data.get('radar') or {}).get('group')})." if moves else "- Group: Radar has no reading for that pass.")
+        levels = data.get("levels") or {}
+        near = (levels.get("at") or levels.get("below") or levels.get("above") or [None])[0]
+        vwap = (data.get("vwap") or {}).get("vwap")
+        lines.append(f"- Level: nearest {near['label']} at {near['low']}–{near['high']}" + (f"; VWAP {vwap}." if vwap else ".")
+                     if near else "- Level: no automatic level near it.")
+        fills = (data.get("fills") or {}).get("fills") or []
+        pings = (data.get("pings") or {}).get("pings") or []
+        lines.append("- You: " + ("; ".join(f"{f['side']} {f['contracts']:g} at {f['price']} ({f['minutes_from_moment']:+d} min)" for f in fills)
+                                  if fills else "no fills within 30 minutes")
+                     + ("; pings: " + ", ".join(f"{p['kind']} ({p['minutes_from_moment']:+d} min)" for p in pings) if pings else "") + ".")
+        lines.append("- What I can't tell: who was trading it or why; headlines after the candle did not move it.")
+        return head + "\n".join(lines)
 
     @staticmethod
     def _changes(data: dict) -> str:
@@ -870,6 +936,10 @@ def _summary(name: str, data: dict) -> str:
                     f"{p['entry_trigger']['price']}, invalidation {p['invalidation']['price']}")[:160]
         return (f"proposed watch: {p.get('symbol')} {p.get('condition')} {p.get('price')}" if p.get("kind") == "watch"
                 else f"proposed revisit in {p.get('horizon_days')} d")[:160]
+    if name == "get_moment":
+        bar, news, fills = data.get("bar") or {}, data.get("news") or {}, data.get("fills") or {}
+        return (f"{data.get('timeframe')} {bar['t']} C {bar.get('c')} · " if bar else f"{data.get('state')} · ") + \
+            f"{len(news.get('articles') or [])} headlines · {len(fills.get('fills') or [])} fills"
     if name == "get_investigation_changes":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]
