@@ -362,3 +362,26 @@ def test_the_turn_refuses_a_hosted_database_without_the_owner_opt_in(plan_env, t
     assert _decide(sdk)["error"]["code"] == "plan_local_only" and sdk.options is None and turns() == []
     monkeypatch.setenv("COPILOT_PLAN_REMOTE_OK", "true")
     assert _decide(sdk)["answer"] == plan_answer()
+
+
+def test_a_failed_save_is_an_error_not_a_stuck_decision(engine, tmp_path, monkeypatch):
+    store = radar_store(tmp_path, ("NBIS", at(10, 39)))
+    worker, _, _ = shadow(engine, store, at(10, 40), [{"answer": plan_answer()}])
+
+    def broken(decision_id, answer):
+        raise RuntimeError("database went away")
+    monkeypatch.setattr(worker, "record_answer", broken)
+    asyncio.run(worker.decide_one(worker.claim_next()))
+    [(row, _)] = decisions(engine)
+    assert (row.status, row.reason) == ("error", "The answer could not be saved.")
+
+
+def test_an_unavailable_calendar_waits_instead_of_closing_a_position(engine, tmp_path):
+    store = radar_store(tmp_path, ("NBIS", at(10, 39)))
+    worker, clock, _ = shadow(engine, store, at(10, 40), [{"answer": plan_answer()}])
+    asyncio.run(worker.decide_one(worker.claim_next()))
+    worker.calendar = SimpleNamespace(hours=lambda day: None)
+    clock.now = at(10, 50)
+    worker.manage()
+    [(row, state)] = decisions(engine)
+    assert book.position_status(row, state) == "open"

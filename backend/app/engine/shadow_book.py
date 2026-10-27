@@ -16,7 +16,8 @@ time stop and the session's last regular minute are clock exits. The exit is the
 condition (the bid to sell, the ask to cover). Every economic fact is an append-only ``ShadowBookEvent``; a position
 is their fold, so a restart rebuilds the book. A position still open once its session has ended is ``unresolved``.
 
-Nothing here touches fills, trades, accounts, alerts, notifications or the strategy factory.
+Nothing here touches fills, trades, accounts, alerts, notifications or the strategy factory. One API process runs
+it (``recover`` treats every ``deciding`` row as interrupted).
 """
 from __future__ import annotations
 
@@ -298,7 +299,22 @@ class ShadowBook:
         except Exception as exc:  # noqa: BLE001 - a failed turn is recorded on its decision, never retried
             log.exception("Shadow book turn failed")
             answer = {"error": {"code": "internal", "message": type(exc).__name__}}
-        await asyncio.to_thread(self.record_answer, row.id, answer)
+        try:
+            await asyncio.to_thread(self.record_answer, row.id, answer)
+        except Exception:  # noqa: BLE001 - the answer could not be saved: an error on the row, never left deciding
+            log.exception("Shadow book answer not saved")
+            await asyncio.to_thread(self._fail, row.id, "The answer could not be saved.")
+
+    def _fail(self, decision_id: uuid.UUID, reason: str) -> None:
+        try:
+            with Session(self.engine) as db:
+                row = db.get(ShadowBookDecision, decision_id)
+                if row is not None and row.status == "deciding":
+                    row.status, row.reason = "error", reason
+                    db.add(row)
+                    db.commit()
+        except Exception:  # noqa: BLE001 - the next start's recover() records it instead
+            log.exception("Shadow book decision %s left deciding", decision_id)
 
     def record_answer(self, decision_id: uuid.UUID, answer: dict) -> None:
         decided = self.clock()
@@ -346,8 +362,10 @@ class ShadowBook:
                 continue
             plan = json.loads(row.plan_json)
             try:
-                if row.session_date != today or session is None:
+                if row.session_date != today:
                     self._store(row.id, "unresolved", self.clock(), {"reason": "session ended before the position finished"})
+                elif session is None:
+                    continue  # the calendar is unavailable this pass: wait, never close a position on a guess
                 elif status == "pending_entry":
                     self._enter(row.id, plan, _epoch(row.decided_at))
                 elif status == "open":
