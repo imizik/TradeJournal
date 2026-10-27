@@ -37,9 +37,16 @@ allowlist.
 
 Order matters: this edit needs the merged code on both runtimes first. The
 Check runtime is upgraded with `deploy/check_control.py upgrade` from a build
-of this change and the journal-coach runtime by its own refresh; the app's
-automatic deployment does not touch either. An older runtime rejects the
-unknown `client_id` field and refuses every token until the file is reverted.
+of this change. The live journal coach is the manually installed
+`tradejournal-journal-real` service (runtime under
+`/opt/tradejournal-journal-real/runtime/backend/`, config in
+`/etc/tradejournal-journal-real/`; the `tradejournal-journal-coach` unit from
+`deploy/journal_coach_stage.py` is the fixture-only gateway and is not it). It
+is refreshed by hand: copy the merged `cloud_mcp_d0.py` and
+`cloud_mcp_journal.py` over the runtime copies (root-owned, mode 0644) and
+restart the service. The app's automatic deployment touches neither runtime.
+An older runtime rejects the unknown `client_id` field and refuses every token
+until the file is reverted.
 
 Profiles carry an optional `client_id`. A profile with one is matched only by
 tokens from that client, so the same Auth0 subject through Claude becomes a
@@ -59,10 +66,10 @@ In `/etc/tradejournal-check/config.json` append, as the second profile:
  "enabled": true, "client_id": "<Claude Duet client ID>"}
 ```
 
-Do the same in `/etc/tradejournal-journal/config.json` with a `d0_<new uuid4>`
-ID. A new profile is a grant change: from the moment the file changes until
-`tradejournal-check.service` and `tradejournal-journal-coach.service` are
-restarted, every token on that server is refused, Jo's included, so edit and
+Do the same in `/etc/tradejournal-journal-real/config.json` with a
+`d0_<new uuid4>` ID. A new profile is a grant change: from the moment the file
+changes until `tradejournal-check.service` and
+`tradejournal-journal-real.service` are restarted, every token on that server is refused, Jo's included, so edit and
 restart in one step, outside Jo's scheduled reads. Later flipping `enabled`
 on the Check profile applies on the next call; on the journal coach any
 profile change, `enabled` included, refuses every token until its restart.
