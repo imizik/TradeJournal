@@ -1002,7 +1002,8 @@ def level_history_sentence(data: dict) -> str:
 
 def option_candidates_card(data: dict) -> dict | None:
     """What the plan card offers as a pick list for its contract: each candidate's short label ("Nov 13 '26 95C", within
-    the plan's 40 characters), its days to expiry and its ask per contract."""
+    the plan's 40 characters), its days to expiry, its ask per contract and per share, and its delta when the chain
+    gives one (null otherwise, never estimated), with the chains' read time: the premium "Size it for me" sizes at."""
     if data.get("state") not in ("ok", "partial") or not data.get("candidates"):
         return None
     picks = []
@@ -1010,9 +1011,10 @@ def option_candidates_card(data: dict) -> dict | None:
         expiry = date.fromisoformat(r["expiry"])
         cost = r["per_contract"]["ask"] if isinstance(r.get("per_contract"), dict) else None
         picks.append({"label": f"{expiry:%b} {expiry.day} '{expiry:%y} {r['strike']:g}{r['type'][0].upper()}",
-                      "days": r["days"], "ask_contract": cost})
+                      "days": r["days"], "ask_contract": cost, "ask": r["ask"],
+                      "delta": r["delta"] if isinstance(r.get("delta"), (int, float)) else None})
     return {"symbol": data.get("symbol"), "direction": data.get("direction"), "simulated": bool(data.get("simulated")),
-            "picks": picks}
+            "as_of": data.get("as_of"), "picks": picks}
 
 
 def level_history_card(data: dict) -> dict | None:

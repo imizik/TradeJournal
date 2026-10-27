@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, savePlanCapture, saveTimeStop, type DrawnPlan, type LevelHistory, type OptionCandidates, type PlanConfirmed, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,39 @@ export function historyText(h: LevelHistory): string {
   const signed = (n: number, digits: number) => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(digits)}%`;
   const median = h.median_from_cross_pct === null ? "" : `; median ${signed(h.median_from_cross_pct, 0)} from there`;
   return `${h.crossed} of ${h.trades} past ${h.symbol} trades crossed ${signed(h.distance_pct, 1)} while held; ${h.recovered} recovered${median}.`;
+}
+
+const SIZE_MAX = 120;
+const usd = (n: number) => `$${n >= 100 || Number.isInteger(n) ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
+// Rounding down: a whole share or contract only when the risk covers it (the nudge absorbs float error like 150 / 1.5).
+const whole = (risk: number, each: number) => Math.floor(risk / each + 1e-9);
+
+/** Size it for me, a stock plan: whole shares whose move from the entry to the invalidation loses at most the risk. */
+export function sizeShares(risk: number, entry: number, invalidation: number, last: number | null) {
+  const distance = Math.round(Math.abs(entry - invalidation) * 10000) / 10000;
+  if (!(risk > 0) || !(distance > 0)) return null;
+  const shares = whole(risk, distance);
+  return { shares, distance, atRisk: shares * distance, cost: last === null ? null : shares * last };
+}
+
+/**
+ * Size it for me, a long call or put at its ask. Max loss: the premium is all at risk, so contracts = risk ÷ ask per
+ * contract. At invalidation, only with the chain's delta: a contract loses about delta × the distance × the multiplier
+ * there, never more than its premium. Nothing is estimated without a delta.
+ */
+export function sizeContracts(risk: number, pick: { ask_contract: number; ask: number; delta: number | null }, distance: number | null) {
+  if (!(risk > 0) || !(pick.ask_contract > 0) || !(pick.ask > 0)) return null;
+  const maxLoss = whole(risk, pick.ask_contract);
+  const perContract = pick.delta === null || !(distance && distance > 0) ? 0
+    : Math.min(Math.abs(pick.delta) * distance * (pick.ask_contract / pick.ask), pick.ask_contract);
+  const atInvalidation = perContract > 0 ? { contracts: whole(risk, perContract), perContract } : null;
+  return { maxLoss, premium: maxLoss * pick.ask_contract, atInvalidation };
+}
+
+/** The computed size leads the owner's size note, which keeps its 120 characters: the owner's words are cut, not the size. */
+export function sizedNote(sized: string, note: string): string {
+  const both = [sized, note.trim()].filter(Boolean).join("; ");
+  return both.length <= SIZE_MAX ? both : `${both.slice(0, SIZE_MAX - 1).trimEnd()}…`;
 }
 
 /** Under a price the owner drew on Charts: "from your drawing" while the card's price is theirs, else what they drew. */
@@ -56,6 +89,10 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const [stop, setStop] = useState(String(plan.invalidation.price));
   const [timeStop, setTimeStop] = useState(plan.time_stop ?? "");
   const [size, setSize] = useState(plan.size_note ?? "");
+  // Size it for me: the risk this browser last used; the card is client-only, so it reads storage on mount.
+  const [risk, setRisk] = useState(() => savedRisk());
+  const [sizeEdited, setSizeEdited] = useState(false);  // the owner's own size note after sizing wins over the count
+  const [quote, setQuote] = useState<FreshQuote | "failed" | null>(null);
   const [setup, setSetup] = useState<CaptureSetup | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [picked, setAccount] = useState("");
@@ -74,6 +111,12 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     }, 300);
     return () => { clearTimeout(wait); controller.abort(); };
   }, [stopText, alertsSupported]);
+  const riskUsd = Number(risk);
+  const wantsQuote = plan.instrument === "stock" && riskUsd > 0 && quote === null;
+  useEffect(() => {
+    if (!wantsQuote) return;
+    freshQuote(plan.symbol).then(setQuote).catch(() => setQuote("failed"));
+  }, [wantsQuote, plan.symbol]);
   if (dismissed) return null;
 
   const side = SIDE[`${plan.direction} ${plan.instrument}`];
@@ -97,8 +140,48 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const finished = parts.every(p => results[p].state === "done");
   const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
+  const sizing = sizeIt();
+  const sizeText = sizing?.note && !sizeEdited ? sizedNote(sizing.note, size) : size.trim();
   const wording = [`Entry: ${levelText(entryLevel)}.`, `Invalidation: ${levelText(stopLevel)}.`,
-    timeStop.trim() && `Time stop: ${timeStop.trim()}.`, size.trim() && `Size: ${size.trim()}.`].filter(Boolean).join(" ").slice(0, 400);
+    timeStop.trim() && `Time stop: ${timeStop.trim()}.`, sizeText && `Size: ${sizeText}.`].filter(Boolean).join(" ").slice(0, 400);
+
+  /** What the typed risk buys, in plain lines, and the line Confirm puts in front of the size note (none for zero). */
+  function sizeIt(): { lines: string[]; note: string | null } | null {
+    if (!(riskUsd > 0)) return null;
+    const losing = long ? entryLevel.price - stopLevel.price : stopLevel.price - entryLevel.price;
+    const distance = Number.isFinite(losing) && losing > 0 ? losing : null;
+    const stopAt = stopLevel.price.toFixed(2);
+    if (plan.instrument === "stock") {
+      if (distance === null) return { lines: ["Size needs an invalidation on the losing side of the entry."], note: null };
+      const live = quote && quote !== "failed" && quote.fresh && quote.last !== null ? quote : null;
+      const s = sizeShares(riskUsd, entryLevel.price, stopLevel.price, live?.last ?? null);
+      if (!s) return null;
+      if (s.shares === 0) return { lines: [`${usd(riskUsd)} does not cover one share: it is ${s.distance.toFixed(2)} a share to the ${stopAt} invalidation.`], note: null };
+      const cost = live && s.cost !== null ? `${usd(s.cost)} at the ${live.last} quote${live.age_s !== null ? ` (${Math.round(live.age_s)}s old)` : ""}.`
+        : quote === null ? "Reading the quote for the cost…" : "Cost not shown: the latest quote is stale or missing.";
+      return {
+        lines: [`${s.shares} share${s.shares === 1 ? "" : "s"}: ${usd(s.atRisk)} lost if it reaches the ${stopAt} invalidation (${s.distance.toFixed(2)} a share).`, cost],
+        note: `${s.shares} shares${live ? ` at ${live.last}` : ""}, ${usd(s.atRisk)} at risk to ${stopAt}, risk ${usd(riskUsd)}`,
+      };
+    }
+    const pick: OptionPick | undefined = candidates?.picks.find(p => p.label === contract);
+    if (!pick || pick.ask_contract === null || !pick.ask) return { lines: [
+      !candidates?.picks.length ? "No option premiums in this conversation yet: ask the copilot which strike and expiry, then choose a contract from its list to size it."
+        : contract ? `${contract} has no premium from the option chain here: choose a contract from the Contract list to size it.`
+        : "Choose a contract from the Contract list to size it."], note: null };
+    const c = sizeContracts(riskUsd, { ask_contract: pick.ask_contract, ask: pick.ask, delta: pick.delta ?? null }, distance);
+    if (!c) return null;
+    const read = candidates?.as_of ? ` from the option chain read at ${new Date(candidates.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET` : " from the option chain";
+    const n = (k: number) => `${k} contract${k === 1 ? "" : "s"}`;
+    const lines = [
+      c.maxLoss === 0 ? `Max loss: ${usd(riskUsd)} does not buy one contract at the ${usd(pick.ask_contract)} ask.`
+        : `Max loss: ${n(c.maxLoss)}, ${usd(c.premium)} of premium, all of it at risk.`,
+      !c.atInvalidation ? (pick.delta == null ? "At invalidation: the chain gives no delta, so there is no estimate." : "At invalidation: needs an invalidation on the losing side of the entry.")
+        : `At invalidation: about ${n(c.atInvalidation.contracts)}, each losing about ${usd(c.atInvalidation.perContract)} if ${plan.symbol} reaches ${stopAt} (delta ${pick.delta}); the premium is still all at risk past it.`,
+      `Priced at the ${pick.ask.toFixed(2)} ask (${usd(pick.ask_contract)} a contract)${read}${candidates?.simulated ? " (simulated)" : ""}.`,
+    ];
+    return { lines, note: c.maxLoss === 0 ? null : `${n(c.maxLoss)} of ${pick.label} at ${pick.ask.toFixed(2)}, ${usd(c.premium)} max loss, risk ${usd(riskUsd)}` };
+  }
   const note = [`Thesis: ${thesis.trim()}`, contract && `Contract: ${contract}.`, "From a Copilot Lab plan card."]
     .filter(Boolean).join(" ").slice(0, 500);
 
@@ -219,10 +302,24 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
             : `Kept as a note: ${preview?.read && "reason" in preview.read ? preview.read.reason : "the time could not be read."}`}
         </p>
       )}
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">Size</span>
-        <input value={size} onChange={e => setSize(e.target.value.slice(0, 120))} placeholder="e.g. one starter, no adds" disabled={locked} className={cn(field, "min-h-11")} />
-      </label>
+      <div className="grid grid-cols-[6rem_1fr] items-end gap-2">
+        <label className="block space-y-1">
+          <span className="text-xs text-muted-foreground">Risk $</span>
+          <input value={risk} onChange={e => { const v = e.target.value.replace(/[^\d.]/g, "").slice(0, 9); setRisk(v); rememberRisk(v); }}
+            inputMode="decimal" placeholder="e.g. 150" disabled={locked} className={cn(field, "min-h-11")} />
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs text-muted-foreground">Size</span>
+          <input value={size} onChange={e => { setSize(e.target.value.slice(0, SIZE_MAX)); if (sizing?.note) setSizeEdited(true); }}
+            placeholder="e.g. one starter, no adds" disabled={locked} className={cn(field, "min-h-11")} />
+        </label>
+      </div>
+      {sizing && (
+        <div aria-label="Size it for me" className="space-y-0.5 text-xs text-muted-foreground">
+          {sizing.lines.map(line => <p key={line}>{line}</p>)}
+          {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : `Confirm puts this size in front of the size note${sizeText.endsWith("…") ? `, which is cut to fit ${SIZE_MAX} characters` : ""}.`}</p>}
+        </div>
+      )}
       {setup && !setup.default_account_id && accounts.length > 1 && (
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Journal account</span>

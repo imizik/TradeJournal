@@ -330,3 +330,90 @@ test("without option candidates the plan card shows no contract pick list", asyn
   const card = await askForPlan(page);
   await expect(card.getByLabel("Contract")).toHaveCount(0);
 });
+
+// Size it for me: the turn's option candidates carry each contract's ask and, when the chain gives one, its delta.
+const SIZED = { symbol: "NBIS", direction: "long", simulated: false, as_of: "2026-10-24T14:00:00Z", picks: [
+  { label: "Nov 6 '26 95C", days: 14, ask_contract: 565, ask: 5.65, delta: null },
+  { label: "Nov 13 '26 95C", days: 21, ask_contract: 692, ask: 6.92, delta: 0.45 }] };
+const turnWith = (plan: object, candidates: object | null) => sse([
+  ...(candidates ? [{ type: "tool", id: "o1", name: "get_option_candidates", status: "ok", summary: "2 calls", ms: 1,
+    input: { symbol: "NBIS", horizon_days: 21, direction: "long" },
+    provenance: { source: "Tradier option chains (Charts options feed cache)", kind: "fetched", as_of: "2026-10-24T14:00:00Z" }, candidates }] : []),
+  { type: "tool", id: "p1", name: "propose_plan", status: "ok", summary: "proposed plan", ms: 1, provenance: { source: "proposal", kind: "proposal", as_of: null } },
+  { type: "proposal", ...plan },
+  { type: "text", delta: "NBIS plan (draft). Nothing is saved or armed until you confirm it." },
+  { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2,
+    tool_calls: [], usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
+]);
+
+test("size it for me: a risk becomes a contract count at the chosen contract's ask, written in front of the size note", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turnWith(PLAN, SIZED) }));
+  const card = await askForPlan(page);
+  const sizing = card.getByLabel("Size it for me");
+  await expect(sizing).toHaveCount(0); // blank until the owner types a risk
+  await expect(card.getByLabel("Risk $")).toHaveAttribute("inputmode", "decimal");
+  await card.getByLabel("Risk $").fill("700");
+  // The drafted contract has no premium from the chain: the card says how to pick one, never a guess.
+  await expect(sizing).toHaveText("Nov 21 100C has no premium from the option chain here: choose a contract from the Contract list to size it.");
+
+  await card.getByLabel("Contract").selectOption("Nov 6 '26 95C");
+  await expect(sizing).toContainText("Max loss: 1 contract, $565 of premium, all of it at risk.");
+  await expect(sizing).toContainText("At invalidation: the chain gives no delta, so there is no estimate.");
+  await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");
+  await expect(sizing).toContainText("Max loss: 1 contract, $692 of premium, all of it at risk.");
+  // 0.45 × (95.90 − 92.30) × 100 = $162 a contract at the invalidation; 700 ÷ 162 rounds down to 4.
+  await expect(sizing).toContainText("At invalidation: about 4 contracts, each losing about $162 if NBIS reaches 92.30 (delta 0.45); the premium is still all at risk past it.");
+  await expect(sizing).toContainText("Priced at the 6.92 ask ($692 a contract) from the option chain read at 10:00 AM ET.");
+  await expect(sizing).toContainText("Confirm puts this size in front of the size note.");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await card.screenshot({ path: test.info().outputPath("plan-size-it.png") });
+  await card.getByLabel("Risk $").fill("500");
+  await expect(sizing).toContainText("Max loss: $500 does not buy one contract at the $692 ask.");
+  await card.getByLabel("Risk $").fill("1400");
+  await expect(sizing).toContainText("Max loss: 2 contracts, $1,384 of premium, all of it at risk.");
+  expect(server.posts).toEqual([]); // sizing saves nothing
+
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");
+  const [capture] = posts(server, "captures");
+  expect(capture.wording).toBe("Entry: 5m close beyond 95.9. Invalidation: crosses 92.3. Time stop: out by 15:30 if the entry has not worked. "
+    + "Size: 2 contracts of Nov 13 '26 95C at 6.92, $1,384 max loss, risk $1,400; one starter, no adds.");
+
+  // The risk is remembered in this browser for the next card.
+  await page.reload();
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turnWith(PLAN, null) }));
+  const next = await askForPlan(page);
+  await expect(next.getByLabel("Risk $")).toHaveValue("1400");
+  await expect(next.getByLabel("Size it for me")).toHaveText(
+    "No option premiums in this conversation yet: ask the copilot which strike and expiry, then choose a contract from its list to size it.");
+});
+
+test("size it for me on a stock plan: shares from the invalidation distance, cost at the fresh quote; a hand-edited note is kept", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" },
+    body: turnWith({ ...PLAN, instrument: "stock", contract: null }, null) }));
+  const card = await askForPlan(page);
+  // A long note written before sizing is cut to keep 120 characters, and the card says so before Confirm.
+  await card.getByLabel("Size", { exact: true }).fill("x".repeat(100));
+  await card.getByLabel("Risk $").fill("150");
+  await expect(card.getByLabel("Size it for me")).toContainText("Confirm puts this size in front of the size note, which is cut to fit 120 characters.");
+  // 150 ÷ (95.90 − 92.30) = 41.7, rounded down to 41 shares: $147.60 (shown $148) at risk, $3,868 at the 94.35 quote.
+  const sizing = card.getByLabel("Size it for me");
+  await expect(sizing).toContainText("41 shares: $148 lost if it reaches the 92.30 invalidation (3.60 a share).");
+  await expect(sizing).toContainText("$3,868 at the 94.35 quote (2s old).");
+  await card.getByLabel("Risk $").fill("3");
+  await expect(sizing).toContainText("$3 does not cover one share: it is 3.60 a share to the 92.30 invalidation.");
+  await card.getByLabel("Invalidation (crosses)").fill("97");
+  await expect(sizing).toHaveText("Size needs an invalidation on the losing side of the entry.");
+  await card.getByLabel("Invalidation (crosses)").fill("92.3");
+  await card.getByLabel("Risk $").fill("150");
+  await card.getByLabel("Size", { exact: true }).fill("half size, earnings week");
+  await expect(sizing).toContainText("Your size note is kept as you wrote it.");
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");
+  const [capture] = posts(server, "captures");
+  expect(capture.wording).toContain("Size: half size, earnings week.");
+});
