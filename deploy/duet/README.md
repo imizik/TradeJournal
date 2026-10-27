@@ -35,6 +35,12 @@ allowlist.
 
 ## 2. VPS: a second profile bound to that client
 
+Order matters: this edit needs the merged code on both runtimes first. The
+Check runtime is upgraded with `deploy/check_control.py upgrade` from a build
+of this change and the journal-coach runtime by its own refresh; the app's
+automatic deployment does not touch either. An older runtime rejects the
+unknown `client_id` field and refuses every token until the file is reverted.
+
 Profiles carry an optional `client_id`. A profile with one is matched only by
 tokens from that client, so the same Auth0 subject through Claude becomes a
 separate actor: its pre-trade checks, verdicts, day reviews, grades, notes,
