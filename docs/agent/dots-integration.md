@@ -21,14 +21,19 @@ bounded by the server save deadline, with deadline-time price baselines.
 Production Jo and Shadow are unchanged.
 
 Checkpoint: October 24, 2026 (documentation reconciliation only): added the personal follow-ups row from merged #423/#425; no host state was checked. October 21, 2026: conditional price-plan follow-through was activated at about 01:52 ET with owner authorization (`CONDITIONAL_PLAN_ENABLED=true` in the VPS `backend.env`, `conditional_plan_enabled=true` in the Check configuration); its live proof is still pending. The Check runtime was upgraded to `141a015f`, which includes #368's packet-read marker; a read-only check at 10:16 ET still found `141a015f`, so #377's Check upgrade (scheduled after 16:15 ET) was pending then. The first scored morning brief was on time, with the morning watchdog and `HEALTHCHECK_PING_URL` configured in `alerts.env`. The same check found reads linked to every expected scheduled market-read slot since October 15 on the reliability screen; per-slot on-time/late/missing states and an opt-in missed-read alert merged in #378; missed-read alert activation remains unverified. Earlier checkpoint, October 20, 2026: the normal private journal's separate read-only Check reader was activated and verified (list/detail/grades, peer/write refusals and reader recovery); the detail-page rendering repair has since merged in #365, and real link/unlink acceptance remains open. Earlier that day, a read-only VPS check found `STOCK_WATCH_ENABLED=true` and `MARKET_WATCH_ENABLED=true` in `backend.env` (whether every running service has loaded them was not separately verified), conditional plans unset (off) in both the app and Check configurations, the morning runner enabled with publish 08:45 / deadline 09:15, and the phone-alert timer running every two minutes. Earlier checkpoint, October 19, 2026: owner approved starting the morning-briefing implementation below, accepting shared-context Shadow as independence-unverified. Shadow S1 retains its October 17 owner acceptance on October 16 live-session evidence. Other rows retain their individually stated evidence dates; this update is not a production-state audit.
-**Claude Duet trial, October 26, 2026 (built, not activated):** the owner was
-admitted to Anthropic's Claude Duet preview and selected one trial beside Jo:
-a researched morning brief and an evening debrief, through the existing Check
-and journal-coach MCP servers added to his Claude account as custom connectors
-under a second, client-bound profile ([recipe and instructions](../../deploy/duet/README.md)).
-Auth0 client, VPS profiles, connector sign-in and the Duet instructions are
-owner steps; nothing about Jo, Shadow or the app's alerts changes, and no
-usefulness is claimed before five rated mornings.
+**Claude Duet trial, October 26, 2026 (server side ready, connectors not yet
+added):** the owner was admitted to Anthropic's Claude Duet preview and
+selected one trial beside Jo: a researched morning brief and an evening
+debrief, through the existing Check and journal-coach MCP servers added to his
+Claude account as custom connectors under a second, client-bound profile
+([recipe and instructions](../../deploy/duet/README.md)). On October 27, 2026
+the Check runtime was upgraded to `889a2870`, the live journal coach
+(`tradejournal-journal-real`) was refreshed by hand, the Auth0 application
+Claude Duet was created, and a second profile bound to it was added to both
+configurations with both services restarted at 12:00 ET (Jo's profile
+unchanged). The Claude connector sign-ins and the Duet standing instructions
+are still owner steps; nothing about Jo, Shadow or the app's alerts changes,
+and no usefulness is claimed before five rated mornings.
 
 This board is the one place that answers "what is built, switched on, seen
 working and accepted" for Dots; the linked contracts hold the evidence. Open owner
