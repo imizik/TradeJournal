@@ -1,0 +1,2524 @@
+{
+  "archived_sources": [
+    {
+      "path": "docs/pine/vwap-reclaim.md",
+      "ref": "8f343d79",
+      "sha256": "3cb5f4bfaf1acd74ce2c6e55f195827c318b9fe808b488fbd8d3d5a74a1df4f0"
+    },
+    {
+      "path": "docs/pine/nbis-swing.md",
+      "ref": "8f343d79",
+      "sha256": "3588a98fc7806ffa71c67f613f99680a86b65dbf3527f565213da61b59e181ea"
+    },
+    {
+      "path": "docs/pine/isaac_market_map.pine",
+      "ref": "8f343d79",
+      "sha256": "2a0e7ca199071e9d9871a4ff59821acc3020b7c1e7a865be740ce46555850640"
+    }
+  ],
+  "as_of_date_et": "2026-10-27",
+  "branch": "factory/ledger",
+  "checkout": "/Users/user/TradeJournal-factory",
+  "class_ast_comparison": {
+    "classes": {
+      "FailedBreakout": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "a445dc14e169405b29278c472b7a2fc7613be98351f0fdb6cbfe5bca3b10ddb7"
+          }
+        ]
+      },
+      "OpeningRangeBreakout": {
+        "absent_at": [
+          "334a98d",
+          "386cbad",
+          "6330b45",
+          "818447b",
+          "a8c0aa4"
+        ],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "38375ca1",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "127f857b4601e7b12563127f24dc3ecfb46ce071979c5acb7f68b9cd2e902649"
+          }
+        ]
+      },
+      "RecoverySwing": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "659998a4adb98f31a1089fa301eed741f9acc812b77cf2092f9d24ea69c2c245"
+          }
+        ]
+      },
+      "VwapReclaim": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "6909a5a08cbb60d7d6fbbe3a54db0083b75b409ef74d3c2a5bc9da6c7938c201"
+          }
+        ]
+      },
+      "_FailedBreakoutRun": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "8917c94b46fdb656cdf8f265326f19f21061d4ab953e7c73c8dfc309eed5f1b8"
+          }
+        ]
+      },
+      "_OpeningRangeBreakoutRun": {
+        "absent_at": [
+          "334a98d",
+          "386cbad",
+          "6330b45",
+          "818447b",
+          "a8c0aa4"
+        ],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "38375ca1",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "ec10d8106b2a61693fe146a543a3f579a4f206b0bb43363d4a41e3eed2f3f8ad"
+          }
+        ]
+      },
+      "_RecoverySwingRun": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "7fe654ccebecc056cf24fe784ce0e047ef3f9d078d34c8ae8702739b06d46250"
+          }
+        ]
+      },
+      "_VwapReclaimRun": {
+        "absent_at": [],
+        "variants": [
+          {
+            "code_refs": [
+              "01ba535b",
+              "055168ad",
+              "0b217af8",
+              "0db7a02c",
+              "140d13d9",
+              "150c1d1",
+              "159e4411",
+              "22c5f643",
+              "23dfd78c",
+              "2d864116",
+              "334a98d",
+              "38375ca1",
+              "386cbad",
+              "395b5388",
+              "39d7e29e",
+              "3d6d9056",
+              "3da69f03",
+              "40309f51",
+              "4a0bcc6c",
+              "4f29cb13",
+              "563c9001",
+              "5c31b79c",
+              "6330b45",
+              "66891049",
+              "66f9cf4",
+              "673ab773",
+              "67532c12",
+              "67649c75",
+              "6dad26e4",
+              "6de27b44",
+              "71e84c77",
+              "764decad",
+              "76ff8ecd",
+              "7b8a5e70",
+              "7db6cef1",
+              "7f9a4539",
+              "818447b",
+              "81b89a95",
+              "86eefa08",
+              "886ddbb0",
+              "8e4acf68",
+              "91359218",
+              "97f7dec3",
+              "9908c67b",
+              "9e632bbd",
+              "a1728efd",
+              "a23859eb",
+              "a8a69ea3",
+              "a8c0aa4",
+              "b7d45178",
+              "b81f36a4",
+              "bbdd5bd3",
+              "bc9470b3",
+              "bea7fc5c",
+              "cdaa7f7f",
+              "cfa2b746",
+              "d2afca03",
+              "dad973f8",
+              "df5ea80d",
+              "e0605256",
+              "e07df4f4",
+              "e0bd3aa7",
+              "e8e2821f",
+              "e92b331d",
+              "e935abad",
+              "f8e9e9a",
+              "f91cf24c",
+              "fbce27b9",
+              "fe2af5a2",
+              "ff8ad5bd",
+              "ff996f1a"
+            ],
+            "sha256": "0278263a1d31250e9c3fb6db9c654250fece4f8a2daca049576c0f8ae87f4dd0"
+          }
+        ]
+      }
+    },
+    "code_reference_count": 71,
+    "code_references": [
+      "01ba535b",
+      "055168ad",
+      "0b217af8",
+      "0db7a02c",
+      "140d13d9",
+      "150c1d1",
+      "159e4411",
+      "22c5f643",
+      "23dfd78c",
+      "2d864116",
+      "334a98d",
+      "38375ca1",
+      "386cbad",
+      "395b5388",
+      "39d7e29e",
+      "3d6d9056",
+      "3da69f03",
+      "40309f51",
+      "4a0bcc6c",
+      "4f29cb13",
+      "563c9001",
+      "5c31b79c",
+      "6330b45",
+      "66891049",
+      "66f9cf4",
+      "673ab773",
+      "67532c12",
+      "67649c75",
+      "6dad26e4",
+      "6de27b44",
+      "71e84c77",
+      "764decad",
+      "76ff8ecd",
+      "7b8a5e70",
+      "7db6cef1",
+      "7f9a4539",
+      "818447b",
+      "81b89a95",
+      "86eefa08",
+      "886ddbb0",
+      "8e4acf68",
+      "91359218",
+      "97f7dec3",
+      "9908c67b",
+      "9e632bbd",
+      "a1728efd",
+      "a23859eb",
+      "a8a69ea3",
+      "a8c0aa4",
+      "b7d45178",
+      "b81f36a4",
+      "bbdd5bd3",
+      "bc9470b3",
+      "bea7fc5c",
+      "cdaa7f7f",
+      "cfa2b746",
+      "d2afca03",
+      "dad973f8",
+      "df5ea80d",
+      "e0605256",
+      "e07df4f4",
+      "e0bd3aa7",
+      "e8e2821f",
+      "e92b331d",
+      "e935abad",
+      "f8e9e9a",
+      "f91cf24c",
+      "fbce27b9",
+      "fe2af5a2",
+      "ff8ad5bd",
+      "ff996f1a"
+    ],
+    "normalization": "ast.dump include_attributes=False; leading class docstring removed; no execution or imports of research modules"
+  },
+  "conclusion": "No exact or rule-equivalent implementation found in the inspected saved specifications and sources. Conceptual lineage remains shared; no independent edge or attempt eligibility established.",
+  "excluded_from_extraction": [
+    "verdict",
+    "summary",
+    "periods",
+    "gates",
+    "bar_t",
+    "notes",
+    "trade files",
+    "protected exam artifacts",
+    "market bars and option paths"
+  ],
+  "family_counts": {
+    "etf_bil_exploratory_v1": 1,
+    "failed_breakout": 12,
+    "opening_range_breakout": 15,
+    "recovery_swing": 23,
+    "s1_research": 12,
+    "vwap_reclaim": 13
+  },
+  "head": "a954218f0e5c968c013d983064da79271cf68e03",
+  "identities": [
+    {
+      "code_refs": [
+        "e8e2821f"
+      ],
+      "family": "etf_bil_exploratory_v1",
+      "id": "etf-c4c308ecc58fc194",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "1e475a45273aaa888b2f47431b3cdda99cbfa3d3409b03551ceec296aa0a9c24"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "cfa2b746"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-1028f85c13",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "1028f85c13c035aca3540351f12b0cb62cfb69bf38d1967f0a2ea1675ba2fe60"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "4f29cb13"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-191661aa14",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "191661aa140c3f20d03315e0394adf0d402fb396f0d8398682c8323a313f0232"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "f91cf24c"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-197de105b0",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "197de105b0ba526d6d7da16bbdff757689b2a01b7152ab69d6879001af65e2ea"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "fbce27b9"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-2573b31328",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "2573b313282d6fb4192f7a623fa58bb308a894d42d8321c501123d8bc6b71705"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "159e4411"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-386c982f25",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "386c982f25cccbccbdc0b476b0d2ab1eea26d16729d46e46e9e4d31bcec45f13"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "bea7fc5c"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-4e6570534e",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "4e6570534e7ed91b731dea3af93ad74f07c68df9b6642715b9935c51a0562d21"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "0db7a02c",
+        "5c31b79c"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-51ce18820a",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "51ce18820ae3a9ece5b42a3ccb1a030bafc2e7b4804a3ad6df6c79d593ef015c"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "6330b45"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-72fca93262",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "72fca932625941251bc6134277891d1f54c2aa0d9fac65d5bc83135ff7a099b9"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "395b5388"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-bd3d96af8c",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "bd3d96af8c0ddcce9266e13333cce5463beadcac1dd48f2189d18ee5244e4d42"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "a1728efd"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-c85e48cf83",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "c85e48cf8347d474a069013d4b8b5b05f442ae4bc1952e64aacb4039cf8b7cea"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "0b217af8"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-dbd3589401",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "dbd35894011d556e2acac12e4418f9651c09f97de3a0b1de7cec242da156a46a"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "4a0bcc6c"
+      ],
+      "family": "failed_breakout",
+      "id": "fa-f2f5860e4c",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "f2f5860e4c7a9a8d144761eaa8486ea7ebfffcc9d19b6e8dafbddab87dea55e0"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-imm-v1.0.0",
+      "legacy_reference": {
+        "name": "Isaac Market Map v1.0.0, every setup, both sides",
+        "where": "docs/pine/README.md, Out-of-sample test (v1.1.0)"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-imm-v1.1.0",
+      "legacy_reference": {
+        "name": "Isaac Market Map v1.1.0, longs with RS >= 1.5%",
+        "where": "docs/pine/README.md, Out-of-sample test (v1.1.0)"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-nbis-daily-ema",
+      "legacy_reference": {
+        "name": "NBIS recovery swing, daily-EMA reclaim reading (NBIS only)",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/nbis-swing.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-nbis-intraday",
+      "legacy_reference": {
+        "name": "NBIS recovery swing entries, intraday-only exit",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/nbis-swing.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-vwap-v0.1",
+      "legacy_reference": {
+        "name": "VWAP reclaim/rejection v0.1 (eight tickers)",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/vwap-reclaim.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-vwap-v0.1-3min",
+      "legacy_reference": {
+        "name": "VWAP reclaim/rejection v0.1 on three-minute bars",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/vwap-reclaim.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-vwap-v0.2-2r",
+      "legacy_reference": {
+        "name": "VWAP reclaim/rejection with a 2R target",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/vwap-reclaim.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [],
+      "family": null,
+      "id": "hand-vwap-v0.2-40min",
+      "legacy_reference": {
+        "name": "VWAP reclaim/rejection with a 40-minute hold",
+        "where": "branch claude/nbis-recovery-swing, docs/pine/vwap-reclaim.md"
+      },
+      "record_count": 1,
+      "rule_field_sha256s": [],
+      "sources": [
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [
+        "b81f36a4"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-1e7fdc3455",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "1e7fdc34556fc37a608230ffbaa114eaa31015153e9bbb2c8abd7003a41b7f7c"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "38375ca1"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-2a811caf9b",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "2a811caf9b94fd8085e767a11983f98223b7744a4ce330adee51e7fbd70c0c54"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "3d6d9056"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-2dbca51a67",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "2dbca51a677ded844e8c90065181d12b1f5745c6c558c558be2048516fc10286"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "dad973f8"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-30d48ea079",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "30d48ea07906f7301190a798f0b0b8b5aeea2c5e16428a64ad4f76a2b38673d1"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "2d864116"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-3e18b7a299",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "3e18b7a29937ef0689ce6b645c8babd60f049d1319381d5607f508ac7d83e4e0"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "563c9001"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-45ea65a5cd",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "45ea65a5cd5877652eb0fdcf7622c5d903684d649283fc5c12186130aa47eb07"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "7b8a5e70"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-599834809b",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "599834809be3798e3a79332abbdf2541ce7b270e6b1c84072891339145f1a4b5"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "66f9cf4"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-63dc1c56a3",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "63dc1c56a360907171f08bceb5cb7559b99e951b544de0569665a19682a40866"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "66f9cf4"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-72f0fc136f",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "72f0fc136f2bc2cb36352eda0c55ba0814772b38c6c7243415420ad18202682f"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "67649c75"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-7f71884194",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "7f7188419483c41f3b0a477bbcf0b2d01fb51eb96b7802448ba5f2032c6a0038"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "7f9a4539"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-8676dbe66f",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "8676dbe66f3b3dcd65069642c6b26749f12984f3a74b3aec2e610c4d1e9a2574"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "67532c12"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-998d19a73d",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "998d19a73dc2f0ae5e33bb250633ea4300eed00ec6a04a1b0452d764056558a5"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "3da69f03"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-a3e4e69a6a",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "a3e4e69a6a07a8abb8a52ad1eec090f170a89a60a3cd2cd4343b38e48bebd337"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "01ba535b"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-a879437c70",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "a879437c7063e36a97a49ad570febd4f51dfa0234668bb6c032cd67c6644edac"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "39d7e29e"
+      ],
+      "family": "opening_range_breakout",
+      "id": "op-febb969e20",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "febb969e201fc293bb885597b5558fbb16992d74f05178874e0068b3d03141d5"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "f8e9e9a"
+      ],
+      "family": "recovery_swing",
+      "id": "re-1dc0025c19",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "1dc0025c197b3629d4b83b59e335ccc73edf77f7119515b3128763e10ac66110"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "818447b"
+      ],
+      "family": "recovery_swing",
+      "id": "re-31521c49aa",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "31521c49aaf89566c673cc43477378a251a827fd542f3e31da556153c538fe45"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "9908c67b"
+      ],
+      "family": "recovery_swing",
+      "id": "re-31c3f6ec5b",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "31c3f6ec5b67692be031b1d36ec6527cff1dbf93cfd32072c46ce54159e4a880"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "150c1d1"
+      ],
+      "family": "recovery_swing",
+      "id": "re-3d2a12fb74",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "3d2a12fb74d99e170afc4f9347ce8985d042cac04f4bdb27cb435d7e4380192f"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "673ab773"
+      ],
+      "family": "recovery_swing",
+      "id": "re-3dfc671beb",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "3dfc671bebbfbbf4fe006f9d7f04f2f2aa71eacc190fb921f6d51236c562fee3"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "40309f51"
+      ],
+      "family": "recovery_swing",
+      "id": "re-5547ddb993",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "5547ddb99344c3d55d61fc64f4e77610c5578b1249c407ca29b737d23a7235a5"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "6330b45"
+      ],
+      "family": "recovery_swing",
+      "id": "re-5c58b4e869",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "5c58b4e869091a4624e4535e99a139d98f678286d8d6751ed6f9e0b4ce82901c"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "71e84c77"
+      ],
+      "family": "recovery_swing",
+      "id": "re-642d9bb6b1",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "642d9bb6b1befa5328de74369f818fc6a6fa2b89341be84a798a60fb70932333"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "f8e9e9a"
+      ],
+      "family": "recovery_swing",
+      "id": "re-74729e13aa",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "74729e13aa49efea35141f1d8839fda3886c1969744865e8befcb4827acc3683"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "ff8ad5bd"
+      ],
+      "family": "recovery_swing",
+      "id": "re-77f3156702",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "77f31567027a3122c9b28c73586f0297e0d7e14c810b723d79a5916c3465ff19"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "a23859eb"
+      ],
+      "family": "recovery_swing",
+      "id": "re-997466a5b2",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "997466a5b2a394c49df2a6e69b28efb14cf235b6781d8acc25c8182689a4c9e9"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "86eefa08"
+      ],
+      "family": "recovery_swing",
+      "id": "re-a639743a86",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "a639743a8603f4e681e47d0af81e1db1599b339089413d57a431a8427a23b938"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "334a98d"
+      ],
+      "family": "recovery_swing",
+      "id": "re-a9765cdc93",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "a9765cdc93c68585273b860c5c45d02e2ca0b7de4653f0ce8cbc431e0cb79508"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "bc9470b3"
+      ],
+      "family": "recovery_swing",
+      "id": "re-b015773da0",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "b015773da0cac50c5f2f49275383c029c633fb3f58cc34fe034260b1cc4c9ca4"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "91359218"
+      ],
+      "family": "recovery_swing",
+      "id": "re-bd746696e2",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "bd746696e2b645dcbaf53c222e721adeba0beddf5ca19d64ee274c9a64a3a96c"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "a8c0aa4"
+      ],
+      "family": "recovery_swing",
+      "id": "re-d5194badb1",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "d5194badb110ae8b2a529421e419b2299bb306668a02ea4fb5c5bdb3fd15c7f9"
+      ],
+      "sources": [
+        "factory",
+        "hand research"
+      ]
+    },
+    {
+      "code_refs": [
+        "818447b"
+      ],
+      "family": "recovery_swing",
+      "id": "re-d5bbe25d57",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "d5bbe25d57538d95fcb3f1935500951c385cdb1584945ea971ac903f9c8d2d22"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "66891049"
+      ],
+      "family": "recovery_swing",
+      "id": "re-e3945c3bc9",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e3945c3bc90af0c8d32ca1e67b3cf4db46115f819ccdf00399edf1eb14209a23"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "386cbad"
+      ],
+      "family": "recovery_swing",
+      "id": "re-e608952717",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "e6089527174bc6c60bc7af60678a32fb95667efd62b159b02ae96382f8ebb9d0"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "6dad26e4"
+      ],
+      "family": "recovery_swing",
+      "id": "re-e686097705",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e6860977054e7414091ef4f5b1a51b2f39559e4ab1cdc83a0724cb35ab81bbef"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "d2afca03"
+      ],
+      "family": "recovery_swing",
+      "id": "re-e797a5cf39",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e797a5cf39568266633cf5d0be8c0b858c71ec442ba1d7d154252d3fffd53009"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "150c1d1"
+      ],
+      "family": "recovery_swing",
+      "id": "re-f700e5e41e",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "f700e5e41e7261027839c6c7683b097e32819be6f9082b620a09510762c4d4b8"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "fe2af5a2"
+      ],
+      "family": "recovery_swing",
+      "id": "re-fa4163f758",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "fa4163f7589e1b74cdd5fbd21dfcb771a6c6695a8be121c69604588f61267aac"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "140d13d9"
+      ],
+      "family": "s1_research",
+      "id": "s1-0b2c5f54ba",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "0b2c5f54ba721ca21dbc4b9791edbb59cee069c0ba6df8ee59867ecb8c80fa28"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "23dfd78c"
+      ],
+      "family": "s1_research",
+      "id": "s1-455b2eabc7",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "455b2eabc784d171b76d9a4b8c4f36466a78feb9229d1d8896f00acebdff9175"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "ff996f1a"
+      ],
+      "family": "s1_research",
+      "id": "s1-4b1639a57d",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "4b1639a57d8064f4e1da61eb89bda16c96fdb0ea77e62a367cef49dffdf288e6"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "6de27b44"
+      ],
+      "family": "s1_research",
+      "id": "s1-53a79d5d02",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "53a79d5d0216d2406630e8361446f6bdd13de1d111ccaa569a7a2f9a16c256ad"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "9e632bbd"
+      ],
+      "family": "s1_research",
+      "id": "s1-56be0f2c1f",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "56be0f2c1f2f0548452cafc25bc2a1a0e76187c8530b90c182564134e568d906"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "e0bd3aa7"
+      ],
+      "family": "s1_research",
+      "id": "s1-63141cfbfc",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "63141cfbfc222e6ceb38521e11f532e39bc360565a7b56b8419677695ac9e35c"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "e07df4f4"
+      ],
+      "family": "s1_research",
+      "id": "s1-b35ab71e83",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "b35ab71e83a0c3ace4b3e4b7dd684dd47f30f4ed3965960343f818af7137f4c0"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "8e4acf68"
+      ],
+      "family": "s1_research",
+      "id": "s1-c3c45b609c",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "c3c45b609cbff0f65338ff32a02f221896d0167fb45a6b4933e6074ec65baa48"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "a8a69ea3"
+      ],
+      "family": "s1_research",
+      "id": "s1-c9472bbf23",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "c9472bbf2396b8f2561782306523206976b1ee09555fd0b2b78682344e4e203a"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "bbdd5bd3"
+      ],
+      "family": "s1_research",
+      "id": "s1-cb494225de",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "cb494225deed2d46d4aba2d568c1af03c73462019626096d2d79f0c90fb0d52a"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "055168ad"
+      ],
+      "family": "s1_research",
+      "id": "s1-e7983f5dcd",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e7983f5dcda69a71b40379c97fd33497ad3fdc7b2a10e3c3f79ba38743eab127"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "7db6cef1"
+      ],
+      "family": "s1_research",
+      "id": "s1-e95fc81153",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e95fc811532bc1f431e6f351141f7d85d515b8c6ce278748183352074a4189db"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "cdaa7f7f"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-0eb510af04",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "0eb510af04ea630ed9e6a5a0aefe241bb48ea3afd601cf89b157447eebca5c04"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "81b89a95"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-18665f6d8c",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "18665f6d8ccb8d5c34804305dc70b00fb78cad66ebf89362de30cabd7ed14cbc"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "818447b"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-200918674a",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "200918674af00563fa5d0ea780b0eb6ed595f51c10a1c063f85956d319c7c89b"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "764decad"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-280a95e157",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "280a95e157219056e8072741ee077c2b47a90bd9d9d1c86a82af03c68b1a7368"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "97f7dec3"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-3aba9b1dd8",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "3aba9b1dd8cec3f846f0cfb197d40357a9fdbd597d3fa2725b3c01f84de42553"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "6330b45"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-3d24a7243d",
+      "record_count": 1,
+      "rule_field_sha256s": [
+        "3d24a7243da25ca419e30c1262affe0de71e5800b189bd0d3aa1a46c75464753"
+      ],
+      "sources": [
+        "factory"
+      ]
+    },
+    {
+      "code_refs": [
+        "22c5f643"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-513913dfdb",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "513913dfdbee9a9502e45b5747d5faf9023d0115781e45016012d23695378a02"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "886ddbb0"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-619a30b2ed",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "619a30b2eddba41d08df9ceb345c5799dc6662fadd91ec279419070a27b5d20f"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "e0605256"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-977e9301a5",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "977e9301a5267007dd86306405f5bf57df19086060089cbcac7ee9600a67946c"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "e935abad"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-9bb2a1cb86",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "9bb2a1cb86bdb8f40929f79338641447a43f3a17d1b936010367f7db694a56b5"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "b7d45178",
+        "e92b331d"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-ba2f618d73",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "ba2f618d730175df720deddbe98983e94a5490d79279477f691da9fb94dcfce7"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "df5ea80d"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-e236834318",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e2368343181a8aa0fec02e41112917c1242c9360bb4289a5080c447df2c304b1"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    },
+    {
+      "code_refs": [
+        "76ff8ecd"
+      ],
+      "family": "vwap_reclaim",
+      "id": "vw-e3e5433c78",
+      "record_count": 2,
+      "rule_field_sha256s": [
+        "e3e5433c787253369d4d25cff9f609831ad33c5b0582600a26c51579dc62b0ff"
+      ],
+      "sources": [
+        "continuous-search"
+      ]
+    }
+  ],
+  "ledger": {
+    "distinct_ids": 84,
+    "hand_research_records": 9,
+    "legacy_only_ids": 8,
+    "path": "research/ledger.jsonl",
+    "records": 146,
+    "sha256": "e7f5bda38f29993e6bd6c30903bf5d750ba850a45c503f03e647bb43558bb637",
+    "structured_ids": 76
+  },
+  "limits": [
+    "Legacy references do not preserve complete manifests for every manual run.",
+    "Class AST identity does not establish identity of every historical dependency.",
+    "Rule hashes on raw spec files are not normalized Factory IDs and do not establish equivalence alone.",
+    "No performance metrics were extracted or computed."
+  ],
+  "purpose": "Rule equivalence only; not an evaluation, candidate reservation or performance report.",
+  "s1_source_comparison": {
+    "code_refs": [
+      "055168ad",
+      "140d13d9",
+      "23dfd78c",
+      "6de27b44",
+      "7db6cef1",
+      "8e4acf68",
+      "9e632bbd",
+      "a8a69ea3",
+      "bbdd5bd3",
+      "e07df4f4",
+      "e0bd3aa7",
+      "ff996f1a"
+    ],
+    "files": {
+      "backend/app/engine/factory_search_family.py": [
+        {
+          "code_refs": [
+            "055168ad",
+            "140d13d9",
+            "23dfd78c",
+            "6de27b44",
+            "7db6cef1",
+            "8e4acf68",
+            "9e632bbd",
+            "a8a69ea3",
+            "bbdd5bd3",
+            "e07df4f4",
+            "e0bd3aa7",
+            "ff996f1a"
+          ],
+          "sha256": "097b47b068434fb897ed24fe14a9440cfd8a850a1d497ba3920eed1e9adcb202"
+        }
+      ],
+      "backend/app/engine/scanner_rules.py": [
+        {
+          "code_refs": [
+            "055168ad",
+            "140d13d9",
+            "23dfd78c",
+            "6de27b44",
+            "7db6cef1",
+            "8e4acf68",
+            "9e632bbd",
+            "a8a69ea3",
+            "bbdd5bd3",
+            "e07df4f4",
+            "e0bd3aa7",
+            "ff996f1a"
+          ],
+          "sha256": "715410455dd91c8e708572364d524298614c4a597a8f73f602be259c2247f62d"
+        }
+      ]
+    }
+  },
+  "schema": "read-only-rule-comparison-v1",
+  "source_files": [
+    {
+      "path": "backend/app/engine/factory_rules.py",
+      "sha256": "1f286c72b6aac911648e4c97a23862aba04b0004e1ed214765fb0e99e6a4e061"
+    },
+    {
+      "path": "backend/app/engine/factory_gates.py",
+      "sha256": "0ae8444c45990bc26778586e85acafbedfc56f4ed5237c32d69c1635aa6ef453"
+    },
+    {
+      "path": "backend/app/engine/factory_search_family.py",
+      "sha256": "097b47b068434fb897ed24fe14a9440cfd8a850a1d497ba3920eed1e9adcb202"
+    },
+    {
+      "path": "backend/app/engine/scanner_rules.py",
+      "sha256": "715410455dd91c8e708572364d524298614c4a597a8f73f602be259c2247f62d"
+    },
+    {
+      "path": "backend/app/engine/market_map.py",
+      "sha256": "d768f8b4d8563609b997ccb7f86675a6d15c6c6a52de7a25d78c2d58d27992f7"
+    },
+    {
+      "path": "docs/pine/README.md",
+      "sha256": "768a8265398032d1abfc767edb3646ea5a43d019f69d5b3393f2e9c0e90ecb1a"
+    },
+    {
+      "path": "docs/strategy-factory.md",
+      "sha256": "5a9dd90331d036801df12490ddd78104a8f49b21041c7cea7e95771f49f107f6"
+    },
+    {
+      "path": "docs/agent/setup-scanner-contract.md",
+      "sha256": "3c760b72528d2ca64ea38aa75db5271fdca8037a6428ddef774456dbd1238046"
+    }
+  ],
+  "spec_files": [
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-09-29/recovery-swing-skipping-the-first-bar-of-the-session.json",
+      "rule_field_sha256": "096893619a46bc64a81fee005daffb9c5b191ead9298fc6946a1ec4c2890a73e",
+      "sha256": "17f73438e0b8ad021fecdc0fc0ab703757f2ec3f1e661fba6ffefd9bea54fead"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-09-29/recovery-swing-triggered-on-the-daily-ema-not-the-intraday-e.json",
+      "rule_field_sha256": "be6b1e838a9791a93de61b318c555b31f29c82250af6f72f13b7866409af557e",
+      "sha256": "0de69623d621a5c8a6f1c2af072c32e2720a7d2b7684bca88c9efeede455adb6"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/2026-09-29/vwap-reclaim-on-5-minute-bars-with-a-one-hour-hold.json",
+      "rule_field_sha256": "5f0464ea03ad0c41a2ac4ba551981f1447fb7eeb291a52556a70783c6b19f655",
+      "sha256": "835a58f4b6921097b0e4db3a1de4e2683cf20a5259e0fe24d7ed125c76098533"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-09-29b/daily-ema-recovery-swing-no-trigger-on-the-session-s-first-b.json",
+      "rule_field_sha256": "105475656b8dcf2f86321930a0e488cfe9d0ea0f9c975be2f978864f0fc2cca1",
+      "sha256": "65d8e45d6064f9ae65ea082639bd222f668425b6aab5fbd94926bf207234ce96"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-09-29c/daily-ema-recovery-swing-with-a-one-hour-stall-exit.json",
+      "rule_field_sha256": "2eec889c69f94e61f05f1f4975c0a652cab67ff4fffa0f35760b9f27bb8c8f5b",
+      "sha256": "09497ed1fd483f608b85e811db7963585de2bd61fbc6a49c0ef32a0c5a27cb1b"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/2026-09-29d/opening-range-breakout-on-a-15-minute-range.json",
+      "rule_field_sha256": "e127d56359d841466c2974ff6fe0e1c58d649ed27750b25cb7d60ff8ae9c2579",
+      "sha256": "fde4a0e416fa467bfd99d4bf696bc2c688c6ddfec10c9bc2b057528ddac2c8c2"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/2026-09-29d/opening-range-breakout-skipping-breaks-on-the-first-bar-afte.json",
+      "rule_field_sha256": "d2577cf9e28dfa01cd09e30798b26328129e1bf45cfe80af0a8e8a460eef45c1",
+      "sha256": "3fc7f1c543771b87394bd6db0b4cd55015792c99acca0f365198b82a0ab206ac"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-10-04/daily-ema-recovery-swing-held-a-third-session.json",
+      "rule_field_sha256": "6241dccd50b2119bb9fbc66571f4b55106481fccb35e974d6bf933f9d57f93a1",
+      "sha256": "fb2ba27b1bd48c7c4052734362f2844aa5c807fe062e631c6d3f416af7690768"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-10-04/daily-ema-recovery-swing-only-when-spy-is-up-on-the-day.json",
+      "rule_field_sha256": "b2a110c658a0d3375b44a21478384850b9be3163c27b9b9635ed08e4f9bf8caa",
+      "sha256": "d7d0fe67257c0746cd248bee32f2a44d55e4fb9f7b8fc43ccafa50fe1265b3e5"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-10-11/daily-ema-recovery-swing-triggered-on-the-reclaim-itself-not.json",
+      "rule_field_sha256": "00ce3b4ae5fb37f2bd4d6da5b09d5016a616b4341d5c01dccec1434c0ce2ccc9",
+      "sha256": "9ca846a1f6aea35ef548a6ab825544794af7881be54dd6395623bcfd7325896e"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/2026-10-11/daily-ema-recovery-swing-with-a-three-session-arm.json",
+      "rule_field_sha256": "955792099211a580cc4ba9f82a8c5d0829cc1a05e75e5978389df7c243f0781f",
+      "sha256": "f358a18b52e161fbacfd42723f53b14cb4ee39fca17e7dd2ba53818951a1c1e8"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/failed_breakout_v0.1.json",
+      "rule_field_sha256": "44fe7ce78d6af7ec4b5787373d38c4f76f41cd8d2e57b98fe819f6921ea11591",
+      "sha256": "7c21cac1d4caa6d704544875e8dc155bc4836982efe25c462da8d3c86ac61eff"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/opening_range_breakout_rvol2_v1.json",
+      "rule_field_sha256": "b16ebef1c30c10b71467532b52fed7cf733e2eb23aae0ff4a9f8a1cc97702a07",
+      "sha256": "0f5dbe2d3e021824d1456aea86c68a669a812519e230280a3b4227a897ca6e27"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/recovery_swing_v0.1.json",
+      "rule_field_sha256": "6bd2ecd1cfd159f45181b12e1c0c838a40883e3a1ee3fd488cb216942dadfc35",
+      "sha256": "71528a4d0151f8e64c97a97a64a0653c536812d75d5d414ff1c4b0453b85fbe8"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/recovery_swing_v0.1_logistic.json",
+      "rule_field_sha256": "236572fdd8180310f87275024939b603a0adb529462ee7165b19f4df4d0c83ef",
+      "sha256": "a401e04ff9a3918af2cbc8cd16c9ad0e631c699b6923586102a9e2f144375864"
+    },
+    {
+      "family": "etf_bil_exploratory_v1",
+      "path": "research/specs/search-etf-c4c308ecc58fc194.json",
+      "rule_field_sha256": "1e475a45273aaa888b2f47431b3cdda99cbfa3d3409b03551ceec296aa0a9c24",
+      "sha256": "2fad388ad5f261d86744a85b79b2392e546348d2520f59df9a9133afb7e719f0"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-1028f85c13.json",
+      "rule_field_sha256": "4738132087e016008485c05d932948c865966b43651ddb12230f30bcb308217b",
+      "sha256": "9d94aee5ab085c9856294df2d6f58a916adb3ad90c2fbe63df6abc96cf78f615"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-191661aa14.json",
+      "rule_field_sha256": "840dd0ef9efc0cb354ddc689869e09e19227533bf208f926c55557c380d2e966",
+      "sha256": "902ba4c701c650489a64c9e366c3346971393c5539ef723d2321ebbf4cb188f1"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-197de105b0.json",
+      "rule_field_sha256": "1eb2be6979b013887d6af8050eea3bf0885f18dde74ecb1fb3e0431a4c95325f",
+      "sha256": "b0f10d6cbcef93c92184f14bc259039729d57757ec5fbd0bb9b26526082a6200"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-2573b31328.json",
+      "rule_field_sha256": "ece763345f29ca059bd5f9e2878e534e8a3fa5a068cdc205d5e3f571b65732e4",
+      "sha256": "75a7baa50a7b8ce5091a0bfcc2f5f010517efb194717ca1ca469cc6ad33c8015"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-386c982f25.json",
+      "rule_field_sha256": "8c1179f8f01adc79f55749d945f9bc40dccfff47d592ba969bbd57af9196ba67",
+      "sha256": "4234ca2e5dc19b574061599ad4887ec369ba4cd11fd40a0f0d812f83f3b90715"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-4e6570534e.json",
+      "rule_field_sha256": "0777e67881f0cc7167194ab51722b8444061973f9c726b8b558068819f3d8740",
+      "sha256": "3a09ba5aaf0937c32f86d17134e699a55d1dc2aaaa21468677c902947af9e59b"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-51ce18820a.json",
+      "rule_field_sha256": "cab4e0e0e6f1bf167020877338f3a49fe77d8bfc20cf79fc8d98dfba8c33025d",
+      "sha256": "db65eded64385344696f2aef43d8456580e3a32a12635f5a945dbaea4dd8f93f"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-bd3d96af8c.json",
+      "rule_field_sha256": "b407164585d69d0c512b77e1d060a9ea7c4fce9083cb6a3eab3e447675a05b38",
+      "sha256": "c578b72ba1b80ccedba7a83777d0f023976acafca9c39464fdcdbb7c5e74943b"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-c85e48cf83.json",
+      "rule_field_sha256": "6a36b3a8fbc65d23a699bc04cb54d22d3e86e81bfecf88831e80a68c058b2919",
+      "sha256": "66a87980d77bf52ad77e845fe0e98de9912d329c5f0513c7dd30329b2777b1bd"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-dbd3589401.json",
+      "rule_field_sha256": "a9d6946441dfbe87336ffd6ad4ecbe0b82fab180a6b2572bd3313e03f5070f62",
+      "sha256": "54757416100698b547dc72f7d998f336828eb77ab1f7712689deb82430cfb992"
+    },
+    {
+      "family": "failed_breakout",
+      "path": "research/specs/search-fa-f2f5860e4c.json",
+      "rule_field_sha256": "64cf4e43d2620e9e1e8fc67bfc7d88cbf0f1543b54a4fbea7f1f1d1bf00af14a",
+      "sha256": "cffb841600cf06019bbe00c5b77c7d04ca5b70967263b4a156f0ac3b13d352cf"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-1e7fdc3455.json",
+      "rule_field_sha256": "f14af45c726788c9c09d56427216fd5a5b717d2bf3ec01a2032b4b3eb2d15c09",
+      "sha256": "d72c83b68577761067fda1deeddcb05d5e4a9b006a65efbd4f74704b49d0935d"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-2a811caf9b.json",
+      "rule_field_sha256": "1d19aa8c315bb180cc697bf3563ba40bb73b5bf55580c6aeed9678d509e21bf3",
+      "sha256": "3ecb2eb61f067d392cf1d97c0a10ff1d4fa95ecc78b07aa6ef47b667d312ba7c"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-2dbca51a67.json",
+      "rule_field_sha256": "64960555b2d63decff0e480923328b932f3d94cbf29b1a4dd705b924759d022b",
+      "sha256": "0b6ab01d1be8f42d5d77c7ea7af36182146284772a691107cf57f9f2f5d3feeb"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-30d48ea079.json",
+      "rule_field_sha256": "583c77a4befc40eaf43f2bdd30dcbb09d25844a655513300b215907d5e9f7d6a",
+      "sha256": "f31026753d6fceab7a490eb144dc08112ffad3550de19bc70e3977eadf94d7a5"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-3e18b7a299.json",
+      "rule_field_sha256": "a3a50f962d3696f49f117560c1480670db1d3c6e689c966c5c47c2a91d90cc89",
+      "sha256": "511b701a2455c406c3c57dc94dc67e5796357d449821a5484dae2a76157b7585"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-45ea65a5cd.json",
+      "rule_field_sha256": "b49da5462a9dc0dd019c8829fd10e07a03d65ac6bc44b3dee9299b3ffbeda95d",
+      "sha256": "24a786e1a2e51d0920ee9d8c725e313e08f666584a143ef327e7bbecddea56de"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-599834809b.json",
+      "rule_field_sha256": "0731e951790287fa77d46de6b3f5b73449070008e4a59d6766fe293435942632",
+      "sha256": "e5729e69eb54929d31db441bbc4f9ed7a55f88a920c7f6d9c6ccec3b389cff43"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-7f71884194.json",
+      "rule_field_sha256": "2de674a76261b7740d793700759844958753351d6c5a646ed13803e3bc9dfc35",
+      "sha256": "a2abf90f2ec3bbce9db4e7e051352acd38a5d8dd9709e7ca6e4cbc0914664a92"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-8676dbe66f.json",
+      "rule_field_sha256": "1d9d6ae8e631491c17cde80a636ce9fea4c449315efcd96587077b9c7c5c0e83",
+      "sha256": "df124c8c2eaae261133ef9db5c5e1690558143caaec60aa23d01601558721e1a"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-998d19a73d.json",
+      "rule_field_sha256": "9d3f67c5447051afea50f8f7c92c006ebfff675d005b5830921dfe6e84e44b48",
+      "sha256": "7ac74d3fa77320dbd4bbd163a8f546c5c7fe460507641b95cc4c66f8524ab55c"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-a3e4e69a6a.json",
+      "rule_field_sha256": "acb9a7818e70a62349fc20af4ab30e853b40898dff257110d55a266a392544e6",
+      "sha256": "11fd966008b868d75e866dd721c17b6e1fd324dd939d1a3ec4e65e9860023fe4"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-a879437c70.json",
+      "rule_field_sha256": "ea2b0a84fbc28908ccd92645702181f12113955e289dac97b4d4a1ffc22ad2d8",
+      "sha256": "01ea4daf2380c1a77f66b15433bb2529e91d7946c45e437408f1ad3242bc984a"
+    },
+    {
+      "family": "opening_range_breakout",
+      "path": "research/specs/search-op-febb969e20.json",
+      "rule_field_sha256": "62e464bef787101c45c32429d517cc8e9b27968474471658c3a1a3dba4ad5f1d",
+      "sha256": "2a5f66cc00772f98eb0f499e5da268671ad0305eba1fca5c99b671fa83844ffd"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-31c3f6ec5b.json",
+      "rule_field_sha256": "091b82eb29ce914acde02ff25b8d14395a9a75e76a53e677407950cc9f081276",
+      "sha256": "76a7fe22ed423e4546993cc6ed48d0458c909c7f2aad59365a3cfcf01fc5d210"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-3dfc671beb.json",
+      "rule_field_sha256": "df3faf316102e0a8b495e8d6d0f8b4f96e4644b51ca168d940792e3983a85dee",
+      "sha256": "e39987668ccf2604ed454a534a981bd85097051ec3e853fb30965dcb5c79576e"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-5547ddb993.json",
+      "rule_field_sha256": "c21ace647f46747d2adf7265a6a889f19d7aff57503c71b7dee544e222251623",
+      "sha256": "7e2ea2f89517fdfb4ff73404cd8c1392f398bad6b3236cdc5b83c3b4d24d2aee"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-642d9bb6b1.json",
+      "rule_field_sha256": "d501fd531d60b34c308415cad01c7a555cb0b1ef52a78be3280d11ac7cb8f775",
+      "sha256": "a4cc32d28fadb4e7c14617336d9b1f1390cee246a2f49f88c0a01b9db2ee7545"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-77f3156702.json",
+      "rule_field_sha256": "294e05a024749824724e20064e3c8cc912c6a5d7506805018fbb1df6ca7c8de0",
+      "sha256": "a09b07300c1055d12d2c025dc041216beed2f66cf921572e8d9b4bc5dc556390"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-997466a5b2.json",
+      "rule_field_sha256": "e1cc31692d4efd7166255cec39fa76ba9a9e11fcbfe4b04819f1cbcc0b382d5b",
+      "sha256": "b2fdcd5f76a7ab1a2a3faf92bbbcc24a2b0de624dfacbf6fc1356c44e53887e5"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-a639743a86.json",
+      "rule_field_sha256": "b1cacb32ef1fcff1656cb3967dcb7ff41cf694783662eb8447795fab1e2b1227",
+      "sha256": "17fa4f28b111f0a8832da67d2b00bb76e6ad832f60494ac331b4d4ceac0250ab"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-b015773da0.json",
+      "rule_field_sha256": "fac603642060434d874b9063901d542c9335eb1b1f48d5dbee19568518506041",
+      "sha256": "c9094317f7963c57d409fe9cc2cd12043b91989248f88408531994306ff81384"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-bd746696e2.json",
+      "rule_field_sha256": "4d9b3638d3416e163d7b8ab09be850d8626ee839aa096ade21523b9bb94277ff",
+      "sha256": "399b156e67b4720fcc232d96e7252af121bf658218097fd851997bdba8fa5acb"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-e3945c3bc9.json",
+      "rule_field_sha256": "a088eb6354f23c6207fdd1ded5c619519253cf66347b918bc7c25af7f231bf0f",
+      "sha256": "fa0d567591e25a789602002b24a99c7afc7987c4033ed9ed364a7e06268ce484"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-e686097705.json",
+      "rule_field_sha256": "fb2051ae1a51e8a5c12ac6dc064757e0eb3be03b4f6247fec060fe79646e8168",
+      "sha256": "644f4e013e30ac63fa16ff02201849866e43a1f873aecce94bcf91f258754418"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-e797a5cf39.json",
+      "rule_field_sha256": "1d71684bddf78a4a9c1e0cdbc6720d2dfb6ccece32a8914d1b5d6be32fb49023",
+      "sha256": "642dc112ed2cdf9565b324fa053f1ab2e1736a49d83541aabd7f47531a975703"
+    },
+    {
+      "family": "recovery_swing",
+      "path": "research/specs/search-re-fa4163f758.json",
+      "rule_field_sha256": "bd28c6009e57a6f7679a05891c31577b3fb00068e400856faff2e3d37ab52ba0",
+      "sha256": "5c44ab293375056457442cbf6c52f40cc9577fa885790fc6b9a893a30fb94c6f"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-0b2c5f54ba.json",
+      "rule_field_sha256": "0c4b729212f079265cf18353fff3a31f57ebf1855d6062e37fe737b3980d6cbe",
+      "sha256": "5c22a76a1831dff2a3388c6378eb926da3882a8449985561907c7bd9f3a36f28"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-455b2eabc7.json",
+      "rule_field_sha256": "0c783897880716a8077b76319ca5b7b7d87a93b27488f2971f7151f96d247d83",
+      "sha256": "1ff14fdd94efa0de6110808f8f355a26c53c731bf95b7bd114cfe922849b483d"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-4b1639a57d.json",
+      "rule_field_sha256": "83a0d538f6e530047bcef37a073b676f2586ded1b8a67ffd877f9072d174fc34",
+      "sha256": "4597e079b37a53b7aa1b46e8a313642f041cd9715bdacb2a6bae138603abbcbe"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-53a79d5d02.json",
+      "rule_field_sha256": "87fda8e74953ef3ff885beec79d286db546841d3888771bdd5bb6bd8414bf3af",
+      "sha256": "99daf2b3235ead087738362fdd37f4ebb48bac169c70f75614db7fffd138a959"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-56be0f2c1f.json",
+      "rule_field_sha256": "9a9efd700c6148a8b35f9abec73bdd4deed4003f9854696e3be915cb4de39096",
+      "sha256": "6cb8796448a11af6a576cd228990c3200d09a4e48f104bbe7407e336be2b31f6"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-63141cfbfc.json",
+      "rule_field_sha256": "e6e7f530cad2edb9ed9d0e10ea36e32fa5bd7ce303ff4bb1c1fae82389858b99",
+      "sha256": "44260e4cbab460efc95153a4941196444577dcb333420253f2de20cde1888ab4"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-b35ab71e83.json",
+      "rule_field_sha256": "203f830d13754938f7b0bab7436bff5026e93be25845f25c239e37bcdf355ac8",
+      "sha256": "2408cac9ccbff6bdd33a8d96cfcbf56c12e29f0a8500d66fc14be3999ae05111"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-c3c45b609c.json",
+      "rule_field_sha256": "727efb88584b10a2940e46a2d0fdbd1146bf0d898aaeadf3b42a99f99097fd22",
+      "sha256": "128e679eefc86be7d2c680fde0bcb67e4a242cbdbca00d6e6cc55de304a510af"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-c9472bbf23.json",
+      "rule_field_sha256": "1bc6f805368f35f01eff1b4290645ec82113fe9ef651b29cf3778baca9c07c59",
+      "sha256": "60dbb4bee823eb7e916956d2a666a8e492695e91dd8a9b2186872c3f850ef305"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-cb494225de.json",
+      "rule_field_sha256": "62838cb7dba23074fc6bed8b65489fde604de432453d5f19b55cd1d6aa23adf7",
+      "sha256": "dab2d34961e3fb14258947fbf2cc31850d85fe4bffd17302e3329b2c46b6e033"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-e7983f5dcd.json",
+      "rule_field_sha256": "99820ac7de1da4af760f86eeec87908d7f09257e9be59d7e15bf7a83e4583f61",
+      "sha256": "c2ccb0ffad4b197a8e0e31618eac824f13f84dcc639f507a93103dc8f2fa628b"
+    },
+    {
+      "family": "s1_research",
+      "path": "research/specs/search-s1-e95fc81153.json",
+      "rule_field_sha256": "dfcf3bd2bf4e3f5fec9df5618f379b8ec2594f6e4425c3e0a9b518e0cdc5f9c4",
+      "sha256": "7f6f8632df93f15b56f52e11adfa3f16dc0a80576e345ca4c85feff0ae63f491"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-0eb510af04.json",
+      "rule_field_sha256": "96a3384813203565aa8ccdc1571d9deed81fe2b4df3d9ceb7e507770ebbc16c4",
+      "sha256": "d949c3eebd2d425441919a892163f7d61dd41438218c94bab6cbe78319aca0ae"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-18665f6d8c.json",
+      "rule_field_sha256": "802a965c20b5742127875cb849e7016119006384fa9854be525d6b02335e00f9",
+      "sha256": "7dc269aff047c352c1cd90e95d5a6f74049604bdf5d75734cbbc342f4ef3b9d9"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-280a95e157.json",
+      "rule_field_sha256": "b04abd81c74007dbd1cc6aa8261eb180ebb69e9a6f32d02a035b993579c6b627",
+      "sha256": "e9a4716ed92035118ab0aeffb83ea917d16cb9a527fca73cf6bfb8d97c500f2b"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-3aba9b1dd8.json",
+      "rule_field_sha256": "22822bfa38ad32989039aece14aecb94b9944c6e5f675a95256c46988f0bf5aa",
+      "sha256": "0584999191a2b29a366db70c3dd1dcb665ed506a6071a4f121ca1a0c14583e8c"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-513913dfdb.json",
+      "rule_field_sha256": "9a77aba15700d812c5cff7184e6d09632ab051f1326c86fb7e2aac2250a93620",
+      "sha256": "b6022c111d4b913c00752d70e4edaeb181d28b21ec5204aa660148ccfa2fc2db"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-619a30b2ed.json",
+      "rule_field_sha256": "41d4a83cb7830d85fadbc60c4e4d1885e3413bf64f3234dbe4f00e2511d31dc0",
+      "sha256": "ab0d0b91b379d7eb7ae411d0b25d149340c26042aeeab6e8f392cada66152867"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-977e9301a5.json",
+      "rule_field_sha256": "a1579c4be0a05f4b662a45632ba1449dd4554f8fd40e57fc2f7405bc54455c45",
+      "sha256": "f24f3c5204cb8824eddb6bf305a0ca7aa5116334f8e5eccd802c29fb63d71f3a"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-9bb2a1cb86.json",
+      "rule_field_sha256": "5cad47cec7cf90bcd5b1b961b5906635320aea3f217a28e9f48ada61b7884c16",
+      "sha256": "b43250ee42a37085994250bbb1c3cc012c6c5c2306eebdbaf037bb76568edf8f"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-ba2f618d73.json",
+      "rule_field_sha256": "4ab95873f2ced5b695c1b6112737ade93ed46868717452f40993397cb30f2279",
+      "sha256": "b627042d64709b0207de38c55a16b51fbf365a59d59d10ba3a00ca7fa8c313db"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-e236834318.json",
+      "rule_field_sha256": "cf221e8c60f44410f48a607e5d2ffd4f661c70991fd515b21e33462a739feb8b",
+      "sha256": "ce23f99bc4c5acafab86f5ef49f5b54651de67344df57957eca502f7145681f7"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/search-vw-e3e5433c78.json",
+      "rule_field_sha256": "7684c27762390010a81f11ccf57692c3bb295e315dda0da4a5c4e67fe91de3ec",
+      "sha256": "62f94aa4e3f43cecb0ef18fd6b45d333612348bc9a9c89f0972d504398e0118b"
+    },
+    {
+      "family": "vwap_reclaim",
+      "path": "research/specs/vwap_reclaim_v0.1.json",
+      "rule_field_sha256": "a5346b33e43692b27ee6cc249ca44f3e4f66d8828a0895d45315dbca34fed97a",
+      "sha256": "3ec45472467baf3a2aeeda5853c7cbf5319f19b6cc5fdd63ac993999174b17c8"
+    }
+  ]
+}
