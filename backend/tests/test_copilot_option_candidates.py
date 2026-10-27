@@ -255,7 +255,8 @@ def test_the_scripted_model_compares_contracts_and_the_card_gets_a_pick_list():
     assert tool["provenance"]["kind"] == "simulated" and tool["summary"] == "8 calls across 3 expiries for a 21-day horizon"
     picks = tool["candidates"]
     assert picks["symbol"] == "NBIS" and picks["simulated"] is True and len(picks["picks"]) == 8
-    assert picks["picks"][0] == {"label": "Nov 6 '26 95C", "days": 14, "ask_contract": 565.0}
+    assert picks["picks"][0] == {"label": "Nov 6 '26 95C", "days": 14, "ask_contract": 565.0, "ask": 5.65, "delta": None}
+    assert picks["as_of"] == tool["provenance"]["as_of"]  # the premium's read time, for "Size it for me"
     assert all(len(p["label"]) <= 40 for p in picks["picks"])  # fits the plan's contract hint
     text = "".join(e["delta"] for e in events if e["type"] == "text")
     assert "2026-11-06 (14 d) 95 call: $5.65 ask ($565 a contract), spread 4.0%, needs +6.7% by expiry to break even; " \
