@@ -835,13 +835,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         request_sha256 = digest({"idea": idea, "free_text": free_text})
         operation_id = operation_id or str(uuid.uuid4())
         try:
-            original = await asyncio.to_thread(ledger.find, checked.subject, operation_id, request_sha256)
+            original = await asyncio.to_thread(ledger.find, checked.claims["actor"], operation_id, request_sha256)
             if original is not None:
                 return jo_view(original, replayed=True)
             if slots.locked():
                 raise ToolError("Check service busy; retry with the same operation_id")
             async with slots:
-                record = await compute(checked.subject, checked.claims["profile_id"], operation_id, idea, free_text, request_sha256)
+                record = await compute(checked.claims["actor"], checked.claims["profile_id"], operation_id, idea, free_text, request_sha256)
                 stored = await asyncio.to_thread(ledger.insert, record)
         except Conflict:
             raise ToolError("This operation_id already holds a different idea; use a new operation_id") from None
@@ -859,8 +859,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         Include the trigger, invalidation and recheck condition. Unsaved advice cannot be reopened in review_checks."""
         checked = await authenticated("attach_model_verdict")
         try:
-            saved = await asyncio.to_thread(ledger.attach, checked.subject, check_id, verdict, summary)
-            record = await asyncio.to_thread(ledger.get, checked.subject, check_id)
+            saved = await asyncio.to_thread(ledger.attach, checked.claims["actor"], check_id, verdict, summary)
+            record = await asyncio.to_thread(ledger.get, checked.claims["actor"], check_id)
         except NotFound:
             raise ToolError("Unknown check_id for this connection") from None
         except Conflict:
@@ -893,11 +893,11 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         start = datetime.combine(target, datetime.min.time(), ET)
         span = (start.astimezone(timezone.utc).isoformat(), (start + timedelta(days=1)).astimezone(timezone.utc).isoformat())
         try:
-            saved = await asyncio.to_thread(ledger.between, checked.subject, *span, REVIEW_LIMIT + 1)
+            saved = await asyncio.to_thread(ledger.between, checked.claims["actor"], *span, REVIEW_LIMIT + 1)
         except (ValueError, OSError, sqlite3.Error):
             raise ToolError("Checks could not be read") from None
         truncated = len(saved) > REVIEW_LIMIT
-        settled, features = await settle(checked.subject, saved[:REVIEW_LIMIT], now)
+        settled, features = await settle(checked.claims["actor"], saved[:REVIEW_LIMIT], now)
         checks, counts = [], {}
         for record, model, result in settled:
             answer = record["answer"]
@@ -976,10 +976,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         now = clock()
         start = now - timedelta(days=days or 30)
         try:
-            saved = await asyncio.to_thread(ledger.between, checked.subject, start.isoformat(), now.isoformat(), GRADE_LIMIT)
+            saved = await asyncio.to_thread(ledger.between, checked.claims["actor"], start.isoformat(), now.isoformat(), GRADE_LIMIT)
         except (ValueError, OSError, sqlite3.Error):
             raise ToolError("Checks could not be read") from None
-        settled, features = await settle(checked.subject, saved, now)
+        settled, features = await settle(checked.claims["actor"], saved, now)
         # Saved results only, the same set /advisor-review grades, so the two always agree.
         final = [(record, model, result) for record, model, result in settled if result.get("saved")]
         grade = grade_results([{"verdict": record["answer"]["verdict"], "model_verdict": (model or {}).get("verdict"),

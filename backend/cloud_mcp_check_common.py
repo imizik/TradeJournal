@@ -11,7 +11,8 @@ import uuid
 
 from pydantic import Field, field_validator, model_validator
 
-from cloud_mcp_d0 import Config, JWKSVerifier, MAX_BYTES, Strict, reject_model_credentials
+from cloud_mcp_d0 import (Config, JWKSVerifier, MAX_BYTES, Strict, bound_to_top_level_client, profile_key,
+    reject_model_credentials)
 
 READ_SCOPE = "check:read"
 RUN_SCOPE = "check:run"
@@ -28,6 +29,10 @@ class CheckProfile(Strict):
     subject: str = Field(min_length=1, max_length=200)
     id: str = Field(pattern=r"^check_[0-9a-f-]{36}$")
     enabled: bool = True
+    # Optional own OAuth client: a second connector (Claude Duet) signing in as
+    # the same subject gets its own actor in the ledger. The first profile stays
+    # hosted Jo's; owner briefing/follow-up paths read profiles[0].
+    client_id: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("id")
     @classmethod
@@ -46,7 +51,7 @@ class CheckConfig(Strict):
     jwks_file: str
     client_id: str = Field(min_length=1, max_length=200)
     client_claim: Literal["client_id", "azp"] = "client_id"
-    profiles: list[CheckProfile] = Field(min_length=1, max_length=1)
+    profiles: list[CheckProfile] = Field(min_length=1, max_length=2)
     ledger_file: str
     features_pointer: str
     market_watch_snapshots_dir: str | None = None
@@ -94,6 +99,12 @@ class CheckConfig(Strict):
             raise ValueError("Require the separate /check/mcp resource")
         if len({self.ledger_file, self.features_pointer, self.jwks_file}) != 3:
             raise ValueError("Ledger, features and keys must be distinct files")
+        if (len({profile_key(p) for p in self.profiles}) != len(self.profiles)
+                or len({p.id for p in self.profiles}) != len(self.profiles)):
+            raise ValueError("Check profiles must have distinct subject/client pairs and IDs")
+        if self.profiles[0].client_id is not None:
+            raise ValueError("The first check profile is the hosted connector's and uses the top-level client")
+        bound_to_top_level_client(self)
         if self.market_watch_outbox_dir and not self.market_watch_snapshots_dir:
             raise ValueError("A market-watch outbox requires the market-watch snapshots directory")
         if self.followup_enabled and not (self.market_watch_snapshots_dir and self.market_watch_outbox_dir):

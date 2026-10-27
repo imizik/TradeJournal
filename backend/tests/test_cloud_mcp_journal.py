@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import uuid
 import os
 import time
 from datetime import datetime, timezone
@@ -161,6 +162,21 @@ def test_denied_tokens_never_return_data(setup, claims):
         response = call(client, token(**claims))
         assert response.status_code in (401, 403)
         assert "-25.25" not in response.text and "MU" not in response.text
+
+
+def test_second_client_profile_reads_the_same_grant(setup):
+    cfg, _, _, config, _, token = setup
+    config["profiles"].append({"subject": "coach-subject", "id": "d0_" + str(uuid.uuid4()),
+                               "enabled": True, "client_id": "claude-duet"})
+    cfg.write_text(json.dumps(config))
+    with TestClient(journal.create_server(cfg).streamable_http_app()) as client:
+        assert call(client, token(client_id="claude-duet")).status_code == 200
+        assert call(client, token()).status_code == 200
+        assert call(client, token(client_id="other")).status_code == 401
+    config["profiles"][1]["client_id"] = CLIENT_ID
+    cfg.write_text(json.dumps(config))
+    with pytest.raises(ValueError):
+        journal.read_config(cfg)
 
 
 @pytest.mark.parametrize(

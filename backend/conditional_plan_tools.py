@@ -75,7 +75,7 @@ def register(server, config, ledger, authenticated, scopes, clock):
                 request,
                 config.market_watch_snapshots_dir,
                 clock,
-                check_actor=checked.subject,
+                check_actor=checked.claims["actor"],
             )
         except Conflict as exc:
             raise ToolError(str(exc)) from None

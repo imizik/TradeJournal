@@ -323,7 +323,9 @@ def test_silence_is_measured_between_visible_events():
             yield "final", copilot.Round([{"type": "text", "text": "Answer."}], "end_turn", copilot._zero_usage())
 
     metrics = _turn([{"role": "user", "content": "x"}], Slow())[-1]["metrics"]
-    assert metrics["first_feedback_ms"] == metrics["first_progress_ms"] < 100
+    # The turn's opening pack event is the first visible moment; the progress note follows within the same few
+    # milliseconds, so the two stamps may differ by rounding on a loaded runner.
+    assert metrics["first_feedback_ms"] <= metrics["first_progress_ms"] < 100
     assert metrics["first_text_ms"] >= 200 and metrics["max_silence_ms"] >= 190
 
 

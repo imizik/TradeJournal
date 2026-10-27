@@ -122,7 +122,13 @@ Step 2 was built October 11, 2026 and activated with step 3 on October 12 (below
   [identity/config](../../backend/cloud_mcp_check_common.py) and the
   [immutable ledger](../../backend/cloud_mcp_check_ledger.py). Scopes:
   `check:read` on every call, plus `check:run` for `pre_trade_check` and
-  `check:note` for `attach_model_verdict`. `pre_trade_check` also takes an
+  `check:note` for `attach_model_verdict`. Up to two profiles: the first is
+  the hosted connector's; a second may be bound to its own OAuth `client_id`
+  so the same subject through another connector is a separate ledger actor
+  for checks, verdicts, reviews, grades, notes, shadow decisions and plans;
+  the hosted profile's rows keep their subject key and the owner view lists
+  and grades hosted Jo's checks only
+  ([Claude Duet trial](../../deploy/duet/README.md)). `pre_trade_check` also takes an
   optional `operation_id`; reusing it with the same idea returns the saved
   check. Jo's view omits the hashed fill keys; the ledger keeps them.
 - Live data: the scalp packet's four provider reads now run concurrently, and

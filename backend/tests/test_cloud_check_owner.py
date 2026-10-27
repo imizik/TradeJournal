@@ -154,6 +154,13 @@ def test_grades_and_detail_use_only_saved_results(owner):
     ledger.attach(saved["actor"], saved["check_id"], "go", "Take it.")
     result = {"outcome": {"state": "traded", "total_pnl": 30.0}, "move": {"state": "complete", "move_pct": 0.4}}
     ledger.save_result(saved["actor"], saved["check_id"], result)
+    # A client-bound profile's check (actor = its profile ID) is neither Jo's in the list nor in the grade.
+    other = record(now)
+    other["actor"] = other["profile_id"]
+    foreign = ledger.insert(other)
+    ledger.attach(foreign["actor"], foreign["check_id"], "go", "Mine.")
+    listed = read(app, PEER, reader.LIST_PATH).json()
+    assert listed["total"] == 2 and foreign["check_id"] not in {row["check_id"] for row in listed["checks"]}
     grades = read(app, PEER, reader.GRADES_PATH).json()
     assert grades["checks"] == 2 and grades["settled"] == 1
     assert grades["grade"]["followed"] == 1 and grades["grade"]["jo"]["agrees_with_rules"] == 1

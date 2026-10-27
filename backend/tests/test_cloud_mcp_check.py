@@ -3,7 +3,7 @@
 Generated signing keys and tokens only; provider responses are the recorded
 Alpaca fixture (tests/fixtures/alpaca). No network, issuer or database server.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -234,6 +234,70 @@ def test_azp_client_claim(harness):
     with TestClient(harness.server().streamable_http_app()) as client:
         assert rpc(client, "pre_trade_check", IDEA, harness.token(client_id="ignored", extra={"azp": CLIENT})).status_code == 200
         assert rpc(client, "pre_trade_check", IDEA, harness.token(extra={"azp": "other"})).status_code == 401
+
+
+def test_second_client_profile_is_a_separate_actor(harness):
+    hosted = json.loads(harness.config_path.read_text())["profiles"][0]
+    duet = {"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True, "client_id": "claude-duet"}
+    harness.configure(client_claim="azp", profiles=[hosted, duet])
+    with TestClient(harness.server().streamable_http_app()) as client:
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": CLIENT})).status_code == 200
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "claude-duet"})).status_code == 200
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "other"})).status_code == 401
+        # Disabling the second grant alone leaves the hosted connector working.
+        harness.configure(profiles=[hosted, {**duet, "enabled": False}])
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "claude-duet"})).status_code == 401
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": CLIENT})).status_code == 200
+    actors = sqlite3.connect(json.loads(harness.config_path.read_text())["ledger_file"]).execute(
+        "SELECT DISTINCT actor FROM tool_call ORDER BY actor").fetchall()
+    assert sorted(a for (a,) in actors) == sorted([hosted["id"], duet["id"]])
+    # The hosted connector's profile stays first and never carries its own client.
+    harness.configure(profiles=[duet, hosted])
+    with pytest.raises(ValueError):
+        service.read_config(harness.config_path)
+    # A second profile naming the top-level client would shadow the hosted one after its revocation.
+    harness.configure(profiles=[hosted, {**duet, "client_id": CLIENT}])
+    with pytest.raises(ValueError):
+        service.read_config(harness.config_path)
+
+
+def test_second_client_checks_and_verdicts_are_its_own(harness):
+    pretrade_features.publish([feature_row("2026-09-1%dT10:0%d:00" % (i % 4, i), 12.0, f"k{i}") for i in range(9)],
+        harness.pointer, now=RECEIPT)
+    hosted = json.loads(harness.config_path.read_text())["profiles"][0]
+    duet = {"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True, "client_id": "claude-duet"}
+    harness.configure(profiles=[hosted, duet])
+    jo, dt = harness.token(), harness.token(client_id="claude-duet")
+    idea = {**IDEA, "stop": round(SPY_LAST * 0.99, 2), "operation_id": str(uuid.uuid4())}
+    with TestClient(harness.server().streamable_http_app()) as client:
+        jo_check = call(client, "pre_trade_check", idea, jo)["structuredContent"]["check_id"]
+        # Same subject, same operation ID, other client: a new check, not Jo's replayed.
+        duet_raw = call(client, "pre_trade_check", idea, dt)
+        assert not duet_raw.get("isError"), duet_raw
+        duet_result = duet_raw["structuredContent"]
+        assert duet_result["check_id"] != jo_check and not duet_result.get("replayed")
+        # Duet neither sees nor annotates Jo's check; Jo's own, different verdict still saves afterwards.
+        assert call(client, "attach_model_verdict", {"check_id": jo_check, "verdict": "go", "summary": "Go."}, dt)["isError"]
+        jo_attach = call(client, "attach_model_verdict", {"check_id": jo_check, "verdict": "wait", "summary": "Wait."}, jo)
+        assert not jo_attach["isError"], jo_attach
+        listed = {row["check_id"] for row in call(client, "review_checks", {}, dt)["structuredContent"]["checks"]}
+        assert listed == {duet_result["check_id"]}
+        listed = {row["check_id"] for row in call(client, "review_checks", {}, jo)["structuredContent"]["checks"]}
+        assert listed == {jo_check}
+        # Each actor grades only its own settled checks: a final result saved for Duet's check grades for Duet alone.
+        ledger_file = json.loads(harness.config_path.read_text())["ledger_file"]
+        Ledger(ledger_file).save_result(duet["id"], duet_result["check_id"],
+            {"outcome": {"state": "traded", "total_pnl": 30.0}, "move": {"state": "complete", "move_pct": 0.4}})
+    with TestClient(harness.server(now=RECEIPT + timedelta(hours=1)).streamable_http_app()) as client:
+        graded = call(client, "grade_checks", {}, dt)["structuredContent"]
+        assert (graded["checks"], graded["settled"]) == (1, 1)
+        graded = call(client, "grade_checks", {}, jo)["structuredContent"]
+        assert (graded["checks"], graded["settled"]) == (1, 0)
+    db = sqlite3.connect(ledger_file)
+    rows = db.execute("SELECT check_id, actor FROM check_record ORDER BY received_at").fetchall()
+    # Jo's rows keep the subject key its existing ledger uses; Duet's carry its profile ID.
+    assert dict(rows) == {jo_check: SUBJECT, duet_result["check_id"]: duet["id"]}
+    assert db.execute("SELECT check_id, actor, verdict FROM model_verdict").fetchall() == [(jo_check, SUBJECT, "wait")]
 
 
 def test_recorded_live_check_saves_immutable_record_and_replays(harness):
