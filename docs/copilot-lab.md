@@ -826,7 +826,8 @@ instrument question needs real contracts, not just marks of the ones held.
   to choose from, never a recommended contract. The scripted `fake` model does
   the same for "which strike/expiry" or "calls"/"puts" with a horizon.
 - The tool event carries `candidates` (`copilot.option_candidates_card`: a
-  short label such as "Nov 13 '26 95C", days and ask per contract). The plan
+  short label such as "Nov 13 '26 95C", days, ask per contract and per share,
+  delta when given, and the chains' read time). The plan
   card offers them as a Contract pick list beside the copilot's own wording,
   which stays the default; the pick goes into the saved plan's note. The
   Evidence strip labels the read "Option candidates".
@@ -898,7 +899,28 @@ nothing exists until the owner confirms.
     thesis, entry and invalidation prices, time stop and size as editable
     fields with phone-sized tap targets. Under the time stop it shows when it
     would ping, read by the server (`GET /copilot/time-stops/preview`), or
-    "Kept as a note" when the words hold no time. Confirm runs three parts
+    "Kept as a note" when the words hold no time.
+  - **Size it for me.** A `Risk $` field beside the size (numeric keypad,
+    remembered per browser in `localStorage` key `copilot.risk`, blank until
+    typed; no server setting) turns a dollar risk into a size as it is typed,
+    on the card itself with nothing saved: a stock plan gets whole shares =
+    risk ÷ the entry-to-invalidation distance, rounded down, with the dollars
+    lost at the invalidation and the cost at a fresh `GET /copilot/quote`. A
+    calls or puts plan sizes the contract the card names, at its ask from the
+    turn's option candidates (the card says the premium and the chain's read
+    time): **max loss** contracts = risk ÷ the ask per contract (the premium
+    is all at risk), and **at invalidation**, only when the chain gives a
+    delta, about delta × the distance × the multiplier per contract, capped at
+    its premium. Delta is `unavailable` today, so that line says so rather
+    than estimate one. A contract with no premium on the card (the copilot's
+    own wording, or no candidates in the conversation) gets a line saying how
+    to pick one, never a guess; a risk too small for one share or contract
+    says that. On Confirm the size ("2 contracts of Nov 13 '26 95C at 6.92,
+    $1,384 max loss, risk $1,400"; the max-loss count for options) goes in
+    front of the size note, the owner's words cut to keep its 120 characters,
+    unless the owner edited the note after the size appeared. Spreads,
+    account balances and orders are out of scope.
+  - Confirm runs three parts
     (four with a time stop it can read), each with its own result; a failed
     part says why and offers a retry of that part only:
     - **Pre-trade plan:** the existing `POST /charts/captures`, mode

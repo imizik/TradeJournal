@@ -28,10 +28,12 @@ export type ToolEvent = {
   looked_at?: string[];
 };
 
-/** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to expiry, ask per contract. */
+/** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to
+ * expiry, ask per contract and per share, delta when the chain gives one, and the chains' read time (as_of). */
+export type OptionPick = { label: string; days: number; ask_contract: number | null; ask?: number; delta?: number | null };
 export type OptionCandidates = {
-  symbol: string; direction: "long" | "short"; simulated: boolean;
-  picks: { label: string; days: number; ask_contract: number | null }[];
+  symbol: string; direction: "long" | "short"; simulated: boolean; as_of?: string | null;
+  picks: OptionPick[];
 };
 
 /** What the owner's own past trades in the symbol did at a level the same distance from their entry: evidence, not a rule. */
@@ -129,6 +131,17 @@ export function pickedModel(status: CopilotStatus | null): string | null {
 
 export function rememberModel(model: string | null) {
   try { if (model) window.localStorage.setItem(MODEL_KEY, model); else window.localStorage.removeItem(MODEL_KEY); } catch { /* per-browser convenience only */ }
+}
+
+/** Size it for me: the dollar risk per trade the owner last typed on a plan card in this browser, blank until then. */
+export const RISK_KEY = "copilot.risk";
+
+export function savedRisk(): string {
+  try { return window.localStorage.getItem(RISK_KEY) ?? ""; } catch { return ""; }
+}
+
+export function rememberRisk(risk: string) {
+  try { if (Number(risk) > 0) window.localStorage.setItem(RISK_KEY, risk); else window.localStorage.removeItem(RISK_KEY); } catch { /* per-browser convenience only */ }
 }
 
 /** Read it back: whether this browser speaks each finished answer, and how fast. */
