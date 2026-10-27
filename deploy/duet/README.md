@@ -39,7 +39,10 @@ Profiles carry an optional `client_id`. A profile with one is matched only by
 tokens from that client, so the same Auth0 subject through Claude becomes a
 separate actor: its pre-trade checks, verdicts, day reviews, grades, notes,
 shadow decisions and plans are keyed by its own profile ID, and it can neither
-list nor annotate Jo's. Jo's existing rows keep their key. The first profile
+list nor annotate Jo's. Jo's existing rows keep their key, and the owner's
+`/advisor-review` list and grades keep showing hosted Jo only, so Duet's
+checks never count as Jo's; Duet's own `review_checks` and `grade_checks`
+are where its record lives. The first profile
 stays Jo's and uses the top-level client (the owner briefing and follow-up
 paths read it); a second profile may not name the top-level client.
 

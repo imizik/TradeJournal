@@ -3,7 +3,7 @@
 Generated signing keys and tokens only; provider responses are the recorded
 Alpaca fixture (tests/fixtures/alpaca). No network, issuer or database server.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -276,18 +276,28 @@ def test_second_client_checks_and_verdicts_are_its_own(harness):
         assert not duet_raw.get("isError"), duet_raw
         duet_result = duet_raw["structuredContent"]
         assert duet_result["check_id"] != jo_check and not duet_result.get("replayed")
-        # Duet neither sees nor annotates Jo's check; its day review holds only its own.
-        note = {"check_id": jo_check, "verdict": "go", "summary": "Go."}
-        assert call(client, "attach_model_verdict", note, dt)["isError"]
-        assert not call(client, "attach_model_verdict", note, jo)["isError"]
+        # Duet neither sees nor annotates Jo's check; Jo's own, different verdict still saves afterwards.
+        assert call(client, "attach_model_verdict", {"check_id": jo_check, "verdict": "go", "summary": "Go."}, dt)["isError"]
+        jo_attach = call(client, "attach_model_verdict", {"check_id": jo_check, "verdict": "wait", "summary": "Wait."}, jo)
+        assert not jo_attach["isError"], jo_attach
         listed = {row["check_id"] for row in call(client, "review_checks", {}, dt)["structuredContent"]["checks"]}
         assert listed == {duet_result["check_id"]}
         listed = {row["check_id"] for row in call(client, "review_checks", {}, jo)["structuredContent"]["checks"]}
         assert listed == {jo_check}
-    rows = sqlite3.connect(json.loads(harness.config_path.read_text())["ledger_file"]).execute(
-        "SELECT check_id, actor FROM check_record ORDER BY received_at").fetchall()
+        # Each actor grades only its own settled checks: a final result saved for Duet's check grades for Duet alone.
+        ledger_file = json.loads(harness.config_path.read_text())["ledger_file"]
+        Ledger(ledger_file).save_result(duet["id"], duet_result["check_id"],
+            {"outcome": {"state": "traded", "total_pnl": 30.0}, "move": {"state": "complete", "move_pct": 0.4}})
+    with TestClient(harness.server(now=RECEIPT + timedelta(hours=1)).streamable_http_app()) as client:
+        graded = call(client, "grade_checks", {}, dt)["structuredContent"]
+        assert (graded["checks"], graded["settled"]) == (1, 1)
+        graded = call(client, "grade_checks", {}, jo)["structuredContent"]
+        assert (graded["checks"], graded["settled"]) == (1, 0)
+    db = sqlite3.connect(ledger_file)
+    rows = db.execute("SELECT check_id, actor FROM check_record ORDER BY received_at").fetchall()
     # Jo's rows keep the subject key its existing ledger uses; Duet's carry its profile ID.
     assert dict(rows) == {jo_check: SUBJECT, duet_result["check_id"]: duet["id"]}
+    assert db.execute("SELECT check_id, actor, verdict FROM model_verdict").fetchall() == [(jo_check, SUBJECT, "wait")]
 
 
 def test_recorded_live_check_saves_immutable_record_and_replays(harness):

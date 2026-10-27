@@ -90,13 +90,21 @@ def connect(path):
     return db
 
 
+# Hosted Jo's checks only: a profile bound to its own OAuth client (the Claude
+# Duet trial) is keyed by its profile ID, while the hosted profile keeps the
+# issuer subject, so its rows are the ones whose actor is not their profile ID.
+# Records older than the profile_id field count as hosted.
+HOSTED = "coalesce(json_extract(c.record_json, '$.profile_id'), '') != c.actor"
+
+
 def list_checks(path):
-    """Newest checks first: idea, rules verdict, Jo's verdict and timing only."""
+    """Newest hosted-Jo checks first: idea, rules verdict, Jo's verdict and timing only."""
     db = connect(path)
     try:
         rows = db.execute("SELECT c.record_json, v.verdict FROM check_record c LEFT JOIN model_verdict v"
-            " ON v.check_id = c.check_id ORDER BY c.received_at DESC, c.check_id DESC LIMIT ?", (LIST_LIMIT,)).fetchall()
-        total = db.execute("SELECT count(*) FROM check_record").fetchone()[0]
+            f" ON v.check_id = c.check_id WHERE {HOSTED} ORDER BY c.received_at DESC, c.check_id DESC LIMIT ?",
+            (LIST_LIMIT,)).fetchall()
+        total = db.execute(f"SELECT count(*) FROM check_record c WHERE {HOSTED}").fetchone()[0]
     finally:
         db.close()
     checks = []
@@ -134,7 +142,8 @@ def grade_checks(path, now=None):
     db = connect(path)
     try:
         rows = db.execute("SELECT c.check_id, c.record_json, c.record_sha256, v.verdict FROM check_record c LEFT JOIN"
-            " model_verdict v ON v.check_id = c.check_id WHERE c.received_at >= ? ORDER BY c.received_at DESC LIMIT ?",
+            f" model_verdict v ON v.check_id = c.check_id WHERE c.received_at >= ? AND {HOSTED}"
+            " ORDER BY c.received_at DESC LIMIT ?",
             ((now - timedelta(days=GRADE_DAYS)).isoformat(), GRADE_LIMIT)).fetchall()
         results = saved_results(db, [row[0] for row in rows])
     finally:

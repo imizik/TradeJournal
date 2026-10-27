@@ -88,8 +88,9 @@ class PlanLedger:
 
     def source(self, actor, source_kind, source_id, directory, now, check_actor):
         if source_kind == "check":
-            # Pre-trade checks use the authenticated subject; stock/shadow
-            # receipts use profile_id. Both come from the verified grant.
+            # Pre-trade checks use the verified actor claim (the subject for
+            # the hosted profile, the profile ID for a client-bound one);
+            # stock/shadow receipts use profile_id. Both come from the grant.
             r = self.ledger.get(check_actor, source_id)
             if r["profile_id"] != actor:
                 raise ValueError("Check belongs to a different profile")
