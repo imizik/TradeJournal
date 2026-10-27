@@ -317,7 +317,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       {sizing && (
         <div aria-label="Size it for me" className="space-y-0.5 text-xs text-muted-foreground">
           {sizing.lines.map(line => <p key={line}>{line}</p>)}
-          {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : "Confirm puts this size in front of the size note."}</p>}
+          {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : `Confirm puts this size in front of the size note${sizeText.endsWith("…") ? `, which is cut to fit ${SIZE_MAX} characters` : ""}.`}</p>}
         </div>
       )}
       {setup && !setup.default_account_id && accounts.length > 1 && (

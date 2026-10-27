@@ -396,7 +396,10 @@ test("size it for me on a stock plan: shares from the invalidation distance, cos
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" },
     body: turnWith({ ...PLAN, instrument: "stock", contract: null }, null) }));
   const card = await askForPlan(page);
+  // A long note written before sizing is cut to keep 120 characters, and the card says so before Confirm.
+  await card.getByLabel("Size", { exact: true }).fill("x".repeat(100));
   await card.getByLabel("Risk $").fill("150");
+  await expect(card.getByLabel("Size it for me")).toContainText("Confirm puts this size in front of the size note, which is cut to fit 120 characters.");
   // 150 ÷ (95.90 − 92.30) = 41.7, rounded down to 41 shares: $147.60 (shown $148) at risk, $3,868 at the 94.35 quote.
   const sizing = card.getByLabel("Size it for me");
   await expect(sizing).toContainText("41 shares: $148 lost if it reaches the 92.30 invalidation (3.60 a share).");
