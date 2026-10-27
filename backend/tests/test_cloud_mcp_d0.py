@@ -30,6 +30,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata
 
+import cloud_mcp_d0 as d0
 from cloud_mcp_d0 import create_server
 import cloud_mcp_d0
 
@@ -196,6 +197,38 @@ def test_valid_token_returns_only_stable_synthetic_profile(
     assert PROFILE_ID in text
     assert "TradeJournal D0 synthetic profile" in text
     assert "owner-subject" not in text
+
+
+DUET_CLIENT = "claude-duet-client"
+DUET_PROFILE_ID = "d0_" + str(uuid.uuid4())
+
+
+def test_same_subject_through_a_second_client_is_its_own_profile(
+    config_path: Path, signing_key: rsa.RSAPrivateKey
+) -> None:
+    _write_config(config_path, profiles=[
+        {"subject": "owner-subject", "id": PROFILE_ID, "enabled": True},
+        {"subject": "owner-subject", "id": DUET_PROFILE_ID, "enabled": True, "client_id": DUET_CLIENT},
+    ])
+    with TestClient(_app(config_path, signing_key)) as client:
+        hosted = json.dumps(_request(client, "tools/call", {"name": "get_profile", "arguments": {}}, _token(signing_key)))
+        duet = json.dumps(_request(client, "tools/call", {"name": "get_profile", "arguments": {}},
+                                   _token(signing_key, client_id=DUET_CLIENT)))
+        assert PROFILE_ID in hosted and DUET_PROFILE_ID not in hosted
+        assert DUET_PROFILE_ID in duet and PROFILE_ID not in duet
+        # A client that no profile names is still refused, as is a subject the second client has no grant for.
+        for token in (_token(signing_key, client_id="another-client"),
+                      _token(signing_key, client_id=DUET_CLIENT, subject="unmapped-subject")):
+            response = client.post(RESOURCE, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_profile", "arguments": {}}})
+            assert response.status_code == 401
+    # Two grants for the same subject and client are one grant, not two.
+    _write_config(config_path, profiles=[
+        {"subject": "owner-subject", "id": PROFILE_ID, "enabled": True},
+        {"subject": "owner-subject", "id": DUET_PROFILE_ID, "enabled": True},
+    ])
+    with pytest.raises(ValueError):
+        d0.read_config(config_path)
 
 
 def test_profile_identity_is_stable_across_tokens_and_server_restart(

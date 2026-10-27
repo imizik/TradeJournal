@@ -47,6 +47,10 @@ class ProfileGrant(Strict):
     subject: str = Field(min_length=1, max_length=200)
     id: str = Field(pattern=r"^d0_[0-9a-f-]{36}$")
     enabled: bool = True
+    # A profile bound to its own OAuth client (a second connector, such as
+    # Claude Duet, signing in as the same issuer subject) keeps its own
+    # actor/ledger identity. Unset means the configured top-level client.
+    client_id: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("id")
     @classmethod
@@ -98,10 +102,19 @@ class Config(Strict):
             raise ValueError("JWKS must use the explicitly configured issuer origin")
         if urlsplit(self.resource_url).path != "/mcp":
             raise ValueError("The synthetic resource must end in /mcp")
-        if (len({p.subject for p in self.profiles}) != len(self.profiles)
+        if (len({profile_key(p) for p in self.profiles}) != len(self.profiles)
                 or len({p.id for p in self.profiles}) != len(self.profiles)):
             raise ValueError("Subjects and synthetic profile IDs must be unique")
         return self
+
+
+def profile_key(profile):
+    """One grant per issuer subject and OAuth client; unset client means the top-level client."""
+    return profile.subject, getattr(profile, "client_id", None)
+
+
+def allowed_clients(config):
+    return {config.client_id} | {c for c in (getattr(p, "client_id", None) for p in config.profiles) if c}
 
 
 class Profile(Strict):
@@ -308,8 +321,8 @@ class JWKSVerifier:
             immutable = {"issuer_url", "resource_url", "jwks_url", "jwks_file", "client_id", "client_claim"}
             if not current.enabled or any(getattr(current, key) != getattr(self.config, key) for key in immutable):
                 return None
-            original_ids = {p.subject: p.id for p in self.config.profiles}
-            if any(original_ids.get(p.subject) != p.id for p in current.profiles):
+            original_ids = {profile_key(p): p.id for p in self.config.profiles}
+            if any(original_ids.get(profile_key(p)) != p.id for p in current.profiles):
                 return None
             return current
         except (OSError, ValueError):
@@ -356,17 +369,20 @@ class JWKSVerifier:
             claims = jwt.decode(token, public_key, algorithms=["RS256"],
                 issuer=self.config.issuer_url, audience=self.config.resource_url,
                 options={"require": ["iss", "aud", "sub", "exp", "iat", self.config.client_claim], "strict_aud": True})
+            client = claims[self.config.client_claim]
             if (type(claims["exp"]) is not int or type(claims["iat"]) is not int
                     or not 0 < claims["exp"] - claims["iat"] <= TOKEN_LIFETIME
-                    or claims[self.config.client_claim] != self.config.client_id):
+                    or not isinstance(client, str) or client not in allowed_clients(current)):
                 return None
             subject, scopes = claims["sub"], claims.get("scope", "")
             if not isinstance(subject, str) or not isinstance(scopes, str) or len(scopes) > 200:
                 return None
-            profile = next((p for p in current.profiles if p.subject == subject and p.enabled), None)
+            # The same subject through another client is another profile, never a shared one.
+            profile = next((p for p in current.profiles if p.subject == subject and p.enabled
+                            and (getattr(p, "client_id", None) or current.client_id) == client), None)
             if profile is None:
                 return None
-            return AccessToken(token=token, client_id=self.config.client_id, subject=subject,
+            return AccessToken(token=token, client_id=client, subject=subject,
                 expires_at=claims["exp"], resource=self.config.resource_url, scopes=scopes.split(),
                 claims={"profile_id": profile.id})
         except (OSError, jwt.PyJWTError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError, RecursionError):

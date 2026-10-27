@@ -25,6 +25,7 @@ from cloud_mcp_d0 import (
     SCOPE,
     Strict,
     activated_socket,
+    profile_key,
     reject_model_credentials,
 )
 from journal_coach_snapshot import load_snapshot, summary
@@ -43,7 +44,7 @@ class JournalConfig(Strict):
     jwks_file: str
     client_id: str = Field(min_length=1, max_length=200)
     client_claim: Literal["client_id", "azp"] = "client_id"
-    profiles: list[ProfileGrant] = Field(min_length=1, max_length=1)
+    profiles: list[ProfileGrant] = Field(min_length=1, max_length=2)
     snapshot_file: str | None = None
     snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     start_day: date | None = None
@@ -84,6 +85,9 @@ class JournalConfig(Strict):
             raise ValueError("Public keys must match the selected issuer")
         if urlsplit(self.resource_url).path != "/mcp":
             raise ValueError("Use a dedicated resource ending in /mcp")
+        if (len({profile_key(p) for p in self.profiles}) != len(self.profiles)
+                or len({p.id for p in self.profiles}) != len(self.profiles)):
+            raise ValueError("Journal profiles must have distinct subject/client pairs and IDs")
         if self.publication_file is not None:
             if self.rolling_days is None or any(value is not None for value in (
                 self.snapshot_file, self.snapshot_sha256, self.start_day, self.end_day

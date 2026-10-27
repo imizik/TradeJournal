@@ -104,7 +104,11 @@ to a protected file outside Git. Keep `enabled` false while preparing. Select:
   by ChatGPT; no wildcard or guessed callbacks. Require S256, refresh and
   `d0:profile`. ID tokens/multiple audiences are rejected.
 - `profiles`: one approved issuer subject and stable newly generated synthetic
-  UUID. Preserve IDs across reconnects; keep `synthetic_only` true.
+  UUID. Preserve IDs across reconnects; keep `synthetic_only` true. A profile
+  may carry its own `client_id`: tokens from that client match only it, so the
+  same subject through a second connector (the [Claude Duet trial](../../deploy/duet/README.md))
+  is a separate profile and actor. Unset means the top-level client. Adding a
+  profile needs a restart; `enabled` applies per call.
 
 Create an unprivileged `tradejournal-d0` user/group and a root-owned separate
 runtime under `/opt/tradejournal-d0/backend`. Install only the probe and its

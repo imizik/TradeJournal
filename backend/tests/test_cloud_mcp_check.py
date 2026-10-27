@@ -236,6 +236,27 @@ def test_azp_client_claim(harness):
         assert rpc(client, "pre_trade_check", IDEA, harness.token(extra={"azp": "other"})).status_code == 401
 
 
+def test_second_client_profile_is_a_separate_actor(harness):
+    hosted = json.loads(harness.config_path.read_text())["profiles"][0]
+    duet = {"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True, "client_id": "claude-duet"}
+    harness.configure(client_claim="azp", profiles=[hosted, duet])
+    with TestClient(harness.server().streamable_http_app()) as client:
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": CLIENT})).status_code == 200
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "claude-duet"})).status_code == 200
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "other"})).status_code == 401
+        # Disabling the second grant alone leaves the hosted connector working.
+        harness.configure(profiles=[hosted, {**duet, "enabled": False}])
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": "claude-duet"})).status_code == 401
+        assert rpc(client, "position_check", {}, harness.token(client_id="x", extra={"azp": CLIENT})).status_code == 200
+    actors = sqlite3.connect(json.loads(harness.config_path.read_text())["ledger_file"]).execute(
+        "SELECT DISTINCT actor FROM tool_call ORDER BY actor").fetchall()
+    assert sorted(a for (a,) in actors) == sorted([hosted["id"], duet["id"]])
+    # The hosted connector's profile stays first and never carries its own client.
+    harness.configure(profiles=[duet, hosted])
+    with pytest.raises(ValueError):
+        service.read_config(harness.config_path)
+
+
 def test_recorded_live_check_saves_immutable_record_and_replays(harness):
     pretrade_features.publish([feature_row("2026-09-1%dT10:0%d:00" % (i % 4, i), 12.0, f"k{i}") for i in range(9)],
         harness.pointer, now=RECEIPT)
