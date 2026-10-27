@@ -157,6 +157,18 @@ def test_invalid_json_has_an_evidence_record_instead_of_disappearing(adapter, ra
     assert event.raw == frame.raw == raw and event.issues == ("invalid_json_object",)
 
 
+@pytest.mark.parametrize("bad", [b'{"type":"quote","bid":1e999999999999999999999}',
+                               b'{"type":"timesale","last":1e-999999999999999999999}',
+                               b'{"type":"summary","unknown":1e999999999999999999999}',
+                               b'{"type":"quote","unknown":{"nested":1e999999999999999999999}}'])
+def test_unrepresentable_json_decimal_retains_bad_line_and_adjacent_events(adapter, bad):
+    raw = json.dumps(trade_row()).encode() + b'\n' + bad + b'\n' + json.dumps(quote_row()).encode()
+    frame = adapter.decode_frame(raw, received_at=at(second=10), received_mono_ns=1)
+    assert frame.raw == raw
+    assert [e.kind for e in frame.events] == ["timesale", "invalid", "quote"]
+    assert frame.events[1].raw == bad and frame.events[1].issues == ("invalid_json_object",)
+
+
 @pytest.mark.parametrize("row", [{"type": "summary"}, {"error": "stream refused"},
                                {"type": "heartbeat"}, {"type": "trade"}, {"type": ["quote"]}])
 def test_unsupported_status_or_error_is_retained_and_never_asserts_health(adapter, row):

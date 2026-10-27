@@ -151,7 +151,7 @@ def _decode(line, ordinal):
     try:
         row = json.loads(line.decode("utf-8"), parse_float=Decimal,
                          parse_constant=_reject_constant, object_pairs_hook=_unique_object)
-    except (UnicodeError, ValueError, RecursionError):
+    except (UnicodeError, ValueError, RecursionError, InvalidOperation):
         return Event(ordinal, line, "invalid", None, ("invalid_json_object",))
     if not isinstance(row, dict):
         return Event(ordinal, line, "invalid", None, ("invalid_json_object",))
