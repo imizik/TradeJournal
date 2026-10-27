@@ -291,6 +291,14 @@ def test_uncertain_nearer_contract_cannot_be_skipped_for_farther(change):
     assert result[0] == "contract_data_error"
 
 
+@pytest.mark.parametrize("change", [dict(side=-1), dict(symbol="QQQ"), dict(expiry=date(2030, 1, 10)), dict(adjusted=False, root="SPY1")])
+def test_conflicting_identity_cannot_hide_behind_contract_filters(change):
+    # The OCC identity remains the nearer SPY Jan 7 call at strike 102.
+    conflicting = replace(contract(), **change)
+    snapshot = Chain(at(second=8), (contract(strike=101), conflicting))
+    assert select(signal(), session(), [snapshot], [trade()], at(second=15))[0] == "contract_data_error"
+
+
 def test_adjusted_excluded_duplicates_refused_and_no_farther_expiry_fallback():
     s, c = signal(), contract()
     def choose(items):
@@ -439,6 +447,27 @@ def test_delayed_preentry_print_cannot_cross_but_stale_or_unknown_print_is_unres
     other = ExitExample(position(), session())
     other.batch(at(second=12), [trade("100", when=at(second=12), conditions_known=False)])
     assert other.unresolved
+
+
+@pytest.mark.parametrize("change", [dict(source=at(second=11)), dict(conditions_known=False), dict(feed="iex")])
+def test_pending_exit_still_checks_exposure_validity(change):
+    runner = exit_example()
+    original_intent = runner.intent
+    event = trade("102", when=at(second=14), **change)
+    runner.batch(event.received, [event])
+    assert runner.unresolved and runner.unresolved_reason == "unresolved_reference"
+    assert runner.intent == original_intent and runner.reason == "stop"
+    assert runner.liquidate([quote(when=at(second=15))], at(second=15)) == ("unresolved", None)
+
+
+def test_pending_exit_after_timer_checks_health_without_restarting_intent():
+    runner = ExitExample(position(), session())
+    due = at(10, 2, 10)
+    runner.batch(due)
+    runner.batch(due + timedelta(seconds=1), [trade("103", when=due + timedelta(seconds=1))])
+    assert not runner.unresolved and runner.intent == due and runner.reason == "time"
+    runner.health(healthy=False, heartbeat_gap_seconds=0)
+    assert runner.unresolved and runner.intent == due
 
 
 @pytest.mark.parametrize("sequences,expected", [((1, 2), "stop"), ((2, 1), "target"), ((None, None), "unresolved_event_order"), ((1, 1), "unresolved_event_order")])

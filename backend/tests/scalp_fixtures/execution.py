@@ -105,13 +105,14 @@ def select(signal, session, chains, prints, through):
     ref = reference(prints, session, signal.symbol, chain.received)
     if ref is None:
         return "no_underlying_reference", None, None
-    eligible = [c for c in chain.contracts if c.symbol == signal.symbol and c.side == signal.side
-                and 2 <= (c.expiry - signal.at.astimezone(ET).date()).days <= 5 and not c.adjusted]
     # Conflicting identity fields cannot be trusted to locate a contract. For
     # otherwise consistent identities, metadata on a farther strike cannot
-    # displace a confirmed nearer contract.
-    if any(not c.identity() for c in eligible):
+    # displace a confirmed nearer contract. Validate BEFORE using these fields
+    # to exclude a listing: a bad side/symbol/expiry could hide the nearest one.
+    if any(not c.identity() for c in chain.contracts if not c.adjusted):
         return "contract_data_error", None, None
+    eligible = [c for c in chain.contracts if c.symbol == signal.symbol and c.side == signal.side
+                and 2 <= (c.expiry - signal.at.astimezone(ET).date()).days <= 5 and not c.adjusted]
     if not eligible:
         return "no_expiry", None, None
     expiry = min(c.expiry for c in eligible)
@@ -231,7 +232,7 @@ class ExitExample:
 
     def batch(self, at, prints=()):
         """One complete receipt-time batch; empty batches exercise the timer."""
-        if self.intent is not None or self.unresolved:
+        if self.primary_exit is not None or self.unresolved:
             return
         p = self.position
         if (at < p.entry.received or self.last_received is not None and at <= self.last_received
@@ -240,7 +241,7 @@ class ExitExample:
             return
         self.last_received = at
         due = min(p.entry.received + timedelta(minutes=15), self.session.at(11, 15))
-        if at > due:
+        if self.intent is None and at > due:
             # Fixture caller must deliver the timer; a missed timer is not
             # reconstructed from a later price or assigned an earlier fill.
             self.fail("unresolved_missing_timer")
@@ -264,6 +265,8 @@ class ExitExample:
                 self.fail("unresolved_event_order")
                 return
             crosses.sort()
+        if self.intent is not None:
+            return  # Still exposed: validity checked, original intent preserved.
         reason = crosses[0][1] if crosses else ("time" if at == due else None)
         if reason:
             self.intent, self.reason = at, reason
