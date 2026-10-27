@@ -86,6 +86,13 @@ def test_no_plan_or_an_older_plan_says_so(db):  # noqa: F811
 
 
 def test_the_week_breaks_trades_down_by_origin(db, radar_file):  # noqa: F811
+    # The seeded journal closes this trade three days before today, which is a weekend on a Tuesday or a Wednesday
+    # (and, on a UTC runner, from 8pm New York on a Monday). A week review is Monday to Friday, so move it to that Friday.
+    trade = db.get(Trade, REVIEWED)
+    if (back := trade.closed_at.weekday() - 4) > 0:
+        trade.opened_at, trade.closed_at = trade.opened_at - timedelta(days=back), trade.closed_at - timedelta(days=back)
+        db.add(trade)
+        db.commit()
     _origin_plan(db, REVIEWED, "radar_event", "e7", RADAR_LINE)
     trade = db.get(Trade, REVIEWED)
     week = copilot_review.week_review(trade.closed_at.date().isoformat(), session=db)
