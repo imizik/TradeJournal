@@ -99,7 +99,8 @@ def test_results_options_per_contract_and_stock_on_its_shares():
 
 def test_exits_on_the_underlying_then_the_clock():
     calls = book.check_plan(plan_answer()["plan"], ["NBIS"], at(10, 40), CLOSE)
-    minute = lambda m, lo, hi: {"time": at(10, m), "end_time": at(10, m) + 60, "open": lo, "high": hi, "low": lo, "close": hi}
+    def minute(m, lo, hi):
+        return {"time": at(10, m), "end_time": at(10, m) + 60, "open": lo, "high": hi, "low": lo, "close": hi}
     bars = [minute(41, 117.8, 118.4), minute(42, 116.4, 121.2)]  # the second bar touches both: the invalidation
     found = book.exit_condition(calls, bars, at(10, 40, 10), CLOSE, at(10, 44))
     assert (found["reason"], found["reference"]) == ("invalidation", 116.5)
