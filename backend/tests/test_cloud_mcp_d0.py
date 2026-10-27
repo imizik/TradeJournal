@@ -229,6 +229,12 @@ def test_same_subject_through_a_second_client_is_its_own_profile(
     ])
     with pytest.raises(ValueError):
         d0.read_config(config_path)
+    _write_config(config_path, profiles=[
+        {"subject": "owner-subject", "id": PROFILE_ID, "enabled": True},
+        {"subject": "owner-subject", "id": DUET_PROFILE_ID, "enabled": True, "client_id": CLIENT_ID},
+    ])
+    with pytest.raises(ValueError):
+        d0.read_config(config_path)
 
 
 def test_profile_identity_is_stable_across_tokens_and_server_restart(

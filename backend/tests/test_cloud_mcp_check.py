@@ -255,6 +255,39 @@ def test_second_client_profile_is_a_separate_actor(harness):
     harness.configure(profiles=[duet, hosted])
     with pytest.raises(ValueError):
         service.read_config(harness.config_path)
+    # A second profile naming the top-level client would shadow the hosted one after its revocation.
+    harness.configure(profiles=[hosted, {**duet, "client_id": CLIENT}])
+    with pytest.raises(ValueError):
+        service.read_config(harness.config_path)
+
+
+def test_second_client_checks_and_verdicts_are_its_own(harness):
+    pretrade_features.publish([feature_row("2026-09-1%dT10:0%d:00" % (i % 4, i), 12.0, f"k{i}") for i in range(9)],
+        harness.pointer, now=RECEIPT)
+    hosted = json.loads(harness.config_path.read_text())["profiles"][0]
+    duet = {"subject": SUBJECT, "id": "check_" + str(uuid.uuid4()), "enabled": True, "client_id": "claude-duet"}
+    harness.configure(profiles=[hosted, duet])
+    jo, dt = harness.token(), harness.token(client_id="claude-duet")
+    idea = {**IDEA, "stop": round(SPY_LAST * 0.99, 2), "operation_id": str(uuid.uuid4())}
+    with TestClient(harness.server().streamable_http_app()) as client:
+        jo_check = call(client, "pre_trade_check", idea, jo)["structuredContent"]["check_id"]
+        # Same subject, same operation ID, other client: a new check, not Jo's replayed.
+        duet_raw = call(client, "pre_trade_check", idea, dt)
+        assert not duet_raw.get("isError"), duet_raw
+        duet_result = duet_raw["structuredContent"]
+        assert duet_result["check_id"] != jo_check and not duet_result.get("replayed")
+        # Duet neither sees nor annotates Jo's check; its day review holds only its own.
+        note = {"check_id": jo_check, "verdict": "go", "summary": "Go."}
+        assert call(client, "attach_model_verdict", note, dt)["isError"]
+        assert not call(client, "attach_model_verdict", note, jo)["isError"]
+        listed = {row["check_id"] for row in call(client, "review_checks", {}, dt)["structuredContent"]["checks"]}
+        assert listed == {duet_result["check_id"]}
+        listed = {row["check_id"] for row in call(client, "review_checks", {}, jo)["structuredContent"]["checks"]}
+        assert listed == {jo_check}
+    rows = sqlite3.connect(json.loads(harness.config_path.read_text())["ledger_file"]).execute(
+        "SELECT check_id, actor FROM check_record ORDER BY received_at").fetchall()
+    # Jo's rows keep the subject key its existing ledger uses; Duet's carry its profile ID.
+    assert dict(rows) == {jo_check: SUBJECT, duet_result["check_id"]: duet["id"]}
 
 
 def test_recorded_live_check_saves_immutable_record_and_replays(harness):

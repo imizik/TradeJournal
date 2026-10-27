@@ -37,9 +37,11 @@ allowlist.
 
 Profiles carry an optional `client_id`. A profile with one is matched only by
 tokens from that client, so the same Auth0 subject through Claude becomes a
-separate actor in the Check ledger and never shares hosted Jo's checks, notes
-or shadow decisions. The first profile stays Jo's and uses the top-level
-client; the owner briefing and follow-up paths read it.
+separate actor: its pre-trade checks, verdicts, day reviews, grades, notes,
+shadow decisions and plans are keyed by its own profile ID, and it can neither
+list nor annotate Jo's. Jo's existing rows keep their key. The first profile
+stays Jo's and uses the top-level client (the owner briefing and follow-up
+paths read it); a second profile may not name the top-level client.
 
 In `/etc/tradejournal-check/config.json` append, as the second profile:
 
@@ -49,10 +51,14 @@ In `/etc/tradejournal-check/config.json` append, as the second profile:
 ```
 
 Do the same in `/etc/tradejournal-journal/config.json` with a `d0_<new uuid4>`
-ID. A new profile is a grant change that needs a restart of
-`tradejournal-check.service` and `tradejournal-journal-coach.service`; later
-flipping `enabled` applies on the next call. Revoking Duet is `enabled: false`
-on its profile plus disconnecting the connector in Claude.
+ID. A new profile is a grant change: from the moment the file changes until
+`tradejournal-check.service` and `tradejournal-journal-coach.service` are
+restarted, every token on that server is refused, Jo's included, so edit and
+restart in one step, outside Jo's scheduled reads. Later flipping `enabled`
+on the Check profile applies on the next call; on the journal coach any
+profile change, `enabled` included, refuses every token until its restart.
+Revoking Duet is `enabled: false` on its profiles, the journal restart, and
+disconnecting the connector in Claude.
 
 ## 3. Claude: add both servers as custom connectors
 
@@ -66,11 +72,14 @@ In claude.ai, Customize > Connectors > Add custom connector, twice:
 | OAuth client | Use your own OAuth client, the Claude Duet client ID, secret blank | same |
 
 After signing in, open each connector and set these Check tools to
-**Blocked** so Duet can only read, check and note: `shadow_setup`,
-`shadow_decide`, `market_watch_snapshot`, `market_watch_submit`,
-`stock_alert`, `stock_alert_submit`, every `followup_*` and
-`conditional_plan_*` tool, `jo_briefing_submit`, `settle` and
-`grade_checks`. Allowed: `position_check`, `preopen_watchlist`, `get_notes`,
+**Blocked**: `shadow_setup`, `shadow_decide`, `market_watch_snapshot`,
+`market_watch_submit`, `stock_alert`, `stock_alert_submit`, every
+`followup_*`, `conditional_plan_*` and `jo_*` tool, and `grade_checks`.
+This is the Claude-side half; the server's half is the scopes the Auth0
+client holds (keep `shadow:decide`, `market-watch:*`, `jo:read` and
+`jo:submit` off it, since Claude requests every scope the server advertises)
+and the actor separation above. Nothing Duet does can reach Jo's records
+either way. Allowed: `position_check`, `preopen_watchlist`, `get_notes`,
 `candles`, `pre_trade_check`, `attach_model_verdict`, `review_checks`, and
 both journal tools. Duet inherits the connectors from the account; nothing is
 configured inside Duet.
@@ -90,10 +99,10 @@ watched name that has something new, each with a number and the source. Say
 decides exits. If a tool refuses or is stale, say so instead of guessing.
 
 **Evening debrief.** Every trading day at 16:30 America/New_York: call
-`get_notes` and `review_checks` for today on TradeJournal Check and
-`list_journal_trades` on TradeJournal Journal. Ask me one question about the
-day: the exit I overrode, the plan I skipped, or the check I ran but did not
-follow. Wait for my answer, then draft a three-line journal note in my words
+`get_notes` and `position_check` on TradeJournal Check and
+`list_journal_trades` on TradeJournal Journal; `review_checks` shows only the
+checks you ran yourself. Ask me one question about the day: the exit I
+overrode, the plan I skipped, or the position I added to without a plan. Wait for my answer, then draft a three-line journal note in my words
 and show it to me; I paste it into the journal myself. If I do not answer,
 ask again the next evening with what changed since.
 

@@ -173,6 +173,10 @@ def test_second_client_profile_reads_the_same_grant(setup):
         assert call(client, token(client_id="claude-duet")).status_code == 200
         assert call(client, token()).status_code == 200
         assert call(client, token(client_id="other")).status_code == 401
+    config["profiles"][1]["client_id"] = CLIENT_ID
+    cfg.write_text(json.dumps(config))
+    with pytest.raises(ValueError):
+        journal.read_config(cfg)
 
 
 @pytest.mark.parametrize(

@@ -25,6 +25,7 @@ from cloud_mcp_d0 import (
     SCOPE,
     Strict,
     activated_socket,
+    bound_to_top_level_client,
     profile_key,
     reject_model_credentials,
 )
@@ -88,6 +89,7 @@ class JournalConfig(Strict):
         if (len({profile_key(p) for p in self.profiles}) != len(self.profiles)
                 or len({p.id for p in self.profiles}) != len(self.profiles)):
             raise ValueError("Journal profiles must have distinct subject/client pairs and IDs")
+        bound_to_top_level_client(self)
         if self.publication_file is not None:
             if self.rolling_days is None or any(value is not None for value in (
                 self.snapshot_file, self.snapshot_sha256, self.start_day, self.end_day

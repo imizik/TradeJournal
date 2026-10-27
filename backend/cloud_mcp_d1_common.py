@@ -13,6 +13,7 @@ MAX_RESPONSE_BYTES = 1048576
 
 
 class LinkedProfile(ProfileGrant):
+    client_id: None = None  # D1 readers never bind to a second client.
     principal_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,63}$")
     principal_version: int = Field(ge=1)
 

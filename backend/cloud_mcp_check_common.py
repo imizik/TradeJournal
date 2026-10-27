@@ -11,7 +11,8 @@ import uuid
 
 from pydantic import Field, field_validator, model_validator
 
-from cloud_mcp_d0 import Config, JWKSVerifier, MAX_BYTES, Strict, profile_key, reject_model_credentials
+from cloud_mcp_d0 import (Config, JWKSVerifier, MAX_BYTES, Strict, bound_to_top_level_client, profile_key,
+    reject_model_credentials)
 
 READ_SCOPE = "check:read"
 RUN_SCOPE = "check:run"
@@ -103,6 +104,7 @@ class CheckConfig(Strict):
             raise ValueError("Check profiles must have distinct subject/client pairs and IDs")
         if self.profiles[0].client_id is not None:
             raise ValueError("The first check profile is the hosted connector's and uses the top-level client")
+        bound_to_top_level_client(self)
         if self.market_watch_outbox_dir and not self.market_watch_snapshots_dir:
             raise ValueError("A market-watch outbox requires the market-watch snapshots directory")
         if self.followup_enabled and not (self.market_watch_snapshots_dir and self.market_watch_outbox_dir):

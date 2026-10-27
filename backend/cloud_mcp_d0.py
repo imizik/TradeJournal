@@ -105,12 +105,19 @@ class Config(Strict):
         if (len({profile_key(p) for p in self.profiles}) != len(self.profiles)
                 or len({p.id for p in self.profiles}) != len(self.profiles)):
             raise ValueError("Subjects and synthetic profile IDs must be unique")
+        bound_to_top_level_client(self)
         return self
 
 
 def profile_key(profile):
     """One grant per issuer subject and OAuth client; unset client means the top-level client."""
     return profile.subject, getattr(profile, "client_id", None)
+
+
+def bound_to_top_level_client(config):
+    """A profile naming the top-level client would shadow the hosted profile and survive its revocation."""
+    if any(getattr(p, "client_id", None) == config.client_id for p in config.profiles):
+        raise ValueError("A client-bound profile must name a client other than the top-level client")
 
 
 def allowed_clients(config):
@@ -382,9 +389,12 @@ class JWKSVerifier:
                             and (getattr(p, "client_id", None) or current.client_id) == client), None)
             if profile is None:
                 return None
+            # Record keys: the hosted profile keeps the subject its existing rows
+            # use; a client-bound profile is keyed by its own profile ID.
+            actor = subject if getattr(profile, "client_id", None) is None else profile.id
             return AccessToken(token=token, client_id=client, subject=subject,
                 expires_at=claims["exp"], resource=self.config.resource_url, scopes=scopes.split(),
-                claims={"profile_id": profile.id})
+                claims={"profile_id": profile.id, "actor": actor})
         except (OSError, jwt.PyJWTError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
             # Neither tokens nor issuer responses belong in an error/result log.
             return None
