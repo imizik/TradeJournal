@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { money } from "@/lib/format";
 import { DashboardCard, dashboardLink } from "./dashboard/DashboardCard";
-import { ExitHabitsView, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitHabits";
+import { ExitHabitsView, EXIT_HABIT_VERDICT, EXIT_HABIT_CAVEAT, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitHabits";
 
 // The two proofs from the October 22 end goal, read from /analytics/exit-habits and /radar/proof, and a secondary read
 // (not a third proof), planned against unplanned trades, from /analytics/plan-proof.
@@ -49,11 +49,11 @@ function useJson<T>(path: string) {
   return { body, error };
 }
 
-function VerdictBlock({ verdict, reason, sample, rule, testId }: { verdict: Verdict; reason: string; sample: string; rule: string; testId: string }) {
+function VerdictBlock({ verdict, reason, sample, rule, testId, label }: { verdict: Verdict; reason: string; sample: string; rule: string; testId: string; label?: string }) {
   const v = VERDICT[verdict];
   return <div className="space-y-1.5" data-testid={testId}>
     <div className="flex flex-wrap items-center gap-2">
-      <span className={`rounded-md border px-2 py-0.5 text-sm font-semibold ${v.tone}`}>{v.label}</span>
+      <span className={`rounded-md border px-2 py-0.5 text-sm font-semibold ${v.tone}`}>{label ?? v.label}</span>
       <span className="text-sm">{reason}</span>
     </div>
     <p className="text-xs text-muted-foreground">Sample: {sample}</p>
@@ -75,10 +75,11 @@ function Status({ error, what }: { error: boolean; what: string }) {
 
 function AlertsProof() {
   const { body, error } = useJson<ExitHabitsBody>("/analytics/exit-habits");
-  return <DashboardCard title="Do position alerts help you reconsider?" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
+  return <DashboardCard title="Exit habits and alert follow-up" action={<Link href="/analytics" className={dashboardLink}>Analytics →</Link>}>
     {body ? <div className="space-y-4">
-      <VerdictBlock testId="proof-alerts-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
+      <VerdictBlock testId="proof-alerts-verdict" label={EXIT_HABIT_VERDICT[body.verdict.verdict].label} verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
         sample={`${body.verdict.sample} of the last ${body.window} trades since ${body.go_live} vs ${body.baseline_trades} before`} />
+      <p className="text-xs text-muted-foreground">{EXIT_HABIT_CAVEAT}</p>
       <Counts title={`What you did after ${body.alerts_total} alert${body.alerts_total === 1 ? "" : "s"}`}
         rows={[...Object.entries(RESPONSE), ["unmatched", "Not matched to fills"]]} counts={body.responses} />
       <div className="border-t pt-3"><ExitHabitsView body={body} alertsShown={5} /></div>
