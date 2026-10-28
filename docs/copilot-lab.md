@@ -13,7 +13,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
 - `GET /copilot/status`, `POST /copilot/chat` (Server-Sent Events) and `POST /copilot/transcribe` in
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
-  (`frontend/components/copilot/CopilotLab.tsx`). It is in the nav ("Copilot") only for the owner while the lab is on.
+  (`frontend/components/copilot/CopilotLab.tsx`), laid out as the desk (below). It is in the nav ("Copilot") only for the owner while the lab is on.
 - One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
   It is the full page (`variant="page"`, `CopilotLab.tsx`: Recent, symbol,
   history, deep links) and the panel beside other pages (`variant="panel"`).
@@ -169,8 +169,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
-- **Plans**, at the top of the lab page's home, above Open threads (same
-  conditions: page only, lab on, nothing open or sent). One row per confirmed
+- **Plans**, at the top of the desk's thread list, above Open threads (page
+  only, lab on). One row per confirmed
   copilot plan that is still armed: its entry or invalidation alert is armed,
   its time stop is pending, or the fill linked to its pre-trade plan is an open
   position. Each row shows the symbol and direction, the thesis in one line,
@@ -240,12 +240,12 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   Radar event and investigation ids its rows link to. Browser proof:
   `frontend/e2e/today.spec.ts` (375 and 1440 px); route tests:
   `tests/test_today.py`.
-- **Open threads**, the lab page's home. While the lab is on, no
-  investigation is open and nothing has been sent, the page (not the panel
-  beside Charts or Radar) shows what is live above the conversation. A deep
-  link that brings a prepared question (`?context=…`: a Radar row, a ping, the
-  plan streak chip) opens on that question without Plans or Open threads, so
-  the message box and Send stay on a phone's first screen:
+- **Open threads**, in the desk's thread list under Plans. While the lab is
+  on, the page (not the panel beside Charts or Radar) shows what is live beside
+  the conversation, whether or not one is open. On a phone a deep link that
+  brings a prepared question (`?context=…`: a Radar row, a ping, the plan
+  streak chip) opens on the Thread tab, so the message box and Send stay on
+  the first screen:
   - positions: symbol, instrument, unrealized %, give-back state, and days to
     expiry (options) or time held (stocks);
   - armed alerts: symbol, condition, price, label;
@@ -347,6 +347,33 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   text), first text, longest wait between visible events, total latency, tool
   names, tokens and estimated cost. The UI shows the same metrics under each
   answer.
+
+## The desk
+
+The full page is a desk of three panes beside each other
+(`frontend/components/copilot/CopilotLab.tsx`, layout and look in
+`CopilotLab.module.css`):
+
+- **Threads**: Plans and Open threads (above). They stay in view while a
+  conversation runs; a row or "What matters right now?" opens or asks in the
+  conversation beside it, through the panel's `desk` hand-off.
+- **Conversation**: the page variant of `CopilotPanel.tsx`. On the desk its
+  message box stays in reach while the conversation scrolls.
+- **Context**: the open investigation's linked activity (alerts, time stop,
+  revisits) and a link to Charts; empty until a conversation is saved.
+
+The panes follow the desk's own width: three from 1100 px, two below that
+(Context under Threads), and below 760 px one at a time behind Now / Thread /
+Context tabs. A phone lands on Now unless a deep link brings a conversation.
+While the lab is off only the conversation shows, saying so.
+
+The desk has its own palette (warm graphite, amber as the one accent) and type
+(Instrument Sans, IBM Plex Mono for tabular numbers), scoped to this page
+ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
+only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
+the conversation hand-off, thread-list rows and groups, logged decisions).
+Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone)
+and `frontend/e2e/copilot-plans-board.spec.ts`.
 
 ## How the copilot reasons (system prompt)
 

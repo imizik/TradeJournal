@@ -15,6 +15,7 @@ import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
 import type { CaptureOrigin } from "@/lib/captures";
+import type { DeskHooks } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -250,10 +251,13 @@ function savedFields(messages: LabMessage[], current: Current | null, symbol: st
  * ``home`` (page only) renders above an empty conversation while the lab is on and no investigation is open.
  * ``strip`` (panel only) renders above the conversation: the page's own view of its symbol (Charts' loop).
  * ``look`` (panel only) offers "Look at my chart": the page's chart goes out as an image with its line, in one turn.
+ * ``desk`` (page only) is the Copilot desk's hand-off: its thread list opens investigations or asks through
+ * ``command``, the open investigation goes up through ``onThread``, and its activity shows in the desk's inspector.
  */
-function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look }: {
+function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, onClose, home, strip, look, desk }: {
   link?: PanelLink | null; variant?: "page" | "panel"; pageSymbol?: string; pageContext?: string; onClose?(): void;
   home?: (actions: HomeActions) => ReactNode; strip?: (actions: PanelActions) => ReactNode; look?: () => Promise<ChartLook>;
+  desk?: DeskHooks;
 }) {
   const panel = variant === "panel";
   const { owner } = useAppAccess();
@@ -446,6 +450,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     void follow(pageSymbol, controller.signal, true);
     return () => controller.abort();
   }, [pageSymbol]); // eslint-disable-line react-hooks/exhaustive-deps -- only a change of the page's symbol moves an empty panel
+
+  // The desk's thread list: open a saved investigation or ask across everything, never while a turn runs.
+  useEffect(() => {
+    const command = desk?.command;
+    if (!command || busy || status?.enabled !== true) return;
+    if (command.kind === "open") void resume(command.id);
+    else { setSymbol(""); void send(command.text, ""); }
+  }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives
+
+  // The desk's inspector follows the open investigation.
+  const onThread = desk?.onThread;
+  useEffect(() => {
+    onThread?.(current ? { id: current.id, symbol: symbol || null, title: current.title, refreshKey: linkedKey } : null);
+  }, [onThread, current?.id, current?.title, symbol, linkedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the reported fields, not the whole record
 
   const update = (fn: (last: LabMessage) => LabMessage) =>
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
@@ -719,7 +737,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {current && <ResearchDeeper key={`research-${current.id}`} investigationId={current.id} symbol={symbol} topic={topic}
         onFinished={refreshRecent} onOpenResult={id => void resume(id)} onDiscuss={id => void discuss(id)} />}
 
-      {current && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
+      {current && !desk && <LinkedActivity key={`linked-${current.id}`} investigationId={current.id} refreshKey={linkedKey} />}
 
       {current?.findings && <FindingsView findings={current.findings} source={current.source} createdAt={current.created_at} />}
 
@@ -766,7 +784,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         <div ref={end} />
       </div>
 
-      <div className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1")}>
+      {/* On the desk the box stays in reach while the conversation scrolls; a phone keeps it above the tab bar. */}
+      <div className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1",
+        desk && "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 bg-background py-2 md:bottom-0")}>
       {voice.banner}
       {(attached.length > 0 || attaching) && (
         <div className="flex flex-wrap items-center gap-2" aria-label="Attached screenshots">

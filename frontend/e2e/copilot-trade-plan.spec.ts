@@ -211,6 +211,7 @@ test("the plan card fits a 375 px phone with large tap targets, and Dismiss remo
   await page.setViewportSize({ width: 375, height: 812 });
   const server: Server = { alerts: [], posts: [] };
   await lab(page, server);
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   const card = await askForPlan(page);
   const box = (await card.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -369,6 +370,7 @@ test("size it for me: a risk becomes a contract count at the chosen contract's a
   await expect(sizing).toContainText("Priced at the 6.92 ask ($692 a contract) from the option chain read at 10:00 AM ET.");
   await expect(sizing).toContainText("Confirm puts this size in front of the size note.");
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   await card.screenshot({ path: test.info().outputPath("plan-size-it.png") });
   await card.getByLabel("Risk $").fill("500");
   await expect(sizing).toContainText("Max loss: $500 does not buy one contract at the $692 ask.");
@@ -385,6 +387,7 @@ test("size it for me: a risk becomes a contract count at the chosen contract's a
   // The risk is remembered in this browser for the next card.
   await page.reload();
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turnWith(PLAN, null) }));
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // still a phone after the reload
   const next = await askForPlan(page);
   await expect(next.getByLabel("Risk $")).toHaveValue("1400");
   await expect(next.getByLabel("Size it for me")).toHaveText(
