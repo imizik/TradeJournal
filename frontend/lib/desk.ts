@@ -105,3 +105,45 @@ export async function getThreadPlan(thread: Pick<DeskThreadRef, "id" | "symbol">
       ?? open.find(row => row.plan) ?? open[0] ?? null;
   return { plan, position, quotesAt: board?.quotes_at ?? null, unavailable: !board && !held };
 }
+
+// --------------------------------------------------------------------------- the Context pane
+
+/** The Context pane's tabs: the chart opens first; the timeline and the owner's history wait until asked for. */
+export type ContextTab = "chart" | "timeline" | "history";
+
+/** One thing that touched the thread (``GET /copilot/desk/{id}/timeline``); ``at`` is epoch seconds. */
+export type DeskTimelineRow = {
+  kind: "alert" | "time_stop" | "revisit" | "fill" | "thesis" | "ping" | "decision";
+  at: number; text: string; detail: string | null;
+};
+export type DeskTimeline = { state: "ok"; symbol: string | null; rows: DeskTimelineRow[]; count: number; unavailable: string[]; recent_days: number };
+
+/** The owner's record at the plan's invalidation (``GET /copilot/desk/{id}/history``): won and not won among the past
+ * trades that crossed a level this far from their entry while held, and one sentence from those counts. */
+export type DeskHistory =
+  | { state: "ok"; symbol: string; level: number; side: "below" | "above"; entry: number; entry_from: "planned" | "current";
+      distance_pct: number; trades: number; crossed: number; won: number; not_won: number; recovered: number;
+      median_from_cross_pct: number | null; small: boolean; window_days: number; sentence: string; note: string; simulated: boolean }
+  | { state: "missing" | "unavailable"; symbol?: string; reason: string };
+
+const deskPath = (id: string, part: string) => apiUrl(`/copilot/desk/${encodeURIComponent(id)}/${part}`);
+
+async function deskRead<T>(id: string, part: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(deskPath(id, part), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as T;
+}
+
+export const getDeskTimeline = (id: string, signal?: AbortSignal) => deskRead<DeskTimeline>(id, "timeline", signal);
+export const getDeskHistory = (id: string, signal?: AbortSignal) => deskRead<DeskHistory>(id, "history", signal);
+
+/** Today's picture for the thread as an object URL (the caller revokes it), or the server's reason it is unavailable. */
+export async function getDeskPicture(id: string, signal?: AbortSignal): Promise<{ url: string } | { reason: string }> {
+  const response = await fetch(deskPath(id, "picture"), { cache: "no-store", signal });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    return { reason: typeof body?.detail === "string" ? body.detail : `The chart is unavailable (${response.status}).` };
+  }
+  return { url: URL.createObjectURL(await response.blob()) };
+}
