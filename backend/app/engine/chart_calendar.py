@@ -86,6 +86,17 @@ class ChartCalendar:
             entry = self._months.get((day.year, day.month))
         return entry[1].get(day) if entry else None
 
+    def nonblocking_peek(self, day: date) -> tuple[date, dict] | None:
+        """Return today's in-memory calendar copy without waiting or loading disk."""
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            entry = self._months.get((day.year, day.month))
+            item = entry[1].get(day) if entry else None
+            return (entry[0], dict(item)) if entry and item else None
+        finally:
+            self._lock.release()
+
     def hours(self, day: date) -> dict | None:
         """The normalized day, or None when the calendar is unavailable."""
         key = (day.year, day.month)

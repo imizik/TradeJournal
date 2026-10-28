@@ -111,6 +111,20 @@ class ChartFeed:
                     return saved.data, saved.fetched_at, str(error)
                 raise error from None
 
+    def nonblocking_cache_peek(self):
+        """Return a structural snapshot of the existing cache, or None if busy.
+
+        This deliberately does not refresh LRU state, consult the provider, or
+        expose a path that can populate the cache. Cached payloads are treated as
+        immutable after insertion by ``read``.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return tuple(self._cache.items())
+        finally:
+            self._lock.release()
+
     def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True,
                   stored_session: Callable[[str, date], list[dict] | None] | None = None,
                   volume_profile: Callable[[str, date], chart_rvol.Profile | None] | None = None,

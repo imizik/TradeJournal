@@ -23,6 +23,7 @@ from app.engine.chart_timing import request_timing
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
+from app.engine.opening_cache import peek_opening_cache, peek_opening_observation
 from app.engine.chart_indices import is_index
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS, market_day
@@ -141,6 +142,36 @@ def history(
         fills, truncated = _markers(db, symbol, [data]) if access.is_journal(request) else ([], False)
         data["fills_truncated"] = truncated
         return data
+
+
+@router.get("/research/opening-cache")
+def opening_cache(request: Request, checkpoint: str = Query(..., min_length=20, max_length=20)):
+    """Owner-only, cache-only Tradier opening data handoff."""
+    who = getattr(request.state, "access", None)
+    if (who is not None and not who.owner) or (who is None and access.enabled()):
+        raise HTTPException(403, "Private owner entrance required")
+    try:
+        return peek_opening_cache(chart_feed, chart_calendar, checkpoint)
+    except ValueError:
+        raise HTTPException(422, "Use a current 5-minute opening checkpoint in UTC.") from None
+
+
+@router.get("/research/opening-observation")
+def opening_observation(
+    request: Request, checkpoint: str = Query(..., min_length=20, max_length=20)
+):
+    """Owner-only minute-level cached quote for opening outcome observations."""
+    who = getattr(request.state, "access", None)
+    if (who is not None and not who.owner) or (who is None and access.enabled()):
+        raise HTTPException(403, "Private owner entrance required")
+    try:
+        return peek_opening_observation(chart_feed, checkpoint)
+    except ValueError:
+        raise HTTPException(
+            422, "Use a current minute checkpoint from 09:30 through 10:16 ET in UTC."
+        ) from None
+
+
 
 @router.get("/stream")
 async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=600)):
