@@ -139,7 +139,7 @@ test("while the lab is on the desk is home: Today forwards to it, and Desk leads
 
 test("an empty day collapses every section to its count; a failed section says so and the rest stand", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await today(page, { ...EMPTY, held: { state: "unavailable" }, new: { ...EMPTY.new, thesis: { state: "unavailable" } } });
+  await today(page, { ...EMPTY, held: { state: "unavailable" }, new: { ...EMPTY.new, thesis: { state: "unavailable" } } }, false);
   for (const name of ["Act now", "Plans near a trigger", "New since you looked"]) {
     await expect(section(page, name)).toHaveAttribute("data-empty", "true");
     await expect(section(page, name).getByTestId("today-count")).toHaveText("0");
