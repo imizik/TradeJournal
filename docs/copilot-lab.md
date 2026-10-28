@@ -438,6 +438,37 @@ The full page is a desk of three panes beside each other
     planned entry, says what is missing; the pane never measures from a live
     quote.
 
+**Decision bar** (`components/copilot/DecisionBar.tsx`, above the
+conversation). While the market is open and the open thread's symbol has an
+Act-now row on `GET /today` (give-back fired, invalidation near or hit,
+expires today, time stop due), one bar says what fired and when ("Give-back
+fired at 10:31."), what the plan says ("Your plan says hold while NBIS is
+above 85.00. It is 3.1% above.", from the row's `invalidation`, `time_stop`
+and `latest_alert`), and offers **Holding**, **Exiting** and **Ask why**. Ask
+why puts a question in the message box unsent (the `fill` desk command).
+Holding and Exiting save one day-journal entry of kind `decision` with the
+symbol and a sentence such as "Holding. Give-back fired at 10:31; plan says
+hold above 85.00 (3.1% above)." Entries are immutable, so the save waits 5
+seconds behind "Logged holding · Undo" (leaving the thread inside the window
+still saves); a double tap or retry reuses one `operation_id`. Afterwards the
+bar is one quiet line ("You logged holding at 10:44. Next check: a close below
+85.00."); a decision logged before a later phone alert, an invalidation hit
+or a time stop coming due does not hide the bar. The hold side is read from
+where the level sits (a long put's invalidation is above the price), not from
+the lot's direction.
+Advice only: Exiting places, sizes and sends nothing; its line says to close
+the position in Robinhood, where the fill links to the plan on its own.
+Logging what was decided after each alert is the data that shows whether
+position alerts help.
+
+**Close of day.** After 16:00 New York on a weekday (by `/today`'s `as_of`;
+holidays and early closes are not known here), a thread whose symbol has an
+open position asks "Review: did you follow the plan?" and one with an armed
+plan not yet in a position asks "Added or not, and why?" (`GET
+/copilot/symbol/{symbol}`), instead of the bar. Answer opens a one-line input
+that saves a `reflection` entry for the symbol; Skip hides it for the day in
+this browser. Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
+
 The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
 Context tabs. A phone lands on Now unless a deep link brings a conversation.
@@ -447,7 +478,8 @@ The desk has its own palette (warm graphite, amber as the one accent) and type
 (Instrument Sans, IBM Plex Mono for tabular numbers), scoped to this page
 ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
 only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
-the conversation hand-off, thread-list rows and groups, logged decisions).
+the conversation hand-off, thread-list rows and groups, logged decisions,
+the decision bar's wording).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-list.spec.ts`,
 `frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px) and

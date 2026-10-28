@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
+import DecisionBar from "@/components/copilot/DecisionBar";
 import Inspector from "@/components/copilot/Inspector";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
@@ -50,6 +51,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
+          {on && <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} fill={text => setCommand({ kind: "fill", text, n: ++sent.current })} />}
           {on && <DeskThreadTop thread={thread} />}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
