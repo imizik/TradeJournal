@@ -8,10 +8,8 @@ const ON = {
   key_configured: false, plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
   limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 },
 };
-const THREADS = {
-  as_of: "2026-10-24T15:12:00Z", positions: { state: "ok", count: 0, positions: [] },
-  investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] },
-};
+const DESK = { as_of: "2026-10-24T15:12:00Z", quotes_at: null, quote_issue: null,
+  day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] };
 const TURN = [
   { type: "tool", id: "fake_1_0", name: "get_week_review", input: {}, status: "ok", summary: "week of 2026-10-19: 8 trades -27.00 $ · planned 2/1/5",
     provenance: { source: "SIMULATED fixture", kind: "simulated", as_of: "2026-10-23T15:12:00Z", state: "ok" } },
@@ -26,7 +24,7 @@ const statusAnswer = (page: Page) => page.waitForResponse((response) => response
 async function labOn(page: Page) {
   const chats: { messages: { role: string; content: string }[] }[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: THREADS }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: {
     id: "33333333-3333-4333-8333-333333333333", source: "copilot", title: "Review my week", symbol: null, status: "open", conclusion: null,
@@ -77,8 +75,8 @@ test("Daily Review offers it on a Friday, naming that week, and not on other day
 test("the lab home's Review my week sends one turn and shows the week review tool", async ({ page }) => {
   const chats = await labOn(page);
   await page.goto("/copilot-lab");
-  const home = page.getByRole("region", { name: "Open threads" });
-  await expect(home).toContainText("No open positions.");
+  const home = page.getByRole("navigation", { name: "Thread list" });
+  await expect(home.getByTestId("desk-day")).toBeVisible();
   expect(chats).toHaveLength(0);
   await home.getByRole("button", { name: "Review my week" }).click();
   await expect(page.getByText("Planned vs unplanned first.")).toBeVisible();
