@@ -99,7 +99,7 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]
       } finally { if (symbol === "NVDA") completed++; }
     });
     // No provider history or stream is needed for this navigation journey.
-    await page.route("**/api/backend/charts/history?**", route => route.fulfill({ json: { bars: [], markers: [], exhausted: true } }));
+    await stubExhaustedHistory(page);
     await page.route("**/api/backend/charts/stream?**", route => route.fulfill({ contentType: "text/event-stream", body: "" }));
     await page.goto("/radar?session=2026-10-20");
     await page.getByTestId("radar-event").getByRole("button").first().click();
