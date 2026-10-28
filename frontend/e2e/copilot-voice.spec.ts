@@ -57,8 +57,8 @@ async function lab(page: Page, { configured = true, ...fakes }: Fakes & { config
     }
   }, fakes);
   await page.route("**/copilot/status", (route) => route.fulfill({ json: status(configured) }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: {
-    positions: { state: "ok", count: 0, positions: [] }, investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] }, as_of: null } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: {
     id: "33333333-3333-4333-8333-333333333333", source: "copilot", title: "x", symbol: "NBIS", status: "open", conclusion: null, revision: 1,
@@ -82,7 +82,7 @@ async function lab(page: Page, { configured = true, ...fakes }: Fakes & { config
 async function hold(page: Page, ms = 700) {
   const mic = page.getByTestId("copilot-mic");
   // The thread list loads in after the mic appears (beside it, or on its own tab on a phone): let it settle first.
-  await expect(page.getByText("No open positions.")).toBeAttached();
+  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeAttached();
   await mic.hover();
   const box = (await mic.boundingBox())!;
   await page.mouse.down();
@@ -178,7 +178,7 @@ test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab");
-  await expect(page.getByText("No open positions.")).toBeVisible();
+  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
   const send = (await page.getByRole("button", { name: "Send", exact: true }).boundingBox())!;

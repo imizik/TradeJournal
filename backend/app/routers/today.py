@@ -87,10 +87,11 @@ class SharedQuotes:
 
 # --------------------------------------------------------------------------- sections
 
-def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date) -> dict:
+def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date, book: dict | None = None) -> dict:
+    """``book``: a ``plan_positions.positions`` read the caller already made (the desk's thread list)."""
     from app.engine import plan_positions
     from app.models import Trade
-    book = plan_positions.positions(db, quotes=quotes)
+    book = book or plan_positions.positions(db, quotes=quotes)
     expiring = set()
     for row in book["positions"]:
         trade = db.get(Trade, uuid.UUID(row["trade_id"]))

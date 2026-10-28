@@ -169,28 +169,76 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - Browser proof: `frontend/e2e/copilot-entry.spec.ts` (including a 375 px
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
-- **Plans**, at the top of the desk's thread list, above Open threads (page
-  only, lab on). One row per confirmed
-  copilot plan that is still armed: its entry or invalidation alert is armed,
-  its time stop is pending, or the fill linked to its pre-trade plan is an open
-  position. Each row shows the symbol and direction, the thesis in one line,
-  the last price, the distance to the entry and to the invalidation in % and
-  $ (or "hit at 10:41" once fired), the time stop, and the fill: in position,
-  fill to link (a matching open trade not yet linked to the plan), or waiting
-  for entry. Rows sort nearest to an armed trigger first; a tap opens the
-  plan's investigation in place. It reads `GET /copilot/plans`
-  (`app/engine/copilot_plans.py`): the `plan_role` alerts and time stops by
-  investigation, the plan capture (the time stop's `client_id`, else the
-  newest "Copilot plan" capture for the symbol made with them), its capture
-  link, and one batched quote read (`chart_feed.quote_rows`, as
-  `GET /copilot/quote`). An investigation with several plans shows its latest:
-  the parts made within ten minutes of the newest. The only id out is the
-  investigation's. It refreshes every minute while the page is visible. A plan
-  whose alerts have all fired or been deleted and with no open position drops
-  off, and still shows in its investigation (Linked to this investigation).
-  With nothing armed it says so beside the **Plan a trade** button. Browser
-  proof: `frontend/e2e/copilot-plans-board.spec.ts` (with a 375 px phone
-  check); route tests: `tests/test_copilot_plans.py`.
+- **Thread list**, the desk's left pane (page only, lab on;
+  `components/copilot/ThreadRail.tsx`). One grouped list, in `DESK_GROUPS`
+  order, with one line for the day above it: the market phase, how many rows
+  need a decision, and the plan streak. Groups:
+  - **Pinned**: Briefing (today's pre-market prep when there is one) and
+    Review my week (this week's planned/total entries, the practice line).
+    Pressing one sends one turn: Briefing the fixed **What matters right
+    now?** prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`, "What matters
+    right now across my open positions, armed watches and open
+    investigations? Lead with anything that needs a decision today; say
+    plainly if nothing does."), Review my week its prompt. Opening the list
+    never sends.
+  - **Act now**: open positions the Today screen flags (within 1% of an
+    armed invalidation or past a hit one, expiring today, give-back fired,
+    time stop within 30 minutes). Empty, it says "Clear. Nothing needs a
+    decision right now.", or that positions are unavailable. A `decision`
+    day-journal entry for the symbol logged today moves the row to Watching,
+    unless the invalidation was hit after it.
+  - **Near a trigger**: armed plans not yet in a position within 1% of their
+    entry or invalidation.
+  - **Waiting for you**: unarmed plan drafts. No store keeps them yet, so it
+    stays hidden.
+  - **New since you looked**: Radar events since the last Radar visit and
+    the newest thesis-watch trigger today per investigation. What the owner
+    has opened or marked seen is remembered in this browser only
+    (`localStorage`); seen rows stay, dimmed, below the new ones.
+  - **Watching**: every other open position (its plan's nearest line, or "No
+    plan yet"), armed plan and open investigation (a research job's
+    conclusion is never shown: a model that read web pages wrote it).
+
+  Each row: symbol, instrument (contract, direction or "research"), one value
+  and one status line coloured by what it needs (amber: needs you). A
+  position's value is its own unrealized P&L, an option's from its own mark;
+  its plan levels are on the underlying, named in the status line. Only Act
+  now and Near a trigger rows carry a plan meter: the underlying on the track
+  from the invalidation (left) to the entry (the tick), with room past it.
+  Empty groups other than Act now are left out. A row with an investigation
+  opens it in place; any other follows its link (a Radar event's
+  `/radar?event=<id>`, planning an unplanned position, a trade). **Plan a
+  trade** sits under the groups. It refreshes every minute while visible and
+  reads one owner-only `GET /copilot/desk/threads`
+  (`app/routers/copilot_desk.py`), composed in-process from the Plans board
+  (`copilot_plans.board`), `plan_positions.positions` with the Today
+  screen's Act now rule (`today._act_now`), the open investigations, today's
+  day journal, the Today screen's Radar, thesis-watch, prep and week readers,
+  and the market calendar for the phase, sharing one batched quote read.
+  Each source stands alone: one that fails reads `unavailable` and the list
+  names it. Read-only: no Radar visit, no pings. The only ids out are the
+  investigation, trade and Radar event ids its rows link to. Browser proof:
+  `frontend/e2e/copilot-thread-list.spec.ts` (with a 375 px phone check) and
+  `frontend/e2e/copilot-home.spec.ts`; route tests:
+  `tests/test_copilot_desk.py`.
+- **Plans board read** (`GET /copilot/plans`, `app/engine/copilot_plans.py`):
+  one row per confirmed copilot plan that is still armed: its entry or
+  invalidation alert is armed, its time stop is pending, or the fill linked
+  to its pre-trade plan is an open position. Each row has the symbol and
+  direction, the thesis, the last price, the distance to the entry and to the
+  invalidation in % and $ (or when it was hit), the time stop, and the fill:
+  in position, fill to link (a matching open trade not yet linked to the
+  plan), or waiting. Rows sort nearest to an armed trigger first. It reads
+  the `plan_role` alerts and time stops by investigation, the plan capture
+  (the time stop's `client_id`, else the newest "Copilot plan" capture for
+  the symbol made with them), its capture link, and one batched quote read
+  (`chart_feed.quote_rows`, as `GET /copilot/quote`). An investigation with
+  several plans shows its latest: the parts made within ten minutes of the
+  newest. The only id out is the investigation's. A plan whose alerts have
+  all fired or been deleted and with no open position drops off, and still
+  shows in its investigation (Linked to this investigation). The thread list,
+  the Charts dock and the Today screen read it in process; route tests:
+  `tests/test_copilot_plans.py`.
 - **Plans card on the Dashboard** (`components/dashboard/PlansCard.tsx`),
   near the top of the owner Dashboard above Exit habits, owner-only and shown
   only while the lab is on. One row per open position (Webull left out): the
@@ -240,35 +288,16 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   Radar event and investigation ids its rows link to. Browser proof:
   `frontend/e2e/today.spec.ts` (375 and 1440 px); route tests:
   `tests/test_today.py`.
-- **Open threads**, in the desk's thread list under Plans. While the lab is
-  on, the page (not the panel beside Charts or Radar) shows what is live beside
-  the conversation, whether or not one is open. On a phone a deep link that
-  brings a prepared question (`?context=…`: a Radar row, a ping, the plan
-  streak chip) opens on the Thread tab, so the message box and Send stay on
-  the first screen:
-  - positions: symbol, instrument, unrealized %, give-back state, and days to
-    expiry (options) or time held (stocks);
-  - armed alerts: symbol, condition, price, label;
-  - open investigations: title and conclusion, each a link that opens it in
-    place;
-  - waiting research jobs.
-
-  It reads `GET /copilot/threads`, which returns `{positions, investigations,
-  watches, as_of}` from the no-symbol owner context pack (Owner context,
-  below). A position is cut to the fields above: no account, entry, mark or
+- **Open threads read** (`GET /copilot/threads`): `{positions,
+  investigations, watches, as_of}` from the no-symbol owner context pack
+  (Owner context, below), each open investigation with its last three
+  thesis-watch triggers. The desk showed it before the thread list replaced
+  it; no page reads it now. A position is cut to symbol, instrument,
+  unrealized %, give-back state and its clocks: no account, entry, mark or
   captured plan. Memories and habits are never returned, and the only ids are
   investigations'. It is a page read, not a turn, so the pack's size cap does
   not apply (`owner_context(None, bounded=False)`); each section keeps its row
-  caps. A section the server could not read says so. Fixture mode serves the
-  simulated pack. Replay says it is unavailable.
-
-  Opening reads, never sends: a turn costs money, as with What changed?. One
-  button, **What matters right now?**, starts a new conversation with no
-  symbol and sends one fixed prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`):
-  "What matters right now across my open positions, armed watches and open
-  investigations? Lead with anything that needs a decision today; say plainly
-  if nothing does." Browser proof: `frontend/e2e/copilot-home.spec.ts`
-  (including a 375 px phone check).
+  caps. Fixture mode serves the simulated pack. Replay says it is unavailable.
 - `GET`/`POST /copilot/investigations` and `GET`/`PUT /copilot/investigations/{id}`
   hold saved investigations (below).
 - All these routes are owner-only: they are in no assistant grant
@@ -354,8 +383,8 @@ The full page is a desk of three panes beside each other
 (`frontend/components/copilot/CopilotLab.tsx`, layout and look in
 `CopilotLab.module.css`):
 
-- **Threads**: Plans and Open threads (above). They stay in view while a
-  conversation runs; a row or "What matters right now?" opens or asks in the
+- **Threads**: the thread list (above). It stays in view while a
+  conversation runs; a row or a pinned question opens or asks in the
   conversation beside it, through the panel's `desk` hand-off.
 - **Conversation**: the page variant of `CopilotPanel.tsx`. On the desk its
   message box stays in reach while the conversation scrolls.
@@ -373,7 +402,7 @@ ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
 only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
 the conversation hand-off, thread-list rows and groups, logged decisions).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone)
-and `frontend/e2e/copilot-plans-board.spec.ts`.
+and `frontend/e2e/copilot-thread-list.spec.ts`.
 
 ## How the copilot reasons (system prompt)
 
@@ -447,7 +476,7 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
     research jobs that name it (question jobs) or are linked to one of its
     investigations (reassessments); Radar event jobs name an event, not a
     symbol, so they are not matched. At most 6.
-- **No symbol** (a turn with an empty symbol box, and Open threads): there is
+- **No symbol** (a turn with an empty symbol box, and the Open threads read): there is
   no `history`, and memories are the general ones. `investigations` are the
   open ones across every symbol, newest first, at most 4, each with its symbol.
   The same conclusion rule holds: a copilot conversation's is shown, a
@@ -680,7 +709,7 @@ migration `d2a7e5c9f3b1`), so the owner never has to press the button:
   opens with the practice score while a goal is active, and proposes one
   practice when the counts support it, exactly as above. The answer is saved as
   an open copilot investigation titled `Week review Oct 19–Oct 23` (Monday to
-  Friday), so it shows in Open threads. A proposed practice is kept on the
+  Friday), so it shows in the desk's thread list. A proposed practice is kept on the
   `week_review_auto` row, and `GET /copilot/practice?investigation=<id>`
   returns it as `proposed`, so opening that investigation shows the practice
   card under the answer until it is confirmed (a goal saved from that
@@ -1155,7 +1184,7 @@ prep; Jo's morning briefing (`/morning`) is separate and untouched.
   prep for …" and asks for at most 6 lines from those facts only: what expires
   or sits near a trigger today and one thing to decide before the open. The
   answer, cut to 6 lines, is saved as an open copilot investigation titled
-  `Pre-market prep <date>`, so it shows in Open threads.
+  `Pre-market prep <date>`, so it shows in the desk's thread list.
 - **Ping:** title `Pre-market prep`, body the first two lines; a tap opens
   `/copilot-lab?investigation=<id>`. If the turn fails (an error event,
   including the budget stop, or no text), the ping and the saved record carry
@@ -1777,9 +1806,9 @@ day, and nothing runs when the flag is off.
   (`reassess:<id>:<day>`, the same key as its stale-investigation trigger, so
   one a day; the queue's budget applies when it runs). The queue's own result
   ping is the only other notification.
-- **Lab home:** each open investigation on the Open threads row lists its
-  last three triggers (`watch` on `GET /copilot/threads`: kind, text, time and
-  delivery state).
+- **Lab home:** the desk's thread list shows each investigation's newest
+  trigger today under New since you looked (kind and text), opening the
+  investigation.
 
 Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
 quotes, bars and earnings).

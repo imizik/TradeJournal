@@ -4,6 +4,8 @@
  * bar, inspector and palette build against the types below. See docs/copilot-lab.md#the-desk.
  */
 
+import { apiUrl } from "./api";
+
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
 
@@ -32,7 +34,8 @@ export type DeskTone = "gain" | "loss" | "attention" | "info" | "muted";
 
 /**
  * One row of the thread list. ``meter`` places the live price on the plan's track from the invalidation (0) to the
- * entry (``entry``, 0-100) and beyond; it is absent when there is no plan. Ids say what the row opens.
+ * entry (``entry``, 0-100) and beyond; it is absent when there is no plan. Ids say what the row opens: an investigation
+ * opens in place; otherwise ``path`` is a deep link (a Radar event, planning a position, a trade).
  */
 export type DeskThread = {
   key: string;
@@ -44,11 +47,42 @@ export type DeskThread = {
   status: { text: string; tone: DeskTone };
   meter: { last: number; entry: number; tone: DeskTone } | null;
   investigationId: string | null;
-  tradeId: number | null;
+  tradeId: string | null;
   radarEventId: string | null;
+  path: string | null;
   /** Epoch seconds of the newest change, for "new since you looked". */
   changedAt: number | null;
 };
 
 /** A decision logged from the decision bar; saved as a day-journal entry of kind ``decision``. */
 export type DeskDecision = { symbol: string; choice: "holding" | "exiting"; reason: string; investigationId: string | null; at: string };
+
+/** The day's one line above the groups: the market phase (null when unknown), how many rows need a decision, the plan streak. */
+export type DeskDay = { phase: "pre" | "regular" | "post" | "closed" | null; needYou: number; streak: { current: number; best: number } | null };
+
+/** ``GET /copilot/desk/threads``: every row in group order, and each source's state (one failure reads unavailable). */
+export type DeskThreads = {
+  asOf: string; quotesAt: number | null; quoteIssue: string | null; day: DeskDay; threads: DeskThread[];
+  sections: Record<string, "ok" | "unavailable" | "off">;
+};
+
+type Wire = {
+  as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
+  day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
+  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt"> &
+    { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null })[];
+};
+
+export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads> {
+  const response = await fetch(apiUrl("/copilot/desk/threads"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  const wire = body as Wire;
+  return {
+    asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
+    day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
+    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, ...row }) => ({
+      ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at,
+    })),
+  };
+}
