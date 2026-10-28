@@ -87,10 +87,11 @@ class SharedQuotes:
 
 # --------------------------------------------------------------------------- sections
 
-def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date) -> dict:
+def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date, book: dict | None = None) -> dict:
+    """``book``: a ``plan_positions.positions`` read the caller already made (the desk's thread list)."""
     from app.engine import plan_positions
     from app.models import Trade
-    book = plan_positions.positions(db, quotes=quotes)
+    book = book or plan_positions.positions(db, quotes=quotes)
     expiring = set()
     for row in book["positions"]:
         trade = db.get(Trade, uuid.UUID(row["trade_id"]))
@@ -119,7 +120,10 @@ def _act_now(db: Session, quotes: SharedQuotes, now: float, today: date) -> dict
         if reasons:
             rows.append({"trade_id": row["trade_id"], "symbol": row["symbol"], "contract": row["contract"],
                          "quantity": row["quantity"], "unrealized_usd": row["unrealized_usd"],
-                         "unrealized_pct": row["unrealized_pct"], "reasons": reasons})
+                         "unrealized_pct": row["unrealized_pct"], "reasons": reasons,
+                         # what the Copilot desk's decision bar says beside the reasons: the plan's level and the alert's time
+                         "direction": row["direction"], "invalidation": level, "time_stop": stop,
+                         "latest_alert": row["latest_alert"]})
     return {"state": "ok", "rows": rows, "open_positions": book["count"]}
 
 

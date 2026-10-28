@@ -193,3 +193,18 @@ def test_review_context_preserves_creation_time_and_retrospective_provenance(jou
     assert timeline[1]["retrospective"] is True and timeline[1]["created_at"] == "2026-10-01T12:00:00Z"
     assert plans["not_traded"][0]["later_notes"] == [{"text": "Later thought", "created_at": "2026-10-01T12:02:00Z", "kind": "note"}]
 
+
+
+def test_a_desk_decision_saves_once_per_operation_id(journal):
+    client, _ = journal
+    body = {"operation_id": "decision-NBIS-1", "kind": "decision", "symbol": "NBIS",
+            "text": "Holding. Give-back fired 10:31; plan says hold above 85.00 (3.1% above)."}
+    first = client.post(f"/day-journal/{DAY}/entries", json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["kind"] == "decision" and first.json()["symbol"] == "NBIS"
+    assert client.post(f"/day-journal/{DAY}/entries", json=body).json() == first.json()  # a double tap saves once
+    assert [e["kind"] for e in client.get(f"/day-journal/{DAY}").json()["entries"]] == ["decision"]
+    assert client.post(f"/day-journal/{DAY}/entries", json={**body, "operation_id": "x", "kind": "order"}).status_code == 422
+    with pytest.raises(day_journal.EntryError, match="decision"):
+        with Session(journal[1]) as session:
+            day_journal.append(session, day=DAY, operation_id="y", kind="order", text="t")

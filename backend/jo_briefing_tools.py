@@ -41,11 +41,26 @@ def register(server, config, authenticated, scopes, clock):
         def read(actor):
             now = clock()
             day = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
-            pointer = exchange.read(snapshots, f"jo-morning-{actor}-{day}.json")
-            if pointer.get("profile_id") != actor or pointer.get("day") != day:
-                raise ValueError("Morning packet identity mismatch")
-            packet_id = UUID(pointer["packet_id"])
-            result = exchange.context(snapshots, actor, packet_id, now)
+            try:
+                pointer = exchange.read(snapshots, f"jo-morning-{actor}-{day}.json")
+                if pointer.get("profile_id") != actor or pointer.get("day") != day:
+                    raise ValueError("Morning packet identity mismatch")
+                packet_id = UUID(pointer["packet_id"])
+                result = exchange.context(snapshots, actor, packet_id, now)
+            except FileNotFoundError:
+                raise ToolError("Morning context unavailable [morning_packet_missing]. Today's published packet "
+                                "is not available. No briefing was generated or submitted; this is a publication/read "
+                                "gap, not a save failure. Do not substitute yesterday's packet.") from None
+            except PermissionError:
+                raise ToolError("Morning context unavailable [morning_packet_unreadable]. Check cannot read "
+                                "the published packet; owner investigation is required. No briefing was submitted.") from None
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise ToolError("Morning context unavailable [morning_packet_invalid]. Today's packet failed "
+                                "identity, schema or publication-time validation (including expiry). "
+                                "No briefing was submitted; do not substitute another packet.") from None
+            except OSError:
+                raise ToolError("Morning context unavailable [morning_exchange_unavailable]. The packet exchange "
+                                "could not be read. No briefing was submitted; owner investigation is required.") from None
             try:
                 exchange.record_read(outbox, actor, day, packet_id, now)
             except Exception as error:  # The trace is best-effort; the read itself succeeded.

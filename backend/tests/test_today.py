@@ -109,6 +109,9 @@ def test_the_one_percent_invalidation_rule(client, engine, quotes):  # noqa: F81
     [row] = client.get("/today").json()["act_now"]["rows"]
     assert row["trade_id"] == trade and row["contract"] == "NBIS 10/23/26 100C"
     assert row["reasons"] == [{"kind": "invalidation_near", "text": "1.0% from invalidation 92.30"}]
+    # the decision bar's detail: the plan's level beside the reason
+    assert row["direction"] == "long" and row["invalidation"]["price"] == 92.3 and row["invalidation"]["distance_pct"] == -0.97
+    assert row["time_stop"]["clock"] == "15:30" and row["latest_alert"] is None
     quotes["rows"][0]["last"] = 93.3  # -1.07%
     assert client.get("/today").json()["act_now"]["rows"] == []
 
@@ -146,6 +149,8 @@ def test_expiring_today_and_give_back_fired(client, engine):  # noqa: F811
     body = client.get("/today").json()
     assert reasons(body, expiring) == ["expires_today"]
     assert reasons(body, later) == ["giveback"]
+    [row] = [r for r in body["act_now"]["rows"] if r["trade_id"] == later]
+    assert row["latest_alert"] == {"kind": "giveback", "at": epoch(T0 + timedelta(minutes=90))} and row["invalidation"] is None
     assert body["act_now"]["open_positions"] == 2
 
 

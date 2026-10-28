@@ -179,7 +179,8 @@ experiment, and no new forecasting study. Saving a plan does not activate it.
 
 The owner authorized a daily thinking workflow after the isolated UX audit.
 The private owner UI records morning outlooks, later thoughts, ideas (including
-explicitly untraded ones) and end-of-day reflections in `DayJournalEntry`.
+explicitly untraded ones), end-of-day reflections and, from the Copilot desk's
+decision bar, what was decided after an alert (`decision`) in `DayJournalEntry`.
 The Morning page and Daily Review share the selected day's timeline; Jo's
 briefing remains separately attributed. Entries need no trade or account and
 retain original text and server receipt time. A later update adds a new entry;
@@ -350,6 +351,24 @@ skips completed receipts, rotates bounded pending batches, and tolerates malform
 files without blocking publication. Disable the configuration to stop both
 publication and import; stop/cancel the Jo task separately. Existing exported
 copies remain subject to their expiry and the explicit cleanup procedure.
+
+Morning-context failures distinguish a missing packet (`morning_packet_missing`),
+unreadable files (`morning_packet_unreadable`), invalid/expired context
+(`morning_packet_invalid`) and other exchange I/O failures
+(`morning_exchange_unavailable`). These are read failures before generation or
+submission, not failed briefing saves. Details never include paths, packet text
+or exception messages. The API's morning-loop status/log includes the exception
+class, without its message, so an owner can distinguish a permission failure
+from a validation failure. Check runtime and connector metadata updates remain
+separate from app deployment.
+
+When investigating a missing morning packet, test the configured Check binding
+under the API service's Unix identity, not just root. The API needs its already
+approved read access to that exact configuration and traversal of its parent.
+Replacing a configuration file can discard a named-user ACL even when its
+owner/group/mode look unchanged. Preserve the approved ACL across replacements;
+do not solve this by adding the API user to the Check service group or making
+the configuration public. Restoring production access requires owner approval.
 
 The Daily Review's Jo timeline labels publication **Morning data ready** and
 shows **Morning data read** separately only when both a recorded marker and its

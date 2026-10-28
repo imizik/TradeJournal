@@ -52,6 +52,19 @@ class InputSessionMismatch(ValueError):
     """The offered input belongs to a different session."""
 
 
+class ScheduledReadNotDue(ValueError):
+    """An identified scheduled read cannot consume its operation before its slot."""
+
+
+def scheduled_read_time(operation_id, session_date):
+    if not operation_id.startswith('mw-scheduled-v1:'):
+        return None
+    match = re.fullmatch(r'mw-scheduled-v1:(\d{4}-\d{2}-\d{2}):(09:50|11:00|12:30|14:00)', operation_id)
+    if not match or match[1] != session_date:
+        raise InvalidSubmission('Scheduled operation_id must name the current session and an approved slot')
+    return datetime.fromisoformat(f'{match[1]}T{match[2]}:00').replace(tzinfo=ZoneInfo('America/New_York'))
+
+
 def identifier(prefix):
     return prefix + '_' + str(uuid.uuid4())
 
@@ -303,6 +316,9 @@ class MarketWatchLedger:
             validate_request(request, snapshot)
             if snapshot['session_date'] != now.astimezone(ZoneInfo('America/New_York')).date().isoformat():
                 raise InputSessionMismatch('Input is not current session')
+            due = scheduled_read_time(request['operation_id'], snapshot['session_date'])
+            if due is not None and now < due:
+                raise ScheduledReadNotDue('Scheduled slot has not arrived')
             reads = [r for r in self.rows(db, TABLES[1], actor) if r['session_date'] == snapshot['session_date'] and r['protocol_id'] == snapshot['protocol_id']]
             if request.get('previous_read_id') != (reads[-1]['read_id'] if reads else None):
                 raise ParentConflict('Latest parent required')

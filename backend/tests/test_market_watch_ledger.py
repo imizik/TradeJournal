@@ -31,6 +31,33 @@ def ledger(tmp_path):
     return MarketWatchLedger(Ledger(tmp_path / 'ledger.sqlite'))
 
 
+def test_scheduled_read_waits_until_slot_and_preserves_exact_recovery(ledger):
+    from market_watch_ledger import ScheduledReadNotDue
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    req = request(inp['input_id'], operation_id='mw-scheduled-v1:2026-10-14:11:00')
+    due = NOW + timedelta(hours=1)
+    with pytest.raises(ScheduledReadNotDue):
+        ledger.submit(ACTOR, req, lambda: due - timedelta(microseconds=1))
+    # Timing guard neither consumes the operation nor changes age/quality flags.
+    saved = ledger.submit(ACTOR, req, lambda: due)
+    assert saved['received_at'] == due.isoformat()
+    recovered = ledger.submit(ACTOR, req, lambda: due + timedelta(days=1))
+    assert recovered['replayed'] and recovered['read_id'] == saved['read_id']
+    assert len(ledger.export(ledger.ledger.path, ACTOR)['reads']) == 1
+
+
+@pytest.mark.parametrize('operation_id', [
+    'mw-scheduled-v1:2026-10-13:09:50', 'mw-scheduled-v1:2026-10-14:09:46',
+    'mw-scheduled-v1:invalid',
+])
+def test_scheduled_operation_cannot_relabel_session_or_slot(ledger, operation_id):
+    from market_watch_ledger import InvalidSubmission
+    inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
+    with pytest.raises(InvalidSubmission, match='current session'):
+        ledger.submit(ACTOR, request(inp['input_id'], operation_id=operation_id), lambda: NOW)
+    assert ledger.export(ledger.ledger.path, ACTOR)['reads'] == []
+
+
 def test_atomic_concurrent_retry_restart_and_next_day_recovery(ledger):
     inp = ledger.serve(ACTOR, fixture_snapshot(), lambda: NOW)
     req = request(inp['input_id'])

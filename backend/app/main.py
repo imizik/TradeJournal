@@ -294,10 +294,10 @@ async def _maybe_start_jo_morning(app_: FastAPI):
         while True:
             try:
                 await asyncio.to_thread(runner.run_once)
-            except Exception:
+            except Exception as error:
                 # Never log record contents or configuration paths.
-                runner.last_error = "Morning briefing pass unavailable"
-                logging.getLogger(__name__).warning("Morning briefing pass unavailable")
+                runner.last_error = f"Morning briefing pass unavailable ({type(error).__name__})"
+                logging.getLogger(__name__).warning("%s", runner.last_error)
             await asyncio.sleep(30)
     return asyncio.create_task(loop())
 
@@ -502,6 +502,8 @@ from app.routers import copilot_plans as copilot_plans_router  # owner-only Plan
 app.include_router(copilot_plans_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import copilot_practice as copilot_practice_router  # owner-only practice goal (Review my week)
 app.include_router(copilot_practice_router.router, prefix="/copilot", tags=["copilot lab"])
+from app.routers import copilot_desk as copilot_desk_router  # owner-only desk thread list
+app.include_router(copilot_desk_router.router, prefix="/copilot", tags=["copilot lab"])
 from app.routers import today as today_router  # owner-only Today screen; composes existing readers, read-only
 app.include_router(today_router.router, prefix="/today", tags=["today"])
 from app.routers import replay as replay_router  # owner-only Watch your day clips; read-only
