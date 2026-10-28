@@ -73,7 +73,7 @@ TOOL_ARGUMENTS = {
     "conditional_plan_cancel": ({"plan_id"}, set()),
     "stock_alert": ({"alert_id"}, set()),
     "stock_alert_submit": ({"alert_id", "stance", "summary", "invalidation", "notify"}, set()),
-    "market_watch_snapshot": (set(), set()),
+    "market_watch_snapshot": (set(), {"scheduled_slot"}),
     "market_watch_submit": ({"operation_id", "input_id", "view", "main", "alternative", "invalidation", "change_summary", "forecasts", "message_intent", "prompt_version"}, {"previous_read_id", "correction_of_read_id", "model_id", "phone_summary"}),
     "candles": ({"symbol", "interval"}, {"bars"}),
     "shadow_setup": ({"candidate_id"}, set()),
@@ -557,19 +557,30 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
                 raise ToolError('Stock review/export refused; retry identical content only to recover') from None
 
         from market_watch_ledger import (MarketWatchLedger, MessageBudgetExceeded, FullMarketRequired, write_read_notice,
-            InvalidSubmission, ParentConflict, OperationConflict, InputUnavailable, InputSessionMismatch)
+            InvalidSubmission, ParentConflict, OperationConflict, InputUnavailable, InputSessionMismatch,
+            ScheduledReadNotDue)
         from app.engine.market_watch_snapshot import read_latest_snapshot
         market_ledger = MarketWatchLedger(ledger)
 
         @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
             meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("market_watch_snapshot")}]})
-        async def market_watch_snapshot() -> dict[str, Any]:
+        async def market_watch_snapshot(scheduled_slot: Literal['09:50', '11:00', '12:30', '14:00'] | None = None) -> dict[str, Any]:
             """Freeze an actor-bound market input receipt. Never call between shadow_setup and shadow_decide.
             Public SPY/QQQ evidence and own latest read/message-intent context only.
-            No provider requests, trades or delivery. Context recovers the same-session parent and message budget."""
+            No provider requests, trades or delivery. Context recovers the same-session parent and message budget.
+            For a scheduled run, pass its scheduled_slot. An early wake returns not_due and retry_at,
+            without issuing input. Wait until retry_at using the host's wait capability, then read once.
+            If waiting is unavailable, report an early-wake timing gap; never save an early slot or invent a retry."""
             checked = await authenticated("market_watch_snapshot")
             try:
-                snapshot = await asyncio.to_thread(read_latest_snapshot, config.market_watch_snapshots_dir, clock())
+                now = clock()
+                if scheduled_slot is not None:
+                    hour, minute = map(int, scheduled_slot.split(':'))
+                    due = now.astimezone(ET).replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if now < due:
+                        return {"status": "not_due", "reason": "scheduled_slot_not_due",
+                            "server_time": now.isoformat(), "retry_at": due.isoformat()}
+                snapshot = await asyncio.to_thread(read_latest_snapshot, config.market_watch_snapshots_dir, now)
                 if snapshot is None:
                     context = await asyncio.to_thread(market_ledger.context, checked.claims["profile_id"], clock)
                     return {"status": "unavailable", "reason": "no_current_session_snapshot", "context": context}
@@ -620,6 +631,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
                     "detail": "Cannot submit a new read against IEX evidence."}
             except MessageBudgetExceeded:
                 raise ToolError("Daily message-intent budget exhausted; resubmit the read with message_intent=none") from None
+            except ScheduledReadNotDue:
+                raise ToolError("Market read refused [scheduled_read_not_due]; not saved. Wait until the named ET slot, "
+                                "then fetch market_watch_snapshot with scheduled_slot and reconsider from its fresh input. "
+                                "Keep the same operation_id. If waiting is unavailable, report a timing gap; never relabel the run.") from None
             except InvalidSubmission as exc:
                 # Only this typed validator error contains safe server-authored fields/rules.
                 # Never expose arbitrary ValueError/SQLite text or submitted values.

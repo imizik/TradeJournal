@@ -351,6 +351,24 @@ files without blocking publication. Disable the configuration to stop both
 publication and import; stop/cancel the Jo task separately. Existing exported
 copies remain subject to their expiry and the explicit cleanup procedure.
 
+Morning-context failures distinguish a missing packet (`morning_packet_missing`),
+unreadable files (`morning_packet_unreadable`), invalid/expired context
+(`morning_packet_invalid`) and other exchange I/O failures
+(`morning_exchange_unavailable`). These are read failures before generation or
+submission, not failed briefing saves. Details never include paths, packet text
+or exception messages. The API's morning-loop status/log includes the exception
+class, without its message, so an owner can distinguish a permission failure
+from a validation failure. Check runtime and connector metadata updates remain
+separate from app deployment.
+
+When investigating a missing morning packet, test the configured Check binding
+under the API service's Unix identity, not just root. The API needs its already
+approved read access to that exact configuration and traversal of its parent.
+Replacing a configuration file can discard a named-user ACL even when its
+owner/group/mode look unchanged. Preserve the approved ACL across replacements;
+do not solve this by adding the API user to the Check service group or making
+the configuration public. Restoring production access requires owner approval.
+
 The Daily Review's Jo timeline labels publication **Morning data ready** and
 shows **Morning data read** separately only when both a recorded marker and its
 timestamp exist. Publication does not wake Jo; the read does not establish the

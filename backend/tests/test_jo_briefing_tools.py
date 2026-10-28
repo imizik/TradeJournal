@@ -96,6 +96,26 @@ def result(client, name, args, token):
     return value["structuredContent"]
 
 
+@pytest.mark.parametrize('error,code', [
+    (FileNotFoundError, 'morning_packet_missing'),
+    (PermissionError, 'morning_packet_unreadable'),
+    (ValueError, 'morning_packet_invalid'),
+    (OSError, 'morning_exchange_unavailable'),
+])
+def test_morning_read_failure_names_stage_without_leaking_details(personal, monkeypatch, error, code):
+    h, config, _, _, _ = personal
+    def fail(*args):
+        raise error('private-sentinel /private/config.json')
+    monkeypatch.setattr(exchange, 'read', fail)
+    with TestClient(h.server().streamable_http_app()) as client:
+        response = call(client, 'jo_morning_context', {}, h.token(scope=SCOPES))
+    assert response['isError']
+    message = response['content'][0]['text']
+    assert f'[{code}]' in message and 'submitted' in message
+    assert 'private-sentinel' not in message and '/private/' not in message
+    assert not list(Path(config.market_watch_outbox_dir).iterdir())
+
+
 def test_end_to_end_pending_import_reopen_and_receipt_recovery(personal):
     h, config, engine, packet, memory = personal
     token = h.token(scope=SCOPES)
