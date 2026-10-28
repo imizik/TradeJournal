@@ -1,5 +1,5 @@
 {
-  "commit": "cc8cf4a7a438fee4acd5b9e182050e3d542fd0e2",
-  "date": "2026-10-26",
-  "note": "Reconciled 746e8428..cc8cf4a7 (21 code commits, #480-#505: Today screen, plans board, plan streak, plan linking, Review my week and its automatic run, practice goal, trade origin, notification policy, thesis watch, pre-market prep, Radar alerts, option candidates, personal decision replay, Factory replay adapter). Most PRs updated their own docs. Fixed: feature-map phone tab bar (owner gets Today, assistant Dashboard); background-jobs now names thesis watch as an API-owned task. Not checked: every prose claim in the per-PR sections of copilot-lab, radar, charts-workspace, strategy-factory and personal-decision-replay; deploy/README env notes; live host states. Changed-domain reconciliation, not an exhaustive audit."
+  "commit": "e40b122cd213bd231237db591c2ef8f11c84667f",
+  "date": "2026-10-28",
+  "note": "Reconciled cc8cf4a7..e40b122c (31 code commits, #499-#547: Copilot desk shell, thread list, header, Context pane and kept proposal cards; model and backend pickers with the daily API budget; images, Read it back, Explain this candle, Watch your day, pings with pictures, draw the plan, Size it for me; shadow book; Radar rules v1 kit; Duet profiles; CI shards). Most PRs updated their own docs. Fixed in feature-map: copilot tool count (seventeen), the proposal outcome route, the backend picker test. Not checked: every prose claim in the per-PR sections of copilot-lab, radar and charts-workspace; deploy/duet notes; research notes; live host states."
 }
