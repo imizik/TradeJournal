@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import PlanLadder, { daysTo } from "@/components/copilot/PlanLadder";
 import { getThreadPlan, type DeskPosition, type DeskThreadPlan, type DeskThreadRef } from "@/lib/desk";
 import type { PlanBoardRow } from "@/lib/copilot";
@@ -108,7 +108,9 @@ export function ThreadHead({ thread, data, draft = false }: { thread: DeskThread
  * Reads ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` when the thread opens or its activity changes, then
  * each minute while the page is visible. Nothing for a conversation across everything with no plan.
  */
-export default function DeskThreadTop({ thread, draft = false }: { thread: DeskThreadRef | null; draft?: boolean }) {
+export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false }: {
+  thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean;
+}) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
   const id = thread?.id, symbol = thread?.symbol ?? null, refreshKey = thread?.refreshKey;
   useEffect(() => {
@@ -131,7 +133,8 @@ export default function DeskThreadTop({ thread, draft = false }: { thread: DeskT
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
       <ThreadHead thread={thread} data={data} draft={draft} />
-      {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} />}
+      {hero}
+      {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact} />}
     </div>
   );
 }

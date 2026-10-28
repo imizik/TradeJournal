@@ -29,9 +29,10 @@ function save(day: string, write: DayJournalWrite, keepalive = false) {
  * Act-now reason (``GET /today``), it says what fired and what the plan says, and logs Holding or Exiting as a ``decision``
  * day-journal entry after a short Undo window. After the close it asks one review question instead and saves the answer
  * as a ``reflection``. Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message
- * box, unsent.
+ * box, unsent. ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest
+ * of the thread (the plan ladder shrinks to one line while it asks).
  */
-export default function DecisionBar({ symbol, fill }: { symbol: string | null; fill(text: string): void }) {
+export default function DecisionBar({ symbol, fill, onActive }: { symbol: string | null; fill(text: string): void; onActive?(asking: boolean): void }) {
   const [today, setToday] = useState<TodayBody | null>(null);
   const [entries, setEntries] = useState<DayJournalEntry[]>([]);
   const [review, setReview] = useState<Review | null>(null);
@@ -81,6 +82,18 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
     if (left) void save(left.day, left.pending.write, true).catch(() => undefined);
   }, []);
 
+  // Asking = market hours, an Act-now reason for this symbol, and no decision logged since it fired.
+  const asking = (() => {
+    if (!symbol || !today || pending || afterClose(today.as_of) || today.act_now.state !== "ok") return false;
+    const row = today.act_now.rows.find(r => r.symbol === symbol);
+    if (!row) return false;
+    const trigger = deskDecision(row).trigger;
+    const logged = [...entries].reverse().find(e => e.symbol === symbol && e.kind === "decision");
+    return !(logged && decisionChoice(logged.text) && !(trigger !== null && Date.parse(logged.created_at) / 1000 < trigger));
+  })();
+  useEffect(() => { onActive?.(asking); }, [asking, onActive]);
+  useEffect(() => () => onActive?.(false), [onActive]);
+
   if (!symbol || !today) return null;
   const day = today.day;
   const mine = entries.filter(e => e.symbol === symbol);
@@ -101,7 +114,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
   if (afterClose(today.as_of)) {
     if (!review) return null;
     const reflected = mine.find(e => e.kind === "reflection");
-    if (reflected) return <p data-testid="desk-review-done" className="mb-3 text-sm text-muted-foreground">You reviewed {symbol} at {hhmm(reflected.created_at)}.</p>;
+    if (reflected) return <p data-testid="desk-review-done" className="text-sm text-muted-foreground">You reviewed {symbol} at {hhmm(reflected.created_at)}.</p>;
     if (skipped) return null;
     const question = review.kind === "position" ? "Review: did you follow the plan?" : "Added or not, and why?";
     const skip = () => { setSkipped(true); try { localStorage.setItem(skipKey(day, symbol), "1"); } catch { /* skipped for this visit only */ } };
@@ -111,7 +124,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
       if (await send({ operation_id: `reflection-${uid()}`, kind: "reflection", symbol, text })) { setAnswering(false); setAnswer(""); }
     };
     return (
-      <section aria-label="Close of day" data-testid="desk-review" className="mb-3 rounded-lg border border-primary/40 bg-card p-3">
+      <section aria-label="Close of day" data-testid="desk-review" className="rounded-lg border border-primary/40 bg-card p-3">
         <p className="text-sm font-medium text-foreground">{question}</p>
         {answering ? (
           <form className="mt-2 flex flex-col gap-2 sm:flex-row" onSubmit={event => { event.preventDefault(); void submit(); }}>
@@ -142,7 +155,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
   if (pending) {
     const undo = () => { if (timer.current) clearTimeout(timer.current); pendingRef.current = null; setPending(null); };
     return (
-      <p role="status" data-testid="desk-decision-pending" className="mb-3 flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
+      <p role="status" data-testid="desk-decision-pending" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
         Logged {pending.choice}
         {!sending && <>
           <span aria-hidden>·</span>
@@ -152,7 +165,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
     );
   }
   if (logged && loggedChoice && !stale) {
-    return <p data-testid="desk-decision-logged" className="mb-3 text-sm text-muted-foreground">{words.after(loggedChoice, hhmm(logged.created_at))}</p>;
+    return <p data-testid="desk-decision-logged" className="text-sm text-muted-foreground">{words.after(loggedChoice, hhmm(logged.created_at))}</p>;
   }
 
   const choose = (choice: DeskDecision["choice"]) => {
@@ -169,7 +182,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
   };
 
   return (
-    <section aria-label="Decision" data-testid="desk-decision" className="mb-3 rounded-lg border border-primary/50 bg-card p-3">
+    <section aria-label="Decision" data-testid="desk-decision" className="rounded-lg border border-primary/50 bg-card p-3">
       <p className="text-sm font-medium text-primary">{words.fired}</p>
       {words.others.length > 0 && <p className="mt-0.5 text-xs text-muted-foreground">{words.others.join(" · ")}</p>}
       <p className="mt-1 text-sm text-foreground">{words.plan ?? "No plan on file for this position."}</p>
