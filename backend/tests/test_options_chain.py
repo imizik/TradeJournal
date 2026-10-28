@@ -351,7 +351,17 @@ TRADIER_OPTION_FIELDS = re.compile(
     r"""["'](root_symbol|contract_size|expiration_type|smv_vol|mid_iv|bid_iv|ask_iv|bidsize|asksize|bid_date|ask_date)["']"""
     r"""|/markets/options/"""
 )
-TRADIER_ADAPTERS = {"engine/tradier.py", "engine/options_chain.py"}
+# The passive cache is also a provider boundary: it copies raw equity quote
+# sizes/timestamps without refreshing them. It must not grow an option reader.
+TRADIER_ADAPTERS = {"engine/tradier.py", "engine/options_chain.py", "engine/opening_cache.py"}
+TRADIER_OPTIONS_ONLY_FIELDS = re.compile(
+    r"""["'](root_symbol|contract_size|expiration_type|smv_vol|mid_iv|bid_iv|ask_iv)["']"""
+    r"""|/markets/options/"""
+)
+
+
+def test_passive_equity_cache_does_not_read_option_fields():
+    assert not TRADIER_OPTIONS_ONLY_FIELDS.search((APP / "engine/opening_cache.py").read_text())
 
 
 def test_tradier_option_field_names_appear_only_in_tradier_adapters():
