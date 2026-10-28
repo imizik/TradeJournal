@@ -142,3 +142,20 @@ def test_bad_store_never_stops_the_api(monkeypatch, tmp_path):
     monkeypatch.setattr(tradier, "TRADIER_API_KEY", "test")
     app_ = SimpleNamespace(state=SimpleNamespace())
     assert asyncio.run(main._maybe_start_radar(app_)) is None and app_.state.radar is None
+
+
+def test_live_receipt_records_zero_events_and_detector_failure(tmp_path, monkeypatch):
+    runner, store, _ = _runner(tmp_path)
+    monkeypatch.setattr(runner, "detect", lambda *args: ([], []))
+    first = runner.run_once()
+    receipts, configs = store.detection_evidence()
+    assert receipts[first]["origin"] == "live" and receipts[first]["status"] == "ok"
+    assert receipts[first]["event_ids"] == [] and receipts[first]["hours"] == OPEN
+    assert configs[receipts[first]["config_digest"]]["universe"] == runner.universe
+    def fail(*args):
+        raise RuntimeError("synthetic detector failure")
+    monkeypatch.setattr(runner, "detect", fail)
+    second = runner.run_once()
+    receipts, _ = store.detection_evidence()
+    assert store.passes()[-1]["status"] == "ok"
+    assert receipts[second]["status"] == "failed"

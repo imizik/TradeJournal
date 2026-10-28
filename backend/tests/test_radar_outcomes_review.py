@@ -10,12 +10,16 @@ from scripts import radar_outcomes_review as rv
 def _row(event_id, session, value, symbol, movers=0.0):
     return {"event_id": event_id, "session_date": session, "rule_version": "radar-rules-v1", "kind": "relative_to_spy",
             "direction": "up", "symbols": [symbol], "first_seen_at": f"{session}T14:00:00.000Z",
-            "horizons": {"60m": {"event": value, "movers": movers}}}
+            "horizons": {"60m": {"event": value, "movers": movers}},
+            "evidence_verified": True, "config_digest": "frozen"}
 
 
 ROWS = [_row("a", "2026-10-27", 3.0, "AAA"), _row("b", "2026-10-27", -2.0, "BBB"), _row("c", "2026-10-28", 1.0, "CCC"),
         _row("d", "2026-10-28", -0.5, "AAA"), _row("old", "2026-10-20", 9.0, "OLD"),
         {**_row("nohorizon", "2026-10-28", 0.0, "NNN"), "horizons": {}}]
+
+ROWS += [{"record_type": "session", "session_date": d, "rule_version": "radar-rules-v1",
+          "verified": True, "config_digest": "frozen"} for d in ("2026-10-20", "2026-10-27", "2026-10-28")]
 
 
 def test_the_question_ranks_each_side_within_the_range_and_dedupes_symbols():
@@ -76,3 +80,15 @@ def test_a_dry_run_prints_the_question_and_runs_nothing(tmp_path, monkeypatch, c
     monkeypatch.setattr(research_job, "run", lambda *a, **k: pytest.fail("dry run"))
     assert rv.main([str(_outcomes(tmp_path)), "--since", "2026-10-27", "--dry-run"]) == 0
     assert json.loads(capsys.readouterr().out)["symbols"] == ["AAA", "CCC", "BBB"]
+
+
+def test_legacy_only_file_and_unverified_events_never_build_a_review():
+    event = _row("legacy", "2026-10-27", 3.0, "AAA")
+    assert rv.question_for([event], "2026-10-27", None) is None
+    session = {"record_type": "session", "session_date": "2026-10-27", "rule_version": "radar-rules-v1",
+               "verified": True, "config_digest": "frozen"}
+    event.pop("evidence_verified")
+    assert rv.question_for([event, session], "2026-10-27", None) is None
+    event["evidence_verified"] = True
+    session["verified"] = False
+    assert rv.question_for([event, session], "2026-10-27", None) is None

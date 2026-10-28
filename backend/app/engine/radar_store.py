@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+import hashlib
 from pathlib import Path
 import sqlite3
 import time
@@ -23,10 +24,17 @@ APPLICATION_ID = 0x52414431  # RAD1: the isolated Radar recorder file; foreign f
 RETENTION_SESSIONS = 20
 UNIVERSE_PATH = Path(__file__).resolve().parent.parent / "data" / "radar_universe.json"
 
-TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback", "event_news"}
+TABLES = {"pass", "quote", "event", "event_revision", "visit", "feedback", "event_news", "detection_config", "detection_receipt"}
 RATINGS = ("useful", "already_knew", "too_late", "irrelevant")
 NEWS_STATUSES = ("found", "none_found", "unavailable")
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS detection_config(digest TEXT PRIMARY KEY, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS detection_receipt(pass_id INTEGER PRIMARY KEY REFERENCES pass(id),
+  config_digest TEXT NOT NULL REFERENCES detection_config(digest), payload TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS detection_config_no_update BEFORE UPDATE ON detection_config BEGIN SELECT RAISE(ABORT,'immutable detection config'); END;
+CREATE TRIGGER IF NOT EXISTS detection_config_no_delete BEFORE DELETE ON detection_config BEGIN SELECT RAISE(ABORT,'immutable detection config'); END;
+CREATE TRIGGER IF NOT EXISTS detection_receipt_no_update BEFORE UPDATE ON detection_receipt BEGIN SELECT RAISE(ABORT,'immutable detection receipt'); END;
+CREATE TRIGGER IF NOT EXISTS detection_receipt_no_delete BEFORE DELETE ON detection_receipt BEGIN SELECT RAISE(ABORT,'immutable detection receipt'); END;
 CREATE TABLE IF NOT EXISTS pass(id INTEGER PRIMARY KEY AUTOINCREMENT, session_date TEXT NOT NULL,
   started_at TEXT NOT NULL, finished_at TEXT NOT NULL, universe_version TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('ok','partial','failed','skipped')),
@@ -223,6 +231,39 @@ class RadarStore:
                 yield db
         finally:
             db.close()
+
+    def append_detection(self, pass_id: int, *, universe: dict, rules: dict, hours: dict | None,
+                         status: str, event_ids: list[str], recorded_at: str, origin: str = "replay") -> None:
+        """No backfill: only the live runner explicitly supplies origin=live after detection.
+
+        A crash before this receipt leaves the pass unverified. Config bytes are saved
+        once by content digest, so a reused version label cannot rewrite history.
+        """
+        if origin not in ("live", "replay") or status not in ("ok", "failed", "skipped"):
+            raise ValueError("invalid detection receipt")
+        config = _json({"universe": universe, "rules": rules})
+        digest = hashlib.sha256(config.encode()).hexdigest()
+        payload = _json({"pass_id": pass_id, "config_digest": digest, "origin": origin, "status": status,
+                         "event_ids": event_ids, "hours": hours, "recorded_at": recorded_at})
+        with self._db() as db:
+            if db.execute("SELECT 1 FROM pass WHERE id=?", (pass_id,)).fetchone() is None:
+                raise ValueError("detection pass missing")
+            db.execute("INSERT OR IGNORE INTO detection_config VALUES(?,?)", (digest, config))
+            db.execute("INSERT INTO detection_receipt VALUES(?,?,?)", (pass_id, digest, payload))
+
+    def detection_evidence(self) -> tuple[dict[int, dict], dict[str, dict]]:
+        """Metadata only; old read-only stores are accepted without schema writes."""
+        with self._db() as db:
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"detection_receipt", "detection_config"} <= tables:
+                return {}, {}
+            receipts = {r[0]: json.loads(r[1]) for r in db.execute("SELECT pass_id,payload FROM detection_receipt")}
+            configs = {}
+            for digest, payload in db.execute("SELECT digest,payload FROM detection_config"):
+                if hashlib.sha256(payload.encode()).hexdigest() != digest:
+                    raise ValueError("detection config digest mismatch")
+                configs[digest] = json.loads(payload)
+            return receipts, configs
 
     def append_pass(self, record: RadarPass, quotes: list[RadarQuote] = ()) -> int:
         """One pass and its quote rows in one transaction; returns the pass id."""

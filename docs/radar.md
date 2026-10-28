@@ -287,6 +287,14 @@ backfills the morning.
 
 ### Outcome scoring
 
+The October 28 evidence repair adds per-pass detector receipts and frozen
+rule/universe snapshots. Only complete, verified live sessions count, including
+zero-event sessions; legacy/replay and incomplete sessions stay explicitly
+unverified. `--census-only` reports metadata without prices or output writes.
+The first 20 qualifying sessions form one review window. This does not switch
+v0 to v1, change alerts, or authorize deployment. See the
+[evidence and rollback boundary](../research/radar-outcomes/spec.md#october-28-evidence-accounting-repair).
+
 `backend/scripts/radar_outcomes.py /abs/path/radar.sqlite --out /abs/path/outcomes.jsonl` opens the store
 read-only and scores each recorded event of a completed session at its first-seen pass: the return
 against SPY at +30 min, +60 min and the close, signed in the event's direction, beside the plain Movers

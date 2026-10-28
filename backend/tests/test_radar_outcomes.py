@@ -1,12 +1,13 @@
 """Radar outcome scorer on a synthetic store: signed returns against SPY, horizons, the Movers and random
 comparisons, exclusions, the append-only output and the per-version read-out, with hand-worked numbers."""
 from datetime import UTC, datetime
+from dataclasses import asdict
 import hashlib
 import json
 
 import pytest
 
-from app.engine import radar_movers
+from app.engine import radar_movers, radar_rules
 from app.engine.chart_math import ET
 from app.engine.radar_store import RadarStore
 from scripts import radar_outcomes as ro
@@ -51,6 +52,18 @@ def _event(store, event_id, kind, direction, symbols, first_seen, rule="radar-ru
                         "summary": "", "measures": {}, "evidence": [], "coverage": {}, "chart": {}})
 
 
+def _certify(store, hours=None, origin="live", failed=()):
+    receipts, _ = store.detection_evidence()
+    for p in store.passes():
+        if p['id'] in receipts:
+            continue
+        ids = [e['event_id'] for e in store.events(p['session_date']) if e['first_seen_at'] == p['finished_at']]
+        store.append_detection(p['id'], universe=UNIVERSE, rules=asdict(radar_rules.V1),
+                               hours=hours or {"status": "open", "open": 570, "close": 960},
+                               status="failed" if p['id'] in failed else "ok", event_ids=ids,
+                               recorded_at=p['finished_at'], origin=origin)
+
+
 FLAT = {s: 100.0 for s in PREV}
 
 
@@ -65,10 +78,12 @@ def store(tmp_path, monkeypatch):
     _event(s, "up_aaa", "relative_to_spy", "up", ["AAA"], start)
     _event(s, "down_fff", "relative_to_spy", "down", ["FFF"], start)
     _event(s, "pair", "group_move", "up", ["AAA", "BBB"], start)
+    _certify(s)
     return s
 
 
 def _rows(store, today="2026-10-28"):
+    _certify(store)
     return {r["event_id"]: r for r in ro.score_store(RadarStore(store.path, read_only=True), UNIVERSE, set(), today)}
 
 
@@ -127,9 +142,9 @@ def test_main_appends_once_skips_today_and_never_writes_the_store(store, tmp_pat
     first = out.read_text().splitlines()
     capsys.readouterr()
     ro.main([str(store.path), "--out", str(out), "--today", "2026-10-28"])
-    assert out.read_text().splitlines() == first and len(first) == 3
+    assert out.read_text().splitlines() == first and len(first) == 4
     printed = json.loads(capsys.readouterr().out)
-    assert printed["scored_now"] == 0 and printed["versions"]["radar-rules-v1"]["events"] == 3
+    assert printed["scored_now"] == 0 and printed["versions"]["radar-rules-v1"]["excluded_events"] == 3
     assert hashlib.sha256(store.path.read_bytes()).hexdigest() == before
 
 
@@ -139,6 +154,10 @@ def test_the_read_out_is_per_rule_version_and_keeps_calibration_sessions_out():
                 "horizons": {"60m": {"event": value, "movers": movers, "random": 0.0}}}
     rows = [row("a", "radar-rules-v0", "2026-10-22", 5.0, 0.0), row("b", "radar-rules-v0", "2026-10-26", 1.0, 0.0),
             row("c", "radar-rules-v1", "2026-10-27", -1.0, 1.0)]
+    for r in rows:
+        r.update(evidence_verified=True, config_digest="frozen")
+    rows += [{"record_type": "session", "rule_version": r["rule_version"], "session_date": r["session_date"],
+              "verified": True, "config_digest": "frozen"} for r in list(rows)]
     out = ro.summarize(rows)
     v0, v1 = out["radar-rules-v0"], out["radar-rules-v1"]
     assert (v0["events"], v0["sessions"]) == (1, 1)
