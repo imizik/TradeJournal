@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { confirmedElsewhere, createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { cn } from "@/lib/utils";
@@ -56,6 +56,10 @@ export function sizedNote(sized: string, note: string): string {
   return both.length <= SIZE_MAX ? both : `${both.slice(0, SIZE_MAX - 1).trimEnd()}…`;
 }
 
+/** A confirmed card's saved part results; parts it never ran start idle. */
+const restored = (outcome: ProposalOutcome | null): Record<Part, Result> =>
+  ({ plan: IDLE, entry: IDLE, invalidation: IDLE, timeStop: IDLE, ...outcome?.parts });
+
 /** Under a price the owner drew on Charts: "from your drawing" while the card's price is theirs, else what they drew. */
 function FromDrawing({ name, drawn, value }: { name: string; drawn: number | null; value: string }) {
   // Only the invalidation was drawn: the trigger is the copilot's.
@@ -70,25 +74,28 @@ function FromDrawing({ name, drawn, value }: { name: string; drawn: number | nul
  * plan (the capture route) and arms its entry and invalidation alerts (the alerts route, as a watch does). A time stop
  * the server can read as a time ("out by 15:30", "45m", "2 days") is shown before Confirm and saved as a timed ping;
  * other wording stays a note in the plan. Each part reports its own result, and only a failed part is retried.
- * Nothing is saved or armed before Confirm.
+ * Nothing is saved or armed before Confirm. A saved card comes back as it was left (``plan.outcome``): confirmed shows
+ * its fields and each part's result (a failed part can still be retried), dismissed stays hidden. ``onOutcome``
+ * reports a Confirm's results or a Dismiss so the investigation keeps them.
  */
-export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, candidates = null, origin, drawn = null, onDone }: {
+export default function TradePlanCard({ plan, investigationId, alertsSupported, history = null, candidates = null, origin, drawn = null, onDone, onOutcome }: {
   plan: TradePlan; investigationId: string | null; alertsSupported: boolean; history?: LevelHistory | null;
   /** The turn's option candidates, offered as a pick list for the contract beside the copilot's own wording. */
   candidates?: OptionCandidates | null;
   /** What prompted the conversation; the saved plan records it (docs/copilot-lab.md § Origin). */
   origin?: CaptureOrigin;
   /** The levels the owner drew on Charts for this plan ("Plan this"): shown beside the prices, flagged where they differ. */
-  drawn?: DrawnPlan | null; onDone(): void;
+  drawn?: DrawnPlan | null; onDone(): void; onOutcome(outcome: ProposalOutcome): void;
 }) {
-  const [dismissed, setDismissed] = useState(false);
-  const [thesis, setThesis] = useState(plan.thesis);
-  const [contract, setContract] = useState(plan.contract ?? "");
+  const saved = plan.outcome?.state === "confirmed" ? plan.outcome : null;
+  const [dismissed, setDismissed] = useState(plan.outcome?.state === "dismissed");
+  const [thesis, setThesis] = useState(saved?.fields?.thesis ?? plan.thesis);
+  const [contract, setContract] = useState(saved?.fields?.contract ?? plan.contract ?? "");
   const picks = (candidates?.picks ?? []).filter(p => p.label !== plan.contract);
-  const [entry, setEntry] = useState(String(plan.entry_trigger.price));
-  const [stop, setStop] = useState(String(plan.invalidation.price));
-  const [timeStop, setTimeStop] = useState(plan.time_stop ?? "");
-  const [size, setSize] = useState(plan.size_note ?? "");
+  const [entry, setEntry] = useState(saved?.fields?.entry ?? String(plan.entry_trigger.price));
+  const [stop, setStop] = useState(saved?.fields?.invalidation ?? String(plan.invalidation.price));
+  const [timeStop, setTimeStop] = useState(saved?.fields?.time_stop ?? plan.time_stop ?? "");
+  const [size, setSize] = useState(saved?.fields?.size_note ?? plan.size_note ?? "");
   // Size it for me: the risk this browser last used; the card is client-only, so it reads storage on mount.
   const [risk, setRisk] = useState(() => savedRisk());
   const [sizeEdited, setSizeEdited] = useState(false);  // the owner's own size note after sizing wins over the count
@@ -96,10 +103,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const [setup, setSetup] = useState<CaptureSetup | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [picked, setAccount] = useState("");
-  const [results, setResults] = useState<Record<Part, Result>>({ plan: IDLE, entry: IDLE, invalidation: IDLE, timeStop: IDLE });
+  const [results, setResults] = useState<Record<Part, Result>>(() => restored(saved));
   // The server's reading of the time stop, for the words it was asked about; a failed read leaves it a note.
   const [preview, setPreview] = useState<{ text: string; read: TimeStopPreview | null } | null>(null);
-  const clientId = useRef(newClientId());  // one plan per card: a retried save returns the first one
+  // One plan per card, its id kept with it: a save retried here, after a reload or from another window returns the first one.
+  const clientId = useRef(plan.client_id ?? newClientId());
   useEffect(() => { fetchSetup().then(setSetup).catch(() => setSetupError(true)); }, []);
   const stopText = timeStop.trim();
   useEffect(() => {
@@ -137,6 +145,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const reading = alertsSupported && !!stopText && preview?.text !== stopText;
   const timed = alertsSupported && !reading && preview?.read?.due_at ? preview.read : null;
   const parts: Part[] = alertsSupported ? ["plan", "entry", "invalidation", ...(timed ? ["timeStop" as const] : [])] : ["plan"];
+  // A restored card also lists the parts it ran, whatever this window reads now.
+  const rows = (Object.keys(PART_LABEL) as Part[]).filter(p => parts.includes(p) || results[p].state !== "idle");
   const finished = parts.every(p => results[p].state === "done");
   const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
@@ -185,7 +195,14 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const note = [`Thesis: ${thesis.trim()}`, contract && `Contract: ${contract}.`, "From a Copilot Lab plan card."]
     .filter(Boolean).join(" ").slice(0, 500);
 
-  async function run(part: Part): Promise<boolean> {
+  /** What the investigation keeps once a Confirm or a retry finishes: each part's result and the fields as confirmed. */
+  function report(all: Record<Part, Result>) {
+    const ran = Object.fromEntries(Object.entries(all).filter(([, r]) => r.state === "done" || r.state === "failed")
+      .map(([part, r]) => [part, { state: r.state, text: r.text.slice(0, 500) }]));
+    onOutcome({ state: "confirmed", parts: ran, fields: { thesis: thesis.trim(), contract, entry, invalidation: stop, time_stop: timeStop, size_note: size } });
+  }
+
+  async function run(part: Part): Promise<Result> {
     setResults(r => ({ ...r, [part]: { state: "working", text: "" } }));
     try {
       let text: string;
@@ -211,18 +228,26 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         text = `Set: ${plan.symbol} ${levelText(level)}.`;
         onDone();
       }
-      setResults(r => ({ ...r, [part]: { state: "done", text } }));
-      return true;
+      const done: Result = { state: "done", text };
+      setResults(r => ({ ...r, [part]: done }));
+      return done;
     } catch (failure) {
-      setResults(r => ({ ...r, [part]: { state: "failed", text: failure instanceof Error ? failure.message : "Not done." } }));
-      return false;
+      const failed: Result = { state: "failed", text: failure instanceof Error ? failure.message : "Not done." };
+      setResults(r => ({ ...r, [part]: failed }));
+      return failed;
     }
+  }
+
+  async function retry(part: Part) {
+    report({ ...results, [part]: await run(part) });
   }
 
   /** The plan first: its alerts are armed only once it is saved, so a failed save leaves nothing armed without a plan. */
   async function savePlanThenAlerts() {
-    if (!(await run("plan"))) return;
-    for (const part of parts.slice(1)) if (results[part].state !== "done") await run(part);
+    const all = { ...results, plan: await run("plan") };
+    if (all.plan.state !== "done") return report(all);
+    for (const part of parts.slice(1)) if (results[part].state !== "done") all[part] = await run(part);
+    report(all);
     // Charts labels the levels this plan was drawn from, and shows its alerts.
     const detail: PlanConfirmed = { symbol: plan.symbol, side: plan.direction, entry: entryLevel.price, invalidation: stopLevel.price, drawn };
     window.dispatchEvent(new CustomEvent(PLAN_CONFIRMED, { detail }));
@@ -230,6 +255,16 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
 
   async function confirm() {
     if (!ready || started) return;
+    setResults(r => ({ ...r, plan: { state: "working", text: "" } }));
+    // Another window may have confirmed this card already: show what it did instead of saving and arming it again.
+    const elsewhere = investigationId ? await confirmedElsewhere(investigationId, plan.id) : null;
+    if (elsewhere) {
+      const f = elsewhere.fields;
+      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); }
+      setResults(restored(elsewhere));
+      onOutcome(elsewhere);
+      return;
+    }
     await savePlanThenAlerts();
   }
 
@@ -333,7 +368,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       {problem && !locked && <p role="alert" className="text-xs text-amber-300">{problem}</p>}
       {started && (
         <ul aria-label="Plan results" className="space-y-1">
-          {parts.map(part => {
+          {rows.map(part => {
             const r = results[part];
             return (
               <li key={part} className="flex flex-wrap items-center gap-2 text-xs">
@@ -342,7 +377,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
                 </span>
                 {r.text && <span className={r.state === "failed" ? "text-amber-300" : "text-muted-foreground"}>{r.text}</span>}
                 {r.state === "failed" && (
-                  <button type="button" onClick={() => void (part === "plan" ? savePlanThenAlerts() : run(part))} disabled={busy}
+                  <button type="button" onClick={() => void (part === "plan" ? savePlanThenAlerts() : retry(part))} disabled={busy}
                     className="min-h-11 rounded border px-3 py-1 text-foreground disabled:opacity-40">Retry {PART_LABEL[part].toLowerCase()}</button>
                 )}
               </li>
@@ -355,7 +390,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
           <button type="button" onClick={() => void confirm()} disabled={!ready}
             className="min-h-11 rounded bg-primary px-4 py-2 text-primary-foreground disabled:opacity-40">
             {!investigationId && alertsSupported ? "Saving…" : "Confirm"}</button>
-          <button type="button" onClick={() => setDismissed(true)}
+          <button type="button" onClick={() => { setDismissed(true); onOutcome({ state: "dismissed" }); }}
             className="min-h-11 rounded border px-4 py-2 text-muted-foreground hover:text-foreground">Dismiss</button>
           <span className="col-span-2 text-xs text-muted-foreground">Nothing is saved or armed until you confirm.</span>
         </div>

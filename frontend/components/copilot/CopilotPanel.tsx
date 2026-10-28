@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
-  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
+  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
+  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, X } from "lucide-react";
@@ -14,7 +14,7 @@ import ResearchDeeper from "@/components/copilot/ResearchDeeper";
 import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
-import type { CaptureOrigin } from "@/lib/captures";
+import { newClientId, type CaptureOrigin } from "@/lib/captures";
 import type { DeskHooks } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -468,6 +468,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const update = (fn: (last: LabMessage) => LabMessage) =>
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
 
+  /** A card was confirmed or dismissed: the conversation keeps it, and a saved investigation records it at once. A card
+   * from the turn still running is not saved yet; the save at the turn's end carries it. */
+  function recordOutcome(id: string, outcome: ProposalOutcome) {
+    setMessages(list => list.map(m => m.proposals?.some(p => p.id === id)
+      ? { ...m, proposals: m.proposals.map(p => p.id === id ? { ...p, outcome } : p) } : m));
+    if (!current || running.current) return;
+    void saveOutcome(current.id, id, outcome).catch(() => setSaveState({ state: "error",
+      message: "What you did with that card was not saved, so after a reload it may offer Confirm again (a retried Confirm does not save a plan or memory twice)." }));
+  }
+
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
@@ -524,7 +534,15 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       await streamTurn(history, about.trim().toUpperCase() || null, event => {
         if (event.type === "text") update(last => ({ ...last, content: last.content + event.delta }));
         else if (event.type === "progress") update(last => ({ ...last, progress: event.text }));
-        else if (event.type === "proposal") update(last => ({ ...last, proposals: [...(last.proposals ?? []), event] }));
+        // Each card gets its one id for its replayable saves here, and keeps it in the saved investigation. Its id is
+        // made unique in the conversation, which keeps its outcome: the plan backend numbers calls per turn.
+        else if (event.type === "proposal") setMessages(list => {
+          const taken = new Set(list.flatMap(m => m.proposals ?? []).map(p => p.id));
+          let id = event.id;
+          for (let n = 2; taken.has(id); n += 1) id = `${event.id}.${n}`;
+          const last = list[list.length - 1];
+          return [...list.slice(0, -1), { ...last, proposals: [...(last.proposals ?? []), { ...event, id, client_id: newClientId() }] }];
+        });
         else if (event.type === "tool") update(last => {
           const tools = last.tools ?? [];
           const at = tools.findIndex(t => t.id === event.id);
@@ -772,10 +790,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}
-                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)}
+                onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ) : (
               <ProposalCard key={proposal.id} proposal={proposal} investigationId={current?.id ?? null}
-                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)} />
+                alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)}
+                onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Evidence tools={message.tools ?? []} />
             {message.metrics && <Metrics metrics={message.metrics} />}
