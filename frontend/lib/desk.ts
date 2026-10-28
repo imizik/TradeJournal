@@ -4,7 +4,9 @@
  * bar, inspector and palette build against the types below. See docs/copilot-lab.md#the-desk.
  */
 
-import { apiUrl } from "./api";
+import type { PlanPosition } from "@/components/dashboard/PlansCard";
+import { apiUrl } from "@/lib/api";
+import type { PlanBoardRow, PlansBoard } from "@/lib/copilot";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
@@ -85,4 +87,53 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at,
     })),
   };
+}
+
+/**
+ * The open thread's plan and position, for the thread header and plan ladder. An option's ``mark`` and ``avg_entry``
+ * are a contract each (the premium x 100), as the journal keeps them; a stock's are dollars a share.
+ */
+export type DeskPosition = PlanPosition & {
+  option?: { side: string; strike: number; expiry: string } | null;
+  mark?: number | null; avg_entry?: number | null; days_held?: number;
+};
+export type DeskThreadPlan = {
+  /** The Plans board row for this investigation; its ``last`` and levels are the symbol's own (the underlying's). */
+  plan: PlanBoardRow | null;
+  position: DeskPosition | null;
+  quotesAt: number | null;
+  /** Neither read answered, so "no plan" would be a guess. */
+  unavailable: boolean;
+};
+
+async function readJson<T>(path: string, signal?: AbortSignal): Promise<T | null> {
+  try {
+    const response = await fetch(apiUrl(path), { cache: "no-store", signal });
+    return response.ok ? await response.json() as T : null;
+  } catch (failure) {
+    if (signal?.aborted) throw failure;
+    return null;
+  }
+}
+
+/**
+ * ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` for one thread. The plan is the board row for this
+ * investigation. The position is the open one in its symbol: while that plan is in a position, preferably the one whose
+ * plan has the same invalidation; with no plan on the board, any open position in the symbol; an armed plan not yet
+ * entered shows none, so another trade's position is never shown as this plan's.
+ */
+export async function getThreadPlan(thread: Pick<DeskThreadRef, "id" | "symbol">, signal?: AbortSignal): Promise<DeskThreadPlan> {
+  const [board, held] = await Promise.all([
+    readJson<PlansBoard>("/copilot/plans", signal),
+    thread.symbol ? readJson<{ positions: DeskPosition[] }>("/copilot/plans/positions", signal) : Promise.resolve(null),
+  ]);
+  const plan = board?.plans.find(row => row.investigation_id === thread.id) ?? null;
+  const symbol = thread.symbol ?? plan?.symbol ?? null;
+  const open = (held?.positions ?? []).filter(row => row.symbol === symbol);
+  let position: DeskPosition | null = null;
+  if (!plan) position = open[0] ?? null;
+  else if (plan.position === "in_position")
+    position = open.find(row => plan.invalidation && row.plan?.invalidation?.price === plan.invalidation.price)
+      ?? open.find(row => row.plan) ?? open[0] ?? null;
+  return { plan, position, quotesAt: board?.quotes_at ?? null, unavailable: !board && !held };
 }

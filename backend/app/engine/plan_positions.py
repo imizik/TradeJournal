@@ -11,7 +11,10 @@ distance uses one batched underlying quote read, as the lab's Plans board does.
 
 A position with no plan carries the one-tap link page when plans are suggested
 for it (``plan_nudges.candidates``), else the plan-this-position deep link the
-nudge opens. Read-only; the only id out is each row's trade id.
+nudge opens. Each row also carries the book's mark and average entry (dollars a
+share, or a contract: the premium x 100, as the journal keeps them), an
+option's strike, side and expiry, and the days held, for the Copilot desk's
+thread header. Read-only; the only id out is each row's trade id.
 """
 
 from datetime import UTC, datetime
@@ -97,6 +100,7 @@ def positions(db: Session, quotes=None) -> dict:
             "trade_id": str(trade.id), "symbol": trade.ticker,
             "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
             "instrument": trade.instrument_type, "direction": row["direction"], "quantity": row["quantity"],
+            "option": row.get("option"), "mark": row["mark"], "avg_entry": row["avg_entry"], "days_held": row["days_held"],
             "unrealized_usd": row["unrealized_usd"], "unrealized_pct": row["unrealized_pct"],
             "giveback": giveback, "latest_alert": latest,
             "plan": None, "link_path": None, "plan_path": None,
