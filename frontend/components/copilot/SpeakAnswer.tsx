@@ -32,7 +32,7 @@ function prime() {
  */
 export function useSpeakAnswer({ ready, turn, message, busy, listening, disabled }: {
   ready: boolean; turn: number; message: LabMessage | null; busy: boolean; listening: boolean; disabled: boolean;
-}): { available: boolean; stop(): void; button: ReactNode; setting: ReactNode } {
+}): { available: boolean; speaking: boolean; stop(): void; button: ReactNode; setting: ReactNode } {
   // The settings are read in the browser; the speaker renders only once ``ready`` (the lab's status, which only the
   // browser reads), so the server's render and the first client render agree.
   const [on, setOn] = useState(() => typeof window !== "undefined" && speakOn());
@@ -108,5 +108,5 @@ export function useSpeakAnswer({ ready, turn, message, busy, listening, disabled
     </label>
   );
 
-  return { available, stop, button, setting };
+  return { available, speaking, stop, button, setting };
 }

@@ -2,11 +2,11 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AUTO_WEEK_REVIEW_TITLE, asOfText, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
+  AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
 } from "@/lib/copilot";
 import Link from "next/link";
-import { Eye, ImagePlus, Loader2, X } from "lucide-react";
+import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
 import { useAppAccess } from "@/components/AccessProvider";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
@@ -15,7 +15,7 @@ import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
 import { newClientId, type CaptureOrigin } from "@/lib/captures";
-import type { DeskHooks } from "@/lib/desk";
+import { getDeskPicture, type DeskHooks } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
@@ -25,10 +25,6 @@ const remember = (id: string | null) => {
   try { if (id) window.localStorage.setItem(CURRENT_KEY, id); else window.localStorage.removeItem(CURRENT_KEY); } catch { /* convenience only */ }
 };
 const shortTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-const KIND_TONE: Record<string, string> = {
-  recorded: "bg-sky-500/10 text-sky-300", fetched: "bg-emerald-500/10 text-emerald-300",
-  cached: "bg-muted text-muted-foreground", simulated: "bg-amber-500/10 text-amber-300", replay: "bg-violet-500/10 text-violet-300", saved: "bg-teal-500/10 text-teal-300",
-};
 const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
 const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 12)} [clipped]`;
 const UNAVAILABLE = new Set(["off", "unavailable", "failed", "error", "ungrouped", "not_configured"]);
@@ -62,6 +58,7 @@ function inline(text: string) {
 }
 
 const BULLET = /^\s*[-*] /;
+const NOTE = /^_\(([\s\S]*)\)_$/; // a label the server adds ("Simulated model …"), shown quietly
 
 /** Paragraphs and bullet lists; a run of bullet lines is a list even under a heading line in the same block. */
 function Prose({ text }: { text: string }) {
@@ -80,41 +77,65 @@ function Prose({ text }: { text: string }) {
     <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
       {runs.map((run, i) => run.list
         ? <ul key={i} className="list-disc space-y-1 pl-5">{run.lines.map((line, j) => <li key={j}>{inline(line.replace(BULLET, ""))}</li>)}</ul>
-        : <p key={i} className="whitespace-pre-wrap">{inline(run.lines.join("\n").replace(/^_\(([\s\S]*)\)_$/, "($1)"))}</p>)}
+        : NOTE.test(run.lines.join("\n"))
+          ? <p key={i} className="text-xs text-muted-foreground">{run.lines.join("\n").replace(NOTE, "($1)")}</p>
+          : <p key={i} className="whitespace-pre-wrap">{inline(run.lines.join("\n"))}</p>)}
     </div>
   );
 }
 
-function Evidence({ tools }: { tools: ToolEvent[] }) {
-  if (!tools.length) return null;
+/** An answer in the copilot's format (docs/copilot-lab.md § How the copilot reasons): the verdict and the headline, the
+ * body, and a plain Changes if line. An answer without the format reads as plain text, as before. */
+function Answer({ text }: { text: string }) {
+  const parts = answerParts(text);
+  if (!parts) return <Prose text={text} />;
   return (
-    <details className="group mt-2 text-xs">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-muted-foreground">
-        <span className="font-medium">Evidence</span>
-        {tools.map(tool => {
-          const missing = tool.status === "error" || UNAVAILABLE.has(tool.provenance?.state ?? "");
-          return (
-            <span key={tool.id} className={cn("rounded px-1.5 py-0.5", missing ? "bg-rose-500/10 text-rose-300" : tool.status === "running" ? "bg-muted text-muted-foreground" : KIND_TONE[tool.provenance?.kind ?? "cached"])}>
-              {TOOL_LABEL[tool.name] ?? tool.name}{tool.status === "running" ? " …" : missing ? " · unavailable" : ` · ${tool.provenance?.kind}`}
-            </span>
-          );
-        })}
-        {tools.flatMap(tool => tool.looked_at ?? []).length > 0 && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-foreground/80">Looked at: {tools.flatMap(tool => tool.looked_at ?? []).join(", ")}</span>
-        )}
-        <span className="group-open:hidden">▸</span>
+    <div className="space-y-2" data-testid="copilot-answer">
+      <p className="flex items-baseline gap-2">
+        <span data-testid="copilot-verdict" className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
+          {parts.verdict}
+        </span>
+        <strong className="text-sm font-semibold leading-snug text-foreground">{parts.headline}</strong>
+      </p>
+      {parts.body && <Prose text={parts.body} />}
+      {parts.changesIf && <p className="text-sm text-muted-foreground">Changes if {parts.changesIf}</p>}
+    </div>
+  );
+}
+
+/** What the answer read, folded into one line. The line still says what was unavailable, stale, partial, simulated or a
+ * replay; opening it lists each source and the turn's model, timings and cost. */
+function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics }) {
+  const read = tools.filter(tool => tool.name !== "propose_plan"); // a proposal is its card, not a source
+  if (!read.length && !metrics) return null;
+  const missing = (tool: ToolEvent) => tool.status === "error" || UNAVAILABLE.has(tool.provenance?.state ?? "");
+  const count = (test: (tool: ToolEvent) => boolean) => read.filter(test).length;
+  const unavailable = count(missing), stale = count(t => !missing(t) && t.provenance?.state === "stale");
+  const partial = count(t => !missing(t) && t.provenance?.state === "partial"), reading = count(t => t.status === "running");
+  const kinds = new Set(read.map(t => t.provenance?.kind));
+  const looked = read.flatMap(t => t.looked_at ?? []);
+  const line = [`Sources · ${read.length || "none"}`, unavailable && `${unavailable} unavailable`, stale && `${stale} stale`,
+    partial && `${partial} partial`, kinds.has("simulated") && "simulated", kinds.has("replay") && "replay", reading && "reading…"]
+    .filter(Boolean).join(" · ");
+  return (
+    <details className="group mt-2 text-xs" data-testid="copilot-sources">
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-muted-foreground hover:text-foreground sm:min-h-0">
+        {line}<span aria-hidden className="group-open:rotate-90">▸</span>
       </summary>
       <ul className="mt-1.5 space-y-1 border-l pl-3 text-muted-foreground">
-        {tools.map(tool => (
+        {read.map(tool => (
           <li key={tool.id}>
-            <span className="text-foreground">{TOOL_LABEL[tool.name] ?? tool.name}</span>
+            <span className={missing(tool) ? "text-rose-300" : "text-foreground"}>
+              {TOOL_LABEL[tool.name] ?? tool.name} · {tool.status === "running" ? "reading" : missing(tool) ? "unavailable" : tool.provenance?.kind}
+            </span>
             {tool.input ? ` (${Object.values(tool.input).flat().join(", ")})` : ""}: {tool.summary ?? tool.status}
             {tool.provenance && <> · {tool.provenance.source} · as of {asOfText(tool.provenance.as_of)}</>}
-            {tool.looked_at?.length ? <> · looked at the {tool.looked_at.join(" and ")}</> : null}
             {tool.ms !== undefined && <> · {tool.ms} ms</>}
           </li>
         ))}
+        {looked.length > 0 && <li>Looked at: {looked.join(", ")}</li>}
       </ul>
+      {metrics && <Metrics metrics={metrics} />}
     </details>
   );
 }
@@ -156,7 +177,7 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
   const input = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens;
   const tokens = input + u.output_tokens;
   return (
-    <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">
+    <p className="mt-1 text-[11px] text-muted-foreground">
       {metrics.model}
       {metrics.first_feedback_ms !== undefined && <> · first feedback {seconds(metrics.first_feedback_ms)}</>}
       {" "}· first text {seconds(metrics.first_text_ms)} · total {seconds(metrics.total_ms)}
@@ -168,32 +189,39 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
   );
 }
 
-/** The lab's backing and evidence as two chips. The page's own description says what the lab may and may not do. */
+/** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line. The page's own description says
+ * what the lab may and may not do. */
 const BACKEND_LABEL: Record<Backend, string> = { plan: "Claude plan (no API credits)", anthropic: "Claude API (credits)" };
 
-function StatusLine({ status, error, model, onModel, backend, onBackend }: { status: CopilotStatus | null; error: string | null; compact?: boolean;
+function StatusLine({ status, error, model, onModel, backend, onBackend, quiet = false }: { status: CopilotStatus | null; error: string | null; quiet?: boolean;
   model: string | null; onModel: (model: string | null) => void; backend: Backend | null; onBackend: (backend: Backend | null) => void }) {
   if (error) return <p role="alert" className="rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">{error}</p>;
   if (!status) return <p className="text-sm text-muted-foreground">Checking Copilot Lab…</p>;
   if (!status.enabled) return <p className="rounded border px-3 py-2 text-sm text-muted-foreground">{status.reason}</p>;
   const simulated = status.backend === "fake";
   const effective = backend ?? status.backend;
+  // A chip's tone; on the desk's quiet line every part is plain text, a dot between each.
+  const chip = (tone: string) => quiet ? undefined : cn("rounded px-1.5 py-0.5", tone);
+  const pick = quiet ? "min-h-11 rounded border-0 bg-transparent text-[11px] text-muted-foreground hover:text-foreground sm:min-h-0"
+    : "min-h-11 rounded border bg-background px-1.5 text-xs text-foreground sm:min-h-0";
   return (
-    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      <span className={cn("rounded px-1.5 py-0.5", simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
+    <p data-testid="copilot-status" className={quiet
+      ? "flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground [&>*+*]:before:mr-1.5 [&>*+*]:before:content-['·']"
+      : "flex flex-wrap items-center gap-2 text-xs text-muted-foreground"}>
+      <span className={chip(simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
         {simulated ? "Simulated model — no API calls" : effective === "plan" ? `Claude plan (no API credits) · ${model ?? status.model}` : `Claude API · ${model ?? status.model}`}
       </span>
       {!simulated && (status.backends?.length ?? 0) > 1 && (
         <label className="inline-flex items-center gap-1">
           <span className="sr-only">Backend</span>
           <select aria-label="Backend" value={effective} onChange={e => onBackend(e.target.value === status.backend ? null : e.target.value as Backend)}
-            className="min-h-11 rounded border bg-background px-1.5 text-xs text-foreground sm:min-h-0">
+            className={pick}>
             {status.backends!.map(b => <option key={b} value={b}>{BACKEND_LABEL[b]}{b === status.backend ? " (default)" : ""}</option>)}
           </select>
         </label>
       )}
       {!simulated && effective === "anthropic" && status.spend_today_usd != null && status.daily_budget_usd != null && (
-        <span className={cn("rounded px-1.5 py-0.5", status.spend_today_usd >= status.daily_budget_usd ? "bg-rose-500/10 text-rose-300" : "bg-muted")}>
+        <span className={status.spend_today_usd >= status.daily_budget_usd ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-muted")}>
           API today ${status.spend_today_usd.toFixed(2)} of ${status.daily_budget_usd.toFixed(2)}
         </span>
       )}
@@ -201,18 +229,18 @@ function StatusLine({ status, error, model, onModel, backend, onBackend }: { sta
         <label className="inline-flex items-center gap-1">
           <span className="sr-only">Model</span>
           <select aria-label="Model" value={model ?? status.model} onChange={e => onModel(e.target.value === status.model ? null : e.target.value)}
-            className="min-h-11 rounded border bg-background px-1.5 text-xs text-foreground sm:min-h-0">
+            className={pick}>
             {status.models!.map(m => <option key={m} value={m}>{m}{m === status.model ? " (default)" : ""}</option>)}
           </select>
         </label>
       )}
       {status.evidence === "replay" ? (
-        <span className={cn("rounded px-1.5 py-0.5", status.replay && "error" in status.replay ? "bg-rose-500/10 text-rose-300" : "bg-violet-500/10 text-violet-300")}>
+        <span className={status.replay && "error" in status.replay ? cn(chip("bg-rose-500/10"), "text-rose-300") : chip("bg-violet-500/10 text-violet-300")}>
           {!status.replay ? "Replay" : "error" in status.replay ? `Replay unavailable: ${status.replay.error}`
             : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
         </span>
       ) : (
-        <span className={cn("rounded px-1.5 py-0.5", status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-sky-500/10 text-sky-300")}>
+        <span className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-sky-500/10 text-sky-300")}>
           {status.evidence === "fixture" ? "Simulated market data" : "Read-only TradeJournal data"}
         </span>
       )}
@@ -233,6 +261,9 @@ export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 export type PanelActions = { busy: boolean; start(context: string, origin?: LinkOrigin | null, plan?: DrawnPlan | null, chart?: boolean): void; open(id: string): void };
 /** A page's own chart for "Look at my chart" (``look``): its image and one line of what it shows. */
 export type ChartLook = { image: Blob; line: string };
+
+/** A suggestion chip above the desk's message box. */
+type Suggestion = { label: string; title?: string; run(): void };
 
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
@@ -291,6 +322,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [saveState, setSaveState] = useState<{ state: "saving" | "saved" | "error"; message?: string } | null>(null);
   const [conclusion, setConclusion] = useState("");
   const [linkedKey, setLinkedKey] = useState(0);
+  // The desk's composer: the thread menu (conclusion, Close), typing a symbol for the scope chip, a phone's "+" tray.
+  const [menu, setMenu] = useState(false);
+  const [scoping, setScoping] = useState(false);
+  const [tray, setTray] = useState(false);
+  const menuBox = useRef<HTMLDivElement | null>(null);
+  const lesson = useRef<HTMLInputElement | null>(null);
   const unsaved = useRef(false);
   const persisting = useRef(false);
   // Card outcomes recorded while their card may not be saved yet (a turn running, or its save in flight): sent once
@@ -313,6 +350,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   function open(saved: Investigation) {
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
+    setMenu(false);
     pendingOutcomes.current.clear();
     setMessages(fromSaved(saved));
     setSymbol(saved.symbol ?? "");
@@ -469,7 +507,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const command = desk?.command;
     if (!command || busy || status?.enabled !== true) return;
     if (command.kind === "open") void resume(command.id);
-    else if (command.kind === "fill") { typed.current = true; setDraft(command.text.slice(0, 4000)); box.current?.focus(); }
+    else if (command.kind === "fill") fill(command.text);
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives
 
@@ -478,6 +516,23 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   useEffect(() => {
     onThread?.(current ? { id: current.id, symbol: symbol || null, title: current.title, refreshKey: linkedKey } : null);
   }, [onThread, current?.id, current?.title, symbol, linkedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the reported fields, not the whole record
+
+  // The thread menu closes on a press outside it or Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const away = (event: PointerEvent) => { if (!menuBox.current?.contains(event.target as Node)) setMenu(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", escape); };
+  }, [menu]);
+
+  /** Words in the message box, unsent, with the cursor after them (the decision bar's Ask why, a suggestion). */
+  function fill(text: string) {
+    typed.current = true;
+    setDraft(text.slice(0, 4000));
+    window.setTimeout(() => { const el = box.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 0);
+  }
 
   const update = (fn: (last: LabMessage) => LabMessage) =>
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
@@ -600,12 +655,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** "Look at my chart": the page's chart joins any attached screenshot (two at most) and goes out at once, with the
    * owner's own words from the box when there are some. */
-  async function lookAtChart() {
-    if (!look || busy) return;
+  async function lookAtChart(see = look) {
+    if (!see || busy) return;
     if (attached.length >= MAX_IMAGES) { setAttaching({ state: "error", message: "Two screenshots are attached; remove one to add the chart." }); return; }
     setAttaching({ state: "busy" });
     try {
-      const { image, line } = await look();
+      const { image, line } = await see();
       const stored = await uploadImage(image);
       setAttaching(null);
       const own = draft.replace(/^Context: [^\n]*\n+/, "").trim();
@@ -627,8 +682,19 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     return () => controller.abort();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount only; the page remounts the lab per deep link
 
+  /** The desk's "Look at my chart": the Context pane's picture of the thread's symbol today, with the plan's lines. */
+  async function deskChart(): Promise<ChartLook> {
+    if (!current) throw new Error("The chart needs a saved conversation.");
+    const picture = await getDeskPicture(current.id);
+    if ("reason" in picture) throw new Error(picture.reason);
+    let image: Blob;
+    try { image = await fetch(picture.url).then(r => r.blob()); } finally { URL.revokeObjectURL(picture.url); }
+    return { image, line: `${symbol} today's minute chart, with the plan's entry and invalidation lines` };
+  }
+
   function startNew() {
     if (busy) return;
+    setMenu(false);
     setMessages([]);
     setCurrent(null);
     setConclusion("");
@@ -696,6 +762,50 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {saveState.state === "saving" ? "Saving…" : saveState.state === "saved" ? "Saved" : saveState.message}
     </span>
   );
+  const messageBox = (
+    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
+      onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
+      placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
+      className={desk ? "min-h-[2.75rem] w-full resize-y rounded bg-transparent px-3 py-2 text-base text-foreground outline-none disabled:opacity-50 sm:text-sm"
+        : "min-h-[2.75rem] min-w-0 flex-1 basis-28 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm"} />
+  );
+  const sendButton = busy
+    ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
+    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>;
+  const attachButton = (
+    <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
+      onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}
+      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border text-muted-foreground hover:text-foreground disabled:opacity-40">
+      {attaching?.state === "busy" ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+    </button>
+  );
+  const pickerInput = (
+    <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Screenshot file" data-testid="copilot-image-input"
+      onChange={e => { void attach([...(e.target.files ?? [])]); e.target.value = ""; }} />
+  );
+  // The answer being read stops the moment the mic is pressed, before it starts listening.
+  // On the desk it is round, the main button on a phone.
+  const mic = (
+    <span onPointerDownCapture={speak.stop} onKeyDownCapture={speak.stop} className={cn("contents", desk
+      && "[&>button]:rounded-full max-md:[&>button]:h-12 max-md:[&>button]:w-12 [&>button[aria-pressed=false]]:border-primary/50 [&>button[aria-pressed=false]]:text-primary")}>
+      {voice.button}
+    </span>
+  );
+  // The desk's next steps from the thread's state, two to four of them; each sends one turn, fills the box or opens the menu.
+  const planned = messages.some(m => m.proposals?.some(p => p.kind === "trade_plan"));
+  const offered: (Suggestion | false | null | undefined | "")[] = !desk || !enabled ? [] : [
+    current && messages.length > 0 && { label: "What changed?", title: "One copilot turn: what changed since this investigation was last discussed",
+      run: () => void send(whatChangedPrompt(current.id)) },
+    current && symbol && { label: "Look at my chart", title: `Send today's ${symbol} chart from the Context pane and ask what the copilot sees`,
+      run: () => void lookAtChart(deskChart) },
+    planned && { label: "Size it", title: "Put a sizing question in the box, unsent: you add the dollars at risk",
+      run: () => fill("Size it: with this plan's entry and invalidation, how many shares or contracts keep the loss at the invalidation to $") },
+    current?.status === "open" && messages.length > 0 && { label: "Close with a lesson", title: "Write the one-line lesson, then close the thread",
+      run: () => { setMenu(true); window.setTimeout(() => lesson.current?.focus(), 0); } },
+    !current && !messages.length && symbol && { label: `Is ${symbol}'s group confirming?`, run: () => void send(`Is ${symbol}'s group confirming the move?`) },
+    !current && !messages.length && symbol && { label: "Plan a trade", run: () => void send(`Plan a trade on ${symbol}.`) },
+  ];
+  const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 4);
   return (
     <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} data-testid={panel ? "copilot-panel" : undefined}>
       {panel && (
@@ -711,8 +821,53 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </span>
         </div>
       )}
-      <StatusLine status={status} error={statusError} compact={panel} model={model} onModel={next => { setModel(next); rememberModel(next); }}
-        backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
+      {desk ? (
+        // The desk: one quiet line (what answers, what data), then New and the thread's menu.
+        <div className="flex items-center gap-2">
+          <StatusLine quiet status={status} error={statusError} model={model} onModel={next => { setModel(next); rememberModel(next); }}
+            backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+            {saveState?.state !== "error" && saving}
+            {current?.status === "closed" && <span>Closed</span>}
+            <button type="button" onClick={startNew} disabled={busy || (!messages.length && !current)} title="Leave this conversation saved and start a new one"
+              className="min-h-11 rounded px-2 hover:text-foreground disabled:opacity-40 sm:min-h-7">New</button>
+            {current && (
+              <div ref={menuBox} className="relative">
+                <button type="button" onClick={() => setMenu(open => !open)} aria-expanded={menu} aria-haspopup="true" aria-label="Thread actions"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded hover:text-foreground sm:min-h-7 sm:min-w-7">
+                  <MoreHorizontal size={16} />
+                </button>
+                {menu && (
+                  <div role="group" aria-label="Thread actions" className="absolute right-0 top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] space-y-2 rounded border bg-card p-2 text-xs shadow-lg">
+                    <input ref={lesson} value={conclusion} onChange={e => setConclusion(e.target.value.slice(0, 280))} disabled={busy}
+                      onKeyDown={e => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        if ((conclusion.trim() || null) !== current.conclusion) void persist({ conclusion: conclusion.trim() || null });
+                        setMenu(false);
+                      }}
+                      placeholder="One-line conclusion or lesson" aria-label="Conclusion"
+                      className="w-full rounded border bg-background px-2 py-1 text-base text-foreground sm:text-xs" />
+                    <div className="flex justify-end gap-1.5">
+                      <button type="button" disabled={busy || (conclusion.trim() || null) === current.conclusion}
+                        onClick={() => { void persist({ conclusion: conclusion.trim() || null }); setMenu(false); }}
+                        className="min-h-11 rounded border px-2 text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-7">Save</button>
+                      <button type="button" disabled={busy}
+                        onClick={() => { void persist({ status: current.status === "open" ? "closed" : "open", conclusion: conclusion.trim() || null }); setMenu(false); }}
+                        className="min-h-11 rounded border px-2 text-foreground hover:bg-muted disabled:opacity-40 sm:min-h-7">{current.status === "open" ? "Close thread" : "Reopen"}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </span>
+        </div>
+      ) : (
+        <StatusLine status={status} error={statusError} model={model} onModel={next => { setModel(next); rememberModel(next); }}
+          backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
+      )}
+      {/* A failed save says so on its own line, where a long message can wrap. */}
+      {desk && saveState?.state === "error" && saving}
       {offer && engaged && pageSymbol && (
         <div role="status" aria-label="Symbol changed" className="flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
           <span className="text-foreground">The page is now on {pageSymbol}; this conversation is about {symbol}.</span>
@@ -723,7 +878,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           {busy && <span className="text-muted-foreground">after this answer</span>}
         </div>
       )}
-      {!panel && <div className="flex flex-wrap items-center gap-2">
+      {!panel && !desk && <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Symbol
           <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10))}
@@ -734,7 +889,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         {saving}
       </div>}
 
-      {!panel && recent.length > 0 && (
+      {!panel && !desk && recent.length > 0 && (
         <nav aria-label="Recent investigations" className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-muted-foreground">Recent</span>
           {recent.map(item => (
@@ -751,7 +906,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
       {panel && strip?.({ busy, start: begin, open: id => { setKept(null); void resume(id); } })}
 
-      {current && (
+      {current && !desk && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className={cn("rounded px-1.5 py-0.5", current.status === "open" ? "bg-emerald-500/10 text-emerald-300" : "bg-muted")}>{current.status}</span>
           <input value={conclusion} onChange={e => setConclusion(e.target.value.slice(0, 280))} disabled={busy}
@@ -799,7 +954,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </div>
         ) : (
           <div key={i} className="max-w-[95%]">
-            {message.content ? <Prose text={message.content} /> : !message.error && !message.metrics && (
+            {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content} /> : !message.error && !message.metrics && (
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
@@ -813,8 +968,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 alertsSupported={status?.enabled === true && !!status.capabilities?.copilot_alerts} onDone={() => setLinkedKey(key => key + 1)}
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
-            <Evidence tools={message.tools ?? []} />
-            {message.metrics && <Metrics metrics={message.metrics} />}
+            <Sources tools={message.tools ?? []} metrics={message.metrics} />
           </div>
         ))}
         <div ref={end} />
@@ -848,30 +1002,73 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <Eye size={14} /> Look at my chart
         </button>
       )}
-      {/* The buttons wrap under the box when a narrow dock would squeeze it below 7rem. */}
-      <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end justify-end gap-2">
-        <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
-          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
-          placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
-          className="min-h-[2.75rem] min-w-0 flex-1 basis-28 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm" />
-        {busy
-          ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
-          : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>}
-        <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
-          onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}
-          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border text-muted-foreground hover:text-foreground disabled:opacity-40">
-          {attaching?.state === "busy" ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
-        </button>
-        <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Screenshot file" data-testid="copilot-image-input"
-          onChange={e => { void attach([...(e.target.files ?? [])]); e.target.value = ""; }} />
-        {/* The answer being read stops the moment the mic is pressed, before it starts listening. */}
-        <span className="contents" onPointerDownCapture={speak.stop} onKeyDownCapture={speak.stop}>{voice.button}</span>
-        {speak.button}
-      </form>
+      {suggestions.length > 0 && (
+        <div role="group" aria-label="Suggestions" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 max-md:[scrollbar-width:none] md:flex-wrap">
+          {suggestions.map(item => (
+            <button key={item.label} type="button" onClick={item.run} disabled={busy} title={item.title}
+              className="min-h-11 shrink-0 rounded-full border px-3 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground disabled:opacity-40 md:min-h-7">
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {desk ? (
+        // The desk: the scope chip sits inside the message box. A phone gives the box the full width, keeps attach and
+        // read-aloud behind "+", and makes the mic the main round button beside Send.
+        <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end gap-2">
+          <div className="flex min-w-0 basis-full flex-col rounded border bg-background focus-within:border-primary/50 md:flex-1 md:basis-0">
+            <div className="flex min-h-7 items-center px-2 pt-1.5 text-xs">
+              {symbol ? (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">
+                  About {symbol}
+                  <button type="button" onClick={() => setSymbol("")} disabled={busy} aria-label="Ask across everything"
+                    title={`Ask across everything, not just ${symbol}`}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground disabled:opacity-40">
+                    <X size={12} />
+                  </button>
+                </span>
+              ) : scoping ? (
+                <input autoFocus aria-label="Investigation symbol" placeholder="Symbol" disabled={busy}
+                  onBlur={e => { setSymbol(e.target.value); setScoping(false); }}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); box.current?.focus(); } if (e.key === "Escape") { e.currentTarget.value = ""; setScoping(false); } }}
+                  onChange={e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10); }}
+                  className="w-24 rounded border bg-background px-2 py-0.5 text-base uppercase text-foreground sm:text-xs" />
+              ) : (
+                <button type="button" onClick={() => setScoping(true)} disabled={busy} data-testid="copilot-scope"
+                  className="rounded-full px-1 text-muted-foreground hover:text-foreground disabled:opacity-40">Across everything · add a symbol</button>
+              )}
+            </div>
+            {messageBox}
+          </div>
+          <div className="flex w-full items-center gap-2 md:w-auto">
+            <button type="button" onClick={() => setTray(open => !open)} aria-expanded={tray} aria-label="More: attach, read aloud"
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-full border text-muted-foreground hover:text-foreground md:hidden">
+              <Plus className={cn("h-5 w-5 transition-transform", tray && "rotate-45")} />
+            </button>
+            {/* While an answer is read aloud its Stop stays in view on a phone. */}
+            <span className={cn("items-center gap-2 md:flex", tray ? "flex" : "hidden")}>{attachButton}</span>
+            <span className={cn("items-center md:flex", tray || speak.speaking ? "flex" : "hidden")}>{speak.button}</span>
+            <span className="flex-1 md:hidden" />
+            {sendButton}
+            {mic}
+          </div>
+          {pickerInput}
+        </form>
+      ) : (
+        /* The buttons wrap under the box when a narrow dock would squeeze it below 7rem. */
+        <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end justify-end gap-2">
+          {messageBox}
+          {sendButton}
+          {attachButton}
+          {pickerInput}
+          {mic}
+          {speak.button}
+        </form>
+      )}
       {(voice.available || speak.available) && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}
-          <span className="flex flex-wrap items-center gap-x-3">{voice.setting}{speak.setting}</span>
+          <span className={cn("flex flex-wrap items-center gap-x-3", desk && !tray && "max-md:hidden")}>{voice.setting}{speak.setting}</span>
         </div>
       )}
       </div>

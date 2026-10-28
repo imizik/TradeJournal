@@ -75,6 +75,7 @@ test("attach a screenshot: thumbnail, a ready question, the id in the chat body,
   expect(body.messages.at(-1)!.content).toBe(`[shared a screenshot] ${PREFILL}`);
   await expect(page.getByRole("img", { name: "Shared screenshot" })).toHaveCount(2);  // on the sent message
   await expect(page.getByRole("img", { name: "Attached screenshot" })).toHaveCount(0);
+  await page.getByTestId("copilot-sources").last().locator("summary").click(); // the answer's sources, folded into one line
   await expect(page.getByText("Looked at: plan chart")).toBeVisible();
   await expect.poll(() => seen.saved.length).toBe(1);
   expect(seen.saved[0].transcript[0].content).toBe(`[shared a screenshot] ${PREFILL}`);

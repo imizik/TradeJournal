@@ -140,6 +140,7 @@ def fallback_lines(review: dict) -> list[str]:
 def _plain(line: str) -> str:
     """One answer line for the lock screen: no markdown heading, bullet, emphasis or code marks."""
     line = re.sub(r"^\s*(#+|>|[-*•]|\d+[.)])\s+", "", line)
+    line = re.sub(r"^\**verdict\**:\**\s*", "", line, flags=re.I)  # the answer format's label; the saved answer keeps it
     line = re.sub(r"\*\*|__|`", "", line).strip()
     if len(line) > 2 and line[0] == line[-1] and line[0] in "_*":
         line = line[1:-1].strip()

@@ -38,6 +38,7 @@ from datetime import date, datetime, timedelta
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Callable
@@ -305,14 +306,20 @@ def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str |
 def _save(db: Session, day: date, question: str, written: list[str]) -> str:
     from app.engine import copilot_investigations as investigations
     fields = investigations.InvestigationFields(
-        title=f"{TITLE} {day.isoformat()}", conclusion=written[0][:280] if written else None,
+        title=f"{TITLE} {day.isoformat()}", conclusion=unlabelled(written[0])[:280] if written else None,
         transcript=[{"role": "user", "content": question[:20_000]}, {"role": "assistant", "content": "\n".join(written)}])
     return investigations.create(fields, session=db)["id"]
 
 
+def unlabelled(line: str) -> str:
+    """A line without the answer format's "Verdict: " label, for the lock screen and the conclusion; the saved answer
+    keeps it for the desk to render."""
+    return re.sub(r"^\**verdict\**:\**\s*", "", line, flags=re.I)
+
+
 def message(row: PremarketPrep) -> tuple[str, str, str]:
     """Title, body (the first two lines) and the app path the notification opens."""
-    shown = (row.body or "").splitlines()[:BODY_LINES]
+    shown = [unlabelled(line) for line in (row.body or "").splitlines()[:BODY_LINES]]
     # ``origin``: a plan made from the prep records it (docs/copilot-lab.md § Origin).
     path = (f"/copilot-lab?investigation={row.investigation_id}&origin=premarket_prep:{row.investigation_id}"
             if row.investigation_id else "/copilot-lab?origin=premarket_prep")

@@ -45,7 +45,7 @@ async function lab(page: Page, queue: Queue, withResult = () => false) {
     return route.fulfill({ json: { jobs: queue.jobs, queue_enabled: queue.enabled, daily_budget_usd: 2, spent_today_usd: 0 } });
   });
   await page.goto("/copilot-lab");
-  await expect(page.getByLabel("Conclusion")).toBeVisible(); // the saved investigation is open
+  await expect(page.getByRole("button", { name: "Thread actions" })).toBeVisible(); // the saved investigation is open
 }
 
 test("no Research deeper while the research queue is disabled", async ({ page }) => {
@@ -83,7 +83,8 @@ test("Research deeper queues a linked job, follows it to done, then offers its r
   await expect(page.getByText("Research · done")).toBeVisible();
   await expect(page.getByRole("button", { name: "Research deeper" })).toBeVisible(); // free to ask again
   await expect(page.getByRole("list", { name: "Research jobs" })).toContainText("$0.42");
-  await expect(page.getByRole("navigation", { name: "Recent investigations" })).toContainText("research · Is the neocloud group confirming?");
+  // The result is one click away here; the desk's thread list (not this panel) lists saved investigations.
+  await expect(page.getByRole("button", { name: "Open result" })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("research-deeper-done.png") });
 
   // Polling stops once nothing is waiting or running.
@@ -94,7 +95,7 @@ test("Research deeper queues a linked job, follows it to done, then offers its r
   // Discuss: a new conversation on the result's symbol with the result as its opening context, not sent.
   await page.getByRole("button", { name: "Discuss this result" }).click();
   await expect(page.getByLabel("Message")).toHaveValue(/^Context: background research "Is the neocloud group confirming\?" \(saved .+ ET\): Financing stress, not demand/);
-  await expect(page.getByLabel("Investigation symbol")).toHaveValue("NBIS");
+  await expect(page.getByTestId("copilot-scope")).toHaveText("About NBIS");
   await expect(page.getByText(/Ask about an opportunity/)).toBeVisible();
 });
 

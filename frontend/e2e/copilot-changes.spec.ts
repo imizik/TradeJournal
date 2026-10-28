@@ -14,6 +14,14 @@ const record = {
   transcript: [{ role: "user", content: "Is NBIS confirming?" }, { role: "assistant", content: "Not yet: it lags CRWV." }],
   evidence: [{ tool: "get_group_comparison", as_of: "2026-10-23T15:12:00Z", kind: "recorded", message: 1 }], findings: null,
 };
+// The desk's thread list, with the saved investigation as its one row (copilot-thread-list.spec.ts covers the list).
+const DESK = {
+  as_of: "2026-10-24T14:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "regular", need_you: 0, streak: null },
+  sections: { positions: "ok", plans: "ok", investigations: "ok", radar: "off" },
+  threads: [{ key: `investigation:${INV}`, group: "watch", symbol: "NBIS", title: "NBIS bounce", instrument: null, value: null,
+    status: { text: "Lagging its group", tone: "muted" }, meter: null, investigation_id: INV, trade_id: null, radar_event_id: null, path: null,
+    changed_at: null }],
+};
 const ANSWER = "Since Oct 23 the 92.46 alert fired at 92.40, and a research result finished. The saved conclusion still holds.";
 const TURN = [
   { type: "tool", id: "c1", name: "get_investigation_changes", status: "running" },
@@ -27,6 +35,7 @@ const TURN = [
 async function lab(page: Page, url = "/copilot-lab") {
   const chats: { messages: { role: string; content: string }[] }[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [record] } }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: route.request().method() === "PUT" ? { ...record, revision: 4 } : record }));
   await page.route("**/copilot/chat", (route) => {
@@ -42,7 +51,7 @@ async function lab(page: Page, url = "/copilot-lab") {
 test("a reopened investigation's What changed? runs one turn with its id and shows the answer", async ({ page }) => {
   const chats = await lab(page);
   await expect(page.getByRole("button", { name: "What changed?" })).toHaveCount(0); // a new conversation has nothing to compare
-  await page.getByRole("navigation", { name: "Recent investigations" }).getByRole("button", { name: /NBIS bounce/ }).click();
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("link", { name: /NBIS bounce/ }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   const button = page.getByRole("button", { name: "What changed?" });
   await expect(button).toBeVisible();
@@ -53,7 +62,11 @@ test("a reopened investigation's What changed? runs one turn with its id and sho
   const sent = chats[0].messages;
   expect(sent.slice(0, 2)).toEqual(record.transcript); // the saved conversation goes with it
   expect(sent.at(-1)).toEqual({ role: "user", content: expect.stringMatching(new RegExp(`^What changed\\? Use get_investigation_changes for investigation ${INV}`)) });
-  await expect(page.getByText("What changed · saved")).toBeVisible();
+  // The answer's one source, folded; opening it names the source and its kind.
+  const sources = page.getByTestId("copilot-sources").last();
+  await expect(sources.locator("summary")).toHaveText(/^Sources · 1\b/);
+  await sources.locator("summary").click();
+  await expect(sources.getByText("What changed · saved")).toBeVisible();
 });
 
 test("opened from an alert's link, What changed? waits in the message box, unsent", async ({ page }) => {
