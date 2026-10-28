@@ -63,7 +63,7 @@ test("Undo posts nothing; Pass is logged; a decision already logged shows as one
   expect(posts.map(p => p.text)).toEqual(["Passing. Radar vs sector: MU up 4.1% vs Semis by 3.2% over 30 min."]);
 
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await hit(page, { logged: [{ id: "x", day: DAY, kind: "decision", symbol: "MU", text: "Watching. Radar vs sector: MU up.", not_traded: false,
+  await hit(page, { logged: [{ id: "x", day: DAY, kind: "decision", symbol: "MU", text: "Watching. Radar vs sector: MU up 4.1% vs Semis by 3.2% over 30 min.", not_traded: false,
     created_at: `${DAY}T14:50:00Z`, actor: "owner" }] });
   await expect(page.getByTestId("radar-decision-logged")).toContainText("You logged watching at");
   await expect(page.getByRole("region", { name: "Radar hit" }).getByRole("button", { name: "Plan it" })).toBeVisible();

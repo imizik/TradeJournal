@@ -30,7 +30,6 @@ happened in it, from the same kind of existing readers.
 
 from datetime import UTC, datetime
 import logging
-import sqlite3
 import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -499,7 +498,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
     else:
         try:
             hits = radar_scorecard.scorecard(store, db, now)
-        except (sqlite3.Error, ValueError, KeyError, OSError, TypeError) as exc:  # a busy or damaged file must not become a 500
+        except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
             log.warning("radar scorecard unreadable: %s", exc)
             hits = {"state": "unavailable", "reason": "The Radar file could not be read right now."}
     return {**alert_scorecard.scorecard(db, now), "radar": hits}

@@ -34,6 +34,7 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const left = useRef<{ day: string; write: DayJournalWrite } | null>(null);
+  const planning = useRef(false); // Plan it in flight: a double tap logs and navigates once
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,8 +46,11 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
       const journal = await api.dayJournal(found.event.session_date);
       if (controller.signal.aborted) return;
       const seen = Date.parse(found.event.first_seen_at);
+      const said = (found.event.summary ?? "").replace(/\.\s*$/, "");
       setDetail({ ...found, today: found.event.session_date === nyDay(Date.now()) });
-      setLogged(journal.entries.find(e => e.kind === "decision" && e.symbol === symbol && Date.parse(e.created_at) >= seen && radarChoice(e.text)) ?? null);
+      // This hit's own decision: its entry quotes the hit's summary, so a later hit on the symbol keeps its own.
+      setLogged(journal.entries.find(e => e.kind === "decision" && e.symbol === symbol && Date.parse(e.created_at) >= seen && radarChoice(e.text)
+        && (!said || e.text.includes(said))) ?? null);
     })().catch(failure => { if (!controller.signal.aborted) setFailed(failure instanceof Error ? failure.message : "Radar is unavailable."); });
     return () => controller.abort();
   }, [eventId, symbol]);
@@ -90,8 +94,9 @@ export default function RadarDecision({ eventId, symbol, fill }: { eventId: stri
   };
   const undo = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; left.current = null; setPending(null); };
   const plan = async () => {
-    if (left.current || pending) return;
-    if (today && !(logged && radarChoice(logged.text) === "planning") && !(await send(write("planning")))) return;
+    if (left.current || pending || planning.current) return;
+    planning.current = true;
+    if (today && !(logged && radarChoice(logged.text) === "planning") && !(await send(write("planning")))) { planning.current = false; return; }
     router.push(planHref);
   };
 
