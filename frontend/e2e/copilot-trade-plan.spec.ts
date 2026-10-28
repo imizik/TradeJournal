@@ -71,7 +71,30 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     server.alerts = [...server.alerts, { id: `a${server.alerts.length + 1}`, created_on: "2026-10-24", direction: "up", state: "active", armed_at: 1, event: null, ...body }];
     return route.fulfill({ json: { alerts: server.alerts, phone: true } });
   });
+  // The desk's Context pane reads the thread's timeline from the server; this one answers from the alerts and time
+  // stops above, as GET /copilot/desk/{id}/timeline would (its composition is tests/test_copilot_desk_context.py).
+  await page.route(`**/copilot/desk/${INV}/timeline`, (route) => {
+    type Alert = { price: number; condition: string; label: string; plan_role: "entry" | "invalidation" | null; state: string; event: { price: number; event_at: number } | null };
+    type Stop = { text: string; delivery: string; error: string | null };
+    const name = (a: Alert) => a.plan_role === "entry" ? "Entry" : a.plan_role === "invalidation" ? "Invalidation" : "Alert";
+    const rows = [
+      ...(server.alerts as Alert[]).map((a) => a.state === "active"
+        ? { kind: "alert", at: DUE - 5 * 3600, text: `${name(a)} armed`, detail: `${a.condition.replace("_", " ")} ${a.price} · ${a.label}` }
+        : { kind: "alert", at: a.event!.event_at, text: `${name(a)} hit`, detail: `at ${a.event!.price} · pinged` }),
+      ...((server.stops ?? []) as Stop[]).map((t) => t.delivery === "scheduled"
+        ? { kind: "time_stop", at: DUE - 5 * 3600, text: "Time stop set for 15:30", detail: `${t.text} · time-stop pings are off on this server` }
+        : { kind: "time_stop", at: DUE, text: `Time stop ${t.delivery === "sent" ? "pinged" : t.delivery}`, detail: t.error ?? t.text }),
+    ];
+    return route.fulfill({ json: { state: "ok", symbol: "NBIS", unavailable: [], recent_days: 7, count: rows.length, rows } });
+  });
   await page.goto("/copilot-lab");
+}
+
+/** The Context pane's Timeline tab, opened. */
+async function timeline(page: Page) {
+  const pane = page.getByRole("complementary", { name: "Context" });
+  await pane.getByRole("tab", { name: "Timeline" }).click();
+  return pane.getByRole("list", { name: "Timeline" });
 }
 
 async function askForPlan(page: Page) {
@@ -141,7 +164,7 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   ]);
   expect(posts(server, "time-stops")).toEqual([]); // a time stop the server does not read as a time stays a note
   await expect(card.getByLabel("Thesis")).toBeDisabled(); // the saved plan is what the card shows now
-  await expect(page.getByRole("region", { name: "Linked to this investigation" })).toContainText("NBIS invalidation: crosses 92.1");
+  await expect(await timeline(page)).toContainText("NBIS invalidation: crosses 92.1");
 });
 
 test("a partial failure names the failed part and retries only that part", async ({ page }) => {
@@ -254,11 +277,11 @@ test("a time stop read as a time is previewed before Confirm and set as a timed 
   expect(stop.client_id).toBe(posts(server, "captures")[0].client_id); // one card, one plan, one time stop
   expect(posts(server, "captures")[0].wording).toContain("Time stop: 2 days.");
 
-  const linked = page.getByRole("region", { name: "Linked to this investigation" });
-  await expect(linked).toContainText("Entry · armed");
-  await expect(linked).toContainText("Invalidation · armed");
-  await expect(linked).toContainText("Time stop · pending");
-  await expect(linked).toContainText("Time-stop pings are off on this server.");
+  const linked = await timeline(page);
+  await expect(linked).toContainText("Entry armed");
+  await expect(linked).toContainText("Invalidation armed");
+  await expect(linked).toContainText("Time stop set for 15:30");
+  await expect(linked).toContainText("time-stop pings are off on this server");
 });
 
 test("a plan alert's link opens its investigation with the question ready, and the linked activity shows what fired", async ({ page }) => {
@@ -279,13 +302,13 @@ test("a plan alert's link opens its investigation with the question ready, and t
   await page.goto(`/copilot-lab?investigation=${INV}&context=${encodeURIComponent(ask)}`);
   await expect(page.getByText("NBIS plan (draft).")).toBeVisible();
   await expect(page.getByLabel("Message")).toHaveValue(ask);
-  const linked = page.getByRole("region", { name: "Linked to this investigation" });
-  await expect(linked).toContainText("Entry · hit");
-  await expect(linked).toContainText("fired");
-  await expect(linked).toContainText("Invalidation · armed");
-  await expect(linked).toContainText("Alert · armed"); // a plain copilot watch keeps its own wording
-  await expect(linked).toContainText("Time stop · sent");
-  await expect(linked).toContainText("Time stop · skipped");
+  const linked = await timeline(page);
+  await expect(linked).toContainText("Entry hit");
+  await expect(linked).toContainText("at 95.93");
+  await expect(linked).toContainText("Invalidation armed");
+  await expect(linked).toContainText("Alert armed"); // a plain copilot watch keeps its own wording
+  await expect(linked).toContainText("Time stop pinged");
+  await expect(linked).toContainText("Time stop skipped");
   await expect(linked).toContainText("No open NBIS position opened after the plan, so nothing was sent.");
   await linked.screenshot({ path: test.info().outputPath("plan-linked-activity.png") });
   await page.waitForTimeout(300);

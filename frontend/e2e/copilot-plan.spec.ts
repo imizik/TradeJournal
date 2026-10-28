@@ -63,7 +63,24 @@ async function lab(page: Page, server: Server, { alertsSupported = true, url = "
       attempts: 0, error: null, cost_usd: null, investigation_id: null, created_at: "2026-10-24T14:01:00", next_attempt_at: "2026-10-25T14:01:00", finished_at: null }];
     return route.fulfill({ status: 201, json: { job: server.jobs[0], created: true, queue_enabled: !server.queueOff } });
   });
+  // The desk's Context pane reads the thread's timeline from the server; this one answers from the alerts and revisits
+  // above, as GET /copilot/desk/{id}/timeline would (its composition is tests/test_copilot_desk_context.py).
+  await page.route(`**/copilot/desk/${INV}/timeline`, (route) => route.fulfill({ json: { state: "ok", symbol: "NBIS", unavailable: [],
+    recent_days: 7, count: 0, rows: [
+      ...(server.alerts as { price: number; label: string; state: string; source_kind: string; source_id: string;
+        event: { price: number; event_at: number } | null }[]).filter((a) => a.source_kind === "copilot" && a.source_id === INV).map((a) =>
+        a.state === "active" ? { kind: "alert", at: 1792857000, text: "Alert armed", detail: `crosses ${a.price} · ${a.label}` }
+          : { kind: "alert", at: a.event!.event_at, text: "Alert hit", detail: `at ${a.event!.price}` }),
+      ...(server.jobs as { input: { question: string } }[]).map((j) => ({ kind: "revisit", at: 1792857100, text: "Revisit queued", detail: j.input.question })),
+    ] } }));
   await page.goto(url);
+}
+
+/** The Context pane's Timeline tab, opened. */
+async function timeline(page: Page) {
+  const pane = page.getByRole("complementary", { name: "Context" });
+  await pane.getByRole("tab", { name: "Timeline" }).click();
+  return pane.getByRole("list", { name: "Timeline" });
 }
 
 async function askForPlan(page: Page) {
@@ -95,8 +112,8 @@ test("a proposed watch is confirmed against a fresh quote and shows as a linked 
   await expect(card.getByRole("status")).toHaveText("Alert set: NBIS crosses 92.46 (NBIS was 94.35).");
   expect(server.posts.find((p) => p.path === "alerts")!.body).toEqual({ symbol: "NBIS", price: 92.46, reference: 94.35, condition: "crosses",
     interval: null, session: "regular", source_kind: "copilot", source_id: INV, label: "NBIS 2% below the last price" });
-  const linked = page.getByRole("region", { name: "Linked to this investigation" });
-  await expect(linked).toContainText("Alert · armed");
+  const linked = await timeline(page);
+  await expect(linked).toContainText("Alert armed");
   await expect(linked).toContainText("NBIS 2% below the last price");
   await expect(page.getByRole("region", { name: "Research deeper" })).toHaveCount(1); // one per investigation, also after it saves
   await page.screenshot({ path: test.info().outputPath("confirm-a-plan.png") });
@@ -125,7 +142,7 @@ test("without alert support a watch waits, while a revisit still confirms; Dismi
   await revisit.getByRole("button", { name: "Confirm" }).click();
   await expect(revisit.getByRole("status")).toHaveText("Revisit queued. The research queue is off, so it waits until the queue is turned on.");
   expect(server.posts.find((p) => p.path === "reassess")!.body).toEqual({ investigation_id: INV, question: "Is NBIS still lagging its group?", after_days: 1 });
-  await expect(page.getByRole("region", { name: "Linked to this investigation" })).toContainText("Revisit · queued");
+  await expect(await timeline(page)).toContainText("Revisit queued");
   await watch.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByRole("region", { name: "Proposed watch" })).toHaveCount(0);
   expect(server.posts.filter((p) => p.path === "alerts")).toEqual([]);
@@ -165,8 +182,7 @@ test("?investigation= opens that investigation with its fired alert", async ({ p
   ];
   await lab(page, server, { url: `/copilot-lab?investigation=${INV}` });
   await expect(page.getByText("Make a plan for NBIS")).toBeVisible();
-  const linked = page.getByRole("region", { name: "Linked to this investigation" });
-  await expect(linked).toContainText("Alert · fired");
-  await expect(linked).toContainText(/fired .+ ET at 92\.4/);
-  await expect(linked).not.toContainText("Charts level"); // only this investigation's alerts
+  const linked = await timeline(page);
+  await expect(linked).toContainText("Alert hit");
+  await expect(linked).toContainText("at 92.4");
 });

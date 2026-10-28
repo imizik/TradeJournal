@@ -378,8 +378,35 @@ The full page is a desk of three panes beside each other
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
   entered), once a minute; a thread with no plan shows only the header.
-- **Context**: the open investigation's linked activity (alerts, time stop,
-  revisits) and a link to Charts; empty until a conversation is saved.
+- **Context**: the open thread's symbol, "today" and Open in Charts →, with
+  three small tabs (`components/copilot/Inspector.tsx`, reads in
+  `backend/app/engine/desk_context.py`); empty until a conversation is saved.
+  Each tab reads only when opened and again when something is confirmed in the
+  conversation; nothing here arms or sends.
+  - **Chart** (first): today's minute bars as the server's ping picture
+    (`GET /copilot/desk/{id}/picture`, `chart_render` over the same cached
+    chart-feed read as a ping), the regular session once it has bars, with the
+    plan's entry (TRIG) and invalidation (INV) lines and the owner's fills in
+    the symbol today (IN and OUT; an option fill at the underlying's recorded
+    price, else a line at its time; a pre-market fill is left off once the
+    regular session shows). No timeframes yet. No bars, a failed read, a read
+    past 6 seconds, or both workers still busy with earlier reads says why
+    instead of a blank picture.
+  - **Timeline** (`/timeline`): one list, newest first, New York time on the
+    right and a dot by kind: the investigation's alerts (armed, hit; a sent
+    ping for one rides on its row, a held one shows with why), time stop (set,
+    pinged, skipped with the reason; whether time-stop pings are off), revisit
+    jobs, the fills of the trade
+    linked to its plan, and for the symbol over 7 days its thesis-watch
+    triggers, phone pings (sent or held back) and today's `decision` journal
+    entries. A source that cannot be read is named under the list.
+  - **Your history** (`/history`): `copilot_review.level_history` (the engine
+    behind `get_level_history`) at the plan's invalidation, the side from the
+    plan (below for a long), measured from its planned entry: a tile per past
+    trade that crossed that distance while held, won (realized P&L above zero)
+    or not, and one sentence from the counts. No plan invalidation, or no
+    planned entry, says what is missing; the pane never measures from a live
+    quote.
 
 The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
@@ -392,8 +419,10 @@ ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
 only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
 the conversation hand-off, thread-list rows and groups, logged decisions).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
-`frontend/e2e/copilot-plans-board.spec.ts` and
-`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px).
+`frontend/e2e/copilot-plans-board.spec.ts`,
+`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px) and
+`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
+states, the 375 px Context tab).
 
 ## How the copilot reasons (system prompt)
 
