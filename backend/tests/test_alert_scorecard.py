@@ -1,6 +1,6 @@
 """The alert scorecard (app/engine/alert_scorecard.py): each sent position alert, the decision logged after it, and
 what its contracts fetched against selling at the alert's bid."""
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 import uuid
 
 import pytest
