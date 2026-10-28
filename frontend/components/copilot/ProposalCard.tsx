@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { createWatch, enqueueRevisit, freshQuote, operationId, practiceLine, saveMemory, savePractice, type PlanLevel, type Proposal } from "@/lib/copilot";
+import { confirmedElsewhere, createWatch, enqueueRevisit, freshQuote, operationId, practiceLine, saveMemory, savePractice, type PlanLevel, type Proposal, type ProposalOutcome } from "@/lib/copilot";
 
 const CONDITION: Record<string, string> = { touches: "touches", crosses: "crosses", closes_beyond: "closes beyond" };
 const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -26,16 +26,22 @@ export const conditionText = (level: Pick<PlanLevel, "condition" | "interval">) 
 /** "crosses 92.3", "5m close beyond 95.9". */
 export const levelText = (level: Pick<PlanLevel, "condition" | "price" | "interval">) => `${conditionText(level)} ${number(level.price)}`;
 
-/** A proposal from the model: nothing exists until the owner presses Confirm. */
-export default function ProposalCard({ proposal, investigationId, alertsSupported, onDone }: {
+/** A proposal from the model: nothing exists until the owner presses Confirm. A saved card comes back as it was left
+ * (``proposal.outcome``): confirmed shows what Confirm said, dismissed stays hidden. ``onOutcome`` reports a Confirm or
+ * Dismiss so the investigation keeps it. */
+export default function ProposalCard({ proposal, investigationId, alertsSupported, onDone, onOutcome }: {
   proposal: Exclude<Proposal, { kind: "trade_plan" }>; investigationId: string | null; alertsSupported: boolean; onDone(): void;
+  onOutcome(outcome: ProposalOutcome): void;
 }) {
-  const [phase, setPhase] = useState<"open" | "confirming" | "done" | "dismissed">("open");
-  const [note, setNote] = useState<string | null>(null);
+  const saved = proposal.outcome;
+  const [phase, setPhase] = useState<"open" | "confirming" | "done" | "dismissed">(
+    saved?.state === "confirmed" ? "done" : saved?.state === "dismissed" ? "dismissed" : "open");
+  const [note, setNote] = useState<string | null>(saved?.note ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [text, setText] = useState(proposal.kind === "memory" || proposal.kind === "practice" ? proposal.text : "");
+  const [text, setText] = useState(saved?.text ?? (proposal.kind === "memory" || proposal.kind === "practice" ? proposal.text : ""));
   const [rememberToo, setRememberToo] = useState(false);
-  const operation = useRef(operationId());  // one id per card: a retried Confirm replays, never duplicates
+  // One id per card, kept with it: a Confirm retried here, after a reload or from another window replays, never duplicates.
+  const operation = useRef(proposal.client_id ?? operationId());
   const practiceSaved = useRef<string | null>(null);  // the saved goal's line: a retry after a failed memory save skips it
   if (phase === "dismissed") return null;
   const watch = proposal.kind === "watch";
@@ -49,30 +55,42 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
     if (!ready || phase !== "open") return;
     setPhase("confirming");
     setError(null);
+    // Another window may have confirmed this card already: show what it made instead of making it again.
+    const elsewhere = investigationId ? await confirmedElsewhere(investigationId, proposal.id) : null;
+    if (elsewhere) {
+      setNote(elsewhere.note ?? "Confirmed in another window.");
+      if (elsewhere.text) setText(elsewhere.text);
+      setPhase("done");
+      onOutcome(elsewhere);
+      return;
+    }
     try {
+      let said: string;
       if (proposal.kind === "practice") {
         practiceSaved.current ??= practiceLine(await savePractice({ text: text.trim(), measure: proposal.measure, target: proposal.target,
           investigation_id: investigationId })) ?? "Practice saved";
         // Only when ticked: the practice also becomes an approved lesson memory, through the existing memory store.
         if (rememberToo) await saveMemory({ id: proposal.id, kind: "memory", memory_kind: "lesson", symbol: null, text: text.trim() },
           text.trim(), investigationId, operation.current);
-        setNote(`${practiceSaved.current}. Next week's review scores it.${rememberToo ? " Also remembered as a lesson." : ""}`);
+        said = `${practiceSaved.current}. Next week's review scores it.${rememberToo ? " Also remembered as a lesson." : ""}`;
       } else if (proposal.kind === "memory") {
         await saveMemory(proposal, text.trim(), investigationId, operation.current);
-        setNote(`Remembered (${proposal.memory_kind}${proposal.symbol ? `, ${proposal.symbol}` : ""}). It joins your approved memories from the next turn.`);
+        said = `Remembered (${proposal.memory_kind}${proposal.symbol ? `, ${proposal.symbol}` : ""}). It joins your approved memories from the next turn.`;
       } else if (proposal.kind === "watch") {
         // The side the alert waits on comes from the price now, so a stale or missing quote is refused.
         const quote = await freshQuote(proposal.symbol);
         if (!quote.fresh || quote.last === null) throw new Error(`The latest ${proposal.symbol} quote is stale or missing, so the alert was not set. Try again in a moment.`);
         if (quote.last === proposal.price) throw new Error(`${proposal.symbol} is at ${number(proposal.price)} now, so the alert has no side to wait on.`);
         await createWatch(investigationId!, proposal, quote.last);
-        setNote(`Alert set: ${proposalText(proposal)} (${proposal.symbol} was ${number(quote.last)}).`);
+        said = `Alert set: ${proposalText(proposal)} (${proposal.symbol} was ${number(quote.last)}).`;
       } else {
         const made = await enqueueRevisit(investigationId!, proposal.question, proposal.horizon_days);
         const queued = made.created ? "Revisit queued." : "This revisit was already queued today.";
-        setNote(made.queue_enabled ? queued : `${queued} The research queue is off, so it waits until the queue is turned on.`);
+        said = made.queue_enabled ? queued : `${queued} The research queue is off, so it waits until the queue is turned on.`;
       }
+      setNote(said);
       setPhase("done");
+      onOutcome({ state: "confirmed", note: said, ...(memory || practice ? { text: text.trim() } : {}) });
       onDone();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "That was not confirmed.");
@@ -124,7 +142,7 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
             : <button type="button" onClick={() => void confirm()} disabled={!ready || phase === "confirming"}
                 className="min-h-11 rounded bg-primary px-3 py-1 text-primary-foreground disabled:opacity-40 sm:min-h-0">
                 {phase === "confirming" ? "Confirming…" : !ready && !memory && !practice ? "Saving…" : "Confirm"}</button>}
-          <button type="button" onClick={() => setPhase("dismissed")} disabled={phase === "confirming"}
+          <button type="button" onClick={() => { setPhase("dismissed"); onOutcome({ state: "dismissed" }); }} disabled={phase === "confirming"}
             className="min-h-11 rounded border px-3 py-1 text-muted-foreground hover:text-foreground disabled:opacity-40 sm:min-h-0">Dismiss</button>
           <span className="text-muted-foreground">{memory ? "Nothing is remembered until you confirm." : practice ? "Confirm replaces any practice you have now." : "Nothing is active until you confirm."}</span>
         </div>

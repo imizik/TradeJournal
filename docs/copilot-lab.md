@@ -1084,8 +1084,31 @@ nothing exists until the owner confirms.
   "Invalidation · armed/hit"), its plan time stops (pending, sent, skipped
   with why, not sent, or may have sent) and its revisit jobs, each from its
   own route (`GET /copilot/time-stops?investigation=<id>` for time stops).
-- Proposal cards live in the conversation on screen, not in the saved
-  transcript. A confirmed step remains as linked activity.
+- **Kept cards.** Each card is saved with its answer in the investigation's
+  transcript, so switching threads or reloading brings it back as it was
+  left: pending with Confirm, confirmed with what Confirm said (a plan card
+  with its fields and each part's result, locked; a failed part can still be
+  retried), or dismissed and hidden. Bringing a card back creates nothing;
+  Confirm stays the only way anything is made.
+  - A card gets one `client_id` when it arrives, saved with it, used for its
+    plan capture, time stop and memory saves, so a Confirm retried after a
+    reload or from a second window returns the first record.
+  - Confirm or Dismiss records the card's `outcome` at once through
+    `PUT /copilot/investigations/{id}/proposals/{proposal_id}/outcome`
+    (`state` `confirmed` or `dismissed`, Confirm's note, a memory's or
+    practice's saved words, a plan's part results and fields). It needs no
+    revision and does not bump it. A card that may not be saved yet (its turn
+    still running, or that turn's save in flight) is recorded once that save
+    lands.
+  - A saved outcome is never lost to a save from a window that had not seen
+    it, and a confirmed card stays confirmed. Before Confirm runs, the card
+    re-reads the investigation; if another window already confirmed it, it
+    shows that result instead of making anything. Watches and plan alerts
+    have no client id; if two windows press Confirm in the same moment, the
+    alerts route refuses the same alert twice in a day, so the second says
+    "This alert is already set."
+  - A confirmed step also remains as linked activity.
+  - Browser proof: `frontend/e2e/copilot-keep-drafts.spec.ts`.
 - `/copilot-lab?investigation=<id>` opens that saved investigation with
   "What changed?" ready; with `&context=…` (a plan alert's link) that text is
   ready instead.
@@ -1365,12 +1388,16 @@ After each turn the page saves the conversation as a `copilot_investigation`
 row (`backend/app/models.py`, additive migration `a7c1e3f5b9d2`), so it can be
 resumed from any browser. The lab lists the 8 most recent; clicking one
 resumes it. A row holds a title (the first question), symbol, open/closed
-status, an optional one-line conclusion, the text-only transcript, and evidence
+status, an optional one-line conclusion, the transcript, and evidence
 references: tool name, `as_of`, provenance kind and which answer used it, never
-the data. Each save carries the revision it was read at, and a stale save from
-another window is refused (409). The browser remembers only which
-investigation was open. No follow-up, plan, decision, memory or monitoring is
-created or linked.
+the data. The transcript is each message's text plus, on an answer, its
+proposal cards (at most 4; see Confirm a plan), re-validated on save as
+`propose_plan` validated them, and counted toward the transcript's 400,000
+character cap. A record saved before cards were kept has none and reads and
+saves exactly as it was. Each save carries the revision it was read at, and a
+stale save from another window is refused (409). The browser remembers only
+which investigation was open. No follow-up, plan, decision, memory or
+monitoring is created or linked: a saved card is only a card.
 
 The same record holds background research results. `source` is `copilot` (the
 lab page, through the HTTP routes) or `research_job` (saved in-process by
