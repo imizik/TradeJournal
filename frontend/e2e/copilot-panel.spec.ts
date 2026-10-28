@@ -115,6 +115,44 @@ test("the Charts copilot opens on the chart's symbol, saves a turn, and the lab 
   await expect(page.getByTestId("copilot-scope")).toHaveText("About MRVL");
 });
 
+test("a long answer ends above the message box, and reading up while the next one arrives keeps your place", async ({ page }) => {
+  const lab: Lab = { saved: new Map(), chats: [] };
+  await stubLab(page, lab);
+  const long = Array.from({ length: 30 }, (_, i) => `Point ${i + 1}: MRVL keeps pace with its group on the 15-minute read.`).join("\n\n");
+  let hold: Promise<void> | null = null;
+  let release = () => {};
+  await page.unroute("**/copilot/chat");
+  await page.route("**/copilot/chat", async (route) => {
+    if (hold) await hold;
+    return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn(long) }).catch(() => undefined);
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=MRVL");
+  const panel = await openPanel(page);
+  const scroller = await panel.evaluateHandle((node) => {
+    for (let el = node.parentElement; el; el = el.parentElement) {
+      const { overflowY } = getComputedStyle(el);
+      if (overflowY === "auto" || overflowY === "scroll") return el;
+    }
+    return document.documentElement;
+  });
+  const toEnd = () => scroller.evaluate((el) => Math.round(el.scrollHeight - el.scrollTop - el.clientHeight));
+  const message = panel.getByLabel("Message");
+  await message.fill("Is MRVL leading?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByText("Point 30:")).toBeVisible();
+  await expect.poll(toEnd).toBeLessThanOrEqual(1); // the last line sits above the message box, not under it
+
+  hold = new Promise((resolve) => { release = resolve; });
+  await message.fill("And the invalidation?");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent("wheel", { deltaY: -400, bubbles: true })); el.scrollTop = 0; });
+  release();
+  await expect(panel.getByText("Point 30:").nth(1)).toBeAttached();
+  await page.waitForTimeout(400);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0); // still where the reader scrolled to
+});
+
 test("a symbol switch is offered, never forced, once a conversation exists; an empty panel just follows", async ({ page }) => {
   const lab: Lab = { saved: new Map(), chats: [] };
   lab.saved.set(NVDA, record(NVDA, "NVDA", [{ role: "user", content: "Is NVDA extended?" }, { role: "assistant", content: "Yes, well above VWAP." }]));
