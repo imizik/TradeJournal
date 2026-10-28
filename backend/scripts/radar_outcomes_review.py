@@ -39,11 +39,10 @@ def _line(row: dict) -> str:
 def question_for(rows: list[dict], since: str, until: str | None) -> tuple[str, list[str]] | None:
     """The question and its symbols, or None when no event in the range has a +60 min score."""
     chosen = [r for r in rows if since <= r["session_date"] <= (until or "9999") and HORIZON in r.get("horizons", {})]
-    if any(r.get("record_type") == "session" for r in rows):
-        eligible = {(r["session_date"], r["rule_version"], r["config_digest"]) for r in rows
-                    if r.get("record_type") == "session" and r["verified"]}
-        chosen = [r for r in chosen if r.get("evidence_verified")
-                  and (r["session_date"], r["rule_version"], r.get("config_digest")) in eligible]
+    eligible = {(r["session_date"], r["rule_version"], r["config_digest"]) for r in rows
+                if r.get("record_type") == "session" and r["verified"]}
+    chosen = [r for r in chosen if r.get("evidence_verified")
+              and (r["session_date"], r["rule_version"], r.get("config_digest")) in eligible]
     if not chosen:
         return None
     ranked = sorted(chosen, key=lambda r: (-r["horizons"][HORIZON]["event"], r["event_id"]))

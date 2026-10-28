@@ -127,3 +127,16 @@ def test_event_inserted_without_receipt_invalidates_session(tmp_path):
     _event(s, "backfilled", "relative_to_spy", "up", ["AAA"], s.passes()[0])
     [row] = census(s, "2026-10-28")
     assert not row["verified"] and "events lack unique live receipt provenance" in row["issues"]
+
+
+def test_additive_upgrade_preserves_legacy_rows_without_certifying_them(tmp_path):
+    s = RadarStore(tmp_path / "legacy.sqlite")
+    _add_pass(s, "10:00", FLAT)
+    before = s.passes(), s.quotes()
+    with sqlite3.connect(s.path) as db:
+        db.execute("DROP TABLE detection_receipt")
+        db.execute("DROP TABLE detection_config")
+    upgraded = RadarStore(s.path)
+    assert (upgraded.passes(), upgraded.quotes()) == before
+    assert upgraded.detection_evidence() == ({}, {})
+    assert not census(upgraded, "2026-10-28")[0]["verified"]
