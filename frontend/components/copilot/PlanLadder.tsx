@@ -86,7 +86,8 @@ function Details({ plan, ladder, position }: { plan: PlanBoardRow; ladder: Ladde
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt>{label}</dt>
-            <dd className="text-foreground"><span className="tabular-nums">{value}</span></dd>
+            {/* Words with numbers: aligned figures in the text face; the desk keeps monospace for figures alone. */}
+            <dd className="text-foreground [font-variant-numeric:tabular-nums]">{value}</dd>
           </div>
         ))}
       </dl>

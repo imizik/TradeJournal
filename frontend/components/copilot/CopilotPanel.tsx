@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
@@ -265,6 +265,9 @@ export type ChartLook = { image: Blob; line: string };
 /** A suggestion chip above the desk's message box. */
 type Suggestion = { label: string; title?: string; run(): void };
 
+/** The message box's toolbar look for the voice hooks' own buttons: borderless icons, compact on a wide screen. */
+const TOOL = "[&>button]:rounded-lg [&>button]:border-transparent [&>button:hover]:bg-secondary md:[&>button]:min-h-9 md:[&>button]:min-w-9";
+
 /** How close to the bottom (px) still counts as reading the end of the conversation. */
 const FOLLOW_PX = 80;
 /** Scroll events this soon (ms) after the panel scrolled itself are its own, not the reader's. */
@@ -331,7 +334,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [backend, setBackend] = useState<Backend | null>(null);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
-  const following = useRef(true); // the reader is at the bottom, so new text scrolls into view
+  // The reader is at the bottom, so new text scrolls into view. A side panel is a chat and opens on its latest message;
+  // the page opens a thread at its top (header and decision first) and follows once the owner sends.
+  const following = useRef(variant === "panel");
   const autoAt = useRef(0); // when the panel last scrolled itself
   const scroller = useRef<HTMLElement | null>(null); // a dock or drawer's own scroller; null for the page
   const root = useRef<HTMLDivElement | null>(null);
@@ -367,7 +372,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
   function open(saved: Investigation) {
-    following.current = true;
+    following.current = panel;
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMenu(false);
     pendingOutcomes.current.clear();
@@ -418,7 +423,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** A new conversation on ``target``, with the page's context line ready, unless the owner has typed their own. */
   function fresh(target: string) {
-    following.current = true;
+    following.current = panel;
     pendingOutcomes.current.clear();
     setMessages([]);
     setCurrent(null);
@@ -512,7 +517,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // A panel scrolls its own list, never the page around it.
   // Follow a streaming answer only while the reader is at the bottom: scrolled up to read, they stay where they are.
   // Wheel, touch and paging keys stop following at once (a scroll event can arrive after the next chunk already scrolled
-  // down); the position re-pins when they come back to the end. Their own send, or opening a conversation, follows again.
+  // down); the position re-pins when they come back to the end. Their own send follows again, as does opening a conversation in a side panel.
   useEffect(() => {
     const box = scrollParent(end.current);
     scroller.current = box;
@@ -536,6 +541,15 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       window.removeEventListener("keydown", key);
     };
   }, [status?.enabled]); // the conversation renders once the status read says the lab is on
+  // The message box grows with what is typed, up to a cap (a dock's share of its height, 40% of the page), then scrolls.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const cap = panel ? 224 : Math.round(window.innerHeight * 0.4);
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
+  }, [draft, panel, status?.enabled]);
   // To the very end, so the newest line sits above the pinned message box instead of under it.
   const pin = useCallback(() => {
     if (!following.current) return;
@@ -828,20 +842,19 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     </span>
   );
   const messageBox = (
-    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={2} disabled={!enabled}
+    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={3} disabled={!enabled}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
       placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
-      className={desk ? "min-h-[2.75rem] w-full resize-y rounded bg-transparent px-3 py-2 text-base text-foreground outline-none disabled:opacity-50 sm:text-sm"
-        : "min-h-[2.75rem] min-w-0 flex-1 basis-28 resize-y rounded border bg-background px-3 py-2 text-base text-foreground disabled:opacity-50 sm:text-sm"} />
+      className="block min-h-[4.75rem] w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm" />
   );
   const sendButton = busy
-    ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded border px-3 py-2 text-sm">Stop</button>
-    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Send</button>;
+    ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded-lg border px-4 text-sm md:min-h-9">Stop</button>
+    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40 md:min-h-9">Send</button>;
   const attachButton = (
     <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
       onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}
-      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border text-muted-foreground hover:text-foreground disabled:opacity-40">
-      {attaching?.state === "busy" ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 md:min-h-9 md:min-w-9">
+      {attaching?.state === "busy" ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <ImagePlus className="h-[18px] w-[18px]" />}
     </button>
   );
   const pickerInput = (
@@ -851,8 +864,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // The answer being read stops the moment the mic is pressed, before it starts listening.
   // On the desk it is round, the main button on a phone.
   const mic = (
-    <span onPointerDownCapture={speak.stop} onKeyDownCapture={speak.stop} className={cn("contents", desk
-      && "[&>button]:rounded-full max-md:[&>button]:h-12 max-md:[&>button]:w-12 [&>button[aria-pressed=false]]:border-primary/50 [&>button[aria-pressed=false]]:text-primary")}>
+    <span onPointerDownCapture={speak.stop} onKeyDownCapture={speak.stop} className={cn("contents", TOOL, desk
+      && "max-md:[&>button]:h-12 max-md:[&>button]:w-12 max-md:[&>button]:rounded-full max-md:[&>button[aria-pressed=false]]:border-primary/50 max-md:[&>button[aria-pressed=false]]:text-primary")}>
       {voice.button}
     </span>
   );
@@ -1001,14 +1014,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         open: id => void resume(id),
       })}
 
-      <div className={panel ? "min-h-[8rem] space-y-3 rounded border bg-card/40 p-2" : "min-h-[10rem] space-y-4 rounded border bg-card/40 p-3 sm:min-h-[16rem]"} aria-live="polite">
+      <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">
         {!messages.length && !current?.findings && (
           <p className="text-sm text-muted-foreground">
             Ask about an opportunity, push back on the read, then ask for a plan. Try: “{symbol || "NBIS"} looks like it might recover. Is the whole group confirming?”
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
-          <div key={i} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded bg-primary/10 px-3 py-2 text-sm text-foreground">
+          <div key={i} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground">
             {message.images?.length ? (
               <span className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
@@ -1077,11 +1090,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           ))}
         </div>
       )}
-      {desk ? (
-        // The desk: the scope chip sits inside the message box. A phone gives the box the full width, keeps attach and
-        // read-aloud behind "+", and makes the mic the main round button beside Send.
-        <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end gap-2">
-          <div className="flex min-w-0 basis-full flex-col rounded border bg-background focus-within:border-primary/50 md:flex-1 md:basis-0">
+      {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
+          full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
+      <form onSubmit={e => { e.preventDefault(); void send(draft); }}
+        className="rounded-xl border bg-background transition-colors focus-within:border-primary/50">
+        {desk && (
             <div className="flex min-h-7 items-center px-2 pt-1.5 text-xs">
               {symbol ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">
@@ -1103,33 +1116,25 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                   className="rounded-full px-1 text-muted-foreground hover:text-foreground disabled:opacity-40">Across everything · add a symbol</button>
               )}
             </div>
-            {messageBox}
-          </div>
-          <div className="flex w-full items-center gap-2 md:w-auto">
+        )}
+        {messageBox}
+        <div className="flex items-center gap-1 px-1.5 pb-1.5">
+          {desk && (
             <button type="button" onClick={() => setTray(open => !open)} aria-expanded={tray} aria-label="More: attach, read aloud"
-              className="flex min-h-11 min-w-11 items-center justify-center rounded-full border text-muted-foreground hover:text-foreground md:hidden">
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden">
               <Plus className={cn("h-5 w-5 transition-transform", tray && "rotate-45")} />
             </button>
-            {/* While an answer is read aloud its Stop stays in view on a phone. */}
-            <span className={cn("items-center gap-2 md:flex", tray ? "flex" : "hidden")}>{attachButton}</span>
-            <span className={cn("items-center md:flex", tray || speak.speaking ? "flex" : "hidden")}>{speak.button}</span>
-            <span className="flex-1 md:hidden" />
-            {sendButton}
-            {mic}
-          </div>
-          {pickerInput}
-        </form>
-      ) : (
-        /* The buttons wrap under the box when a narrow dock would squeeze it below 7rem. */
-        <form onSubmit={e => { e.preventDefault(); void send(draft); }} className="flex flex-wrap items-end justify-end gap-2">
-          {messageBox}
-          {sendButton}
-          {attachButton}
-          {pickerInput}
+          )}
+          {/* While an answer is read aloud its Stop stays in view on a phone. */}
+          <span className={cn("items-center gap-1", desk ? cn("md:flex", tray ? "flex" : "hidden") : "flex")}>{attachButton}</span>
+          <span className={cn("items-center", TOOL, desk ? cn("md:flex", tray || speak.speaking ? "flex" : "hidden") : "flex")}>{speak.button}</span>
+          <span className="flex-1" />
           {mic}
-          {speak.button}
-        </form>
-      )}
+          {sendButton}
+        </div>
+        {pickerInput}
+      </form>
+      {desk && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
       {(voice.available || speak.available) && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}

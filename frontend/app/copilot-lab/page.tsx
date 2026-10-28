@@ -14,7 +14,8 @@ export default async function CopilotLabPage({ searchParams }: { searchParams: P
   if (!(await requireAccess()).owner) notFound();
   const link = readDeepLink(await searchParams);
   return (
-    <div className={`${sans.variable} ${mono.variable}`}>
+    // Full screen beside the nav rail on a wide screen (AppMain), the desk fills the height left under the banner.
+    <div className={`${sans.variable} ${mono.variable} lg:flex lg:min-h-0 lg:flex-1 lg:flex-col`}>
       <CopilotLab key={JSON.stringify(link)} link={link} />
     </div>
   );
