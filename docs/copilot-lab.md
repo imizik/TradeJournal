@@ -358,7 +358,26 @@ The full page is a desk of three panes beside each other
   conversation runs; a row or "What matters right now?" opens or asks in the
   conversation beside it, through the panel's `desk` hand-off.
 - **Conversation**: the page variant of `CopilotPanel.tsx`. On the desk its
-  message box stays in reach while the conversation scrolls.
+  message box stays in reach while the conversation scrolls. Above it, the
+  open thread's header (`ThreadHead.tsx`): a status chip (In position,
+  Armed, Draft · not armed, Not planned), one meta line (an option's strike,
+  expiry and days left, or a stock's days held), the symbol, the thesis on
+  one truncated line (full text on hover) and the price. An option shows its
+  own mark (a share's premium; the journal keeps a contract's) and P&L %,
+  with "NBIS 87.74 · underlying" beneath, so the underlying's price is never
+  read as the option's; a stock shows its last price, P&L % and average cost.
+  Under it, the plan ladder (`PlanLadder.tsx`): one scale from the
+  invalidation through the entry to 1R and 2R past it (R is the
+  entry-to-invalidation distance; plans have no target, so these only
+  measure), the live price, "3.1% above invalidation", the current R multiple,
+  one quiet line with the time stop or expiry, and the rest (alert conditions,
+  1R in dollars, entry premium, size, open P&L) behind Details. For an option
+  the levels are the underlying's, said in its title. `compact` draws it as
+  one line (invalidation · bar · 2R), `dimmed` for a plan not armed yet.
+  Both read `GET /copilot/plans` (the plan is the row for the open
+  investigation) and `GET /copilot/plans/positions` (the open position in its
+  symbol, matched by the plan's invalidation; none for an armed plan not yet
+  entered), once a minute; a thread with no plan shows only the header.
 - **Context**: the open investigation's linked activity (alerts, time stop,
   revisits) and a link to Charts; empty until a conversation is saved.
 
@@ -372,8 +391,9 @@ The desk has its own palette (warm graphite, amber as the one accent) and type
 ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
 only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
 the conversation hand-off, thread-list rows and groups, logged decisions).
-Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone)
-and `frontend/e2e/copilot-plans-board.spec.ts`.
+Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
+`frontend/e2e/copilot-plans-board.spec.ts` and
+`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px).
 
 ## How the copilot reasons (system prompt)
 

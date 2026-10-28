@@ -70,6 +70,10 @@ def test_a_planned_position_shows_pl_invalidation_distance_time_stop_countdown_a
     [row] = body["positions"]
     assert row["trade_id"] == trade and row["contract"] == "NBIS 10/23/26 100C"
     assert (row["quantity"], row["unrealized_usd"], row["unrealized_pct"]) == (2, 180.0, 29.0)
+    # The desk header's price block: the option's own mark and entry, a contract each (premium x 100), never the underlying.
+    assert (row["mark"], row["avg_entry"]) == (400.0, 310.0)
+    assert row["option"] == {"side": "call", "strike": 100, "expiry": "2026-10-23"}
+    assert isinstance(row["days_held"], int)
     assert row["plan"] == {
         "setup": "Copilot plan", "thesis": "Reclaims VWAP with the group", "timing": "pre_entry",
         "invalidation": {"price": 92.3, "condition": "crosses", "state": "armed", "distance_usd": -1.7, "distance_pct": -1.81},
@@ -134,6 +138,7 @@ def test_webull_is_left_out_and_stock_has_no_watch(engine, lab, marks):  # noqa:
     buy(engine, 601, "CRWV", stock=True)
     [row] = lab.get("/copilot/plans/positions").json()["positions"]
     assert (row["contract"], row["giveback"], row["unrealized_usd"]) == ("CRWV stock", None, 112.0)
+    assert (row["option"], row["mark"], row["avg_entry"]) == (None, 131.2, 120.0)  # dollars a share
 
 
 def test_nothing_open_is_an_empty_list_and_the_only_id_out_is_the_trade(engine, lab, marks):  # noqa: F811
