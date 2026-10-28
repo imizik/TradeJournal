@@ -467,12 +467,13 @@ on the symbol alone, where the bar shows without a saved conversation.
 
 **Alert scorecard** (`components/copilot/AlertScorecard.tsx`, under the
 Briefing's session timeline; `GET /copilot/desk/scorecard`,
-`app/engine/alert_scorecard.py`). For each position alert that reached the
+`app/engine/alert_scorecard.py`). For each position alert sent to the
 phone in the last 30 days: what was decided after it (the first `decision`
-journal entry for the symbol before the position's next alert) and what its
+journal entry for the symbol that New York day, before the position's next
+alert; the journal keeps the symbol, not the position) and what its
 contracts then fetched, against selling them at the alert's bid (its mark
-when no bid was quoted). The closing sells after the alert are taken in FIFO
-order up to the contracts the alert saw open; contracts that expired fetched
+when no bid was quoted). The closing sells from the alert's minute on are
+taken in FIFO order up to the contracts the alert saw open; contracts that expired fetched
 nothing; a position still open is "still open"; a short position, an alert
 with no price, or a trade that cannot be found is "not measured". One line
 sums it ("You held 5: 3 better than selling at the alert, 1 worse, 1 still

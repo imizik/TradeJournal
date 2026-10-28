@@ -162,3 +162,30 @@ def test_the_route_refuses_while_the_lab_is_off_and_reads_the_card_while_it_is_o
     assert copilot_desk.desk_scorecard(db) == {"window_days": 30, "alerts": 0, "summary": {
         k: {"alerts": 0, "closed": 0, "better": 0, "worse": 0, "even": 0, "open": 0, "not_measured": 0, "vs_alert_usd": 0}
         for k in ("holding", "exiting", "none")}, "rows": [], "truncated": False}
+
+
+def test_a_decision_only_answers_an_alert_on_its_own_new_york_day(db):
+    trade, key = position(db, "NBIS", [(1, 400, ny(27, 9, 41))], [(1, 450, ny(29, 10))], status="closed", closed_at=ny(29, 10))
+    alert(db, trade, key, utc(27, 10, 31), contracts=1, bid=300)
+    decide(db, "NBIS", "Holding. A later thought about another position.", utc(28, 10, 0))
+    [row] = alert_scorecard.scorecard(db, NOW)["rows"]
+    assert row["decision"] is None
+
+
+def test_a_sell_in_the_alert_s_own_minute_counts(db):
+    trade, key = position(db, "NBIS", [(1, 400, ny(27, 9, 41))], [(1, 320, ny(27, 10, 31))], status="closed", closed_at=ny(27, 10, 31))
+    alert(db, trade, key, datetime(2026, 10, 27, 14, 31, 30), contracts=1, bid=300)  # 10:31:30 New York
+    [row] = alert_scorecard.scorecard(db, NOW)["rows"]
+    assert row["outcome"]["state"] == "closed" and row["outcome"]["vs_alert_usd"] == 20.0
+
+
+def test_a_failed_desk_link_read_still_sends_the_alert_to_the_trade_page(db, monkeypatch):
+    from types import SimpleNamespace
+    from app.engine import position_alerts
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.setattr(position_alerts, "desk_path", lambda own, alert: (_ for _ in ()).throw(RuntimeError("db went away")))
+    row = SimpleNamespace(trade_id=uuid.uuid4(), id=uuid.uuid4(), contract="NBIS 11/21/26 100C", kind="giveback",
+                          peak_gain=None, gain=None, mark=None, detected_at=datetime(2026, 10, 27, 14, 31))
+    path, more = position_alerts._links(db, row)
+    assert path == f"/trades/{row.trade_id}?alert={row.id}"
+    assert db.exec(__import__("sqlmodel").select(Account)).first() is not None  # the caller's session still works

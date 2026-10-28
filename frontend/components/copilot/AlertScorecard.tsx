@@ -33,7 +33,7 @@ function Outcome({ row }: { row: ScorecardRow }) {
 }
 
 /**
- * The Briefing's alert scorecard (``GET /copilot/desk/scorecard``): for the position alerts that reached the phone in
+ * The Briefing's alert scorecard (``GET /copilot/desk/scorecard``): for the position alerts sent to the phone in
  * the last 30 days, what was decided after each and what its contracts then fetched against selling at the alert. One
  * line, with each alert behind a disclosure. Alerts are prompts to decide, not exit rules; this is how their value shows.
  */
@@ -57,7 +57,7 @@ export default function AlertScorecard() {
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Alert scorecard</h2>
         <span className="text-xs text-muted-foreground">last {card.window_days} days · against selling at the alert</span>
       </div>
-      {!card.alerts ? <p className="text-muted-foreground">No position alert reached your phone in the last {card.window_days} days.</p> : (
+      {!card.alerts ? <p className="text-muted-foreground">No position alert was sent to your phone in the last {card.window_days} days.</p> : (
         <>
           <p className="text-foreground">
             {card.alerts} alert{card.alerts === 1 ? "" : "s"}.{" "}

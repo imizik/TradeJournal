@@ -65,5 +65,5 @@ test("with no alerts it says so, and at 375 px the scorecard fits without sidewa
     summary: { holding: tally({}), exiting: tally({}), none: tally({}) } } }));
   await page.reload();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click();
-  await expect(page.getByRole("region", { name: "Alert scorecard" })).toContainText("No position alert reached your phone in the last 30 days.");
+  await expect(page.getByRole("region", { name: "Alert scorecard" })).toContainText("No position alert was sent to your phone in the last 30 days.");
 });

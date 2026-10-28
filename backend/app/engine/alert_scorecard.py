@@ -1,15 +1,18 @@
-"""The alert scorecard (docs/copilot-lab.md § The desk): for each position alert that reached the phone, what the owner
+"""The alert scorecard (docs/copilot-lab.md § The desk): for each position alert sent to the phone, what the owner
 decided after it and what happened next, measured against selling at the alert.
 
 An alert is a prompt to decide, not an exit rule (the 2026-10-24 exit study rejected each alert as a mechanical exit),
 so its value can only show in the owner's decisions after it. Read-only; nothing here changes an alert or a threshold.
 
-- Alerts: ``PositionAlert`` rows sent (or possibly sent) in the last ``WINDOW_DAYS``, newest first.
-- Decision: the first ``decision`` day-journal entry for the alert's symbol logged after it and before the same
-  position's next alert ("holding" or "exiting", from the entry's first word); none means no decision was logged.
+- Alerts: ``PositionAlert`` rows sent to the phone (or possibly sent) in the last ``WINDOW_DAYS``, newest first.
+- Decision: the first ``decision`` day-journal entry for the alert's symbol logged after it, on the same New York day
+  (the decision bar asks only that day) and before the same position's next alert ("holding" or "exiting", from the
+  entry's first word); none means no decision was logged. The journal keeps the symbol, not the position, so two
+  positions in one symbol alerting the same day would share a decision.
 - Outcome, for the contracts the alert saw open (``PositionAlert.contracts``): selling them at the alert would have
   fetched the alert's bid times those contracts (its mark when no bid was quoted; ``basis`` says which). What they
-  actually fetched is the closing fills after the alert, taken in order as FIFO closes the oldest lots first, plus
+  actually fetched is the closing fills from the alert's minute on (fill times carry minutes only), taken in order as
+  FIFO closes the oldest lots first, up to the contracts the alert saw, plus
   nothing for contracts that expired. ``vs_alert_usd`` is actual minus selling at the alert: positive means holding
   past the alert paid. A position with contracts still open is ``open``; a short position, an alert with no price, or
   a trade that cannot be found is ``not_measured``.
@@ -85,8 +88,8 @@ def _outcome(db: Session, alert: PositionAlert, trade: Trade | None) -> dict:
         return {"state": "not_measured", "why": "a short position"}
     held = float(alert.contracts)
     at_alert = round(float(price) * held, 2)
-    after = _ny(alert.detected_at)
-    exits = sorted((f for f in _fills(db, trade.id, "exit") if f.executed_at > after),
+    after = _ny(alert.detected_at).replace(second=0, microsecond=0)  # fills are recorded to the minute
+    exits = sorted((f for f in _fills(db, trade.id, "exit") if f.executed_at >= after),
                    key=lambda f: (f.executed_at, f.raw_email_id or "", str(f.id)))
     taken = proceeds = 0.0
     ended = None
@@ -130,8 +133,9 @@ def scorecard(db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
     for i, alert in enumerate(alerts):
         symbol = (alert.contract or "").split(" ")[0]
         until = later.get(i)
+        day = _ny(alert.detected_at).date()
         decided = next((d for d in decisions if d.symbol == symbol and d.created_at >= alert.detected_at
-                        and (until is None or d.created_at < until) and _choice(d)), None)
+                        and _ny(d.created_at).date() == day and (until is None or d.created_at < until) and _choice(d)), None)
         rows.append({
             "at": _epoch_utc(alert.detected_at), "kind": alert.kind, "kind_label": KIND.get(alert.kind, "Position alert"),
             "contract": alert.contract, "symbol": symbol,

@@ -303,7 +303,8 @@ def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str
     if os.environ.get("COPILOT_ENABLED") != "true":
         return trade, ()
     try:
-        desk = desk_path(db, alert)
+        with Session(db.get_bind()) as own:  # its own session: a failed read cannot abort the alert's transaction
+            desk = desk_path(own, alert)
     except Exception:  # noqa: BLE001 - the alert matters more than where it opens
         log.warning("Desk link skipped for a position alert", exc_info=True)
         return trade, _ask_copilot(alert)
