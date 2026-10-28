@@ -198,7 +198,7 @@ def test_the_week_and_the_streak(desk, engine):  # noqa: F811
     assert body["threads"][1]["status"]["text"] == "1 of 1 entries planned this week"
 
 
-def test_after_hours_and_a_closed_day(desk, clock, monkeypatch):
+def test_after_hours_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F811
     clock["t"] = datetime(2026, 10, 21, 21, 0, tzinfo=UTC).timestamp()  # 17:00 New York
     assert read(desk)["day"]["phase"] == "post"
     monkeypatch.setattr(copilot_desk, "_hours", lambda day: {"status": "closed"})
