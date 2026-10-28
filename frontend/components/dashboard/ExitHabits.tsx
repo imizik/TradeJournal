@@ -39,9 +39,9 @@ function Line({ name, group }: { name: string; group: Group }) {
 function result(a: Alert) {
   if (a.vs_alert == null) return a.note ?? "No result.";
   const by = money(Math.abs(a.vs_alert), { cents: false });
-  if (a.vs_alert > 0) return `You came out ${by} better than closing at the alert.`;
-  if (a.vs_alert < 0) return `Closing at the alert would have been ${by} better.`;
-  return "The same as closing at the alert.";
+  if (a.vs_alert > 0) return `Your result was ${by} above the recorded midpoint value at the alert.`;
+  if (a.vs_alert < 0) return `Your result was ${by} below the recorded midpoint value at the alert.`;
+  return "Your result matched the recorded midpoint value at the alert.";
 }
 
 export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: ExitHabitsBody; alertsShown?: number }) {
@@ -57,6 +57,7 @@ export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: Exi
     </li>)}</ul>
     <div className="border-t pt-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent alerts</h3>
+      <p className="text-xs text-muted-foreground">Dollar differences compare your result with the position’s recorded midpoint value at the alert. That value is a reference, not a guaranteed exit price.</p>
       {body.alerts.length ? <ul className="divide-y divide-border">{body.alerts.slice(0, alertsShown).map((a) => <li key={a.id} className="space-y-0.5 py-2" data-testid="exit-habits-alert">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
           {a.trade_id ? <Link href={`/trades/${a.trade_id}?alert=${encodeURIComponent(a.id)}`} className="text-sm font-medium text-primary hover:underline">{a.contract}</Link>
@@ -70,11 +71,13 @@ export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: Exi
   </div>;
 }
 
-const VERDICT: Record<ExitHabitsBody["verdict"]["verdict"], { label: string; tone: string }> = {
-  helping: { label: "Helping", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
-  not_helping: { label: "Not helping", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
+export const EXIT_HABIT_VERDICT: Record<ExitHabitsBody["verdict"]["verdict"], { label: string; tone: string }> = {
+  helping: { label: "Lower habit rates", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
+  not_helping: { label: "No consistent decrease", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
   not_enough_data: { label: "Not enough data", tone: "border-border bg-muted text-muted-foreground" },
 };
+
+export const EXIT_HABIT_CAVEAT = "This before/after comparison does not establish that alerts caused a change.";
 
 /** The dashboard's one line on the alerts: the verdict and its reason. The habits, alerts and sample live on /proof. */
 export default function ExitHabits() {
@@ -87,13 +90,13 @@ export default function ExitHabits() {
       .then(setBody).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, []);
-  const verdict = body ? VERDICT[body.verdict.verdict] : null;
+  const verdict = body ? EXIT_HABIT_VERDICT[body.verdict.verdict] : null;
   return <DashboardCard title="Exit habits" action={<Link href="/proof" className={dashboardLink}>Proof →</Link>}>
     <div data-testid="exit-habits" className="min-w-0 break-words text-sm">
-      {body && verdict ? <p className="flex flex-wrap items-center gap-2" data-testid="exit-habits-verdict">
+      {body && verdict ? <><p className="flex flex-wrap items-center gap-2" data-testid="exit-habits-verdict">
           <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
           <span>{body.verdict.reason}</span>
-        </p>
+        </p><p className="mt-2 text-xs text-muted-foreground">{EXIT_HABIT_CAVEAT}</p></>
         : <p role="status" className={error ? "text-amber-300" : "text-muted-foreground"}>{error ? "Exit habits could not load." : "Loading exit habits…"}</p>}
     </div>
   </DashboardCard>;

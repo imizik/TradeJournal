@@ -19,8 +19,10 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(alerts).toContainText("0 of 30 trades closed since the alerts went live.");
     await expect(alerts).toContainText("Sample: 0 of the last 30 trades since 2026-10-21 vs 2 before");
     await expect(alerts).toContainText("2 standard errors");
-    const card = page.getByRole("region", { name: "Do position alerts help you reconsider?" });
+    const card = page.getByRole("region", { name: "Exit habits and alert follow-up" });
     await expect(card).toContainText("What you did after 3 alerts");
+    await expect(card).toContainText("does not establish that alerts caused a change");
+    await expect(card).toContainText("not a guaranteed exit price");
     // The habits against baseline, counts only, and each alert's follow-up (moved here from the Dashboard card).
     await expect(card).toContainText("0 since phone alerts went live on Oct 21, against 2 before");
     await expect(card).toContainText("Too few trades yet to read a change");
@@ -35,11 +37,11 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     const nvda = rows.filter({ hasText: "NVDA" });
     await expect(nvda).toContainText("Gave back its gain");
     await expect(nvda).toContainText("Closed within 15 min");
-    await expect(nvda).toContainText("You came out $250 better than closing at the alert."); // 5 sold at $700 vs a $650 mark
+    await expect(nvda).toContainText("Your result was $250 above the recorded midpoint value at the alert."); // 5 sold at $700 vs a $650 mark
     const tsla = rows.filter({ hasText: "TSLA" });
     await expect(tsla).toContainText("Held an hour");
     await expect(tsla).toContainText("Let it expire");
-    await expect(tsla).toContainText("Closing at the alert would have been $240 better.");
+    await expect(tsla).toContainText("Your result was $240 below the recorded midpoint value at the alert.");
     const aapl = rows.filter({ hasText: "AAPL" });
     await expect(aapl).toContainText("Trimmed within 15 min");
     await expect(aapl).toContainText("Still open, so there is no result yet.");

@@ -19,9 +19,10 @@ bought later sits behind them. From those sales:
 - ``still_open``: some are still held and the option has not expired.
 
 ``vs_alert`` is what those contracts brought in (zero for any that expired)
-minus their value at the alert's midpoint mark, in dollars: positive means what
-you did came out better than closing at the alert. Cost cancels out of that
-difference, so it is the same as realized P&L minus P&L at the mark. It is None,
+minus their value at the alert's midpoint mark, in dollars: positive means
+proceeds exceeded the recorded midpoint value. This reference mark is not
+a guaranteed executable exit price. Cost cancels out of the difference, so it
+is the same as realized P&L minus P&L at the mark. It is None,
 with a reason, when the alert had no mark, the position is still open, or the
 fills no longer show the alert's contracts open at the alert.
 
@@ -212,9 +213,9 @@ def habit_change(recent: dict, baseline: dict) -> str | None:
 
 
 def verdict(card: dict) -> dict:
-    """Do the alerts help? Defaults to not_enough_data; never claims a change the sample cannot show."""
-    rule = (f"Helping: {HABITS_TO_HELP}+ of the 4 habits lower than before alerts by {Z:g} standard errors and none higher, "
-            f"over the last {card['window']} trades. Not helping: none lower, or any higher.")
+    """Describe changes in habit rates; the legacy verdict keys do not establish causation."""
+    rule = (f"Lower habit rates: {HABITS_TO_HELP}+ of the 4 habits lower than before alerts by {Z:g} standard errors and none higher, "
+            f"over the last {card['window']} trades. No consistent decrease: none lower, or any higher.")
     out = {"verdict": "not_enough_data", "rule": rule, "sample": card["recent_trades"], "changes": {}}
     if not card["baseline_trades"]:
         return {**out, "reason": "No trades before the alerts went live, so there is no baseline."}
