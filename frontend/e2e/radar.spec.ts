@@ -42,7 +42,11 @@ for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]
     await expect(news).not.toContainText("caused");
     await page.getByRole("button", { name: "Too late", exact: true }).click();
     await expect(page.getByRole("button", { name: "Too late", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("link", { name: /Open chart · MU/ })).toHaveAttribute("href", "/charts?symbol=MU");
+    const chartLink = new URL((await page.getByRole("link", { name: /Open chart · MU/ }).getAttribute("href"))!, "http://fixture");
+    expect(chartLink.searchParams.get("symbol")).toBe("MU");
+    const origin = radarChartContext(chartLink.searchParams)!;
+    expect(origin).toMatchObject({ symbol: "MU", session: "2026-10-20", eventId: EVENT });
+    expect(radarReturnHref(origin)).toBe(`/radar?session=2026-10-20&event=${EVENT}`);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
     await page.screenshot({ path: test.info().outputPath(`radar-${size}.png`), fullPage: true });
 
@@ -141,7 +145,8 @@ test("Radar navigation context rejects invalid dates and keeps return links inte
   expect(context.group).toBe("AI & compute");
   expect(radarReturnHref(context)).toBe("/radar?session=2026-10-20&groups=all#radar-group-AI%20%26%20compute");
   for (const [key, value] of [["radar_symbol", "../bad"], ["radar_session", "2026-02-30"],
-    ["radar_at", "bad"], ["radar_at", "2026-10-21T15:12:00Z"], ["radar_at", "2026-10-20T15:12:00"], ["radar_group", " "]]) {
+    ["radar_at", "bad"], ["radar_at", "2026-10-21T15:12:00Z"], ["radar_at", "2026-10-20T15:12:00"], ["radar_group", " "],
+    ["radar_event", "../bad"], ["radar_event", ""], ["radar_event", "x".repeat(121)]]) {
     const invalid = new URLSearchParams(query); invalid.set(key, value);
     expect(radarChartContext(invalid)).toBeNull();
   }

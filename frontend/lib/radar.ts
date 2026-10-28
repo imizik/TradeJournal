@@ -201,7 +201,7 @@ export function groupLine(g: RadarMoverGroup): string {
 }
 
 /** Navigation provenance only. Never interpreted as a historical chart/replay window. */
-export type RadarChartContext = { symbol: string; session: string; observedAt: string; group?: string; allGroups: boolean };
+export type RadarChartContext = { symbol: string; session: string; observedAt: string; group?: string; allGroups: boolean; eventId?: string };
 export function radarSession(value: string | null): string | undefined {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
   const date = new Date(`${value}T00:00:00Z`);
@@ -210,11 +210,13 @@ export function radarSession(value: string | null): string | undefined {
 export function radarChartContext(query: URLSearchParams): RadarChartContext | null {
   const symbol = query.get("radar_symbol"), session = radarSession(query.get("radar_session"));
   const observedAt = query.get("radar_at"), group = query.get("radar_group") ?? undefined;
+  const eventId = query.get("radar_event");
   if (!symbol || !/^[A-Z0-9.\-]{1,16}$/.test(symbol) || !session || !observedAt ||
     !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(observedAt) || !Number.isFinite(Date.parse(observedAt)) ||
     new Intl.DateTimeFormat("en-CA", { timeZone: NY }).format(new Date(observedAt)) !== session ||
-    (group !== undefined && (!group.trim() || group.length > 120))) return null;
-  return { symbol, session, observedAt, group, allGroups: query.get("radar_groups") === "all" };
+    (group !== undefined && (!group.trim() || group.length > 120)) ||
+    (eventId !== null && !radarEventId(eventId))) return null;
+  return { symbol, session, observedAt, group, allGroups: query.get("radar_groups") === "all", eventId: eventId ?? undefined };
 }
 export function radarChartHref(symbol: string, movers: RadarMovers, group?: string, allGroups = false): string {
   const query = new URLSearchParams({ symbol });
@@ -229,6 +231,17 @@ export function radarChartHref(symbol: string, movers: RadarMovers, group?: stri
 }
 export function radarReturnHref(context: RadarChartContext): string {
   const query = new URLSearchParams({ session: context.session });
+  if (context.eventId) {
+    query.set("event", context.eventId);
+    return `/radar?${query}`;
+  }
   if (context.allGroups) query.set("groups", "all");
   return `/radar?${query}#${encodeURIComponent(context.group ? `radar-group-${context.group}` : "radar-movers")}`;
+}
+
+export function radarEventChartHref(event: RadarEvent): string {
+  const symbol = event.chart?.symbol ?? event.symbols[0];
+  const query = new URLSearchParams({ symbol, radar_symbol: symbol, radar_session: event.session_date,
+    radar_at: event.first_seen_at, radar_event: event.event_id });
+  return `/charts?${query}`;
 }
