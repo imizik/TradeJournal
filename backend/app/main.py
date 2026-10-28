@@ -345,6 +345,22 @@ async def _maybe_start_research_queue(app_: FastAPI):
     return asyncio.create_task(runner.loop())
 
 
+async def _maybe_start_shadow_book(app_: FastAPI):
+    """The copilot's own paper book from Radar events (docs/radar.md § Shadow book); off unless SHADOW_BOOK_ENABLED."""
+    app_.state.shadow_book = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.shadow_book import book_from_env
+    try:
+        book = book_from_env(engine)
+    except Exception:
+        # A bad store or path must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Shadow book could not start; it stays off")
+        book = None
+    app_.state.shadow_book = book
+    return None if book is None else asyncio.create_task(book.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -372,9 +388,12 @@ async def lifespan(_app: FastAPI):
     jo_morning = await _maybe_start_jo_morning(_app)
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)
+    shadow_book = await _maybe_start_shadow_book(_app)
     try:
         yield
     finally:
+        if shadow_book is not None:
+            shadow_book.cancel()
         if thesis_watch is not None:
             thesis_watch.cancel()
         if jo_morning is not None:

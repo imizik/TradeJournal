@@ -620,6 +620,66 @@ not 8) to `/etc/tradejournal/backend.env` and restart
 `backend/tests/test_radar_proof.py` (alerted counts) and the tap in
 `frontend/e2e/radar.spec.ts`.
 
+## Shadow book (off by default)
+
+Shadow book v1 is the copilot's own paper book, deciding by itself from Radar
+events: Isaac's "Shadow Isaac" using the app like a trader with its own book,
+on the Claude copilot instead of Dots. It is off unless
+`SHADOW_BOOK_ENABLED=true` (and `RADAR_STORE` is set); switching it on is
+Isaac's call, because it runs unattended plan turns in a new worker.
+
+- **Trigger:** `backend/app/engine/shadow_book.py` runs in the API process
+  (`_maybe_start_shadow_book` in `app/main.py`, a pass every 15 seconds). During
+  the regular session it reads today's events from the Radar store (read only)
+  and gives each new event at most one decision, one at a time, at most
+  `SHADOW_BOOK_MAX_TURNS` turns a session (default 12). An event it reaches more
+  than ten minutes after Radar first saw it, one in the session's last half
+  hour, and one past the cap is recorded `not_decided` with the reason and no
+  turn. Between sessions it is quiet. Phone pings are not built.
+- **Decision:** one turn through `backend/app/ai/shadow_turn.py` on Isaac's
+  Claude plan only, never an API key (`research_job.prepare("plan")`, whatever
+  `RESEARCH_AUTH` says). It refuses on a hosted database unless
+  `COPILOT_PLAN_REMOTE_OK=true`, as the plan chat does. Tools are an allowlist:
+  the research job's read-only lab tools plus `get_option_candidates`, no
+  built-in tools and no web; a PreToolUse hook denies everything else. The
+  prompt carries the event, the 5-minute chart context and the shadow book's own
+  open positions and last ten results, never Isaac's book. The answer is SKIP
+  with a one-line reason, or one plan in the `trade_plan` shape `propose_plan`
+  uses (checked by the same validator) plus a target and an `HH:MM` New York time
+  stop; the thesis states the copilot's own rules. A plan that fails the checks
+  is recorded `error`, never traded. Each turn is a `copilot_turn` row with
+  `billing=claude_plan`.
+- **Unit:** one position is one unit: one option contract for calls or puts, or
+  whole shares worth $1,000 for stock (at least one). No scaling, adding or
+  spreads.
+- **Paper execution:** the setup scanner's pricing. The entry is the first
+  quote whose bid and ask both moved after the decision (ask to buy; bid to
+  sell stock short), within two minutes or the position is `unresolved`. The
+  invalidation and target are touches on completed 1-minute bars of the
+  underlying (a bar touching both is the invalidation); the time stop and the
+  session's last regular minute are clock exits; the exit is the first fresh
+  quote after the condition (bid to sell; ask to cover). Options score as the
+  scanner does (per contract, commissions); stock on its shares. A position
+  still open after its session is `unresolved`.
+- **Record:** `shadow_book_decision` (one per Radar event, unique; claimed as
+  `deciding` before the turn, so a restart records an interrupted turn as an
+  error and never decides the event again) and append-only `shadow_book_event`
+  (entry, exit_intent, exit, unresolved); a position is the fold of its events,
+  so a restart rebuilds the book. Additive migration
+  `backend/alembic/versions/9ff22204d1d2_add_shadow_book.py`. Nothing touches
+  fills, trades, accounts, alerts, Radar rules or the strategy factory.
+- **Screen:** the Shadow book section under the feed on `/radar` (`GET
+  /radar/shadow-book?week=`): each decision with its event, the plan or the
+  reason, the fill, the exit and the result, and a week line with the shadow
+  P&L and counts beside Isaac's own week from the week review, side by side and
+  not compared.
+
+Switching on: add `SHADOW_BOOK_ENABLED=true` (and `SHADOW_BOOK_MAX_TURNS` if not
+12) to `/etc/tradejournal/backend.env` and restart `tradejournal-api.service`;
+the plan token and `COPILOT_PLAN_REMOTE_OK=true` are already there. Undo: remove
+the line (or set it to false) and restart; the stored decisions stay and the
+section keeps showing them. Tests: `backend/tests/test_shadow_book.py`.
+
 ## Social buzz (studied, not built)
 
 An October 24 desk study looked at adding a Reddit/X/Stocktwits attention signal
@@ -635,7 +695,9 @@ own: wherever the recorder runs, detection runs with it and writes events to the
 screen, under v0 unless `RADAR_RULES_VERSION` names v1
 ([Rules v1 candidate](#rules-v1-candidate-october-26-2026)); switching is Isaac's call. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
 ([Phone alerts](#phone-alerts-off-by-default)), and the premarket pilot its
-own `RADAR_PREMARKET_ENABLED`, also off; turning either on is Isaac's call.
+own `RADAR_PREMARKET_ENABLED`, also off, and the shadow book its own
+`SHADOW_BOOK_ENABLED`, also off ([Shadow book](#shadow-book-off-by-default));
+turning any of them on is Isaac's call.
 
 
 ### Movers to Charts navigation

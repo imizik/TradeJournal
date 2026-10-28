@@ -1844,6 +1844,42 @@ class ScannerEvent(SQLModel, table=True):
     data_json: str = Field(sa_column=Column(Text, nullable=False))
 
 
+class ShadowBookDecision(SQLModel, table=True):
+    """One shadow-book decision on one Radar event (``engine/shadow_book.py``): the copilot's own paper book, never
+    the owner's. The unique ``radar_event_id`` is the one-decision-per-event guard, claimed (``deciding``) before the
+    turn starts, so a restart never decides an event twice. ``plan_json`` is the frozen plan; the position's economics
+    are the fold of its ``ShadowBookEvent`` rows. Additive; nothing here touches fills, trades, accounts or alerts."""
+
+    __tablename__ = "shadow_book_decision"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    radar_event_id: str = Field(unique=True)
+    session_date: date = Field(index=True)  # New York trading day
+    symbol: Optional[str] = None  # the plan's symbol, else the event's first
+    event_json: str = Field(sa_column=Column(Text, nullable=False))  # the Radar event as the turn saw it
+    status: str  # deciding | plan | skip | error | not_decided
+    reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # skip, error or not-decided reason
+    plan_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    model: Optional[str] = None
+    claimed_at: datetime = Field(default_factory=utc_now_naive)  # UTC
+    decided_at: Optional[datetime] = None  # UTC: when the answer was stored, the entry's decision time
+
+
+class ShadowBookEvent(SQLModel, table=True):
+    """One append-only paper fact for a shadow-book plan: entry, exit_intent, exit or unresolved. The position is the
+    fold of these rows; the unique (decision, event_type) pair keeps a retry or restart from recording a fact twice."""
+
+    __tablename__ = "shadow_book_event"
+    __table_args__ = (UniqueConstraint("decision_id", "event_type", name="uq_shadow_book_event_type"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    decision_id: uuid.UUID = Field(foreign_key="shadow_book_decision.id", index=True)
+    event_type: str  # entry | exit_intent | exit | unresolved
+    effective_at: datetime  # UTC: the quote or market moment the event is about
+    recorded_at: datetime  # UTC: when this server stored it
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+
+
 class MarketContextItem(SQLModel, table=True):
     """External market context for the pre-trade check (advisor step 9): each
     tracked symbol's next earnings date and a live VIX quote, from Tradier.

@@ -245,6 +245,15 @@ def proof(db: Session = Depends(get_session)):
         return {"state": "off", "reason": "The Radar file could not be read right now."}
 
 
+@router.get("/shadow-book")
+def shadow_book(week: date | None = Query(None, description="Any day of the week; default this week"),
+                db: Session = Depends(get_session)):
+    """The copilot's own paper book for one week (docs/radar.md § Shadow book): each decision with its event, plan or
+    skip reason, fill, exit and result, and the week's summary beside the owner's own; read-only."""
+    from app.engine import shadow_book as book
+    return book.week_view(db, week)
+
+
 @router.get("/events/{event_id}")
 def event_detail(event_id: str, db: Session = Depends(get_session)):
     store = _require_store()

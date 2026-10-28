@@ -77,7 +77,8 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
 async function askForPlan(page: Page) {
   await page.getByLabel("Message").fill("Plan a trade: yolo NBIS calls");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("NBIS plan (draft).")).toBeVisible();
+  // This turn's answer, not the saved "NBIS plan (draft)." a reload may reopen above it.
+  await expect(page.getByText("NBIS plan (draft). Nothing is saved or armed until you confirm it.").last()).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible(); // the investigation exists, so the alerts can link to it
   return page.getByRole("region", { name: "Proposed trade plan" });
 }

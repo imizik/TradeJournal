@@ -320,7 +320,7 @@ def published_moment(value) -> datetime | None:
     return moment.replace(tzinfo=ET) if moment.tzinfo is None else moment
 
 
-def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
+def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder, tools: tuple[str, ...] = JOB_TOOLS):
     def make(spec: dict):
         name = spec["name"]
 
@@ -345,7 +345,7 @@ def _lab_server(sdk, evidence, cfg: copilot.Settings, rec: _Recorder):
                         annotations=sdk.ToolAnnotations(readOnlyHint=True))(handler)
 
     return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0",
-                                     tools=[make(t) for t in copilot_tools.TOOLS if t["name"] in JOB_TOOLS])
+                                     tools=[make(t) for t in copilot_tools.TOOLS if t["name"] in tools])
 
 
 def options(sdk, binary: str, env: dict, model: str, lim: JobLimits, server, rec: _Recorder):
