@@ -827,7 +827,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           <StatusLine quiet status={status} error={statusError} model={model} onModel={next => { setModel(next); rememberModel(next); }}
             backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
           <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-            {saving}
+            {saveState?.state !== "error" && saving}
             {current?.status === "closed" && <span>Closed</span>}
             <button type="button" onClick={startNew} disabled={busy || (!messages.length && !current)} title="Leave this conversation saved and start a new one"
               className="min-h-11 rounded px-2 hover:text-foreground disabled:opacity-40 sm:min-h-7">New</button>
@@ -866,6 +866,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         <StatusLine status={status} error={statusError} model={model} onModel={next => { setModel(next); rememberModel(next); }}
           backend={backend} onBackend={next => { setBackend(next); rememberBackend(next); }} />
       )}
+      {/* A failed save says so on its own line, where a long message can wrap. */}
+      {desk && saveState?.state === "error" && saving}
       {offer && engaged && pageSymbol && (
         <div role="status" aria-label="Symbol changed" className="flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
           <span className="text-foreground">The page is now on {pageSymbol}; this conversation is about {symbol}.</span>
