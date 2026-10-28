@@ -59,6 +59,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   }), []);
   const jumpKey = useJumpKey();
   const desk = useRef<HTMLDivElement>(null);
+  const [deciding, setDeciding] = useState(false);
   const sent = useRef(0);
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setTab("thread"); },
@@ -175,9 +176,12 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
-          {on && <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} fill={fill} />}
-          {/* The Briefing (or no thread) opens on the day at a glance; any other thread on its header and plan. */}
-          {on && (!thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <SessionTape /> : <DeskThreadTop thread={thread} />)}
+          {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
+              then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}
+          {on && (!thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <SessionTape /> : (
+            <DeskThreadTop thread={thread} compact={deciding} hero={
+              <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} />} />
+          ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} /></aside>}

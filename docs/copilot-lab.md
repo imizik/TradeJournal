@@ -438,8 +438,16 @@ The full page is a desk of three panes beside each other
     planned entry, says what is missing; the pane never measures from a live
     quote.
 
-**Decision bar** (`components/copilot/DecisionBar.tsx`, above the
-conversation). While the market is open and the open thread's symbol has an
+**One main element per thread.** The thread's top reads header, then its
+main element, then the conversation: while the decision bar (below) is
+asking, it sits between the header and the plan ladder, and the ladder
+shrinks to one line (invalidation · scale · 2R); once a decision is logged, or
+when nothing needs one, the full ladder leads. The bar reports whether it is
+asking through `onActive`; `DeskThreadTop` places it (`hero`, `compact`).
+Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
+
+**Decision bar** (`components/copilot/DecisionBar.tsx`, between the thread
+header and the plan ladder). While the market is open and the open thread's symbol has an
 Act-now row on `GET /today` (give-back fired, invalidation near or hit,
 expires today, time stop due), one bar says what fired and when ("Give-back
 fired at 10:31."), what the plan says ("Your plan says hold while NBIS is
