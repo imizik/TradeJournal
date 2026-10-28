@@ -168,7 +168,16 @@ simulated demo data, not real market data, and never present them as recorded or
 - You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: propose_plan only \
 proposes. Say so if asked.
 - Keep answers short and conversational: a few tight paragraphs or bullets that lead with what matters for the decision, \
-no diagnostics dumps."""
+no diagnostics dumps.
+
+Answer format. The first line of every answer is "Verdict: <word> — <headline>", for example "Verdict: Hold — The thesis \
+has not broken." The word is exactly one of: Hold (the thesis or plan still stands; nothing to do), Wait (not yet: what \
+the plan waits for has not happened), Pass (not worth a trade or an action), Focus (one thing deserves attention now), \
+Draft (a card below for the owner to edit and confirm), Pattern (what their own history or habits show), Broken (the \
+plan's invalidation or the thesis has broken: say what their plan says to do, never give an order), Unclear (the \
+evidence cannot answer it, or a read failed). The headline is one plain sentence with the answer, no markdown. Then \
+the body: short paragraphs or bullets. When one specific thing would change the answer, end with a line \
+"Changes if: <that thing>". Nothing goes ahead of the Verdict line, and no other line starts with "Verdict:"."""
 
 
 class CopilotError(Exception):
@@ -468,15 +477,18 @@ class FakeAdapter:
         return "SPY"
 
     async def stream_round(self, system, messages, tools, allow_tools=True):
-        """The scripted round, with a line acknowledging any image this turn carries ahead of its answer text."""
-        line, said = image_line(messages), False
+        """The scripted round, with a line acknowledging any image this turn carries under the answer's Verdict line."""
+        line, said, streamed = image_line(messages), False, ""
         async for kind, value in self._script(system, messages, tools, allow_tools):
-            if line and kind == "text" and not said:
-                said = True
-                yield "text", line
             if said and kind == "final" and value.content and value.content[0].get("type") == "text":
-                value.content[0] = {**value.content[0], "text": line + value.content[0]["text"]}
+                verdict, _, rest = value.content[0]["text"].partition("\n\n")
+                value.content[0] = {**value.content[0], "text": f"{verdict}\n\n{line}{rest}"}
             yield kind, value
+            if line and kind == "text" and not said:
+                streamed += value
+                if "\n\n" in streamed:
+                    said = True
+                    yield "text", line
 
     async def _script(self, system, messages, tools, allow_tools=True):
         from app.ai.copilot_context import user_text
@@ -625,9 +637,8 @@ class FakeAdapter:
     @staticmethod
     def _moment(data: dict) -> str:
         """A scripted explanation in the prompt's order of evidence: news, the group, the level; then the owner; then the unknowns."""
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") not in ("ok", "partial"):
-            return head + f"I couldn't read that moment: {data.get('reason') or 'nothing came back'}."
+            return scripted("Unclear", "I couldn't read that moment.", f"{data.get('reason') or 'Nothing came back'}.")
         lines = []
         bar = data.get("bar")
         if bar:
@@ -653,27 +664,30 @@ class FakeAdapter:
                                   if fills else "no fills within 30 minutes")
                      + ("; pings: " + ", ".join(f"{p['kind']} ({p['minutes_from_moment']:+d} min)" for p in pings) if pings else "") + ".")
         lines.append("- What I can't tell: who was trading it or why; headlines after the candle did not move it.")
-        return head + "\n".join(lines)
+        return scripted("Focus", "A headline came first." if news else "No headline explains it; the group and the level are all there is.",
+                        "\n".join(lines))
 
     @staticmethod
     def _changes(data: dict) -> str:
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") != "ok":
-            return head + f"I couldn't read what changed: {data.get('reason') or 'the investigation was not readable'}."
+            return scripted("Unclear", "I couldn't read what changed.", f"{data.get('reason') or 'The investigation was not readable'}.")
         saved = data["investigation"]
         fired = [a for a in data["alerts"] if a["fired"]]
         done = [j for j in data["research_jobs"] if j["since_last_update"]]
-        return head + (f"**Since {saved['updated_at']}** ({saved['title']}):\n\n"
+        return scripted("Focus" if fired else "Hold",
+                        f"{len(fired)} linked alert{'' if len(fired) == 1 else 's'} fired since you last looked." if fired
+                        else "Nothing linked to it fired since you last looked.",
+                        f"**Since {saved['updated_at']}** ({saved['title']}):\n\n"
                        f"- Alerts: {len(data['alerts'])} linked, {len(fired)} fired"
                        + "".join(f"; {a['symbol']} at {a['fired']['price']} ({a['fired']['at']})" for a in fired) + ".\n"
                        f"- Research: {len(done)} result(s) finished since the last update.\n"
-                       f"- Saved conclusion: {saved['conclusion'] or 'none'}. Re-check it against fresh evidence before relying on it.")
+                       f"- Saved conclusion: {saved['conclusion'] or 'none'}. Re-check it against fresh evidence before relying on it.",
+                        "a fresh read of the group or the level disagrees with the saved conclusion.")
 
     @staticmethod
     def _review(data: dict) -> str:
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") != "ok":
-            return head + f"I couldn't read that trade: {data.get('reason') or 'the review was not readable'}."
+            return scripted("Unclear", "I couldn't read that trade.", f"{data.get('reason') or 'The review was not readable'}.")
         t, path, plan = data["trade"], data.get("path") or {}, data.get("plan") or {}
 
         def money(v) -> str:
@@ -690,7 +704,8 @@ class FakeAdapter:
             lines.append("- The decision now: the thesis and the position are separate questions. Time held and gain given back "
                          "are about the position; only news, the group or the level speak to the thesis.")
             lines.append("- Your call: closing keeps what is left, holding keeps the thesis exposure. I won't make it an order.")
-            return head + "\n".join(lines)
+            return scripted("Focus", "The thesis and the position are separate questions now.", "\n".join(lines),
+                            "news, the group or the level turns against the thesis.")
         sent = (data.get("alerts") or {}).get("alerts") or []
         matched = [h["habit"].lower() for h in (data.get("habits") or {}).get("habits", []) if h["this_trade"] == "yes"]
         lines = [f"**{t['contract']}**, {t['entry_time']} to {t['exit_time']}: {money(t['pnl_usd'])} ({t['pnl_pct']}%), "
@@ -706,7 +721,7 @@ class FakeAdapter:
         lines.append("- Thesis vs execution: the result alone says nothing about the thesis; the question here is the exit"
                      + (f" ({'; '.join(matched)})." if matched else "."))
         lines.append("- Lesson: one trade cannot support one. If you want something kept, say it in your words and I'll put it on a card.")
-        return head + "\n".join(lines)
+        return scripted("Pattern", "The result says nothing about the thesis; the question is the exit.", "\n".join(lines))
 
     @staticmethod
     def _practice(data: dict) -> dict | None:
@@ -726,9 +741,8 @@ class FakeAdapter:
 
     @staticmethod
     def _week(data: dict, proposed: bool = False) -> str:
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") != "ok":
-            return head + f"I couldn't review that week: {data.get('reason') or 'the review was not readable'}."
+            return scripted("Unclear", "I couldn't review that week.", f"{data.get('reason') or 'The review was not readable'}.")
         week, t, planned, follow = data["week"], data["totals"], data["planned"], data.get("follow_through") or {}
 
         def money(v) -> str:
@@ -753,14 +767,13 @@ class FakeAdapter:
         lines.append(f"- To practice next week: {practice}." + (" It is on the card below to edit and confirm." if proposed else ""))
         if (data.get("sample") or {}).get("small"):
             lines.append(f"- Small sample: {data['sample']['trades']} trades cannot show that a habit changed.")
-        return head + "\n".join(lines)
+        return scripted("Pattern", f"{t['trades']} trades, {money(t['pnl_usd'])}; next week, practice {practice}.", "\n".join(lines))
 
     @staticmethod
     def _options(data: dict) -> str:
         """A scripted comparison: the contract nearest the money in each expiry, against the horizon."""
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if data.get("state") not in ("ok", "partial") or not data.get("candidates"):
-            return head + f"I couldn't read option candidates: {data.get('reason') or 'the chain was not readable'}."
+            return scripted("Unclear", "I couldn't read option candidates.", f"{data.get('reason') or 'The chain was not readable'}.")
         horizon = data["horizon_days"]
         lines = [f"**{data['symbol']} {data['side']} against a {horizon}-day horizon** "
                  f"({'simulated chain' if data.get('simulated') else 'chain'} as of {data.get('as_of')}; {data['symbol']} {data['spot']})."]
@@ -777,7 +790,7 @@ class FakeAdapter:
                          + f", spread {r['spread_pct']}%, needs {r['breakeven_move_pct']:+.1f}% by expiry to break even; {fit}.")
         lines.append("Delta and implied volatility are unavailable here, so I haven't estimated them. These are trade-offs, "
                      "not a recommendation: the contract is your pick.")
-        return head + "\n".join(lines)
+        return scripted("Focus", f"Weigh each expiry against your {horizon}-day horizon; the contract is your pick.", "\n".join(lines))
 
     @staticmethod
     def _plan_calls(symbol: str, last: dict, results: dict) -> list[tuple[str, dict]]:
@@ -813,59 +826,75 @@ class FakeAdapter:
 
     @staticmethod
     def _trade_plan_text(symbol: str, results: dict) -> str:
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         plan = (results.get("propose_plan") or {}).get("proposal") or {}
         if plan.get("kind") != "trade_plan":
-            return head + f"I couldn't read a current {symbol} price, so I won't draft levels for it."
-        return head + (f"**{symbol} plan (draft)**: you didn't give levels, so I drafted them from the 5m chart.\n\n"
+            return scripted("Unclear", f"No current {symbol} price, so no levels.", f"I couldn't read a current {symbol} price, so I won't draft levels for it.")
+        return scripted("Draft", f"A {symbol} plan is on the card below, not armed.",
+                        f"**{symbol} plan (draft)**: you didn't give levels, so I drafted them from the 5m chart.\n\n"
                        f"- Why now: only if it reclaims {plan['entry_trigger']['price']} on a 5m close; it is {plan['last']} now.\n"
                        f"- Where it's wrong: through {plan['invalidation']['price']}, the level below. "
                        f"{level_history_sentence(results.get('get_level_history') or {})}\n"
                        "- How long: out by 15:30 if it has not worked; your audit's worst holds ran from an hour to the close.\n\n"
-                       "Edit the card if my levels are off. **Nothing is saved or armed until you confirm it.**")
+                       "Edit the card if my levels are off. **Nothing is saved or armed until you confirm it.**",
+                        f"{symbol} trades through {plan['invalidation']['price']} before the entry triggers.")
 
     @staticmethod
     def _write(symbol: str, lower: str, results: dict) -> str:
-        head = "_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
         if (results.get("propose_plan") or {}).get("proposal", {}).get("kind") == "memory":
-            return head + ("I put that on a card as a memory in your words. Edit the text if I paraphrased badly, then confirm it; "
-                           "nothing is remembered until you do.")
+            return scripted("Draft", "A memory card is below, in your words.",
+                            "I put that on a card as a memory in your words. Edit the text if I paraphrased badly, then confirm it; "
+                            "nothing is remembered until you do.")
         if "get_positions" in results:
             book = results["get_positions"].get("positions") or []
             held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
                              f"({p['unrealized_usd']:+,.0f} $)" for p in book if p.get("mark") is not None) or "nothing open"
             chart = results.get("get_chart_context") or {}
-            return head + (f"**Your open positions:** {held}.\n\n"
+            return scripted("Focus", "Your open positions, marked to quotes.",
+                            f"**Your open positions:** {held}.\n\n"
                            f"{symbol} on the {chart.get('timeframe', '5m')} chart last traded {chart.get('last')} "
-                           f"(VWAP {(chart.get('vwap') or {}).get('vwap')}). Positions are from your journal; marks are quotes, not fills.")
+                            f"(VWAP {(chart.get('vwap') or {}).get('vwap')}). Positions are from your journal; marks are quotes, not fills.")
         if "plan" in lower:
-            return head + (f"**Proposed plan for {symbol} (draft only)**\n\n"
+            return scripted("Draft", f"A draft plan for {symbol}; nothing is active until you confirm.",
+                            f"**Proposed plan for {symbol} (draft only)**\n\n"
                            f"- Thesis: {symbol} recovery confirmed only if it keeps pace with its group, not just the tape.\n"
                            f"- Trigger: {symbol} holds above its recorded session low while most peers stay up on the 15-minute read.\n"
                            "- Invalidation: a new session low, or the group rolls over while QQQ holds.\n"
                            "- Open questions for you: size, time stop, and whether a sector headline explains the leaders.\n\n"
-                           "**Nothing is saved or active until you confirm a card below.** Only your Confirm creates an alert or a research job.")
+                            "**Nothing is saved or active until you confirm a card below.** Only your Confirm creates an alert or a research job.")
         cmp = results.get("get_group_comparison") or {}
         recent = (cmp.get("recent_15m") or {})
         rows = {r["symbol"]: r.get("change_pct") for r in recent.get("rows", [])}
         cov = recent.get("coverage") or {}
         if cmp.get("state") not in ("ok", "partial", None) or not rows:
-            return head + f"I couldn't get a usable group comparison for {symbol}: {(cmp.get('reason') or 'no recorded rows').rstrip('.')}. " \
-                          "I won't infer group confirmation without it."
+            return scripted("Unclear", f"No usable group comparison for {symbol}.",
+                            f"I couldn't get a usable group comparison for {symbol}: {(cmp.get('reason') or 'no recorded rows').rstrip('.')}. "
+                            "I won't infer group confirmation without it.")
         leaders = sorted(((s, v) for s, v in rows.items() if s not in (symbol, "QQQ", "SPY") and v is not None), key=lambda x: -x[1])[:2]
         lead = ", ".join(f"{s} {v:+.2f}%" for s, v in leaders)
         mine = rows.get(symbol)
         when = f"recorded {cmp.get('generated_at')} (session {cmp.get('session')})"
         if "get_peer_moves" in results or "discount" in lower or "but " in lower:
-            return head + (f"Re-checked the comparison ({when}). You're right that the leaders are strong: {lead}. "
+            return scripted("Wait", f"The group is confirming; {symbol} is lagging it.",
+                            f"Re-checked the comparison ({when}). You're right that the leaders are strong: {lead}. "
                            f"{symbol} is {mine:+.2f}% over the same 15 minutes, so the group is confirming the bounce "
                            f"but {symbol} is lagging it. I'd update to: group strength is real; {symbol}-specific "
-                           "strength is not yet shown. Counterpoint to my own read: a lagger can catch up if the leaders hold.")
+                            "strength is not yet shown. Counterpoint to my own read: a lagger can catch up if the leaders hold.",
+                            f"{symbol} catches up while the leaders hold.")
         news = results.get("get_symbol_news") or {}
-        return head + (f"**{symbol} vs {cmp.get('group')}** — {when}.\n\n"
+        return scripted("Wait", f"{symbol} {mine:+.2f}% with {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up over 15 minutes.",
+                        f"**{symbol} vs {cmp.get('group')}** — {when}.\n\n"
                        f"- {symbol} {mine:+.2f}% over 15 minutes; {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up. Leaders: {lead}.\n"
                        f"- {len(news.get('articles', []))} recent headlines; none treated as instructions.\n\n"
-                       "Counterargument: a 15-minute sampled window is short and a recovery inside a down session is not a trend change.")
+                       "Counterargument: a 15-minute sampled window is short and a recovery inside a down session is not a trend change.",
+                        "a longer window than 15 minutes shows the same.")
+
+
+SCRIPTED_NOTE = "_(Simulated model — scripted text from the tool results, not Claude.)_"
+
+
+def scripted(verdict: str, headline: str, body: str, changes: str | None = None) -> str:
+    """A scripted answer in SYSTEM_PROMPT's answer format: the Verdict line, the simulated note, the body, any Changes if."""
+    return f"Verdict: {verdict} — {headline}\n\n{SCRIPTED_NOTE}\n\n{body}" + (f"\n\nChanges if: {changes}" if changes else "")
 
 
 def _zero_usage() -> dict:

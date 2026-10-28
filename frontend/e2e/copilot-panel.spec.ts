@@ -112,7 +112,7 @@ test("the Charts copilot opens on the chart's symbol, saves a turn, and the lab 
   await panel.getByRole("link", { name: "Open in lab" }).click();
   await expect(page).toHaveURL(new RegExp(`/copilot-lab\\?investigation=${MRVL}`));
   await expect(page.getByText(ANSWER)).toBeVisible();
-  await expect(page.getByLabel("Investigation symbol")).toHaveValue("MRVL");
+  await expect(page.getByTestId("copilot-scope")).toHaveText("About MRVL");
 });
 
 test("a symbol switch is offered, never forced, once a conversation exists; an empty panel just follows", async ({ page }) => {

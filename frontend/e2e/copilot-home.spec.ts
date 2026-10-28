@@ -76,7 +76,7 @@ test("the list sends nothing on open, and What matters right now? asks across ev
   await expect(threads).toBeVisible(); // the desk keeps the thread list beside the open conversation
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0].symbol).toBeNull(); // saved about no symbol
-  await expect(page.getByLabel("Investigation symbol")).toHaveValue("");
+  await expect(page.getByTestId("copilot-scope")).toHaveText("Across everything · add a symbol");
 });
 
 test("an open investigation opens in place without sending", async ({ page }) => {

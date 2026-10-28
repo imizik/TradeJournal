@@ -15,8 +15,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   `backend/app/routers/copilot.py`. The frontend page is `/copilot-lab`
   (`frontend/components/copilot/CopilotLab.tsx`), laid out as the desk (below). It is in the nav ("Copilot") only for the owner while the lab is on.
 - One conversation component, `frontend/components/copilot/CopilotPanel.tsx`.
-  It is the full page (`variant="page"`, `CopilotLab.tsx`: Recent, symbol,
-  history, deep links) and the panel beside other pages (`variant="panel"`).
+  It is the full page (`variant="page"`, `CopilotLab.tsx`: the desk's
+  conversation, history, deep links) and the panel beside other pages (`variant="panel"`).
   Both share investigations, proposals, Research deeper, What changed? and
   linked activity. A panel renders nothing for the assistant profile or while
   the lab is off.
@@ -375,8 +375,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   investigation. One metrics line per turn is
   logged: model, first feedback (first progress note, tool call or answer
   text), first text, longest wait between visible events, total latency, tool
-  names, tokens and estimated cost. The UI shows the same metrics under each
-  answer.
+  names, tokens and estimated cost. The UI shows the same metrics inside each
+  answer's folded Sources line.
 
 ## The desk
 
@@ -387,8 +387,30 @@ The full page is a desk of three panes beside each other
 - **Threads**: the thread list (above). It stays in view while a
   conversation runs; a row or a pinned question opens or asks in the
   conversation beside it, through the panel's `desk` hand-off.
-- **Conversation**: the page variant of `CopilotPanel.tsx`. On the desk its
-  message box stays in reach while the conversation scrolls. Above it, the
+- **Conversation**: the page variant of `CopilotPanel.tsx` in `desk` mode. Its
+  message box stays in reach while the conversation scrolls. One quiet line
+  says what answers and on what data (the simulated model, simulated or replay
+  data, the API budget, a missing key), with **New** and a **…** menu (the
+  thread's one-line conclusion or lesson, Save, Close thread / Reopen) at its
+  end. There is no Recent row (the thread list does that) and no Symbol box:
+  the message box carries a scope chip, "About NBIS ×", where × asks across
+  everything and "add a symbol" scopes it again. Above the box, two to four
+  suggestion chips from the thread's state: **What changed?** (a saved
+  conversation; one turn), **Look at my chart** (sends the Context pane's
+  picture of today with the plan's lines; one turn), **Size it** (a plan card
+  in the thread; fills the box unsent, the owner adds the dollars at risk),
+  **Close with a lesson** (opens the menu on the conclusion), and for a fresh
+  conversation "Is NBIS's group confirming?" and **Plan a trade**. Below
+  768 px the box takes the full width; attach and read-aloud wait behind
+  **+** (the speaker stays out while it reads, so its Stop is in reach),
+  and the mic is the main round button (48 px) beside Send, above the tab
+  bar. Each answer leads with its verdict and headline (see How the
+  copilot reasons) and folds what it read into one **Sources · N** line that
+  still names anything unavailable, stale, partial, simulated or a replay
+  ("Sources · 4 · 1 unavailable · simulated"); opening it lists each source
+  and the turn's model, timings and cost. The panel beside Charts and Radar
+  keeps its own header and composer, with the same answers and Sources line.
+  Above the conversation, the
   open thread's header (`ThreadHead.tsx`): a status chip (In position,
   Armed, Draft · not armed, Not planned), one meta line (an option's strike,
   expiry and days left, or a stock's days held), the symbol, the thesis on
@@ -482,7 +504,9 @@ the conversation hand-off, thread-list rows and groups, logged decisions,
 the decision bar's wording).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-list.spec.ts`,
-`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px) and
+`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px),
+`frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
+the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
 states, the 375 px Context tab).
 
@@ -513,8 +537,26 @@ states, the 375 px Context tab).
   pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders; brevity that leads with what matters for the decision.
+- **The answer format.** The first line of every answer is
+  `Verdict: <word> — <headline>`, for example
+  `Verdict: Hold — The thesis has not broken.`, with the word from a fixed
+  set: Hold, Wait, Pass, Focus, Draft, Pattern, Broken (the plan's
+  invalidation or the thesis broke: what the plan says, never an order) and
+  Unclear. Then the body in short paragraphs or bullets, and, when one thing
+  would change the answer, a last line `Changes if: …`. The frontend parses
+  the structure rather than guessing it from prose (`lib/copilot.ts`
+  `answerParts`, `VERDICTS`): the verdict as a small tag, the headline in
+  bold, the body, then a plain "Changes if …" line. An answer without it (one
+  saved before the format, a backend that ignores it, an unknown word, an
+  error) renders as plain text. The scripted `fake` backend writes every
+  answer this way (`copilot.scripted`), with its simulated-model note (and
+  any image note) under the Verdict line. Read aloud, the line becomes
+  "Hold. The thesis has not broken." The scheduled turns' phone pings and
+  saved conclusions drop the "Verdict: " label (`premarket_prep.unlabelled`,
+  `week_review_auto._plain`); their saved answers keep it.
 
-Tests pin the sentences other guards depend on (`tests/test_copilot_book.py`
+Tests pin the sentences other guards depend on (`tests/test_copilot_answer_format.py`
+on the answer format and the scripted answers, `tests/test_copilot_book.py`
 on account identifiers, `tests/test_copilot_adversarial.py` on "you cannot
 create alerts or research jobs yourself", `tests/test_copilot.py` on the
 four-question frame and the memory rule).
@@ -591,7 +633,7 @@ it; it is rebuilt on the server each turn, so marks and hold times are current.
 
 ## What changed?
 
-A reopened investigation, from Recent or from an alert's
+A reopened investigation, from the desk's thread list or from an alert's
 `?investigation=<id>` link, offers **What changed?**. One tap sends one
 turn with a fixed prompt that names the investigation's id. Opening never
 sends it, because a turn costs money. From an alert's link, the same prompt
@@ -1418,7 +1460,7 @@ Two kinds of image reach the model, never more than **two per turn**:
   linked plan with a saved chart image (`TradeCapture.image_state = saved`),
   its `plan` says `image: available` and `copilot._run_tool` appends that
   image to the tool result, so the model sees the chart the owner planned on
-  beside what happened. The evidence row reads **Looked at: plan chart**. A
+  beside what happened. The answer's Sources line lists **Looked at: plan chart**. A
   server-side chart of the trade's path is not rendered: no plotting library
   (matplotlib or Pillow) is installed and none was added.
 
@@ -1486,7 +1528,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_REPLAY_STORE` | none | `replay` only: path to a read-only copy of a Radar store. |
 | `COPILOT_REPLAY_AT` | none | `replay` only: New York time inside a recorded session, e.g. `2026-10-23T11:12`. |
 | `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic` and `plan`: the default for a turn. |
-| `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line under each answer shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
+| `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line in each answer's Sources shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic,plan` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. Each is offered only when usable: `anthropic` needs the API key; `plan` needs the token and the SDK and, off a local database, `COPILOT_PLAN_REMOTE_OK`. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_PLAN_REMOTE_OK` | unset (off) | `true` lets the `plan` backend run against a hosted database: the owner accepts the Claude plan's terms for this app, as already done for research jobs (`RESEARCH_AUTH=plan`). Without it the plan backend stays local-only. |
@@ -1771,7 +1813,7 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   - The job's status, cost and error show under the investigation. The list
     is re-read every 10 s while a job is queued or running, and no longer
     after that.
-  - A finished job's result appears under Recent, with "Open result" and
+  - A finished job's row offers "Open result" and
     "Discuss this result". Discuss starts a new conversation on the result's
     symbol, with the result as its opening context. It is not sent.
   - Browser proof: `frontend/e2e/copilot-research.spec.ts`.

@@ -124,7 +124,9 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   const why = history.getByRole("link", { name: "why this is evidence, not a rule" });
   await expect(why).toHaveAttribute("href", /invalidation_study_2026-10-25\.md#defaults-the-copilot-could-suggest--approval-only$/);
   await expect(why).toHaveAttribute("target", "_blank");
-  await expect(page.locator("summary").filter({ hasText: "Evidence" })).toContainText("Your history here · saved");
+  const sources = page.getByTestId("copilot-sources").last();
+  await sources.locator("summary").click(); // the answer's sources, folded into one line
+  await expect(sources.getByText("Your history here · saved")).toBeVisible();
 
   // An edited level is not refetched on every keystroke: the line asks for a fresh turn instead. The distance was
   // measured from the drafted entry, so an edited entry stales it too.
@@ -333,7 +335,9 @@ test("option candidates are an evidence row and a pick list for the plan's contr
   await lab(page, server);
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
   const card = await askForPlan(page);
-  await expect(page.locator("summary").filter({ hasText: "Evidence" })).toContainText("Option candidates · fetched");
+  const sources = page.getByTestId("copilot-sources").last();
+  await sources.locator("summary").click(); // the answer's sources, folded into one line
+  await expect(sources.getByText("Option candidates · fetched")).toBeVisible();
 
   const contract = card.getByLabel("Contract");
   await expect(contract).toHaveValue("Nov 21 100C"); // the copilot's wording stays the default

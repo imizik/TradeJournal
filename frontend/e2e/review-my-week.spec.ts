@@ -82,5 +82,8 @@ test("the lab home's Review my week sends one turn and shows the week review too
   await expect(page.getByText("Planned vs unplanned first.")).toBeVisible();
   expect(chats).toHaveLength(1);
   expect(chats[0].messages.at(-1)?.content).toContain("Review my week");
-  await expect(page.getByText("Week review · simulated")).toBeVisible();
+  const sources = page.getByTestId("copilot-sources").last();
+  await expect(sources.locator("summary")).toContainText("simulated"); // simulated evidence still shows while folded
+  await sources.locator("summary").click();
+  await expect(sources.getByText("Week review · simulated")).toBeVisible();
 });

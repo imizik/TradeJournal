@@ -43,6 +43,13 @@ async function lab(page: Page, server: Server) {
   const post = (path: string, route: Route) => server.posts.push({ path, body: route.request().postDataJSON() });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: STATUS }));
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: THREADS }));
+  // The desk's thread list: one row per investigation in this test's store, which a row opens in place.
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-27T14:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "regular", need_you: 0, streak: null },
+    sections: { positions: "ok", plans: "ok", investigations: "ok", radar: "off" },
+    threads: [...server.records.values()].map((record) => ({ key: `investigation:${record.id}`, group: "watch", symbol: record.symbol,
+      title: record.title, instrument: null, value: null, status: { text: "Open", tone: "muted" }, meter: null, investigation_id: record.id,
+      trade_id: null, radar_event_id: null, path: null, changed_at: null })) } }));
   await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: TURN }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [...server.records.values()].map(summary) } }));
   await page.route("**/copilot/investigations", (route) => {
@@ -124,11 +131,11 @@ test("drafted cards come back after a reload and a thread switch, a confirmed on
   await expect(planCard(page).getByRole("button", { name: "Confirm" })).toBeEnabled();
 
   // Switch to another investigation and back: the same two states.
-  const recent = page.getByRole("navigation", { name: "Recent investigations" });
-  await recent.getByRole("button", { name: /CRWV capacity/ }).click();
+  const recent = page.getByRole("navigation", { name: "Thread list" });
+  await recent.getByRole("link", { name: /CRWV capacity/ }).click();
   await expect(page.getByText("CRWV is still adding capacity.")).toBeVisible();
   await expect(planCard(page)).toHaveCount(0);
-  await recent.getByRole("button", { name: /Plan NBIS and watch the gap/ }).click();
+  await recent.getByRole("link", { name: /Plan NBIS and watch the gap/ }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(watchCard(page).getByRole("status")).toHaveText("Alert set: NBIS crosses 97.5 (NBIS was 94.35).");
   await expect(planCard(page).getByRole("button", { name: "Confirm" })).toBeEnabled();

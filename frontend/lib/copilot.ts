@@ -216,7 +216,9 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
   for (const block of message.content.split(/\n{2,}/)) {
     if (/^_?\(Simulated model[\s\S]*\)_?$/.test(block.trim())) continue;
     for (const raw of block.split("\n")) {
-      const line = speakLine(raw.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*•]\s+|\d+[.)]\s+)/, ""));
+      // The answer format's labels: "Verdict: Hold — The thesis…" reads "Hold. The thesis…", "Changes if: …" as a clause.
+      const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ");
+      const line = speakLine(said.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*•]\s+|\d+[.)]\s+)/, ""));
       if (!line) continue;
       sentences.push(/[.!?:;,]$/.test(line) ? line : `${line}.`);
     }
@@ -272,6 +274,49 @@ export function asOfText(value: string | number | null | undefined): string {
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET";
+}
+
+// --------------------------------------------------------------------------- the answer format
+
+/** The words an answer may lead with, in step with ``SYSTEM_PROMPT``'s answer format (backend/app/ai/copilot.py). */
+export const VERDICTS = ["Hold", "Wait", "Pass", "Focus", "Draft", "Pattern", "Broken", "Unclear"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+/** An answer in the copilot's format: ``Verdict: Hold — The thesis has not broken.`` first, then the body, then an
+ * optional ``Changes if: …`` last line, kept apart from the body. */
+export type AnswerParts = { verdict: Verdict; headline: string; body: string; changesIf: string | null };
+
+const VERDICT_LINE = /^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*(.+)$/i;
+const CHANGES_LINE = /^(?:[-*]\s+)?\**changes if\**\s*:\**\s*(.+?)\**$/i;
+const NOTE_LINE = /^_\(.*\)_$/; // the scripted model's own labels ("Simulated model …"), which a server may put first
+
+/**
+ * The answer's verdict, headline, body and Changes if line; null for an answer without that structure (one saved
+ * before the format, a backend that ignores it, an unknown verdict word), which renders as plain text. Note lines
+ * ahead of the Verdict line stay at the top of the body.
+ */
+export function answerParts(text: string): AnswerParts | null {
+  const lines = text.split("\n");
+  let at = 0;
+  while (at < lines.length && (!lines[at].trim() || NOTE_LINE.test(lines[at].trim()))) at += 1;
+  const found = VERDICT_LINE.exec(lines[at]?.trim() ?? "");
+  const verdict = found && VERDICTS.find(v => v.toLowerCase() === found[1].toLowerCase());
+  if (!found || !verdict) return null;
+  const rest = [...lines.slice(0, at), ...lines.slice(at + 1)];
+  // Only the answer's last line is its Changes if; one inside the body stays where the model put it.
+  let last = rest.length - 1;
+  while (last >= 0 && !rest[last].trim()) last -= 1;
+  const changesIf = last >= 0 && CHANGES_LINE.test(rest[last].trim()) ? CHANGES_LINE.exec(rest[last].trim())![1].trim() : null;
+  if (changesIf !== null) rest.splice(last, 1);
+  return { verdict, headline: found[2].replace(/\*\*/g, "").trim(), body: rest.join("\n").trim(), changesIf: changesIf || null };
+}
+
+/** While an answer streams in, a first line that could still become the Verdict line ("Verd", "Verdict: Hold —") is not
+ * shown yet. */
+export function verdictPending(text: string): boolean {
+  const lines = text.split("\n");
+  const writing = lines[lines.length - 1].trim().replace(/\*/g, "").toLowerCase();
+  const before = lines.slice(0, -1).some(line => line.trim() && !NOTE_LINE.test(line.trim()));
+  return !before && writing.length > 0 && ("verdict:".startsWith(writing) || (writing.startsWith("verdict:") && !VERDICT_LINE.test(writing)));
 }
 
 // --------------------------------------------------------------------------- saved investigations
