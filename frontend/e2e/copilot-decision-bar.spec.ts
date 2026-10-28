@@ -30,14 +30,15 @@ const OPEN = "2026-10-27T14:44:00Z"; // 10:44 New York
 const CLOSED = "2026-10-27T20:05:00Z"; // 16:05 New York
 
 async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], loop = { positions: [GIVEBACK] as unknown[], plans: [] as unknown[] },
-  logged = [] as unknown[], symbol = "NBIS" } = {}) {
+  logged = [] as unknown[], symbol = "NBIS", board = { plans: [] as unknown[], quotes_at: null, quote_issue: null } } = {}) {
   const posts: { kind: string; text: string; symbol: string; operation_id: string }[] = [];
   const chats: unknown[] = [];
   const entries: unknown[] = [...logged];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: { as_of: asOf, positions: { state: "ok", count: 0, positions: [] },
     investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] } } }));
-  await page.route("**/copilot/plans", (route) => route.fulfill({ json: { plans: [], quotes_at: null, quote_issue: null } }));
+  await page.route("**/copilot/plans", (route) => route.fulfill({ json: board }));
+  await page.route("**/copilot/plans/positions", (route) => route.fulfill({ json: { count: 0, quotes_at: null, quote_issue: null, positions: [] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: { ...saved, symbol } }));
   await page.route("**/copilot/chat", (route) => { chats.push(route.request().postDataJSON()); return route.abort(); });
@@ -77,6 +78,26 @@ test("Holding logs one decision after the Undo window, then the bar is one quiet
   await page.waitForTimeout(500);
   expect(posts).toHaveLength(1);
   expect(chats).toEqual([]);
+});
+
+test("while the bar asks, the plan ladder shrinks to one line under it; once logged, the full ladder is back", async ({ page }) => {
+  const board = { quotes_at: null, quote_issue: null, plans: [{ investigation_id: INV, symbol: "NBIS", direction: "long",
+    thesis: "The recovery is real only if NBIS keeps pace with its group.", last: 87.66,
+    entry: { price: 88.1, condition: "crosses", interval: null, state: "hit", hit_at: at(9, 41) },
+    invalidation: { price: 85, condition: "closes_beyond", interval: "15m", state: "armed", distance_usd: -2.66, distance_pct: -3.03 },
+    time_stop: null, position: "in_position" }] };
+  await desk(page, { board });
+  const bar = page.getByRole("region", { name: "Decision" });
+  const line = page.getByRole("img", { name: /^Plan ladder: invalidation 85\.00, entry 88\.10/ });
+  await expect(bar).toBeVisible();
+  await expect(line).toBeVisible(); // the decision is the thread's main element; the ladder is one quiet line
+  await expect(page.getByRole("region", { name: "Plan ladder" })).toHaveCount(0);
+  expect((await bar.boundingBox())!.y).toBeLessThan((await line.boundingBox())!.y);
+  await page.getByRole("region", { name: "Conversation" }).screenshot({ path: test.info().outputPath("decision-hero-desktop.png") });
+
+  await bar.getByRole("button", { name: "Holding" }).click();
+  await expect(page.getByTestId("desk-decision-logged")).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole("region", { name: "Plan ladder" })).toBeVisible(); // decided: the full ladder (its scale inside) leads again
 });
 
 test("a long put's plan holds below a level above the price, and a later alert brings the bar back", async ({ page }) => {

@@ -23,6 +23,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   const [tab, setTab] = useState<DeskTab>(link ? "thread" : "now");
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
+  const [deciding, setDeciding] = useState(false);
   const sent = useRef(0);
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setTab("thread"); },
@@ -51,8 +52,11 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
-          {on && <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} fill={text => setCommand({ kind: "fill", text, n: ++sent.current })} />}
-          {on && <DeskThreadTop thread={thread} />}
+          {/* One main element per thread: the header, then the decision when one is asked (the ladder shrinks to a line),
+              else the full plan ladder; the conversation follows. */}
+          {on && <DeskThreadTop thread={thread} compact={deciding} hero={
+            <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} onActive={setDeciding}
+              fill={text => setCommand({ kind: "fill", text, n: ++sent.current })} />} />}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} /></aside>}
