@@ -265,6 +265,20 @@ export type ChartLook = { image: Blob; line: string };
 /** A suggestion chip above the desk's message box. */
 type Suggestion = { label: string; title?: string; run(): void };
 
+/** How close to the bottom (px) still counts as reading the end of the conversation. */
+const FOLLOW_PX = 80;
+/** Scroll events this soon (ms) after the panel scrolled itself are its own, not the reader's. */
+const AUTO_MS = 150;
+
+/** The element that scrolls the conversation: a dock or drawer's own scroller, or null for the page itself. */
+function scrollParent(node: HTMLElement | null): HTMLElement | null {
+  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+    const { overflowY } = getComputedStyle(el);
+    if (overflowY === "auto" || overflowY === "scroll") return el;
+  }
+  return null;
+}
+
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
   next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
@@ -317,6 +331,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [backend, setBackend] = useState<Backend | null>(null);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
+  const following = useRef(true); // the reader is at the bottom, so new text scrolls into view
+  const autoAt = useRef(0); // when the panel last scrolled itself
+  const scroller = useRef<HTMLElement | null>(null); // a dock or drawer's own scroller; null for the page
+  const root = useRef<HTMLDivElement | null>(null);
   const [current, setCurrent] = useState<Current | null>(null);
   const [recent, setRecent] = useState<InvestigationSummary[]>([]);
   const [saveState, setSaveState] = useState<{ state: "saving" | "saved" | "error"; message?: string } | null>(null);
@@ -349,6 +367,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
   function open(saved: Investigation) {
+    following.current = true;
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMenu(false);
     pendingOutcomes.current.clear();
@@ -399,6 +418,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** A new conversation on ``target``, with the page's context line ready, unless the owner has typed their own. */
   function fresh(target: string) {
+    following.current = true;
     pendingOutcomes.current.clear();
     setMessages([]);
     setCurrent(null);
@@ -490,7 +510,51 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps -- save once per finished turn, with that render's messages
 
   // A panel scrolls its own list, never the page around it.
-  useEffect(() => { end.current?.scrollIntoView({ block: panel ? "nearest" : "end" }); }, [messages, panel]);
+  // Follow a streaming answer only while the reader is at the bottom: scrolled up to read, they stay where they are.
+  // Wheel, touch and paging keys stop following at once (a scroll event can arrive after the next chunk already scrolled
+  // down); the position re-pins when they come back to the end. Their own send, or opening a conversation, follows again.
+  useEffect(() => {
+    const box = scrollParent(end.current);
+    scroller.current = box;
+    const target: HTMLElement | Window = box ?? window;
+    const read = () => {
+      if (performance.now() - autoAt.current < AUTO_MS) return; // our own scroll, not the reader's
+      const el = box ?? document.scrollingElement;
+      if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
+    };
+    const wheel = (event: WheelEvent) => { if (event.deltaY < 0) following.current = false; };
+    const touch = () => { following.current = false; };
+    const key = (event: KeyboardEvent) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key) && !(event.target as HTMLElement)?.closest?.("textarea, input")) following.current = false; };
+    target.addEventListener("scroll", read, { passive: true });
+    target.addEventListener("wheel", wheel as EventListener, { passive: true });
+    target.addEventListener("touchmove", touch, { passive: true });
+    window.addEventListener("keydown", key);
+    return () => {
+      target.removeEventListener("scroll", read);
+      target.removeEventListener("wheel", wheel as EventListener);
+      target.removeEventListener("touchmove", touch);
+      window.removeEventListener("keydown", key);
+    };
+  }, [status?.enabled]); // the conversation renders once the status read says the lab is on
+  // To the very end, so the newest line sits above the pinned message box instead of under it.
+  const pin = useCallback(() => {
+    if (!following.current) return;
+    autoAt.current = performance.now();
+    const box = scroller.current;
+    if (box) box.scrollTop = box.scrollHeight;
+    else if (panel) end.current?.scrollIntoView({ block: "nearest" }); // a panel never scrolls the page around it
+    else window.scrollTo({ top: document.documentElement.scrollHeight });
+  }, [panel]);
+  useEffect(pin, [messages, pin]);
+  // What grows after the last chunk (the finished answer's cards, the suggestions, the message box's rows) keeps the end
+  // in view too, while following.
+  useEffect(() => {
+    const node = root.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => pin());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pin, status?.enabled]);
 
   // The page's symbol changed: an empty panel simply follows; a conversation is never retargeted, only offered.
   const engaged = messages.length > 0 || current !== null;
@@ -553,6 +617,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
     if (!content || busy || running.current || !status?.enabled) return;
+    following.current = true; // the owner's own message: show it and follow the answer
     if (lookOnSend.current && look && shots.length < MAX_IMAGES) {
       lookOnSend.current = false;
       running.current = true; // a second press while the chart is read sends nothing
@@ -807,7 +872,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   ];
   const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 4);
   return (
-    <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} data-testid={panel ? "copilot-panel" : undefined}>
+    <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} ref={root} data-testid={panel ? "copilot-panel" : undefined}>
       {panel && (
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground">Copilot · {symbol}</h2>
