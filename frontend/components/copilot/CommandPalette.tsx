@@ -57,6 +57,7 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
 
   const choose = (item: Item | undefined) => {
     if (!item) return;
+    dialog.current?.close(); // now, so the dialog hands focus back before a command (a fill) takes it
     onClose();
     if (item.kind === "thread") onThread(item.row);
     else item.command.run();

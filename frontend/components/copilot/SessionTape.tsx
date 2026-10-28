@@ -6,7 +6,8 @@ import { getDeskSession, type DeskSession, type DeskSessionEvent } from "@/lib/d
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
-const DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-emerald-400", ping: "bg-primary", radar: "bg-sky-400", decision: "bg-foreground" };
+// Amber is kept for what still needs you (a time stop ahead); what already happened stays quiet.
+const DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-emerald-400", ping: "bg-muted-foreground", radar: "bg-sky-400", decision: "bg-foreground" };
 const KIND: Record<DeskSessionEvent["kind"], [string, string]> = {
   fill: ["fill", "fills"], ping: ["ping", "pings"], radar: ["Radar event", "Radar events"], decision: ["decision", "decisions"],
 };
@@ -97,7 +98,8 @@ export default function SessionTape() {
             <div className="absolute left-0 top-[5px] h-0.5 rounded-full bg-muted-foreground/60" style={{ width: `${done}%` }} />
             {data.events.map((event, i) => (
               <span key={`${event.kind}-${event.at}-${i}`} data-kind={event.kind} title={`${hhmm(event.at)} · ${event.text}`}
-                className={cn("absolute top-[3px] -ml-[3px] h-1.5 w-1.5 rounded-full ring-2 ring-card", DOT[event.kind])} style={{ left: `${pos(event.at)}%` }} />
+                className={cn("absolute top-[3px] -ml-[3px] h-1.5 w-1.5 rounded-full ring-2 ring-card", DOT[event.kind],
+                  (event.at < open || event.at > open + span) && "opacity-50")} style={{ left: `${pos(event.at)}%` }} />
             ))}
             {ahead.map(stop => (
               <span key={`${stop.symbol}-${stop.at}`} data-kind="time_stop" title={`${stop.clock} · ${stop.symbol} time stop`}

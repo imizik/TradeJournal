@@ -469,14 +469,16 @@ plan not yet in a position asks "Added or not, and why?" (`GET
 that saves a `reflection` entry for the symbol; Skip hides it for the day in
 this browser. Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
 
-**Today's session (the Briefing's top).** While the Briefing (or any thread
-without a symbol, or none) is open, the top of the conversation shows the day
+**Today's session (the Briefing's top).** While the Briefing (or no thread) is
+open, the top of the conversation shows the day
 at a glance instead of a header and plan ladder (`SessionTape.tsx`): "Today",
 the market phase and SPY and QQQ's change on one line; one strip of the regular
 session in New York time (9:30 to 16:00, or the calendar's early close) with a
 "now" marker, today's fills, phone pings sent, Radar events and logged
-decisions as small ticks coloured by kind (hover for the time and what it was),
-and the plan time stops still ahead as hollow amber ticks; then one quiet line:
+decisions as small ticks coloured by kind (hover for the time and what it was;
+one before the open or after the close sits faded at the edge), and the plan
+time stops still ahead as hollow amber ticks, amber being for what still needs
+you; then one quiet line:
 the next time stop, the practice goal's line, and pings sent against the daily
 cap (with how many were held). Before the open the strip waits (no marker) and
 the line leads with whether the pre-market prep is written; after the close it
@@ -502,7 +504,7 @@ matters right now? send their one turn exactly as their pinned rows do; Prep
 the day and Close the day only put a question in the message box, unsent.
 While not typing in a field: J / K open the next or previous thread in list
 order (rows that open in place; a Radar or trade-link row is skipped, since it
-leaves the page), N opens Plan a trade, and `]` hides or shows the Context pane
+leaves the page), N opens Plan a trade (not while the message box holds unsent words), and `]` hides or shows the Context pane
 where the panes sit side by side (remembered in this browser; the desk bar's
 pane button does the same, and a phone keeps its tabs). No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut

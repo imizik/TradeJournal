@@ -119,6 +119,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/]);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
   await page.keyboard.press("ControlOrMeta+k"); // typing in the box: ignored
   await expect(palette(page)).toBeHidden();
   await page.getByRole("textbox", { name: "Message" }).blur();

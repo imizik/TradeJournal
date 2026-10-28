@@ -23,6 +23,8 @@ const CONTEXT_KEY = "desk.context.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
 const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null });
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
+/** A Briefing conversation keeps its question's first line as its title (CopilotPanel's ``savedFields``). */
+const BRIEFING_TITLE = WHAT_MATTERS_PROMPT.split("\n")[0].slice(0, 80);
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
 
 /** Typing somewhere: a desk key never fires there. */
@@ -56,6 +58,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return !shown;
   }), []);
   const jumpKey = useJumpKey();
+  const desk = useRef<HTMLDivElement>(null);
   const sent = useRef(0);
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setTab("thread"); },
@@ -120,17 +123,24 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
         setPalette(true);
         return;
       }
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (key === "j" || key === "k") { event.preventDefault(); step(key === "j" ? 1 : -1); }
-      else if (key === "n" && !event.shiftKey) { event.preventDefault(); planTrade(); }
-      else if (event.key === "]") { event.preventDefault(); toggleContext(); }
+      else if (key === "n" && !event.repeat) {
+        // A new plan leaves this conversation: never over words not yet sent.
+        const box = desk.current?.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
+        if (box?.value.trim()) return;
+        event.preventDefault();
+        planTrade();
+      }
+      // The pane hides only where the panes sit side by side; a phone keeps its tabs.
+      else if (event.key === "]" && (desk.current?.clientWidth ?? 0) >= 760) { event.preventDefault(); toggleContext(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [on, palette, step, planTrade, toggleContext]);
 
   return (
-    <div className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
+    <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
         <h1 className={styles.title}>Copilot Lab</h1>
         <p className={styles.note}>Research on read-only evidence. No orders; a plan, watch or revisit exists only once you confirm it.</p>
@@ -164,8 +174,8 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
         )}
         <section aria-label="Conversation" className={styles.thread}>
           {on && <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} fill={fill} />}
-          {/* The Briefing (or no thread) opens on the day at a glance; a symbol's thread on its header and plan. */}
-          {on && (thread?.symbol ? <DeskThreadTop thread={thread} /> : <SessionTape />)}
+          {/* The Briefing (or no thread) opens on the day at a glance; any other thread on its header and plan. */}
+          {on && (!thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <SessionTape /> : <DeskThreadTop thread={thread} />)}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} /></aside>}
