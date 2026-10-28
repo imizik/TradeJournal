@@ -297,6 +297,26 @@ export type ScorecardTally = { alerts: number; closed: number; better: number; w
 export type AlertScorecard = {
   window_days: number; alerts: number; rows: ScorecardRow[]; truncated: boolean;
   summary: { holding: ScorecardTally; exiting: ScorecardTally; none: ScorecardTally };
+  /** The Radar scorecard, from the same read; ``off`` while Radar is not recording. */
+  radar?: RadarScorecard | { state: "off" | "unavailable"; reason: string | null };
+};
+
+// --------------------------------------------------------------------------- the Radar scorecard
+
+/** A Radar decision on the desk, logged as a day-journal ``decision`` ("Watching. …", "Passing. …", "Planning. …"). */
+export type RadarChoice = "watching" | "passing" | "planning";
+export const radarChoice = (text: string): RadarChoice | null =>
+  text.startsWith("Watching.") ? "watching" : text.startsWith("Passing.") ? "passing" : text.startsWith("Planning.") ? "planning" : null;
+/** One stock hit: the decision after it, and the stock against SPY in the hit's direction (percent) an hour on and at the close. */
+export type RadarScorecardRow = {
+  event_id: string; at: number; symbol: string; kind: string; kind_label: string; direction: "up" | "down"; summary: string | null;
+  decision: RadarChoice | null; decided_at: number | null; planned: boolean; traded: boolean;
+  after: { hour_pct: number | null; close_pct: number | null; why: string | null };
+};
+export type RadarTally = { hits: number; measured: number; kept_going: number; avg_close_pct: number | null };
+export type RadarScorecard = {
+  state: "ok"; window_days: number; hits: number; rows: RadarScorecardRow[]; truncated: boolean;
+  summary: Record<RadarChoice | "none", RadarTally>;
 };
 
 export async function getAlertScorecard(signal?: AbortSignal): Promise<AlertScorecard> {

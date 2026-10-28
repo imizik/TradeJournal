@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAlertScorecard, type AlertScorecard as Card, type ScorecardRow, type ScorecardTally } from "@/lib/desk";
+import { getAlertScorecard, type AlertScorecard as Card, type RadarScorecard, type RadarScorecardRow, type RadarTally, type ScorecardRow, type ScorecardTally } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const ET = "America/New_York";
@@ -32,10 +32,71 @@ function Outcome({ row }: { row: ScorecardRow }) {
   );
 }
 
+const pct = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}%`;
+const Pct = ({ value }: { value: number }) => <span className={cn("tabular-nums font-medium", tone(value))}>{pct(value)}</span>;
+
+/** "You watched 4 (2 kept going, avg +0.8%)": only what happened. */
+function radarLine(t: RadarTally, verb: string) {
+  if (!t.hits) return null;
+  return <span>You {verb} {t.hits}{t.measured ? <> ({t.kept_going} kept going, avg <Pct value={t.avg_close_pct ?? 0} />)</> : null}. </span>;
+}
+
+function RadarAfter({ row }: { row: RadarScorecardRow }) {
+  const { hour_pct: hour, close_pct: close, why } = row.after;
+  if (hour === null && close === null) return <span className="text-muted-foreground">Not measured: {why}</span>;
+  return (
+    <span className="text-muted-foreground">
+      {hour !== null && <>1h <Pct value={hour} /></>}{hour !== null && " · "}
+      {close !== null ? <>close <Pct value={close} /></> : <>close: {why}</>}
+    </span>
+  );
+}
+
+/** Radar's stock hits: what was decided on each and how far the stock then went the way Radar flagged it, against SPY. */
+function RadarCard({ card }: { card: RadarScorecard }) {
+  const { watching, passing, planning, none } = card.summary;
+  return (
+    <section aria-label="Radar scorecard" className="mb-4 space-y-2 border-b pb-4 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Radar scorecard</h2>
+        <span className="text-xs text-muted-foreground">last {card.window_days} days · the stock vs SPY, the way Radar flagged it, by the close</span>
+      </div>
+      {!card.hits ? <p className="text-muted-foreground">Radar flagged no stock in the last {card.window_days} days.</p> : (
+        <>
+          <p className="text-foreground">
+            {card.hits} hit{card.hits === 1 ? "" : "s"}. {radarLine(watching, "watched")}{radarLine(planning, "planned")}{radarLine(passing, "passed on")}
+            {none.hits > 0 && <span className="text-muted-foreground">No decision on {none.hits}{none.measured ? <> (avg <Pct value={none.avg_close_pct ?? 0} />)</> : null}.</span>}
+          </p>
+          <details className="group">
+            <summary className="w-fit cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">Each hit ▾</summary>
+            <ul className="mt-2 space-y-2">
+              {card.rows.map(row => (
+                <li key={row.event_id} className="space-y-0.5">
+                  <p className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-medium text-foreground">{row.symbol} {row.direction}</span>
+                    <span className="text-xs text-muted-foreground">{row.kind_label} · {when(row.at)}</span>
+                  </p>
+                  <p className="text-xs">
+                    <span className="text-foreground">{row.decision ? `You logged ${row.decision}` : "No decision logged"}</span>
+                    {row.planned && <span className="text-muted-foreground"> · plan saved{row.traded ? ", traded" : ""}</span>}
+                    <span className="text-muted-foreground"> · </span><RadarAfter row={row} />
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {card.truncated && <p className="mt-2 text-xs text-muted-foreground">Showing the newest {card.rows.length}.</p>}
+          </details>
+        </>
+      )}
+    </section>
+  );
+}
+
 /**
  * The Briefing's alert scorecard (``GET /copilot/desk/scorecard``): for the position alerts sent to the phone in
  * the last 30 days, what was decided after each and what its contracts then fetched against selling at the alert. One
  * line, with each alert behind a disclosure. Alerts are prompts to decide, not exit rules; this is how their value shows.
+ * The same read carries the Radar scorecard, shown under it while Radar records.
  */
 export default function AlertScorecard() {
   const [card, setCard] = useState<Card | null>(null);
@@ -51,7 +112,9 @@ export default function AlertScorecard() {
   if (!card) return error ? <p className="mb-4 text-xs text-muted-foreground">Alert scorecard unavailable: {error}</p> : null;
   const { holding, exiting, none } = card.summary;
   const lines = [held(holding, "held"), held(exiting, "exited")].filter((line): line is NonNullable<typeof line> => line !== null);
+  const radar = card.radar;
   return (
+    <>
     <section aria-label="Alert scorecard" className="mb-4 space-y-2 border-b pb-4 text-sm">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Alert scorecard</h2>
@@ -88,5 +151,8 @@ export default function AlertScorecard() {
         </>
       )}
     </section>
+    {radar?.state === "ok" ? <RadarCard card={radar} />
+      : radar?.state === "unavailable" && <p className="mb-4 text-xs text-muted-foreground">Radar scorecard unavailable: {radar.reason}</p>}
+    </>
   );
 }

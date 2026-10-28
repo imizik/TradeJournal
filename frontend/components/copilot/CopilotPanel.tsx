@@ -252,7 +252,9 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
 
 /** ``origin``: what prompted the conversation (a Radar event, a ping, a page's Plan a trade); a confirmed plan records it.
  * ``image``: a screenshot the phone's share sheet stored, attached to the first message and not sent. */
-export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null; plan?: DrawnPlan | null; image?: string | null };
+export type PanelLink = { symbol: string; context: string; investigation: string | null; origin?: LinkOrigin | null; plan?: DrawnPlan | null; image?: string | null;
+  /** A Radar hit's event id: the desk opens on its decision. */
+  radar?: string | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
 export type HomeActions = { ask(prompt: string): void; open(id: string): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
