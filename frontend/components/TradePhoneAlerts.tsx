@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
 import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from "@/lib/chartJournal";
+import PositionAlertFeedback from "./PositionAlertFeedback";
+import { useAppAccess } from "./AccessProvider";
+import type { AlertFeedback } from "@/lib/alertFeedback";
 
 // Older API responses still render their history, but cannot identify a linked event.
-type Sent = { id?: string; contract?: string; quoted_at?: number | null;
+type Sent = { id?: string; contract?: string; quoted_at?: number | null; feedback?: AlertFeedback | null;
   kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped" | "held"; error: string | null; delivered_at: number | null;
@@ -60,6 +63,7 @@ function PositionNow({ tradeId }: { tradeId: string }) {
 }
 
 export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, askHref }: { tradeId: string; alertId?: string; symbol: string; status: string; askHref?: string }) {
+  const { owner } = useAppAccess();
   const [body, setBody] = useState<Body | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -116,6 +120,9 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
       </div>
       <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}</p>
+      {owner && selected.id && selected.feedback !== undefined && ["giveback", "hold_hour", "expiry_first", "expiry_final"].includes(selected.kind)
+        && ["sent", "unknown"].includes(selected.delivery) && <PositionAlertFeedback key={`${tradeId}:${selected.id}`}
+          tradeId={tradeId} alertId={selected.id} initial={selected.feedback} />}
     </div>}
     {body?.enabled && body.watch && !alertId && <p className="text-muted-foreground">
       {body.watch.fired

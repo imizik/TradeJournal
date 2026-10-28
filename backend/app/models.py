@@ -598,6 +598,23 @@ class PositionAlert(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class PositionAlertFeedback(SQLModel, table=True):
+    """Owner-reported usefulness, independent of delivery, fills and habit verdicts.
+
+    The alert identity survives journal rebuilds. One current response per alert;
+    version guards edits and makes a lost-response retry safe.
+    """
+
+    __tablename__ = "position_alert_feedback"
+
+    alert_id: uuid.UUID = Field(foreign_key="position_alert.id", primary_key=True)
+    rating: str  # prompted_review | already_aware | too_late | not_useful
+    reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    version: int = 1
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class RadarAlert(SQLModel, table=True):
     """One Radar phone ping (``engine/radar_alerts.py``) for a newly detected Radar event, written
     once per event: the unique event id keeps a restart or a second process from recording it twice.

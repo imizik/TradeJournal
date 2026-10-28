@@ -53,6 +53,7 @@ from app.engine.analytics import wall_time
 from app.engine.chart_journal import OPEN_SIDES
 from app.engine.chart_math import ET
 from app.models import Fill, FillMarketContext, PositionAlert, Trade, TradeFill, TradePathMetrics
+from app.engine import alert_feedback
 
 GO_LIVE = date(2026, 10, 21)  # POSITION_ALERTS_ENABLED=true on the VPS
 WINDOW = 30
@@ -293,8 +294,9 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
 
     out["verdict"] = verdict(out)
     # Every sent alert counts toward the follow-up tally; only the newest ALERTS_SHOWN are listed.
-    alerts = db.exec(select(PositionAlert).where(PositionAlert.delivery.in_(("sent", "unknown")))
+    alerts = db.exec(select(PositionAlert).where(PositionAlert.delivery.in_(alert_feedback.ELIGIBLE_DELIVERIES))
                      .order_by(PositionAlert.detected_at.desc())).all()
+    feedback = alert_feedback.for_alerts(db, [a.id for a in alerts])
     listed = []
     for a in alerts:
         trade_id = trade_of_source.get((a.account_id, a.source_key))
@@ -303,6 +305,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
                            fills_of.get(trade_id), trade.status if trade else None)
         listed.append({
             "id": str(a.id), "kind": a.kind, "contract": a.contract, "contracts": float(a.contracts),
+            "feedback": feedback.get(a.id),
             "detected_at": _epoch(a.detected_at), "delivery": a.delivery, "mark": _num(a.mark),
             # Unmatched: no link, since the stored trade id may predate a rebuild.
             "trade_id": str(trade_id) if trade_id else None, **{k: v for k, v in result.items() if k != "closed_at"},
@@ -310,5 +313,7 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
         })
     out["responses"] = dict(Counter(a["response"] or "unmatched" for a in listed))
     out["alerts_total"] = len(listed)
+    out["feedback"] = {"total": len(alerts), "responded": len(feedback), "unanswered": len(alerts) - len(feedback),
+                       "counts": dict(Counter(f["rating"] for f in feedback.values()))}
     out["alerts"] = listed[:ALERTS_SHOWN]
     return out
