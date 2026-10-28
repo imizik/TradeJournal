@@ -56,6 +56,11 @@ def clean():
 
 @pytest.fixture
 def pushes(monkeypatch):
+    # These tests prove the research job's own limits (its daily max, once per investigation). The shared phone
+    # ping policy is proved in test_notification_policy.py; left on here, pings other tests sent earlier in the same
+    # worker reach its daily cap or quiet window and these come back "held" instead of "sent" (the CI flake of
+    # October 27, 2026).
+    monkeypatch.setenv("ALERT_POLICY_ENABLED", "false")
     sent = []
 
     def publish(title, message, *, priority=4, tags=("bell",), path="", direct_click=False):
