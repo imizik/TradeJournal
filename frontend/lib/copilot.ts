@@ -473,7 +473,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
  * with it is the owner's question, ready in the message box (a plan alert's tap). */
-export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[]; plan?: string | string[]; image?: string | string[] }) {
+export function readDeepLink(params: { symbol?: string | string[]; context?: string | string[]; investigation?: string | string[]; origin?: string | string[]; plan?: string | string[]; image?: string | string[]; radar?: string | string[] }) {
   const one = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value) ?? "";
   const symbol = one(params.symbol).trim().toUpperCase();
   const context = one(params.context).replace(/\s+/g, " ").trim().slice(0, CONTEXT_MAX);
@@ -481,10 +481,13 @@ export function readDeepLink(params: { symbol?: string | string[]; context?: str
   const origin = readOrigin(one(params.origin));
   // A screenshot the phone's share sheet stored (app/share-target): attached, not sent.
   const image = /^[0-9a-f]{32}$/.test(one(params.image)) ? one(params.image) : null;
+  // A desk Radar row: the desk opens on that hit's decision (watching, passing or planning).
+  const radar = /^[A-Za-z0-9._-]{1,120}$/.test(one(params.radar)) ? one(params.radar) : null;
   if (UUID_RE.test(investigation)) return { symbol: "", context, investigation: investigation.toLowerCase(), origin, plan: null };
   // An origin alone (a prep ping with no investigation) still starts a conversation that records it.
   if (!symbol && !context && !origin && !image) return null;
-  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin, plan: readDrawn(one(params.plan)), image };
+  return { symbol: SYMBOL_RE.test(symbol) ? symbol : "", context, investigation: null, origin, plan: readDrawn(one(params.plan)), image,
+    ...(radar && SYMBOL_RE.test(symbol) ? { radar } : {}) };
 }
 
 // --------------------------------------------------------------------------- research queue

@@ -6,6 +6,7 @@ import { MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
+import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
@@ -183,8 +184,11 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
         <section aria-label="Conversation" className={styles.thread}>
           {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}
-          {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision. */}
-          {on && (!thread && link?.symbol && !link.investigation ? (
+          {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision.
+              A desk Radar row names the hit too: it opens on watching, passing or planning it. */}
+          {on && (!thread && link?.symbol && link.radar ? (
+            <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
+          ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} /></div>
           ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><BriefingExtras /><AlertScorecard /></> : (
             <DeskThreadTop thread={thread} compact={deciding} hero={

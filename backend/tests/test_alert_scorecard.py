@@ -159,7 +159,10 @@ def test_the_route_refuses_while_the_lab_is_off_and_reads_the_card_while_it_is_o
     assert refused.value.status_code == 503
     monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=True))
     monkeypatch.setattr(copilot_desk.today, "_now", lambda: NOW)
-    assert copilot_desk.desk_scorecard(db) == {"window_days": 30, "alerts": 0, "summary": {
+    monkeypatch.delenv("RADAR_ENABLED", raising=False)
+    card = copilot_desk.desk_scorecard(db)
+    assert card.pop("radar") == {"state": "off", "reason": "Radar recording is not switched on."}
+    assert card == {"window_days": 30, "alerts": 0, "summary": {
         k: {"alerts": 0, "closed": 0, "better": 0, "worse": 0, "even": 0, "open": 0, "not_measured": 0, "vs_alert_usd": 0}
         for k in ("holding", "exiting", "none")}, "rows": [], "truncated": False}
 

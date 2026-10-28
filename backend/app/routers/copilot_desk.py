@@ -22,14 +22,16 @@ out are investigation, trade and Radar event ids, each the row's own link.
 An option position's value is its own unrealized P&L (the option's mark), never the underlying's price; its plan
 levels and meter are on the underlying, and the status line says so by naming it.
 
-``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``).
+``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``), with the Radar scorecard
+(``app/engine/radar_scorecard.py``) under ``radar``.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers.
 """
 
 from datetime import UTC, datetime
+import logging
 import uuid
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, col, select
@@ -38,6 +40,8 @@ from app.ai import copilot
 from app.database import get_session
 from app.engine.chart_math import ET, session_windows
 from app.routers import today
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -279,8 +283,11 @@ def _new_rows(radar: dict, thesis: dict, titles: dict[str, str]) -> list[dict]:
     rows = []
     for event in radar.get("rows", []):
         kind = RADAR_KIND.get(event["kind"], (event["kind"] or "event").replace("_", " "))
+        # A stock hit opens on the desk, on its decision (watching, passing or planning); a group event stays on Radar.
+        path = (f"/copilot-lab?{urlencode({'symbol': event['symbol'], 'radar': event['event_id']})}"
+                if event["symbol"] and event["kind"] in ("relative_to_spy", "relative_to_sector") else event["path"])
         rows.append(_row(f"radar:{event['event_id']}", "new", event["summary"] or kind, _say(f"Radar · {kind}", "info"),
-                         symbol=event["symbol"] or None, radar_event_id=event["event_id"], path=event["path"],
+                         symbol=event["symbol"] or None, radar_event_id=event["event_id"], path=path,
                          changed_at=_epoch(event["first_seen_at"])))
     seen = set()
     for trigger in thesis.get("rows", []):  # newest first: one row per investigation (or link), its newest trigger
@@ -477,9 +484,21 @@ def desk_session(db: Session = Depends(get_session)):
 @router.get("/desk/scorecard")
 def desk_scorecard(db: Session = Depends(get_session)):
     """The alert scorecard (``app/engine/alert_scorecard.py``): each position alert of the last 30 days, the decision
-    logged after it and what happened next against selling at the alert. Read-only, owner-only, refused while the lab
-    is off."""
+    logged after it and what happened next against selling at the alert; under ``radar``, the same for Radar's stock hits
+    (``app/engine/radar_scorecard.py``), ``off`` or ``unavailable`` with a reason when the Radar file is. Read-only,
+    owner-only, refused while the lab is off."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    from app.engine import alert_scorecard
-    return alert_scorecard.scorecard(db, today._now())
+    from app.engine import alert_scorecard, radar_scorecard
+    from app.routers import radar
+    now = today._now()
+    store, reason = radar._store(read_only=True)
+    if store is None:
+        hits = {"state": "off", "reason": reason}
+    else:
+        try:
+            hits = radar_scorecard.scorecard(store, db, now)
+        except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
+            log.warning("radar scorecard unreadable: %s", exc)
+            hits = {"state": "unavailable", "reason": "The Radar file could not be read right now."}
+    return {**alert_scorecard.scorecard(db, now), "radar": hits}

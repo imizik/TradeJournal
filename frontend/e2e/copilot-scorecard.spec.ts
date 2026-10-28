@@ -24,6 +24,19 @@ const CARD = {
     { at: at(21, 11, 0), kind: "giveback", kind_label: "Give-back", contract: "AMD 11/21/26 250C", symbol: "AMD", pnl_pct_at_alert: null,
       decision: null, decided_at: null, outcome: { state: "not_measured", why: "no price at the alert" } },
   ],
+  radar: {
+    state: "ok", window_days: 30, hits: 3, truncated: false,
+    summary: { watching: { hits: 1, measured: 1, kept_going: 1, avg_close_pct: 2.4 }, planning: { hits: 1, measured: 1, kept_going: 0, avg_close_pct: -1.1 },
+      passing: { hits: 0, measured: 0, kept_going: 0, avg_close_pct: null }, none: { hits: 1, measured: 0, kept_going: 0, avg_close_pct: null } },
+    rows: [
+      { event_id: "rv1-mu", at: at(28, 10, 42), symbol: "MU", kind: "relative_to_sector", kind_label: "vs sector", direction: "up", summary: null,
+        decision: null, decided_at: null, planned: false, traded: false, after: { hour_pct: 0.8, close_pct: null, why: "the session is still open" } },
+      { event_id: "rv1-nvda", at: at(27, 11, 5), symbol: "NVDA", kind: "relative_to_spy", kind_label: "vs SPY", direction: "up", summary: null,
+        decision: "watching", decided_at: at(27, 11, 7), planned: false, traded: false, after: { hour_pct: 1.2, close_pct: 2.4, why: null } },
+      { event_id: "rv1-amd", at: at(24, 14, 0), symbol: "AMD", kind: "relative_to_spy", kind_label: "vs SPY", direction: "down", summary: null,
+        decision: "planning", decided_at: at(24, 14, 3), planned: true, traded: true, after: { hour_pct: null, close_pct: -1.1, why: "no pass recorded then" } },
+    ],
+  },
 };
 
 async function briefing(page: Page, card: unknown = CARD) {
@@ -47,7 +60,22 @@ test("the Briefing's scorecard says in one line how holding past alerts compared
   await expect(card).toContainText("You logged exiting · Still open · $620 at the alert's bid");
   await expect(card).toContainText("No decision logged · Not measured: no price at the alert");
   await card.screenshot({ path: test.info().outputPath("alert-scorecard-desktop.png") });
+
+  // The same read carries Radar's: each stock hit, what was decided, and how far it went the way Radar flagged it.
+  const radar = page.getByRole("region", { name: "Radar scorecard" });
+  await expect(radar).toContainText("3 hits. You watched 1 (1 kept going, avg +2.4%). You planned 1 (0 kept going, avg −1.1%). No decision on 1.");
+  await radar.getByText("Each hit ▾").click();
+  await expect(radar).toContainText("No decision logged · 1h +0.8% · close: the session is still open");
+  await expect(radar).toContainText("You logged watching · 1h +1.2% · close +2.4%");
+  await expect(radar).toContainText("You logged planning · plan saved, traded · close −1.1%");
+  await radar.screenshot({ path: test.info().outputPath("radar-scorecard-desktop.png") });
   expect(reads()).toBe(1);
+});
+
+test("while Radar is off the Radar scorecard stays out of the way", async ({ page }) => {
+  await briefing(page, { ...CARD, radar: { state: "off", reason: "Radar recording is not switched on." } });
+  await expect(page.getByRole("region", { name: "Alert scorecard" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Radar scorecard" })).toHaveCount(0);
 });
 
 test("with no alerts it says so, and at 375 px the scorecard fits without sideways scrolling", async ({ page }) => {

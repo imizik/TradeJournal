@@ -206,8 +206,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   now and Near a trigger rows carry a plan meter: the underlying on the track
   from the invalidation (left) to the entry (the tick), with room past it.
   Empty groups other than Act now are left out. A row with an investigation
-  opens it in place; any other follows its link (a Radar event's
-  `/radar?event=<id>`, planning an unplanned position, a trade). **Plan a
+  opens it in place; any other follows its link (a stock Radar hit opens the
+  desk on its decision, `/copilot-lab?symbol=<symbol>&radar=<id>`; a group
+  event its `/radar?event=<id>`; planning an unplanned position; a trade). **Plan a
   trade** sits under the groups. It refreshes every minute while visible and
   reads one owner-only `GET /copilot/desk/threads`
   (`app/routers/copilot_desk.py`), composed in-process from the Plans board
@@ -482,6 +483,35 @@ to decide, not exit rules (the 2026-10-24 exit study), so their value shows
 here, in what was decided after them. Read-only; it changes no alert or
 threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
+
+**Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
+A stock Radar hit in New since you looked opens the desk on that hit: what
+Radar saw (its kind, direction, first-seen time and summary, with Open in
+Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
+entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
+decision bar's Undo window; **Plan it** logs "Planning. …" and opens a plan
+conversation whose origin is the hit (`radar_event`), so a confirmed plan
+carries it to Radar's Planned and Traded marks. Ask about it puts a question in
+the message box, unsent. A hit from an earlier day offers only Plan it: a
+decision counts on the hit's own New York day. Once logged it is one line, with
+Plan it still offered after Watching. Advice only. Proof:
+`frontend/e2e/copilot-radar-decision.spec.ts`.
+
+**Radar scorecard** (under the alert scorecard, from the same
+`GET /copilot/desk/scorecard` read, its `radar` part;
+`app/engine/radar_scorecard.py`). For each stock Radar hit of the last 30
+days: what was decided (the first Watching, Passing or Planning `decision`
+entry for the symbol on the hit's New York day, before the stock's next hit;
+the journal keeps the symbol, not the hit), whether a plan names it and was
+traded, and how far the stock then went against SPY in the direction Radar
+flagged, an hour on and at the session's last pass (the outcome scorer's
+`60m` and `close`, `scripts/radar_outcomes.py`). A hit whose pass or prices
+are missing, or whose session is still open, says why it is not measured.
+One line sums it ("You watched 4 (2 kept going, avg +0.8%)"), and each hit is
+behind "Each hit". Group events name no one stock to decide on and stay on the
+Radar page. While Radar is off the section is left out; an unreadable Radar
+file reads unavailable and the alert scorecard stands. Read-only. Proof:
+`tests/test_radar_scorecard.py`, `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **One main element per thread.** The thread's top reads header, then its
 main element, then the conversation: while the decision bar (below) is
