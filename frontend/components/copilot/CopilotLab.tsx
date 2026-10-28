@@ -6,6 +6,7 @@ import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/cop
 import DecisionBar from "@/components/copilot/DecisionBar";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import PlansBoard from "@/components/copilot/PlansBoard";
+import DeskThreadTop from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import type { DeskCommand, DeskHooks, DeskTab, DeskThreadRef } from "@/lib/desk";
 import styles from "./CopilotLab.module.css";
@@ -223,6 +224,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
         )}
         <section aria-label="Conversation" className={styles.thread}>
           {on && <DecisionBar key={thread?.symbol ?? ""} symbol={thread?.symbol ?? null} fill={text => setCommand({ kind: "fill", text, n: ++sent.current })} />}
+          {on && <DeskThreadTop thread={thread} />}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} /></aside>}
