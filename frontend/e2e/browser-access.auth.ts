@@ -39,6 +39,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
   expect((await page.request.get("/api/backend/jo/morning?day=2026-10-19")).status()).toBe(403);
   expect((await page.request.get("/api/backend/day-journal/2026-10-19")).status()).toBe(403);
+  expect((await page.request.get("/api/backend/weekly-review/2026-08-03")).status()).toBe(403);
+  for (const suffix of ["", "/result"]) expect((await page.request.put(`/api/backend/weekly-review/2026-08-03${suffix}`, { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} })).status()).toBe(403);
   expect((await page.request.post("/api/backend/day-journal/2026-10-19/entries", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { operation_id: "refused-thought", kind: "outlook", text: "Must not save" } })).status()).toBe(403);
   expect((await page.request.post("/api/backend/jo/briefings/00000000-0000-0000-0000-000000000001/feedback", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { rating: "useful" } })).status()).toBe(403);
   expect((await page.request.get("/api/backend/scanner/settings")).status()).toBe(403);
@@ -312,4 +314,34 @@ test("an assistant sees no copilot anywhere, even with the lab reported on", asy
   await expect(page.getByTestId("copilot-panel")).toHaveCount(0);
   await expect(page.getByText(/^Ask copilot/)).toHaveCount(0);
   expect((await page.request.get("/api/backend/copilot/status")).status()).toBe(403); // and the proxy refuses it
+});
+
+test("weekly review proxy preserves owner, assistant and CSRF boundaries", async ({ browser, request }) => {
+  const path = '/api/backend/weekly-review/2026-08-03';
+  expect((await request.get(path)).status()).toBe(401);
+  expect((await request.put(path, { data: { rule_key: null, note: null } })).status()).toBe(401);
+  expect((await request.put(`${path}/result`, { data: { result: 'kept' } })).status()).toBe(401);
+  const owner = await browser.newContext({ baseURL: ownerOrigin });
+  try {
+    // The private owner gateway bootstraps its owner session; public anonymous requests above cannot.
+    expect((await owner.request.get(path)).status()).toBe(200);
+    const page = await owner.newPage();
+    await page.goto('/daily/week/2026-08-03');
+    await expect(page.getByRole('heading', { name: /^Week of/ })).toBeVisible();
+    const session = await (await owner.request.get('/api/access/me')).json();
+    const before = await (await owner.request.get(path)).json();
+    const data = { rule_key: before.rules[0].key, note: 'Invented owner weekly note' };
+    expect((await owner.request.put(path, { data })).status()).toBe(403);
+    expect((await owner.request.put(path, { headers: { Origin: ownerOrigin, 'x-tj-csrf': 'forged' }, data })).status()).toBe(403);
+    expect((await owner.request.put(path, { headers: { Origin: 'https://example.com', 'x-tj-csrf': session.csrf }, data })).status()).toBe(403);
+    const headers = { Origin: ownerOrigin, 'x-tj-csrf': session.csrf };
+    expect((await owner.request.put(path, { headers, data })).status()).toBe(200);
+    expect((await (await owner.request.get(path)).json()).chosen.note).toBe(data.note);
+    const resultPath = '/api/backend/weekly-review/2026-08-10/result';
+    expect((await owner.request.put(resultPath, { data: { result: 'not_enough' } })).status()).toBe(403);
+    expect((await owner.request.put(resultPath, { headers, data: { result: 'not_enough' } })).status()).toBe(200);
+    expect((await owner.request.delete(path, { headers })).status()).toBe(404);
+    expect((await owner.request.get(`${path}/unknown`)).status()).toBe(404);
+    expect((await owner.request.get('/api/backend/monthly-review/2026-08')).status()).toBe(404);
+  } finally { await owner.close(); }
 });
