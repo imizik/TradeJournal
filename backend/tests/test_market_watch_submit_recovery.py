@@ -46,6 +46,25 @@ def refused(result, code):
     return text
 
 
+def test_early_snapshot_is_not_a_missing_packet_or_an_input(market):
+    client, token, _, ledger, actor, _ = market
+    before = ledger.export(ledger.ledger.path, actor)
+    early = call(client, 'market_watch_snapshot', {'scheduled_slot': '11:00'}, token)['structuredContent']
+    assert early == {'status': 'not_due', 'reason': 'scheduled_slot_not_due',
+                     'server_time': NOW.isoformat(), 'retry_at': '2026-10-14T11:00:00-04:00'}
+    assert ledger.export(ledger.ledger.path, actor) == before
+    assert 'input_id' in call(client, 'market_watch_snapshot', {'scheduled_slot': '09:50'}, token)['structuredContent']
+    assert call(client, 'market_watch_snapshot', {'scheduled_slot': '09:46'}, token)['isError']
+
+
+def test_legacy_caller_cannot_commit_a_future_scheduled_slot(market):
+    req = request(market[2]['input_id'], operation_id='mw-scheduled-v1:2026-10-14:11:00')
+    assert 'not saved' in refused(submit(market, req), 'scheduled_read_not_due')
+    ledger, actor, outbox = market[3:]
+    assert ledger.export(ledger.ledger.path, actor)['reads'] == []
+    assert list(outbox.iterdir()) == []
+
+
 @pytest.mark.parametrize('field,value,detail', [
     ('main', {'text': 'private-sentinel'}, 'main: require exactly'),
     ('change_summary', 'private-sentinel' * 150, 'change_summary'),

@@ -294,10 +294,10 @@ async def _maybe_start_jo_morning(app_: FastAPI):
         while True:
             try:
                 await asyncio.to_thread(runner.run_once)
-            except Exception:
+            except Exception as error:
                 # Never log record contents or configuration paths.
-                runner.last_error = "Morning briefing pass unavailable"
-                logging.getLogger(__name__).warning("Morning briefing pass unavailable")
+                runner.last_error = f"Morning briefing pass unavailable ({type(error).__name__})"
+                logging.getLogger(__name__).warning("%s", runner.last_error)
             await asyncio.sleep(30)
     return asyncio.create_task(loop())
 

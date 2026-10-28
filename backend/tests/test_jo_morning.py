@@ -1,4 +1,5 @@
 """Automatic packet → tool → import → owner view, all against disposable data."""
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -18,6 +19,39 @@ from tests.test_cloud_mcp_check import harness, signing_key, call  # noqa: F401
 from tests.test_jo_briefing import client, engine, packet, briefing  # noqa: F401
 
 NOW = datetime(2026, 10, 19, 12, 45, tzinfo=timezone.utc)  # 08:45 ET
+
+
+def test_runner_logs_failure_class_without_private_exception_text(monkeypatch, caplog):
+    from types import SimpleNamespace
+    from app import main
+    from app.engine import jo_morning
+
+    def fail():
+        raise PermissionError('private-sentinel /private/config.json')
+    runner = SimpleNamespace(run_once=fail, last_error=None)
+    app = SimpleNamespace(state=SimpleNamespace())
+    monkeypatch.setenv('JO_MORNING_CONFIG', '/unused-fixture')
+    monkeypatch.delenv('TJ_DOT_TRIAL_ENABLED', raising=False)
+    monkeypatch.setattr(jo_morning, 'MorningRunner', lambda db_engine: runner)
+
+    async def invoke(function):
+        function()
+
+    async def stop_after_pass(seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(main.asyncio, 'to_thread', invoke)
+    monkeypatch.setattr(main.asyncio, 'sleep', stop_after_pass)
+
+    async def run():
+        task = await main._maybe_start_jo_morning(app)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+    assert runner.last_error == 'Morning briefing pass unavailable (PermissionError)'
+    assert runner.last_error in caplog.text
+    assert 'private-sentinel' not in caplog.text and '/private/' not in caplog.text
 
 
 @pytest.fixture

@@ -583,6 +583,16 @@ unproven; no trial, schedule or market-message delivery was activated.
 
 ### Selected first slice: four scheduled reads
 
+Scheduled callers pass `scheduled_slot` to `market_watch_snapshot`. Before that
+ET slot, it returns `not_due` with server time and `retry_at`, without creating
+an input receipt or declaring a missing snapshot. The task waits only if its
+host supports waiting; otherwise it records a timing gap. The ledger also
+refuses new `mw-scheduled-v1:DATE:SLOT` submissions before the named slot and
+refuses a mismatched date/slot, including callers with older prompts. Exact
+recovery of an already committed operation still precedes these checks. This
+does not change the external scheduler, refresh stale data, or prove that a
+hosted task uses the updated template; runtime/catalog/task rollout is separate.
+
 On October 14 the owner requested a scheduled market read at 09:50, 11:00,
 12:30 and 14:00 ET and a market-context exception to setup Go-only messages.
 This selects the fixed-schedule/chat-advice slice below; deterministic event

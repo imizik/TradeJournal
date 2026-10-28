@@ -23,7 +23,16 @@ and their dependent market continuations retain all their own inbox, batch
 and failure guards when using the shared workflow below. A late scheduled
 read remains late; never invent the intended receipt time.
 
-1. Call market_watch_snapshot once. Its context contains only your current-day
+1. For scheduled runs, call market_watch_snapshot with scheduled_slot=SLOT.
+   Event/setup continuations reusing this workflow omit scheduled_slot and read
+   immediately under their existing ordering and expiry rules; they have no SLOT.
+   For a scheduled run, an early wake returns
+   status=not_due, server_time and retry_at, without issuing an input receipt.
+   This is not a missing-data failure. If the host supports waiting, wait until
+   retry_at and call once again with the SAME slot. If it cannot wait, record
+   an early-wake timing gap in the native task result and stop; do not pretend
+   a retry was scheduled, change the slot or save the read early.
+   Its successful context contains only your current-day
    latest read, latest message intent and shared discretionary-intent budget.
    Recover previous_read_id from context.latest_read.read_id, or null when
    absent. Never assume task memory is the ledger. Keep today's scheduled CPI,
@@ -73,6 +82,10 @@ read remains late; never invent the intended receipt time.
    {text,evidence_refs}. Include change_summary. model_id stays null unless
    actually known. A confirmed refusal permits at most ONE repair/resubmission
    for this run, retaining the SAME operation_id; never guess or fork:
+   - `scheduled_read_not_due`: no read was saved. Wait until the named slot if
+     the host supports waiting, then fetch a fresh snapshot with scheduled_slot
+     and reconsider the entire read once, keeping the operation ID. Otherwise
+     report the timing gap and stop. Never relabel the slot to bypass refusal.
    - `invalid_content`: correct the named field/rule without inventing evidence.
    - `parent_conflict`, `input_unavailable`, `input_not_current_session`: call
      market_watch_snapshot once again. Stop if no current-session input is
@@ -127,10 +140,15 @@ Keep routine no-change reads and operational gaps in the native task result.
 No routine chat ping. No continuous monitoring or event detector. A snapshot or
 Jo wake failure is a coverage gap; never erase it from a later report. Holiday
 and half-day slots outside the exchange session do not make live forecasts.
+The native completion result should be one short status line for an unchanged
+read. Keep receipt IDs, empty forecast slots and repeated independence labels
+in the saved record; do not turn them into a daily trading briefing. A failed
+run names the failed stage and safe error code, not an invented market view.
+Keep personal reminders and API-budget notices out of this market workflow.
 
 Rollout: these are repository instructions, not proof a hosted task uses them.
 After the app-side consumer understands v1 and v2 notices and the Check producer
-supports phone_summary, copy these instructions into the native scheduled task.
+supports phone_summary and scheduled_slot, copy these instructions into the native scheduled task.
 Inline them in event/setup tasks that use this workflow. Do not enable new
 schedules or change grants. Until that update, old tasks still use the longer
 fallback. Verify a saved summary and actual phone appearance separately from
