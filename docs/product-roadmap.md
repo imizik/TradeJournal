@@ -54,9 +54,15 @@ automated trading.
   early enough to investigate. Measured by the Radar pilot: his ratings, and
   comparison with the Movers ranking and the morning brief.
 
-The `/proof` page reads both every week: a verdict per question (`helping`,
-`not helping`, or by default `not enough data`) with its rule and sample on
-screen, from `GET /analytics/exit-habits` and `GET /radar/proof`
+The `/proof` page reads both every week, with each rule and sample on screen.
+Alerts describe observed habit rates as Lower habit rates / No consistent
+decrease / Not enough data, without claiming that alerts caused a change; Radar
+retains its helping / not helping / not enough data labels. Alert feedback
+(Prompted a review / Already aware / Too late / Not useful, optional reason) is
+saved against the exact alert with a timestamp. Proof shows response coverage
+and unanswered counts across all recorded sent or delivery-unconfirmed position
+alerts, separately from fill-derived actions and financial results. These reads
+come from `GET /analytics/exit-habits` and `GET /radar/proof`
 (`backend/app/engine/exit_habits.py`, `backend/app/engine/radar_proof.py`).
 A third card, "Do planned trades do better?" (`GET /analytics/plan-proof`,
 `backend/app/engine/plan_proof.py`), compares planned with unplanned trades

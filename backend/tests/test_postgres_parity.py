@@ -61,6 +61,44 @@ from tests.postgres_support import (  # noqa: E402
 pytestmark = requires_postgres
 
 
+def test_position_alert_feedback_concurrent_save_and_stale_update(migrated):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from uuid import uuid4
+    from fastapi import HTTPException
+    from app.engine import alert_feedback
+    from app.models import PositionAlert, PositionAlertFeedback
+
+    alert_id = uuid4()
+    with Session(migrated) as db:
+        db.add(PositionAlert(id=alert_id, account_id=uuid4(), source_key=str(alert_id), kind="giveback", generation=0,
+            trade_id=uuid4(), contract="Fixture", contracts=1, avg_cost=100, delivery="sent"))
+        db.commit()
+
+    def race(version, ratings):
+        barrier = Barrier(2)
+        def write(rating):
+            with Session(migrated) as db:
+                barrier.wait(timeout=10)
+                try:
+                    return alert_feedback.save(db, alert_id, rating, None, version)
+                except HTTPException as exc:
+                    return exc.status_code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            return list(pool.map(write, ratings))
+
+    first = race(0, ["prompted_review", "prompted_review"])
+    assert first[0] == first[1] and first[0]["version"] == 1
+    second = race(1, ["already_aware", "too_late"])
+    assert sum(result == 409 for result in second) == 1
+    with Session(migrated) as db:
+        row = db.get(PositionAlertFeedback, alert_id)
+        assert row.version == 2
+        db.delete(row)
+        db.delete(db.get(PositionAlert, alert_id))
+        db.commit()
+
+
 @pytest.fixture(scope="module")
 def pg_engine():
     engine = create_engine(TEST_DATABASE_URL)

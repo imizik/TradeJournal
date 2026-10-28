@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { money } from "@/lib/format";
+import { ALERT_FEEDBACK_LABELS, feedbackTime, type AlertFeedback } from "@/lib/alertFeedback";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 
 // What happened after each phone alert, and the audit's four exit habits against the trades before the alerts.
@@ -11,9 +12,10 @@ import { DashboardCard, dashboardLink } from "./DashboardCard";
 type Group = { n: number; trades: number; excluded: number; pct: number | null; pnl: number };
 type Habit = { key: string; label: string; recent: Group; baseline: Group };
 type Alert = { id: string; kind: string; contract: string; contracts: number; detected_at: number; trade_id: string | null;
-  response: string | null; vs_alert: number | null; note: string | null };
+  response: string | null; vs_alert: number | null; note: string | null; feedback?: AlertFeedback | null };
 export type ExitHabitsBody = { go_live: string; window: number; since_go_live: number; recent_trades: number; baseline_trades: number;
   habits: Habit[]; alerts: Alert[]; alerts_total: number; responses: Record<string, number>;
+  feedback?: { total: number; responded: number; unanswered: number; counts: Record<string, number> };
   verdict: { verdict: "helping" | "not_helping" | "not_enough_data"; reason: string; rule: string; sample: number } };
 
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
@@ -66,6 +68,10 @@ export function ExitHabitsView({ body, alertsShown = ALERTS_SHOWN }: { body: Exi
         </div>
         <p className="text-xs">{a.response ? RESPONSE[a.response] ?? a.response.replace(/_/g, " ") : "Not matched to fills"}</p>
         <p className={`text-xs ${a.vs_alert == null ? "text-muted-foreground" : ""}`}>{result(a)}</p>
+        {a.feedback ? <div className="text-xs text-muted-foreground">
+          <p>Your feedback: {ALERT_FEEDBACK_LABELS[a.feedback.rating]} · {feedbackTime(a.feedback.updated_at)}</p>
+          {a.feedback.reason && <p className="whitespace-pre-wrap break-words">{a.feedback.reason}</p>}
+        </div> : a.feedback === null && <p className="text-xs text-muted-foreground">Feedback: unanswered</p>}
       </li>)}</ul> : <p className="py-2 text-sm text-muted-foreground">No phone alerts sent yet.</p>}
     </div>
   </div>;

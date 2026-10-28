@@ -23,6 +23,9 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(card).toContainText("What you did after 3 alerts");
     await expect(card).toContainText("does not establish that alerts caused a change");
     await expect(card).toContainText("not a guaranteed exit price");
+    await expect(page.getByTestId("proof-alert-feedback")).toContainText("of 3 alerts have feedback.");
+    await expect(page.getByTestId("proof-alert-feedback")).toContainText("Unanswered");
+    await expect(page.getByTestId("proof-alert-feedback")).toContainText("Unanswered does not mean unseen or unhelpful.");
     // The habits against baseline, counts only, and each alert's follow-up (moved here from the Dashboard card).
     await expect(card).toContainText("0 since phone alerts went live on Oct 21, against 2 before");
     await expect(card).toContainText("Too few trades yet to read a change");
@@ -68,6 +71,75 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(planningCard.getByTestId("plan-group-late")).toContainText("shown, not counted");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: test.info().outputPath(`proof-${size}.png`), fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const [size, width, height, symbol] of [["desktop", 1440, 1000, "AAPL"], ["phone", 390, 844, "TSLA"]] as const) {
+  test(`alert feedback survives a lost save response, reload and stale edit on ${size}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    const initial = await (await page.request.get("/api/backend/analytics/exit-habits")).json();
+    const alert = initial.alerts.find((a: { contract: string }) => a.contract.startsWith(symbol));
+    const baseVersion = alert.feedback?.version ?? 0;
+    const endpoint = `/trades/${alert.trade_id}/phone-alerts/${alert.id}/feedback`;
+    await page.goto(`/trades/${alert.trade_id}?alert=${alert.id}`);
+    const form = page.getByTestId("position-alert-feedback");
+    if (alert.feedback) await form.getByRole("button", { name: "Edit feedback" }).click();
+    if (!alert.feedback) await expect(form.getByRole("button", { name: "Save feedback" })).toBeDisabled();
+    await form.getByRole("radio", { name: "Prompted a review" }).check();
+    await form.getByLabel("Reason (optional)").fill("Rechecked my original thesis.");
+    let writes = 0;
+    await page.route(`**${endpoint}`, async route => {
+      if (++writes === 1) {
+        const committed = await route.fetch();
+        expect(committed.ok()).toBe(true);
+        await route.abort("failed"); // server saved it; the browser never received the acknowledgement
+      } else await route.continue();
+    });
+    await form.getByRole("button", { name: "Save feedback" }).click();
+    await expect(form.getByRole("alert")).toBeVisible();
+    await expect(form.getByLabel("Reason (optional)")).toHaveValue("Rechecked my original thesis.");
+    await form.getByRole("button", { name: "Save feedback" }).click();
+    await expect(form.getByRole("status")).toContainText("Saved: Prompted a review");
+    await expect(form.getByRole("status")).toContainText("ET");
+    await page.reload();
+    await expect(form).toContainText("Rechecked my original thesis.");
+    const saved = await (await page.request.get("/api/backend/analytics/exit-habits")).json();
+    expect(saved.alerts.find((a: { id: string }) => a.id === alert.id).feedback.version).toBe(baseVersion + 1);
+    expect(saved.feedback.responded).toBe(initial.feedback.responded + (alert.feedback ? 0 : 1));
+    expect(saved.feedback.unanswered + saved.feedback.responded).toBe(saved.feedback.total);
+    await form.scrollIntoViewIfNeeded();
+    await form.screenshot({ path: test.info().outputPath(`alert-feedback-saved-${size}.png`) });
+
+    await form.getByRole("button", { name: "Edit feedback" }).click();
+    await form.getByRole("radio", { name: "Too late" }).check();
+    await form.getByLabel("Reason (optional)").fill("My unsaved draft");
+    // Another tab updates first: the stale form must not overwrite it.
+    expect((await page.request.put(`/api/backend${endpoint}`, { data: {
+      rating: "already_aware", reason: "I was already reviewing it.", base_version: baseVersion + 1,
+    } })).ok()).toBe(true);
+    await form.getByRole("button", { name: "Save feedback" }).click();
+    await expect(form.getByRole("alert")).toContainText("Feedback may have changed");
+    await expect(form.getByLabel("Reason (optional)")).toHaveValue("My unsaved draft");
+    await expect(form.getByRole("button", { name: "Save feedback" })).toBeDisabled();
+    await form.getByRole("button", { name: "Reload saved feedback" }).click();
+    await expect(form.getByRole("status")).toContainText("Saved: Already aware");
+    await form.getByRole("button", { name: "Edit feedback" }).click();
+    await form.getByRole("radio", { name: "Not useful" }).check();
+    await form.getByRole("button", { name: "Cancel edit" }).click();
+    await expect(form.getByRole("status")).toContainText("Saved: Already aware");
+    await form.getByRole("button", { name: "Edit feedback" }).click();
+    await form.scrollIntoViewIfNeeded();
+    await form.screenshot({ path: test.info().outputPath(`alert-feedback-edit-${size}.png`) });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.goto("/proof");
+    const summary = page.getByTestId("proof-alert-feedback");
+    await expect(summary).toContainText(`${saved.feedback.responded} of 3 alerts have feedback.`);
+    await expect(page.getByTestId("exit-habits-alert").filter({ hasText: symbol })).toContainText("Your feedback: Already aware");
+    await expect(page.getByTestId("exit-habits-alert").filter({ hasText: symbol })).toContainText("I was already reviewing it.");
+    await summary.screenshot({ path: test.info().outputPath(`alert-feedback-proof-${size}.png`) });
     expect(errors).toEqual([]);
   });
 }

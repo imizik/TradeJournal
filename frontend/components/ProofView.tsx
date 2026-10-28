@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { money } from "@/lib/format";
+import { ALERT_FEEDBACK_LABELS } from "@/lib/alertFeedback";
 import { DashboardCard, dashboardLink } from "./dashboard/DashboardCard";
 import { ExitHabitsView, EXIT_HABIT_VERDICT, EXIT_HABIT_CAVEAT, RESPONSE, type ExitHabitsBody } from "./dashboard/ExitHabits";
 
@@ -80,6 +81,13 @@ function AlertsProof() {
       <VerdictBlock testId="proof-alerts-verdict" label={EXIT_HABIT_VERDICT[body.verdict.verdict].label} verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
         sample={`${body.verdict.sample} of the last ${body.window} trades since ${body.go_live} vs ${body.baseline_trades} before`} />
       <p className="text-xs text-muted-foreground">{EXIT_HABIT_CAVEAT}</p>
+      {body.feedback && <div className="space-y-2" data-testid="proof-alert-feedback">
+        <Counts title="Your alert feedback" rows={[...Object.entries(ALERT_FEEDBACK_LABELS), ["unanswered", "Unanswered"]]}
+          counts={{ ...body.feedback.counts, unanswered: body.feedback.unanswered }} />
+        <p className="text-xs">{body.feedback.responded} of {body.feedback.total} alerts have feedback.</p>
+        <p className="text-xs text-muted-foreground">All recorded sent or delivery-unconfirmed position alerts. Unanswered does not mean unseen or unhelpful.
+          Self-reported usefulness, not evidence of higher returns. Open a recent alert below to respond.</p>
+      </div>}
       <Counts title={`What you did after ${body.alerts_total} alert${body.alerts_total === 1 ? "" : "s"}`}
         rows={[...Object.entries(RESPONSE), ["unmatched", "Not matched to fills"]]} counts={body.responses} />
       <div className="border-t pt-3"><ExitHabitsView body={body} alertsShown={5} /></div>

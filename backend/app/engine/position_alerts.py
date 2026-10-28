@@ -69,7 +69,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, ping_images, position_alert_context
+from app.engine import alert_feedback, notification_policy, ntfy, ping_images, position_alert_context
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -547,12 +547,14 @@ def for_trade(db: Session, trade: Trade) -> dict:
     key = anchor(entries)
     alerts = db.exec(select(PositionAlert).where(PositionAlert.account_id == trade.account_id, PositionAlert.source_key == key)
                      .order_by(PositionAlert.detected_at)).all()
+    feedback = alert_feedback.for_alerts(db, [a.id for a in alerts])
     watch = db.exec(select(PositionWatch).where(PositionWatch.account_id == trade.account_id, PositionWatch.source_key == key)).first()
     return {
         "enabled": enabled(),
         "giveback_dollar_floor_applies": floor_applies,
         "alerts": [{
             "id": str(a.id), "contract": a.contract,
+            "feedback": feedback.get(a.id),
             "quoted_at": int(_epoch(a.quoted_at)) if a.quoted_at else None,
             "kind": a.kind, "detected_at": int(_epoch(a.detected_at)), "contracts": a.contracts, "mark": a.mark, "bid": a.bid,
             "gain": a.gain, "gain_pct": a.gain_pct, "peak_gain": a.peak_gain, "peak_gain_pct": a.peak_gain_pct,

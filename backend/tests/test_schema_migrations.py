@@ -185,3 +185,32 @@ def test_position_alert_context_upgrade_and_downgrade_preserve_existing_alert(tm
     with db_engine.connect() as db:
         assert db.execute(text("SELECT context_snapshot_json FROM position_alert")).scalar() is None
     db_engine.dispose()
+
+
+def test_alert_feedback_upgrade_downgrade_preserves_alert_and_supports_create_all(tmp_path):
+    from sqlalchemy import text
+
+    path = tmp_path / "alert-feedback.sqlite"
+    _alembic(path, "upgrade", "9ff22204d1d2")
+    db_engine = sa_create_engine(f"sqlite:///{path}")
+    with db_engine.begin() as db:
+        db.execute(text("""INSERT INTO position_alert
+            (id, account_id, source_key, kind, generation, trade_id, contract,
+             contracts, avg_cost, detected_at, delivery, attempts)
+            VALUES ('00000000000000000000000000000001', '00000000000000000000000000000002',
+                    'feedback-fixture', 'giveback', 0, '00000000000000000000000000000003',
+                    'SNDK call', 2, 400, '2026-10-21 14:00:00', 'sent', 1)"""))
+    _alembic(path, "upgrade", "c6d8e2f4a901")
+    with db_engine.begin() as db:
+        assert db.execute(text("SELECT COUNT(*) FROM position_alert_feedback")).scalar() == 0
+        db.execute(text("""INSERT INTO position_alert_feedback
+            (alert_id, rating, reason, version, created_at, updated_at)
+            VALUES ('00000000000000000000000000000001', 'prompted_review', 'fixture', 1,
+                    '2026-10-28 16:00:00', '2026-10-28 16:00:00')"""))
+    _alembic(path, "downgrade", "9ff22204d1d2")
+    with db_engine.connect() as db:
+        assert tuple(db.execute(text("SELECT source_key, delivery, attempts FROM position_alert")).one()) == ("feedback-fixture", "sent", 1)
+    assert "position_alert_feedback" not in inspect(db_engine).get_table_names()
+    SQLModel.metadata.create_all(db_engine)
+    _alembic(path, "upgrade", "c6d8e2f4a901")  # supported create_all-before-upgrade path
+    db_engine.dispose()

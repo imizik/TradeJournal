@@ -3,15 +3,38 @@ one-tap plan link page's data; see app/engine/position_alerts.py and app/engine/
 
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.database import get_session
-from app.engine import notification_policy, plan_nudges, position_alerts
+from app.engine import alert_feedback, notification_policy, plan_nudges, position_alerts
 from app.models import Trade
 
 router = APIRouter()
+
+
+class FeedbackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rating: Literal["prompted_review", "already_aware", "too_late", "not_useful"]
+    reason: str | None = Field(default=None, max_length=500)
+    base_version: int = Field(ge=0, strict=True)
+
+
+@router.put("/{trade_id}/phone-alerts/{alert_id}/feedback")
+def save_feedback(trade_id: uuid.UUID, alert_id: uuid.UUID, body: FeedbackBody, db: Session = Depends(get_session)):
+    """Owner-only via the route boundary; bind to the position's current source identity."""
+    trade = db.get(Trade, trade_id)
+    if trade is None:
+        raise HTTPException(404, "That trade is no longer in the journal.")
+    alert = next((a for a in position_alerts.for_trade(db, trade)["alerts"] if a["id"] == str(alert_id)), None)
+    if alert is None:
+        raise HTTPException(404, "This alert is unavailable for this position.")
+    if alert["delivery"] not in alert_feedback.ELIGIBLE_DELIVERIES:
+        raise HTTPException(409, "Feedback is only available for sent or delivery-unconfirmed position alerts.")
+    return alert_feedback.save(db, alert_id, body.rating, body.reason, body.base_version)
 
 
 @router.get("/{trade_id}/phone-alerts")
