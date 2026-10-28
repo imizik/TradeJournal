@@ -30,7 +30,7 @@ export const viewport: Viewport = {
   // cover + the safe-area padding below keeps content clear of the notch and
   // the home indicator when it runs full screen.
   viewportFit: "cover",
-  themeColor: "#12151c",
+  themeColor: "#0e0e10",
 };
 
 export default async function RootLayout({
