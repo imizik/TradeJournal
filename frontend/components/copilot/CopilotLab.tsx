@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
-import LinkedActivity from "@/components/copilot/LinkedActivity";
+import Inspector from "@/components/copilot/Inspector";
 import PlansBoard from "@/components/copilot/PlansBoard";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
@@ -164,20 +164,6 @@ function OpenThreadsBlock({ ask, open }: HomeActions) {
           </div>
         )}
     </section>
-  );
-}
-
-/** The inspector: what the open thread is linked to. Empty until a conversation is saved. */
-function Inspector({ thread }: { thread: DeskThreadRef | null }) {
-  if (!thread) return <p className="text-sm text-muted-foreground">Open a thread to see its alerts, plans and pings here.</p>;
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="font-semibold text-foreground">{thread.symbol ?? "Across everything"}</span>
-        {thread.symbol && <Link href={`/charts?symbol=${encodeURIComponent(thread.symbol)}`} className="ml-auto text-xs text-muted-foreground hover:text-primary">Open in Charts →</Link>}
-      </div>
-      <LinkedActivity key={thread.id} investigationId={thread.id} refreshKey={thread.refreshKey} />
-    </div>
   );
 }
 

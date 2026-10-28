@@ -60,8 +60,11 @@ export type CopilotEvent =
   | { type: "error"; code: string; message: string }
   | { type: "done"; metrics: TurnMetrics };
 
-/** A step the model proposed (propose_plan). It is only a card: nothing exists until the owner confirms it. */
-export type Proposal = { id: string } & (
+/** A step the model proposed (propose_plan). It is only a card: nothing exists until the owner confirms it. Saved
+ * with its answer: ``client_id`` is the card's one id for its replayable saves (minted when it arrives, so a Confirm
+ * retried after a reload or from a second window returns the first plan, time stop or memory), and ``outcome`` is
+ * what the owner did with it, so a reopened card comes back as it was left. */
+export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutcome } & (
   | { kind: "watch"; symbol: string; condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null;
       label: string; why: string; last?: number; as_of?: string | number | null }
   | { kind: "revisit"; question: string; horizon_days: number }
@@ -70,6 +73,12 @@ export type Proposal = { id: string } & (
       thesis: string; entry_trigger: PlanLevel; invalidation: PlanLevel; time_stop: string | null; size_note: string | null;
       last?: number; as_of?: string | number | null }
   | { kind: "practice"; text: string; measure: PracticeMeasure; label: string; target: number | null; why: string });
+/** ``confirmed``: Confirm ran (``note``: what it said; ``text``: the words a memory or practice saved; a plan card's
+ * part results and fields as confirmed). ``dismissed``: the card stays hidden. Only a record of what happened on the
+ * page: restoring one creates nothing. */
+export type ProposalOutcome = { state: "confirmed" | "dismissed"; note?: string; text?: string;
+  parts?: Partial<Record<"plan" | "entry" | "invalidation" | "timeStop", { state: "done" | "failed"; text: string }>>;
+  fields?: { thesis: string; contract: string; entry: string; invalidation: string; time_stop: string; size_note: string } };
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
@@ -277,7 +286,7 @@ export type InvestigationSummary = {
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
-  transcript: { role: "user" | "assistant"; content: string }[]; evidence: EvidenceRef[]; findings: Findings | null;
+  transcript: { role: "user" | "assistant"; content: string; proposals?: Proposal[] }[]; evidence: EvidenceRef[]; findings: Findings | null;
 };
 export type InvestigationFields = Pick<Investigation, "title" | "symbol" | "status" | "conclusion" | "transcript" | "evidence">;
 
@@ -299,9 +308,20 @@ export const createInvestigation = (fields: InvestigationFields) =>
   investigationRequest<Investigation>("", { method: "POST", body: JSON.stringify(fields) });
 export const updateInvestigation = (id: string, revision: number, fields: InvestigationFields) =>
   investigationRequest<Investigation>(`/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ ...fields, revision }) });
+/** Records what the owner did with a saved card. It needs no revision: an open window's next save keeps it. */
+export const saveOutcome = (id: string, proposalId: string, outcome: ProposalOutcome) =>
+  investigationRequest<Investigation>(`/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/outcome`,
+    { method: "PUT", body: JSON.stringify(outcome) });
+/** The card's confirmed outcome as saved now (another window may have confirmed it), else null; a failed read is null. */
+export async function confirmedElsewhere(id: string, proposalId: string): Promise<ProposalOutcome | null> {
+  try {
+    const card = (await getInvestigation(id)).transcript.flatMap(m => m.proposals ?? []).find(p => p.id === proposalId);
+    return card?.outcome?.state === "confirmed" ? card.outcome : null;
+  } catch { return null; /* Confirm's own saves still replay on the card's client id */ }
+}
+/** Cards kept per answer, as the server caps them. */
+export const MAX_SAVED_PROPOSALS = 4;
 
-/** What is saved: the text of each message and, per answer, which tools it used and how old their data was.
- * A proposal is not evidence, so propose_plan is left out. */
 // --------------------------------------------------------------------------- screenshots
 
 /** What a message that carried a screenshot says in history and the saved transcript; the image itself is never kept. */
@@ -327,14 +347,19 @@ export async function uploadImage(file: Blob): Promise<SharedImage> {
   return response.json();
 }
 
+/** What is saved: the text of each message, each answer's cards with what was done with them, and, per answer, which
+ * tools it used and how old their data was. A proposal is not evidence, so propose_plan is left out of the evidence. */
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
-    transcript: messages.map(m => ({ role: m.role, content: spokenText(m) })),
+    transcript: messages.map(m => ({ role: m.role, content: spokenText(m),
+      // A card from the stream still carries its event type, which is not part of the proposal.
+      ...(m.proposals?.length ? { proposals: m.proposals.slice(0, MAX_SAVED_PROPOSALS).map(card => Object.fromEntries(Object.entries(card).filter(([key]) => key !== "type")) as Proposal) } : {}) })),
     evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan")
       .map(t => ({ tool: t.name, as_of: t.provenance!.as_of, kind: t.provenance!.kind, message: i }))),
   };
 }
 
+/** A saved conversation as messages; its cards come back as cards, with any outcome they were left with. */
 export function fromSaved(saved: Investigation): LabMessage[] {
   return saved.transcript.map((m, i) => ({ ...m, tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
     type: "tool" as const, id: `saved-${i}-${j}`, name: e.tool, status: "ok" as const,

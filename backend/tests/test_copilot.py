@@ -487,6 +487,118 @@ def test_investigations_save_resume_and_refuse_stale_or_unknown(monkeypatch):
             assert client.post("/copilot/investigations", json=bad).status_code == 422, bad
 
 
+WATCH_CARD = {"id": "toolu_w1", "kind": "watch", "symbol": "NBIS", "condition": "crosses", "price": 95.9, "interval": None,
+              "label": "NBIS reclaim", "why": "Where the bounce failed.", "last": 94.35, "as_of": "2026-10-24T14:00:00Z",
+              "client_id": "0123456789abcdef0123456789abcdef"}
+PLAN_CARD = {"id": "toolu_p1", "kind": "trade_plan", "symbol": "NBIS", "direction": "long", "instrument": "stock", "contract": None,
+             "thesis": "Reclaims the level with its group.", "entry_trigger": {"condition": "crosses", "price": 95.9, "interval": None},
+             "invalidation": {"condition": "crosses", "price": 92.3, "interval": None}, "time_stop": None, "size_note": None,
+             "last": 94.35, "as_of": 1729778400, "client_id": "fedcba9876543210fedcba9876543210"}
+
+
+def _with_cards(*cards):
+    return [{"role": "user", "content": "Plan NBIS"}, {"role": "assistant", "content": "Two drafts.", "proposals": list(cards)}]
+
+
+def test_investigations_keep_each_answers_cards_and_what_was_done_with_them(monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        made = client.post("/copilot/investigations", json={"title": "NBIS plan", "transcript": _with_cards(WATCH_CARD, PLAN_CARD)})
+        assert made.status_code == 201
+        saved = made.json()
+        assert saved["transcript"][1]["proposals"] == [WATCH_CARD, PLAN_CARD]  # back exactly, nothing armed or saved
+        assert "proposals" not in saved["transcript"][0]
+        url = f"/copilot/investigations/{saved['id']}"
+
+        confirmed = {"state": "confirmed", "parts": {"plan": {"state": "done", "text": "Saved."}, "entry": {"state": "failed", "text": "Stale quote."}},
+                     "fields": {"thesis": "Reclaims the level.", "entry": "96", "invalidation": "92.3"}}
+        put = client.put(f"{url}/proposals/toolu_p1/outcome", json=confirmed)
+        assert put.status_code == 200 and put.json()["revision"] == 1  # a recorded result, not an edit
+        plan = put.json()["transcript"][1]["proposals"][1]
+        assert plan["outcome"]["state"] == "confirmed" and plan["outcome"]["parts"]["entry"]["state"] == "failed"
+        assert plan["outcome"]["fields"]["time_stop"] == ""
+
+        # A window that had not seen the Confirm saves its copy (no outcomes): the confirmed card stays confirmed, and a
+        # dismiss from it cannot hide what was made.
+        stale_copy = {"title": "NBIS plan", "revision": 1, "transcript": _with_cards(WATCH_CARD, {**PLAN_CARD, "outcome": {"state": "dismissed"}})}
+        again = client.put(url, json=stale_copy).json()
+        assert again["revision"] == 2 and again["transcript"][1]["proposals"][1]["outcome"] == plan["outcome"]
+        assert client.put(f"{url}/proposals/toolu_p1/outcome", json={"state": "dismissed"}).json()["transcript"][1]["proposals"][1]["outcome"]["state"] == "confirmed"
+        # A dismissed card stays dismissed, and a later Confirm (another window) wins over it.
+        assert client.put(f"{url}/proposals/toolu_w1/outcome", json={"state": "dismissed"}).json()["transcript"][1]["proposals"][0]["outcome"] == {"state": "dismissed"}
+        kept = client.put(url, json={**stale_copy, "revision": 2}).json()["transcript"][1]["proposals"][0]
+        assert kept["outcome"] == {"state": "dismissed"}
+        done = client.put(f"{url}/proposals/toolu_w1/outcome", json={"state": "confirmed", "note": "Alert set."}).json()
+        assert done["transcript"][1]["proposals"][0]["outcome"] == {"state": "confirmed", "note": "Alert set."}
+
+        assert client.put(f"{url}/proposals/nope/outcome", json={"state": "dismissed"}).status_code == 404
+        assert client.put(f"/copilot/investigations/{uuid.uuid4()}/proposals/toolu_w1/outcome", json={"state": "dismissed"}).status_code == 404
+        for bad in ({"state": "armed"}, {"state": "confirmed", "note": "x" * 501}, {"state": "confirmed", "parts": {"exit": {"state": "done"}}},
+                    {"state": "confirmed", "data": {}}):
+            assert client.put(f"{url}/proposals/toolu_w1/outcome", json=bad).status_code == 422, bad
+
+
+@pytest.mark.parametrize("card", [
+    {**WATCH_CARD, "kind": "order"},
+    {**WATCH_CARD, "symbol": "nb is"},
+    {**WATCH_CARD, "price": -1},
+    {**WATCH_CARD, "quantity": 100},  # a field no proposal has
+    {**WATCH_CARD, "id": ""},
+    {**WATCH_CARD, "client_id": "short"},
+    {**WATCH_CARD, "last": 0},
+    {**WATCH_CARD, "outcome": {"state": "confirmed", "alert_id": "a1"}},
+    {**PLAN_CARD, "invalidation": {"condition": "crosses", "price": 99.0, "interval": None}},  # above a long's entry
+    {"id": "toolu_m1", "kind": "memory", "memory_kind": "statement", "symbol": None, "text": "x" * 401},
+])
+def test_investigation_cards_are_validated_like_the_proposals_they_were(card, monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        assert client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(card)}).status_code == 422
+
+
+def test_investigation_cards_are_capped_and_old_records_read_as_before(monkeypatch):
+    from app.engine import copilot_investigations as investigations
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        five = [{**WATCH_CARD, "id": f"toolu_{i}"} for i in range(5)]
+        assert client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(*five)}).status_code == 422
+        twice = client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(WATCH_CARD, WATCH_CARD)})
+        assert twice.status_code == 422
+        across = client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(WATCH_CARD) + _with_cards(WATCH_CARD)})
+        assert across.status_code == 422  # an outcome is recorded by card id, so it is unique in the investigation
+        practice = {"id": "week-review-practice", "kind": "practice", "text": "Exit at my invalidation", "measure": "exit_at_invalidation",
+                    "label": "exit at my invalidation", "target": 1.0, "why": "Two of three held past it."}
+        memory = {"id": "toolu_m1", "kind": "memory", "memory_kind": "lesson", "symbol": None, "text": "Wait for the close.",
+                  "client_id": "0123456789abcdef", "outcome": {"state": "confirmed", "text": "Wait for the 5m close.", "note": "Remembered."}}
+        revisit = {"id": "toolu_r1", "kind": "revisit", "question": "Did the group confirm?", "horizon_days": 2}
+        ok = client.post("/copilot/investigations", json={"title": "x", "transcript": _with_cards(practice, memory, revisit)})
+        assert ok.status_code == 201, ok.text
+        cards = ok.json()["transcript"][1]["proposals"]
+        assert [c["id"] for c in cards] == ["week-review-practice", "toolu_m1", "toolu_r1"] and cards[1]["outcome"]["text"] == "Wait for the 5m close."
+        monkeypatch.setattr(investigations, "MAX_TRANSCRIPT_CHARS", 3000)  # cards count toward the size cap
+        big = [{**PLAN_CARD, "id": f"toolu_{i}", "thesis": "t" * 300} for i in range(8)]
+        transcript = _with_cards(*big[:4]) + _with_cards(*big[4:])
+        assert client.post("/copilot/investigations", json={"title": "x", "transcript": transcript}).status_code == 413
+
+    # A record saved before cards were kept reads exactly as it was stored, and saves again unchanged.
+    from sqlmodel import Session
+    from app.database import engine
+    from app.models import CopilotInvestigation
+    old = [{"role": "user", "content": "Is NBIS confirming?"}, {"role": "assistant", "content": "Not yet."}]
+    with Session(engine) as db:
+        row = CopilotInvestigation(source="copilot", title="Old", transcript_json=json.dumps(old), evidence_json="[]")
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        saved_id = row.id
+    read = investigations.get(saved_id)
+    assert read["transcript"] == old
+    again = investigations.update(saved_id, investigations.InvestigationFields(title="Old", transcript=read["transcript"]), read["revision"])
+    assert again["transcript"] == old
+    with Session(engine) as db:
+        assert json.loads(db.get(CopilotInvestigation, saved_id).transcript_json) == old
+
+
 # --------------------------------------------------------------------------- replay (no hindsight)
 
 def _replay_store(path, *, with_future: bool):

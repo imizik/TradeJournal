@@ -69,6 +69,101 @@ async function stub(page: Page, onRequest?: (url: string) => void) {
   });
 }
 
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
+  test(`Radar event investigation survives symbol changes and failed refresh on ${size}`, async ({ page, request }) => {
+    const event = "rad_sample_mu_20261020_1";
+    expect((await request.post(`http://127.0.0.1:${process.env.E2E_BACKEND_PORT || 8099}/__test/radar-seed`)).ok()).toBe(true);
+    await page.setViewportSize({ width, height });
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    let fail = false, release = () => {}, delayed = 0, completed = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const intervals: Interval[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
+    const candles = realisticPanels(intervals);
+    const amdCandles = realisticPanels(intervals, 9, 140);
+    await page.route("**/api/backend/charts/workspace?**", async route => {
+      const url = route.request().url(), query = new URL(url).searchParams;
+      const symbol = query.get("symbol");
+      if (symbol === "NVDA") { delayed++; await gate; }
+      try {
+        // Both the superseded success and error must stay on their old symbol.
+        if (fail || (symbol === "NVDA" && query.get("phase") !== "prices"))
+          await route.fulfill({ status: 503, json: { detail: { message: "Fixture refresh unavailable" } } });
+        else {
+          const data = fixture(url);
+          const shown = symbol === "AMD" ? amdCandles : candles;
+          data.panels = Object.fromEntries(Object.keys(data.panels).map(interval => [interval, shown[interval as Interval]]));
+          data.quotes = data.quotes.map(quote => ({ ...quote, last: quote.symbol === "AMD" ? 217.41 : quote.last }));
+          await route.fulfill({ json: data });
+        }
+      } finally { if (symbol === "NVDA") completed++; }
+    });
+    // No provider history or stream is needed for this navigation journey.
+    await page.route("**/api/backend/charts/history?**", route => route.fulfill({ json: { bars: [], markers: [], exhausted: true } }));
+    await page.route("**/api/backend/charts/stream?**", route => route.fulfill({ contentType: "text/event-stream", body: "" }));
+    await page.goto("/radar?session=2026-10-20");
+    await page.getByTestId("radar-event").getByRole("button").first().click();
+    await page.getByRole("link", { name: "Open chart · MU", exact: true }).click();
+    const canvas = page.getByTestId("canvas-main");
+    await expect(canvas).toHaveAttribute("data-bars", "240");
+    await expect(page.getByLabel("Chart symbol", { exact: true })).toHaveAttribute("placeholder", "MU");
+    await page.screenshot({ path: test.info().outputPath(`radar-event-chart-${size}.png`) });
+    const control = async (name: string) => {
+      const button = page.getByRole("button", { name, exact: true });
+      if (!await button.isVisible()) await page.getByRole("button", { name: "More chart controls", exact: true }).click();
+      await button.click();
+      if (size === "phone") await page.keyboard.press("Escape");
+    };
+    await control("Pause chart updates");
+    const choose = async (symbol: string) => {
+      await page.getByLabel("Chart symbol", { exact: true }).fill(symbol);
+      await page.getByRole("button", { name: "Load symbol", exact: true }).click();
+    };
+    await choose("NVDA");
+    await expect.poll(() => delayed).toBe(2);
+    await expect(canvas).toHaveAttribute("data-pending", "");
+    await expect(page.getByRole("status").filter({ hasText: /^Loading NVDA…$/ }).first()).toBeVisible();
+    await choose("AMD");
+    await expect(page.getByLabel("Selected symbol quote")).toContainText("217.41");
+    await expect(canvas).not.toHaveAttribute("data-pending", "");
+    release();
+    await expect.poll(() => completed).toBe(2);
+    await expect(page.getByRole("alert", { name: "Chart data error" })).toHaveCount(0);
+    await expect(page.getByLabel("Chart symbol", { exact: true })).toHaveAttribute("placeholder", "AMD");
+    await expect(page.getByLabel("main candle values")).toContainText(`C ${amdCandles["5m"]!.bars.at(-1)!.close.toFixed(2)}`);
+    fail = true;
+    await control("Refresh charts");
+    await expect(page.getByRole("alert", { name: "Chart data error" })).toContainText("Showing the last successful data.");
+    await expect(page.getByLabel("Selected symbol quote")).toContainText("217.41");
+    await expect(canvas).toHaveAttribute("data-bars", "240");
+    await page.screenshot({ path: test.info().outputPath(`radar-event-refresh-failed-${size}.png`) });
+    fail = false;
+    await control("Refresh charts");
+    await expect(page.getByRole("alert", { name: "Chart data error" })).toHaveCount(0);
+    const origin = page.getByRole("region", { name: "Radar origin" });
+    await expect(origin).toContainText("MU · 2026-10-20");
+    await expect(origin).toContainText("not a replay");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await origin.getByRole("link", { name: "Back to Radar" }).click();
+    await expect(page).toHaveURL(new RegExp(`/radar\\?session=2026-10-20&event=${event}$`));
+    await expect(page.getByLabel("Session", { exact: true })).toHaveValue("2026-10-20");
+    await expect(page.getByRole("region", { name: "Original evidence" })).toBeVisible();
+    const chartLink = page.getByRole("link", { name: "Open chart · MU", exact: true });
+    await chartLink.scrollIntoViewIfNeeded();
+    await expect(chartLink).toBeInViewport();
+    await chartLink.click();
+    await expect(origin).toBeVisible();
+    await page.reload();
+    await expect(origin.getByRole("link", { name: "Back to Radar" })).toHaveAttribute("href", `/radar?session=2026-10-20&event=${event}`);
+    await page.getByRole("button", { name: "Dismiss Radar context" }).click();
+    expect(new URL(page.url()).searchParams.has("radar_event")).toBe(false);
+    await page.reload();
+    await expect(canvas).toHaveAttribute("data-bars", "240");
+    await expect(origin).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+}
+
 test("five charts render, symbols link, and levels survive reload", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

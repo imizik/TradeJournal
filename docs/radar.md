@@ -486,8 +486,8 @@ change chips and valuation data remain separate and explicitly labeled.
 
 Tests: `backend/tests/test_radar_comparison.py`, the owner boundary in
 `backend/tests/test_radar_api.py`, and desktop/390px interaction and failure
-coverage in `frontend/e2e/symbol-info-peers.spec.ts`. Historical event-to-chart
-context and alternate lookbacks remain later slices; this is a current recorded
+coverage in `frontend/e2e/symbol-info-peers.spec.ts`. Historical event replay
+and alternate lookbacks remain later slices; this is a current recorded
 comparison, not a replay of an event or the chart crosshair time.
 
 ## News nearby
@@ -715,8 +715,10 @@ replay, historical peer lookup, event detector or new market read is implied.
 location using an internal link. Origin parameters are validated, displayed as
 plain text, and can be dismissed without affecting chart ranges or trade links.
 The origin remains explicitly tied to its original ticker when another chart
-symbol is selected. Existing event-detail links remain unchanged; historical
-event-context handoff is deferred.
+symbol is selected. Event-detail **Open chart** links carry the event's first-seen
+time, original ticker, recorded session and event id through the same origin note;
+**Back to Radar** reopens the original event in that session. This is navigation
+continuity only: historical event replay remains deferred.
 
 ### Selected holding since entry
 
