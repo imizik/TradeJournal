@@ -2,8 +2,10 @@
 
 import { usePathname } from "next/navigation";
 
-/** The charts workspace (C7.3) takes the whole screen beside a navigation rail; every other page keeps the padded journal shell. */
-export const fullScreenRoute = (pathname: string) => pathname === "/charts" || pathname.startsWith("/charts/");
+/** The charts workspace (C7.3) and the Copilot desk take the whole screen beside a navigation rail; every other page keeps
+ * the padded journal shell. */
+export const fullScreenRoute = (pathname: string) =>
+  pathname === "/charts" || pathname.startsWith("/charts/") || pathname === "/copilot-lab";
 
 /**
  * The page column. On `/charts` a desktop gets no page padding and no page

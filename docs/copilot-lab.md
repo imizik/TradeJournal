@@ -546,7 +546,19 @@ J/K order, `]` remembered, keys ignored while typing, the timeline at 1440 and
 The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
 Context tabs. A phone lands on Now unless a deep link brings a conversation.
-While the lab is off only the conversation shows, saying so.
+While the lab is off only the conversation shows, saying so. On a wide screen
+(1024 px and up) the desk takes the whole screen beside the navigation rail,
+as Charts does (`AppMain.fullScreenRoute`), and each pane scrolls on its own.
+The desk bar holds Jump to… (⌘K), New plan and the Context toggle; the
+read-only note sits under the message box.
+
+The message box (desk and side panel alike) is one box: on the desk the
+"About <symbol>" chip, then a full-width text area that starts three lines
+tall and grows with what is typed (up to 40% of the page, or about 14 lines in
+a panel), then a toolbar inside it (attach and read aloud; mic and Send). A
+streaming answer is followed only while the reader is at the bottom of the
+conversation: scrolling up to read stops following, and the end follows again
+on their next send.
 
 The desk has its own palette (warm graphite, amber as the one accent) and type
 (Instrument Sans, IBM Plex Mono for tabular numbers), scoped to this page

@@ -2,7 +2,8 @@
  * The Copilot desk (/copilot-lab). Its own palette and type sit over the app's shadcn tokens, scoped to this page
  * until the app-wide redesign: every component inside (bg-card, text-muted-foreground, bg-primary) picks them up.
  * Warm graphite surfaces; amber is the one accent and means "needs you". Numbers set in tabular-nums use Plex Mono.
- * Panes follow the desk's own width: three at 1100 px, two below that, and three tabs below 760 px.
+ * Panes follow the desk's own width: three at 1100 px, two below that, and three tabs below 760 px. On a wide screen the
+ * desk takes the whole screen beside the nav rail, as Charts does (AppMain), and each pane scrolls on its own.
  */
 .desk {
   --background: 240 6% 6%;
@@ -39,23 +40,25 @@
 .bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 12px;
-  padding: 12px 16px;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 52px;
+  padding: 8px 16px;
   border-bottom: 1px solid hsl(var(--border));
 }
 
 .title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
-.note {
-  margin: 0;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
+.title svg {
+  color: hsl(var(--primary));
 }
 
 .barActions {
@@ -132,14 +135,14 @@
   }
 
   .thread {
-    padding: 20px 28px 0;
+    padding: 24px 32px 0;
   }
 }
 
-/* A phone: the desk runs edge to edge inside the page's 12 px padding, so the message row keeps its full width. */
+/* A phone: the desk runs edge to edge inside the page's 8 px padding, so the message row keeps its full width. */
 @media (max-width: 767px) {
   .desk {
-    margin-inline: -12px;
+    margin-inline: -8px;
     border-inline: 0;
     border-radius: 0;
   }
@@ -209,5 +212,49 @@
 @container (max-width: 759px) {
   .contextToggle {
     display: none !important;
+  }
+}
+
+/* A wide screen: the desk fills the height beside the nav rail and under the banner, and each pane scrolls on its own, so
+   the thread list and the Context pane stay put while the conversation scrolls. Two panes keep Context under the list. */
+@media (min-width: 1024px) {
+  .desk {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .panes {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .desk[data-on="true"] .panes {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
+  }
+
+  .rail,
+  .thread,
+  .inspector {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    position: static;
+    max-height: none;
+    align-self: stretch;
+  }
+
+  @container (min-width: 1100px) {
+    .desk[data-on="true"] .panes {
+      grid-template-rows: minmax(0, 1fr);
+    }
+  }
+
+  @container (min-width: 760px) {
+    .desk[data-on="true"][data-context="hidden"] .panes {
+      grid-template-rows: minmax(0, 1fr);
+    }
   }
 }

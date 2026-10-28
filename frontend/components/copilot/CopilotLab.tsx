@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PanelRight, Search } from "lucide-react";
+import { MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
@@ -145,13 +145,16 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
-        <h1 className={styles.title}>Copilot Lab</h1>
-        <p className={styles.note}>Research on read-only evidence. No orders; a plan, watch or revisit exists only once you confirm it.</p>
+        <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Copilot</h1>
         {on && (
           <div className={styles.barActions}>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
               className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
               <Search size={14} aria-hidden />Jump to…<kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
+            </button>
+            <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 sm:min-h-8">
+              <Plus size={14} aria-hidden />New plan
             </button>
             <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide the Context pane ( ] )"
               className={cn(styles.contextToggle, "inline-flex h-8 w-8 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground", !contextShown && "bg-secondary")}>
