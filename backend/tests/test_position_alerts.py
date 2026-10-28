@@ -313,22 +313,25 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     assert alerts(engine)[0].delivery == "sent"
 
 
-def test_ask_copilot_rides_along_only_while_the_lab_is_on(engine, world, monkeypatch):
+def test_while_the_lab_is_on_a_ping_opens_the_desk_with_the_trade_and_ask_copilot_as_buttons(engine, world, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     clock, _, watcher = world
     alert = fired(engine, world)
+    trade = f"/trades/{alert.trade_id}?alert={alert.id}"
     monkeypatch.delenv("COPILOT_ENABLED", raising=False)
     sent, buttons = [], []
     sent_to(monkeypatch, sent, buttons)
     watcher.deliver()
-    assert buttons == [()]  # lab off: only the Open app action ntfy.publish always adds
+    assert sent[0][1] == trade and buttons == [()]  # lab off: the trade page, and only the Open app action ntfy adds
 
     with Session(engine) as db:
         db.get(PositionAlert, alert.id).delivery = "pending"
         db.commit()
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     watcher.deliver()
-    [(label, path)] = buttons[1]
+    assert sent[1][1] == "/copilot-lab?symbol=SNDK"  # no plan card saved this position: the desk opens on the symbol
+    (open_label, open_path), (label, path) = buttons[1]
+    assert (open_label, open_path) == ("Open trade", trade)
     query = parse_qs(urlsplit(path).query)
     assert label == "Ask copilot" and path.startswith("/copilot-lab?") and query["symbol"] == ["SNDK"]
     assert query["context"] == [f"Review this position: {alert.trade_id}. Give-back alert at "
@@ -340,8 +343,24 @@ def test_ask_copilot_rides_along_only_while_the_lab_is_on(engine, world, monkeyp
         db.get(PositionAlert, alert.id).delivery = "pending"
         db.commit()
     monkeypatch.setattr(position_alerts, "ask_copilot_path", lambda alert: 1 / 0)
-    watcher.deliver()  # a broken extra button never holds back the alert
-    assert buttons[2] == () and alerts(engine)[0].delivery == "sent"
+    monkeypatch.setattr(position_alerts, "desk_path", lambda db, alert: 1 / 0)
+    watcher.deliver()  # a broken link or button never holds back the alert
+    assert sent[2][1] == trade and buttons[2] == () and alerts(engine)[0].delivery == "sent"
+
+
+def test_the_desk_link_opens_the_plan_conversation_a_plan_card_saved(engine, world, monkeypatch):
+    from types import SimpleNamespace
+    from app.engine import capture_links
+    alert = fired(engine, world)
+    plan = "0f0e0d0c-0b0a-4908-8706-050403020100"
+    older = SimpleNamespace(received_at=datetime(2026, 10, 20, 13), context_json=f'{{"investigation_id": "{plan}"}}', client_id="c1")
+    newer = SimpleNamespace(received_at=datetime(2026, 10, 21, 13), context_json="{}", client_id="c2")
+    monkeypatch.setattr(capture_links, "for_trade", lambda db, trade_id: [newer, older])
+    with Session(engine) as db:
+        assert position_alerts.desk_path(db, alert) == f"/copilot-lab?investigation={plan}"
+    monkeypatch.setattr(capture_links, "for_trade", lambda db, trade_id: [])
+    with Session(engine) as db:
+        assert position_alerts.desk_path(db, alert) == "/copilot-lab?symbol=SNDK"
 
 
 def test_publish_adds_the_extra_actions_after_open_app(monkeypatch):

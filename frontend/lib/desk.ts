@@ -280,3 +280,28 @@ export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession>
   if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
   return body as DeskSession;
 }
+
+// --------------------------------------------------------------------------- the alert scorecard
+
+/** What one alert's contracts did after it (``GET /copilot/desk/scorecard``); dollars, against selling at the alert. */
+export type ScorecardOutcome =
+  | { state: "closed"; how: "sold" | "expired" | "sold_then_expired"; sell_at_alert_usd: number; basis: "bid" | "mark";
+      actual_usd: number; vs_alert_usd: number; ended_at: number | null }
+  | { state: "open"; sell_at_alert_usd: number; basis: "bid" | "mark"; sold_so_far_usd: number; contracts_left: number }
+  | { state: "not_measured"; why: string };
+export type ScorecardRow = {
+  at: number; kind: string; kind_label: string; contract: string; symbol: string; pnl_pct_at_alert: number | null;
+  decision: "holding" | "exiting" | null; decided_at: number | null; outcome: ScorecardOutcome;
+};
+export type ScorecardTally = { alerts: number; closed: number; better: number; worse: number; even: number; open: number; not_measured: number; vs_alert_usd: number };
+export type AlertScorecard = {
+  window_days: number; alerts: number; rows: ScorecardRow[]; truncated: boolean;
+  summary: { holding: ScorecardTally; exiting: ScorecardTally; none: ScorecardTally };
+};
+
+export async function getAlertScorecard(signal?: AbortSignal): Promise<AlertScorecard> {
+  const response = await fetch(apiUrl("/copilot/desk/scorecard"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as AlertScorecard;
+}

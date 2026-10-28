@@ -460,6 +460,29 @@ The full page is a desk of three panes beside each other
     planned entry, says what is missing; the pane never measures from a live
     quote.
 
+**Pings open on the decision.** A position alert's phone ping opens the
+desk thread for that position (see Review a trade or position), so a tap
+lands on the decision bar: on the plan's conversation when there is one, else
+on the symbol alone, where the bar shows without a saved conversation.
+
+**Alert scorecard** (`components/copilot/AlertScorecard.tsx`, under the
+Briefing's session timeline; `GET /copilot/desk/scorecard`,
+`app/engine/alert_scorecard.py`). For each position alert sent to the
+phone in the last 30 days: what was decided after it (the first `decision`
+journal entry for the symbol that New York day, before the position's next
+alert; the journal keeps the symbol, not the position) and what its
+contracts then fetched, against selling them at the alert's bid (its mark
+when no bid was quoted). The closing sells from the alert's minute on are
+taken in FIFO order up to the contracts the alert saw open; contracts that expired fetched
+nothing; a position still open is "still open"; a short position, an alert
+with no price, or a trade that cannot be found is "not measured". One line
+sums it ("You held 5: 3 better than selling at the alert, 1 worse, 1 still
+open (net +$412)"), and each alert is behind "Each alert". Alerts are prompts
+to decide, not exit rules (the 2026-10-24 exit study), so their value shows
+here, in what was decided after them. Read-only; it changes no alert or
+threshold. Proof: `tests/test_alert_scorecard.py`,
+`frontend/e2e/copilot-scorecard.spec.ts`.
+
 **One main element per thread.** The thread's top reads header, then its
 main element, then the conversation: while the decision bar (below) is
 asking, it sits between the header and the plan ladder, and the ladder
@@ -735,9 +758,13 @@ copilot** opens `/copilot-lab?symbol=<ticker>&context=Review this trade: <trade
 id>`. On an open trade's page **Ask copilot about this position** opens it with
 `Review this position: <trade id>`: the primary action inside the selected
 alert a position alert's link opens (`TradePhoneAlerts.tsx`), a header link
-otherwise. The position alert push itself carries an **Ask copilot** ntfy
-action next to Open app (both need `ALERT_APP_URL`; this one also
-`COPILOT_ENABLED=true`), whose context adds what the alert saw, e.g.
+otherwise. While the lab is on (`COPILOT_ENABLED=true`), a position alert's
+tap opens the desk on that position's decision (`position_alerts.desk_path`:
+the plan's conversation when a plan card saved the position's plan, else
+`/copilot-lab?symbol=…`, which opens on the decision bar), and the push carries
+**Open trade** (the trade page above) and **Ask copilot** ntfy actions next to
+Open app (all need `ALERT_APP_URL`); with the lab off the tap opens the trade
+page as before. Ask copilot's context adds what the alert saw, e.g.
 `Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
 (at most 300 characters, `position_alerts.ask_copilot_path`). The message box
 holds the context, unsent; the owner sends it, adding a question if they like.

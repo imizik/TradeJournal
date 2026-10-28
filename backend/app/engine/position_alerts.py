@@ -74,7 +74,7 @@ from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
 from app.engine.tradier import TradierError, get_quotes_once
-from app.models import Fill, PositionAlert, PositionWatch, Trade, TradeFill
+from app.models import Fill, PlanTimeStop, PositionAlert, PositionWatch, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +277,40 @@ def _ask_copilot(alert: PositionAlert) -> tuple[tuple[str, str], ...]:
         return ()
 
 
+def desk_path(db: Session, alert: PositionAlert) -> str:
+    """The Copilot desk's thread for this position (docs/copilot-lab.md § The desk), which opens on its decision bar:
+    the plan's conversation when a plan card saved the position's plan (its oldest linked capture, as the Plans card
+    reads it), else the symbol."""
+    from app.engine import capture_links, plan_nudges  # plan_nudges imports this module
+    linked = capture_links.for_trade(db, alert.trade_id)  # a rebuilt trade id finds none: the symbol still opens
+    if linked:
+        capture = min(linked, key=lambda c: c.received_at)
+        investigation = plan_nudges._investigation(capture)
+        if investigation is None:
+            stop = db.exec(select(PlanTimeStop).where(PlanTimeStop.client_id == capture.client_id)
+                           .order_by(PlanTimeStop.created_at.desc())).first()
+            investigation = stop.investigation_id if stop else None
+        if investigation:
+            return "/copilot-lab?" + urlencode({"investigation": investigation})
+    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0]})
+
+
+def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """Where the ping opens, and its extra buttons. While Copilot Lab is on: the desk's thread for the position, so a
+    tap lands on the decision, with the trade page and Ask copilot as buttons; otherwise the trade page. A link that
+    cannot be built falls back to the trade page, so it never holds back the alert."""
+    trade = f"/trades/{alert.trade_id}?alert={alert.id}"
+    if os.environ.get("COPILOT_ENABLED") != "true":
+        return trade, ()
+    try:
+        with Session(db.get_bind()) as own:  # its own session: a failed read cannot abort the alert's transaction
+            desk = desk_path(own, alert)
+    except Exception:  # noqa: BLE001 - the alert matters more than where it opens
+        log.warning("Desk link skipped for a position alert", exc_info=True)
+        return trade, _ask_copilot(alert)
+    return desk, (("Open trade", trade),) + _ask_copilot(alert)
+
+
 def _minute_of(stamp: float) -> int:
     moment = datetime.fromtimestamp(stamp, ET)
     return moment.hour * 60 + moment.minute
@@ -448,7 +482,7 @@ class PositionAlerts:
                 return
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
                                             max(1, int((close - now) // 60)) if close else None)
-            more = _ask_copilot(alert)
+            path, more = _links(db, alert)
             ticket = notification_policy.decide(
                 db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,
                 anchor=notification_policy.anchor(alert.account_id, alert.source_key), symbol=(alert.contract or "").split(" ")[0],
@@ -461,7 +495,7 @@ class PositionAlerts:
             alert.attempts += 1
             try:
                 _, image_state = ping_images.publish(title, body + ticket.append, image, priority=priority, tags=("warning",),
-                                                     path=f"/trades/{alert.trade_id}?alert={alert.id}", direct_click=True, more=more)
+                                                     path=path, direct_click=True, more=more)
             except ntfy.NtfyError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
