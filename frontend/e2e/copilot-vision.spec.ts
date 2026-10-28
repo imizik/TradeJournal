@@ -24,8 +24,8 @@ type Seen = { chats: { messages: { content: string }[]; image_ids?: string[] }[]
 async function lab(page: Page): Promise<Seen> {
   const seen: Seen = { chats: [], uploads: 0, saved: [] };
   await page.route("**/copilot/status", (route) => route.fulfill({ json: status }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: {
-    positions: { state: "ok", count: 0, positions: [] }, investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] }, as_of: null } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => {
     seen.saved.push(route.request().postDataJSON());
@@ -54,7 +54,7 @@ const box = (page: Page) => page.getByRole("textbox", { name: "Message", exact: 
 test("attach a screenshot: thumbnail, a ready question, the id in the chat body, a text marker in the saved transcript", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
-  await expect(page.getByText("No open positions.")).toBeVisible();
+  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeVisible();
   await page.getByTestId("copilot-image-input").setInputFiles({ name: "chart.png", mimeType: "image/png", buffer: PNG });
   await expect(page.getByRole("img", { name: "Attached screenshot" })).toBeVisible();
   await expect(box(page)).toHaveValue(PREFILL);

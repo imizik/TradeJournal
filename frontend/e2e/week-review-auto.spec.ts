@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // The automatic week review (docs/copilot-lab.md § Review my week): Friday's review is saved as an open copilot
-// investigation, so it shows in Open threads; opening it shows the answer and the practice card it proposed, kept on
+// investigation, so it shows in the desk's thread list; opening it shows the answer and the practice card it proposed, kept on
 // the server until confirmed. The e2e backend runs with the lab off, so these tests stand in for its lab routes.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false,
@@ -28,12 +28,11 @@ async function labOn(page: Page) {
   const posts: Record<string, unknown>[] = [];
   let confirmed = false;
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: {
-    as_of: "2026-10-23T20:50:00Z", positions: { state: "ok", count: 0, positions: [] },
-    investigations: { state: "ok", investigations: [{ id: INVESTIGATION, source: "copilot", title: TITLE, status: "open",
-      conclusion: SAVED.conclusion, updated_at: SAVED.updated_at }] },
-    watches: { state: "ok", watches: [] } } }));
-  await page.route("**/copilot/plans", (route) => route.fulfill({ json: { plans: [], quotes_at: null, quote_issue: null } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T20:50:00Z", quotes_at: null, quote_issue: null, day: { phase: "post", need_you: 0, streak: null }, sections: {},
+    threads: [{ key: `investigation:${INVESTIGATION}`, group: "watch", symbol: null, title: TITLE, instrument: null, value: null,
+      status: { text: SAVED.conclusion, tone: "muted" }, meter: null, investigation_id: INVESTIGATION, trade_id: null,
+      radar_event_id: null, path: null, changed_at: null }] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${INVESTIGATION}`, (route) => route.fulfill({ json: SAVED }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
@@ -50,10 +49,10 @@ async function labOn(page: Page) {
   return posts;
 }
 
-test("Friday's saved review shows in Open threads and opens with its practice card", async ({ page }) => {
+test("Friday's saved review shows in the thread list and opens with its practice card", async ({ page }) => {
   const posts = await labOn(page);
   await page.goto("/copilot-lab");
-  const home = page.getByRole("region", { name: "Open threads" });
+  const home = page.getByRole("navigation", { name: "Thread list" });
   const thread = home.getByRole("link", { name: TITLE });
   await expect(thread).toHaveAttribute("href", `/copilot-lab?investigation=${INVESTIGATION}`);
   await expect(home).toContainText(SAVED.conclusion);

@@ -96,8 +96,8 @@ async function lab(page: Page, { speech = true } = {}) {
   }, speech);
   const chats: { messages: { content: string }[] }[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: status }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: {
-    positions: { state: "ok", count: 0, positions: [] }, investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] }, as_of: null } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", quotes_at: null, quote_issue: null, day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: {
     id: "33333333-3333-4333-8333-333333333333", source: "copilot", title: "x", symbol: "NBIS", status: "open", conclusion: null, revision: 1,
@@ -201,7 +201,7 @@ test("at 375 px the speaker is a 44 px target beside the mic, and nothing scroll
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab");
-  await expect(page.getByText("No open positions.")).toBeVisible();
+  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   await speaker(page).click();
   const target = (await speaker(page).boundingBox())!;
