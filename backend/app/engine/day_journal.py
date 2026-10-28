@@ -10,7 +10,8 @@ from sqlmodel import Session, select
 
 from app.models import DailyReviewRecord, DayJournalEntry
 
-KINDS = {"outlook", "update", "idea", "reflection"}
+# ``decision``: what the owner chose after an alert, logged from the Copilot desk's decision bar.
+KINDS = {"outlook", "update", "idea", "reflection", "decision"}
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 MAX_TEXT = 10_000
 
@@ -33,7 +34,7 @@ def append(session: Session, *, day: date, operation_id: str, kind: str, text: s
     if not operation_id.strip() or len(operation_id) > 100:
         raise EntryError("operation_id must contain 1 to 100 characters")
     if kind not in KINDS:
-        raise EntryError("kind must be outlook, update, idea, or reflection")
+        raise EntryError("kind must be outlook, update, idea, reflection, or decision")
     if not text.strip() or len(text) > MAX_TEXT:
         raise EntryError(f"text must contain 1 to {MAX_TEXT} characters")
     symbol = symbol.strip().upper() if symbol is not None else None

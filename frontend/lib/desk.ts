@@ -7,8 +7,9 @@
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
 
-/** What the desk asks the conversation to do: open a saved investigation, or send one prompt across everything. */
-export type DeskCommand = { kind: "open"; id: string; n: number } | { kind: "ask"; text: string; n: number };
+/** What the desk asks the conversation to do: open a saved investigation, send one prompt across everything, or put a
+ * question in the message box unsent (the decision bar's Ask why). */
+export type DeskCommand = { kind: "open"; id: string; n: number } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number };
 
 /** The conversation's open investigation, reported up so the inspector can show its context. */
 export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number };
@@ -52,3 +53,77 @@ export type DeskThread = {
 
 /** A decision logged from the decision bar; saved as a day-journal entry of kind ``decision``. */
 export type DeskDecision = { symbol: string; choice: "holding" | "exiting"; reason: string; investigationId: string | null; at: string };
+
+/**
+ * One Act-now row of ``GET /today`` (backend/app/routers/today.py): an open position with the reasons it needs a decision,
+ * the plan's invalidation and time stop beside them, and the latest phone alert's time (epoch seconds).
+ */
+export type DeskActRow = {
+  trade_id: string; symbol: string; contract: string; direction: string | null;
+  reasons: { kind: string; text: string }[];
+  invalidation: { price: number; condition: string; state: "armed" | "hit"; distance_pct?: number; hit_at?: number | null } | null;
+  time_stop: { clock: string; state: string } | null;
+  latest_alert: { kind: string; at: number } | null;
+};
+
+const ORDER = ["invalidation_hit", "giveback", "invalidation_near", "time_stop", "expires_today"];
+const hhmm = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
+
+/**
+ * What the decision bar says for one Act-now row: what fired and when, what the plan says, the day-journal text for each
+ * choice, and the quiet line after it. ``trigger`` is the newest known trigger time (epoch seconds), so a decision logged
+ * before a later alert does not hide it. Advice only: nothing here places, sizes or sends an order.
+ */
+export function deskDecision(row: DeskActRow) {
+  const reasons = [...row.reasons].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
+  const top = reasons[0];
+  const level = row.invalidation;
+  const price = level?.price.toFixed(2);
+  const gaveBack = row.latest_alert?.kind === "giveback" ? row.latest_alert.at : null;
+  const fired = top?.kind === "giveback" ? `Give-back fired${gaveBack ? ` at ${hhmm(gaveBack)}` : ""}`
+    : top?.kind === "invalidation_hit" ? `Invalidation ${price} hit${level?.hit_at ? ` at ${hhmm(level.hit_at)}` : ""}`
+    : top?.text ?? "";
+  const short = row.direction === "short";
+  const holdSide = short ? "below" : "above";
+  let plan: string | null = null;
+  let planShort = "no plan on file";
+  let next = "your next alert";
+  if (level?.state === "hit") {
+    plan = `Your plan's invalidation, ${price}, was hit.`;
+    planShort = `plan's invalidation ${price} was hit`;
+  } else if (level) {
+    const gap = level.distance_pct;
+    const side = gap === undefined ? null : gap < 0 ? "above" : "below";
+    plan = `Your plan says hold while ${row.symbol} is ${holdSide} ${price}.${gap !== undefined ? ` It is ${Math.abs(gap).toFixed(1)}% ${side}.` : ""}`;
+    planShort = `plan says hold ${holdSide} ${price}${gap !== undefined ? ` (${Math.abs(gap).toFixed(1)}% ${side})` : ""}`;
+    const breakSide = short ? "above" : "below";
+    next = level.condition === "touches" ? `a touch of ${price}` : level.condition === "crosses" ? `a cross ${breakSide} ${price}` : `a close ${breakSide} ${price}`;
+  } else if (row.time_stop) {
+    plan = `Your plan's time stop is ${row.time_stop.clock}.`;
+    planShort = `plan's time stop ${row.time_stop.clock}`;
+  }
+  if (row.time_stop?.state === "pending" && (!level || level.state === "hit")) next = `the time stop at ${row.time_stop.clock}`;
+  const triggers = [gaveBack, level?.hit_at ?? null].filter((t): t is number => typeof t === "number");
+  return {
+    fired: fired ? `${fired}.` : "",
+    others: reasons.slice(1).map(r => r.text),
+    plan,
+    entry: (choice: DeskDecision["choice"]) => `${choice === "holding" ? "Holding" : "Exiting"}. ${fired}; ${planShort}.`,
+    ask: `${fired} on ${row.symbol}; ${planShort}. Should I hold or exit here, and why?`,
+    after: (choice: DeskDecision["choice"], at: string) => choice === "holding"
+      ? `You logged holding at ${at}. Next check: ${next}.`
+      : `You logged exiting at ${at}. Close it in Robinhood; the fill links to the plan on its own.`,
+    trigger: triggers.length ? Math.max(...triggers) : null,
+  };
+}
+
+/** A logged decision's choice, read back from its day-journal text ("Holding. …" / "Exiting. …"). */
+export const decisionChoice = (text: string): DeskDecision["choice"] | null =>
+  text.startsWith("Holding.") ? "holding" : text.startsWith("Exiting.") ? "exiting" : null;
+
+/** After the regular close (16:00 New York) on a weekday, by ``at`` (an ISO time); holidays and early closes are not known here. */
+export function afterClose(at: string) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(at)).map(p => [p.type, p.value]));
+  return !["Sat", "Sun"].includes(parts.weekday) && Number(parts.hour) >= 16;
+}

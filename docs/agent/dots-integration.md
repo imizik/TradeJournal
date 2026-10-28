@@ -179,7 +179,8 @@ experiment, and no new forecasting study. Saving a plan does not activate it.
 
 The owner authorized a daily thinking workflow after the isolated UX audit.
 The private owner UI records morning outlooks, later thoughts, ideas (including
-explicitly untraded ones) and end-of-day reflections in `DayJournalEntry`.
+explicitly untraded ones), end-of-day reflections and, from the Copilot desk's
+decision bar, what was decided after an alert (`decision`) in `DayJournalEntry`.
 The Morning page and Daily Review share the selected day's timeline; Jo's
 briefing remains separately attributed. Entries need no trade or account and
 retain original text and server receipt time. A later update adds a new entry;
