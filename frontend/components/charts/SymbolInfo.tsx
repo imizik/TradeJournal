@@ -69,25 +69,6 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
     focused.current = true;
     queueMicrotask(() => setView((current) => ({ ...current, expanded: true, tab: "Overview" })));
   }, [contextN, contextFocus?.target]);
-  useEffect(() => {
-    if (!contextN || !view.ready || !view.expanded || view.tab !== "Overview") return;
-    // Overview moves Peers from its loading fallback into the loaded blocks.
-    // Wait for that transition so the requested focus does not immediately disappear.
-    if (contextFocus?.target === "peers" && result?.key !== `Overview|${symbol}`) return;
-    let settledFrame = 0;
-    const frame = requestAnimationFrame(() => {
-      const section = document.getElementById(`${id}-${contextFocus?.target}`);
-      const button = section?.querySelector<HTMLButtonElement>("button[aria-expanded]");
-      if (!section || !button) return;
-      if (button.getAttribute("aria-expanded") === "false") button.click();
-      settledFrame = requestAnimationFrame(() => {
-        button.focus({ preventScroll: true });
-        section.scrollIntoView({ block: "start" });
-        onContextHandled?.();
-      });
-    });
-    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(settledFrame); };
-  }, [contextN, contextFocus?.target, view.ready, view.expanded, view.tab, result, symbol, id, onContextHandled]);
   const radarGroup = owner && radarOrigin?.group;
   useEffect(() => {
     if (!radarGroup) return;
@@ -176,6 +157,26 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   const group = chosenGroup ? (chosenGroup.members.includes(symbol) ? chosenGroup.name : undefined)
     : radarOrigin?.symbol === symbol ? radarGroup || undefined : undefined;
   const { peers: peersResult, movement } = usePeers(symbol, !!onSelectSymbol && view.expanded && view.tab === "Overview", owner, group);
+  useEffect(() => {
+    if (!contextN || !view.ready || !view.expanded || view.tab !== "Overview") return;
+    // Overview moves Peers from its loading fallback into the loaded blocks.
+    // Wait for that transition so the requested focus does not immediately disappear.
+    // The peer list then fills the valuation block above Peers, so wait for it too or the scroll lands short.
+    if (contextFocus?.target === "peers" && (result?.key !== `Overview|${symbol}` || peersResult?.symbol !== symbol)) return;
+    let settledFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      const section = document.getElementById(`${id}-${contextFocus?.target}`);
+      const button = section?.querySelector<HTMLButtonElement>("button[aria-expanded]");
+      if (!section || !button) return;
+      if (button.getAttribute("aria-expanded") === "false") button.click();
+      settledFrame = requestAnimationFrame(() => {
+        button.focus({ preventScroll: true });
+        section.scrollIntoView({ block: "start" });
+        onContextHandled?.();
+      });
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(settledFrame); };
+  }, [contextN, contextFocus?.target, view.ready, view.expanded, view.tab, result, peersResult, symbol, id, onContextHandled]);
   // Adopt only server-validated membership, so every navigation path (not just
   // comparison-row clicks) retains the group for members and releases nonmembers.
   const handoffGroup = !chosenGroup && radarGroup ? movement?.data?.groups.find((candidate) => candidate.name === radarGroup) : undefined;
