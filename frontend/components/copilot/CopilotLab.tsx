@@ -10,6 +10,7 @@ import Inspector from "@/components/copilot/Inspector";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
+import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape from "@/components/copilot/SessionTape";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
@@ -146,7 +147,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
-        <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Copilot</h1>
+        <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && (
           <div className={styles.barActions}>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
@@ -185,7 +186,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision. */}
           {on && (!thread && link?.symbol && !link.investigation ? (
             <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} /></div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><BriefingExtras /><AlertScorecard /></> : (
             <DeskThreadTop thread={thread} compact={deciding} hero={
               <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} />} />
           ))}

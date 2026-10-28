@@ -107,6 +107,14 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
   );
 }
 
+/** While the Copilot Lab is on, the desk is home: it takes Today's place, first in the menu and on the phone's tab bar
+ * (Today forwards there), and the Labs entry for the same page goes. */
+const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
+function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
+  if (!copilot) return items;
+  return items.flatMap(item => (item.href === "/today" ? [{ ...item, ...DESK }] : item.href === "/copilot-lab" ? [] : [item]));
+}
+
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */
 function shownHref(href: string, owner: boolean, enabled: boolean, journal: boolean, frozenOnly = false) {
   if (!owner && frozenOnly) return ["/", "/daily"].includes(href);
@@ -165,7 +173,7 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
   const copilot = useCopilotOn(); // the owner's, and only while the lab is on
   return (
     <ul className="space-y-1">
-      {navItems.filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot)).map(({ href, label, icon: Icon, heading }) => {
+      {withDesk(navItems, copilot).filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot)).map(({ href, label, icon: Icon, heading }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
         const link = (
             <Link
@@ -206,6 +214,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   const [menuOpen, setMenuOpen] = useState(false);
   const anyRunning = useAnyJobRunning(owner);
   const access = useAppAccess();
+  const copilot = useCopilotOn(); // the owner's, and only while the lab is on: then the desk is home
   const enabled = access.enabled;
   // The layout passes journal access (owner, or an assistant granted the journal).
   const journalOn = journal;
@@ -270,7 +279,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
       {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
-        {TABS.filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/" && access.owner)).map(({ href, label, icon: Icon }) => {
+        {withDesk(TABS, copilot).filter(({ href }) => shownHref(href, access.owner, enabled, journalOn, access.grants.market_decision_write) && !(href === "/" && access.owner)).map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
