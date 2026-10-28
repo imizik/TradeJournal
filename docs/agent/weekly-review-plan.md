@@ -143,7 +143,7 @@ line (until that work lands), no Jo memory toggle.
 - Confirm, change, skip and "keep last week's rule" all save and reload.
 - NY week boundaries including a holiday week and Friday expiries.
 - Works with Check, Jo and the Claude plan all unavailable.
-- Phone and desktop browser acceptance remains unverified by a committed weekly-review browser test.
+- Fixture browser acceptance is covered by `frontend/e2e/weekly-review.spec.ts`: desktop/phone week navigation, trade disclosure, delayed/failed save, draft retention, retry and reopen. `frontend/e2e/browser-access.auth.ts` covers owner forwarding, assistant refusal and CSRF on the weekly-review proxy root. This is engineering proof, not real-use acceptance.
 
 **Acceptance (in use) — separate, Isaac's call:** he completes three
 consecutive weekly reviews in under ~2 minutes each and can say which rule he
