@@ -295,6 +295,18 @@ def get_investigation(investigation_id: str, session: Session = Depends(get_sess
         raise _http(exc)
 
 
+@router.put("/investigations/{investigation_id}/proposals/{proposal_id}/outcome")
+def set_proposal_outcome(investigation_id: str, proposal_id: str, body: investigations.ProposalOutcome,
+                         session: Session = Depends(get_session)):
+    """What the owner did with a saved card, so it comes back as left: the result of a Confirm that already ran on the
+    page, or a dismiss. It creates nothing itself."""
+    _enabled()
+    try:
+        return investigations.set_outcome(investigation_id, proposal_id, body, session=session)
+    except investigations.InvestigationError as exc:
+        raise _http(exc)
+
+
 @router.put("/investigations/{investigation_id}")
 def update_investigation(investigation_id: str, body: InvestigationUpdate, session: Session = Depends(get_session)):
     _enabled()

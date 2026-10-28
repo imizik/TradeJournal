@@ -408,8 +408,35 @@ The full page is a desk of three panes beside each other
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
   entered), once a minute; a thread with no plan shows only the header.
-- **Context**: the open investigation's linked activity (alerts, time stop,
-  revisits) and a link to Charts; empty until a conversation is saved.
+- **Context**: the open thread's symbol, "today" and Open in Charts →, with
+  three small tabs (`components/copilot/Inspector.tsx`, reads in
+  `backend/app/engine/desk_context.py`); empty until a conversation is saved.
+  Each tab reads only when opened and again when something is confirmed in the
+  conversation; nothing here arms or sends.
+  - **Chart** (first): today's minute bars as the server's ping picture
+    (`GET /copilot/desk/{id}/picture`, `chart_render` over the same cached
+    chart-feed read as a ping), the regular session once it has bars, with the
+    plan's entry (TRIG) and invalidation (INV) lines and the owner's fills in
+    the symbol today (IN and OUT; an option fill at the underlying's recorded
+    price, else a line at its time; a pre-market fill is left off once the
+    regular session shows). No timeframes yet. No bars, a failed read, a read
+    past 6 seconds, or both workers still busy with earlier reads says why
+    instead of a blank picture.
+  - **Timeline** (`/timeline`): one list, newest first, New York time on the
+    right and a dot by kind: the investigation's alerts (armed, hit; a sent
+    ping for one rides on its row, a held one shows with why), time stop (set,
+    pinged, skipped with the reason; whether time-stop pings are off), revisit
+    jobs, the fills of the trade
+    linked to its plan, and for the symbol over 7 days its thesis-watch
+    triggers, phone pings (sent or held back) and today's `decision` journal
+    entries. A source that cannot be read is named under the list.
+  - **Your history** (`/history`): `copilot_review.level_history` (the engine
+    behind `get_level_history`) at the plan's invalidation, the side from the
+    plan (below for a long), measured from its planned entry: a tile per past
+    trade that crossed that distance while held, won (realized P&L above zero)
+    or not, and one sentence from the counts. No plan invalidation, or no
+    planned entry, says what is missing; the pane never measures from a live
+    quote.
 
 The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
@@ -422,8 +449,10 @@ ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
 only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
 the conversation hand-off, thread-list rows and groups, logged decisions).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
-`frontend/e2e/copilot-thread-list.spec.ts` and
-`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px).
+`frontend/e2e/copilot-thread-list.spec.ts`,
+`frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px) and
+`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
+states, the 375 px Context tab).
 
 ## How the copilot reasons (system prompt)
 
@@ -1085,8 +1114,31 @@ nothing exists until the owner confirms.
   "Invalidation · armed/hit"), its plan time stops (pending, sent, skipped
   with why, not sent, or may have sent) and its revisit jobs, each from its
   own route (`GET /copilot/time-stops?investigation=<id>` for time stops).
-- Proposal cards live in the conversation on screen, not in the saved
-  transcript. A confirmed step remains as linked activity.
+- **Kept cards.** Each card is saved with its answer in the investigation's
+  transcript, so switching threads or reloading brings it back as it was
+  left: pending with Confirm, confirmed with what Confirm said (a plan card
+  with its fields and each part's result, locked; a failed part can still be
+  retried), or dismissed and hidden. Bringing a card back creates nothing;
+  Confirm stays the only way anything is made.
+  - A card gets one `client_id` when it arrives, saved with it, used for its
+    plan capture, time stop and memory saves, so a Confirm retried after a
+    reload or from a second window returns the first record.
+  - Confirm or Dismiss records the card's `outcome` at once through
+    `PUT /copilot/investigations/{id}/proposals/{proposal_id}/outcome`
+    (`state` `confirmed` or `dismissed`, Confirm's note, a memory's or
+    practice's saved words, a plan's part results and fields). It needs no
+    revision and does not bump it. A card that may not be saved yet (its turn
+    still running, or that turn's save in flight) is recorded once that save
+    lands.
+  - A saved outcome is never lost to a save from a window that had not seen
+    it, and a confirmed card stays confirmed. Before Confirm runs, the card
+    re-reads the investigation; if another window already confirmed it, it
+    shows that result instead of making anything. Watches and plan alerts
+    have no client id; if two windows press Confirm in the same moment, the
+    alerts route refuses the same alert twice in a day, so the second says
+    "This alert is already set."
+  - A confirmed step also remains as linked activity.
+  - Browser proof: `frontend/e2e/copilot-keep-drafts.spec.ts`.
 - `/copilot-lab?investigation=<id>` opens that saved investigation with
   "What changed?" ready; with `&context=…` (a plan alert's link) that text is
   ready instead.
@@ -1366,12 +1418,16 @@ After each turn the page saves the conversation as a `copilot_investigation`
 row (`backend/app/models.py`, additive migration `a7c1e3f5b9d2`), so it can be
 resumed from any browser. The lab lists the 8 most recent; clicking one
 resumes it. A row holds a title (the first question), symbol, open/closed
-status, an optional one-line conclusion, the text-only transcript, and evidence
+status, an optional one-line conclusion, the transcript, and evidence
 references: tool name, `as_of`, provenance kind and which answer used it, never
-the data. Each save carries the revision it was read at, and a stale save from
-another window is refused (409). The browser remembers only which
-investigation was open. No follow-up, plan, decision, memory or monitoring is
-created or linked.
+the data. The transcript is each message's text plus, on an answer, its
+proposal cards (at most 4; see Confirm a plan), re-validated on save as
+`propose_plan` validated them, and counted toward the transcript's 400,000
+character cap. A record saved before cards were kept has none and reads and
+saves exactly as it was. Each save carries the revision it was read at, and a
+stale save from another window is refused (409). The browser remembers only
+which investigation was open. No follow-up, plan, decision, memory or
+monitoring is created or linked: a saved card is only a card.
 
 The same record holds background research results. `source` is `copilot` (the
 lab page, through the HTTP routes) or `research_job` (saved in-process by

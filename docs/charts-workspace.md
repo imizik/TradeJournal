@@ -228,7 +228,10 @@ time; candles and peer values remain fresh reads, not a replay of that pass.
 The selected group is validated by the existing comparison API, with unavailable
 groups shown as unavailable. Back to Radar restores its selected date, expanded
 group list and group location. Plain Movers ticker links carry origin without
-assuming a group. Ordinary chart and historical trade links keep their behavior.
+assuming a group. Event-detail chart links carry the event's first-seen time,
+original ticker, session and identity through the same origin note. Back to Radar
+reopens that event in its recorded session, including after chart symbol changes.
+Ordinary chart and historical trade links keep their behavior.
 
 A **Peers** block (T3.4) is the last block of the **Overview** tab: the
 active symbol's peers as chips, each with today's percent change, from

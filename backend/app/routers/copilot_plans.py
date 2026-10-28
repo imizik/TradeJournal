@@ -1,6 +1,8 @@
 """The Copilot Lab's Plans board (``engine/copilot_plans.py``): confirmed copilot plans still armed, nearest first,
 the Dashboard's Plans card (``engine/plan_positions.py``): each open position beside the plan it was entered under,
-and the Charts dock's loop for one symbol (``GET /copilot/symbol/{symbol}``): both of those and what is new on it.
+the Charts dock's loop for one symbol (``GET /copilot/symbol/{symbol}``): both of those and what is new on it, and the
+desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/picture|timeline|history``,
+``engine/desk_context.py``).
 
 Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only.
 """
@@ -8,12 +10,12 @@ Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-onl
 from datetime import datetime
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import copilot_plans, plan_positions
+from app.engine import copilot_plans, desk_context, plan_positions
 from app.engine.chart_math import ET
 from app.routers import today
 
@@ -71,3 +73,37 @@ def symbol_loop(symbol: str, db: Session = Depends(get_session)):
                 "thesis": today._section(db, "symbol thesis", lambda: today._thesis(db, day, symbol))},
         "quotes_at": shared.at, "quote_issue": shared.issue,
     }
+
+
+def _thread(investigation_id: str, db: Session):
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    found = desk_context.investigation(db, investigation_id)
+    if found is None:
+        raise HTTPException(404, "No such investigation.")
+    return found
+
+
+@router.get("/desk/{investigation_id}/picture")
+def desk_picture(investigation_id: str, db: Session = Depends(get_session)):
+    """The Context pane's chart: today's minute bars for the thread's symbol with its plan's levels and today's fills,
+    as a PNG. Unavailable (no symbol, no bars yet, the read failed or ran long) is a 404 whose detail says why."""
+    inv = _thread(investigation_id, db)
+    try:
+        png = desk_context.picture(db, inv, today._now())
+    except desk_context.Unavailable as exc:
+        raise HTTPException(404, str(exc)) from None
+    return Response(png, media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/desk/{investigation_id}/timeline")
+def desk_timeline(investigation_id: str, db: Session = Depends(get_session)):
+    """What touched the thread, newest first: its plan's alerts, time stop and revisits, its linked fills, and the
+    symbol's thesis triggers, pings and today's decisions."""
+    return desk_context.timeline(db, _thread(investigation_id, db), today._now())
+
+
+@router.get("/desk/{investigation_id}/history")
+def desk_history(investigation_id: str, db: Session = Depends(get_session)):
+    """The owner's own record at the thread's plan invalidation (the engine behind ``get_level_history``)."""
+    return desk_context.history(db, _thread(investigation_id, db))

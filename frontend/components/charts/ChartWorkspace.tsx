@@ -940,7 +940,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
   const dismissRadar = () => {
     setRadarOrigin(null);
     const url = new URL(window.location.href);
-    for (const key of ["radar_symbol", "radar_session", "radar_at", "radar_group", "radar_groups"]) url.searchParams.delete(key);
+    for (const key of ["radar_symbol", "radar_session", "radar_at", "radar_group", "radar_groups", "radar_event"]) url.searchParams.delete(key);
     window.history.replaceState(window.history.state, "", url);
   };
   const chooseSymbol = (symbol: string) => {

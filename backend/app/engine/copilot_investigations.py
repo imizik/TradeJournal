@@ -3,25 +3,32 @@
 One record for two writers: the interactive copilot (``source="copilot"``, saved by the lab page) and background
 research jobs (``source="research_job"``, saved in-process with ``save_research_result``). A record holds text and
 references only: a transcript, evidence references (tool + as-of, never the data) and optional cited findings.
-Nothing here creates or links follow-ups, plans, decisions, memories or watches.
+An answer's proposal cards ride in its message with what the owner did with each (``outcome``), so a card comes back
+after a reload as it was left. Nothing here creates or links follow-ups, plans, decisions, memories or watches: a
+stored card is only a card, and Confirm on the page is still the only way anything is made.
 
 Plain Python, no HTTP: pass a ``Session`` or let each call open its own.
 """
 from __future__ import annotations
 
 import json
+import math
+import re
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlmodel import Session, select
 
 from app.models import CopilotInvestigation
 
 SYMBOL_PATTERN = r"^[A-Z][A-Z0-9.\-]{0,9}$"
-MAX_TRANSCRIPT_CHARS = 400_000
+MAX_TRANSCRIPT_CHARS = 400_000  # message text and stored cards together
+MAX_PROPOSALS = 4  # per answer: it may make two, and a week review's practice card can join them
+PROPOSAL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")  # what the capture, time-stop and memory saves replay on
 Source = Literal["copilot", "research_job"]
 
 
@@ -37,9 +44,77 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PartResult(_Strict):
+    state: Literal["done", "failed"]
+    text: str = Field("", max_length=500)
+
+
+class PlanFields(_Strict):
+    """A confirmed plan card's fields as the owner left them (the inputs' text)."""
+    thesis: str = Field("", max_length=300)
+    contract: str = Field("", max_length=80)
+    entry: str = Field("", max_length=24)
+    invalidation: str = Field("", max_length=24)
+    time_stop: str = Field("", max_length=80)
+    size_note: str = Field("", max_length=120)
+
+
+class ProposalOutcome(_Strict):
+    """What the owner did with a card. ``confirmed``: Confirm ran (``note`` is what it said, ``text`` the words a memory
+    or practice saved; a plan card keeps each part's result and its fields). ``dismissed``: the card stays hidden."""
+    state: Literal["confirmed", "dismissed"]
+    note: str | None = Field(None, max_length=500)
+    text: str | None = Field(None, max_length=4000)
+    parts: dict[Literal["plan", "entry", "invalidation", "timeStop"], PartResult] | None = None
+    fields: PlanFields | None = None
+
+
+def _saved_proposal(card: dict) -> dict:
+    """One stored card: the proposal as propose_plan validated it, its id, the price it was drafted at, the card's
+    client id and its outcome. Raises ValueError for anything else."""
+    from app.ai import copilot_tools
+    if not isinstance(card, dict):
+        raise ValueError("a proposal is an object")
+    rest = dict(card)
+    pid, client_id, outcome = rest.pop("id", None), rest.pop("client_id", None), rest.pop("outcome", None)
+    last, as_of = rest.pop("last", None), rest.pop("as_of", None)
+    if not isinstance(pid, str) or not PROPOSAL_ID.match(pid):
+        raise ValueError("a proposal needs its id")
+    if client_id is not None and (not isinstance(client_id, str) or not CLIENT_ID.match(client_id)):
+        raise ValueError("a proposal's client_id is 8-64 letters, digits, - or _")
+    if last is not None and (isinstance(last, bool) or not isinstance(last, (int, float)) or not math.isfinite(last) or last <= 0):
+        raise ValueError("a proposal's last price must be positive")
+    if as_of is not None and not (isinstance(as_of, (int, float)) and not isinstance(as_of, bool) or isinstance(as_of, str) and len(as_of) <= 40):
+        raise ValueError("a proposal's as_of is a time")
+    if rest.get("kind") == "practice":
+        rest.pop("label", None)  # derived from the measure and target
+    try:
+        out = {"id": pid, **copilot_tools._proposal(rest)}
+    except copilot_tools.ToolInputError as exc:
+        raise ValueError(f"proposal {pid}: {exc}") from None
+    if out["kind"] in ("watch", "trade_plan"):
+        out.update({k: v for k, v in (("last", last), ("as_of", as_of)) if v is not None})
+    if client_id is not None:
+        out["client_id"] = client_id
+    if outcome is not None:
+        try:
+            out["outcome"] = ProposalOutcome.model_validate(outcome).model_dump(exclude_none=True)
+        except ValidationError as exc:
+            raise ValueError(f"proposal {pid} outcome: {exc.errors()[0]['msg']}") from None
+    return out
+
+
 class SavedMessage(_Strict):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=20_000)
+    proposals: list[dict] | None = Field(None, max_length=MAX_PROPOSALS)  # an answer's cards; absent on older records
+
+    @field_validator("proposals")
+    @classmethod
+    def valid_cards(cls, cards: list[dict] | None) -> list[dict] | None:
+        if not cards:
+            return None
+        return [_saved_proposal(card) for card in cards]
 
 
 class EvidenceRef(_Strict):
@@ -104,6 +179,14 @@ class InvestigationFields(_Strict):
     evidence: list[EvidenceRef] = Field(default_factory=list, max_length=400)
     findings: Findings | None = None  # None on an update keeps the saved findings
 
+    @field_validator("transcript")
+    @classmethod
+    def one_card_per_id(cls, transcript: list[SavedMessage]) -> list[SavedMessage]:
+        ids = [p["id"] for m in transcript for p in m.proposals or ()]
+        if len(set(ids)) != len(ids):
+            raise ValueError("each proposal in an investigation has its own id")  # its outcome is recorded by id
+        return transcript
+
 
 @contextmanager
 def _session(session: Session | None) -> Iterator[Session]:
@@ -127,9 +210,25 @@ def full(row: CopilotInvestigation) -> dict:
             "findings": json.loads(row.findings_json) if row.findings_json else None}
 
 
-def _fill(row: CopilotInvestigation, fields: InvestigationFields) -> None:
-    transcript = [m.model_dump() for m in fields.transcript]
-    if sum(len(m["content"]) for m in transcript) > MAX_TRANSCRIPT_CHARS:
+def _outcomes(transcript: list[dict]) -> dict[str, dict]:
+    return {p["id"]: p["outcome"] for m in transcript for p in m.get("proposals") or () if p.get("outcome")}
+
+
+def _kept(outcome: dict | None, stored: dict | None) -> dict | None:
+    """A saved outcome is never lost to a save from a window that had not seen it, and a confirmed card stays
+    confirmed (a dismiss elsewhere cannot hide what was made)."""
+    if stored is None or (outcome is not None and (outcome["state"] == "confirmed" or stored["state"] == "dismissed")):
+        return outcome
+    return stored
+
+
+def _fill(row: CopilotInvestigation, fields: InvestigationFields, stored: dict[str, dict] | None = None) -> None:
+    transcript = [m.model_dump(exclude_none=True) for m in fields.transcript]
+    for card in (p for m in transcript for p in m.get("proposals") or ()):
+        if (outcome := _kept(card.get("outcome"), (stored or {}).get(card["id"]))) is not None:
+            card["outcome"] = outcome
+    size = sum(len(m["content"]) + (len(json.dumps(m["proposals"])) if "proposals" in m else 0) for m in transcript)
+    if size > MAX_TRANSCRIPT_CHARS:
         raise InvestigationError("too_long", "This investigation is too long to save; start a new one.")
     row.title, row.symbol, row.status = fields.title.strip() or "Untitled", fields.symbol, fields.status
     row.conclusion = (fields.conclusion or "").strip() or None
@@ -167,12 +266,34 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         row = _row(db, investigation_id)
         if revision != row.revision:
             raise InvestigationError("stale", "This investigation changed in another window. Reload it before saving.")
-        _fill(row, fields)
+        _fill(row, fields, _outcomes(json.loads(row.transcript_json)))
         row.revision += 1
         row.updated_at = datetime.utcnow()
         db.add(row)
         db.commit()
         db.refresh(row)
+        return full(row)
+
+
+def set_outcome(investigation_id: str | uuid.UUID, proposal_id: str, outcome: ProposalOutcome,
+                session: Session | None = None) -> dict:
+    """Record what the owner did with one saved card (Confirm or Dismiss). It records a result and changes nothing
+    the owner wrote, so it needs no revision and does not bump it: an open window's next save still fits, and keeps
+    this outcome (``_kept``)."""
+    with _session(session) as db:
+        row = _row(db, investigation_id)
+        transcript = json.loads(row.transcript_json)
+        card = next((p for m in transcript for p in m.get("proposals") or () if p.get("id") == proposal_id), None)
+        if card is None:
+            raise InvestigationError("not_found", "That card is not saved with this investigation.")
+        kept = _kept(outcome.model_dump(exclude_none=True), card.get("outcome"))
+        if kept != card.get("outcome"):
+            card["outcome"] = kept
+            row.transcript_json = json.dumps(transcript)
+            row.updated_at = datetime.utcnow()
+            db.add(row)
+            db.commit()
+            db.refresh(row)
         return full(row)
 
 
