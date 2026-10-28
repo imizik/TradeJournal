@@ -42,7 +42,7 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
   useEffect(() => {
     const node = dialog.current;
     if (!node) return;
-    if (open && !node.open) { setQuery(""); setActive(0); node.showModal(); }
+    if (open && !node.open) node.showModal();
     else if (!open && node.open) node.close();
   }, [open]);
 
@@ -55,10 +55,14 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
 
   useEffect(() => { document.getElementById(`${id}-${current}`)?.scrollIntoView({ block: "nearest" }); }, [current, id]);
 
+  // The search clears on the way out, so a reopened palette is empty before its first keystroke: clearing it on open
+  // raced the owner's (or a test's) typing, whose first key could land on the old text.
+  const shut = () => { setQuery(""); setActive(0); onClose(); };
+
   const choose = (item: Item | undefined) => {
     if (!item) return;
     dialog.current?.close(); // now, so the dialog hands focus back before a command (a fill) takes it
-    onClose();
+    shut();
     if (item.kind === "thread") onThread(item.row);
     else item.command.run();
   };
@@ -89,7 +93,7 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
   const threadCount = items.filter(i => i.kind === "thread").length;
   return (
     // A click on the dialog itself is a click on its backdrop: the panel inside fills the box.
-    <dialog ref={dialog} aria-label="Jump to" onClose={onClose} onClick={event => { if (event.target === dialog.current) onClose(); }}
+    <dialog ref={dialog} aria-label="Jump to" onClose={shut} onClick={event => { if (event.target === dialog.current) shut(); }}
       className="mx-auto mb-auto mt-[12vh] w-[min(560px,calc(100%-32px))] max-w-none overflow-hidden rounded-xl border bg-card p-0 text-foreground shadow-2xl backdrop:bg-background/70">
       <div>
         <input autoFocus value={query} placeholder="Jump to a symbol, plan or command…" aria-label="Jump to"

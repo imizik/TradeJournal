@@ -124,6 +124,7 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   await expect(palette(page)).toBeHidden();
   await page.getByRole("textbox", { name: "Message" }).blur();
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(palette(page).getByRole("combobox")).toHaveValue(""); // the earlier search does not come back
   await page.keyboard.type("plan a");
   await page.keyboard.press("Enter");
   await page.waitForURL(/context=Plan\+a\+trade/);
