@@ -125,12 +125,18 @@ def _usage(raw: dict | None) -> dict:
     return {k: int(raw.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
 
 
+def _api_detail(result) -> str:
+    """Claude Code's own wording for a failed API call (e.g. the 400's reason), one line and short, so the error says
+    why rather than only a status."""
+    text = " ".join([*(getattr(result, "errors", None) or []), getattr(result, "result", None) or ""]).split()
+    detail = " ".join(text)
+    return detail if len(detail) <= 300 else detail[:299] + "…"
+
+
 def _result_error(result, assistant_error: str | None, cfg: copilot.Settings) -> dict | None:
     status = getattr(result, "api_error_status", None)
     if result.subtype == "error_max_turns":
         return {"code": "rounds", "message": f"Stopped: this turn used its {cfg.max_rounds} model rounds."}
-    if result.subtype == "error_max_budget_usd":
-        return {"code": "budget", "message": f"Stopped: this turn reached its ${cfg.turn_budget_usd:.2f} API-equivalent cap (no API credits are spent on the plan)."}
     if not result.is_error:
         if result.stop_reason == "refusal":
             return {"code": "refusal", "message": "The model declined to answer this request."}
@@ -143,7 +149,10 @@ def _result_error(result, assistant_error: str | None, cfg: copilot.Settings) ->
         return {"code": "plan_limit", "message": "The Claude plan's usage limit was reached. Try again later."}
     if assistant_error == "billing_error":
         return {"code": "plan_billing", "message": "Claude reported a billing problem for the plan sign-in. This lab never falls back to API credits."}
-    return {"code": "plan_unavailable", "message": f"Claude Code could not finish this turn ({result.subtype}{f', HTTP {status}' if status else ''})."}
+    detail = _api_detail(result)
+    log.warning("copilot plan turn error: subtype=%s status=%s detail=%s", result.subtype, status, detail)
+    return {"code": "plan_unavailable", "message": f"Claude Code could not finish this turn ({result.subtype}{f', HTTP {status}' if status else ''})"
+            + (f": {detail}" if detail else ".")}
 
 
 class PlanAdapter:
@@ -164,11 +173,13 @@ class PlanAdapter:
         self.cfg, self.sdk = cfg, sdk
 
     def options(self, server) -> Any:
+        # No max_budget_usd: the plan bills nothing per token, and a dollar stop on a dear model (Fable) ended turns
+        # after their tools with no answer. max_turns and max_tool_calls bound the turn instead.
         cfg = self.cfg
         return self.sdk.ClaudeAgentOptions(
             system_prompt=copilot.SYSTEM_PROMPT, model=cfg.model, effort=cfg.effort, thinking={"type": "adaptive"},
             tools=[], allowed_tools=list(ALLOWED), mcp_servers={SERVER: server}, strict_mcp_config=True,
-            permission_mode="dontAsk", setting_sources=[], max_turns=cfg.max_rounds, max_budget_usd=cfg.turn_budget_usd,
+            permission_mode="dontAsk", setting_sources=[], max_turns=cfg.max_rounds,
             include_partial_messages=True, verbatim_prompts=True, cli_path=self.binary, cwd=self.env["CLAUDE_CONFIG_DIR"],
             env=self.env,
             extra_args={"restricted": None, "no-session-persistence": None, "disable-slash-commands": None,

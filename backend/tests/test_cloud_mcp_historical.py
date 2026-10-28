@@ -34,7 +34,7 @@ def linked(historical, signing_key, tmp_path):
     for flag in ('TJ_CLOUD_MCP_ENABLED', 'TJ_CLOUD_MCP_HISTORICAL_ENABLED', 'TJ_CLOUD_MCP_DECISION_WRITES'):
         h.b.patch.setenv(flag, 'true')
     h.b.patch.setenv('TJ_CLOUD_MCP_CONFIG', str(config))
-    h.b.patch.setattr(app.state, 'cloud_mcp_sample_only', True, raising=False)
+    h.b.patch.setitem(app.state._state, 'cloud_mcp_sample_only', True)
     cloud_practice_access.verifier.cache_clear()
     token = _token(signing_key, scope='d0:profile practice:read practice:write')
     with TestClient(app) as client:

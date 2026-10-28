@@ -44,7 +44,7 @@ def replay(boundary, request):
         ],
     )
     boundary.patch.setattr(app, "middleware_stack", None)
-    boundary.patch.setattr(app.state, "sample_replay_isolated", True, raising=False)
+    boundary.patch.setitem(app.state._state, "sample_replay_isolated", True)
     config = getattr(request, "param", {})
     config = config if isinstance(config, dict) else {"ending": config}
     if "ending" in config:
@@ -483,7 +483,7 @@ def test_changed_plan_refuses_replay(replay):
 
 def test_five_flags_alone_do_not_enable_replay_on_normal_app(replay):
     saved(replay)
-    replay.patch.setattr(app.state, "sample_replay_isolated", False)
+    replay.patch.setitem(app.state._state, "sample_replay_isolated", False)
     assert replay.public.get("/access/me").json()["sample_replay_enabled"] is False
     assert start(replay).status_code == 403
     with Session(replay.engine) as db:

@@ -44,7 +44,7 @@ def linked(boundary, signing_key, tmp_path):
                  "TJ_CLOUD_MCP_ENABLED", "TJ_CLOUD_MCP_HISTORICAL_ENABLED", "TJ_CLOUD_MCP_DECISION_WRITES"):
         b.patch.setenv(flag, "true")
     for flag in ("market_decisions_isolated", "historical_replay_isolated", "cloud_mcp_sample_only"):
-        b.patch.setattr(app.state, flag, True, raising=False)
+        b.patch.setitem(app.state._state, flag, True)
     with Session(b.engine) as db:
         runs = replay.prepare_batch(db, [two_setup_bundle(), two_setup_bundle(1)], identifier="scanner-test", seed=47,
                                    exam_count=1)

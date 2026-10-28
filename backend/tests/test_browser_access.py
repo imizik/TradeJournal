@@ -266,7 +266,7 @@ def test_actual_revocation_closes_active_stream(boundary):
             clock[0] = 16.0
             return {"type": "trade", "price": 12}
     boundary.patch.setattr(charts.tradier, "tradier_configured", lambda: True)
-    boundary.patch.setattr(app.state, "chart_market_stream", SimpleNamespace(subscribe=lambda wanted: (1, Queue()), unsubscribe=unsubscribed.append), raising=False)
+    boundary.patch.setitem(app.state._state, "chart_market_stream", SimpleNamespace(subscribe=lambda wanted: (1, Queue()), unsubscribe=unsubscribed.append))
     response = boundary.public.get("/charts/stream?symbol=SPY")
     assert response.status_code == 200
     assert response.text.count("event: trade") <= 1

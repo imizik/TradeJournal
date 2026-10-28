@@ -45,6 +45,8 @@ class ResultMessage:
                                                         "cache_read_input_tokens": 400, "cache_creation_input_tokens": 50})
     stop_reason: str | None = "end_turn"
     api_error_status: int | None = None
+    result: str | None = None
+    errors: list | None = None
 
 
 class ProcessError(Exception):
@@ -139,7 +141,7 @@ def test_only_the_five_lab_tools_and_no_built_ins(plan_env):
     assert o.verbatim_prompts is True and o.include_partial_messages is True
     assert {"restricted", "no-session-persistence", "disable-slash-commands"} <= set(o.extra_args)
     assert o.system_prompt == copilot.SYSTEM_PROMPT and o.model == "claude-sonnet-5-5" and o.max_turns == 4
-    assert o.max_budget_usd == 0.25 and o.cli_path == "/bin/sh" and o.cwd == o.env["CLAUDE_CONFIG_DIR"]
+    assert not hasattr(o, "max_budget_usd") and o.cli_path == "/bin/sh" and o.cwd == o.env["CLAUDE_CONFIG_DIR"]
     assert not any(getattr(o, k, None) for k in ("resume", "continue_conversation", "can_use_tool", "hooks"))
 
 
@@ -269,7 +271,6 @@ def test_history_is_quoted_into_one_prompt(plan_env):
 
 @pytest.mark.parametrize("result,error,code", [
     (ResultMessage(subtype="error_max_turns", is_error=True), None, "rounds"),
-    (ResultMessage(subtype="error_max_budget_usd", is_error=True), None, "budget"),
     (ResultMessage(is_error=True, api_error_status=429), "rate_limit", "plan_limit"),
     (ResultMessage(is_error=True, api_error_status=401), "authentication_failed", "plan_auth"),
     (ResultMessage(is_error=True), "billing_error", "plan_billing"),
@@ -283,6 +284,14 @@ def test_result_errors_are_mapped_once(plan_env, result, error, code):
                    *([("raise", ProcessError("exit 1"))] if result.is_error else [])])
     events = _turn(sdk)
     assert [e["code"] for e in events if e["type"] == "error"] == [code] and events[-1]["type"] == "done"
+
+
+def test_api_error_says_why(plan_env):
+    reason = 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long"}}'
+    sdk = FakeSDK([("message", AssistantMessage([], "<synthetic>", error="invalid_request")),
+                   ("message", ResultMessage(is_error=True, api_error_status=400, result=reason)), ("raise", ProcessError("exit 1"))])
+    [error] = [e for e in _turn(sdk) if e["type"] == "error"]
+    assert error["code"] == "plan_unavailable" and "HTTP 400" in error["message"] and "prompt is too long" in error["message"]
 
 
 @pytest.mark.parametrize("exc,code", [(CLINotFoundError("no cli"), "plan_not_installed"), (RuntimeError("boom"), "plan_unavailable")])
