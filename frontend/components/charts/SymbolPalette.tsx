@@ -21,6 +21,7 @@ export default function SymbolPalette({ current, recent, watchlist, quotes, pane
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const selectedOption = useRef<HTMLLIElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
 
   const options = useMemo(() => {
@@ -44,6 +45,10 @@ export default function SymbolPalette({ current, recent, watchlist, quotes, pane
   }, [query, recent, watchlist, current, panel]);
   const pick = (option: Option) => option.kind === "follow" ? onFollow?.() : onChoose(option.symbol);
   const selected = Math.min(active, Math.max(0, options.length - 1));
+
+  useEffect(() => {
+    selectedOption.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected, options]);
 
   const onKey = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
@@ -70,7 +75,7 @@ export default function SymbolPalette({ current, recent, watchlist, quotes, pane
         <ul id="symbol-search-options" role="listbox" aria-label="Symbols" className="max-h-[50vh] overflow-y-auto py-1">
           {options.map((option, index) => {
             const quote = quotes.find((q) => q.symbol === option.symbol);
-            return <li key={optionId(option)} id={optionId(option)} role="option" aria-selected={index === selected}
+            return <li ref={index === selected ? selectedOption : undefined} key={optionId(option)} id={optionId(option)} role="option" aria-selected={index === selected}
               onMouseEnter={() => setActive(index)} onClick={() => pick(option)}
               className={`flex cursor-pointer items-center gap-2 px-3 py-2.5 text-xs ${index === selected ? "bg-sky-400/10 text-slate-100" : "text-slate-300"}`}>
               {option.kind === "typed" ? <ArrowUpRight size={13} className="text-sky-300" /> : option.kind === "recent" ? <Clock3 size={13} className="text-slate-500" /> : option.kind === "follow" ? <Link2 size={13} className="text-sky-300" /> : <Star size={13} className="text-slate-500" />}
