@@ -21,6 +21,9 @@ out are investigation, trade and Radar event ids, each the row's own link.
 
 An option position's value is its own unrealized P&L (the option's mark), never the underlying's price; its plan
 levels and meter are on the underlying, and the status line says so by naming it.
+
+``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
+happened in it, from the same kind of existing readers.
 """
 
 from datetime import UTC, datetime
@@ -352,4 +355,119 @@ def desk_threads(db: Session = Depends(get_session)):
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("decisions", decisions),
             ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
+    }
+
+
+# --------------------------------------------------------------------------- the Briefing's session timeline
+
+INDICES = ("SPY", "QQQ")
+MAX_EVENTS = 80
+
+
+def _utc_epoch(moment: datetime) -> int:
+    return int(moment.replace(tzinfo=UTC).timestamp())
+
+
+def _clock(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, ET).strftime("%H:%M")
+
+
+def _regular(day) -> dict:
+    """Today's regular session as epoch seconds (an early close is the calendar's); none on a closed day."""
+    window = next(((start, end) for name, start, end in session_windows(day, _hours(day)) if name == "regular"), None)
+    if window is None:
+        return {"state": "ok", "open": None, "close": None}
+    at = [int(datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=ET).timestamp()) for minute in window]
+    return {"state": "ok", "open": at[0], "close": at[1]}
+
+
+def _fill_events(db: Session, day) -> dict:
+    from app.engine import day_replay
+    rows = [{"kind": "fill", "at": f.time, "symbol": symbol, "text": f"{'Bought' if f.buy else 'Sold'} {symbol}"}
+            for symbol, fills in day_replay.traded(db, day).items() for f in fills]
+    return {"state": "ok", "rows": rows}
+
+
+def _ping_events(db: Session, now: float) -> dict:
+    """Phone pings the notification policy sent today, and its day count against the cap (held ones count apart)."""
+    from app.engine import notification_policy as policy
+    from app.models import PhonePing
+    start, end = policy.day_bounds(now)
+    found = db.exec(select(PhonePing).where(PhonePing.decided_at >= start, PhonePing.decided_at < end)).all()
+    sent = [p for p in found if p.decision == "sent"]
+    rows = [{"kind": "ping", "at": _utc_epoch(p.decided_at), "symbol": p.symbol,
+             "text": f"{policy._label(p.kind).capitalize()} ping{f' · {p.symbol}' if p.symbol else ''}"} for p in sent]
+    return {"state": "ok", "rows": rows, "sent": len(sent), "held": sum(p.decision in policy.HELD for p in found), "cap": policy.daily_cap()}
+
+
+def _radar_events(day) -> dict:
+    from app.routers import radar
+    store, _reason = radar._store(read_only=True)
+    if store is None:
+        return {"state": "off", "rows": []}
+    rows = []
+    for event in store.events(day.isoformat()):
+        at = _epoch(event.get("first_seen_at"))
+        symbol = (event.get("symbols") or [None])[0]
+        if at is not None:
+            rows.append({"kind": "radar", "at": at, "symbol": symbol, "text": f"Radar · {symbol or 'event'} {RADAR_KIND.get(event.get('kind'), '')}".strip()})
+    return {"state": "ok", "rows": rows}
+
+
+def _decision_events(db: Session, day) -> dict:
+    from app.engine import day_journal
+    rows = [{"kind": "decision", "at": _utc_epoch(e.created_at), "symbol": e.symbol, "text": f"{e.symbol} · {e.text.split('.', 1)[0][:40]}"}
+            for e in day_journal.entries(db, day) if e.kind == "decision" and e.symbol]
+    return {"state": "ok", "rows": rows}
+
+
+def _time_stops(db: Session, now: float) -> dict:
+    """Plan time stops still scheduled for today, soonest first."""
+    from app.engine import notification_policy as policy
+    from app.models import PlanTimeStop
+    start, end = policy.day_bounds(now)
+    found = db.exec(select(PlanTimeStop).where(PlanTimeStop.delivery == "scheduled", PlanTimeStop.due_at >= start,
+                                               PlanTimeStop.due_at < end).order_by(PlanTimeStop.due_at)).all()
+    return {"state": "ok", "rows": [{"symbol": r.symbol, "at": _utc_epoch(r.due_at), "clock": _clock(_utc_epoch(r.due_at))} for r in found]}
+
+
+def _indices() -> dict:
+    from app.engine.chart_feed import chart_feed
+    rows, _at, issue = chart_feed.quote_rows(list(INDICES))
+    found = {r["symbol"]: r for r in rows}
+    return {"state": "ok", "issue": issue, "rows": [
+        {"symbol": s, "last": found[s].get("last"), "change_pct": found[s].get("change_percentage")} for s in INDICES if s in found]}
+
+
+@router.get("/desk/session")
+def desk_session(db: Session = Depends(get_session)):
+    """The Briefing's day at a glance (docs/copilot-lab.md § The desk): today's regular session, what happened in it
+    (fills, phone pings sent, Radar events, logged decisions), the time stops still ahead, the pings against the daily
+    cap, the pre-market prep and SPY/QQQ. Composed from readers that already exist; each source fails on its own.
+    Read-only, owner-only, refused while the lab is off; no ids out."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    regular = today._section(db, "session hours", lambda: _regular(day))
+    phase = today._section(db, "session phase", lambda: _phase(now))
+    fills = today._section(db, "session fills", lambda: _fill_events(db, day))
+    pings = today._section(db, "session pings", lambda: _ping_events(db, now))
+    radar = today._section(db, "session radar", lambda: _radar_events(day))
+    decisions = today._section(db, "session decisions", lambda: _decision_events(db, day))
+    stops = today._section(db, "session time stops", lambda: _time_stops(db, now))
+    prep = today._section(db, "session prep", lambda: today._prep(db, day))
+    indices = today._section(db, "session indices", _indices)
+    events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])), key=lambda r: r["at"])
+    written = (prep.get("prep") or {})
+    return {
+        "as_of": today._iso(now), "now": int(now), "day": day.isoformat(), "phase": phase.get("phase"),
+        "open": regular.get("open"), "close": regular.get("close"),
+        "events": events[-MAX_EVENTS:], "time_stops": stops.get("rows", []),
+        "pings": {k: pings[k] for k in ("sent", "held", "cap")} if pings["state"] == "ok" else None,
+        "prep": {"at": _epoch(written.get("at")), "line": (written.get("lines") or [None])[0]} if written else None,
+        "indices": indices.get("rows", []), "quote_issue": indices.get("issue"),
+        "sections": {name: part["state"] for name, part in (
+            ("hours", regular), ("phase", phase), ("fills", fills), ("pings", pings), ("radar", radar),
+            ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices))},
     }

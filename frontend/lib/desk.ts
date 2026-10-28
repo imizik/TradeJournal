@@ -258,3 +258,25 @@ export async function getDeskPicture(id: string, signal?: AbortSignal): Promise<
   }
   return { url: URL.createObjectURL(await response.blob()) };
 }
+
+// --------------------------------------------------------------------------- the Briefing's session timeline
+
+/** One thing that happened today, for the session strip; ``at`` is epoch seconds. */
+export type DeskSessionEvent = { kind: "fill" | "ping" | "radar" | "decision"; at: number; symbol: string | null; text: string };
+
+/** ``GET /copilot/desk/session``: today's regular session (``open``/``close`` null on a closed day), what happened in it,
+ * the plan time stops still ahead, pings against the daily cap, the pre-market prep and SPY/QQQ. Times are epoch seconds. */
+export type DeskSession = {
+  as_of: string; now: number; day: string; phase: DeskDay["phase"]; open: number | null; close: number | null;
+  events: DeskSessionEvent[]; time_stops: { symbol: string; at: number; clock: string }[];
+  pings: { sent: number; held: number; cap: number } | null; prep: { at: number | null; line: string | null } | null;
+  indices: { symbol: string; last: number | null; change_pct: number | null }[]; quote_issue: string | null;
+  sections: Record<string, "ok" | "unavailable" | "off">;
+};
+
+export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession> {
+  const response = await fetch(apiUrl("/copilot/desk/session"), { cache: "no-store", signal });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`);
+  return body as DeskSession;
+}

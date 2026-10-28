@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
+import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { PracticeLine, WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
@@ -11,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
 const SEEN_KEY = "desk.seen.v1";
-const TONE: Record<DeskTone, string> = {
+export const TONE: Record<DeskTone, string> = {
   attention: "text-primary", loss: "text-rose-300", gain: "text-emerald-300", info: "text-foreground", muted: "text-muted-foreground",
 };
 const BAR: Record<DeskTone, string> = {
@@ -31,7 +32,7 @@ const ASKS: Record<string, { name: string; prompt: string; hint: string }> = {
   week: { name: "Review my week", prompt: WEEK_REVIEW_CONTEXT, hint: "One copilot turn reviewing your latest trading week: planned vs unplanned, follow-through, alerts and exits" },
 };
 /** A real number sets in the desk's mono face; a word never does. */
-const numeric = (text: string) => /^[+−-]?\$?\d/.test(text);
+export const numeric = (text: string) => /^[+−-]?\$?\d/.test(text);
 
 // "New since you looked" is remembered in this browser only, and a blocked store reads as nothing seen.
 function readSeen(): Record<string, number> {
@@ -115,9 +116,12 @@ function DayLine({ data }: { data: DeskThreads }) {
  * The desk's thread list (docs/copilot-lab.md § The desk): one grouped list from ``GET /copilot/desk/threads`` in
  * ``DESK_GROUPS`` order, refreshed each minute while the page is visible. Pinned rows ask in the conversation (only
  * when pressed); a row with an investigation opens it in place, any other follows its deep link. Plan meters show
- * on Act now and Near a trigger only. "New since you looked" is remembered in this browser.
+ * on Act now and Near a trigger only. "New since you looked" is remembered in this browser. ``onRows`` gets the rows in
+ * the order shown, for the desk's J / K and its palette.
  */
-export default function ThreadRail({ actions, active = null }: { actions: HomeActions; active?: string | null }) {
+export default function ThreadRail({ actions, active = null, onRows }: {
+  actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void;
+}) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Rows arrive only after the first client read, so reading the store at first render cannot mismatch the server's.
@@ -149,11 +153,17 @@ export default function ThreadRail({ actions, active = null }: { actions: HomeAc
 
   const rows = data?.threads ?? [];
   const pinned = rows.some(r => r.group === "pinned") ? rows.filter(r => r.group === "pinned") : PINNED;
+  const itemsOf = (id: DeskGroup) => {
+    const items = id === "pinned" ? pinned : rows.filter(r => r.group === id);
+    return id === "new" ? [...items.filter(unread), ...items.filter(r => !unread(r))] : items;
+  };
+  const ordered = useMemo(() => DESK_GROUPS.flatMap(g => itemsOf(g.id)), [data, seen]); // eslint-disable-line react-hooks/exhaustive-deps -- rows and unread come from these two
+  useEffect(() => { onRows?.(ordered); }, [ordered, onRows]);
+  const jumpKey = useJumpKey();
   const missing = Object.entries(data?.sections ?? {}).filter(([name, state]) => state === "unavailable" && SOURCE[name]).map(([name]) => SOURCE[name]);
 
   const group = (id: DeskGroup, title: string) => {
-    let items = id === "pinned" ? pinned : rows.filter(r => r.group === id);
-    if (id === "new") items = [...items.filter(unread), ...items.filter(r => !unread(r))];
+    const items = itemsOf(id);
     const fresh = id === "new" ? items.filter(unread).length : 0;
     if (id !== "pinned" && id !== "act" && !items.length) return null;
     if (id === "act" && !data) return null;
@@ -190,6 +200,10 @@ export default function ThreadRail({ actions, active = null }: { actions: HomeAc
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
       {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}
+      <p data-testid="desk-keys" className="hidden flex-wrap items-center gap-x-1.5 gap-y-1 border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
+        <kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd> move <kbd className={cn(KBD, "ml-2")}>{jumpKey}</kbd> jump
+        <kbd className={cn(KBD, "ml-2")}>N</kbd> new plan <kbd className={cn(KBD, "ml-2")}>]</kbd> context
+      </p>
     </nav>
   );
 }
