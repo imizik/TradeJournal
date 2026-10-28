@@ -130,7 +130,7 @@ def opportunity_link(boundary, signing_key, tmp_path, request):
         "historical_replay_isolated",
         "cloud_mcp_sample_only",
     ):
-        b.patch.setattr(app.state, flag, True, raising=False)
+        b.patch.setitem(app.state._state, flag, True)
     with Session(b.engine) as db:
         runs = op.prepare(db, bundle(), "jo-opportunity-fixture", **getattr(request, "param", {}))
         ids = [str(r.id) for r in runs]

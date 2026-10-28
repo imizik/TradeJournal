@@ -33,7 +33,7 @@ def historical(boundary):
     for name in ("TJ_ACCESS_SAMPLE_DATA", "TJ_DOT_TRIAL_ENABLED", "TJ_MARKET_DECISION_WRITES", "TJ_HISTORICAL_REPLAY_ENABLED"):
         boundary.patch.setenv(name, "true")
     for name in ("market_decisions_isolated", "historical_replay_isolated"):
-        boundary.patch.setattr(app.state, name, True, raising=False)
+        boundary.patch.setitem(app.state._state, name, True)
     original = bundle()
     with Session(boundary.engine) as db:
         run = history.prepare(db, original, identifier="history-test", proof=True)
@@ -137,9 +137,9 @@ def test_flags_factory_csrf_foreign_grants_live_routes_and_revocation(historical
     assert start(h).status_code == 403
     assert choose(h, "NBIS", "skip").status_code == 403
     h.b.patch.setenv("TJ_HISTORICAL_REPLAY_ENABLED", "true")
-    h.b.patch.setattr(app.state, "historical_replay_isolated", False)
+    h.b.patch.setitem(app.state._state, "historical_replay_isolated", False)
     assert start(h).status_code == 403
-    h.b.patch.setattr(app.state, "historical_replay_isolated", True)
+    h.b.patch.setitem(app.state._state, "historical_replay_isolated", True)
     assert h.b.owner.post("/access/assistants/history-test/revoke", json={}).status_code == 200
     assert start(h).status_code == 401
 

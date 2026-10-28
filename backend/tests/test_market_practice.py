@@ -94,7 +94,7 @@ def market(boundary):
         "TJ_MARKET_DECISION_WRITES",
     ):
         boundary.patch.setenv(flag, "true")
-    boundary.patch.setattr(app.state, "market_decisions_isolated", True, raising=False)
+    boundary.patch.setitem(app.state._state, "market_decisions_isolated", True)
     boundary.patch.setattr(
         app,
         "user_middleware",
@@ -295,9 +295,9 @@ def test_flags_factory_revocation_csrf_and_grant_expansion_denied(market):
         ).status_code
         == 403
     )
-    market.patch.setattr(app.state, "market_decisions_isolated", False)
+    market.patch.setitem(app.state._state, "market_decisions_isolated", False)
     assert choose(market).status_code == 403
-    market.patch.setattr(app.state, "market_decisions_isolated", True)
+    market.patch.setitem(app.state._state, "market_decisions_isolated", True)
     market.patch.setenv("TJ_MARKET_DECISION_WRITES", "false")
     assert choose(market).status_code == 403
     market.patch.setenv("TJ_MARKET_DECISION_WRITES", "true")

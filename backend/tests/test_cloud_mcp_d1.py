@@ -38,7 +38,7 @@ def linked(request, signing_key, tmp_path):
         "fetched_at": now, "expires_at": now + 3600, "keys": _jwks(signing_key.public_key())["keys"]}))
     writer.patch.setenv("TJ_CLOUD_MCP_ENABLED", "true")
     writer.patch.setenv("TJ_CLOUD_MCP_CONFIG", str(config))
-    writer.patch.setattr(app.state, "cloud_mcp_sample_only", True, raising=False)
+    writer.patch.setitem(app.state._state, "cloud_mcp_sample_only", True)
     cloud_practice_access.verifier.cache_clear()
     token = _token(signing_key, scope="d0:profile practice:read")
     client = TestClient(app)
@@ -152,7 +152,7 @@ def test_disabled_or_non_sample_backend_refuses_even_valid_bearer(linked, flag):
 
 
 def test_flags_alone_cannot_enable_normal_backend(linked):
-    linked.patch.setattr(app.state, "cloud_mcp_sample_only", False)
+    linked.patch.setitem(app.state._state, "cloud_mcp_sample_only", False)
     assert detail(linked).status_code == 503
 
 
@@ -297,7 +297,7 @@ def test_factory_pins_binding_before_first_request_and_relink_needs_restart(link
     # factory lifetime from the fixture's temporary database location.
     linked.patch.setattr(trial, "validate_environment", lambda *args: None)
     linked.patch.setattr(app, "user_middleware", list(app.user_middleware))
-    linked.patch.setattr(app.state, "sample_replay_isolated", False, raising=False)
+    linked.patch.setitem(app.state._state, "sample_replay_isolated", False)
     assert trial.build_app() is app
     config = json.loads(linked.config.read_text())
     config["profiles"][0]["principal_version"] = 2
