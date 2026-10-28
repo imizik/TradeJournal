@@ -62,7 +62,7 @@ const fits = async (page: Page) => expect(await page.evaluate(() => document.doc
 
 test("the sections in priority order, each row linking to where you act, refreshed every minute", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const { reads } = await today(page);
+  const { reads } = await today(page, BODY, false); // Today shows while the lab is off; with it on, the desk is home
   const names = await page.getByTestId("today-section").evaluateAll((all) => all.map((el) => el.getAttribute("aria-label")));
   expect(names).toEqual(ORDER);
   const act = section(page, "Act now");
@@ -72,24 +72,18 @@ test("the sections in priority order, each row linking to where you act, refresh
   await expect(act.getByTestId("today-act-row")).toContainText("+$180 · +29%");
   await expect(act.getByTestId("today-act-row")).toContainText("0.8% from invalidation 92.30");
   await expect(act.getByTestId("today-act-row")).toContainText("Expires today");
-  await expect(act.getByRole("link", { name: "Review NBIS 10/23/26 100C" }))
-    .toHaveAttribute("href", `/copilot-lab?symbol=NBIS&context=${new URLSearchParams({ c: `Review this position: ${TRADE}` }).toString().slice(2)}`);
+  await expect(act.getByRole("link", { name: "Review NBIS 10/23/26 100C" })).toHaveAttribute("href", `/trades/${TRADE}`);
   const plans = section(page, "Plans near a trigger");
   await expect(plans).toContainText("Entry 100.60 · 0.6% away");
-  await expect(plans.getByRole("link", { name: "Open the CRWV plan" })).toHaveAttribute("href", `/copilot-lab?investigation=${PLAN_INV}`);
   const fresh = section(page, "New since you looked");
   await expect(fresh.getByTestId("today-count")).toHaveText("3");
   await expect(fresh.getByRole("link", { name: "Open the MU Radar event" })).toHaveAttribute("href", `/radar?event=${EVENT}`);
-  await expect(fresh.getByRole("link", { name: "Re-check the NBIS thesis" })).toHaveAttribute("href", THESIS_PATH);
-  await expect(fresh.getByRole("link", { name: "Open today's pre-market prep" })).toHaveAttribute("href", `/copilot-lab?investigation=${PREP_INV}`);
   await expect(fresh.getByTestId("today-prep-row")).toContainText("CRWV entry 100.60 is 0.6% away.");
   const held = section(page, "Held back");
   await expect(held.getByTestId("today-held-row")).toContainText("Quiet window · plan nudge");
   await expect(held.getByTestId("today-held-row")).toContainText("You opened APLD 35C without a plan.");
   await expect(page.getByTestId("today-week")).toContainText("3 of 5 entries planned");
   await expect(page.getByTestId("today-week")).toContainText("Streak 2 · best 4");
-  await expect(page.getByTestId("today").getByRole("link", { name: "Plan a trade" })).toBeVisible();
-  await expect(page.getByTestId("today").getByRole("link", { name: "Review my week" }).last()).toHaveAttribute("href", "/copilot-lab?context=Review+my+week");
   // Desktop: Today sits ahead of Dashboard in the sidebar; one readable column, not stretched across 1440.
   const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("heading", { name: "Labs" }) });
   expect((await sidebar.getByRole("link").allTextContents()).slice(0, 2)).toEqual(["Today", "Dashboard"]);
@@ -104,7 +98,7 @@ test("the sections in priority order, each row linking to where you act, refresh
 
 test("on a phone: Today is the first tab, rows are thumb-sized, nothing scrolls sideways, and a tap opens the row", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await today(page);
+  await today(page, BODY, false); // with the lab on, the desk is home instead (below)
   const tabs = page.getByRole("navigation", { name: "Main tabs" });
   await expect(tabs.getByRole("link").first()).toHaveText("Today");
   await expect(tabs.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
@@ -123,16 +117,29 @@ test("on a phone: Today is the first tab, rows are thumb-sized, nothing scrolls 
   await section(page, "New since you looked").getByRole("link", { name: "Open the MU Radar event" }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/radar" && url.searchParams.get("event") === EVENT);
   await page.goBack();
-  const review = section(page, "Act now").getByRole("link", { name: "Review NBIS 10/23/26 100C" });
-  await expect(review).toHaveAttribute("href", /^\/copilot-lab/);
-  await review.click();
-  await expect(page).toHaveURL((url) => url.pathname === "/copilot-lab" && url.searchParams.get("symbol") === "NBIS"
-    && url.searchParams.get("context") === `Review this position: ${TRADE}`);
+  await expect(section(page, "Act now").getByRole("link", { name: "Review NBIS 10/23/26 100C" })).toHaveAttribute("href", `/trades/${TRADE}`);
+});
+
+test("while the lab is on the desk is home: Today forwards to it, and Desk leads the tabs and the menu", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.route("**/api/backend/today", (route) => route.fulfill({ json: BODY }));
+  await page.goto("/today");
+  await expect(page).toHaveURL((url) => url.pathname === "/copilot-lab");
+  const tabs = page.getByRole("navigation", { name: "Main tabs" });
+  await expect(tabs.getByRole("link").first()).toHaveText("Desk");
+  await expect(tabs.getByRole("link", { name: "Desk" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
+  await tabs.getByRole("button", { name: "Open menu" }).click();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  await expect(menu.getByRole("link", { name: "Desk", exact: true })).toHaveAttribute("href", "/copilot-lab");
+  await expect(menu.getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0); // one entry for one page
 });
 
 test("an empty day collapses every section to its count; a failed section says so and the rest stand", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await today(page, { ...EMPTY, held: { state: "unavailable" }, new: { ...EMPTY.new, thesis: { state: "unavailable" } } });
+  await today(page, { ...EMPTY, held: { state: "unavailable" }, new: { ...EMPTY.new, thesis: { state: "unavailable" } } }, false);
   for (const name of ["Act now", "Plans near a trigger", "New since you looked"]) {
     await expect(section(page, name)).toHaveAttribute("data-empty", "true");
     await expect(section(page, name).getByTestId("today-count")).toHaveText("0");

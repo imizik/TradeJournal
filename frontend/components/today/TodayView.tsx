@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import PlanATrade, { PLAN_BUTTON } from "@/components/copilot/PlanATrade";
@@ -36,8 +37,8 @@ export type Today = {
 };
 
 const REFRESH_MS = 60_000;
-const HELD: Record<string, string> = { merged: "Merged", suppressed: "Quiet window", over_cap: "Over the daily cap" };
-const clock = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }) : "";
+export const HELD: Record<string, string> = { merged: "Merged", suppressed: "Quiet window", over_cap: "Over the daily cap" };
+export const clock = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }) : "";
 const ok = <T extends { state: string }>(section: T | Unavailable): section is T => section.state !== "unavailable";
 
 const ROW = "flex min-h-11 min-w-0 items-center gap-2 rounded border bg-background/40 px-3 py-2";
@@ -165,10 +166,14 @@ function Week({ section, lab }: { section: Today["week"]; lab: boolean }) {
 
 /**
  * The owner's Today screen: what matters right now, top to bottom, each row one tap from acting on it. Refreshed every
- * minute while the page is visible. While the Copilot Lab is off the page still reads, and copilot links are left out.
+ * minute while the page is visible. While the Copilot Lab is off the page still reads, and copilot links are left out;
+ * while it is on, the desk (`/copilot-lab`) is home and this page forwards there.
  */
 export default function TodayView() {
   const lab = useCopilotOn();
+  const router = useRouter();
+  // While the lab is on the Copilot desk is the home screen and shows everything here; Today forwards to it.
+  useEffect(() => { if (lab) router.replace("/copilot-lab"); }, [lab, router]);
   const [body, setBody] = useState<Today | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {

@@ -185,7 +185,7 @@ test("a symbol switch is offered, never forced, once a conversation exists; an e
   expect(lab.chats).toHaveLength(1); // switching sends nothing
 });
 
-test("the Copilot nav item shows only while the lab is on", async ({ page }) => {
+test("the desk's nav item shows only while the lab is on, as Desk in Today's place", async ({ page }) => {
   const lab: Lab = { saved: new Map(), chats: [] };
   const painted = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   await stubLab(page, lab, false);
@@ -195,13 +195,15 @@ test("the Copilot nav item shows only while the lab is on", async ({ page }) => 
   await answered;
   await painted();
   await expect(page.getByRole("link", { name: "Radar", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Desk", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Copilot", exact: true })).toHaveCount(0);
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await stubLab(page, lab, true);
   answered = page.waitForResponse((response) => response.url().includes("/copilot/status"));
   await page.reload();
   await answered;
-  await expect(page.getByRole("link", { name: "Copilot", exact: true }).first()).toHaveAttribute("href", "/copilot-lab");
+  await expect(page.getByRole("link", { name: "Desk", exact: true }).first()).toHaveAttribute("href", "/copilot-lab");
+  await expect(page.getByRole("link", { name: "Today", exact: true })).toHaveCount(0); // the desk is home now
 });
 
 test("on a 375 px phone the Charts copilot is the dock's sheet and nothing scrolls sideways", async ({ page }) => {

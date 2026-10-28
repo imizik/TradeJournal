@@ -575,6 +575,13 @@ as Charts does (`AppMain.fullScreenRoute`), and each pane scrolls on its own.
 The desk bar holds Jump to… (⌘K), New plan and the Context toggle; the
 read-only note sits under the message box.
 
+**The desk is home.** While the lab is on, the desk takes the Today screen's
+place: it is first in the menu and the phone's first tab ("Desk",
+`withDesk` in `frontend/components/Nav.tsx`), `/today` forwards to it, and
+the Labs entry for the same page goes. What Today showed that the desk did
+not now sits in the Briefing (`BriefingExtras.tsx`): the pings held back today
+behind a disclosure, and Watch today. With the lab off, Today is unchanged.
+
 The message box (desk and side panel alike) is one box: on the desk the
 "About <symbol>" chip, then a full-width text area that starts three lines
 tall and grows with what is typed (up to 40% of the page, or about 14 lines in
