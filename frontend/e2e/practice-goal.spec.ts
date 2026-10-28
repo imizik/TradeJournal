@@ -9,10 +9,8 @@ const ON = {
   key_configured: false, plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
   limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 },
 };
-const THREADS = {
-  as_of: "2026-10-24T15:12:00Z", positions: { state: "ok", count: 0, positions: [] },
-  investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] },
-};
+const DESK = { as_of: "2026-10-24T15:12:00Z", quotes_at: null, quote_issue: null,
+  day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] };
 const INVESTIGATION = "33333333-3333-4333-8333-333333333333";
 const PROPOSAL = {
   type: "proposal", id: "fake_3_0", kind: "practice", text: "Exit within 15 minutes when my plan's invalidation breaks.",
@@ -36,8 +34,7 @@ async function labOn(page: Page) {
   const posts: { practice: Record<string, unknown>[]; memories: Record<string, unknown>[] } = { practice: [], memories: [] };
   let now: { goal: Record<string, unknown> | null; this_week: typeof SCORE | null } = { goal: null, this_week: null };
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
-  await page.route("**/copilot/threads", (route) => route.fulfill({ json: THREADS }));
-  await page.route("**/copilot/plans", (route) => route.fulfill({ json: { plans: [], quotes_at: null, quote_issue: null } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: {
     id: INVESTIGATION, source: "copilot", title: "Review my week", symbol: null, status: "open", conclusion: null,
@@ -68,8 +65,8 @@ async function labOn(page: Page) {
 
 async function reviewToCard(page: Page) {
   await page.goto("/copilot-lab");
-  const home = page.getByRole("region", { name: "Open threads" });
-  await expect(home).toContainText("No open positions.");
+  const home = page.getByRole("navigation", { name: "Thread list" });
+  await expect(home.getByTestId("desk-day")).toBeVisible();
   await expect(home).not.toContainText("Practicing:");
   const saved = page.waitForRequest((request) => request.url().endsWith("/copilot/investigations") && request.method() === "POST");
   await home.getByRole("button", { name: "Review my week" }).click();
@@ -101,7 +98,7 @@ test("a practice card is edited, confirmed, remembered, and its line appears on 
     original_text: "Be out within 15 minutes when my invalidation breaks, every time.", source_reference: `copilot:${INVESTIGATION}` });
 
   await page.goto("/copilot-lab");
-  await expect(page.getByRole("region", { name: "Open threads" })).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
+  await expect(page.getByRole("navigation", { name: "Thread list" })).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
   await page.goto("/");
   const link = page.getByTestId("owner-dashboard").getByRole("link", { name: /Review my week/ });
   await expect(link).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
