@@ -1675,6 +1675,41 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
   await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
 });
 
+for (const [size, width, height] of [["desktop", 1440, 900], ["phone", 390, 844]] as const) {
+  test(`symbol search keeps keyboard selection visible in a long watchlist on ${size}`, async ({ page, context }) => {
+    await fakeChartSettings(context, { data: { watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "MSFT", "META", "GOOG", "AMZN", "TSLA", "MU", "INTC", "AVGO", "ORCL", "CRM", "ADBE", "NFLX", "COIN", "PLTR"] } });
+    await stub(page);
+    await page.setViewportSize({ width, height });
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main")).toBeVisible();
+    await page.getByRole("button", { name: "Open symbol search", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Symbol search", exact: true });
+    const input = dialog.getByRole("combobox");
+    const scrollBefore = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+    const chartBefore = await page.getByTestId("canvas-main").boundingBox();
+    await input.press("ArrowUp"); // wrap from first to last, below the visible list
+    const selected = dialog.getByRole("option", { selected: true });
+    await expect(selected).toContainText("PLTR");
+    await page.screenshot({ path: test.info().outputPath(`symbol-search-last-${size}.png`) });
+    await expect(selected).toBeInViewport({ ratio: 1 });
+    await expect(input).toBeFocused();
+    expect(await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))).toEqual(scrollBefore);
+    expect(await page.getByTestId("canvas-main").boundingBox()).toEqual(chartBefore);
+    await input.press("ArrowDown"); // wrap back to the top
+    await expect(selected).toContainText("SPY");
+    await expect(selected).toBeInViewport({ ratio: 1 });
+    for (let i = 0; i < 18; i++) await input.press("ArrowDown");
+    await expect(selected).toContainText("COIN");
+    await expect(selected).toBeInViewport({ ratio: 1 });
+    await input.fill("NV");
+    await expect(selected).toContainText("NVDA");
+    await expect(selected).toBeInViewport({ ratio: 1 });
+    await input.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "NVDA 5m chart", exact: true })).toBeVisible();
+  });
+}
+
 test("watchlist symbols reorder by drag or Shift+Arrow and keep the order after reload", async ({ page }) => {
   await stub(page);
   await page.goto("/charts");
