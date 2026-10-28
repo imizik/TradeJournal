@@ -36,6 +36,7 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
   const [entries, setEntries] = useState<DayJournalEntry[]>([]);
   const [review, setReview] = useState<Review | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [sending, setSending] = useState(false); // past the Undo window: the save is on its way
   const [error, setError] = useState<string | null>(null);
   const [answering, setAnswering] = useState(false);
   const [answer, setAnswer] = useState("");
@@ -143,8 +144,10 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
     return (
       <p role="status" data-testid="desk-decision-pending" className="mb-3 flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
         Logged {pending.choice}
-        <span aria-hidden>·</span>
-        <button type="button" onClick={undo} className="min-h-11 px-1 font-medium text-foreground underline underline-offset-2 sm:min-h-0">Undo</button>
+        {!sending && <>
+          <span aria-hidden>·</span>
+          <button type="button" onClick={undo} className="min-h-11 px-1 font-medium text-foreground underline underline-offset-2 sm:min-h-0">Undo</button>
+        </>}
       </p>
     );
   }
@@ -160,7 +163,8 @@ export default function DecisionBar({ symbol, fill }: { symbol: string | null; f
     setPending(next);
     timer.current = setTimeout(() => {
       timer.current = null;
-      void send(next.write).then(ok => { failed.current = ok ? null : next; pendingRef.current = null; setPending(null); });
+      setSending(true);
+      void send(next.write).then(ok => { failed.current = ok ? null : next; pendingRef.current = null; setPending(null); setSending(false); });
     }, UNDO_MS);
   };
 

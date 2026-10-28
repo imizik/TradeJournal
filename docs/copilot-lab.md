@@ -376,7 +376,10 @@ hold above 85.00 (3.1% above)." Entries are immutable, so the save waits 5
 seconds behind "Logged holding · Undo" (leaving the thread inside the window
 still saves); a double tap or retry reuses one `operation_id`. Afterwards the
 bar is one quiet line ("You logged holding at 10:44. Next check: a close below
-85.00."); a decision logged before a later alert does not hide the bar.
+85.00."); a decision logged before a later phone alert, an invalidation hit
+or a time stop coming due does not hide the bar. The hold side is read from
+where the level sits (a long put's invalidation is above the price), not from
+the lot's direction.
 Advice only: Exiting places, sizes and sends nothing; its line says to close
 the position in Robinhood, where the fill links to the plan on its own.
 Logging what was decided after each alert is the data that shows whether

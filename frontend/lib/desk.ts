@@ -62,7 +62,7 @@ export type DeskActRow = {
   trade_id: string; symbol: string; contract: string; direction: string | null;
   reasons: { kind: string; text: string }[];
   invalidation: { price: number; condition: string; state: "armed" | "hit"; distance_pct?: number; hit_at?: number | null } | null;
-  time_stop: { clock: string; state: string } | null;
+  time_stop: { clock: string; state: string; due_at: number } | null;
   latest_alert: { kind: string; at: number } | null;
 };
 
@@ -71,8 +71,8 @@ const hhmm = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("e
 
 /**
  * What the decision bar says for one Act-now row: what fired and when, what the plan says, the day-journal text for each
- * choice, and the quiet line after it. ``trigger`` is the newest known trigger time (epoch seconds), so a decision logged
- * before a later alert does not hide it. Advice only: nothing here places, sizes or sends an order.
+ * choice, and the quiet line after it. ``trigger`` is the newest known trigger time (epoch seconds: the latest phone alert,
+ * an invalidation hit, a time stop coming due), so a decision logged before it does not hide the bar. Advice only: nothing here places, sizes or sends an order.
  */
 export function deskDecision(row: DeskActRow) {
   const reasons = [...row.reasons].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
@@ -83,8 +83,10 @@ export function deskDecision(row: DeskActRow) {
   const fired = top?.kind === "giveback" ? `Give-back fired${gaveBack ? ` at ${hhmm(gaveBack)}` : ""}`
     : top?.kind === "invalidation_hit" ? `Invalidation ${price} hit${level?.hit_at ? ` at ${hhmm(level.hit_at)}` : ""}`
     : top?.text ?? "";
-  const short = row.direction === "short";
-  const holdSide = short ? "below" : "above";
+  // The hold side is where the level is not: a long put's or short stock's invalidation sits above the price. ``direction``
+  // is the lot's (bought or sold), not the thesis's, so it is only the fallback when no distance was read.
+  const levelAbove = level?.distance_pct !== undefined ? level.distance_pct > 0 : row.direction === "short";
+  const holdSide = levelAbove ? "below" : "above";
   let plan: string | null = null;
   let planShort = "no plan on file";
   let next = "your next alert";
@@ -96,14 +98,16 @@ export function deskDecision(row: DeskActRow) {
     const side = gap === undefined ? null : gap < 0 ? "above" : "below";
     plan = `Your plan says hold while ${row.symbol} is ${holdSide} ${price}.${gap !== undefined ? ` It is ${Math.abs(gap).toFixed(1)}% ${side}.` : ""}`;
     planShort = `plan says hold ${holdSide} ${price}${gap !== undefined ? ` (${Math.abs(gap).toFixed(1)}% ${side})` : ""}`;
-    const breakSide = short ? "above" : "below";
+    const breakSide = levelAbove ? "above" : "below";
     next = level.condition === "touches" ? `a touch of ${price}` : level.condition === "crosses" ? `a cross ${breakSide} ${price}` : `a close ${breakSide} ${price}`;
   } else if (row.time_stop) {
     plan = `Your plan's time stop is ${row.time_stop.clock}.`;
     planShort = `plan's time stop ${row.time_stop.clock}`;
   }
   if (row.time_stop?.state === "pending" && (!level || level.state === "hit")) next = `the time stop at ${row.time_stop.clock}`;
-  const triggers = [gaveBack, level?.hit_at ?? null].filter((t): t is number => typeof t === "number");
+  // Any later phone alert, a hit, or a time stop coming due (30 minutes out, when it joins Act now) answers a new question.
+  const stopDue = reasons.some(r => r.kind === "time_stop") && row.time_stop ? row.time_stop.due_at - 30 * 60 : null;
+  const triggers = [row.latest_alert?.at ?? null, level?.hit_at ?? null, stopDue].filter((t): t is number => typeof t === "number");
   return {
     fired: fired ? `${fired}.` : "",
     others: reasons.slice(1).map(r => r.text),

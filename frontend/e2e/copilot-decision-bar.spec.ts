@@ -29,18 +29,19 @@ const today = (asOf: string, rows: unknown[] = [GIVEBACK]) => ({
 const OPEN = "2026-10-27T14:44:00Z"; // 10:44 New York
 const CLOSED = "2026-10-27T20:05:00Z"; // 16:05 New York
 
-async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], loop = { positions: [GIVEBACK] as unknown[], plans: [] as unknown[] } } = {}) {
+async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], loop = { positions: [GIVEBACK] as unknown[], plans: [] as unknown[] },
+  logged = [] as unknown[], symbol = "NBIS" } = {}) {
   const posts: { kind: string; text: string; symbol: string; operation_id: string }[] = [];
   const chats: unknown[] = [];
-  const entries: unknown[] = [];
+  const entries: unknown[] = [...logged];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: { as_of: asOf, positions: { state: "ok", count: 0, positions: [] },
     investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] } } }));
   await page.route("**/copilot/plans", (route) => route.fulfill({ json: { plans: [], quotes_at: null, quote_issue: null } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
-  await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: saved }));
+  await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: { ...saved, symbol } }));
   await page.route("**/copilot/chat", (route) => { chats.push(route.request().postDataJSON()); return route.abort(); });
-  await page.route("**/copilot/symbol/NBIS", (route) => route.fulfill({ json: { symbol: "NBIS", as_of: asOf,
+  await page.route(`**/copilot/symbol/${symbol}`, (route) => route.fulfill({ json: { symbol: "NBIS", as_of: asOf,
     positions: { state: "ok", rows: loop.positions }, plans: { state: "ok", rows: loop.plans },
     new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } }));
   await page.route("**/today", (route) => route.fulfill({ json: today(asOf, rows) }));
@@ -48,7 +49,7 @@ async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], l
   await page.route(`**/day-journal/${DAY}/entries`, (route) => {
     const body = route.request().postDataJSON();
     posts.push(body);
-    const row = { id: String(posts.length), day: DAY, not_traded: false, created_at: asOf === OPEN ? "2026-10-27T14:44:30Z" : "2026-10-27T20:06:00Z", actor: "owner", ...body };
+    const row = { id: `new-${posts.length}`, day: DAY, not_traded: false, created_at: asOf === OPEN ? "2026-10-27T14:44:30Z" : "2026-10-27T20:06:00Z", actor: "owner", ...body };
     entries.push(row);
     return route.fulfill({ json: row });
   });
@@ -76,6 +77,19 @@ test("Holding logs one decision after the Undo window, then the bar is one quiet
   await page.waitForTimeout(500);
   expect(posts).toHaveLength(1);
   expect(chats).toEqual([]);
+});
+
+test("a long put's plan holds below a level above the price, and a later alert brings the bar back", async ({ page }) => {
+  // A bought put: the lot is long, but the invalidation (600) sits above SPY (590), so the plan holds below it.
+  const put = { ...GIVEBACK, symbol: "SPY", contract: "SPY 11/21/26 580P",
+    invalidation: { price: 600, condition: "closes_beyond", state: "armed", distance_usd: 10, distance_pct: 1.7 } };
+  const holding = { id: "1", operation_id: "decision-old", day: DAY, kind: "decision", symbol: "SPY", not_traded: false, actor: "owner",
+    text: "Holding. Give-back fired at 10:31; plan says hold below 600.00 (1.7% below).", created_at: "2026-10-27T14:20:00Z" }; // 10:20
+  await desk(page, { rows: [put], logged: [holding], symbol: "SPY" });
+  const bar = page.getByRole("region", { name: "Decision" }); // the 10:31 give-back came after the 10:20 decision
+  await expect(bar).toContainText("Your plan says hold while SPY is below 600.00. It is 1.7% below.");
+  await bar.getByRole("button", { name: "Ask why" }).click();
+  await expect(page.getByLabel("Message")).toHaveValue("Give-back fired at 10:31 on SPY; plan says hold below 600.00 (1.7% below). Should I hold or exit here, and why?");
 });
 
 test("Undo inside the window posts nothing and brings the bar back", async ({ page }) => {
