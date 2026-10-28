@@ -85,7 +85,7 @@ test("a tap opens that plan's investigation in place, sending nothing", async ({
   await expect(row).toHaveAttribute("href", `/copilot-lab?investigation=${NBIS}`);
   await row.click();
   await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toBeVisible();
-  await expect(board).toHaveCount(0);
+  await expect(board).toBeVisible(); // the desk keeps Plans beside the open conversation
   expect(chats).toEqual([]);
 });
 

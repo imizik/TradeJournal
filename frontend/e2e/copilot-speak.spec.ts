@@ -202,6 +202,7 @@ test("at 375 px the speaker is a 44 px target beside the mic, and nothing scroll
   await lab(page);
   await page.goto("/copilot-lab");
   await expect(page.getByText("No open positions.")).toBeVisible();
+  await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   await speaker(page).click();
   const target = (await speaker(page).boundingBox())!;
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;

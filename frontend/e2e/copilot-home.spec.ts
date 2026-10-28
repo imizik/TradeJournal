@@ -97,7 +97,7 @@ test("Open threads shows what is live, sends nothing on open, and one button ask
   await home.getByRole("button", { name: "What matters right now?" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
   expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null }]);
-  await expect(home).toHaveCount(0); // a conversation is open now
+  await expect(home).toBeVisible(); // the desk keeps the thread list beside the open conversation
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0].symbol).toBeNull(); // saved about no symbol
   await expect(page.getByLabel("Investigation symbol")).toHaveValue("");
@@ -108,7 +108,7 @@ test("an open investigation from Open threads opens in place without sending", a
   const home = page.getByRole("region", { name: "Open threads" });
   await home.getByRole("link", { name: "NBIS · Is the NBIS recovery real?" }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
-  await expect(home).toHaveCount(0);
+  await expect(home).toBeVisible(); // still beside the conversation on a wide screen
   await expect(page.getByLabel("Message")).toHaveValue(""); // not even a prefilled question
   expect(chats).toEqual([]);
 });
@@ -123,6 +123,23 @@ test("Open threads fits a 375 px phone and its button is thumb-sized", async ({ 
   expect((await ask.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("copilot-home-375.png"), fullPage: true });
+  expect(chats).toEqual([]);
+});
+
+test("on a phone the desk shows one pane at a time, and opening a thread moves to it", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const { chats } = await lab(page);
+  const home = page.getByRole("region", { name: "Open threads" });
+  const tabs = page.getByRole("tablist", { name: "Desk" });
+  await expect(tabs.getByRole("tab", { name: "Now" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Message")).toBeHidden();
+  await home.getByRole("link", { name: "NBIS · Is the NBIS recovery real?" }).click();
+  await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
+  await expect(home).toBeHidden();
+  await expect(tabs.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
+  await tabs.getByRole("tab", { name: "Now" }).click();
+  await expect(home).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   expect(chats).toEqual([]);
 });
 
