@@ -30,7 +30,7 @@ const OPEN = "2026-10-27T14:44:00Z"; // 10:44 New York
 const CLOSED = "2026-10-27T20:05:00Z"; // 16:05 New York
 
 async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], loop = { positions: [GIVEBACK] as unknown[], plans: [] as unknown[] },
-  logged = [] as unknown[], symbol = "NBIS", board = { plans: [] as unknown[], quotes_at: null, quote_issue: null } } = {}) {
+  logged = [] as unknown[], symbol = "NBIS", board = { plans: [] as unknown[], quotes_at: null, quote_issue: null }, path = `/copilot-lab?investigation=${INV}` } = {}) {
   const posts: { kind: string; text: string; symbol: string; operation_id: string }[] = [];
   const chats: unknown[] = [];
   const entries: unknown[] = [...logged];
@@ -54,7 +54,7 @@ async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], l
     entries.push(row);
     return route.fulfill({ json: row });
   });
-  await page.goto(`/copilot-lab?investigation=${INV}`);
+  await page.goto(path);
   return { posts, chats };
 }
 
@@ -111,6 +111,16 @@ test("a long put's plan holds below a level above the price, and a later alert b
   await expect(bar).toContainText("Your plan says hold while SPY is below 600.00. It is 1.7% below.");
   await bar.getByRole("button", { name: "Ask why" }).click();
   await expect(page.getByLabel("Message")).toHaveValue("Give-back fired at 10:31 on SPY; plan says hold below 600.00 (1.7% below). Should I hold or exit here, and why?");
+});
+
+test("a position ping with no plan conversation opens the desk on its symbol, straight onto the decision", async ({ page }) => {
+  const { posts } = await desk(page, { path: "/copilot-lab?symbol=NBIS" });
+  const bar = page.getByRole("region", { name: "Decision" });
+  await expect(bar).toContainText("Give-back fired at 10:31.");
+  await expect(page.getByTestId("session-tape")).toHaveCount(0); // not the Briefing's day at a glance
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(bar.getByRole("button", { name: "Holding" })).toBeInViewport(); // a phone lands on the Thread tab
+  expect(posts).toEqual([]);
 });
 
 test("Undo inside the window posts nothing and brings the bar back", async ({ page }) => {

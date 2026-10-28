@@ -22,6 +22,7 @@ out are investigation, trade and Radar event ids, each the row's own link.
 An option position's value is its own unrealized P&L (the option's mark), never the underlying's price; its plan
 levels and meter are on the underlying, and the status line says so by naming it.
 
+``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``).
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
 happened in it, from the same kind of existing readers.
 """
@@ -471,3 +472,14 @@ def desk_session(db: Session = Depends(get_session)):
             ("hours", regular), ("phase", phase), ("fills", fills), ("pings", pings), ("radar", radar),
             ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices))},
     }
+
+
+@router.get("/desk/scorecard")
+def desk_scorecard(db: Session = Depends(get_session)):
+    """The alert scorecard (``app/engine/alert_scorecard.py``): each position alert of the last 30 days, the decision
+    logged after it and what happened next against selling at the alert. Read-only, owner-only, refused while the lab
+    is off."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    from app.engine import alert_scorecard
+    return alert_scorecard.scorecard(db, today._now())
