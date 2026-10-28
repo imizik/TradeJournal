@@ -179,3 +179,22 @@ test("a dismissed card stays dismissed, and a card confirmed in another window i
   await expect(watchCard(page)).toHaveCount(0);
   await expect(planCard(page).getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");
 });
+
+test("a week review's practice card kept in an earlier answer is not added again", async ({ page }) => {
+  const server: Server = { records: new Map(), posts: [], outcomes: [] };
+  const PRACTICE = { id: "week-practice", kind: "practice", text: "Exit at my invalidation", measure: "exit_at_invalidation",
+    label: "exit at my invalidation", target: 1, why: "Two of three held past it." };
+  // The review proposed it, the owner dismissed it, then asked a follow-up; the practice route still offers the card.
+  server.records.set(INV, { ...meta(INV, "Week review Oct 19"), transcript: [
+    { role: "user", content: "Review my week" }, { role: "assistant", content: "Your week.", proposals: [{ ...PRACTICE, outcome: { state: "dismissed" } }] },
+    { role: "user", content: "And NBIS?" }, { role: "assistant", content: "NBIS lagged its group." }] } as Record_);
+  await page.route("**/copilot/practice?*", (route) => route.fulfill({ json: { goal: null, this_week: null, proposed: PRACTICE } }));
+  await page.addInitScript((id) => window.localStorage.setItem("tradejournal.copilot-lab.current.v2", id), INV);
+  await lab(page, server);
+  await expect(page.getByText("NBIS lagged its group.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Proposed practice" })).toHaveCount(0);
+  await page.getByLabel("Message").fill("Anything else?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  expect(cards(server).filter((c) => c.id === PRACTICE.id)).toEqual([expect.objectContaining({ outcome: { state: "dismissed" } })]);
+});

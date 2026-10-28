@@ -24,6 +24,7 @@ export function historyText(h: LevelHistory): string {
 }
 
 const SIZE_MAX = 120;
+const PRICE_MAX = 24;  // a price as typed; what the saved card keeps
 const usd = (n: number) => `$${n >= 100 || Number.isInteger(n) ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
 // Rounding down: a whole share or contract only when the risk covers it (the nudge absorbs float error like 150 / 1.5).
 const whole = (risk: number, each: number) => Math.floor(risk / each + 1e-9);
@@ -199,7 +200,9 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   function report(all: Record<Part, Result>) {
     const ran = Object.fromEntries(Object.entries(all).filter(([, r]) => r.state === "done" || r.state === "failed")
       .map(([part, r]) => [part, { state: r.state, text: r.text.slice(0, 500) }]));
-    onOutcome({ state: "confirmed", parts: ran, fields: { thesis: thesis.trim(), contract, entry, invalidation: stop, time_stop: timeStop, size_note: size } });
+    // Within what the investigation stores, so an odd input never stops the conversation from saving.
+    onOutcome({ state: "confirmed", parts: ran, fields: { thesis: thesis.trim().slice(0, 300), contract: contract.slice(0, 80),
+      entry: entry.slice(0, PRICE_MAX), invalidation: stop.slice(0, PRICE_MAX), time_stop: timeStop.slice(0, 80), size_note: size.slice(0, SIZE_MAX) } });
   }
 
   async function run(part: Part): Promise<Result> {
@@ -298,11 +301,11 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       <div className="grid grid-cols-2 items-end gap-2">
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Entry ({conditionText(plan.entry_trigger)})</span>
-          <input value={entry} onChange={e => setEntry(e.target.value)} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
+          <input value={entry} onChange={e => setEntry(e.target.value.slice(0, PRICE_MAX))} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
         </label>
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Invalidation ({conditionText(plan.invalidation)})</span>
-          <input value={stop} onChange={e => setStop(e.target.value)} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
+          <input value={stop} onChange={e => setStop(e.target.value.slice(0, PRICE_MAX))} inputMode="decimal" disabled={locked} className={cn(field, "min-h-11")} />
         </label>
       </div>
       {/* Below both inputs, in their columns, so a longer caption never moves one input out of line. */}

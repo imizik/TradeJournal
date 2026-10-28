@@ -292,6 +292,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const [conclusion, setConclusion] = useState("");
   const [linkedKey, setLinkedKey] = useState(0);
   const unsaved = useRef(false);
+  const persisting = useRef(false);
+  // Card outcomes recorded while their card may not be saved yet (a turn running, or its save in flight): sent once
+  // the save lands. Keyed by card id; a switch to another conversation drops them (its messages carried them).
+  const pendingOutcomes = useRef(new Map<string, ProposalOutcome>());
   // What an awaited follow re-checks when it resolves, since the owner may have typed or sent meanwhile.
   const turns = useRef(0); // sends so far
   const running = useRef(false);
@@ -309,6 +313,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   function open(saved: Investigation) {
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
+    pendingOutcomes.current.clear();
     setMessages(fromSaved(saved));
     setSymbol(saved.symbol ?? "");
     setCurrent(saved);
@@ -327,7 +332,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setMessages(list => {
       if (latest.current.current?.id !== id) return list;  // another conversation opened meanwhile
       const at = list.map(m => m.role).lastIndexOf("assistant");
-      if (at < 0 || list[at].proposals?.some(p => p.id === shown.id)) return list;
+      // Already kept with the conversation (in any answer, maybe with what was done with it): not added again.
+      if (at < 0 || list.some(m => m.proposals?.some(p => p.id === shown.id))) return list;
       return list.map((m, i) => i === at ? { ...m, proposals: [...(m.proposals ?? []), shown] } : m);
     });
   }
@@ -355,6 +361,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 
   /** A new conversation on ``target``, with the page's context line ready, unless the owner has typed their own. */
   function fresh(target: string) {
+    pendingOutcomes.current.clear();
     setMessages([]);
     setCurrent(null);
     setConclusion("");
@@ -410,14 +417,20 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (!messages.length) return;
     const fields = savedFields(messages, current, symbol, next);
     setSaveState({ state: "saving" });
+    persisting.current = true;
     try {
       const saved = current ? await updateInvestigation(current.id, current.revision, fields) : await createInvestigation(fields);
       setCurrent(saved);
       remember(saved.id);
       setSaveState({ state: "saved" });
       void refreshRecent();
+      const pending = [...pendingOutcomes.current];
+      pendingOutcomes.current.clear();
+      for (const [id, outcome] of pending) sendOutcome(saved.id, id, outcome);
     } catch (error) {
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Saving failed." });
+    } finally {
+      persisting.current = false;
     }
   }
 
@@ -469,14 +482,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     setMessages(current => [...current.slice(0, -1), fn(current[current.length - 1])]);
 
   /** A card was confirmed or dismissed: the conversation keeps it, and a saved investigation records it at once. A card
-   * from the turn still running is not saved yet; the save at the turn's end carries it. */
+   * that may not be saved yet (its turn running or its save still to land) is recorded once that save lands. */
   function recordOutcome(id: string, outcome: ProposalOutcome) {
     setMessages(list => list.map(m => m.proposals?.some(p => p.id === id)
       ? { ...m, proposals: m.proposals.map(p => p.id === id ? { ...p, outcome } : p) } : m));
-    if (!current || running.current) return;
-    void saveOutcome(current.id, id, outcome).catch(() => setSaveState({ state: "error",
-      message: "What you did with that card was not saved, so after a reload it may offer Confirm again (a retried Confirm does not save a plan or memory twice)." }));
+    if (!current || running.current || unsaved.current || persisting.current) pendingOutcomes.current.set(id, outcome);
+    else sendOutcome(current.id, id, outcome);
   }
+  const sendOutcome = (investigation: string, id: string, outcome: ProposalOutcome) =>
+    void saveOutcome(investigation, id, outcome).catch(() => setSaveState({ state: "error",
+      message: "What you did with that card was not saved, so after a reload it may offer Confirm again (a retried Confirm does not save a plan or memory twice)." }));
 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {

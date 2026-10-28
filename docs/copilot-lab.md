@@ -1048,8 +1048,9 @@ nothing exists until the owner confirms.
     `PUT /copilot/investigations/{id}/proposals/{proposal_id}/outcome`
     (`state` `confirmed` or `dismissed`, Confirm's note, a memory's or
     practice's saved words, a plan's part results and fields). It needs no
-    revision and does not bump it. A card from a turn still running is
-    recorded by that turn's save instead.
+    revision and does not bump it. A card that may not be saved yet (its turn
+    still running, or that turn's save in flight) is recorded once that save
+    lands.
   - A saved outcome is never lost to a save from a window that had not seen
     it, and a confirmed card stays confirmed. Before Confirm runs, the card
     re-reads the investigation; if another window already confirmed it, it
