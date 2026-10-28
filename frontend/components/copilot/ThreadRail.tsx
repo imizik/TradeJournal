@@ -200,9 +200,9 @@ export default function ThreadRail({ actions, active = null, onRows }: {
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
       {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}
-      <p data-testid="desk-keys" className="hidden flex-wrap items-center gap-x-1.5 gap-y-1 border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
-        <kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd> move <kbd className={cn(KBD, "ml-2")}>{jumpKey}</kbd> jump
-        <kbd className={cn(KBD, "ml-2")}>N</kbd> new plan <kbd className={cn(KBD, "ml-2")}>]</kbd> context
+      <p data-testid="desk-keys" className="hidden items-center gap-1 whitespace-nowrap border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
+        <kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move<kbd className={cn(KBD, "ml-1.5")}>{jumpKey}</kbd>jump
+        <kbd className={cn(KBD, "ml-1.5")}>N</kbd>plan<kbd className={cn(KBD, "ml-1.5")}>]</kbd>context
       </p>
     </nav>
   );

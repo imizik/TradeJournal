@@ -115,7 +115,9 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   useEffect(() => {
     if (!on) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || palette || typing(event.target)) return;
+      if (event.defaultPrevented || event.isComposing || typing(event.target)) return;
+      // The open dialog itself, not state: Escape closes it before React re-renders this listener.
+      if (desk.current?.querySelector("dialog[open]")) return;
       const key = event.key.toLowerCase();
       // ⌘K or Ctrl+K on any platform: outside a field neither does anything in the browser.
       if (key === "k" && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
@@ -137,7 +139,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [on, palette, step, planTrade, toggleContext]);
+  }, [on, step, planTrade, toggleContext]);
 
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>

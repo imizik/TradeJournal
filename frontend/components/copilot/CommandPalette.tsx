@@ -79,6 +79,7 @@ export default function CommandPalette({ open, onClose, threads, commands, onThr
       <li key={row.key} id={`${id}-${index}`} role="option" aria-selected={selected} className={base}
         onMouseMove={() => setActive(index)} onClick={() => choose(item)}>
         <span className="shrink-0 font-semibold text-foreground">{row.symbol ?? row.title}</span>
+        {row.symbol && (row.instrument ?? row.title) && <span className="shrink-0 text-xs text-muted-foreground">{row.instrument ?? row.title}</span>}
         <span className={cn("min-w-0 truncate text-xs", TONE[row.status.tone] === "text-foreground" ? "text-muted-foreground" : TONE[row.status.tone])}>{row.status.text}</span>
         {row.value && <span className={cn("ml-auto shrink-0 text-xs", TONE[row.value.tone], numeric(row.value.text) && "tabular-nums")}>{row.value.text}</span>}
       </li>
