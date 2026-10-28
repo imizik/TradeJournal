@@ -590,10 +590,11 @@ streaming answer is followed only while the reader is at the bottom of the
 conversation: scrolling up to read stops following, and the end follows again
 on their next send.
 
-The desk has its own palette (warm graphite, amber as the one accent) and type
-(Instrument Sans, IBM Plex Mono for tabular numbers), scoped to this page
-ahead of the app-wide redesign: it overrides the shadcn tokens inside the desk
-only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
+The whole app now uses the desk's graphite surfaces, text and borders
+(`frontend/app/globals.css`). The desk keeps its own accent (amber as the
+one accent, where the rest of the app's primary stays blue-grey) and type
+(Instrument Sans, IBM Plex Mono for tabular numbers), scoped to this page: it
+overrides the shadcn tokens inside the desk only. `frontend/lib/desk.ts` holds the shapes the desk's pieces share (tabs,
 the conversation hand-off, thread-list rows and groups, logged decisions,
 the decision bar's wording).
 Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),

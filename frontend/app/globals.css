@@ -26,25 +26,27 @@
     --radius: 0.5rem;
   }
 
+  /* Surfaces, text and borders are the Copilot desk's graphite (components/copilot/CopilotLab.module.css);
+     primary stays blue-grey, because amber already means "needs you" across the app. */
   .dark {
-    --background: 222 20% 9%;
-    --foreground: 210 20% 90%;
-    --card: 222 20% 12%;
-    --card-foreground: 210 20% 90%;
-    --popover: 222 20% 12%;
-    --popover-foreground: 210 20% 90%;
+    --background: 240 6% 6%;
+    --foreground: 240 5% 93%;
+    --card: 240 5% 8%;
+    --card-foreground: 240 5% 93%;
+    --popover: 240 5% 8%;
+    --popover-foreground: 240 5% 93%;
     --primary: 210 40% 70%;
-    --primary-foreground: 222 20% 9%;
-    --secondary: 222 20% 16%;
-    --secondary-foreground: 210 20% 90%;
-    --muted: 222 20% 16%;
-    --muted-foreground: 215 16% 55%;
-    --accent: 222 20% 16%;
-    --accent-foreground: 210 20% 90%;
+    --primary-foreground: 240 6% 6%;
+    --secondary: 240 5% 11%;
+    --secondary-foreground: 240 5% 93%;
+    --muted: 240 5% 11%;
+    --muted-foreground: 240 4% 57%;
+    --accent: 240 5% 11%;
+    --accent-foreground: 240 5% 93%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
-    --border: 222 20% 18%;
-    --input: 222 20% 18%;
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
     --ring: 210 40% 70%;
     --radius: 0.5rem;
   }
