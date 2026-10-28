@@ -15,9 +15,10 @@ import random
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import _endpoint, epoch
 from app.engine.radar_movers import build_movers
-from app.engine.radar_store import RadarStore, load_universe
+from app.engine.radar_store import RadarStore
+from app.engine.radar_evidence import census
 
-SCORER_VERSION = "radar-outcomes-v1"
+SCORER_VERSION = "radar-outcomes-v2"
 HORIZONS = (("30m", 30 * 60), ("60m", 60 * 60), ("close", None))
 PRIMARY = "60m"
 TOLERANCE_SECONDS = 120
@@ -94,6 +95,7 @@ def score_event(event: dict, passes: list[dict], quotes: dict[int, dict[str, dic
 
 def score_store(store: RadarStore, universe: dict, done: set[str], today: str) -> list[dict]:
     rows = []
+    receipts, configs = store.detection_evidence()
     for session in sorted(store.sessions()):
         if session >= today:
             continue
@@ -102,7 +104,24 @@ def score_store(store: RadarStore, universe: dict, done: set[str], today: str) -
             continue
         passes = sorted((p for p in store.passes(session) if p["status"] in USABLE), key=lambda p: (p["started_at"], p["id"]))
         quotes = store.pass_quotes(p["id"] for p in passes)
-        rows += [score_event(e, passes, quotes, universe) for e in events]
+        for event in events:
+            matches = [r for r in receipts.values() if event["event_id"] in r["event_ids"]]
+            receipt = matches[0] if len(matches) == 1 else None
+            config = configs.get(receipt["config_digest"]) if receipt else None
+            start = next((p for p in passes if receipt and p["id"] == receipt["pass_id"]), None)
+            verified = bool(receipt and config and start and receipt["origin"] == "live" and receipt["status"] == "ok"
+                            and event["first_seen_at"] == start["finished_at"]
+                            and event["universe_version"] == config["universe"]["version"]
+                            and event["rule_version"] == config["rules"]["version"])
+            if verified:
+                row = score_event(event, passes, quotes, config["universe"])
+            else:
+                row = {k: event[k] for k in ("event_id", "session_date", "rule_version", "kind", "direction", "symbols", "first_seen_at")}
+                row.update(horizons={}, excluded={name: "unverified live provenance" for name, _ in HORIZONS},
+                           scorer_version=SCORER_VERSION)
+            row.update(record_type="event", evidence_verified=verified,
+                       config_digest=receipt["config_digest"] if receipt else None)
+            rows.append(row)
     return rows
 
 
@@ -139,17 +158,29 @@ def _horizons(rows: list[dict]) -> dict:
 
 
 def summarize(rows: list[dict]) -> dict:
+    sessions = [r for r in rows if r.get("record_type") == "session"]
+    events = [r for r in rows if "event_id" in r]
     out = {}
     for version in sorted({r["rule_version"] for r in rows}):
         calibration = CALIBRATION.get(version, set())
-        mine = [r for r in rows if r["rule_version"] == version]
-        own = [r for r in mine if r["session_date"] not in calibration]
+        recorded = [r for r in sessions if r["rule_version"] == version and r["session_date"] not in calibration]
+        verified = [r for r in recorded if r["verified"]]
+        review_window = sorted(verified, key=lambda r: r["session_date"])[:REVIEW_SESSIONS]
+        configs = {r["config_digest"] for r in review_window}
+        # Same label with altered rules/universe is not one frozen experiment.
+        mixed = len(configs) > 1
+        eligible = {r["session_date"]: r["config_digest"] for r in review_window} if not mixed else {}
+        mine = [r for r in events if r["rule_version"] == version]
+        own = [r for r in mine if r.get("evidence_verified") and r["session_date"] in eligible
+               and r.get("config_digest") == eligible[r["session_date"]]]
+        report = {"sessions": len(eligible), "review_at_sessions": REVIEW_SESSIONS,
+                  "recorded_sessions": len(recorded), "verified_sessions_available": len(verified), "unverified_sessions": [r for r in recorded if not r["verified"]],
+                  "mixed_configuration": mixed, "events": len(own), "excluded_events": len(mine) - len(own),
+                  "horizons": _horizons(own)}
+        report["decision"] = "not reviewed: mixed frozen configurations" if mixed else decide(report)
         in_sample = [r for r in mine if r["session_date"] in calibration]
-        report = {"sessions": len({r["session_date"] for r in own}), "review_at_sessions": REVIEW_SESSIONS,
-                  "events": len(own), "horizons": _horizons(own)}
-        report["decision"] = decide(report)
         if in_sample:
-            report["in_sample"] = {"note": "sessions the rules were set on; never part of the decision",
+            report["in_sample"] = {"note": "calibration; excluded from decision",
                                    "sessions": sorted({r["session_date"] for r in in_sample}),
                                    "events": len(in_sample), "horizons": _horizons(in_sample)}
         out[version] = report
@@ -172,16 +203,24 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("store", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--census-only", action="store_true", help="print outcome-blind session metadata; write nothing")
     parser.add_argument("--today", help="New York date treated as today (YYYY-MM-DD); sessions on or after it are skipped")
     args = parser.parse_args(argv)
-    rows = [json.loads(line) for line in args.out.read_text().splitlines() if line.strip()] if args.out.exists() else []
     today = args.today or datetime.now(ET).date().isoformat()
-    new = score_store(RadarStore(args.store, read_only=True), load_universe(), {r["event_id"] for r in rows}, today)
+    store = RadarStore(args.store, read_only=True)
+    sessions = census(store, today)
+    if args.census_only:
+        print(json.dumps({"sessions": sessions}, indent=2))
+        return
+    rows = [json.loads(line) for line in args.out.read_text().splitlines() if line.strip()] if args.out.exists() else []
+    new = score_store(store, None, {r["event_id"] for r in rows if "event_id" in r}, today)
+    saved_sessions = {r["session_date"] for r in rows if r.get("record_type") == "session"}
+    new += [r for r in sessions if r["session_date"] not in saved_sessions]
     if new:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         with args.out.open("a") as handle:
             handle.writelines(json.dumps(r, sort_keys=True) + "\n" for r in new)
-    print(json.dumps({"scored_now": len(new), "versions": summarize(rows + new)}, indent=2))
+    print(json.dumps({"scored_now": sum("event_id" in r for r in new), "versions": summarize(rows + new)}, indent=2))
 
 
 if __name__ == "__main__":

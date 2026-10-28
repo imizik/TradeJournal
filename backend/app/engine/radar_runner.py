@@ -18,6 +18,7 @@ own pre-open lists in a separate file.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import UTC, date, datetime
 import logging
 import os
@@ -68,6 +69,7 @@ class RadarRunner:
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
         """(inside the regular session, skip reason to record or None)."""
         hours = self.calendar.hours(today)
+        self._session_hours = hours
         if hours is None:
             # Clock hours cannot see holidays or early closes, so record the gap instead of guessing.
             clock_hours = today.weekday() < 5 and REGULAR_OPEN <= minute < REGULAR_CLOSE
@@ -100,11 +102,22 @@ class RadarRunner:
         record["finished_at"] = _iso(datetime.fromtimestamp(self.clock(), ET))
         pass_id = self.store.append_pass(record, rows)
         new_events: list[RadarEvent] = []
+        detection_status = "skipped"
         if inside and record["status"] in radar_rules.USABLE:
             try:
                 new_events, _ = self.detect(record["session_date"], pass_id)
+                detection_status = "ok"
             except Exception:  # detection is extra; the recorded pass stands either way
+                detection_status = "failed"
                 log.exception("Radar detection failed")
+        try:
+            self.store.append_detection(pass_id, universe=self.universe, rules=asdict(self.rules),
+                                        hours=self._session_hours, status=detection_status,
+                                        event_ids=[e["event_id"] for e in new_events],
+                                        recorded_at=_iso(datetime.fromtimestamp(self.clock(), UTC)), origin="live")
+        except Exception:
+            # Keep collection/alerts running, but the scorer cannot certify this pass.
+            log.exception("Radar detection receipt failed")
         if inside and self.alerts is not None:
             try:
                 if new_events:

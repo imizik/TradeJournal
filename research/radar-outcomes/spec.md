@@ -55,9 +55,11 @@ Reported per rule version, never pooled across versions:
 
 ## Decision, fixed now
 
-Review once, after **20 recorded sessions of one rule version**. v1 is
-expected after the October 26 close, so the clock starts at v1's first live
-session.
+Review once, using the **first 20 verified recorded sessions of one frozen
+configuration**. The October 28 metadata audit found v0 active and no v1 events;
+the earlier expected v1 start was not activation evidence. This repair does not
+change `RADAR_RULES_VERSION`. Missing legacy provenance cannot be backfilled by
+replay.
 
 - **Radar beats Movers:** at +60 min, Radar − Movers is above 0 with its
   whole 95% range above 0, and the event hit rate is above 50%.
@@ -103,8 +105,9 @@ most two testable ideas for a later rule version.
 
 ## Deliberately not building
 
-- No new database table, API route, screen or phone message. Results go to
-  one JSONL file plus a printed table.
+- No API route, screen or phone message. The October 28 repair adds two
+  append-only metadata tables in the existing Radar SQLite store; results and
+  session receipts go to one JSONL file plus a printed table.
 - No replay of past passes, no threshold search and no sector-relative
   second outcome. One benchmark (SPY) keeps it legible.
 - No integration with ResearchStore or the overnight runner. Codex can wrap
@@ -134,3 +137,52 @@ most two testable ideas for a later rule version.
   it is the free alternative you already have.
 - **Your ratings stay the other half of the pilot.** This measures timing,
   not whether an event was useful to you.
+
+## October 28 evidence-accounting repair
+
+The recorder writes an immutable detection receipt after each recorded pass,
+including failed/skipped detection and successful passes with **zero events**.
+A missing receipt (including a crash after event insertion) is unknown, never
+success. Only the live runner supplies `origin=live`; replay/default callers
+cannot qualify. Each receipt points to a content-hashed snapshot of the actual
+rule parameters and full universe, and records the calendar hours used. This
+is operational provenance, not a cryptographic attestation against an operator
+with database write access.
+
+The outcome-blind census (`--census-only`, with the existing store and `--out`
+arguments) reads metadata only and writes nothing. It reports every recorded
+date before today and absent weekdays since the first recorded date; absent
+dates have unknown calendar status, not inferred holidays or successful days.
+A qualifying session requires consistent hours/configuration, successful live
+receipts for all passes, unique event-to-pass provenance and every scheduled
+minute slot. Timestamp rounding to the nearest minute tolerates scheduler jitter;
+duplicates never replace a missing slot. Early closes use recorded hours.
+Failures, partial days, replay and legacy rows remain explicit exclusions.
+This strict completeness definition is fixed before inspecting outcomes.
+
+`radar-outcomes-v2` appends session records as well as event records to the
+existing JSONL output. Sessions without events count toward the 20-session gate.
+The first 20 qualifying dates define the review window; later observations do
+not repeatedly change that verdict. Configurations that reuse one version label
+with different rule parameters or universe bytes cannot be pooled. The scorer
+uses each event's recorded universe, never today's membership. Existing v1
+scorer output stays unchanged and lacks verification; it cannot qualify merely
+because it is already in the file. The optional review reader skips session rows
+and events from unverified sessions. No return threshold, benchmark, horizon,
+bootstrap rule, provider request, timer or trading policy changes here.
+
+**Existing evidence:** the October 28 read-only audit found four completed
+recorded dates (October 22, 23, 26, 27), 18 persisted v0 events on the latter two,
+and no detector receipts. Thus **zero existing sessions can be certified by this
+repair**. This is missing provenance, not evidence that those events were bad.
+No replay or inferred success is used to restart their clock retroactively.
+The first qualifying full session after an approved rollout starts the verified
+count; a calendar date for the verdict cannot yet be promised.
+
+**Rollout boundary:** implementation is not deployment. First writable opening
+adds `detection_config` and `detection_receipt` to the Radar SQLite file. Earlier
+binaries reject unknown tables, so rollback requires a receipt-aware binary or a
+pre-upgrade backup restored through an explicitly approved recovery procedure.
+Do not delete the new tables or alter the production store during verification.
+Read-only census of an old store performs no migration. The journal database is
+not involved. The PR remains for owner review/merge; no activation is implied.
