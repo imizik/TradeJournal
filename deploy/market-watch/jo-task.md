@@ -23,7 +23,10 @@ and their dependent market continuations retain all their own inbox, batch
 and failure guards when using the shared workflow below. A late scheduled
 read remains late; never invent the intended receipt time.
 
-1. Call market_watch_snapshot with scheduled_slot=SLOT. An early wake returns
+1. For scheduled runs, call market_watch_snapshot with scheduled_slot=SLOT.
+   Event/setup continuations reusing this workflow omit scheduled_slot and read
+   immediately under their existing ordering and expiry rules; they have no SLOT.
+   For a scheduled run, an early wake returns
    status=not_due, server_time and retry_at, without issuing an input receipt.
    This is not a missing-data failure. If the host supports waiting, wait until
    retry_at and call once again with the SAME slot. If it cannot wait, record
