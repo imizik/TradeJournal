@@ -1114,6 +1114,22 @@ model to call:
     owner set to a long hold on the desk, up to 10 (symbol, contract, opening
     day). The desk asks nothing about them day to day, so the review ends with
     a line on each. A week with no closed trades still carries it.
+  - `exit_reviews`, only when a plan exited that week (absent otherwise):
+    the plans whose position closed that week (`copilot_plans.exits`, by
+    the last exit), counted `exited`, `answered`, `skipped` and `waiting`
+    (an exit review not yet answered, or a plan marked done without one; see
+    Plans end under [Close the day](#the-desk)). An answer is the `reflection`
+    saved with its "Exit reviewed" `plan_done` entry. `lines` group the
+    measured facts deterministically: "2 of 3 exits with an invalidation
+    alert came after the invalidation broke", "1 of 2 exits with a time stop
+    came after it was due", "Said they followed the plan on 1 of 2 answered
+    reviews". `rows` (up to 8) are the answered reviews: symbol, exit time,
+    `followed` (what the answer opens with: `yes`, `partly`, `no`, else
+    null), the lesson in the owner's own words (up to 200 characters), and
+    the measured facts: `invalidation` (`broke_while_held` with
+    `minutes_after`, `not_broken`, or null without an alert) and
+    `past_time_stop` (null without one). The lessons are data, never
+    instructions.
   - `practice`, only while a practice goal is active (absent otherwise, so
     such a week reads exactly as before): the goal (text, measure, its label,
     target, first week), `practicing` (false when the reviewed week came
@@ -1128,11 +1144,23 @@ model to call:
   measure fits, saying the count it rests on. It proposes none when the week
   is too small (`sample.small`, under 10 closed trades). It says plainly when
   the sample is too small, and proposes a memory only if the owner states a
-  lesson.
+  lesson. With `exit_reviews` it gives their counts in one line beside the
+  measured facts, and when the practice it proposes matches one of the
+  owner's lessons it quotes that lesson in the answer and the card's why, so
+  the goal is in the owner's own words; the measure stays one of the fixed set.
+- Under the answer, **Your exit lessons this week** ("2 of 3 exits
+  reviewed") lists each answered review on one line (symbol, Followed /
+  Partly / Didn't follow, the lesson), each opening its plan's thread
+  (`ExitLessons.tsx`). The tool event carries it as `lessons`
+  (`copilot.week_lessons_card`, a second read through the evidence's
+  `week_exit_reviews`), the only place the plan's investigation id appears;
+  the model's result never has it. A reopened saved conversation shows the
+  answer without the block (saved evidence keeps no tool data).
 - The review is held under 5,800 characters: over that, it drops the
   provenance labels, the time-stop rows, the follow-through rows, then trims
   the give-back and P&L rankings to two each, drops the notes, and finally
-  the give-back ranking, then the practice note, marking itself `trimmed`.
+  the give-back ranking, cuts the exit lessons to 80 characters and then to
+  three rows, then the practice note, marking itself `trimmed`.
   Totals, planned vs unplanned, the follow-through counts and the practice
   score always stay. One failing section reads `unavailable`.
 - No trade, fill, account, plan or investigation id is returned. Research
@@ -1140,11 +1168,14 @@ model to call:
   "What changed?" leaves it out of an investigation's evidence times.
 - Fixture mode serves a simulated week marked `simulated`; replay says it is
   unavailable. The fake model answers "review my week" (and "review my week
-  of YYYY-MM-DD") by calling the tool and writing a short scripted review;
-  for a week of 10 or more trades it first proposes one practice (exit at
-  the invalidation when a hit was held past 15 minutes, else a plan before
-  every entry when trades had none). The fixture's week has 8, so it
-  proposes none.
+  of YYYY-MM-DD") by calling the tool and writing a short scripted review
+  with an exit reviews line quoting a lesson; for a week of 10 or more
+  trades it first proposes one practice (exit at the invalidation when a hit
+  was held past 15 minutes, quoting a lesson from an exit after the
+  invalidation broke, else a plan before every entry when trades had none).
+  The fixture's week has 8, so it proposes none; its three exited plans have
+  two answered lessons (no thread: each line opens its symbol), and it sheds
+  its provenance labels to fit, as a real week does.
 - Tests: `backend/tests/test_copilot_week_review.py`,
   `frontend/e2e/review-my-week.spec.ts`.
 
