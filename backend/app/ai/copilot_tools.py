@@ -851,6 +851,11 @@ class LiveEvidence:
         from app.ai import copilot_review
         return copilot_review.week_exit_reviews(week_start)
 
+    def week_long_holds(self) -> dict:
+        """The long holds with each plan's thread, for the owner's page only (never the model)."""
+        from app.ai import copilot_review
+        return copilot_review.week_long_holds()
+
     def get_option_candidates(self, symbol: str, horizon_days: int, direction: str, budget_usd: float | None = None) -> dict:
         from app.ai import copilot_options
         return copilot_options.live_candidates(symbol, horizon_days, direction, budget_usd)

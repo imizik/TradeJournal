@@ -28,6 +28,8 @@ export type ToolEvent = {
   looked_at?: string[];
   /** get_week_review only: the week's answered exit reviews, each opening its plan's thread (never sent to the model). */
   lessons?: WeekLessons;
+  /** get_week_review only: open positions set to a long hold, each opening its plan's thread (never sent to the model). */
+  long_holds?: WeekLongHolds;
 };
 
 /** The owner's exit lessons for the reviewed week: ``followed`` is what the answer opens with; ``thread`` the plan's
@@ -35,6 +37,13 @@ export type ToolEvent = {
 export type WeekLessons = {
   exited: number; answered: number; simulated: boolean;
   rows: { symbol: string; followed: "yes" | "partly" | "no" | null; lesson: string; thread: string | null }[];
+};
+
+/** The long holds the desk never asks about day to day: days held, the plan's thesis in the owner's words (absent without
+ * a plan) and ``thread`` the plan's investigation, null without one or in the simulated fixture (the row opens its symbol). */
+export type WeekLongHolds = {
+  simulated: boolean;
+  rows: { symbol: string; contract: string; days_held: number; thesis: string | null; thread: string | null }[];
 };
 
 /** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to

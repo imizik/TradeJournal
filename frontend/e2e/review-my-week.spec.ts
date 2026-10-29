@@ -111,3 +111,29 @@ test("the week review shows your exit lessons, each opening its plan's thread", 
   await expect(rows.nth(1)).toHaveAttribute("href", "/copilot-lab?symbol=CRWV"); // no thread: its symbol
   await page.screenshot({ path: test.info().outputPath("review-my-week-lessons.png") });
 });
+
+test("the week review lists your long holds, each asking whether it is still the thesis", async ({ page }) => {
+  await labOn(page);
+  const holds = { simulated: false, rows: [
+    { symbol: "MSFT", contract: "MSFT stock", days_held: 71, thesis: "Azure capacity keeps growing faster than capex.",
+      thread: "55555555-5555-4555-8555-555555555555" },
+    { symbol: "TSM", contract: "TSM 1/15/27 200C", days_held: 24, thesis: null, thread: null },
+  ] };
+  const turn = TURN.replace('"name":"get_week_review",', `"name":"get_week_review","long_holds":${JSON.stringify(holds)},`);
+  await page.unroute("**/copilot/chat");
+  await page.route("**/copilot/chat", (route) =>
+    route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
+  await page.goto("/copilot-lab");
+  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  const block = page.getByRole("region", { name: "Your long holds" });
+  await expect(block).toContainText("2 held, not asked about day to day");
+  const rows = block.getByRole("link");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("71d");
+  await expect(rows.nth(0)).toContainText("“Azure capacity keeps growing faster than capex.”");
+  await expect(rows.nth(0)).toContainText("Still the thesis?");
+  await expect(rows.nth(0)).toHaveAttribute("href", "/copilot-lab?investigation=55555555-5555-4555-8555-555555555555");
+  await expect(rows.nth(1)).toContainText("TSM 1/15/27 200C · no plan");
+  await expect(rows.nth(1)).toHaveAttribute("href", "/copilot-lab?symbol=TSM"); // no plan: its symbol
+  await page.screenshot({ path: test.info().outputPath("review-my-week-long-holds.png") });
+});

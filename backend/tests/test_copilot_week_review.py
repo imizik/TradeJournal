@@ -15,6 +15,7 @@ from app.ai import copilot, copilot_review, copilot_tools, research_job
 from app.ai.copilot_fixture import FixtureEvidence
 from app.ai.copilot_replay import ReplayEvidence
 from app.engine import capture_links, position_alerts
+from app.engine.chart_math import ET
 from app.models import (Account, Fill, LevelAlert, LevelAlertEvent, PlanTimeStop, PositionAlert, Trade, TradeCapture, TradeFill,
                         TradePathMetrics)
 from app.routers.fills import _rebuild_trades
@@ -323,6 +324,9 @@ def test_the_scripted_model_reviews_the_week_from_the_button_text():
     assert "To practice next week" in text and "Small sample" in text
     assert "Exit reviews: 2 of 3 answered" in text and 'In your words: "No. The invalidation broke' in text
     assert [r["symbol"] for r in tool["lessons"]["rows"]] == ["NBIS", "CRWV"]  # the block under the answer
+    assert "Long holds: MSFT stock held 71 days" in text and "TSM 1/15/27 200C held 24 days, no plan" in text
+    assert [(r["symbol"], r["thread"]) for r in tool["long_holds"]["rows"]] == [("MSFT", None), ("TSM", None)]
+    assert tool["long_holds"]["simulated"] is True
 
 
 def test_the_system_prompt_asks_for_the_week_frame():
@@ -351,9 +355,47 @@ def test_long_holds_the_desk_does_not_ask_about_are_in_the_week(db):
     _rebuild_trades(db, "test")
     db.commit()
     week = copilot_review.week_review("2026-10-21", session=db)
-    assert week["long_holds"] == {"state": "ok", "rows": [{"symbol": "MSFT", "opened": THU.date().isoformat(), "contract": "MSFT stock"}]}
+    days = (datetime.now(ET).date() - THU.date()).days
+    assert week["long_holds"] == {"state": "ok", "rows": [{"symbol": "MSFT", "contract": "MSFT stock", "opened": THU.date().isoformat(),
+                                                           "days_held": days}]}
     assert copilot_review.week_review("2026-10-05", session=db)["long_holds"]["rows"][0]["symbol"] == "MSFT"  # a quiet week too
     assert "long_holds" not in copilot_review.week_review("2026-10-21", session=_without_horizons(db))
+
+
+def test_a_long_hold_carries_its_plans_thesis_and_only_the_owners_page_gets_its_thread(db):
+    from app.models import DayJournalEntry
+    db.add(fill(20, "MSFT", "buy", 3, 400, THU))
+    db.add(DayJournalEntry(operation_id="h1", day=THU.date(), kind="horizon", symbol="MSFT", text="Long hold"))
+    db.commit()
+    _rebuild_trades(db, "test")
+    db.commit()
+    capture = TradeCapture(client_id="plan-msft", received_at=_utc(THU) - timedelta(minutes=30), account_id=ROTH,
+                           account_label="Robinhood Roth 8267", underlying="MSFT", side="buy_stock", instrument="stock",
+                           mode="discretionary", setup_label="Copilot plan", context_state="unavailable", image_state="unavailable",
+                           note="Thesis: Azure keeps growing. Contract: MSFT stock. From a Copilot Lab plan card.",
+                           context_json=json.dumps({"investigation_id": INVESTIGATION}))
+    db.add(capture)
+    db.commit()
+    capture_links.link(db, capture, UUID(int=20))
+    week = copilot_review.week_review("2026-10-21", session=db)
+    [row] = week["long_holds"]["rows"]
+    assert row["thesis"] == "Azure keeps growing." and "thread" not in row and INVESTIGATION not in json.dumps(week)
+    assert "owner's own words" in week["long_holds"]["note"]
+    [mine] = copilot_review._long_holds(db, threads=True)["rows"]
+    assert mine["thread"] == INVESTIGATION and mine["thesis"] == "Azure keeps growing."
+
+
+def test_the_long_holds_block_opens_each_thread_and_needs_a_read():
+    class Live:
+        def week_long_holds(self):
+            return {"state": "ok", "rows": [{"symbol": "MSFT", "contract": "MSFT stock", "opened": "2026-08-14", "days_held": 71,
+                                             "thesis": "Azure keeps growing", "thread": INVESTIGATION}]}
+    data = {"state": "ok", "long_holds": {"state": "ok", "rows": [{"symbol": "MSFT"}]}}
+    assert copilot.long_holds_card(Live(), data) == {"simulated": False, "rows": [
+        {"symbol": "MSFT", "contract": "MSFT stock", "days_held": 71, "thesis": "Azure keeps growing", "thread": INVESTIGATION}]}
+    assert copilot.long_holds_card(Live(), {"state": "none", **{k: v for k, v in data.items() if k != "state"}})  # a quiet week too
+    assert copilot.long_holds_card(Live(), {"state": "ok"}) is None
+    assert copilot.long_holds_card(ReplayEvidence.__new__(ReplayEvidence), data) is None
 
 
 def _without_horizons(db):
