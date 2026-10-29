@@ -166,8 +166,7 @@ test("Waiting for you lists a conversation with cards to confirm and opens it on
   const { chats } = await lab(page, { ...DESK, threads: [...DESK.threads.slice(0, 4), DRAFT, ...DESK.threads.slice(4)] });
   await page.route(`**/copilot/investigations/${APLD}`, (route) => route.fulfill({ json: waiting }));
   const threads = list(page);
-  const titles = await threads.locator("section h3").allTextContents();
-  expect(titles).toEqual(["Pinned", "Act now", "Near a trigger", "Waiting for you", "New since you looked", "Watching"]);
+  await expect(threads.locator("section h3")).toHaveText(["Pinned", "Act now", "Near a trigger", "Waiting for you", "New since you looked", "Watching"]);
   const drafts = threads.getByRole("region", { name: "Waiting for you" });
   await expect(drafts.getByLabel("1 thread")).toBeVisible();
   const apld = drafts.getByRole("link", { name: "APLD APLD base" });
