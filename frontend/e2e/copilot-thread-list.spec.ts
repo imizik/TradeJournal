@@ -164,7 +164,7 @@ const fresh = (symbol: string, minute: number, radar = false) => row(radar
   : { key: `thesis:${symbol}-${minute}`, group: "new", symbol, title: `${symbol} thesis`, status: { text: `News · ${symbol} headline ${minute}`, tone: "info" },
     path: "/copilot-lab", changed_at: epoch("2026-10-23T13:30:00Z") + minute * 60 });
 const BUSY = { ...DESK, threads: [
-  ...DESK.threads.filter((r) => r.group !== "new" && r.group !== "watch"),
+  ...DESK.threads.slice(0, 4), // the pinned, Act now and Near a trigger rows
   fresh("MU", 10, true), fresh("MU", 50), fresh("NBIS", 40), fresh("NBIS", 45), fresh("IREN", 30, true),
   fresh("CRWV", 20), fresh("AMD", 15), fresh("SMCI", 12), fresh("ORCL", 5),
   ...["APLD", "RNXT", "AAPL", "TSLA", "META"].map((symbol) => row({ key: `investigation:${symbol}`, group: "watch", symbol, title: `${symbol} idea`,
