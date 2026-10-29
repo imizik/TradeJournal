@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The desk's Context pane: Chart (default), Timeline and Your history for the open thread. Every lab route is stubbed
-// in the browser, so no model runs and nothing reaches the e2e backend; the pane only reads.
+// The desk's Context pane: Chart (default), Timeline and Your history for the open thread, and on the Briefing the day.
+// Every lab route is stubbed in the browser, so no model runs and nothing reaches the e2e backend; the pane only reads.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
   plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
@@ -111,4 +111,44 @@ test("on a 375 px phone the Context tab shows the pane, and its tabs fit", async
   expect((await tabs.getByRole("tab", { name: "Timeline" }).boundingBox())!.height).toBeGreaterThanOrEqual(36);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("desk-context-375.png"), fullPage: true });
+});
+
+test("on the Briefing the pane shows the day: QQQ with your fills and pings, the day's timeline and this week's record", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
+  await page.route("**/copilot/chat", (route) => route.abort());
+  await page.route("**/copilot/desk/market/picture", (route) => { reads.push("market"); return route.fulfill({ status: 200, contentType: "image/png", body: PNG }); });
+  await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: {
+    as_of: new Date(now * 1000).toISOString(), now, day: "2026-10-28", phase: "regular", open: now - 3600, close: now + 7200,
+    events: [
+      { kind: "fill", at: now - 3000, symbol: "NBIS", text: "Bought NBIS" },
+      { kind: "ping", at: now - 1200, symbol: "NBIS", text: "Give-back ping · NBIS" },
+    ],
+    time_stops: [{ symbol: "CRWV", at: now + 1800, clock: "14:30" }], pings: { sent: 1, held: 0, cap: 12 },
+    prep: { at: now - 7200, line: "Two positions, one draft." }, indices: [], quote_issue: null,
+    sections: { fills: "ok", pings: "unavailable", radar: "off" },
+  } }));
+  await page.route("**/charts/captures/streak", (route) => route.fulfill({ json: {
+    show: true, since: now - 86400 * 30, tracking: true, current: 6, best: 9, pending: 0,
+    this_week: { planned: 3, total: 4, pending: 0, start: now - 86400 * 2 }, last_break: null,
+  } }));
+  await page.goto("/copilot-lab");
+  const pane = page.getByRole("complementary", { name: "Context" });
+  await expect(pane.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
+  await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
+  await expect(pane).toContainText("your fills");
+  expect(reads).toEqual(["market"]);
+
+  const tabs = pane.getByRole("tablist", { name: "Context" });
+  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  const items = pane.getByRole("list", { name: "Timeline" }).getByRole("listitem");
+  await expect(items).toHaveText([/CRWV time stop/, /Give-back ping · NBIS/, /Bought NBIS/, /Pre-market prep written.*Two positions/]);
+  await expect(pane).toContainText("Could not read: pings.");
+
+  await tabs.getByRole("tab", { name: "This week" }).click();
+  await expect(pane.getByRole("img", { name: "3 planned, 1 unplanned" })).toBeVisible();
+  await expect(pane).toContainText("3 of 4 entries this week were planned before entry.");
+  await expect(pane).toContainText("Plan streak 6, best 9. One more planned entry makes 7 in a row.");
+  await pane.screenshot({ path: test.info().outputPath("desk-context-week.png") });
 });

@@ -143,6 +143,38 @@ def test_the_picture_says_why_it_is_unavailable(lab, engine, monkeypatch):  # no
     assert lab.get(f"/copilot/desk/{NBIS}/picture").json() == {"detail": "No NBIS minute bars for today yet."}
 
 
+def test_the_market_picture_is_qqq_today_with_the_days_fills_and_pings(lab, engine, monkeypatch):  # noqa: F811
+    with Session(engine) as db:  # fills keep New York wall time, pings UTC
+        db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="buy", contracts=5, price=93.0,
+                    executed_at=datetime(2026, 10, 21, 10, 5), raw_email_id="gmail:710"))
+        db.add(Fill(account_id=ROTH, ticker="CRWV", instrument_type="stock", side="sell", contracts=5, price=130.0,
+                    executed_at=datetime(2026, 10, 21, 10, 40), raw_email_id="gmail:711"))
+        db.add(PhonePing(sender="level_alerts", source_id="p1", kind="giveback", rank=1, symbol="NBIS", decision="sent",
+                         title="NBIS gave back", body="", decided_at=T0 + timedelta(minutes=20)))
+        db.add(PhonePing(sender="level_alerts", source_id="p2", kind="giveback", rank=1, symbol="NBIS", decision="merged",
+                         title="held", body="", decided_at=T0 + timedelta(minutes=21)))  # held back: not drawn
+        db.commit()
+    asked = []
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: asked.append(symbol) or bars(base=480.0))
+    seen = drawn(monkeypatch)
+    response = lab.get("/copilot/desk/market/picture")
+    assert response.status_code == 200 and response.content.startswith(b"\x89PNG")
+    [chart] = seen
+    assert asked == ["QQQ"] and chart.title == "QQQ" and chart.levels == ()
+    assert [(m.time, m.price, m.label, m.tone) for m in chart.marks] == [
+        (int(epoch(T0 + timedelta(minutes=5))), 480.05, "FILL", "amber"),
+        (int(epoch(T0 + timedelta(minutes=20))), 480.2, "PING", "violet"),
+        (int(epoch(T0 + timedelta(minutes=40))), 480.4, "", "amber"),
+    ]
+
+
+def test_the_market_picture_says_why_it_is_unavailable_and_is_refused_while_the_lab_is_off(lab, monkeypatch):
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: [])
+    assert lab.get("/copilot/desk/market/picture").json() == {"detail": "No QQQ minute bars for today yet."}
+    monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
+    assert lab.get("/copilot/desk/market/picture").status_code == 503
+
+
 def test_a_slow_read_is_cut_off_at_the_budget(engine):  # noqa: F811
     investigation(engine)
 

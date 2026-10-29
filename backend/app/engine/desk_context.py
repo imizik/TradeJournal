@@ -14,6 +14,8 @@ investigation and its symbol.
 - ``history``: the owner's own record at the plan's invalidation, from ``copilot_review.level_history`` (the engine
   behind the copilot's ``get_level_history``), as won / not-won counts for the trades that crossed it while held and one
   sentence built from those counts. No plan, or a plan without an invalidation, says what is missing.
+- ``market_picture``: the Briefing's chart, today's ``MARKET`` (QQQ) minutes with the day's fills and phone pings sent
+  as dots, under the picture route's reserved ``MARKET_ID``.
 
 Read-only: nothing here arms, sends or writes. No account numbers or ids beyond the investigation's own.
 """
@@ -50,6 +52,9 @@ _free = threading.BoundedSemaphore(WORKERS)
 OPENING = {"buy", "buy_to_open", "sell_to_open"}
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}
 ROLE = {"entry": "Entry", "invalidation": "Invalidation"}
+# The Briefing's chart: the market, read through the picture route under this reserved id (investigation ids are UUIDs).
+MARKET_ID = "market"
+MARKET = "QQQ"
 
 
 class Unavailable(Exception):
@@ -160,38 +165,16 @@ def _fill_marks(fills: list[Fill], first: int) -> tuple[tuple[Mark, ...], tuple[
     return tuple(marks), tuple(times)
 
 
-def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budget: float = BUDGET_SECONDS) -> bytes:
-    """Today's minutes for the thread's symbol (the regular session once it has bars, before that the pre-market)
-    with its plan's levels and the owner's fills today. Raises ``Unavailable`` with the reason."""
-    symbol = inv.symbol
-    if not symbol:
-        raise Unavailable("This thread has no symbol, so there is no chart.")
-    found = plan(db, str(inv.id))
-    levels = tuple(sorted((a.plan_role, float(a.price)) for a in (found["entry"], found["invalidation"]) if a)) if found else ()
-    today = datetime.fromtimestamp(now, ET).date()
-    start = datetime.combine(today, datetime.min.time())
-    fills = list(db.exec(select(Fill).where(Fill.ticker == symbol, Fill.executed_at >= start,
-                                            Fill.executed_at < start + timedelta(days=1), _not_webull())
-                         .order_by(Fill.executed_at).limit(MAX_FILLS)).all())
-
-    read, free = bars or ping_images.today_bars, _free
+def _budgeted(symbol: str, draw, budget: float) -> bytes:
+    """Runs ``draw`` on a worker within ``budget`` seconds; no bars (``None``), a failure or a run past the budget is
+    ``Unavailable`` with the reason."""
+    free = _free
 
     def run() -> bytes | None:
         try:
             return draw()
         finally:
             free.release()
-
-    def draw() -> bytes | None:
-        found_bars = [b for b in read(symbol) if b["time"] <= now][-DAY_BARS:]
-        found_bars = [b for b in found_bars if datetime.fromtimestamp(b["time"], ET).date() == today]
-        shown = [b for b in found_bars if not b.get("extended")] or found_bars
-        if not shown:
-            return None
-        first = shown[0]["time"]
-        marks, times = _fill_marks(fills, first)
-        return chart_render.render(Chart(title=symbol, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown),
-                                         levels=ping_images._plan_level_marks(levels), marks=marks, times=times))
 
     if not free.acquire(blocking=False):
         raise Unavailable("Earlier chart reads are still running; try again in a moment.")
@@ -211,6 +194,65 @@ def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budge
     if png is None:
         raise Unavailable(f"No {symbol} minute bars for today yet.")
     return png
+
+
+def _today_shown(read, symbol: str, now: float) -> list[dict]:
+    """Today's minutes up to ``now``: the regular session once it has bars, before that the pre-market."""
+    today = datetime.fromtimestamp(now, ET).date()
+    found_bars = [b for b in read(symbol) if b["time"] <= now][-DAY_BARS:]
+    found_bars = [b for b in found_bars if datetime.fromtimestamp(b["time"], ET).date() == today]
+    return [b for b in found_bars if not b.get("extended")] or found_bars
+
+
+def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budget: float = BUDGET_SECONDS) -> bytes:
+    """Today's minutes for the thread's symbol (the regular session once it has bars, before that the pre-market)
+    with its plan's levels and the owner's fills today. Raises ``Unavailable`` with the reason."""
+    symbol = inv.symbol
+    if not symbol:
+        raise Unavailable("This thread has no symbol, so there is no chart.")
+    found = plan(db, str(inv.id))
+    levels = tuple(sorted((a.plan_role, float(a.price)) for a in (found["entry"], found["invalidation"]) if a)) if found else ()
+    today = datetime.fromtimestamp(now, ET).date()
+    start = datetime.combine(today, datetime.min.time())
+    fills = list(db.exec(select(Fill).where(Fill.ticker == symbol, Fill.executed_at >= start,
+                                            Fill.executed_at < start + timedelta(days=1), _not_webull())
+                         .order_by(Fill.executed_at).limit(MAX_FILLS)).all())
+    read = bars or ping_images.today_bars
+
+    def draw() -> bytes | None:
+        shown = _today_shown(read, symbol, now)
+        if not shown:
+            return None
+        marks, times = _fill_marks(fills, shown[0]["time"])
+        return chart_render.render(Chart(title=symbol, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown),
+                                         levels=ping_images._plan_level_marks(levels), marks=marks, times=times))
+
+    return _budgeted(symbol, draw, budget)
+
+
+def market_picture(events: list[dict], now: float, bars=None, budget: float = BUDGET_SECONDS) -> bytes:
+    """The Briefing's chart: today's ``MARKET`` minutes with the day's fills (any symbol, amber) and phone pings sent
+    (violet) as dots on the bar of their minute, the first of each labelled FILL or PING. ``events`` are the session
+    timeline's rows (``kind``, ``at``); one before the first bar shown is left off. Raises ``Unavailable``."""
+    read = bars or ping_images.today_bars
+    tone = {"fill": ("FILL", "amber"), "ping": ("PING", "violet")}
+
+    def draw() -> bytes | None:
+        shown = _today_shown(read, MARKET, now)
+        if not shown:
+            return None
+        marks: list[Mark] = []
+        said: set[str] = set()
+        for event in sorted((e for e in events if e["kind"] in tone), key=lambda e: e["at"])[:MAX_FILLS]:
+            bar = next((b for b in reversed(shown) if b["time"] <= event["at"]), None)
+            if bar is None:
+                continue
+            label, colour = tone[event["kind"]]
+            marks.append(Mark(int(event["at"]), float(bar["close"]), "" if label in said else label, colour))
+            said.add(label)
+        return chart_render.render(Chart(title=MARKET, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
+
+    return _budgeted(MARKET, draw, budget)
 
 
 # ------------------------------------------------------------------ timeline

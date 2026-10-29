@@ -59,6 +59,12 @@ const noop = () => () => {};
 const read = () => streak;
 const none = () => null;
 
+/** The shared plan streak read, the owner's only; null before the first answer. */
+export function usePlanStreak(): PlanStreak | null {
+  const { owner } = useAppAccess();
+  return useSyncExternalStore(owner ? subscribe : noop, owner ? read : none, none);
+}
+
 function at(seconds: number): string {
   const when = new Date(seconds * 1000);
   const day = (d: Date) => d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
@@ -79,9 +85,8 @@ function describe(s: PlanStreak): string {
  * ``full`` sits in the sidebar, ``menu`` in the phone menu, ``compact`` in the phone title bar, ``rail`` in the charts rail.
  */
 export default function PlanStreakChip({ variant = "full", onNavigate }: { variant?: "full" | "menu" | "compact" | "rail"; onNavigate?: () => void }) {
-  const { owner } = useAppAccess();
-  const data = useSyncExternalStore(owner ? subscribe : noop, owner ? read : none, none);
-  if (!owner || !data?.show) return null;
+  const data = usePlanStreak();
+  if (!data?.show) return null;
   const lit = data.current > 0;
   const label = describe(data);
   // The rail and the phone title bar carry the count alone; the label says the rest. In the title bar the
