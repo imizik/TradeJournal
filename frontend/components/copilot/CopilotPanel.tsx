@@ -587,7 +587,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   useEffect(() => {
     const command = desk?.command;
     if (!command || busy || status?.enabled !== true) return;
-    if (command.kind === "open") void resume(command.id);
+    if (command.kind === "open") void resume(command.id).then(() => { if (command.text) fill(command.text); });
     else if (command.kind === "fill") fill(command.text);
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives

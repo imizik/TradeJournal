@@ -239,13 +239,74 @@ test("before the open the strip waits and the prep line leads; a closed day says
   await expect(tape).toContainText("No regular session today.");
 });
 
-test("before the open on a weekday the thread list offers Arm today's plans, which only fills the box", async ({ page }) => {
-  const { chats } = await lab(page, { time: new Date("2026-10-23T12:45:00Z"), // 8:45 New York
+test("before the open Arm today's plans is a checklist: still good logs, drop asks first, change fills the plan's box", async ({ page }) => {
+  const DAY = "2026-10-23";
+  const level = (price: number, extra: Record<string, unknown> = {}) => ({ price, condition: "crosses", interval: null, state: "armed", ...extra });
+  const plan = (fields: Record<string, unknown>) => ({ instrument: null, thesis: null, horizon: "swing", last: null, entry: null, invalidation: null,
+    time_stop: null, r: null, at: null, note: null, ...fields });
+  const threads = () => ({ ...DESK, day: { ...DESK.day, phase: "pre" },
+    threads: [...DESK.threads, row({ key: `thesis:${APLD}`, group: "new", symbol: "APLD", title: "APLD base breakout",
+      status: { text: "Earnings · APLD reports after the close", tone: "info" }, investigation_id: APLD, changed_at: epoch("2026-10-23T12:00:00Z") })],
+    plans: [
+      plan({ stage: "armed", symbol: "APLD", investigation_id: APLD, instrument: "11/20/26 35C", entry: level(31, { distance_pct: 3.3 }),
+        invalidation: level(29), time_stop: { text: "out by 15:30", due_at: epoch("2026-10-23T19:30:00Z"), state: "pending" } }),
+      plan({ stage: "armed", symbol: "CRWV", investigation_id: CRWV, instrument: "short", entry: level(99), invalidation: level(103) }),
+      plan({ stage: "in_position", symbol: "NBIS", investigation_id: NBIS, r: 0.4 }),
+    ] });
+  const { chats } = await lab(page, { time: new Date("2026-10-23T12:45:00Z"), threads, // 8:45 New York
     session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [] } });
+  const entries: Record<string, unknown>[] = [];
+  const removed: string[] = [];
+  await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries, trade_plans: {} } }));
+  await page.route(`**/day-journal/${DAY}/entries`, (route) => {
+    const body = route.request().postDataJSON();
+    const saved = { id: `e${entries.length}`, day: DAY, not_traded: false, created_at: "2026-10-23T12:46:00Z", actor: "owner", symbol: null, ...body };
+    entries.push(saved);
+    return route.fulfill({ json: saved });
+  });
+  await page.route("**/charts/alerts", (route) => route.fulfill({ json: { phone: true, alerts: [
+    { id: "a1", symbol: "CRWV", price: 99, source_id: CRWV, plan_role: "entry", state: "active", condition: "crosses" }] } }));
+  await page.route("**/charts/alerts/a1", (route) => { removed.push(route.request().method()); return route.fulfill({ json: { alerts: [], phone: true } }); });
+
   const arm = page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Arm today's plans" });
-  await expect(arm).toBeVisible();
   await expect(page.getByTestId("session-facts")).toContainText("Next: the open 9:30");
   await arm.click();
+  const list = page.getByTestId("arm-checklist");
+  await expect(list.getByTestId("arm-progress")).toHaveText("0 of 2 checked"); // the armed plans only
+  await expect(page.getByTestId("session-tape")).toBeHidden();
+  const apld = list.getByRole("listitem", { name: "APLD" });
+  await expect(apld).toContainText("Entry 31.00 · invalidation 29.00 · time stop 15:30");
+  await expect(apld).toContainText("⚑ Earnings · APLD reports after the close");
+  await apld.getByRole("button", { name: "Still good" }).click();
+  await expect(apld).toContainText("✓ Still good");
+  await expect(list.getByTestId("arm-progress")).toHaveText("1 of 2 checked");
+  expect(entries).toEqual([expect.objectContaining({ kind: "decision", symbol: "APLD", text: "Armed for today. Entry 31.00 · invalidation 29.00 · time stop 15:30." })]);
+
+  const crwv = list.getByRole("listitem", { name: "CRWV" });
+  await crwv.getByRole("button", { name: "Drop" }).click();
+  await expect(crwv).toContainText("Its entry 99.00 alert is still armed. Remove it and mark the plan done?"); // the existing confirm
+  expect(removed).toEqual([]);
+  await crwv.getByRole("button", { name: "Remove alerts and mark done" }).click();
+  await expect(crwv).toContainText("✓ Dropped");
+  await expect(list.getByTestId("arm-progress")).toHaveText("2 of 2 checked");
+  expect(removed).toEqual(["DELETE"]);
+  expect(entries[1]).toEqual(expect.objectContaining({ kind: "plan_done", symbol: "CRWV", text: "Marked done" }));
+  await page.screenshot({ path: test.info().outputPath("arm-checklist-1440.png") });
+
+  // A reload reads Still good back from today's journal; Change opens the plan's thread with the question unsent.
+  await page.reload();
+  await arm.click();
+  await expect(list.getByTestId("arm-progress")).toHaveText("1 of 2 checked");
+  await list.getByRole("listitem", { name: "CRWV" }).getByRole("button", { name: "Change" }).click();
+  await expect(list).toBeHidden();
+  await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(
+    "Change my CRWV plan before the open: Entry 99.00 · invalidation 103.00. What should change, and why?");
+
+  // The old question is one link away.
+  await arm.click();
+  await list.getByRole("button", { name: "Ask the copilot instead" }).click();
+  await expect(list).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Arm today's plans: /);
   expect(chats).toEqual([]);
 });
