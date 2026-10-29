@@ -312,13 +312,19 @@ def save_state(state: dict) -> None:
     pending = STATE / "state.json.new"
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(STATE / "state.json")
+    # The app's user owns PUBLIC's directory, so never write through a name it
+    # could have planted: a fresh, exclusively created file, renamed into place.
+    pending = None
     try:
-        pending = PUBLIC.with_name(PUBLIC.name + ".new")
-        pending.write_text(json.dumps(state, indent=2) + "\n")
-        pending.chmod(0o644)
-        pending.replace(PUBLIC)
+        descriptor, pending = tempfile.mkstemp(dir=PUBLIC.parent, prefix=f".{PUBLIC.name}.")
+        with os.fdopen(descriptor, "w") as handle:
+            os.fchmod(handle.fileno(), 0o644)
+            handle.write(json.dumps(state, indent=2) + "\n")
+        os.replace(pending, PUBLIC)
     except OSError as exc:
         print(f"Deploys page status not written: {exc}", flush=True)
+        if pending:
+            Path(pending).unlink(missing_ok=True)
 
 
 def record(settings: Settings, state: dict, build: Build, outcome: str, detail: str, *, title: str) -> None:
@@ -430,7 +436,7 @@ def status(settings: Settings) -> None:
     except Waiting as exc:
         print(f"Newest verified build: unknown; {exc}")
     state = load_state()
-    if state:
+    if "outcome" in state:
         print(f"Last decision: {state['outcome']} for {state['commit'][:12]} at {state['at']}\n  {state['detail']}")
 
 
@@ -460,16 +466,16 @@ def main() -> None:
     if args.action == "status":
         status(settings)
         return
-    if not settings.enabled:
-        print("Automatic deployment is off (AUTODEPLOY_ENABLED is not true)")
-        note_check(settings, "Automatic deployment is off")
-        return
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (STATE / "run.lock").open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print("Another automatic deployment run is active")
+            return
+        if not settings.enabled:
+            print("Automatic deployment is off (AUTODEPLOY_ENABLED is not true)")
+            note_check(settings, "Automatic deployment is off")
             return
         try:
             result = deploy(settings, now=datetime.now(timezone.utc), ignore_hold=args.now, allow_migration=args.allow_migration)

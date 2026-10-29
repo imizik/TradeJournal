@@ -173,6 +173,12 @@ def test_decisions_are_kept_in_a_readable_copy_for_the_deploys_page(autodeploy, 
     assert oct(autodeploy.PUBLIC.stat().st_mode & 0o777) == "0o644"
 
 
+def test_status_reads_a_state_with_a_check_but_no_decision(autodeploy, server, capsys):
+    autodeploy.note_check(settings(autodeploy), "Up to date with aaaaaaaaaaaa")
+    autodeploy.status(settings(autodeploy))
+    assert "Last decision" not in capsys.readouterr().out
+
+
 def test_up_to_date_server_touches_nothing(autodeploy, server):
     server.releases = [published(OLD, "old")]
     assert autodeploy.deploy(settings(autodeploy), now=THURSDAY_5PM_NEW_YORK) == "Up to date with aaaaaaaaaaaa"
