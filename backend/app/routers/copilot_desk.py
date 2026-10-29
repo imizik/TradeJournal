@@ -773,7 +773,7 @@ def waiting(db: Session, now: float) -> dict:
     the symbols still asking their close question (``toReview``, one per symbol); ``alerts`` and ``radar``, today's
     position alerts with no feedback and today's Radar hits not rated (``closeSteps``; older ones stay in the Briefing's
     lists); ``fills``, the fills waiting to link (``fillsToLink``, one per trade). A Skip or "No plan" kept only in a
-    browser is not seen here. Raises when the positions, plans or alerts could not be read."""
+    browser is not seen here. Raises when the positions, plans, alerts or Radar could not be read."""
     day = datetime.fromtimestamp(now, ET).date()
     listed = threads(db, now)
     rows = listed["threads"]
@@ -781,8 +781,7 @@ def waiting(db: Session, now: float) -> dict:
     radar = today._section(db, "waiting radar to rate", lambda: _hits_to_rate(day))
     # A source that could not be read is not "nothing waiting": the caller records the failure instead.
     failed = [name for name in ("positions", "plans") if listed["sections"][name] == "unavailable"]
-    if alerts["state"] == "unavailable":
-        failed.append("alerts")
+    failed += [name for name, part in (("alerts", alerts), ("radar", radar)) if part["state"] == "unavailable"]  # Radar off counts 0
     if failed:
         raise RuntimeError(f"Desk sections unavailable: {', '.join(failed)}")
     return {"review": len({r["symbol"] for r in rows if r["close"] and not r["close"]["reviewed"] and r["symbol"]}),
