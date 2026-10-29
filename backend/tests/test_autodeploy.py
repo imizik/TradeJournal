@@ -173,6 +173,19 @@ def test_decisions_are_kept_in_a_readable_copy_for_the_deploys_page(autodeploy, 
     assert oct(autodeploy.PUBLIC.stat().st_mode & 0o777) == "0o644"
 
 
+def test_readable_copy_never_writes_through_a_planted_link(autodeploy, tmp_path):
+    # The app's account owns the copy's directory; root must not follow its links.
+    secret = tmp_path / "secret"
+    secret.write_text("root only")
+    secret.chmod(0o600)
+    autodeploy.PUBLIC.symlink_to(secret)
+    autodeploy.PUBLIC.with_name(autodeploy.PUBLIC.name + ".new").symlink_to(secret)
+    autodeploy.note_check(settings(autodeploy), "Up to date with aaaaaaaaaaaa")
+    assert secret.read_text() == "root only" and oct(secret.stat().st_mode & 0o777) == "0o600"
+    assert not autodeploy.PUBLIC.is_symlink()
+    assert json.loads(autodeploy.PUBLIC.read_text())["checked"]["result"] == "Up to date with aaaaaaaaaaaa"
+
+
 def test_status_reads_a_state_with_a_check_but_no_decision(autodeploy, server, capsys):
     autodeploy.note_check(settings(autodeploy), "Up to date with aaaaaaaaaaaa")
     autodeploy.status(settings(autodeploy))
