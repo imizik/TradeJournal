@@ -368,7 +368,7 @@ def desk_threads(db: Session = Depends(get_session)):
 
 # --------------------------------------------------------------------------- the Briefing's session timeline
 
-INDICES = ("SPY", "QQQ")
+INDICES = ("SPY", "QQQ", "VIX")  # VIX through the chart feed's index mapping (chart_indices)
 MAX_EVENTS = 80
 
 
@@ -451,7 +451,7 @@ def _indices() -> dict:
 def desk_session(db: Session = Depends(get_session)):
     """The Briefing's day at a glance (docs/copilot-lab.md § The desk): today's regular session, what happened in it
     (fills, phone pings sent, Radar events, logged decisions), the time stops still ahead, the pings against the daily
-    cap, the pre-market prep and SPY/QQQ. Composed from readers that already exist; each source fails on its own.
+    cap, the pre-market prep and SPY/QQQ/VIX. Composed from readers that already exist; each source fails on its own.
     Read-only, owner-only, refused while the lab is off; no ids out."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")

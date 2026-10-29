@@ -113,7 +113,14 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
 });
 
 test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close the day fills the box", async ({ page }) => {
-  const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z") }); // 17:00 New York
+  const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), // 17:00 New York
+    session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
+  await expect(page.getByTestId("desk-status")).toContainText("Closed 16:00");
+  // The thread list's phase button puts the same question in the box, unsent.
+  await page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Close the day" }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+  await page.getByRole("textbox", { name: "Message" }).fill("");
+  await page.getByRole("textbox", { name: "Message" }).blur();
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("close");
   await expect(palette(page).getByRole("option")).toHaveText([/^Close the day/]);
@@ -202,8 +209,14 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
     // 11:00 is 90 of the session's 390 minutes.
     await expect(tape.getByTestId("session-now")).toHaveAttribute("style", /left: 23\.07/);
     await expect(tape.getByTestId("session-labels")).toHaveText("9:3011:0012:3014:0016:00");
-    await expect(tape.getByTestId("session-facts")).toHaveText(
-      "Next: CRWV time stop 14:30 · Practicing: wait for the 15m close · 3 of 5 this week · Pings 4 of 12 · 1 held");
+    await expect(tape.getByTestId("briefing-numbers")).toHaveText(
+      "Positions1Needs you1Nearest triggerCRWV · 0.6% to entry 99.00Pings today4 of 12 · 1 held");
+    await expect(tape.getByTestId("session-facts")).toHaveText("Next: CRWV time stop 14:30 · Practicing: wait for the 15m close · 3 of 5 this week");
+    // The desk bar: live, with the indices on a wide screen only.
+    await expect(page.getByTestId("desk-status")).toContainText("Live");
+    if (width >= 760) await expect(page.getByTestId("desk-indices")).toHaveText("SPY +0.42%QQQ −0.31%");
+    else await expect(page.getByTestId("desk-indices")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Close the day" })).toHaveCount(0); // no phase button mid-session
     await page.screenshot({ path: test.info().outputPath(`briefing-session-${width}.png`), fullPage: width < 760 });
 
     await page.keyboard.press("j"); // a symbol's thread opens on its own header instead
@@ -219,8 +232,20 @@ test("before the open the strip waits and the prep line leads; a closed day says
   await expect(tape).toContainText("Pre-market");
   await expect(tape.getByTestId("session-now")).toHaveCount(0);
   await expect(tape.getByTestId("session-facts")).toHaveText(/^Prep written 8:30 · Next: CRWV time stop 14:30/);
+  await expect(page.getByTestId("desk-status")).toContainText("Pre-market");
   await page.unroute("**/copilot/desk/session");
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: { ...SESSION, phase: "closed", open: null, close: null, events: [], time_stops: [] } }));
   await page.reload();
   await expect(tape).toContainText("No regular session today.");
+});
+
+test("before the open on a weekday the thread list offers Arm today's plans, which only fills the box", async ({ page }) => {
+  const { chats } = await lab(page, { time: new Date("2026-10-23T12:45:00Z"), // 8:45 New York
+    session: { ...SESSION, now: epoch("2026-10-23T12:45:00Z"), phase: "pre", events: [], time_stops: [] } });
+  const arm = page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Arm today's plans" });
+  await expect(arm).toBeVisible();
+  await expect(page.getByTestId("session-facts")).toContainText("Next: the open 9:30");
+  await arm.click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Arm today's plans: /);
+  expect(chats).toEqual([]);
 });

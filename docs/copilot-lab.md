@@ -579,23 +579,35 @@ this browser. Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
 at a glance instead of a header and plan ladder (`SessionTape.tsx`): "Today",
-the market phase and SPY and QQQ's change on one line; one strip of the regular
+the market phase and SPY, QQQ and VIX's change on one line; one strip of the regular
 session in New York time (9:30 to 16:00, or the calendar's early close) with a
 "now" marker, today's fills, phone pings sent, Radar events and logged
 decisions as small ticks coloured by kind (hover for the time and what it was;
 one before the open or after the close sits faded at the edge), and the plan
 time stops still ahead as hollow amber ticks, amber being for what still needs
-you; then one quiet line:
-the next time stop, the practice goal's line, and pings sent against the daily
-cap (with how many were held). Before the open the strip waits (no marker) and
+you; then a numbers row: open positions and how many need a decision (from
+the thread list's rows), the nearest armed trigger (the first Near a trigger
+row, "CRWV · 0.6% to entry 99.00"), and pings sent today against the daily cap
+(with how many were held); then one quiet line: **Next:** the nearest time
+stop, else the open (before it) or the close (during the session), and the
+practice goal's line. Before the open the strip waits (no marker) and
 the line leads with whether the pre-market prep is written; after the close it
-shows the whole day; a closed day says so. One read, `GET
-/copilot/desk/session` (owner only, refused while the lab is off), once a
-minute while the page is visible, composed in `copilot_desk.py` from readers
+shows the whole day; a closed day says so. The desk bar shows the same read
+beside its title: **Live** (green dot) in the regular session, **Pre-market**,
+or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
+QQQ and VIX's change. At the top of the thread list a phase button puts a
+question in the message box, unsent: **Arm today's plans** before 9:30 on a
+weekday (check each plan's entry, invalidation and time stop and propose what
+is missing, for the owner to confirm) and **Close the day** after 16:00. On a
+phone Jump to… and New plan show as icons so the bar stays on one line. One
+read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
+once a minute while the page is visible, read once by the desk
+(`useDeskSession`) for its bar and the Briefing, composed in `copilot_desk.py` from readers
 that already exist: `day_replay.traded` (Webull left out), the notification
 policy's `PhonePing` rows and `daily_cap`, the Radar store's events for today,
 `decision` day-journal entries, scheduled `PlanTimeStop` rows, `today._prep`
-and one `chart_feed.quote_rows` read of SPY and QQQ. Each source fails on its
+and one `chart_feed.quote_rows` read of SPY, QQQ and VIX (the feed's index
+mapping). Each source fails on its
 own; no ids go out. No futures quote is read yet.
 
 **Keys and the palette.** ⌘K (Ctrl+K off a Mac; either works), or the desk bar's

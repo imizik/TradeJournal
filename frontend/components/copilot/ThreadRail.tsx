@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
@@ -131,10 +131,11 @@ function DayLine({ data }: { data: DeskThreads }) {
  * when pressed); a row with an investigation opens it in place, any other follows its deep link. Plan meters show
  * on Act now and Near a trigger only. "New since you looked" is remembered in this browser. ``onRows`` gets the rows in
  * the order shown, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
- * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer.
+ * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer. ``phase`` (the
+ * day's phase button) sits under the day line.
  */
-export default function ThreadRail({ actions, active = null, onRows }: {
-  actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void;
+export default function ThreadRail({ actions, active = null, onRows, phase = null }: {
+  actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void; phase?: ReactNode;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +227,7 @@ export default function ThreadRail({ actions, active = null, onRows }: {
     <nav aria-label="Thread list" className="space-y-3 text-sm">
       {data ? <DayLine data={data} /> : !error && <p className="px-2.5 text-xs text-muted-foreground">Reading what is live…</p>}
       {error && <p className="px-2.5 text-xs text-muted-foreground">{data ? "Not refreshed" : "Threads unavailable"}: {error}</p>}
+      {phase && <div className="px-2.5">{phase}</div>}
       {DESK_GROUPS.map(g => group(g.id, g.title))}
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
