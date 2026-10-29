@@ -156,3 +156,58 @@ test("no thread list while the lab is off", async ({ page }) => {
   await expect(list(page)).toHaveCount(0);
   expect(reads).toBe(0);
 });
+
+// A busy day: two Radar hits and two thesis items on two symbols, seven new symbols in all, five watched threads.
+const fresh = (symbol: string, minute: number, radar = false) => row(radar
+  ? { key: `radar:${symbol}-${minute}`, group: "new", symbol, title: `${symbol} up while its group is flat`, status: { text: "Radar · vs sector", tone: "info" },
+    radar_event_id: `${symbol}-${minute}`, path: `/radar?event=${symbol}-${minute}`, changed_at: epoch("2026-10-23T13:30:00Z") + minute * 60 }
+  : { key: `thesis:${symbol}-${minute}`, group: "new", symbol, title: `${symbol} thesis`, status: { text: `News · ${symbol} headline ${minute}`, tone: "info" },
+    path: "/copilot-lab", changed_at: epoch("2026-10-23T13:30:00Z") + minute * 60 });
+const BUSY = { ...DESK, threads: [
+  ...DESK.threads.filter((r) => r.group !== "new" && r.group !== "watch"),
+  fresh("MU", 10, true), fresh("MU", 50), fresh("NBIS", 40), fresh("NBIS", 45), fresh("IREN", 30, true),
+  fresh("CRWV", 20), fresh("AMD", 15), fresh("SMCI", 12), fresh("ORCL", 5),
+  ...["APLD", "RNXT", "AAPL", "TSLA", "META"].map((symbol) => row({ key: `investigation:${symbol}`, group: "watch", symbol, title: `${symbol} idea`,
+    status: { text: "Open investigation", tone: "muted" }, investigation_id: `${symbol}-id`, changed_at: epoch("2026-10-22T14:00:00Z") })),
+] };
+const summary = (id: string, symbol: string, status: string, updated: string) => ({ id, source: "copilot", title: `${symbol} reclaim`, symbol, status,
+  conclusion: status === "closed" ? "Out at the invalidation; followed the plan." : null, revision: 2, message_count: 4, has_findings: false,
+  created_at: updated, updated_at: updated });
+
+test("a busy day stays calm: one new row per symbol, Radar first, five shown, Watching folded, closed ones in the footer", async ({ page }) => {
+  await lab(page, BUSY);
+  // Registered after lab()'s empty list, so it answers first; the reload reads it.
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [
+    summary("closed-1", "HOOD", "closed", "2026-10-21T18:00:00Z"), summary("closed-0", "PLTR", "closed", "2026-10-16T18:00:00Z"),
+    summary("open-1", "APLD", "open", "2026-10-22T18:00:00Z"),
+  ] } }));
+  await page.reload();
+  const threads = list(page);
+  await expect(threads.getByRole("region", { name: "Pinned" }).getByRole("button")).toHaveText([/Briefing/]); // Review my week is in ⌘K and the Briefing
+
+  const fresh = threads.getByRole("region", { name: "New since you looked" });
+  await expect(fresh.getByRole("link")).toHaveCount(5);
+  // Radar hits first (newest first), then one row per symbol by its newest news.
+  await expect(fresh.getByRole("link")).toHaveText([/^New:IREN/, /^New:MU.*Radar/, /^New:NBIS.*headline 45/, /^New:CRWV/, /^New:AMD/]);
+  await expect(fresh.getByLabel("7 threads")).toBeVisible();
+  await fresh.getByRole("button", { name: "+2 more" }).click();
+  await expect(fresh.getByRole("link")).toHaveCount(7);
+  await fresh.getByRole("button", { name: "Show fewer" }).click();
+  await expect(fresh.getByRole("link")).toHaveCount(5);
+
+  const watching = threads.getByRole("region", { name: "Watching" });
+  await expect(watching.getByRole("link")).toHaveCount(3);
+  await expect(watching.getByRole("button", { name: "+2 more" })).toBeVisible();
+  // With the Briefing (a button), Act now, Near a trigger, five new and three watched: eleven rows on a busy day.
+  await expect(threads.locator("section").getByRole("link")).toHaveCount(10);
+
+  const closed = threads.locator("details", { hasText: "Closed this week" });
+  await expect(closed.locator("summary")).toHaveText("Closed this week1");
+  await closed.locator("summary").click();
+  await expect(closed.getByRole("link")).toHaveText([/HOOD.*Out at the invalidation/]);
+  await expect(threads.getByTestId("desk-keys")).toBeVisible();
+
+  await fresh.getByRole("button", { name: "Mark seen" }).click();
+  await expect(fresh).not.toContainText("New:");
+  await page.screenshot({ path: test.info().outputPath("thread-list-busy.png") });
+});

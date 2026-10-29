@@ -6,7 +6,7 @@
 
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import { apiUrl } from "@/lib/api";
-import type { PlanBoardRow, PlansBoard } from "@/lib/copilot";
+import type { InvestigationSummary, PlanBoardRow, PlansBoard } from "@/lib/copilot";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
@@ -75,6 +75,19 @@ type Wire = {
   threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null })[];
 };
+
+const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
+
+/** Saved conversations closed and last touched since Monday (New York), newest first, from the latest 50 saved. */
+export async function getClosedThisWeek(signal?: AbortSignal): Promise<InvestigationSummary[]> {
+  const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  const today = nyDate(new Date());
+  const noon = Date.parse(`${today}T12:00:00Z`);
+  const monday = new Date(noon - ((new Date(noon).getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+  const { investigations } = await response.json() as { investigations: InvestigationSummary[] };
+  return investigations.filter(row => row.status === "closed" && nyDate(new Date(row.updated_at)) >= monday);
+}
 
 export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads> {
   const response = await fetch(apiUrl("/copilot/desk/threads"), { cache: "no-store", signal });

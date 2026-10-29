@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // The practice goal: Review my week proposes one thing to practice as a card; the owner edits the text, Confirm posts it
-// to /copilot/practice (and a lesson memory only when "Remember this too" is ticked), and the goal's line appears under
-// Review my week on the lab home and on the Dashboard's button. The e2e backend runs with the lab off, so these tests
+// to /copilot/practice (and a lesson memory only when "Remember this too" is ticked), and the goal's line appears in the
+// Briefing's session line on the desk and on the Dashboard's Review my week button. The e2e backend runs with the lab off, so these tests
 // stand in for its status read and its lab routes.
 const ON = {
   enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false,
@@ -11,6 +11,9 @@ const ON = {
 };
 const DESK = { as_of: "2026-10-24T15:12:00Z", quotes_at: null, quote_issue: null,
   day: { phase: "closed", need_you: 0, streak: null }, sections: {}, threads: [] };
+// A closed day: the session strip waits and only its facts line (with the practice goal) shows.
+const SESSION = { as_of: "2026-10-24T15:12:00Z", now: 1792854720, day: "2026-10-24", phase: "closed", open: null, close: null,
+  events: [], time_stops: [], pings: null, prep: null, indices: [], quote_issue: null, sections: { hours: "ok" } };
 const INVESTIGATION = "33333333-3333-4333-8333-333333333333";
 const PROPOSAL = {
   type: "proposal", id: "fake_3_0", kind: "practice", text: "Exit within 15 minutes when my plan's invalidation breaks.",
@@ -35,6 +38,7 @@ async function labOn(page: Page) {
   let now: { goal: Record<string, unknown> | null; this_week: typeof SCORE | null } = { goal: null, this_week: null };
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
+  await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: SESSION }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route("**/copilot/investigations", (route) => route.fulfill({ status: 201, json: {
     id: INVESTIGATION, source: "copilot", title: "Review my week", symbol: null, status: "open", conclusion: null,
@@ -69,7 +73,7 @@ async function reviewToCard(page: Page) {
   await expect(home.getByTestId("desk-day")).toBeVisible();
   await expect(home).not.toContainText("Practicing:");
   const saved = page.waitForRequest((request) => request.url().endsWith("/copilot/investigations") && request.method() === "POST");
-  await home.getByRole("button", { name: "Review my week" }).click();
+  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
   const card = page.getByRole("region", { name: "Proposed practice" });
   await expect(card).toBeVisible();
   await saved;
@@ -98,7 +102,7 @@ test("a practice card is edited, confirmed, remembered, and its line appears on 
     original_text: "Be out within 15 minutes when my invalidation breaks, every time.", source_reference: `copilot:${INVESTIGATION}` });
 
   await page.goto("/copilot-lab");
-  await expect(page.getByRole("navigation", { name: "Thread list" })).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
+  await expect(page.getByTestId("session-facts")).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
   await page.goto("/");
   const link = page.getByTestId("owner-dashboard").getByRole("link", { name: /Review my week/ });
   await expect(link).toContainText("Practicing: exit at my invalidation · 2 of 3 this week");
