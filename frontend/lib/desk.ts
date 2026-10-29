@@ -308,6 +308,10 @@ export const getDeskHistory = (id: string, signal?: AbortSignal) => deskRead<Des
 /** The picture route's reserved id for the Briefing's chart: QQQ today with the day's fills and pings. */
 export const DESK_MARKET = "market";
 
+/** A thread named by its symbol alone (a position or plan with no saved conversation, a Radar hit): the Context pane's
+ * routes read it as ``symbol:`` and the symbol, with its plan's lines and its open trade when it has them. */
+export const deskSymbolThread = (symbol: string): DeskThreadRef => ({ id: `symbol:${symbol}`, symbol, title: symbol, refreshKey: 0 });
+
 /** The thread chart's timeframes: today's minutes, recent sessions' 15-minute bars, a few months of daily bars. */
 export const DESK_TIMEFRAMES = ["2m", "15m", "1D"] as const;
 export type DeskTimeframe = (typeof DESK_TIMEFRAMES)[number];
