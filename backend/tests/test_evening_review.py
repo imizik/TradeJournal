@@ -180,3 +180,20 @@ def test_the_counts_are_the_desks_own(desk, engine, clock, monkeypatch):  # noqa
     EveningReviews(engine, Calendar(), clock=Clock(WED_CLOSE)).run()  # the real count, through the lab's switch
     (sent,) = phone.sent
     assert sent["body"] == message(counts)
+
+
+def test_a_desk_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_waiting(desk, engine, clock, monkeypatch):  # noqa: F811
+    buy(engine, 700, "CRWV")
+    clock["t"] = WED_CLOSE
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(copilot_desk, "_positions", broken)
+    with Session(engine) as db, pytest.raises(RuntimeError, match="positions"):
+        copilot_desk.waiting(db, WED_CLOSE)
+    monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
+    phone = Phone(monkeypatch)
+    EveningReviews(engine, Calendar(), clock=Clock(WED_CLOSE)).run()
+    (row,) = rows(engine)
+    assert row.delivery == "skipped" and row.last_error == "The desk's counts could not be read (RuntimeError), so nothing was sent."
+    assert phone.sent == []

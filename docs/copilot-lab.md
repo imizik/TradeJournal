@@ -1628,8 +1628,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   waiting to link. When any is waiting it sends one ping, "Close the day: To
   review: 2 threads, 3 alerts, 1 fill to link.", that opens
   `/copilot-lab?close=1` on Close the day (kind `evening_review`, ranked with
-  the prep). Nothing waiting, or the lab off, is recorded `skipped` with why
-  and sends nothing. One `evening_review` row a day (unique day, additive
+  the prep). Nothing waiting, the lab off, or a desk source (positions, plans,
+  alerts) that cannot be read is recorded `skipped` with why and sends nothing. One `evening_review` row a day (unique day, additive
   migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
   reached the phone, never resent) or `expired`. A day not counted by two hours
   after its time waits for the next. A Skip or "No plan" kept only in a browser

@@ -774,9 +774,16 @@ def waiting(db: Session, now: float) -> dict:
     ``toReview``, one per symbol); ``fills``, the fills waiting to link (``fillsToLink``, one per trade); ``alerts`` and
     ``radar``, the ``to_answer`` counts. A Skip or "No plan" kept only in a browser is not seen here."""
     day = datetime.fromtimestamp(now, ET).date()
-    rows = threads(db, now)["threads"]
+    listed = threads(db, now)
+    rows = listed["threads"]
     alerts = today._section(db, "waiting alerts to answer", lambda: _alerts_to_answer(db, now))
     radar = today._section(db, "waiting radar to rate", lambda: _hits_to_rate(day))
+    # A source that could not be read is not "nothing waiting": the caller records the failure instead.
+    failed = [name for name in ("positions", "plans") if listed["sections"][name] == "unavailable"]
+    if alerts["state"] == "unavailable":
+        failed.append("alerts")
+    if failed:
+        raise RuntimeError(f"Desk sections unavailable: {', '.join(failed)}")
     return {"review": len({r["symbol"] for r in rows if r["close"] and not r["close"]["reviewed"] and r["symbol"]}),
             "alerts": alerts.get("count", 0), "radar": radar.get("count", 0),
             "fills": len({r["fill_to_link"] for r in rows if r["fill_to_link"]})}
