@@ -6,8 +6,9 @@ only through a plan the owner linked whose timing is pre-entry; a late plan
 (unverified or retrospective) or no plan breaks the streak. A recent entry
 with a suggested but unlinked plan is pending for 30 minutes: it neither
 extends nor breaks the streak until it is linked or that time passes. An entry
-with a date but no time of day is left out, as in capture adherence. Reads
-``capture_links`` and never changes a link.
+with a date but no time of day is left out, as in capture adherence. This
+week's entries are also listed one by one, in time order, with the trade and
+the linked plan's capture. Reads ``capture_links`` and never changes a link.
 """
 
 from __future__ import annotations
@@ -65,8 +66,9 @@ def streak(db: Session, now: datetime | None = None) -> dict:
     active = db.exec(select(CaptureLink.capture_id).where(CaptureLink.unlinked_at.is_(None))).all()
     linked = list(db.exec(select(TradeCapture).where(TradeCapture.id.in_(active))).all()) if active else []
     linked_ids = set(active)
-    timing = {link["trade_id"]: link["timing"] for link in (r["link"] for r in capture_links.link_rows(db, linked).values())
-              if link and link.get("trade_id")}
+    links = [(capture_id, r["link"]) for capture_id, r in capture_links.link_rows(db, linked).items() if r["link"] and r["link"].get("trade_id")]
+    timing = {link["trade_id"]: link["timing"] for _, link in links}
+    plan_of = {link["trade_id"]: str(capture_id) for capture_id, link in links}
     # Plans suggested for an entry in the last 30 minutes; only a capture this recent can be one.
     recent = [c for c in db.exec(select(TradeCapture).where(TradeCapture.received_at >= now - PENDING - timedelta(minutes=15))).all()
               if c.id not in linked_ids and c.not_taken_at is None]
@@ -98,10 +100,15 @@ def streak(db: Session, now: datetime | None = None) -> dict:
                           "short": _short(trade), "entry_time": stamp(trade.opened_at), "reason": "late" if value == "late" else "no_plan"}
             break
     monday, saturday = _week(now)
-    week = [value for trade, value in states if monday <= trade.opened_at < saturday]
+    week = [(trade, value) for trade, value in states if monday <= trade.opened_at < saturday]
+    entries = [{"trade_id": str(trade.id), "contract": contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
+                "short": _short(trade), "entry_time": stamp(trade.opened_at), "state": value,
+                **({"capture_id": plan_of[str(trade.id)]} if str(trade.id) in plan_of else {})} for trade, value in week]
+    counts = [value for _, value in week]
     return {
         "show": show, "since": epoch(since), "tracking": tracked is not None,
         "current": current, "best": best, "pending": sum(value == "pending" for _, value in states),
-        "this_week": {"planned": week.count("planned"), "total": len(week), "pending": week.count("pending"), "start": stamp(monday)},
+        "this_week": {"planned": counts.count("planned"), "total": len(counts), "pending": counts.count("pending"), "start": stamp(monday),
+                      "entries": entries},
         "last_break": last_break,
     }

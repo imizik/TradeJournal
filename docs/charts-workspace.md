@@ -1922,7 +1922,11 @@ A saved plan is tied to the trade it was for by the user; nothing links itself.
   best streak and this week's planned of total entries (Monday to Friday, New
   York). Tapping it opens the Copilot Lab with "Review my week". It is hidden
   until counting is on or a plan exists, reads `GET /charts/captures/streak`
-  (no ids) on load, on focus and every five minutes, and changes no link.
+  on load, on focus and every five minutes, and changes no link. The route
+  carries no ids except in `this_week.entries`: this week's entries in time
+  order, each with `trade_id`, `contract` and `short`, `entry_time` (epoch),
+  `state` (`planned`, `late`, `unplanned` or `pending`) and the linked plan's
+  `capture_id` when one is linked; the Copilot desk's This week tiles read it.
 - **Where a linked plan shows.** In the strip, the trade card (C3.1) and the
   trade page: wording, note, recording and transcript, the chart image, later
   notes labeled as later, and the timing.

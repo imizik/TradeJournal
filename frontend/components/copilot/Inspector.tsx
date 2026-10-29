@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { REVIEW_WEEK, usePlanStreak } from "@/components/PlanStreak";
+import { REVIEW_WEEK, usePlanStreak, type PlanStreakEntry } from "@/components/PlanStreak";
 import {
   DESK_MARKET, getDeskHistory, getDeskPicture, getDeskSession, getDeskTimeline,
   type ContextTab, type DeskHistory, type DeskSession, type DeskSessionEvent, type DeskThreadRef, type DeskTimeline, type DeskTimelineRow,
@@ -33,6 +33,16 @@ const DAY_TABS: { id: DayTab; label: string }[] = [{ id: "chart", label: "Chart"
 const DAY_DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-primary", ping: "bg-violet-400", radar: "bg-sky-400", decision: "bg-emerald-400" };
 const DAY_SOURCES: Record<string, string> = { fills: "fills", pings: "pings", radar: "Radar", decisions: "decisions", time_stops: "time stops", prep: "prep" };
 const REFRESH_MS = 60_000;
+// This week's tiles: planned before entry, not (no plan, or one saved late), or a suggested plan waiting to be linked.
+const WEEK_TILE: Record<PlanStreakEntry["state"], { mark: string; label: string; tone: string }> = {
+  planned: { mark: "+", label: "planned", tone: "bg-emerald-400/15 text-emerald-300" },
+  late: { mark: "−", label: "plan saved late", tone: "bg-rose-400/15 text-rose-300" },
+  unplanned: { mark: "−", label: "no plan", tone: "bg-rose-400/15 text-rose-300" },
+  pending: { mark: "·", label: "waiting to be linked", tone: "bg-muted text-muted-foreground" },
+};
+/** ``Tue 10:31`` by the New York clock. */
+const weekClock = (seconds: number) => new Date(seconds * 1000).toLocaleString("en-US",
+  { timeZone: NY, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(",", "");
 
 const Quiet = ({ children }: { children: ReactNode }) => <p className="text-sm text-muted-foreground">{children}</p>;
 const failed = (failure: unknown) => failure instanceof Error ? failure.message : "Unavailable right now.";
@@ -194,19 +204,27 @@ function WeekTab() {
   const streak = usePlanStreak();
   if (!streak) return <Quiet>Reading this week…</Quiet>;
   if (!streak.show) return <Quiet>No entries are tracked yet. Once a plan is saved before an entry, this week&apos;s record shows here.</Quiet>;
-  const { planned, total, pending } = streak.this_week;
-  const tiles = [...Array(planned).fill("planned"), ...Array(Math.max(0, total - planned - pending)).fill("unplanned"), ...Array(pending).fill("pending")] as string[];
+  const { planned, total, pending, entries } = streak.this_week;
+  // The latest entries when there are more than fit, still oldest first; each opens its trade, where the linked plan shows.
+  const shown = entries.slice(-MAX_TILES);
   return (
     <div className="space-y-2 text-sm">
-      {tiles.length > 0 && (
-        <div role="img" aria-label={`${planned} planned, ${total - planned - pending} unplanned${pending ? `, ${pending} waiting to be linked` : ""}`} className="flex flex-wrap gap-1">
-          {tiles.slice(0, MAX_TILES).map((tile, i) => (
-            <span key={i} title={tile} className={cn("flex h-6 w-6 items-center justify-center rounded text-xs tabular-nums",
-              tile === "planned" ? "bg-emerald-400/15 text-emerald-300" : tile === "unplanned" ? "bg-rose-400/15 text-rose-300" : "bg-muted text-muted-foreground")}>
-              {tile === "planned" ? "+" : tile === "unplanned" ? "−" : "·"}
-            </span>
-          ))}
-        </div>
+      {shown.length > 0 && (
+        <ol aria-label="This week's entries" className="flex flex-wrap items-center gap-1">
+          {entries.length > MAX_TILES && <li className="text-xs tabular-nums text-muted-foreground">+{entries.length - MAX_TILES} earlier</li>}
+          {shown.map(entry => {
+            const tile = WEEK_TILE[entry.state];
+            const label = `${entry.short} · ${weekClock(entry.entry_time)} · ${tile.label}`;
+            return (
+              <li key={entry.trade_id}>
+                <Link href={`/trades/${encodeURIComponent(entry.trade_id)}`} title={label} aria-label={label}
+                  className={cn("flex h-8 w-8 items-center justify-center rounded text-xs tabular-nums hover:ring-1 hover:ring-primary sm:h-6 sm:w-6", tile.tone)}>
+                  {tile.mark}
+                </Link>
+              </li>
+            );
+          })}
+        </ol>
       )}
       <p className="text-foreground">
         {total ? <><span className="tabular-nums">{planned}</span> of <span className="tabular-nums">{total}</span> entries this week were planned before entry.</> : "No entries yet this week."}

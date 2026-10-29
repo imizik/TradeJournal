@@ -9,7 +9,7 @@ const NOW = new Date("2026-10-26T18:30:00Z");
 const now = NOW.getTime() / 1000;
 const STREAK: PlanStreak = {
   show: true, since: now - 86400 * 10, tracking: true, current: 4, best: 6, pending: 0,
-  this_week: { planned: 5, total: 7, pending: 0, start: now - 86400 * 2 },
+  this_week: { planned: 5, total: 7, pending: 0, start: now - 86400 * 2, entries: [] },
   last_break: { contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: now - 60, reason: "no_plan" },  // 14:29 today
 };
 
