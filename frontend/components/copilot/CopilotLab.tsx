@@ -12,7 +12,7 @@ import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
-import SessionTape from "@/components/copilot/SessionTape";
+import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
@@ -28,6 +28,7 @@ const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
 /** A Briefing conversation keeps its question's first line as its title (CopilotPanel's ``savedFields``). */
 const BRIEFING_TITLE = WHAT_MATTERS_PROMPT.split("\n")[0].slice(0, 80);
+const ARM_PROMPT = "Arm today's plans: for each plan I mean to trade today, check its entry, invalidation and time stop against the pre-market, and propose any alert or time stop still missing for me to confirm.";
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
 
 /** Typing somewhere: a desk key never fires there. */
@@ -45,6 +46,7 @@ function typing(target: EventTarget | null) {
 export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
   const on = useCopilotOn();
   const router = useRouter();
+  const session = useDeskSession(on);
   // A deep link (a ping, a Radar row, a chip) opens on its conversation, so a phone's composer is on the first screen.
   const [tab, setTab] = useState<DeskTab>(link ? "thread" : "now");
   const [command, setCommand] = useState<DeskCommand | null>(null);
@@ -99,6 +101,12 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return () => clearInterval(timer);
   }, []);
 
+  // The thread list's phase button: before the open on a weekday, Arm today's plans; after 16:00, Close the day. Each only
+  // puts its question in the message box, unsent; nothing is armed until a card is confirmed.
+  const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Puts a question about today's plans in the box, unsent" }
+    : dayPhase === "close" ? { label: "Close the day", hint: "Puts a close-of-day question in the box, unsent" } : null;
+  const runPhase = useCallback(() => fill(dayPhase === "pre" ? ARM_PROMPT : CLOSE_PROMPT), [fill, dayPhase]);
+
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
@@ -149,15 +157,17 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
+        {on && <DeskStatus data={session.data} />}
         {on && (
           <div className={styles.barActions}>
             <button type="button" onClick={() => setPalette(true)} aria-label="Jump to a thread or command" aria-haspopup="dialog"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
-              <Search size={14} aria-hidden />Jump to…<kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
+              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border bg-card px-2.5 text-xs text-muted-foreground hover:text-foreground sm:min-h-8">
+              {/* A phone keeps the bar on one line: icons only, as the button's label already says. */}
+              <Search size={14} aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className={cn(KBD, "hidden md:inline")}>{jumpKey}</kbd>
             </button>
             <button type="button" onClick={planTrade} title="A new plan; you name the symbol. Nothing is sent. ( N )"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 sm:min-h-8">
-              <Plus size={14} aria-hidden />New plan
+              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 sm:min-h-8">
+              <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
             </button>
             <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide the Context pane ( ] )"
               className={cn(styles.contextToggle, "inline-flex h-8 w-8 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground", !contextShown && "bg-secondary")}>
@@ -178,7 +188,12 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} />
+            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} phase={phaseAction && (
+              <button type="button" onClick={runPhase} title={phaseAction.hint}
+                className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
+                {phaseAction.label}
+              </button>
+            )} />
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
@@ -190,7 +205,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
             <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} /></div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><BriefingExtras /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras /><AlertScorecard /></> : (
             <DeskThreadTop thread={thread} compact={deciding} hero={
               <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} />} />
           ))}

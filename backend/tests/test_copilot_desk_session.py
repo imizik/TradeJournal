@@ -1,5 +1,5 @@
 """The Briefing's session timeline (GET /copilot/desk/session): today's regular session, its fills, phone pings, Radar
-events and logged decisions, the time stops still ahead, the pings against the daily cap, the prep and SPY/QQQ, composed
+events and logged decisions, the time stops still ahead, the pings against the daily cap, the prep and SPY/QQQ/VIX, composed
 from readers that already exist. Owner-only, refused while the lab is off, read-only. No network."""
 
 from datetime import UTC, datetime, timedelta
@@ -35,13 +35,15 @@ def ping(db, kind, minute, decision="sent", symbol="NBIS"):
 
 
 def test_a_quiet_day_is_the_session_and_the_indices(desk, quotes):  # noqa: F811
-    quotes["rows"] += [{"symbol": "SPY", "last": 580.1, "change_percentage": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_percentage": -0.31}]
+    quotes["rows"] += [{"symbol": "SPY", "last": 580.1, "change_percentage": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_percentage": -0.31},
+                       {"symbol": "VIX", "last": 16.9, "change_percentage": 3.1}]
     body = read(desk)
     assert (body["phase"], body["open"], body["close"], body["day"]) == ("regular", OPEN, CLOSE, "2026-10-21")
     assert body["now"] == at(289)  # 14:49
     assert (body["events"], body["time_stops"], body["prep"]) == ([], [], None)
     assert body["pings"] == {"sent": 0, "held": 0, "cap": 12}
-    assert body["indices"] == [{"symbol": "SPY", "last": 580.1, "change_pct": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_pct": -0.31}]
+    assert body["indices"] == [{"symbol": "SPY", "last": 580.1, "change_pct": 0.42}, {"symbol": "QQQ", "last": 500.2, "change_pct": -0.31},
+                               {"symbol": "VIX", "last": 16.9, "change_pct": 3.1}]
     assert body["sections"]["radar"] == "off" and set(body["sections"].values()) <= {"ok", "off"}
 
 

@@ -265,7 +265,7 @@ export async function getDeskPicture(id: string, signal?: AbortSignal): Promise<
 export type DeskSessionEvent = { kind: "fill" | "ping" | "radar" | "decision"; at: number; symbol: string | null; text: string };
 
 /** ``GET /copilot/desk/session``: today's regular session (``open``/``close`` null on a closed day), what happened in it,
- * the plan time stops still ahead, pings against the daily cap, the pre-market prep and SPY/QQQ. Times are epoch seconds. */
+ * the plan time stops still ahead, pings against the daily cap, the pre-market prep and SPY/QQQ/VIX. Times are epoch seconds. */
 export type DeskSession = {
   as_of: string; now: number; day: string; phase: DeskDay["phase"]; open: number | null; close: number | null;
   events: DeskSessionEvent[]; time_stops: { symbol: string; at: number; clock: string }[];
