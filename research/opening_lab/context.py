@@ -4,9 +4,10 @@
 everything in the window and exact timestamps. It does NOT decide what was
 visible at a checkpoint; ``packet.py`` applies that causal cut.
 
-News window: prior session 16:00 ET through 10:30 ET of the session date.
-Pages are fetched newest-first and the NEWEST ~300 items are kept, so a busy
-day loses overnight items, never the open. Macro coverage is CPI / FOMC / jobs only (no GDP, ISM, PCE, retail sales...).
+News window: prior session 16:00 ET through 10:00 ET of the session date.
+The whole window is fetched oldest-first with no count cap (a safety cap marks
+the day "incomplete"), so which early items are stored never depends on later
+bursts. Macro coverage is CPI / FOMC / jobs only (no GDP, ISM, PCE, retail sales...).
 """
 
 import argparse
@@ -30,12 +31,12 @@ NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
 ENV_PATH = Path("/Users/user/TradeJournal/backend/.env")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MACRO_PATH = REPO_ROOT / "backend/app/data/macro_calendar.json"
-CACHE_DIR = Path(__file__).resolve().parent / ".cache" / "news"
+CACHE_DIR = Path(__file__).resolve().parent / ".cache" / "news_v2"
 
 PAGE_LIMIT = 50
-MAX_ITEMS = 300
+SAFETY_CAP = 5000  # per query; hitting it marks the day incomplete
 SUMMARY_CHARS = 400
-WINDOW_END_ET = "10:30"
+WINDOW_END_ET = "10:00"
 MAX_REQUESTS_PER_MIN = 150
 MAX_RETRIES = 4
 QUERIES = (("broad", None), ("spy_qqq", "SPY,QQQ"))
@@ -59,7 +60,7 @@ def _utc_z(value):
 
 def normalize_news(item):
     """Provider article -> contract NewsItem."""
-    return {
+    out = {
         "id": str(item["id"]),
         "headline": _strip_html(item.get("headline")),
         "summary": _strip_html(item.get("summary"))[:SUMMARY_CHARS],
@@ -67,6 +68,9 @@ def normalize_news(item):
         "source": item.get("source") or "",
         "created_at": _utc_z(item["created_at"]),
     }
+    if item.get("updated_at"):
+        out["updated_at"] = _utc_z(item["updated_at"])
+    return out
 
 
 def _merge(items):
@@ -95,9 +99,12 @@ def _prior_weekday(day):
     return d.isoformat()
 
 
-def _window(day, prior):
+def _window(day, prior, now=None):
+    """(start, end) UTC strings; end is 10:00 ET, or ``now`` if earlier."""
     start = et_datetime(prior, "16:00").astimezone(UTC)
     end = et_datetime(day, WINDOW_END_ET).astimezone(UTC)
+    if now is not None:
+        end = min(end, now)
     return start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -135,19 +142,21 @@ def _get(client, params):
 
 
 def _fetch_query(client, start, end, symbols):
-    params = {"start": start, "end": end, "sort": "desc", "limit": PAGE_LIMIT,
+    """Fetch every page oldest-first. Returns (items, complete)."""
+    params = {"start": start, "end": end, "sort": "asc", "limit": PAGE_LIMIT,
               "include_content": "false", "exclude_contentless": "false"}
     if symbols:
         params["symbols"] = symbols
     items, token = [], None
-    while len(items) < MAX_ITEMS:
+    while True:
         page = dict(params, **({"page_token": token} if token else {}))
         data = _get(client, page)
         items += [normalize_news(a) for a in data.get("news") or []]
         token = data.get("next_page_token")
         if not token:
-            break
-    return items[:MAX_ITEMS]
+            return items, True
+        if len(items) >= SAFETY_CAP:
+            return items, False
 
 
 # --- cache -------------------------------------------------------------------
@@ -170,26 +179,32 @@ def _write_cache(day, payload):
     _cache_path(day).write_text(json.dumps(payload, indent=1))
 
 
-def fetch_news_day(day, prior=None, client=None):
-    """Fetch (network) and cache one session's headlines. Returns the cache payload."""
+def fetch_news_day(day, prior=None, client=None, now=None, cache=True):
+    """Fetch one session's headlines up to 10:00 ET (or ``now``, if earlier).
+
+    The result is cached only when ``cache`` is true, the window is the full one
+    (``now`` is past 10:00 ET of ``day``) and no query hit the safety cap.
+    """
     prior = prior or _prior_weekday(day)
-    start, end = _window(day, prior)
+    now = now or datetime.now(UTC)
+    start, end = _window(day, prior, now)
+    full_end = _window(day, prior)[1]
     own = client is None
     client = client or httpx.Client(headers=_headers(), timeout=30)
     try:
-        items, per_query = [], []
+        items, complete = [], True
         for _, symbols in QUERIES:
-            got = _fetch_query(client, start, end, symbols)
-            per_query.append(len(got))
+            got, ok = _fetch_query(client, start, end, symbols)
             items += got
+            complete = complete and ok
     finally:
         if own:
             client.close()
-    merged = _merge(items)
-    capped = len(merged) > MAX_ITEMS or any(n >= MAX_ITEMS for n in per_query)
-    payload = {"date": day, "window": [start, end], "fetched_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "capped": capped, "items": merged[-MAX_ITEMS:]}
-    _write_cache(day, payload)
+    full_window = end == full_end
+    payload = {"date": day, "window": [start, end], "fetched_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "incomplete": not complete, "full_window": full_window, "items": _merge(items)}
+    if cache and complete and full_window:
+        _write_cache(day, payload)
     return payload
 
 
@@ -210,29 +225,32 @@ def load_macro(day, path=MACRO_PATH):
 
 
 # --- public API --------------------------------------------------------------
-def attach_context(session, *, fetch=False):
+def attach_context(session, *, fetch=False, refresh=False):
     """Return a copy of SessionData with ``news``, ``macro`` and provenance["context"] filled.
 
     ``fetch=False`` reads only the on-disk news cache; ``fetch=True`` hits Alpaca
-    when a day is not cached. Missing coverage is recorded, never silent.
+    when a day is not cached (caching only complete, past-10:00 windows).
+    ``refresh=True`` (live) always fetches up to now and never reads or writes the
+    cache. Missing coverage is recorded, never silent.
     """
     out = copy.deepcopy(session)
     day = out["date"]
     prior = _prior_date(out)
     errors = []
 
-    payload = _read_cache(day)
+    payload = None if refresh else _read_cache(day)
     news_status = "cache" if payload else "missing"
-    if payload is None and fetch:
+    if payload is None and (fetch or refresh):
         try:
-            payload = fetch_news_day(day, prior)
-            news_status = "fetched"
+            payload = fetch_news_day(day, prior, cache=not refresh)
+            news_status = "refreshed" if refresh else "fetched"
         except Exception as exc:  # report, never crash a replay
             errors.append(f"news_fetch_failed: {type(exc).__name__}: {str(exc)[:200]}")
             news_status = "error"
     news = payload["items"] if payload else []
-    if payload and payload.get("capped"):
-        errors.append(f"news_capped_at_{MAX_ITEMS}_oldest_dropped")
+    incomplete = bool(payload and payload.get("incomplete"))
+    if incomplete:
+        errors.append("news_incomplete_safety_cap_hit")
 
     macro, macro_cov = load_macro(day)
     out["news"] = news
@@ -243,6 +261,7 @@ def attach_context(session, *, fetch=False):
             "queries": [name for name, _ in QUERIES],
             "status": news_status,
             "count": len(news),
+            "incomplete": incomplete,
             "window": payload["window"] if payload else list(_window(day, prior)),
             "fetched_at": payload.get("fetched_at") if payload else None,
             "note": "created_at is the provider timestamp, possibly later than first publication",
@@ -265,9 +284,9 @@ def weekdays(start, end):
 def prefetch_news(start, end, days=None):
     """Fetch and cache headlines for each weekday in [start, end] (or ``days``).
 
-    Already-cached days are skipped. Returns {"counts": {day: n}, "failures": {day: msg}}.
+    Already-cached days are skipped. Returns {"counts", "failures", "incomplete"}.
     """
-    counts, failures = {}, {}
+    counts, failures, incomplete = {}, {}, []
     todo = days if days is not None else list(weekdays(start, end))
     with httpx.Client(headers=_headers(), timeout=30) as client:
         for day in todo:
@@ -276,9 +295,11 @@ def prefetch_news(start, end, days=None):
                 if payload is None:
                     payload = fetch_news_day(day, client=client)
                 counts[day] = len(payload["items"])
+                if payload.get("incomplete") or not payload.get("full_window", True):
+                    incomplete.append(day)
             except Exception as exc:
                 failures[day] = f"{type(exc).__name__}: {str(exc)[:200]}"
-    return {"counts": counts, "failures": failures}
+    return {"counts": counts, "failures": failures, "incomplete": incomplete}
 
 
 def main(argv=None):
@@ -290,7 +311,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     result = prefetch_news(args.start, args.end)
     counts = sorted(result["counts"].values())
-    print(f"sessions={len(counts)} failures={len(result['failures'])}")
+    print(f"sessions={len(counts)} failures={len(result['failures'])} incomplete={result['incomplete']}")
     if counts:
         print(f"items min={counts[0]} median={counts[len(counts) // 2]} max={counts[-1]}")
     for day, msg in result["failures"].items():

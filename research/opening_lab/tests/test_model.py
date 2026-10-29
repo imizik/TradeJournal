@@ -250,9 +250,9 @@ def test_cache_key_depends_on_settings(tmp_path):
     other = M.ClaudeForecaster("claude-sonnet-5-5", PROMPT + "!", client=FakeClient(),
                                cache_dir=tmp_path / "cache")
     assert key != other.cache_key(PACKET)
-    # backend-agnostic: same key for api and cli
+    # api and cli answers never share a cache entry
     cli = M.ClaudeForecaster("claude-sonnet-5-5", PROMPT, backend="cli", cache_dir=tmp_path / "cache")
-    assert key == cli.cache_key(PACKET)
+    assert key != cli.cache_key(PACKET)
 
 
 def test_invalid_cached_error_not_cached_and_atomic_write(tmp_path, monkeypatch):

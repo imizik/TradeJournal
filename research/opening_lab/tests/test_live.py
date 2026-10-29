@@ -6,7 +6,7 @@ import pytest
 
 from research.opening_lab import data, live
 from research.opening_lab.contract import ET, et_datetime, et_hhmm
-from research.opening_lab.tests.test_data import DAY, PRIOR, put_main_daily, put_main_minutes, raw_day
+from research.opening_lab.tests.test_data import DAY, PRIOR, put_lab_daily, put_main_minutes, raw_day
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def cached(tmp_path, monkeypatch):
     monkeypatch.setattr(data, "_request", lambda *a, **k: pytest.fail("network used"))
     for d in PRIOR:
         put_main_minutes(tmp_path / "main", d, volume=200)
-    put_main_daily(tmp_path / "main", PRIOR)
+    put_lab_daily(tmp_path / "lab", PRIOR)
     return tmp_path
 
 

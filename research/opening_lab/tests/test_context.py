@@ -1,8 +1,11 @@
 """Context attachment tests: no network."""
 
 import json
+from datetime import datetime, timezone
 
 from research.opening_lab import context
+
+UTC = timezone.utc
 
 
 def _session(day="2026-07-15", prior="2026-07-14"):
@@ -26,7 +29,7 @@ def test_merge_dedupes_and_sorts():
 
 def test_window_uses_prior_session_and_et():
     start, end = context._window("2026-07-15", "2026-07-14")
-    assert start == "2026-07-14T20:00:00Z" and end == "2026-07-15T14:30:00Z"
+    assert start == "2026-07-14T20:00:00Z" and end == "2026-07-15T14:00:00Z"
 
 
 def test_prior_date_prefers_daily_else_weekday():
@@ -37,7 +40,7 @@ def test_prior_date_prefers_daily_else_weekday():
 def test_attach_uses_cache_only_without_fetch(tmp_path, monkeypatch):
     monkeypatch.setattr(context, "CACHE_DIR", tmp_path)
     (tmp_path / "2026-07-15.json").write_text(json.dumps(
-        {"window": ["a", "b"], "fetched_at": "t", "capped": False,
+        {"window": ["a", "b"], "fetched_at": "t", "incomplete": False,
          "items": [{"id": "1", "headline": "h", "summary": "", "symbols": [], "source": "s",
                     "created_at": "2026-07-15T12:00:00Z"}]}))
     monkeypatch.setattr(context, "fetch_news_day", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
@@ -76,23 +79,90 @@ def test_macro_events_utc_and_coverage(tmp_path):
     assert events == [] and cov["status"] == "outside_coverage"
 
 
-def test_fetch_query_paginates_with_fake_client(monkeypatch):
+class _Resp:
+    status_code = 200
+
+    def __init__(self, d):
+        self.d = d
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.d
+
+
+class _Client:
+    """Fake Alpaca: serves `articles` honoring start/end, 2 per page."""
+
+    def close(self):
+        pass
+
+    def __init__(self, articles):
+        self.articles, self.calls = articles, []
+
+    def get(self, url, params):
+        self.calls.append(params)
+        rows = [a for a in self.articles if params["start"] <= a["created_at"] <= params["end"]]
+        if params.get("symbols"):
+            rows = [a for a in rows if set(a.get("symbols", [])) & {"SPY", "QQQ"}]
+        pos = int(params.get("page_token") or 0)
+        nxt = pos + 2 if pos + 2 < len(rows) else None
+        return _Resp({"news": rows[pos:pos + 2], "next_page_token": str(nxt) if nxt else None})
+
+
+def _art(i, ts, symbols=()):
+    return {"id": i, "headline": f"h{i}", "created_at": ts, "symbols": list(symbols), "updated_at": ts}
+
+
+EARLY = [_art(1, "2026-07-15T12:00:00Z"), _art(2, "2026-07-15T13:00:00Z"), _art(3, "2026-07-15T13:29:00Z")]
+BURST = [_art(100 + k, "2026-07-15T13:31:00Z") for k in range(30)]
+AFTER_1000 = datetime(2026, 7, 15, 15, 0, tzinfo=UTC)  # 11:00 ET
+
+
+def test_paginates_oldest_first_and_keeps_updated_at(monkeypatch):
     monkeypatch.setattr(context, "_throttle", lambda: None)
-    pages = [{"news": [{"id": 1, "headline": "a", "created_at": "2026-07-15T12:00:00Z"}], "next_page_token": "t"},
-             {"news": [{"id": 2, "headline": "b", "created_at": "2026-07-15T12:01:00Z"}], "next_page_token": None}]
-    seen = []
+    c = _Client(EARLY)
+    items, ok = context._fetch_query(c, "2026-07-14T20:00:00Z", "2026-07-15T14:00:00Z", None)
+    assert ok and [i["id"] for i in items] == ["1", "2", "3"]
+    assert c.calls[0]["sort"] == "asc" and items[0]["updated_at"] == "2026-07-15T12:00:00Z"
 
-    class Resp:
-        status_code = 200
-        def __init__(self, d): self.d = d
-        def raise_for_status(self): pass
-        def json(self): return self.d
 
-    class Client:
-        def get(self, url, params):
-            seen.append(params)
-            return Resp(pages[len(seen) - 1])
+def test_later_burst_does_not_change_early_items(tmp_path, monkeypatch):
+    monkeypatch.setattr(context, "_throttle", lambda: None)
+    monkeypatch.setattr(context, "CACHE_DIR", tmp_path)
+    a = context.fetch_news_day("2026-07-15", "2026-07-14", _Client(EARLY), now=AFTER_1000, cache=False)
+    b = context.fetch_news_day("2026-07-15", "2026-07-14", _Client(EARLY + BURST), now=AFTER_1000, cache=False)
+    early = lambda p: [i["id"] for i in p["items"] if i["created_at"] <= "2026-07-15T13:30:00Z"]
+    assert early(a) == early(b) == ["1", "2", "3"]
 
-    items = context._fetch_query(Client(), "s", "e", "SPY,QQQ")
-    assert [i["id"] for i in items] == ["1", "2"]
-    assert seen[1]["page_token"] == "t" and seen[0]["sort"] == "desc" and seen[0]["symbols"] == "SPY,QQQ"
+
+def test_refresh_never_writes_or_reads_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(context, "_throttle", lambda: None)
+    monkeypatch.setattr(context, "CACHE_DIR", tmp_path)
+    (tmp_path / "2026-07-15.json").write_text(json.dumps({"window": [], "items": [{"id": "stale"}]}))
+    before = (tmp_path / "2026-07-15.json").read_text()
+    monkeypatch.setattr(context, "_headers", lambda: {})
+    monkeypatch.setattr(context.httpx, "Client", lambda **k: _Client(EARLY))
+    out = context.attach_context(_session(), refresh=True)
+    assert [n["id"] for n in out["news"]] == ["1", "2", "3"]
+    assert out["provenance"]["context"]["news"]["status"] == "refreshed"
+    assert (tmp_path / "2026-07-15.json").read_text() == before
+
+
+def test_partial_window_not_cached_full_window_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(context, "_throttle", lambda: None)
+    monkeypatch.setattr(context, "CACHE_DIR", tmp_path)
+    early_now = datetime(2026, 7, 15, 13, 30, 5, tzinfo=UTC)  # 09:30:05 ET
+    p = context.fetch_news_day("2026-07-15", "2026-07-14", _Client(EARLY), now=early_now)
+    assert p["full_window"] is False and not list(tmp_path.glob("*.json"))
+    p = context.fetch_news_day("2026-07-15", "2026-07-14", _Client(EARLY), now=AFTER_1000)
+    assert p["full_window"] is True and (tmp_path / "2026-07-15.json").exists()
+
+
+def test_safety_cap_marks_incomplete_and_skips_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(context, "_throttle", lambda: None)
+    monkeypatch.setattr(context, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(context, "SAFETY_CAP", 4)
+    p = context.fetch_news_day("2026-07-15", "2026-07-14", _Client(EARLY + BURST), now=AFTER_1000)
+    assert p["incomplete"] is True and not list(tmp_path.glob("*.json"))

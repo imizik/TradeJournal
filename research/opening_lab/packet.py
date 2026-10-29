@@ -40,10 +40,11 @@ computable). Prices are rounded to 2 dp, percentages and rvol to 3 dp.
   or when any of those minutes is missing from the profile or it sums to 0.
 
 News selection (full variant): visible items are deduplicated by headline and
-kept only if relevant to the index: market-wide first (an index/macro symbol
-such as SPY or QQQ in ``symbols``, or a macro / Fed / market term in the
-headline), then index heavyweights (``_HEAVYWEIGHTS``) unless the headline is
-routine tape (``_NOISE``: halts, analyst actions, explainers). The long tail is
+kept only if relevant to the index: economic data and policy first
+(``_MACRO_TERMS`` in the headline), then market-wide (an index symbol such as
+SPY or QQQ in ``symbols``, or a ``_MARKET_TERMS`` headline), then index
+heavyweights (``_HEAVYWEIGHTS``) unless the headline is routine tape
+(``_NOISE``: halts, analyst actions, explainers). The long tail is
 dropped. Within a tier newer wins; the top ``NEWS_LIMIT`` are listed newest
 first with ids n1, n2, ...
 """
@@ -56,7 +57,7 @@ from .contract import (BAR_COLUMNS, CHECKPOINTS_ET, ET, NEWS_LAG_SECONDS, PACKET
                        SYMBOLS, UTC, VARIANTS, checkpoint_ts, et_hhmm, visible_bars)
 
 VERSION = "opening-lab-packet-v1"
-NEWS_LIMIT = 12
+NEWS_LIMIT = 15
 HEADLINE_CHARS = 200
 SUMMARY_CHARS = 240
 NEWS_SYMBOLS = 5
@@ -64,11 +65,16 @@ CHARS_PER_TOKEN = 3.5
 
 _MARKET_SYMBOLS = {"SPY", "QQQ", "DIA", "IWM", "VOO", "IVV", "SPX", "$SPX", "NDX", "VIX",
                    "TLT", "ES", "NQ"}
-_MARKET_TERMS = re.compile(
+# Economic data and policy: the headlines most able to move the index today.
+_MACRO_TERMS = re.compile(
     r"\b(fed|fomc|powell|rate cut|rate hike|interest rates?|inflation|cpi|ppi|pce|"
-    r"payrolls?|jobs report|jobless|unemployment|gdp|retail sales|ism|consumer "
-    r"(?:sentiment|confidence)|treasur(?:y|ies)|yields?|tariffs?|recession|economy|"
-    r"stock market|futures|s&p|nasdaq|dow|wall street|equities|crude|oil prices|"
+    r"payrolls?|nonfarm|jobs report|jobless|unemployment|gdp|retail sales|ism|pmi|"
+    r"consumer (?:sentiment|confidence)|empire state|treasur(?:y|ies)|yields?|tariffs?|"
+    r"recession)\b",
+    re.IGNORECASE,
+)
+_MARKET_TERMS = re.compile(
+    r"\b(economy|stock market|futures|s&p|nasdaq|dow|wall street|equities|crude|oil prices|"
     r"geopolitic\w*|sanctions|war|shutdown)\b",
     re.IGNORECASE,
 )
@@ -190,15 +196,18 @@ def _symbol_block(data, day, open_ts, c_ts, variant):
 
 
 def _relevance(item):
-    """0 market-wide, 1 index heavyweight, None for the long tail and routine noise."""
+    """0 economic data / policy, 1 market-wide, 2 index heavyweight, None for the
+    long tail and routine noise."""
     symbols = {str(s).upper() for s in item.get("symbols") or []}
     headline = item.get("headline") or ""
-    if symbols & _MARKET_SYMBOLS or _MARKET_TERMS.search(headline):
+    if _MACRO_TERMS.search(headline):
         return 0
+    if symbols & _MARKET_SYMBOLS or _MARKET_TERMS.search(headline):
+        return 1
     if _NOISE.search(headline):
         return None
     if symbols & _HEAVYWEIGHTS:
-        return 1
+        return 2
     return None
 
 

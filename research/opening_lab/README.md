@@ -48,10 +48,17 @@ training cutoffs (July 2026 on).
 
 ## Data
 
-- Minute and daily SIP bars: the app's Alpaca cache in the main checkout, read
-  only; anything missing is fetched from Alpaca into `.cache/` (gitignored).
+- Minute bars: SIP, raw, from the app's Alpaca cache in the main checkout (read
+  only); anything missing is fetched from Alpaca into `.cache/` (gitignored).
+  Daily bars are fetched raw into `.cache/daily/` — the app's daily cache is
+  dividend-adjusted and would shift prior closes and gaps.
   July 1 – October 27, 2026 is prefetched: 83 sessions, no gaps.
-- Headlines: Alpaca news, cached per date in `.cache/news/`.
+- Headlines: Alpaca/Benzinga, the complete window from the prior session's
+  16:00 to 10:00 ET with no count cap (a cap would let later news decide which
+  earlier headlines survive), cached in `.cache/news_v2/`. Each packet keeps up
+  to 15 visible headlines: economic data and Fed first, then market-wide, then
+  index heavyweights; routine single-name tape (halts, analyst actions) is
+  dropped.
 - Macro: `backend/app/data/macro_calendar.json` (CPI, FOMC, jobs only; no GDP,
   ISM, PCE or other 10:00 releases).
 - No Tradier requests, streams or production routes. Nothing here touches the
@@ -65,16 +72,22 @@ From the repository root, with the backend virtualenv:
 backend/.venv/bin/python -m pytest research/opening_lab/tests -q
 backend/.venv/bin/python -m research.opening_lab prefetch --start 2026-07-01 --end 2026-10-27
 backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/baselines --start 2026-07-01 --end 2026-10-27 --model none
-backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/sonnet --start 2026-07-01 --end 2026-10-27 --estimate
+backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/sonnet --start 2026-07-01 --end 2026-10-27 --model claude-sonnet-5-5 --estimate
+backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/sonnet --start 2026-07-01 --end 2026-07-14 --model claude-sonnet-5-5 --max-cost-usd 5
 ```
 
-A model replay (`--model claude-sonnet-5-5`, or `--fake` for a free dry run)
-writes `run.json`, `records.jsonl`, `packets/` and `report.txt`/`report.json`
-into the run directory. Re-running the same command resumes; model answers are
-cached by packet, so nothing is billed twice. `--max-cost-usd` stops new calls
-at a spend cap (an unknown cost also stops them). A different model, effort or
-code version needs a new run directory. `--backend cli` uses `claude -p` on the
-Claude plan instead of the API key.
+A model replay writes `run.json`, `records.jsonl`, `packets/` and
+`report.txt`/`report.json` into the run directory (`--model fake` is a free dry
+run). Defaults: adaptive thinking at medium effort. Re-running the same command
+resumes: answered checkpoints are kept, provider errors and timeouts are asked
+again (with the later checkpoints of that morning, whose prior decisions
+changed), and answers are cached by packet, so nothing is billed twice.
+`--max-cost-usd` is required for paid API runs and caps the run directory's
+total recorded spend across invocations; an answer with unknown cost, or 20
+provider errors in one invocation, also stops new calls. A different model,
+effort or code version needs a new run directory. `--backend cli` uses
+`claude -p` on the Claude plan instead of the API key (its cache entries are
+kept separate).
 
 `live --run DIR --model … --variant full` runs one morning on live Alpaca data
 (start before 09:30 ET): each packet freezes at checkpoint + 5 s and an answer

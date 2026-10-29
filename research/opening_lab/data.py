@@ -1,9 +1,11 @@
 """Historical SessionData for the opening lab (SPY and QQQ minute + daily bars).
 
-Sources, in order: the read-only Alpaca SIP cache in the main checkout, then
-the lab cache (``research/opening_lab/.cache/``), then, only when
-``fetch=True``, Alpaca's market-data REST API. Fetched data is written to the
-lab cache only; the main checkout's cache is never written.
+Minute bars, in order: the lab cache (``research/opening_lab/.cache/``), the
+read-only Alpaca SIP minute cache in the main checkout, then, only when
+``fetch=True``, Alpaca's market-data REST API. Daily bars come ONLY from the
+lab cache, fetched raw (``adjustment=raw``, feed sip): the main checkout's
+daily cache is dividend-adjusted and must not be mixed with raw minutes.
+Fetched data is written to the lab cache only; the main cache is never written.
 
 ``load_session`` returns the SessionData dict described in ``contract.py`` with
 ``news`` and ``macro`` left empty for ``context.attach_context``.
@@ -229,21 +231,22 @@ def ensure_minutes(days, fetch):
 
 
 def _daily_maps():
-    """{symbol: {date: Bar1D}} merged from the main daily cache and the lab daily cache."""
+    """{symbol: {date: Bar1D}} from the lab's raw daily cache only.
+
+    The main checkout's 1Day cache is deliberately not read: the app fetches it
+    with adjustment=all (dividend-adjusted), which would not match raw minutes.
+    """
     out = {}
     for sym in SYMBOLS:
-        merged = {}
-        for path in (MAIN_CACHE_DIR / "1Day" / FEED / f"{sym}.json", CACHE_DIR / "daily" / f"{sym}.json"):
-            for r in _read_json(path) or []:
-                bar = r if "date" in r else _daily_bar(r)
-                if bar:
-                    merged[bar["date"]] = bar
-        out[sym] = merged
+        bars = (_daily_bar(r) if "date" not in r else r for r in _read_json(CACHE_DIR / "daily" / f"{sym}.json") or [])
+        out[sym] = {b["date"]: b for b in bars if b}
     return out
 
 
 def ensure_daily(days, fetch):
-    """Fetch daily bars for completed sessions in ``days`` that no cache holds."""
+    """Fetch raw daily bars for completed sessions in ``days`` missing from the lab cache.
+
+    Stored bars are never rewritten: a completed session's raw bar is final."""
     if not fetch:
         return
     maps = _daily_maps()
@@ -256,7 +259,7 @@ def ensure_daily(days, fetch):
         merged = {b["date"]: b for b in have}
         for r in raw[sym]:
             bar = _daily_bar(r)
-            if bar:
+            if bar and bar["date"] not in merged and _session_complete(bar["date"]):
                 merged[bar["date"]] = bar
         _write_json(CACHE_DIR / "daily" / f"{sym}.json", [merged[d] for d in sorted(merged)])
 
@@ -324,7 +327,8 @@ def history(day, *, fetch=False):
         daily = [maps[sym][d] for d in sorted(maps[sym]) if d < day][-DAILY_SESSIONS:]
         if prior and (not daily or daily[-1]["date"] != prior[-1]):
             gaps.append(f"{sym}:daily_missing_prior_session={prior[-1]}")
-        prov["daily"][sym] = {"count": len(daily), "last": daily[-1]["date"] if daily else None}
+        prov["daily"][sym] = {"count": len(daily), "last": daily[-1]["date"] if daily else None,
+                              "source": "lab_cache", "adjustment": "raw", "feed": FEED}
 
         totals, used = {}, []
         for d in candidates:
@@ -368,6 +372,8 @@ def load_session(day, *, fetch=False):
     for sym in SYMBOLS:
         bars, source = cached_minutes(sym, day)
         if bars is None:
+            if not _session_complete(day):
+                raise SessionUnavailable(f"{day}: session is not complete yet (data is final after 20:00 ET)")
             raise SessionUnavailable(f"{day}: no minute data for {sym}" + ("" if fetch else " (try fetch=True)"))
         present = len({b["t"] for b in bars if start <= b["t"] < end})
         if present < MIN_USABLE_MINUTES:

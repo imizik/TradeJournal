@@ -86,7 +86,7 @@ def test_live_freezes_after_each_checkpoint_and_records_missed(tmp_path, session
         return sessions[DAY]
 
     monkeypatch.setattr(live, "live_session", fake_live_session)
-    monkeypatch.setattr(context, "attach_context", lambda s, fetch=False: s)
+    monkeypatch.setattr(context, "attach_context", lambda s, fetch=False, refresh=False: s)
 
     def sleep(seconds):
         now["t"] += timedelta(seconds=max(seconds, 0.001))
@@ -106,3 +106,46 @@ def test_live_freezes_after_each_checkpoint_and_records_missed(tmp_path, session
     for at, checkpoint in zip(seen, contract.CHECKPOINTS_ET[2:]):
         assert at.timestamp() >= contract.checkpoint_ts(DAY, checkpoint) + 5
     assert isinstance(start, datetime)
+
+
+class Failing(Counting):
+    def __init__(self, fail_at=None, cost=0.01):
+        super().__init__(cost=cost)
+        self.fail_at = fail_at
+
+    def forecast(self, packet):
+        if self.fail_at in (None, packet["checkpoint_et"]):
+            self.packets.append(packet)
+            return {"status": "error", "forecast": None, "error": "http_529", "cost_usd": None}
+        return super().forecast(packet)
+
+
+def test_resume_retries_failures_and_redoes_later_checkpoints(tmp_path, sessions):
+    runner.replay(tmp_path, [DAY], sessions=sessions, model=Failing(fail_at="09:40"), model_name="m",
+                  variants=["market"])
+    fixed = Counting()
+    run = runner.replay(tmp_path, [DAY], sessions=sessions, model=fixed, model_name="m", variants=["market"])
+    # 09:40 is asked again; 09:45..10:00 are asked again because their prior_decisions now include it
+    assert [p["checkpoint_et"] for p in fixed.packets] == list(contract.CHECKPOINTS_ET[2:])
+    assert all(r["status"] == "ok" for r in run.rows())
+    assert [p["checkpoint_et"] for p in fixed.packets[-1]["prior_decisions"]] == list(contract.CHECKPOINTS_ET[:-1])
+
+
+def test_cost_cap_counts_spend_already_recorded(tmp_path, sessions):
+    first = Counting(cost=0.05)
+    runner.replay(tmp_path, [DAY], sessions=sessions, model=first, model_name="m", variants=["bars"],
+                  max_cost_usd=0.1, log=lambda _m: None)
+    second = Counting(cost=0.05)
+    runner.replay(tmp_path, [DAY], sessions=sessions, model=second, model_name="m", variants=["bars"],
+                  max_cost_usd=0.1, log=lambda _m: None)
+    assert len(first.packets) == 2 and second.packets == []
+
+
+def test_repeated_errors_stop_the_invocation(tmp_path, sessions):
+    model = Failing()
+    messages = []
+    runner.replay(tmp_path, [f"{DAY}"], sessions=sessions, model=model, model_name="m",
+                  variants=["bars", "market", "full"], workers=1, log=messages.append)
+    # errors cost nothing but each chain keeps going; the breaker caps the invocation
+    assert len(model.packets) <= runner.MAX_ERRORS_PER_INVOCATION
+    assert len(model.packets) == 3 * len(contract.CHECKPOINTS_ET) or "provider errors" in messages[0]

@@ -45,11 +45,20 @@ def put_main_minutes(main, day, volume=100, **kw):
         path.write_text(json.dumps(raw_day(day, volume, **kw)))
 
 
-def put_main_daily(main, days):
+def put_main_daily(main, days, close=999.0):
+    """The app's (dividend-adjusted) daily cache; the lab must never read it."""
     for sym in data.SYMBOLS:
         path = main / "1Day" / "sip" / f"{sym}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([raw_daily(d, 100 + i) for i, d in enumerate(days)]))
+        path.write_text(json.dumps([raw_daily(d, close) for d in days]))
+
+
+def put_lab_daily(lab, days):
+    """The lab's raw daily cache (Bar1D rows, closes 100, 101, ...)."""
+    for sym in data.SYMBOLS:
+        path = lab / "daily" / f"{sym}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([data._daily_bar(raw_daily(d, 100 + i)) for i, d in enumerate(days)]))
 
 
 PRIOR = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"]
@@ -74,11 +83,11 @@ def test_normalize_bars_cleans_and_counts():
 
 
 def test_load_session_from_main_cache(dirs):
-    main, _ = dirs
+    main, lab = dirs
     for i, d in enumerate(PRIOR):
         put_main_minutes(main, d, volume=100 * (i + 1))
     put_main_minutes(main, DAY)
-    put_main_daily(main, PRIOR + [DAY])
+    put_lab_daily(lab, PRIOR + [DAY])
     s = data.load_session(DAY)
 
     assert s["date"] == DAY and s["news"] == [] and s["macro"] == []
@@ -88,6 +97,8 @@ def test_load_session_from_main_cache(dirs):
     assert ts == sorted(set(ts))
     assert et_hhmm(ts[0]) == "04:00" and et_hhmm(ts[-1]) == "10:59" and len(ts) == 420
     assert [d["date"] for d in spy["daily"]] == PRIOR  # strictly before the session
+    assert spy["daily"][-1]["c"] == 104  # the lab's raw bar, not the main cache's 999
+    assert s["provenance"]["daily"]["SPY"]["adjustment"] == "raw"
     assert spy["volume_profile"]["09:30"] == pytest.approx(300.0)  # mean of 100..500
     assert list(spy["volume_profile"])[0] == "09:30" and list(spy["volume_profile"])[-1] == "10:59"
     assert len(spy["volume_profile"]) == 90
@@ -150,7 +161,7 @@ def test_early_close_schedule_and_profile_skips_it(dirs, monkeypatch):
     for i, d in enumerate(PRIOR):
         put_main_minutes(main, d, volume=100 * (i + 1))
     put_main_minutes(main, DAY)
-    put_main_daily(main, days)
+    put_lab_daily(lab, days)
     monkeypatch.setattr(data, "_request", lambda url, params: calendar_rows(days, early={"2026-10-07", DAY}))
     data.calendar("2026-07-01", DAY, fetch=True)
     monkeypatch.setattr(data, "_request", lambda *a, **k: pytest.fail("network used"))
@@ -205,3 +216,22 @@ def test_not_a_trading_day(dirs, monkeypatch):
 def test_fetch_defaults_off(dirs):
     with pytest.raises(data.SessionUnavailable, match="fetch=True"):
         data.load_session(DAY)  # _request would fail the test if touched
+
+
+def test_daily_never_read_from_main_checkout(dirs):
+    main, lab = dirs
+    put_main_minutes(main, DAY)
+    put_main_minutes(main, PRIOR[-1])
+    put_main_daily(main, PRIOR)  # adjusted decoy only
+    s = data.load_session(DAY)
+    assert s["symbols"]["SPY"]["daily"] == []
+    assert any(g.startswith("SPY:daily_missing_prior_session") for g in s["provenance"]["gaps"])
+    put_lab_daily(lab, PRIOR)
+    s = data.load_session(DAY)
+    assert [d["c"] for d in s["symbols"]["QQQ"]["daily"]] == [100, 101, 102, 103, 104]
+
+
+def test_today_before_close_says_not_complete(dirs, monkeypatch):
+    monkeypatch.setattr(data, "_session_complete", lambda d, now=None: False)
+    with pytest.raises(data.SessionUnavailable, match="not complete yet"):
+        data.load_session(DAY)

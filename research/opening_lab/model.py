@@ -259,6 +259,8 @@ class ClaudeForecaster:
         return hashlib.sha256(_canonical({
             "v": CACHE_KEY_VERSION,
             "model": self.model,
+            # api and cli answers are separate observations (latency, harness).
+            "backend": self.backend,
             "thinking_budget": self.thinking_budget,
             "effort": self.effort,
             "max_tokens": self.max_tokens,

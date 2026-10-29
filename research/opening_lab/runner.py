@@ -122,25 +122,39 @@ def _prior(row):
             "qqq_p_up": forecast["qqq_p_up"]}
 
 
-class Budget:
-    """Stops new paid calls once reported spend reaches the cap."""
+# Provider failures that a later invocation may ask again; an answered but
+# schema-invalid forecast ("invalid") is the model's result and is kept.
+RETRYABLE = {"error", "timeout"}
+MAX_ERRORS_PER_INVOCATION = 20
 
-    def __init__(self, cap_usd):
+
+def _charge(row):
+    """Spend a record adds: 0 for cache hits and failed requests; an answered
+    request with unknown cost counts as unbounded, so the cap stops the run."""
+    if row.get("cache_hit") or row["status"] in RETRYABLE:
+        return 0.0
+    cost = row.get("cost_usd")
+    return cost if isinstance(cost, (int, float)) else float("inf")
+
+
+class Budget:
+    """Caps TOTAL recorded spend in the run directory, across invocations, and
+    stops after repeated provider errors (an outage or a rejected request shape)."""
+
+    def __init__(self, cap_usd, rows=()):
         self.cap = cap_usd
-        self.spent = 0.0
+        self.spent = sum(_charge(r) for r in rows if r["status"] not in ("missed", "data_missing"))
+        self.errors = 0
         self.lock = threading.Lock()
 
     def open(self):
         with self.lock:
-            return self.cap is None or self.spent < self.cap
+            return (self.cap is None or self.spent < self.cap) and self.errors < MAX_ERRORS_PER_INVOCATION
 
-    def charge(self, result):
-        if result.get("cache_hit"):
-            return
-        cost = result.get("cost_usd")
+    def charge(self, row):
         with self.lock:
-            # Unknown cost counts as the whole remaining budget: stop rather than guess.
-            self.spent += cost if isinstance(cost, (int, float)) else float("inf")
+            self.spent += _charge(row)
+            self.errors += row["status"] in RETRYABLE
 
 
 def replay(run_dir, days, *, sessions, model=None, model_name=None, variants=VARIANTS,
@@ -166,7 +180,7 @@ def replay(run_dir, days, *, sessions, model=None, model_name=None, variants=VAR
                      "horizons": contract.HORIZONS_MINUTES, "cost_bps": contract.ROUND_TRIP_COST_BPS,
                      "news_lag_s": contract.NEWS_LAG_SECONDS},
     })
-    budget = Budget(max_cost_usd)
+    budget = Budget(max_cost_usd, run.rows())
 
     for day in days:
         for checkpoint in CHECKPOINTS_ET:
@@ -181,17 +195,19 @@ def replay(run_dir, days, *, sessions, model=None, model_name=None, variants=VAR
 
     def chain(day, variant):
         prior = []
+        redo = False  # an earlier answer changed, so later packets (prior_decisions) differ
         for checkpoint in CHECKPOINTS_ET:
             key = (day, checkpoint, model_name, variant)
-            if run.has(key):
-                row = run.records[key]
-            else:
+            row = run.records.get(key)
+            if row is None or redo or row["status"] in RETRYABLE:
                 if not budget.open():
                     return "budget"
                 packet = build_packet(sessions[day], checkpoint, variant, prior)
                 result = model.forecast(packet)
-                budget.charge(result)
-                row = _record(day, checkpoint, model_name, variant, packet, result)
+                new = _record(day, checkpoint, model_name, variant, packet, result)
+                budget.charge(new)
+                redo = redo or row is not None and new["status"] == "ok"
+                row = new
                 run.add(row, packet)
             if row["status"] == "ok":
                 prior.append(_prior(row))
@@ -202,8 +218,12 @@ def replay(run_dir, days, *, sessions, model=None, model_name=None, variants=VAR
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             outcomes = list(pool.map(lambda job: chain(*job), jobs))
         if "budget" in outcomes:
-            log(f"Stopped at the ${max_cost_usd:.2f} cost cap after ${budget.spent:.2f}; "
-                "re-run with a higher --max-cost-usd to continue.")
+            if budget.errors >= MAX_ERRORS_PER_INVOCATION:
+                log(f"Stopped after {budget.errors} provider errors; check the error labels in "
+                    "records.jsonl, then re-run the same command to retry them.")
+            else:
+                log(f"Stopped at the cost cap: ${budget.spent:.2f} recorded in this run directory. "
+                    "--max-cost-usd caps the run's TOTAL spend; raise it to continue.")
     return run
 
 
@@ -218,7 +238,10 @@ def write_report(run, sessions):
 
 
 def estimate(days, sessions, variants, model):
-    """Calls still needed and a rough cost, without calling anything."""
+    """Calls a full run makes and its input size, without calling anything.
+
+    An upper bound: it ignores what a run directory or the response cache
+    already holds, and packets without prior_decisions are slightly smaller."""
     from .packet import build_packet, render_user_message
 
     prompt_chars = len(getattr(model, "prompt_text", "") or "")
@@ -264,7 +287,7 @@ def live(run_dir, day, *, model, model_name, variant="full", feed="sip", baselin
         while clock().timestamp() < freeze:
             sleep(min(1.0, freeze - clock().timestamp()))
         try:
-            session = attach_context(live_session(day, clock(), feed=feed), fetch=True)
+            session = attach_context(live_session(day, clock(), feed=feed), refresh=True)
             packet = build_packet(session, checkpoint, variant, prior)
             rules_packet = build_packet(session, checkpoint, BASELINE_VARIANT)
         except Exception as exc:

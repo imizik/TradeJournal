@@ -30,17 +30,19 @@ def _sessions(days, log):
 def _model(args):
     if args.model == "none":
         return None, None
-    if args.fake:
+    if args.fake or args.model == "fake":
+        args.fake = True
         from .model import FakeForecaster
 
         return FakeForecaster(), "fake"
     from .model import ClaudeForecaster
 
+    thinking = 2048 if args.thinking == "adaptive" else 0
     settings = {"model": args.model, "backend": args.backend, "effort": args.effort,
-                "thinking_budget": args.thinking, "max_tokens": args.max_tokens,
+                "thinking": args.thinking, "max_tokens": args.max_tokens,
                 "max_retries": args.retries}
     model = ClaudeForecaster(args.model, PROMPT.read_text(), backend=args.backend,
-                             thinking_budget=args.thinking, effort=args.effort,
+                             thinking_budget=thinking, effort=args.effort,
                              max_tokens=args.max_tokens, max_retries=args.retries)
     model.settings = settings  # pinned in run.json so a run cannot mix configurations
     name = args.model + (f"@{args.effort}" if args.effort else "")
@@ -66,16 +68,18 @@ def main(argv=None):
     prefetch.add_argument("--end", required=True)
 
     def model_options(p):
-        p.add_argument("--model", default=DEFAULT_MODEL, help="Claude model id, or 'none' for baselines only")
+        p.add_argument("--model", required=True,
+                       help=f"Claude model id (e.g. {DEFAULT_MODEL}); 'fake' for a free dry run; "
+                            "'none' for baselines only")
         p.add_argument("--backend", choices=("api", "cli"), default="api",
                        help="api = Anthropic API key (billed); cli = claude -p on the Claude plan")
-        p.add_argument("--thinking", type=int, default=0,
-                       help="0 = thinking off where the model allows; >0 = adaptive thinking "
-                            "(a token budget only on older models)")
-        p.add_argument("--effort", choices=("low", "medium", "high", "max"), default=None,
+        p.add_argument("--thinking", choices=("adaptive", "off"), default="adaptive",
+                       help="adaptive = the model decides how much to think (a 2,048-token budget "
+                            "on older models); off = no thinking where the model allows")
+        p.add_argument("--effort", choices=("low", "medium", "high", "max"), default="medium",
                        help="output effort; steers thinking depth on current models")
-        p.add_argument("--max-tokens", type=int, default=4096)
-        p.add_argument("--retries", type=int, default=0)
+        p.add_argument("--max-tokens", type=int, default=8000)
+        p.add_argument("--retries", type=int, default=2, help="SDK retries on 429/5xx (api backend)")
         p.add_argument("--fake", action="store_true", help="deterministic fake model (no calls)")
         p.add_argument("--baselines", default="all", help="'all', 'none' or a comma list")
 
@@ -86,7 +90,7 @@ def main(argv=None):
     replay.add_argument("--variants", default=",".join(VARIANTS))
     replay.add_argument("--workers", type=int, default=4)
     replay.add_argument("--max-cost-usd", type=float, default=None,
-                        help="stop new paid calls after this much reported spend")
+                        help="cap on the run directory's TOTAL reported spend (required for --backend api)")
     replay.add_argument("--estimate", action="store_true", help="count calls and input size; call nothing")
     model_options(replay)
 
@@ -118,10 +122,13 @@ def main(argv=None):
         run = Run(args.run, config)
         days = sorted({row["date"] for row in run.rows()})
         if config["kind"] == "live":
-            from .data import load_session
+            from .data import SessionUnavailable, load_session
 
             # Outcomes come from the completed session's historical bars.
-            sessions = {d: load_session(d, fetch=True) for d in days}
+            try:
+                sessions = {d: load_session(d, fetch=True) for d in days}
+            except SessionUnavailable as exc:
+                parser.error(f"cannot score yet: {exc} (bars are final after 20:00 ET)")
         else:
             sessions = _sessions(days, log)
         print(write_report(run, sessions))
@@ -150,6 +157,10 @@ def main(argv=None):
     days = [d for d in days if d in sessions]
     if not days:
         parser.error("no usable cached sessions in range; run prefetch first")
+
+    paid = model is not None and not args.fake and args.backend == "api"
+    if paid and not args.estimate and args.max_cost_usd is None:
+        parser.error("a paid API replay needs --max-cost-usd (run --estimate first)")
 
     if args.estimate:
         if model is None:
