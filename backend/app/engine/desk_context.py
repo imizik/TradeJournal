@@ -1,11 +1,14 @@
 """The Copilot desk's Context pane (docs/copilot-lab.md#the-desk): three reads for the open thread, keyed by its saved
 investigation and its symbol.
 
-- ``picture``: today's minute bars as a PNG, drawn by the ping-picture renderer (``chart_render``), with the thread's
-  plan's entry and invalidation lines and the owner's fills in the symbol today marked. The bars come from the same
-  cached chart-feed read as a ping picture (``ping_images.today_bars``); the read and the drawing run on a worker
-  with a ``BUDGET_SECONDS`` budget, and the renderer caches by content, so a repeat costs nothing. No bars, a failed
-  read or a run past the budget is ``Unavailable`` with a reason, never a blank picture.
+- ``picture``: the thread's symbol as a PNG, drawn by the ping-picture renderer (``chart_render``), on one of
+  ``TIMEFRAMES``: ``2m`` today's minutes (the same cached chart-feed read as a ping picture, ``ping_images.today_bars``),
+  ``15m`` today and the ``SESSIONS_15M - 1`` completed sessions before it, ``1D`` the last ``DAILY_DAYS`` of daily bars.
+  The intraday views also mark the plan's entry and invalidation lines, the owner's fills today, and today's phone
+  pings sent (violet) and Radar hits (blue) on the symbol, so an alert can be judged against what price did next. The
+  read and the drawing run on a worker with a ``BUDGET_SECONDS`` budget, and the renderer caches by content, so a
+  repeat costs nothing. No bars, a failed read or a run past the budget is ``Unavailable`` with a reason, never a blank
+  picture.
 - ``timeline``: one list, newest first, of what touched the thread: its plan's level alerts (armed, hit), time stop and
   revisit jobs (the investigation-linked readers ``LinkedActivity`` shows), the fills of the trade linked to its plan,
   and for its symbol over the last ``RECENT_DAYS``: thesis-watch triggers, phone pings (a ping for one of the thread's
@@ -32,7 +35,7 @@ import uuid
 from sqlmodel import Session, select
 
 from app.engine import chart_render, copilot_plans, ping_images
-from app.engine.chart_math import ET
+from app.engine.chart_math import ET, chart_bars
 from app.engine.chart_render import Chart, Mark, Time
 from app.models import (Account, CaptureLink, CopilotInvestigation, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent,
                         PhonePing, PlanTimeStop, ResearchJob, ThesisWatchTrigger, TradeCapture, TradeFill)
@@ -44,6 +47,12 @@ MAX_FILLS = 40  # fills marked on the picture
 MAX_ROWS = 40  # timeline rows
 RECENT_DAYS = 7  # the symbol's thesis triggers and pings this far back
 DAY_BARS = 24 * 60
+TIMEFRAMES = ("2m", "15m", "1D")
+SESSIONS_15M = 3  # today and the completed sessions before it on the 15m picture
+DAILY_DAYS = 120  # calendar days of daily bars on the 1D picture
+WHAT = {"2m": "minute bars for today", "15m": "15-minute bars", "1D": "daily bars"}
+# Today's events on the thread's symbol, as dots on the intraday pictures: (label of the first, colour).
+EVENT_TONE = {"fill": ("FILL", "amber"), "ping": ("PING", "violet"), "radar": ("RADAR", "blue")}
 WORKERS = 2
 _pool = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="desk-picture")
 # A read still running past its budget keeps its worker; a request finding none free says so at once rather than queueing.
@@ -143,8 +152,9 @@ def _not_webull():
 
 def _fill_marks(fills: list[Fill], first: int) -> tuple[tuple[Mark, ...], tuple[Time, ...]]:
     """A stock fill at its price; an option fill at the underlying's price when the fill recorded it, else a line at
-    its time. The first opening and the first closing fill are labelled IN and OUT; the rest are unlabelled dots. A fill
-    before the first bar shown (a pre-market fill once the regular session has bars) is left off."""
+    its time, amber (pings are violet, Radar blue). The first opening and the first closing fill are labelled IN and
+    OUT; the rest are unlabelled dots. A fill before the first bar shown (a pre-market fill once the regular session
+    has bars) is left off."""
     marks: list[Mark] = []
     times: list[Time] = []
     said: set[str] = set()
@@ -153,7 +163,7 @@ def _fill_marks(fills: list[Fill], first: int) -> tuple[tuple[Mark, ...], tuple[
         if at is None or at < first:
             continue
         label = "IN" if fill.side in OPENING else "OUT"
-        tone = "amber" if label == "IN" else "violet"
+        tone = "amber"
         text = "" if label in said else label
         said.add(label)
         price = float(fill.price) if fill.instrument_type == "stock" else (
@@ -165,9 +175,9 @@ def _fill_marks(fills: list[Fill], first: int) -> tuple[tuple[Mark, ...], tuple[
     return tuple(marks), tuple(times)
 
 
-def _budgeted(symbol: str, draw, budget: float) -> bytes:
+def _budgeted(symbol: str, draw, budget: float, what: str = WHAT["2m"]) -> bytes:
     """Runs ``draw`` on a worker within ``budget`` seconds; no bars (``None``), a failure or a run past the budget is
-    ``Unavailable`` with the reason."""
+    ``Unavailable`` with the reason, naming ``what`` was read."""
     free = _free
 
     def run() -> bytes | None:
@@ -187,12 +197,12 @@ def _budgeted(symbol: str, draw, budget: float) -> bytes:
         png = future.result(timeout=budget)
     except FutureTimeout:
         future.cancel()
-        raise Unavailable("Today's bars took too long to read; try again in a moment.") from None
+        raise Unavailable("The bars took too long to read; try again in a moment.") from None
     except Exception:  # noqa: BLE001 - a failed read is an unavailable picture, never an error page
         log.warning("Desk picture for %s failed", symbol, exc_info=True)
-        raise Unavailable(f"Today's {symbol} bars could not be read.") from None
+        raise Unavailable(f"The {symbol} {what} could not be read.") from None
     if png is None:
-        raise Unavailable(f"No {symbol} minute bars for today yet.")
+        raise Unavailable(f"No {symbol} {what} yet.")
     return png
 
 
@@ -204,12 +214,69 @@ def _today_shown(read, symbol: str, now: float) -> list[dict]:
     return [b for b in found_bars if not b.get("extended")] or found_bars
 
 
-def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budget: float = BUDGET_SECONDS) -> bytes:
-    """Today's minutes for the thread's symbol (the regular session once it has bars, before that the pre-market)
-    with its plan's levels and the owner's fills today. Raises ``Unavailable`` with the reason."""
+def fifteen_bars(symbol: str) -> list[dict]:
+    """Regular-session 15-minute bars: today's from the chart feed, and up to ``SESSIONS_15M - 1`` completed sessions
+    before it from the chart history (from disk, or fetched once and stored), split-adjusted like a chart page."""
+    from app.engine.chart_adjust import adjust_minutes
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    from app.engine.chart_history import HistoryError, chart_history
+    from app.engine.chart_splits import UNAVAILABLE
+    data = chart_feed.workspace(symbol, ["15m"], [], "regular", calendar=chart_calendar, quotes=False)
+    today = list(((data.get("panels") or {}).get("15m") or {}).get("bars") or [])
+    info = chart_history.splits.get(symbol) if chart_history.splits else UNAVAILABLE
+    earlier: list[list[dict]] = []
+    day = datetime.now(ET).date()
+    for _ in range(10):  # calendar days back, past a weekend and a holiday
+        if len(earlier) >= SESSIONS_15M - 1:
+            break
+        day -= timedelta(days=1)
+        hours = chart_calendar.hours(day) if day.weekday() < 5 else None
+        if day.weekday() >= 5 or (hours is not None and hours["status"] == "closed"):
+            continue  # weekends and holidays cost no history read
+        try:
+            minutes = adjust_minutes(chart_history.session(symbol, day), day, info["splits"])
+        except HistoryError:
+            break  # the older sessions are a bonus; today's bars still show
+        if minutes:
+            earlier.insert(0, chart_bars(minutes, [], "15m", "regular", {day: hours}))
+    return [b for session in earlier for b in session] + today
+
+
+def daily_bars(symbol: str) -> list[dict]:
+    """Daily bars from the chart feed (whole history once per New York date, kept in memory)."""
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    data = chart_feed.workspace(symbol, ["1D"], [], "regular", calendar=chart_calendar, quotes=False)
+    return list(((data.get("panels") or {}).get("1D") or {}).get("bars") or [])
+
+
+def _event_marks(events: list[dict], shown: list[dict]) -> list[Mark]:
+    """``events`` (``kind``, ``at``) as dots at the close of the bar of their time, the first of each kind labelled; one
+    before the first bar shown is left off."""
+    marks: list[Mark] = []
+    said: set[str] = set()
+    for event in sorted((e for e in events if e["kind"] in EVENT_TONE), key=lambda e: e["at"])[:MAX_FILLS]:
+        bar = next((b for b in reversed(shown) if b["time"] <= event["at"]), None)
+        if bar is None:
+            continue
+        label, colour = EVENT_TONE[event["kind"]]
+        marks.append(Mark(int(event["at"]), float(bar["close"]), "" if label in said else label, colour))
+        said.add(label)
+    return marks
+
+
+def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budget: float = BUDGET_SECONDS,
+            timeframe: str = "2m", events: list[dict] = ()) -> bytes:
+    """The thread's symbol on ``timeframe``: ``2m`` today's minutes (the regular session once it has bars, before that
+    the pre-market), ``15m`` recent sessions, ``1D`` the last ``DAILY_DAYS``. The intraday ones carry its plan's levels,
+    the owner's fills today and ``events`` (today's pings sent and Radar hits on the symbol, ``kind``/``at``). ``bars``
+    replaces the timeframe's read. Raises ``Unavailable`` with the reason."""
     symbol = inv.symbol
     if not symbol:
         raise Unavailable("This thread has no symbol, so there is no chart.")
+    if timeframe not in TIMEFRAMES:
+        raise Unavailable(f"No {timeframe} chart; the choices are {', '.join(TIMEFRAMES)}.")
     found = plan(db, str(inv.id))
     levels = tuple(sorted((a.plan_role, float(a.price)) for a in (found["entry"], found["invalidation"]) if a)) if found else ()
     today = datetime.fromtimestamp(now, ET).date()
@@ -217,17 +284,26 @@ def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budge
     fills = list(db.exec(select(Fill).where(Fill.ticker == symbol, Fill.executed_at >= start,
                                             Fill.executed_at < start + timedelta(days=1), _not_webull())
                          .order_by(Fill.executed_at).limit(MAX_FILLS)).all())
-    read = bars or ping_images.today_bars
+    read = bars or {"2m": ping_images.today_bars, "15m": fifteen_bars, "1D": daily_bars}[timeframe]
 
     def draw() -> bytes | None:
-        shown = _today_shown(read, symbol, now)
+        if timeframe == "2m":
+            shown = _today_shown(read, symbol, now)
+        elif timeframe == "15m":
+            shown = [b for b in read(symbol) if b["time"] <= now]
+        else:
+            shown = [b for b in read(symbol) if now - DAILY_DAYS * 86400 <= b["time"] <= now]
         if not shown:
             return None
+        note = f"NOW {_price(shown[-1]['close'])}"
+        title = symbol if timeframe == "2m" else f"{symbol} {timeframe}"
+        if timeframe == "1D":
+            return chart_render.render(Chart(title=title, note=note, bars=tuple(shown)))
         marks, times = _fill_marks(fills, shown[0]["time"])
-        return chart_render.render(Chart(title=symbol, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown),
-                                         levels=ping_images._plan_level_marks(levels), marks=marks, times=times))
+        return chart_render.render(Chart(title=title, note=note, bars=tuple(shown), levels=ping_images._plan_level_marks(levels),
+                                         marks=marks + tuple(_event_marks(list(events), shown)), times=times))
 
-    return _budgeted(symbol, draw, budget)
+    return _budgeted(symbol, draw, budget, WHAT[timeframe])
 
 
 def market_picture(events: list[dict], now: float, bars=None, budget: float = BUDGET_SECONDS) -> bytes:
@@ -235,21 +311,12 @@ def market_picture(events: list[dict], now: float, bars=None, budget: float = BU
     (violet) as dots on the bar of their minute, the first of each labelled FILL or PING. ``events`` are the session
     timeline's rows (``kind``, ``at``); one before the first bar shown is left off. Raises ``Unavailable``."""
     read = bars or ping_images.today_bars
-    tone = {"fill": ("FILL", "amber"), "ping": ("PING", "violet")}
 
     def draw() -> bytes | None:
         shown = _today_shown(read, MARKET, now)
         if not shown:
             return None
-        marks: list[Mark] = []
-        said: set[str] = set()
-        for event in sorted((e for e in events if e["kind"] in tone), key=lambda e: e["at"])[:MAX_FILLS]:
-            bar = next((b for b in reversed(shown) if b["time"] <= event["at"]), None)
-            if bar is None:
-                continue
-            label, colour = tone[event["kind"]]
-            marks.append(Mark(int(event["at"]), float(bar["close"]), "" if label in said else label, colour))
-            said.add(label)
+        marks = _event_marks([e for e in events if e["kind"] in ("fill", "ping")], shown)
         return chart_render.render(Chart(title=MARKET, note=f"NOW {_price(shown[-1]['close'])}", bars=tuple(shown), marks=tuple(marks)))
 
     return _budgeted(MARKET, draw, budget)

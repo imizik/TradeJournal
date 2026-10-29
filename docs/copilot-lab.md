@@ -455,15 +455,24 @@ The full page is a desk of three panes beside each other
   `backend/app/engine/desk_context.py`); empty until a conversation is saved.
   Each tab reads only when opened and again when something is confirmed in the
   conversation; nothing here arms or sends.
-  - **Chart** (first): today's minute bars as the server's ping picture
-    (`GET /copilot/desk/{id}/picture`, `chart_render` over the same cached
-    chart-feed read as a ping), the regular session once it has bars, with the
-    plan's entry (TRIG) and invalidation (INV) lines and the owner's fills in
-    the symbol today (IN and OUT; an option fill at the underlying's recorded
-    price, else a line at its time; a pre-market fill is left off once the
-    regular session shows). No timeframes yet. No bars, a failed read, a read
-    past 6 seconds, or both workers still busy with earlier reads says why
-    instead of a blank picture.
+  - **Chart** (first): the server's ping picture of the symbol
+    (`GET /copilot/desk/{id}/picture?timeframe=`, `chart_render`) with
+    timeframe buttons **2m** (the default: today's minute bars from the same
+    cached chart-feed read as a ping, the regular session once it has bars),
+    **15m** (regular-session 15-minute bars of today and the two completed
+    sessions before it, those from the chart history: disk, or fetched once
+    and stored) and **1D** (the last 120 days of the chart feed's daily bars).
+    The intraday views carry the plan's entry (TRIG) and invalidation (INV)
+    lines, the owner's fills in the symbol today (amber, IN and OUT; an option
+    fill at the underlying's recorded price, else a line at its time; a
+    pre-market fill is left off once the regular session shows), the phone
+    pings sent today on the symbol (violet, first labelled PING; the session
+    strip's ping reader) and today's Radar hits on it (blue, first labelled
+    RADAR; the Radar store read-only, none when it is off or missing), each
+    on the bar of its time, so an alert can be judged against what price did
+    next. 1D has no marks. A legend under the picture names fills, pings and
+    Radar. No bars, a failed read, a read past 6 seconds, or both workers
+    still busy with earlier reads says why instead of a blank picture.
   - **Timeline** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,
@@ -489,9 +498,12 @@ The full page is a desk of three panes beside each other
   ping readers) and read again each minute; **Timeline**, the day across
   everything newest first from `GET /copilot/desk/session` (time stops still
   ahead, fills, pings sent, Radar events, decisions, the prep); and **This
-  week**, the plan streak's counts (`GET /charts/captures/streak`): a tile per
-  entry this week, planned before entry or not, the streak and best, and what
-  one more planned entry makes.
+  week**, the plan streak's record (`GET /charts/captures/streak`): a tile per
+  entry this week in time order (+ planned before entry, − no plan or a plan
+  saved late, · a suggested plan waiting to be linked), each titled like
+  "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
+  linked plan shows; then the counts, the streak and best, and what one more
+  planned entry makes.
 
 **Pings open on the decision.** A position alert's phone ping opens the
 desk thread for that position (see Review a trade or position), so a tap
@@ -582,7 +594,20 @@ open position asks "Review: did you follow the plan?" and one with an armed
 plan not yet in a position asks "Added or not, and why?" (`GET
 /copilot/symbol/{symbol}`), instead of the bar. Answer opens a one-line input
 that saves a `reflection` entry for the symbol; Skip hides it for the day in
-this browser. Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
+this browser. The thread list asks the same: after 16:00 on a weekday each Act
+now, Near a trigger and Watching row with a position or a plan shows its
+question as its status line in a muted amber (`GET /copilot/desk/threads`
+gives it as `close`, beside the first words of the symbol's first `reflection`
+today), "Reviewed · <first words>" once one is saved, or "Skipped today".
+**Close the day** (the phase button, "Close the day · N to review", or the ⌘K
+command) is a pass through them: it opens the first unreviewed thread in list
+order on its question (a position with no conversation opens by its symbol,
+`/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
+or Skip opens the next; the last one ends it. With none left it puts the
+day's question in the message box, unsent. Nothing is sent to the model. The
+Briefing's line says "N of M reviewed" (one per symbol). Browser proof:
+`frontend/e2e/copilot-decision-bar.spec.ts` and
+`frontend/e2e/copilot-desk-keys.spec.ts`.
 
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
@@ -603,10 +628,11 @@ the line leads with whether the pre-market prep is written; after the close it
 shows the whole day; a closed day says so. The desk bar shows the same read
 beside its title: **Live** (green dot) in the regular session, **Pre-market**,
 or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
-QQQ and VIX's change. At the top of the thread list a phase button puts a
-question in the message box, unsent: **Arm today's plans** before 9:30 on a
-weekday (check each plan's entry, invalidation and time stop and propose what
-is missing, for the owner to confirm) and **Close the day** after 16:00. On a
+QQQ and VIX's change. At the top of the thread list sits a phase button:
+**Arm today's plans** before 9:30 on a weekday puts a question in the message
+box, unsent (check each plan's entry, invalidation and time stop and propose
+what is missing, for the owner to confirm), and **Close the day** after 16:00
+walks each thread's close question (see Close of day). On a
 phone Jump to… and New plan show as icons so the bar stays on one line. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk
@@ -683,8 +709,9 @@ Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px),
 `frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
 the cleaned conversation and the 375 px composer) and
-`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
-states, the 375 px Context tab, the Briefing's day).
+`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, the chart's
+timeframe buttons and legend, unavailable states, the 375 px Context tab, the
+Briefing's day).
 
 ## How the copilot reasons (system prompt)
 

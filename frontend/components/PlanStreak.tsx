@@ -10,8 +10,14 @@ import { cn } from "@/lib/utils";
 /** The plan streak (GET /charts/captures/streak): the owner's latest entries planned before entry, newest first. */
 export type PlanStreak = {
   show: boolean; since: number; tracking: boolean; current: number; best: number; pending: number;
-  this_week: { planned: number; total: number; pending: number; start: number };
+  this_week: { planned: number; total: number; pending: number; start: number; entries: PlanStreakEntry[] };
   last_break: { contract: string; short: string; entry_time: number; reason: "no_plan" | "late" } | null;
+};
+
+/** One of this week's entries, oldest first: its trade, and the linked plan's capture when one is linked. */
+export type PlanStreakEntry = {
+  trade_id: string; contract: string; short: string; entry_time: number;
+  state: "planned" | "late" | "unplanned" | "pending"; capture_id?: string;
 };
 
 export const REVIEW_WEEK = `/copilot-lab?${new URLSearchParams({ context: "Review my week" })}`;

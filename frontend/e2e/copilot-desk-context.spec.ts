@@ -17,6 +17,9 @@ const record = {
 // A 2x1 PNG: the picture itself is the server's (tests/test_copilot_desk_context.py); here only that it shows.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGMQEpUBIgAByACHeNSWqgAAAABJRU5ErkJggg==", "base64");
 const now = Math.floor(Date.now() / 1000);
+// Monday October 26, 2026 09:45 and Tuesday 10:31 in New York (EDT, UTC-4).
+const MON_0945 = Date.UTC(2026, 9, 26, 13, 45) / 1000;
+const TUE_1031 = Date.UTC(2026, 9, 27, 14, 31) / 1000;
 const TIMELINE = {
   state: "ok", symbol: "NBIS", count: 4, unavailable: [], recent_days: 7, rows: [
     { kind: "decision", at: now - 60, text: "Decision", detail: "Holding: the group is still bid." },
@@ -36,6 +39,7 @@ type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
 
 async function lab(page: Page, desk: Desk = {}) {
   const reads: string[] = [];
+  const timeframes: (string | null)[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: record }));
@@ -44,6 +48,7 @@ async function lab(page: Page, desk: Desk = {}) {
     const part = new URL(route.request().url()).pathname.split("/").pop()!;
     reads.push(`${route.request().method()} ${part}`);
     if (part === "picture") {
+      timeframes.push(new URL(route.request().url()).searchParams.get("timeframe"));
       const picture = desk.picture ?? "ok";
       return picture === "ok" ? route.fulfill({ status: 200, contentType: "image/png", body: PNG })
         : route.fulfill({ status: 404, json: { detail: picture } });
@@ -52,7 +57,7 @@ async function lab(page: Page, desk: Desk = {}) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
-  return { reads, pane: page.getByRole("complementary", { name: "Context" }) };
+  return { reads, timeframes, pane: page.getByRole("complementary", { name: "Context" }) };
 }
 
 test("the Context pane opens on today's chart, and Timeline and Your history read only when asked", async ({ page }) => {
@@ -82,6 +87,26 @@ test("the Context pane opens on today's chart, and Timeline and Your history rea
   await expect(pane).toContainText("At 92.3, 3.8% below the planned entry 95.9, over the last 180 days. Evidence to weigh, not a rule.");
   expect(reads).toEqual(["GET picture", "GET timeline", "GET history"]); // reads only, nothing posted
   await pane.screenshot({ path: test.info().outputPath("desk-context-history.png") });
+});
+
+test("the chart's timeframe buttons switch the picture read, and the legend names fills, pings and Radar", async ({ page }) => {
+  const { reads, timeframes, pane } = await lab(page);
+  const group = pane.getByRole("group", { name: "Timeframe" });
+  await expect(group.getByRole("button", { name: "2m" })).toHaveAttribute("aria-pressed", "true");
+  await expect(pane.getByRole("img", { name: /NBIS today: minute bars with .*pings and Radar hits/ })).toBeVisible();
+  const legend = pane.getByLabel("Legend");
+  await expect(legend).toContainText("your fills");
+  await expect(legend).toContainText("pings");
+  await expect(legend).toContainText("Radar");
+
+  await group.getByRole("button", { name: "15m" }).click();
+  await expect(group.getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
+  await expect(pane.getByRole("img", { name: /NBIS recent sessions: 15-minute bars/ })).toBeVisible();
+  await group.getByRole("button", { name: "1D" }).click();
+  await expect(pane.getByRole("img", { name: "NBIS the last few months: daily bars" })).toBeVisible();
+  await expect(legend).toContainText("marked on 2m and 15m");
+  expect(timeframes).toEqual(["2m", "15m", "1D"]);
+  expect(reads).toEqual(["GET picture", "GET picture", "GET picture"]); // reads only
 });
 
 test("each tab says what is unavailable or missing", async ({ page }) => {
@@ -131,7 +156,12 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
   } }));
   await page.route("**/charts/captures/streak", (route) => route.fulfill({ json: {
     show: true, since: now - 86400 * 30, tracking: true, current: 6, best: 9, pending: 0,
-    this_week: { planned: 3, total: 4, pending: 0, start: now - 86400 * 2 }, last_break: null,
+    this_week: { planned: 3, total: 4, pending: 0, start: now - 86400 * 2, entries: [
+      { trade_id: "trade-1", contract: "NBIS 11/20/26 100C", short: "NBIS 100C", entry_time: MON_0945, state: "planned", capture_id: "plan-1" },
+      { trade_id: "trade-2", contract: "CRWV 11/20/26 90C", short: "CRWV 90C", entry_time: MON_0945 + 3600, state: "unplanned" },
+      { trade_id: "trade-3", contract: "NBIS 11/20/26 105C", short: "NBIS 105C", entry_time: TUE_1031, state: "planned", capture_id: "plan-3" },
+      { trade_id: "trade-4", contract: "IREN 11/20/26 40C", short: "IREN 40C", entry_time: TUE_1031 + 600, state: "planned", capture_id: "plan-4" },
+    ] }, last_break: null,
   } }));
   await page.goto("/copilot-lab");
   const pane = page.getByRole("complementary", { name: "Context" });
@@ -147,7 +177,11 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
   await expect(pane).toContainText("Could not read: pings.");
 
   await tabs.getByRole("tab", { name: "This week" }).click();
-  await expect(pane.getByRole("img", { name: "3 planned, 1 unplanned" })).toBeVisible();
+  const tiles = pane.getByRole("list", { name: "This week's entries" }).getByRole("link");
+  await expect(tiles).toHaveText(["+", "−", "+", "+"]);
+  await expect(tiles.nth(2)).toHaveAttribute("title", "NBIS 105C · Tue 10:31 · planned");
+  await expect(tiles.nth(1)).toHaveAttribute("title", "CRWV 90C · Mon 10:45 · no plan");
+  await expect(tiles.nth(2)).toHaveAttribute("href", "/trades/trade-3");
   await expect(pane).toContainText("3 of 4 entries this week were planned before entry.");
   await expect(pane).toContainText("Plan streak 6, best 9. One more planned entry makes 7 in a row.");
   await pane.screenshot({ path: test.info().outputPath("desk-context-week.png") });

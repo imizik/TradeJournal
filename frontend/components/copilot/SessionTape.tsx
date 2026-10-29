@@ -132,6 +132,9 @@ export default function SessionTape({ data, error, rows }: { data: DeskSession |
   const next = ahead[0] ? <>{ahead[0].symbol} time stop {num(ahead[0].clock)}</>
     : before && open !== null ? <>the open {num(hhmm(open))}</> : live && close !== null ? <>the close {num(hhmm(close))}</> : null;
   if (next) facts.push(<>Next: <span className="text-foreground/80">{next}</span></>);
+  // After the close: how many of the day's positions and plans have their review written (one per symbol).
+  const asked = new Map(rows.filter(r => r.close && r.symbol).map(r => [r.symbol, !!r.close!.reviewed]));
+  if (asked.size) facts.unshift(<span data-testid="briefing-reviewed">{num([...asked.values()].filter(Boolean).length)} of {num(asked.size)} reviewed</span>);
   if (practice) facts.push(practice);
 
   return (

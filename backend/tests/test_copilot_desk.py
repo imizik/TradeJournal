@@ -275,6 +275,33 @@ def test_after_hours_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F811
     assert read(desk)["day"]["phase"] == "closed"
 
 
+def test_after_the_close_each_position_and_plan_asks_its_review_until_a_reflection_is_saved(desk, engine, clock):  # noqa: F811
+    trade = planned_nbis(engine)
+    unplanned = buy(engine, 700, "CRWV")
+    alert(engine, APLD, "APLD", "entry", 31.0)
+    investigation(engine, CRWV, "CRWV", "CRWV capacity terms")
+    by_key = lambda body: {r["key"]: r for r in body["threads"]}  # noqa: E731
+    rows = by_key(read(desk))
+    assert all(r["close"] is None for r in rows.values())  # 14:49: the session is still on
+    clock["t"] = datetime(2026, 10, 21, 20, 30, tzinfo=UTC).timestamp()  # 16:30 New York
+    rows = by_key(read(desk))
+    assert rows[f"trade:{trade}"]["close"] == {"kind": "position", "question": "Review: did you follow the plan?", "reviewed": None}
+    assert rows[f"trade:{trade}"]["status"] == {"text": "Review: did you follow the plan?", "tone": "attention"}
+    assert rows[f"trade:{unplanned}"]["close"]["kind"] == "position"  # a position with no plan is reviewed too
+    assert rows[f"plan:{APLD}"]["status"] == {"text": "Added or not, and why?", "tone": "attention"}
+    assert rows[f"investigation:{CRWV}"]["close"] is None and rows["briefing"]["close"] is None
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id="r1", day=WED, kind="reflection", symbol="NBIS",
+                               text="Followed it: held above 92.30 and took half at the target", created_at=T0 + timedelta(minutes=395)))
+        db.add(DayJournalEntry(operation_id="r2", day=WED, kind="reflection", symbol="NBIS", text="A later one", created_at=T0 + timedelta(minutes=396)))
+        db.commit()
+    row = by_key(read(desk))[f"trade:{trade}"]
+    assert row["close"]["reviewed"] == "Followed it: held above 92.30 and…"  # the first reflection's first words
+    assert row["status"] == {"text": "Reviewed · Followed it: held above 92.30 and…", "tone": "muted"}
+    clock["t"] = datetime(2026, 10, 24, 20, 30, tzinfo=UTC).timestamp()  # a Saturday: no close
+    assert all(r["close"] is None for r in read(desk)["threads"])
+
+
 def test_one_failing_source_leaves_the_rest(desk, engine, monkeypatch):  # noqa: F811
     buy(engine, 700, "CRWV", expiration=WED)  # expires today: Act now
 

@@ -55,6 +55,9 @@ export type DeskThread = {
   path: string | null;
   /** Epoch seconds of the newest change, for "new since you looked". */
   changedAt: number | null;
+  /** After 16:00 New York on a weekday, a row with a position or a plan: its close-of-day question (the decision bar's)
+   * and the first words of today's ``reflection`` for its symbol once one is saved. */
+  close: { kind: "position" | "plan"; question: string; reviewed: string | null } | null;
 };
 
 /** A decision logged from the decision bar; saved as a day-journal entry of kind ``decision``. */
@@ -72,8 +75,8 @@ export type DeskThreads = {
 type Wire = {
   as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
   day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
-  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt"> &
-    { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null })[];
+  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close"> &
+    { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null; close?: DeskThread["close"] })[];
 };
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
@@ -97,8 +100,8 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
   return {
     asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
     day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
-    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, ...row }) => ({
-      ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at,
+    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, ...row }) => ({
+      ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
     })),
   };
 }
@@ -180,6 +183,25 @@ export function afterClose(at: string) {
     .formatToParts(new Date(at)).map(p => [p.type, p.value]));
   return !["Sat", "Sun"].includes(parts.weekday) && Number(parts.hour) >= 16;
 }
+
+/** A close-of-day question skipped for the day, remembered in this browser only (``day`` is New York's, YYYY-MM-DD). */
+const skipKey = (day: string, symbol: string) => `tradejournal:desk:review-skipped:${day}:${symbol}`;
+export function reviewSkipped(day: string, symbol: string) {
+  try { return localStorage.getItem(skipKey(day, symbol)) === "1"; } catch { return false; }
+}
+export function skipReview(day: string, symbol: string) {
+  try { localStorage.setItem(skipKey(day, symbol), "1"); } catch { /* skipped for this visit only */ }
+}
+
+/** The close pass's order: one row per symbol still asking its close question today, in list order. */
+export function toReview(rows: DeskThread[], day: string, done: ReadonlySet<string> = new Set()) {
+  const seen = new Set<string>();
+  return rows.filter(r => r.close && !r.close.reviewed && r.symbol && !done.has(r.symbol) && !reviewSkipped(day, r.symbol)
+    && !seen.has(r.symbol) && !!seen.add(r.symbol));
+}
+
+/** Today in New York, YYYY-MM-DD. */
+export const nyDay = (at: Date = new Date()) => nyDate(at);
 
 /**
  * The open thread's plan and position, for the thread header and plan ladder. An option's ``mark`` and ``avg_entry``
@@ -265,9 +287,15 @@ export const getDeskHistory = (id: string, signal?: AbortSignal) => deskRead<Des
 /** The picture route's reserved id for the Briefing's chart: QQQ today with the day's fills and pings. */
 export const DESK_MARKET = "market";
 
-/** Today's picture for the thread as an object URL (the caller revokes it), or the server's reason it is unavailable. */
-export async function getDeskPicture(id: string, signal?: AbortSignal): Promise<{ url: string } | { reason: string }> {
-  const response = await fetch(deskPath(id, "picture"), { cache: "no-store", signal });
+/** The thread chart's timeframes: today's minutes, recent sessions' 15-minute bars, a few months of daily bars. */
+export const DESK_TIMEFRAMES = ["2m", "15m", "1D"] as const;
+export type DeskTimeframe = (typeof DESK_TIMEFRAMES)[number];
+
+/** The thread's picture (today's, or on ``timeframe``) as an object URL (the caller revokes it), or the server's reason
+ * it is unavailable. */
+export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe?: DeskTimeframe): Promise<{ url: string } | { reason: string }> {
+  const part = timeframe ? `picture?timeframe=${encodeURIComponent(timeframe)}` : "picture";
+  const response = await fetch(deskPath(id, part), { cache: "no-store", signal });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     return { reason: typeof body?.detail === "string" ? body.detail : `The chart is unavailable (${response.status}).` };
