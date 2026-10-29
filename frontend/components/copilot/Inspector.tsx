@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { REVIEW_WEEK, usePlanStreak, type PlanStreakEntry } from "@/components/PlanStreak";
+import { VERDICT, useJson, type RadarProof } from "@/components/ProofView";
+import { EXIT_HABIT_VERDICT, type ExitHabitsBody } from "@/components/dashboard/ExitHabits";
 import {
   DESK_MARKET, DESK_TIMEFRAMES, getDeskHistory, getDeskPicture, getDeskSession, getDeskTimeline,
   type ContextTab, type DeskHistory, type DeskTimeframe, type DeskSession, type DeskSessionEvent, type DeskThreadRef, type DeskTimeline, type DeskTimelineRow,
@@ -233,7 +235,38 @@ function DayTimelineTab() {
 
 /** This week's entries, planned before entry or not (the plan streak's own counts, so tiles by kind, not by day), and the
  * streak with what one more planned entry makes. */
+/** This week's two proofs, as /proof reads them (``GET /analytics/exit-habits``, ``GET /radar/proof``): each label and
+ * what it rests on, never recomputed here. A read that is missing or fails says so. */
+function WeekProof() {
+  const alerts = useJson<ExitHabitsBody>("/analytics/exit-habits");
+  const radar = useJson<RadarProof>("/radar/proof");
+  const line = (name: string, label: ReactNode, rest: ReactNode, testId: string) => (
+    <p data-testid={testId} className="min-w-0 break-words">
+      <span className="text-muted-foreground">{name}: </span><span className="font-medium text-foreground">{label}</span>
+      {rest && <span className="text-xs text-muted-foreground"> · {rest}</span>}
+    </p>
+  );
+  const feedback = alerts.body?.feedback;
+  const verdict = radar.body?.verdict;
+  return (
+    <section aria-label="Proof this week" data-testid="week-proof" className="space-y-1 border-b pb-3 text-sm">
+      {alerts.body ? line("Alerts", EXIT_HABIT_VERDICT[alerts.body.verdict.verdict].label,
+        feedback ? <>based on <span className="tabular-nums">{feedback.responded}</span> of <span className="tabular-nums">{feedback.total}</span> alerts answered</>
+          : <>based on <span className="tabular-nums">{alerts.body.verdict.sample}</span> of the last <span className="tabular-nums">{alerts.body.window}</span> trades</>, "week-proof-alerts")
+        : line("Alerts", alerts.error ? "could not load" : "reading…", null, "week-proof-alerts")}
+      {radar.body ? line("Radar", verdict ? VERDICT[verdict.verdict].label : VERDICT.not_enough_data.label,
+        verdict ? <><span className="tabular-nums">{verdict.rated}</span> hit{verdict.rated === 1 ? "" : "s"} rated</> : radar.body.reason ?? "Radar is off", "week-proof-radar")
+        : line("Radar", radar.error ? "could not load" : "reading…", null, "week-proof-radar")}
+      <Link href="/proof" className="inline-flex min-h-11 items-center text-xs font-medium text-primary hover:underline sm:min-h-0">Open Proof →</Link>
+    </section>
+  );
+}
+
 function WeekTab() {
+  return <div className="space-y-3"><WeekProof /><WeekRecord /></div>;
+}
+
+function WeekRecord() {
   const streak = usePlanStreak();
   if (!streak) return <Quiet>Reading this week…</Quiet>;
   if (!streak.show) return <Quiet>No entries are tracked yet. Once a plan is saved before an entry, this week&apos;s record shows here.</Quiet>;
