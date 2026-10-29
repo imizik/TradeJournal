@@ -48,7 +48,12 @@ CONFIG = Path("/etc/tradejournal/autodeploy.env")
 # Phone alerts' ntfy settings, used unless autodeploy.env names its own topic.
 ALERTS_CONFIG = Path("/etc/tradejournal/alerts.env")
 NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL")
-STATE = Path("/var/lib/tradejournal/autodeploy")
+# Root's own: what it holds decides, downloads and runs as root. Not under
+# /var/lib/tradejournal, whose owner (the app's account) could swap a
+# subdirectory there for one of its own.
+STATE = Path("/var/lib/tradejournal-autodeploy")
+# Where the state lived before; read once into STATE, never written.
+LEGACY_STATE = Path("/var/lib/tradejournal/autodeploy/state.json")
 # A world-readable copy of the state for the app's Deploys page; nothing here reads it back.
 PUBLIC = Path("/var/lib/tradejournal/autodeploy.json")
 # Decisions kept for that page, newest last.
@@ -300,15 +305,71 @@ def release_commit(link: Path) -> str | None:
         return None
 
 
+def _owned(info: os.stat_result) -> bool:
+    # Root in production; the test runner's account under pytest.
+    return info.st_uid == os.geteuid() and not stat.S_IMODE(info.st_mode) & 0o022
+
+
+def legacy_state() -> dict:
+    """The old state.json, only if root wrote it: its directory is not root's."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    try:
+        parent = os.open(LEGACY_STATE.parent.parent, flags | os.O_DIRECTORY)
+    except OSError:
+        return {}
+    try:
+        directory = os.open(LEGACY_STATE.parent.name, flags | os.O_DIRECTORY, dir_fd=parent)
+        try:
+            descriptor = os.open(LEGACY_STATE.name, flags | os.O_NONBLOCK, dir_fd=directory)
+        finally:
+            os.close(directory)
+    except OSError:
+        return {}
+    finally:
+        os.close(parent)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or not _owned(info) or info.st_size > 1 << 20:
+            print(f"Not migrating {LEGACY_STATE}: it is not a root-written file", flush=True)
+            return {}
+        try:
+            state = json.loads(handle.read())
+        except ValueError:
+            return {}
+    return state if isinstance(state, dict) else {}
+
+
+def state_dir() -> Path:
+    """STATE, created if missing and refused unless only root can change it."""
+    try:
+        STATE.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    for path in (STATE.parent, STATE):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or not _owned(info):
+            raise RuntimeError(f"Expected a root-owned directory nobody else can write: {path}")
+    if stat.S_IMODE(STATE.lstat().st_mode) != 0o700:
+        raise RuntimeError(f"Expected mode 0700: {STATE}")
+    if not (STATE / "state.json").exists() and (migrated := legacy_state()):
+        _write_state(migrated)
+        print(f"Moved the deployer's state from {LEGACY_STATE} to {STATE}", flush=True)
+    return STATE
+
+
 def load_state() -> dict:
     try:
-        return json.loads((STATE / "state.json").read_text())
+        return json.loads((state_dir() / "state.json").read_text())
     except FileNotFoundError:
         return {}
 
 
 def save_state(state: dict) -> None:
-    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    state_dir()
+    _write_state(state)
+
+
+def _write_state(state: dict) -> None:
     pending = STATE / "state.json.new"
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(STATE / "state.json")
@@ -369,11 +430,10 @@ def deploy(settings: Settings, *, now: datetime, ignore_hold: bool = False, allo
     if job_running():
         raise Waiting("A sync or enrichment job is running")
 
-    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     release = ROOT / "releases" / build.release_id
     if not release.exists():
         try:
-            with tempfile.TemporaryDirectory(dir=STATE) as scratch:
+            with tempfile.TemporaryDirectory(dir=state_dir()) as scratch:
                 archive, source, digest = download(build, Path(scratch))
                 install_controller(source)
                 controller("install", archive, "--sha256", digest)
@@ -466,8 +526,7 @@ def main() -> None:
     if args.action == "status":
         status(settings)
         return
-    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with (STATE / "run.lock").open("a+b") as lock:
+    with (state_dir() / "run.lock").open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:

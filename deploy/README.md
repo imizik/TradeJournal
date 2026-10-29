@@ -701,11 +701,20 @@ To pause it, set `AUTODEPLOY_ENABLED=false`. Manual `migrate`, `activate` and
 `rollback` stop the timer while they run, and a rollback stays rolled back.
 The deployer runs as root because the controller it calls needs root; its
 unit uses `KillMode=process`, so a controller it started always finishes a
-release switch. Its decisions are kept in
-`/var/lib/tradejournal/autodeploy/state.json`, with the last 30 and the latest
-check copied, readable, to `/var/lib/tradejournal/autodeploy.json`. The app's
-**Deploys** page (`/deploys`, owner only) shows that copy alongside the
-running release and the releases still installed.
+release switch. Its decisions, run lock and checksum-verified downloads stay
+in `/var/lib/tradejournal-autodeploy`, a root-owned 0700 directory outside
+the app account's `/var/lib/tradejournal`, whose owner could otherwise swap a
+subdirectory there for one of its own. Each pass refuses to run unless that
+directory and its parent are owned by root and writable by nobody else. A
+server upgraded from the old `/var/lib/tradejournal/autodeploy/state.json`
+copies it over once, only if root wrote that file; the old copy is left in
+place, unused, for an operator to delete. A release from before this move
+reads only that old copy, so set `AUTODEPLOY_ENABLED=false` before rolling
+back to one: it would not remember a build the newer deployer saw fail.
+The last 30 decisions and the latest check are copied, readable, to
+`/var/lib/tradejournal/autodeploy.json`. The app's **Deploys** page
+(`/deploys`, owner only) shows that copy alongside the running release and
+the releases still installed.
 
 ## Verification boundaries
 
@@ -720,7 +729,8 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-optional schema migrations, fresh backups, checksums, and notifications sent
+optional schema migrations, fresh backups, checksums, the root-only state
+directory and its one-time move, and notifications sent
 once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by

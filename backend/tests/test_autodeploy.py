@@ -123,6 +123,7 @@ def autodeploy(tmp_path, monkeypatch):
     module = load()
     monkeypatch.setattr(module, "ROOT", tmp_path / "opt")
     monkeypatch.setattr(module, "STATE", tmp_path / "state")
+    monkeypatch.setattr(module, "LEGACY_STATE", tmp_path / "app/autodeploy/state.json")
     monkeypatch.setattr(module, "PUBLIC", tmp_path / "autodeploy.json")
     old = make_release(module.ROOT, "old", OLD)
     (module.ROOT / "current").symlink_to(old)
@@ -153,6 +154,8 @@ def test_deploys_the_newest_verified_build_through_the_controller(autodeploy, se
     steps = server.steps()
     assert [step[0] for step in steps] == ["download", "install-controller", "install", "activate", "prune"]
     assert steps[2][1].endswith("/new.tar.gz") and steps[2][2:] == ("--sha256", "f" * 64)
+    # The checksum-verified download sits in root's own directory, nowhere else.
+    assert Path(steps[2][1]).parent.parent == autodeploy.STATE
     assert steps[3] == ("activate", "new", "--confirm-database", "127.0.0.1:5432/tradejournal")
     assert steps[4] == ("prune", "--keep", "3")
     assert (autodeploy.ROOT / "current").resolve().name == "new"
@@ -502,3 +505,59 @@ def test_notifications_use_the_alert_sender_and_never_break_a_deploy(autodeploy,
     autodeploy.notify(settings(autodeploy), "TradeJournal updated", "Now running", good_news=True)
     no_topic = autodeploy.Settings(**{**settings(autodeploy).__dict__, "ntfy": {}})
     autodeploy.notify(no_topic, "TradeJournal updated", "Now running")  # no topic: silently nothing
+
+
+def test_state_lives_only_in_a_directory_nobody_else_can_change(autodeploy, tmp_path):
+    autodeploy.save_state({"outcome": "deployed"})
+    assert (autodeploy.STATE.stat().st_mode & 0o777) == 0o700
+    assert autodeploy.load_state() == {"outcome": "deployed"}
+    autodeploy.STATE.chmod(0o750)
+    with pytest.raises(RuntimeError, match="0700"):
+        autodeploy.load_state()
+    autodeploy.STATE.chmod(0o700)
+    # Something planted in its place, such as a link into another account's files.
+    autodeploy.STATE.rename(tmp_path / "moved")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    autodeploy.STATE.symlink_to(elsewhere)
+    with pytest.raises(RuntimeError, match="root-owned directory"):
+        autodeploy.state_dir()
+    autodeploy.STATE.unlink()
+    autodeploy.STATE.parent.chmod(0o777)
+    try:
+        with pytest.raises(RuntimeError, match="root-owned directory"):
+            autodeploy.state_dir()
+    finally:
+        autodeploy.STATE.parent.chmod(0o700)
+
+
+def legacy(autodeploy, content='{"commit": "%s", "outcome": "failed"}' % ("c" * 40), mode=0o600):
+    autodeploy.LEGACY_STATE.parent.mkdir(parents=True, mode=0o700)
+    autodeploy.LEGACY_STATE.write_text(content)
+    autodeploy.LEGACY_STATE.chmod(mode)
+
+
+def test_old_state_moves_once_and_is_not_read_again(autodeploy):
+    legacy(autodeploy)
+    assert autodeploy.load_state() == {"commit": "c" * 40, "outcome": "failed"}
+    assert autodeploy.LEGACY_STATE.exists()
+    autodeploy.save_state({"outcome": "deployed"})
+    autodeploy.LEGACY_STATE.write_text('{"outcome": "rolled-back"}')
+    assert autodeploy.load_state() == {"outcome": "deployed"}
+
+
+@pytest.mark.parametrize("case", ["writable", "link", "not-json", "list"])
+def test_old_state_is_ignored_unless_it_is_a_file_only_root_wrote(autodeploy, tmp_path, case):
+    if case == "writable":
+        legacy(autodeploy, mode=0o666)
+    elif case == "not-json":
+        legacy(autodeploy, content="{")
+    elif case == "list":
+        legacy(autodeploy, content="[]")
+    else:
+        target = tmp_path / "secret.json"
+        target.write_text('{"outcome": "failed"}')
+        autodeploy.LEGACY_STATE.parent.mkdir(parents=True)
+        autodeploy.LEGACY_STATE.symlink_to(target)
+    assert autodeploy.load_state() == {}
+    assert not (autodeploy.STATE / "state.json").exists()

@@ -26,6 +26,8 @@ URL = "postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_deployment"
 IDENTITY = "127.0.0.1:5432/tj_deployment"
 # The commit the repackaged second build claims, as a newer merge would.
 NEXT_COMMIT = "5" * 40
+# Root's own state directory, outside the app account's /var/lib/tradejournal.
+AUTODEPLOY_STATE = Path("/var/lib/tradejournal-autodeploy")
 
 
 def request(path, method="GET"):
@@ -128,7 +130,7 @@ def autodeploy_pass():
     # A Gmail check can hold the sync lane for a moment; the pass then reports
     # that it is waiting and records nothing, and the caller tries again.
     control.run("systemctl", "start", f"{control.AUTODEPLOY}.service")
-    state = control.STATE / "autodeploy/state.json"
+    state = AUTODEPLOY_STATE / "state.json"
     return json.loads(state.read_text()) if state.exists() else {}
 
 
@@ -369,12 +371,21 @@ def main():
             # stand-in for GitHub, verifies checksums, installs the controller
             # and the release, and activates it.
             github = publish(second, second_archive)
+            # A server upgraded from the old layout: its state moves once.
+            legacy = control.STATE / "autodeploy"
+            legacy.mkdir(mode=0o700)
+            (legacy / "state.json").write_text('{"note": "from before"}\n')
+            (legacy / "state.json").chmod(0o600)
             try:
                 for _ in range(12):
                     if autodeploy_pass().get("outcome") == "deployed":
                         break
                     time.sleep(5)
                 assert control.current().name == second.name
+                info = AUTODEPLOY_STATE.stat()
+                assert (info.st_uid, info.st_mode & 0o777) == (0, 0o700)
+                assert json.loads((AUTODEPLOY_STATE / "state.json").read_text())["note"] == "from before"
+                assert sorted(path.name for path in legacy.iterdir()) == ["state.json"]
                 assert moomoo_status(moomoo_token) == {"enabled": True}
                 upgraded_bridge_pid = control.run("systemctl", "show", control.MOOMOO_SERVICE, "--property=MainPID", "--value", capture_output=True, text=True).stdout.strip()
                 assert upgraded_bridge_pid not in ("", "0", bridge_pid)
