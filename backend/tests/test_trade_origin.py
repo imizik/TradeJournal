@@ -98,7 +98,10 @@ def test_the_week_breaks_trades_down_by_origin(db, radar_file):  # noqa: F811
     week = copilot_review.week_review(trade.closed_at.date().isoformat(), session=db)
     others = week["totals"]["trades"] - 1
     pnl = float(trade.realized_pnl)
-    assert week["origins"].startswith(f"no_plan {others} ") and f"; radar_event 1 {'-' if pnl < 0 else '+'}${abs(pnl):,.0f}" in week["origins"]
+    # Most trades first; with one other trade in the week the two kinds tie and keep trade order, so compare the parts.
+    parts = week["origins"].split("; ")
+    assert parts[0].startswith(f"no_plan {others} ") or others == 1
+    assert any(p.startswith(f"no_plan {others} ") for p in parts) and f"radar_event 1 {'-' if pnl < 0 else '+'}${abs(pnl):,.0f}" in parts
     assert "e7" not in week["origins"] and "trimmed" not in week
 
 
