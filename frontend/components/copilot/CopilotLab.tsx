@@ -14,6 +14,7 @@ import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofA
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
+import ArmChecklist from "@/components/copilot/ArmChecklist";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import ThreadRail from "@/components/copilot/ThreadRail";
@@ -143,12 +144,17 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     if (next) review(next);
   }, [rows, review, setClosing]);
 
-  // The thread list's phase button: before the open on a weekday, Arm today's plans (its question in the message box,
-  // unsent; nothing is armed until a card is confirmed); after 16:00, Close the day.
-  const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Puts a question about today's plans in the box, unsent" }
+  // The thread list's phase button: before the open on a weekday, Arm today's plans (a checklist of the armed plans in
+  // the conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
+  const [arming, setArming] = useState(false);
+  useEffect(() => { setArming(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist
+  const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
     : dayPhase === "close" ? { label: left.length ? `Close the day · ${left.length} to review` : "Close the day",
       hint: left.length ? "Opens each thread on its close question, one at a time" : "Puts a close-of-day question in the box, unsent" } : null;
-  const runPhase = useCallback(() => { if (dayPhase === "pre") fill(ARM_PROMPT); else closeDay(); }, [fill, dayPhase, closeDay]);
+  const runPhase = useCallback(() => {
+    if (dayPhase !== "pre") closeDay();
+    else { setArming(true); setTab("thread"); }
+  }, [dayPhase, closeDay]);
 
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
@@ -282,7 +288,12 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}
           {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision.
               A desk Radar row names the hit too: it opens on watching, passing or planning it. */}
-          {on && (!thread && link?.symbol && link.radar ? (
+          {on && arming && (
+            <ArmChecklist onClose={() => setArming(false)} onDropped={() => setRefresh(n => n + 1)}
+              ask={() => { setArming(false); fill(ARM_PROMPT); }}
+              change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setTab("thread"); }} />
+          )}
+          {on && !arming && (!thread && link?.symbol && link.radar ? (
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">

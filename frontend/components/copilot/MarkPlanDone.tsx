@@ -11,8 +11,11 @@ const BUTTON = "min-h-11 rounded border px-2 disabled:opacity-40 sm:min-h-7";
  * The thread menu's Mark plan done (docs/copilot-lab.md § The desk): ends a plan that was never entered or was given up
  * on with a ``plan_done`` day-journal entry. While its entry or invalidation alert is still armed it says so first and
  * removes them (the alerts route's ``DELETE``) only when the owner agrees. The plan, its conversation and the journal stay.
+ * ``label`` and ``buttonClass`` dress its first button (Arm today's plans calls it Drop).
  */
-export default function MarkPlanDone({ investigationId, symbol, onDone }: { investigationId: string; symbol: string; onDone(): void }) {
+export default function MarkPlanDone({ investigationId, symbol, onDone, label = "Mark plan done", buttonClass = "w-full text-foreground hover:bg-muted" }: {
+  investigationId: string; symbol: string; onDone(): void; label?: string; buttonClass?: string;
+}) {
   const [armed, setArmed] = useState<LevelAlert[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +50,7 @@ export default function MarkPlanDone({ investigationId, symbol, onDone }: { inve
 
   if (!armed) return (
     <div className="space-y-1">
-      <button type="button" onClick={() => void start()} disabled={busy} className={`${BUTTON} w-full text-foreground hover:bg-muted`}>Mark plan done</button>
+      <button type="button" onClick={() => void start()} disabled={busy} className={`${BUTTON} ${buttonClass}`}>{label}</button>
       {error && <p role="status" className="text-primary">Not done: {error}</p>}
     </div>
   );

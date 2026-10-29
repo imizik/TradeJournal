@@ -734,10 +734,25 @@ shows the whole day; a closed day says so. The desk bar shows the same read
 beside its title: **Live** (green dot) in the regular session, **Pre-market**,
 or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
 QQQ and VIX's change. At the top of the thread list sits a phase button:
-**Arm today's plans** before 9:30 on a weekday puts a question in the message
-box, unsent (check each plan's entry, invalidation and time stop and propose
-what is missing, for the owner to confirm), and **Close the day** after 16:00
-walks each thread's close question (see Close of day). On a
+**Arm today's plans** before 9:30 on a weekday, and **Close the day** after
+16:00, which walks each thread's close question (see Close of day).
+
+**Arm today's plans** opens a checklist in the conversation pane
+(`ArmChecklist.tsx`; on a phone it moves to the Thread tab): each armed plan
+from the thread list's Plans read, with its contract, entry, invalidation and
+time stop, flagged (⚑) with any thesis-watch trigger fired today on the
+symbol, earnings first, and three answers. **Still good** logs a `decision`
+day-journal entry, "Armed for today. Entry … · invalidation … · time stop …."
+(the decision bar's Holding/Exiting parser does not read it). **Change** opens
+the plan's thread with "Change my <symbol> plan before the open: … What should
+change, and why?" in the box, unsent. **Drop** is Mark plan done: while the
+plan's alerts are armed it asks first, then removes them. "N of M checked"
+counts the plans answered (Still good is read back from today's journal; a
+drop counts on that visit, and the plan leaves the list on the next read).
+**Ask the copilot instead**, at the foot, puts the old question in the box,
+unsent (check each plan against the pre-market and propose what is missing).
+Opening a thread or Close leaves the checklist. Nothing in it arms, sizes or
+sends an order. On a
 phone Jump to… and New plan show as icons so the bar stays on one line. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk

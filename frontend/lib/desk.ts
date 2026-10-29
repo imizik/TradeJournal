@@ -13,9 +13,9 @@ import type { RadarRating } from "@/lib/radar";
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
 
-/** What the desk asks the conversation to do: open a saved investigation, send one prompt across everything, or put a
- * question in the message box unsent (the decision bar's Ask why). */
-export type DeskCommand = { kind: "open"; id: string; n: number } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number };
+/** What the desk asks the conversation to do: open a saved investigation (with ``text`` in the box, unsent), send one
+ * prompt across everything, or put a question in the message box unsent (the decision bar's Ask why). */
+export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number };
 
 /** The conversation's open investigation, reported up so the inspector can show its context. */
 export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number };
