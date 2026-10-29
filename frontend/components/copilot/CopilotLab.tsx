@@ -10,6 +10,7 @@ import DecisionBar from "@/components/copilot/DecisionBar";
 import { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
+import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
@@ -211,6 +212,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     setRefresh(n => n + 1);
   }, []);
   const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
+  const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread asks about its alerts sent today
 
   // Fills waiting for their plan: one bar at the top of the symbol's thread, and "N fills to link" opening each in turn.
   const fills = useFillLinks(rows, pick, () => setRefresh(n => n + 1));
@@ -281,7 +283,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision.
               A desk Radar row names the hit too: it opens on watching, passing or planning it. */}
           {on && (!thread && link?.symbol && link.radar ? (
-            <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
+            <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
               {/* No conversation, so no thread header: the symbol's horizon sits on its own line. */}
@@ -293,10 +295,12 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
               )}
               {fills.bar(link.symbol)}
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
+              <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
             <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
-              <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} /></>} />
+              <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
+                <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
