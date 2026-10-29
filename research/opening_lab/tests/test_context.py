@@ -29,7 +29,7 @@ def test_merge_dedupes_and_sorts():
 
 def test_window_uses_prior_session_and_et():
     start, end = context._window("2026-07-15", "2026-07-14")
-    assert start == "2026-07-14T20:00:00Z" and end == "2026-07-15T14:00:00Z"
+    assert start == "2026-07-14T20:00:00Z" and end == "2026-07-15T14:30:00Z"
 
 
 def test_prior_date_prefers_daily_else_weekday():

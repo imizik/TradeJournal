@@ -4,7 +4,7 @@
 everything in the window and exact timestamps. It does NOT decide what was
 visible at a checkpoint; ``packet.py`` applies that causal cut.
 
-News window: prior session 16:00 ET through 10:00 ET of the session date.
+News window: prior session 16:00 ET through 10:30 ET (trade re-checks run to 10:30) of the session date.
 The whole window is fetched oldest-first with no count cap (a safety cap marks
 the day "incomplete"), so which early items are stored never depends on later
 bursts. Macro coverage is CPI / FOMC / jobs only (no GDP, ISM, PCE, retail sales...).
@@ -31,12 +31,12 @@ NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
 ENV_PATH = Path("/Users/user/TradeJournal/backend/.env")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MACRO_PATH = REPO_ROOT / "backend/app/data/macro_calendar.json"
-CACHE_DIR = Path(__file__).resolve().parent / ".cache" / "news_v2"
+CACHE_DIR = Path(__file__).resolve().parent / ".cache" / "news_v3"
 
 PAGE_LIMIT = 50
 SAFETY_CAP = 5000  # per query; hitting it marks the day incomplete
 SUMMARY_CHARS = 400
-WINDOW_END_ET = "10:00"
+WINDOW_END_ET = "10:30"
 MAX_REQUESTS_PER_MIN = 150
 MAX_RETRIES = 4
 QUERIES = (("broad", None), ("spy_qqq", "SPY,QQQ"))
@@ -100,7 +100,7 @@ def _prior_weekday(day):
 
 
 def _window(day, prior, now=None):
-    """(start, end) UTC strings; end is 10:00 ET, or ``now`` if earlier."""
+    """(start, end) UTC strings; end is 10:30 ET, or ``now`` if earlier."""
     start = et_datetime(prior, "16:00").astimezone(UTC)
     end = et_datetime(day, WINDOW_END_ET).astimezone(UTC)
     if now is not None:
@@ -180,10 +180,10 @@ def _write_cache(day, payload):
 
 
 def fetch_news_day(day, prior=None, client=None, now=None, cache=True):
-    """Fetch one session's headlines up to 10:00 ET (or ``now``, if earlier).
+    """Fetch one session's headlines up to 10:30 ET (or ``now``, if earlier).
 
     The result is cached only when ``cache`` is true, the window is the full one
-    (``now`` is past 10:00 ET of ``day``) and no query hit the safety cap.
+    (``now`` is past 10:30 ET of ``day``) and no query hit the safety cap.
     """
     prior = prior or _prior_weekday(day)
     now = now or datetime.now(UTC)
@@ -229,7 +229,7 @@ def attach_context(session, *, fetch=False, refresh=False):
     """Return a copy of SessionData with ``news``, ``macro`` and provenance["context"] filled.
 
     ``fetch=False`` reads only the on-disk news cache; ``fetch=True`` hits Alpaca
-    when a day is not cached (caching only complete, past-10:00 windows).
+    when a day is not cached (caching only complete, past-10:30 windows).
     ``refresh=True`` (live) always fetches up to now and never reads or writes the
     cache. Missing coverage is recorded, never silent.
     """

@@ -93,10 +93,11 @@ def _utc_iso(dt):
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _fetch_bars(timeframe, start, end):
-    """All bars for SPY and QQQ between two aware datetimes: {symbol: [raw bars]}."""
-    out = {s: [] for s in SYMBOLS}
-    params = {"symbols": ",".join(SYMBOLS), "timeframe": timeframe, "start": _utc_iso(start),
+def _fetch_bars(timeframe, start, end, symbols=SYMBOLS):
+    """All raw bars for ``symbols`` (default SPY, QQQ) between two aware datetimes:
+    {symbol: [raw bars]}."""
+    out = {s: [] for s in symbols}
+    params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": _utc_iso(start),
               "end": _utc_iso(end), "feed": FEED, "adjustment": "raw", "limit": 10000}
     while True:
         page = _request(DATA_URL, params)

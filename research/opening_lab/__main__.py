@@ -14,27 +14,35 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 # every checkpoint, so every pick is graded.
 PROMPTS = {"standard": Path(__file__).with_name("prompt.txt"),
            "forced": Path(__file__).with_name("prompt_forced.txt")}
+TRADE_PROMPT = Path(__file__).with_name("prompt_trade.txt")
 
 
-def _sessions(days, log):
-    """Load cached sessions with context; skip (and say) unusable ones."""
+def _sessions(days, log, cross=False):
+    """Load cached sessions with context (and cross-market bars); skip (and say) unusable ones."""
     from .context import attach_context
+    from .cross import attach_cross
     from .data import load_session
 
     sessions = {}
     for day in days:
         try:
             sessions[day] = attach_context(load_session(day), fetch=False)
+            if cross:
+                sessions[day] = attach_cross(sessions[day], fetch=True)
         except Exception as exc:
             log(f"skip {day}: {type(exc).__name__}: {exc}")
     return sessions
 
 
-def _model(args):
+def _model(args, trade=False):
     if args.model == "none":
         return None, None
     if args.fake or args.model == "fake":
         args.fake = True
+        if trade:
+            from .trades import FakeTrader
+
+            return FakeTrader(), "fake"
         from .model import FakeForecaster
 
         return FakeForecaster(), "fake"
@@ -44,15 +52,22 @@ def _model(args):
     settings = {"model": args.model, "backend": args.backend, "effort": args.effort,
                 "thinking": args.thinking, "max_tokens": args.max_tokens,
                 "max_retries": args.retries}
-    if args.prompt != "standard":  # keeps standard runs' pinned settings unchanged
-        settings["prompt"] = args.prompt
-    model = ClaudeForecaster(args.model, PROMPTS[args.prompt].read_text(), backend=args.backend,
+    if trade:
+        from .trades import TRADE_SCHEMA, validate_decision
+
+        settings["mode"] = "trade"
+        prompt, extra = TRADE_PROMPT, {"schema": TRADE_SCHEMA, "validate": validate_decision}
+    else:
+        if args.prompt != "standard":  # keeps standard runs' pinned settings unchanged
+            settings["prompt"] = args.prompt
+        prompt, extra = PROMPTS[args.prompt], {}
+    model = ClaudeForecaster(args.model, prompt.read_text(), backend=args.backend,
                              thinking_budget=thinking, effort=args.effort,
-                             max_tokens=args.max_tokens, max_retries=args.retries)
+                             max_tokens=args.max_tokens, max_retries=args.retries, **extra)
     model.settings = settings  # pinned in run.json so a run cannot mix configurations
     name = args.model + (f"@{args.effort}" if args.effort else "")
     name += "" if args.backend == "api" else "+cli"
-    return model, name if args.prompt == "standard" else f"{name}+{args.prompt}"
+    return model, name if trade or args.prompt == "standard" else f"{name}+{args.prompt}"
 
 
 def _baselines(args):
@@ -102,6 +117,21 @@ def main(argv=None):
     replay.add_argument("--estimate", action="store_true", help="count calls and input size; call nothing")
     model_options(replay)
 
+    trade = commands.add_parser("trade", help="Trade mode: enter or wait, then hold or exit every 5 "
+                                               "minutes; graded like a short-dated option (resumable)")
+    trade.add_argument("--run", required=True, type=Path)
+    trade.add_argument("--start", required=True)
+    trade.add_argument("--end", required=True)
+    trade.add_argument("--variants", default=",".join(VARIANTS))
+    trade.add_argument("--workers", type=int, default=2)
+    trade.add_argument("--max-cost-usd", type=float, default=None,
+                       help="cap on the run directory's TOTAL reported spend (required for --backend api)")
+    model_options(trade)
+
+    trade_report = commands.add_parser("trade-report", help="Score trade runs and the benchmarks")
+    trade_report.add_argument("--run", required=True, type=Path, action="append",
+                              help="trade run directory; repeat to score several runs together")
+
     report = commands.add_parser("report", help="Score a run directory")
     report.add_argument("--run", required=True, type=Path, action="append",
                         help="run directory; repeat to score several runs together")
@@ -123,6 +153,9 @@ def main(argv=None):
         print(json.dumps({"bars": prefetch_bars(args.start, args.end),
                           "news": prefetch_news(args.start, args.end)}, indent=2, default=str))
         return 0
+
+    if args.command in ("trade", "trade-report"):
+        return _trade_command(args, parser, log)
 
     if args.command == "report":
         from .runner import Run, write_report
@@ -187,6 +220,41 @@ def main(argv=None):
                      variants=variants if model else [], baselines=baselines, workers=args.workers,
                      max_cost_usd=args.max_cost_usd, log=log)
     print(write_report(run, sessions))
+    return 0
+
+
+def _trade_command(args, parser, log):
+    from .data import trading_days
+    from .runner import Run
+    from .trades import render_trades, replay, score_trades
+
+    if args.command == "trade-report":
+        runs = [Run(d, json.loads((d / "run.json").read_text())) for d in args.run]
+        rows = [row for r in runs for row in r.rows()]
+        sessions = _sessions(sorted({row["date"] for row in rows}), log)
+    else:
+        variants = [v for v in args.variants.split(",") if v]
+        if set(variants) - set(VARIANTS):
+            parser.error(f"unknown variants: {sorted(set(variants) - set(VARIANTS))}")
+        model, model_name = _model(args, trade=True)
+        if model is None:
+            parser.error("trade needs a model ('fake' for a dry run)")
+        if not args.fake and args.backend == "api" and args.max_cost_usd is None:
+            parser.error("a paid API run needs --max-cost-usd")
+        days = trading_days(args.start, args.end)
+        sessions = _sessions(days, log, cross="full" in variants)
+        days = [d for d in days if d in sessions]
+        if not days:
+            parser.error("no usable cached sessions in range; run prefetch first")
+        runs = [replay(args.run, days, sessions=sessions, model=model, model_name=model_name,
+                       variants=variants, workers=args.workers, max_cost_usd=args.max_cost_usd, log=log)]
+        rows = runs[0].rows()
+    report = score_trades(rows, sessions)
+    text = render_trades(report)
+    if len(runs) == 1:  # a merged report is printed only, so no run's report is overwritten
+        (runs[0].dir / "trade_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        (runs[0].dir / "trade_report.txt").write_text(text + "\n")
+    print(text)
     return 0
 
 

@@ -155,7 +155,7 @@ def _record(status, *, forecast=None, error=None, latency_s=0.0, usage=None, cos
     }
 
 
-def parse_forecast_text(text):
+def parse_forecast_text(text, validate=validate_forecast):
     """Turn model text into (status, forecast, error). Tolerates code fences."""
     body = (text or "").strip()
     if not body:
@@ -173,7 +173,7 @@ def parse_forecast_text(text):
         if value is None:
             return "invalid", None, "json_parse"
     try:
-        return "ok", validate_forecast(value), None
+        return "ok", validate(value), None
     except ValueError as exc:
         return "invalid", None, str(exc)[:80]
 
@@ -231,7 +231,9 @@ class ClaudeForecaster:
     def __init__(self, model, prompt_text, *, backend="api", thinking_budget=None,
                  max_tokens=4096, timeout_s=40.0, max_retries=0, cache_dir=_UNSET,
                  api_key=None, client=None, runner=None, effort=None, env_file=None,
-                 claude_bin=None):
+                 claude_bin=None, schema=None, validate=None):
+        """``schema`` (structured-output schema) and ``validate`` replace the
+        forecast shape, e.g. for trade decisions; default: the forecast contract."""
         if backend not in ("api", "cli"):
             raise ValueError("backend must be 'api' or 'cli'")
         if (backend == "api" and thinking_budget and not model.startswith(_ADAPTIVE_PREFIXES)
@@ -253,6 +255,8 @@ class ClaudeForecaster:
         self._env_file = env_file
         self._claude_bin = claude_bin
         self._prompt_sha = prompt_sha(prompt_text)
+        self.schema = schema
+        self._validate = validate or validate_forecast
 
     # -- cache ---------------------------------------------------------------
     def cache_key(self, packet):
@@ -265,7 +269,7 @@ class ClaudeForecaster:
             "effort": self.effort,
             "max_tokens": self.max_tokens,
             "prompt_sha": self._prompt_sha,
-            "schema": hashlib.sha256(_canonical(FORECAST_SCHEMA).encode()).hexdigest(),
+            "schema": hashlib.sha256(_canonical(self.schema or FORECAST_SCHEMA).encode()).hexdigest(),
             "packet": packet,
         }).encode("utf-8")).hexdigest()
 
@@ -354,7 +358,7 @@ class ClaudeForecaster:
         return self._client
 
     def _api_kwargs(self, packet):
-        output_config = {"format": {"type": "json_schema", "schema": api_schema()}}
+        output_config = {"format": {"type": "json_schema", "schema": self.schema or api_schema()}}
         if self.effort:
             output_config["effort"] = self.effort
         kwargs = {
@@ -397,7 +401,7 @@ class ClaudeForecaster:
             category = getattr(details, "category", None)
             label = f"refusal:{category}" if isinstance(category, str) else "refusal"
             return _record("error", error=label, raw_text=text, **common)
-        status, forecast, error = parse_forecast_text(text)
+        status, forecast, error = parse_forecast_text(text, self._validate)
         if status == "invalid" and stop == "max_tokens":
             error = "max_tokens"
         elif status == "ok" and stop not in (None, "end_turn", "stop_sequence"):
@@ -409,7 +413,7 @@ class ClaudeForecaster:
         binary = self._claude_bin or shutil.which("claude") or CLAUDE_BIN_FALLBACK
         argv = [
             binary, "-p", "--output-format", "json",
-            "--json-schema", json.dumps(api_schema(), separators=(",", ":")),
+            "--json-schema", json.dumps(self.schema or api_schema(), separators=(",", ":")),
             "--system-prompt", self.prompt_text,
             "--model", self.model,
             "--tools", "",
@@ -448,7 +452,7 @@ class ClaudeForecaster:
             text = json.dumps(structured)
         else:
             text = payload.get("result") if isinstance(payload.get("result"), str) else ""
-        status, forecast, error = parse_forecast_text(text)
+        status, forecast, error = parse_forecast_text(text, self._validate)
         return _record(status, forecast=forecast, error=error, raw_text=text, **common)
 
 
