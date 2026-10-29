@@ -221,3 +221,60 @@ test("a position with no plan is asked once whether it wants one: Plan it saves 
   await page.waitForURL(/context=Plan\+this\+position/);
   expect(posts).toEqual([expect.objectContaining({ kind: "plan_ask", symbol: "NBIS", text: "Planning it" })]);
 });
+
+const EXIT = { kind: "exit", question: "Did you follow the plan? One lesson?" };
+const exitRow = (extra: Record<string, unknown> = {}) => closeRow(EXIT, { key: `plan:${INV}`, trade_id: null, value: { text: "Exited Oct 27", tone: "muted" }, ...extra });
+
+test("an exited plan asks its one exit review at any hour: the answer is a reflection and the plan is done", async ({ page }) => {
+  const { posts } = await desk(page, { rows: [], threads: [exitRow()] }); // 10:44: the session is on
+  const review = page.getByRole("region", { name: "Exit review" });
+  await expect(review).toContainText("Did you follow the plan? One lesson?");
+  await expect(page.getByRole("group", { name: "Thread header" })).toContainText("Exited");
+  await page.screenshot({ path: test.info().outputPath("exit-review-1440.png") });
+  await review.getByRole("button", { name: "Answer" }).click();
+  await review.getByRole("textbox").fill("Followed it; the lesson: size down into earnings.");
+  await review.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("desk-review-done")).toContainText("Plan done · exit reviewed");
+  expect(posts).toEqual([expect.objectContaining({ kind: "reflection", symbol: "NBIS", text: "Followed it; the lesson: size down into earnings." }),
+    expect.objectContaining({ kind: "plan_done", symbol: "NBIS", text: "Exit reviewed" })]);
+});
+
+test("Skip on an exit review still ends the plan, server-side", async ({ page }) => {
+  const { posts } = await desk(page, { asOf: CLOSED, rows: [], threads: [exitRow()] });
+  await page.getByRole("region", { name: "Exit review" }).getByRole("button", { name: "Skip" }).click();
+  await expect(page.getByTestId("desk-review-done")).toContainText("Plan done · exit review skipped");
+  expect(posts).toEqual([expect.objectContaining({ kind: "plan_done", symbol: "NBIS", text: "Exit review skipped" })]);
+});
+
+test("Mark plan done says its alerts are still armed and removes them only when asked; nothing else is deleted", async ({ page }) => {
+  const alerts = [
+    { id: "a1", symbol: "NBIS", price: 95.9, plan_role: "entry", state: "active", source_kind: "copilot", source_id: INV },
+    { id: "a2", symbol: "NBIS", price: 92.3, plan_role: "invalidation", state: "active", source_kind: "copilot", source_id: INV },
+    { id: "a3", symbol: "NBIS", price: 99, plan_role: null, state: "active", source_kind: "level", source_id: null }, // not the plan's
+  ];
+  const removed: string[] = [], done: unknown[] = [];
+  await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts, phone: true } }));
+  // Mark done saves on the browser's own day (no /today read in the menu).
+  await page.route("**/day-journal/*/entries", (route) => {
+    done.push(route.request().postDataJSON());
+    return route.fulfill({ json: { id: "d1", day: DAY, not_traded: false, actor: "owner", created_at: "2026-10-27T14:45:00Z", ...route.request().postDataJSON() } });
+  });
+  await page.route("**/charts/alerts/*", (route) => {
+    removed.push(route.request().url().split("/").pop()!);
+    return route.fulfill({ json: { alerts: [], phone: true } });
+  });
+  const { posts } = await desk(page, { rows: [], threads: [closeRow(null, { key: `plan:${INV}`, trade_id: null, value: { text: "Armed", tone: "muted" } })] });
+  await page.getByRole("button", { name: "Thread actions" }).click();
+  await page.getByRole("button", { name: "Mark plan done" }).click();
+  const ask = page.getByRole("group", { name: "Mark plan done" });
+  await expect(ask).toContainText("Its entry 95.90 and invalidation 92.30 alerts are still armed. Remove them and mark the plan done?");
+  await page.screenshot({ path: test.info().outputPath("mark-done-1440.png") });
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  expect(removed).toEqual([]);
+  expect([...posts, ...done]).toEqual([]);
+  await page.getByRole("button", { name: "Mark plan done" }).click();
+  await page.getByRole("button", { name: "Remove alerts and mark done" }).click();
+  await expect(page.getByRole("group", { name: "Thread actions" })).toHaveCount(0);
+  expect(removed).toEqual(["a1", "a2"]);
+  expect([...posts, ...done]).toEqual([expect.objectContaining({ kind: "plan_done", symbol: "NBIS", text: "Marked done" })]);
+});

@@ -7,6 +7,7 @@ import {
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { useAppAccess } from "@/components/AccessProvider";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
@@ -936,6 +937,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                         onClick={() => { void persist({ status: current.status === "open" ? "closed" : "open", conclusion: conclusion.trim() || null }); setMenu(false); }}
                         className="min-h-11 rounded border px-2 text-foreground hover:bg-muted disabled:opacity-40 sm:min-h-7">{current.status === "open" ? "Close thread" : "Reopen"}</button>
                     </div>
+                    {desk?.planDone && (
+                      <MarkPlanDone investigationId={current.id} symbol={desk.planDone.symbol} onDone={() => { setMenu(false); desk.planDone?.done(); }} />
+                    )}
                   </div>
                 )}
               </div>

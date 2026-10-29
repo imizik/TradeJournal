@@ -25,8 +25,9 @@ const WAITING: Record<PlanBoardRow["position"], string> = {
 
 type Chip = { text: string; tone: string };
 
-function chipOf(data: DeskThreadPlan | null, draft: boolean): Chip | null {
+function chipOf(data: DeskThreadPlan | null, draft: boolean, stage: string | null): Chip | null {
   if (draft) return { text: "Draft · not armed", tone: "bg-primary/10 text-primary" };
+  if (stage) return { text: stage, tone: "bg-primary/10 text-primary" };
   if (!data) return null;
   if (data.position) return { text: "In position", tone: "bg-emerald-400/10 text-emerald-300" };
   const plan = data.plan;
@@ -108,10 +109,11 @@ export function HorizonPick({ horizon, onChange }: { horizon: DeskHorizon; onCha
 }
 
 /** The header alone, for a thread whose plan and position were already read. */
-export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon }: {
+export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon, stage = null }: {
   thread: DeskThreadRef; data: DeskThreadPlan | null; draft?: boolean; horizon?: DeskHorizon | null; onHorizon?(horizon: DeskHorizon): Promise<void>;
+  stage?: string | null;
 }) {
-  const chip = chipOf(data, draft), meta = metaOf(data);
+  const chip = chipOf(data, draft, stage), meta = stage ? "Position closed" : metaOf(data);
   const symbol = thread.symbol ?? data?.plan?.symbol ?? thread.title;
   const thesis = data?.position?.plan?.thesis ?? data?.plan?.thesis ?? null;
   return (
@@ -119,7 +121,7 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
       <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           {chip && <span className={cn("inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium", chip.tone)}>{chip.text}</span>}
-          {horizon && onHorizon && !draft && <HorizonPick horizon={horizon} onChange={onHorizon} />}
+          {horizon && onHorizon && !draft && !stage && <HorizonPick horizon={horizon} onChange={onHorizon} />}
           {meta && <span>{meta}</span>}
         </div>
         <h2 className="text-3xl font-semibold leading-none tracking-tight text-foreground">{symbol}</h2>
@@ -135,9 +137,9 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
  * Reads ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` when the thread opens or its activity changes, then
  * each minute while the page is visible. Nothing for a conversation across everything with no plan.
  */
-export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon }: {
+export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon, stage = null }: {
   thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean; horizon?: DeskHorizon | null;
-  onHorizon?(horizon: DeskHorizon): Promise<void>;
+  onHorizon?(horizon: DeskHorizon): Promise<void>; stage?: string | null;
 }) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
   const id = thread?.id, symbol = thread?.symbol ?? null, refreshKey = thread?.refreshKey;
@@ -160,7 +162,7 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
   if (!thread.symbol && !data?.plan) return null;
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
-      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} />
+      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} />
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact} />}
     </div>

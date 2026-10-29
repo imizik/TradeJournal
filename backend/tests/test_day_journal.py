@@ -223,3 +223,6 @@ def test_a_horizon_and_a_plan_answer_are_check_ins_and_the_newest_horizon_wins(j
         horizons, asked = day_journal.check_ins(session)
     assert horizons == {"NBIS": "long", "APLD": "swing"}
     assert {symbol: e.text for symbol, e in asked.items()} == {"CRWV": "No plan for now"}
+    assert post("d1", "plan_done", "NBIS", "Marked done").status_code == 200
+    with Session(engine) as session:
+        assert set(day_journal.done(session)) == {"NBIS"}

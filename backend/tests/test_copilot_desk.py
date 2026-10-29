@@ -396,3 +396,64 @@ def test_assistant_sessions_cannot_reach_the_desk(boundary, monkeypatch):  # noq
     assert owner.status_code == 200, owner.text
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/desk/threads").status_code == 403
+
+
+def sell(engine, n, symbol="NBIS", *, hour=13):  # noqa: F811
+    """Closes the 2 contracts ``buy(engine, n - 1, symbol)`` opened, Wednesday at ``hour`` New York."""
+    from app.models import Fill
+    from app.routers.fills import _rebuild_trades
+    from tests.test_today import ROTH
+    with Session(engine) as db:
+        db.add(Fill(id=UUID(int=n), account_id=ROTH, ticker=symbol, instrument_type="option", side="sell_to_close", contracts=2,
+                    price=400, executed_at=datetime(2026, 10, 21, hour, 0), raw_email_id=f"gmail:{n}", option_type="call",
+                    strike=100, expiration=datetime(2026, 10, 23).date()))
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+
+
+def test_a_plan_whose_position_closed_is_exited_and_asks_its_review_once_until_done(desk, engine):  # noqa: F811
+    trade = planned_nbis(engine)  # its invalidation alert is still armed
+    sell(engine, 501)
+    body = read(desk)
+    rows = by_key(body)
+    assert f"trade:{trade}" not in rows
+    row = rows[f"plan:{NBIS}"]
+    assert row["group"] == "watch" and groups(body)["watch"][0] == f"plan:{NBIS}"  # ahead of the "+N more" cut
+    assert row["close"] == {"kind": "exit", "question": "Did you follow the plan? One lesson?", "reviewed": None}  # 14:49: any hour
+    assert row["status"] == {"text": "Did you follow the plan? One lesson?", "tone": "attention"}
+    assert row["value"]["text"] == "Exited Oct 21" and body["sections"]["exits"] == "ok"
+    entry(engine, "plan_done", "NBIS", "Exit reviewed", minute=300)
+    body = read(desk)
+    assert not [r for r in body["threads"] if r["symbol"] == "NBIS"]  # done: out of every group, its conversation too
+
+
+def test_a_plan_traded_without_a_link_exits_when_the_symbols_position_after_it_closes(desk, engine, clock):  # noqa: F811
+    alert(engine, APLD, "APLD", "entry", 31.0)
+    buy(engine, 800, "APLD")
+    assert by_key(read(desk))[f"plan:{APLD}"]["close"] is None  # still held
+    sell(engine, 801, "APLD")
+    assert by_key(read(desk))[f"plan:{APLD}"]["close"]["kind"] == "exit"
+    clock["t"] = datetime(2026, 10, 29, 18, 0, tzinfo=UTC).timestamp()  # eight days on: the review is not asked any more,
+    assert by_key(read(desk))[f"plan:{APLD}"]["close"] is None  # its entry alert still armed keeps it a quiet plan row
+
+
+def test_a_trade_long_after_an_unlinked_plan_is_not_its_exit(desk, engine, clock):  # noqa: F811
+    with Session(engine) as db:
+        from app.models import LevelAlert
+        db.add(LevelAlert(symbol="APLD", price=31.0, created_on=WED - timedelta(days=30), condition="crosses", session="regular",
+                          direction="up", source_kind="copilot", source_id=APLD, label="APLD entry", plan_role="entry", state="fired",
+                          created_at=T0 - timedelta(days=30), fired_at=T0 - timedelta(days=29)))
+        db.commit()
+    buy(engine, 800, "APLD")
+    sell(engine, 801, "APLD")
+    assert f"plan:{APLD}" not in by_key(read(desk))
+
+
+def test_mark_done_takes_a_plan_never_entered_off_the_list_and_a_new_plan_comes_back(desk, engine):  # noqa: F811
+    alert(engine, APLD, "APLD", "entry", 31.0)
+    investigation(engine, APLD, "APLD", "APLD breakout")
+    entry(engine, "plan_done", "APLD", "Marked done", minute=30)
+    assert not [r for r in read(desk)["threads"] if r["symbol"] == "APLD"]
+    alert(engine, APLD, "APLD", "entry", 30.5, minute=60)  # planned again after it was done
+    assert by_key(read(desk))[f"plan:{APLD}"]["group"] in ("watch", "near")

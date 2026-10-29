@@ -73,6 +73,7 @@ export function kindLabel(kind: DayJournalEntry["kind"]) {
   // ``horizon`` and ``plan_ask`` are the desk's check-ins (a plan card, the thread header, "Want a plan for this?").
   if (kind === "horizon") return "Horizon";
   if (kind === "plan_ask") return "Plan question";
+  if (kind === "plan_done") return "Plan done";
   return DAY_JOURNAL_KINDS.find(([value]) => value === kind)?.[1] ?? kind;
 }
 

@@ -248,7 +248,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   direction, the thesis, the last price, the distance to the entry and to the
   invalidation in % and $ (or when it was hit), the time stop, and the fill:
   in position, fill to link (a matching open trade not yet linked to the
-  plan), or waiting. Rows sort nearest to an armed trigger first. It reads
+  plan), or waiting, and `confirmed_at` (epoch seconds of its newest part,
+  which the desk compares with a `plan_done` entry). Rows sort nearest to an
+  armed trigger first. It reads
   the `plan_role` alerts and time stops by investigation, the plan capture
   (the time stop's `client_id`, else the newest "Copilot plan" capture for
   the symbol made with them), its capture link, and one batched quote read
@@ -411,8 +413,8 @@ The full page is a desk of three panes beside each other
   message box stays in reach while the conversation scrolls. One quiet line
   says what answers and on what data (the simulated model, simulated or replay
   data, the API budget, a missing key), with **New** and a **…** menu (the
-  thread's one-line conclusion or lesson, Save, Close thread / Reopen) at its
-  end. There is no Recent row (the thread list does that) and no Symbol box:
+  thread's one-line conclusion or lesson, Save, Close thread / Reopen, and
+  Mark plan done on a plan's thread; see Plans end below) at its end. There is no Recent row (the thread list does that) and no Symbol box:
   the message box carries a scope chip, "About NBIS ×", where × asks across
   everything and "add a symbol" scopes it again. Above the box, two to four
   suggestion chips from the thread's state: **What changed?** (a saved
@@ -631,6 +633,28 @@ day's question in the message box, unsent. Nothing is sent to the model. The
 Briefing's line says "N of M reviewed" (one per symbol). Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
+
+**Plans end.** A plan goes Draft → Armed → In position → Exited → Done.
+It is **Exited** once its position is over: the trade linked to its capture
+is closed, or, with no link, every trade in the symbol opened in the two
+weeks after the plan is closed (`copilot_plans.exits`; Webull stays out). For a week after the exit
+its thread list row leads Watching with "Did you follow the plan? One lesson?"
+(`close.kind` `exit`, at any hour, so Close the day walks it too) and its
+header chip says Exited. The decision bar asks it once: Answer saves the line
+as a `reflection` entry, and the answer or Skip saves a `plan_done`
+day-journal entry, so the plan is **Done** on every device and never asks
+again. A week on, an unanswered review stops asking (a plan with an alert
+still armed goes back to a quiet plan row). **Mark plan done** in the thread's
+… menu (a plan's thread, not a held position's) ends a plan that was never
+entered or was given up on the same way. If its entry or invalidation alert is
+still armed it says so and asks first; Remove alerts and mark done removes
+just those alerts through the alerts route (`DELETE /charts/alerts/{id}`, the
+only way the route disarms one), Cancel changes nothing. The plan's capture,
+its conversation and the journal stay. A Done plan (a `plan_done` entry for
+its symbol at or after its newest part) leaves every group of the thread
+list, and so does an owner conversation about the symbol not touched since;
+closing the conversation puts it in the Context pane's This week record. A
+plan confirmed after that is a new plan.
 
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
