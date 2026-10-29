@@ -702,7 +702,10 @@ To pause it, set `AUTODEPLOY_ENABLED=false`. Manual `migrate`, `activate` and
 The deployer runs as root because the controller it calls needs root; its
 unit uses `KillMode=process`, so a controller it started always finishes a
 release switch. Its decisions are kept in
-`/var/lib/tradejournal/autodeploy/state.json`.
+`/var/lib/tradejournal/autodeploy/state.json`, with the last 30 and the latest
+check copied, readable, to `/var/lib/tradejournal/autodeploy.json`. The app's
+**Deploys** page (`/deploys`, owner only) shows that copy alongside the
+running release and the releases still installed.
 
 ## Verification boundaries
 
