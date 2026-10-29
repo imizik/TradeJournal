@@ -54,8 +54,8 @@ training cutoffs (July 2026 on).
   dividend-adjusted and would shift prior closes and gaps.
   July 1 – October 27, 2026 is prefetched: 83 sessions, no gaps.
 - Headlines: Alpaca/Benzinga, the complete window from the prior session's
-  16:00 to 10:00 ET with no count cap (a cap would let later news decide which
-  earlier headlines survive), cached in `.cache/news_v2/`. Each packet keeps up
+  16:00 to 10:30 ET with no count cap (a cap would let later news decide which
+  earlier headlines survive), cached in `.cache/news_v3/`. Each packet keeps up
   to 15 visible headlines: economic data and Fed first, then market-wide, then
   index heavyweights; routine single-name tape (halts, analyst actions) is
   dropped.
@@ -94,6 +94,40 @@ checkpoint, so its picks are graded even where the standard prompt would WAIT;
 the agent is named with a `+forced` suffix. `report --run A --run B` prints one
 scorecard over several runs, including model-vs-model comparisons on the same
 variant (no run directory's report is overwritten).
+
+## Trade mode (options-style)
+
+`trade` (`trades.py`, `prompt_trade.txt`) asks the question an options buyer
+faces. From 09:30 to 10:00, every five minutes, Claude answers WAIT, LONG or
+SHORT on SPY or QQQ, with at most one trade a morning. Once in, it is asked HOLD
+or EXIT every five minutes until it exits or 30 minutes pass. A trade is graded
+like a same-day at-the-money option: net = move in its favour − 2 bp spread −
+0.15 bp per minute held, in basis points of the underlying. A morning without a
+trade scores 0. These costs are stated assumptions, not option quotes, and
+convexity is ignored.
+
+The full variant adds a `cross` section (`cross.py`), read from raw SIP bars
+with the same visibility rule:
+- rates, dollar, oil, gold, volatility and small caps: TLT, UUP, USO, GLD, VIXY,
+  IWM;
+- eight index heavyweights;
+- the 11 sector funds, plus breadth counts.
+
+Index futures aren't in Alpaca's stock feed, so SPY/QQQ premarket stands in for
+the overnight read. Headlines now run to 10:30 (`.cache/news_v3/`), so
+re-checks after 10:00 see 10:00 releases.
+
+The scorecard compares, per morning and with paired session-bootstrap CIs:
+- Claude's trades;
+- the same entries with a fixed 15-minute exit, or held 30 minutes, which
+  separates entry skill from exit skill;
+- each rule's first signal held 15 minutes;
+- no trade.
+
+```bash
+backend/.venv/bin/python -m research.opening_lab trade --run research/opening_lab/runs/sonnet-trade-cli --start 2026-07-01 --end 2026-10-27 --model claude-sonnet-5-5 --backend cli
+backend/.venv/bin/python -m research.opening_lab trade-report --run research/opening_lab/runs/sonnet-trade-cli
+```
 
 `live --run DIR --model … --variant full` runs one morning on live Alpaca data
 (start before 09:30 ET): each packet freezes at checkpoint + 5 s and an answer
