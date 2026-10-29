@@ -259,3 +259,13 @@ def test_pairing_uses_intersection_and_variant_comparisons():
     assert vv[0]["n_sessions"] == 5 and vv[0]["n_points"] == 35
     kinds = sorted(c["kind"] for c in report["comparisons"])
     assert kinds == ["model_vs_baseline", "model_vs_baseline", "variant_vs_variant"]
+
+
+def test_two_models_are_compared_on_the_same_variant_only():
+    sessions = walk_sessions(4, seed=5)
+    a = agent_records(sessions, "claude", oracle, "market") + agent_records(sessions, "claude", oracle, "full")
+    b = agent_records(sessions, "claude+forced", lambda out: fc(), "market")
+    report = evaluate.score(a + b, sessions, draws=200)
+    mm = [c for c in report["comparisons"] if c["kind"] == "model_vs_model"]
+    assert [(c["a"]["agent"], c["b"]["agent"], c["a"]["variant"]) for c in mm] == \
+        [("claude", "claude+forced", "market")]

@@ -346,6 +346,7 @@ def score(records, sessions_by_date, *, baseline_agents=None,
         pairs += [("model_vs_baseline", m, b) for b in bases]
     for i, m in enumerate(models):
         pairs += [("variant_vs_variant", m, o) for o in models[i + 1:] if o[0] == m[0]]
+        pairs += [("model_vs_model", m, o) for o in models[i + 1:] if o[0] != m[0] and o[1] == m[1]]
     comparisons = [{"kind": kind, "a": {"agent": a[0], "variant": a[1]},
                     "b": {"agent": b[0], "variant": b[1]},
                     **compare(groups[a], groups[b], outcome_of, draws, seed)}
@@ -383,14 +384,15 @@ def render_text(report):
     lines = [f"Opening lab scorecard - {m['n_sessions']} sessions, primary horizon "
              f"{m['primary_horizon_min']} min, cost {m['round_trip_cost_bps']} bps round trip",
              ""]
-    head = (f"{'agent':<14}{'variant':<8}{'ok/plan':>10}{'brier':>8}{'skill':>8}{'logloss':>9}"
+    width = max([len("agent")] + [len(a["agent"]) for a in report["agents"]]) + 1
+    head = (f"{'agent':<{width}}{'variant':<8}{'ok/plan':>10}{'brier':>8}{'skill':>8}{'logloss':>9}"
             f"{'dir acc':>8}{'takes':>6}{'net@5':>8}{'net@10':>8}{'net@15':>8}{'hit10':>7}"
             f"{'1st@10':>8}{'took-skip':>10}{'lat p50':>8}{'p95':>7}{'cost$':>8}")
     lines += [head, "-" * len(head)]
     for a in report["agents"]:
         c, p, t, s = a["coverage"], a["probability"], a["takes"], a["selectivity"]
         lines.append(
-            f"{a['agent'][:13]:<14}{a['variant'][:7]:<8}{c['ok']:>5}/{c['planned']:<4}"
+            f"{a['agent']:<{width}}{a['variant'][:7]:<8}{c['ok']:>5}/{c['planned']:<4}"
             f"{_fmt(p['brier']):>8}{_fmt(p['brier_skill_vs_coin'], 3):>8}{_fmt(p['log_loss']):>9}"
             f"{_fmt(a['direction']['accuracy'], 3):>8}{t['count']:>6}"
             f"{_fmt(t['5']['mean_net_bps'], 2):>8}{_fmt(t['10']['mean_net_bps'], 2):>8}"

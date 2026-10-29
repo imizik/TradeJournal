@@ -10,7 +10,10 @@ import sys
 from .contract import VARIANTS
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
-PROMPT = Path(__file__).with_name("prompt.txt")
+# standard: trade only on a clear edge (WAIT allowed); forced: LONG or SHORT at
+# every checkpoint, so every pick is graded.
+PROMPTS = {"standard": Path(__file__).with_name("prompt.txt"),
+           "forced": Path(__file__).with_name("prompt_forced.txt")}
 
 
 def _sessions(days, log):
@@ -41,12 +44,15 @@ def _model(args):
     settings = {"model": args.model, "backend": args.backend, "effort": args.effort,
                 "thinking": args.thinking, "max_tokens": args.max_tokens,
                 "max_retries": args.retries}
-    model = ClaudeForecaster(args.model, PROMPT.read_text(), backend=args.backend,
+    if args.prompt != "standard":  # keeps standard runs' pinned settings unchanged
+        settings["prompt"] = args.prompt
+    model = ClaudeForecaster(args.model, PROMPTS[args.prompt].read_text(), backend=args.backend,
                              thinking_budget=thinking, effort=args.effort,
                              max_tokens=args.max_tokens, max_retries=args.retries)
     model.settings = settings  # pinned in run.json so a run cannot mix configurations
     name = args.model + (f"@{args.effort}" if args.effort else "")
-    return model, name if args.backend == "api" else f"{name}+cli"
+    name += "" if args.backend == "api" else "+cli"
+    return model, name if args.prompt == "standard" else f"{name}+{args.prompt}"
 
 
 def _baselines(args):
@@ -80,6 +86,8 @@ def main(argv=None):
                        help="output effort; steers thinking depth on current models")
         p.add_argument("--max-tokens", type=int, default=8000)
         p.add_argument("--retries", type=int, default=2, help="SDK retries on 429/5xx (api backend)")
+        p.add_argument("--prompt", choices=sorted(PROMPTS), default="standard",
+                       help="standard = trade only on a clear edge; forced = LONG or SHORT every checkpoint")
         p.add_argument("--fake", action="store_true", help="deterministic fake model (no calls)")
         p.add_argument("--baselines", default="all", help="'all', 'none' or a comma list")
 
@@ -95,7 +103,8 @@ def main(argv=None):
     model_options(replay)
 
     report = commands.add_parser("report", help="Score a run directory")
-    report.add_argument("--run", required=True, type=Path)
+    report.add_argument("--run", required=True, type=Path, action="append",
+                        help="run directory; repeat to score several runs together")
 
     live = commands.add_parser("live", help="One live morning (start before 09:30 ET)")
     live.add_argument("--run", required=True, type=Path)
@@ -118,10 +127,11 @@ def main(argv=None):
     if args.command == "report":
         from .runner import Run, write_report
 
-        config = json.loads((args.run / "run.json").read_text())
-        run = Run(args.run, config)
-        days = sorted({row["date"] for row in run.rows()})
-        if config["kind"] == "live":
+        configs = [json.loads((d / "run.json").read_text()) for d in args.run]
+        runs = [Run(d, c) for d, c in zip(args.run, configs)]
+        rows = [row for r in runs for row in r.rows()]
+        days = sorted({row["date"] for row in rows})
+        if any(c["kind"] == "live" for c in configs):
             from .data import SessionUnavailable, load_session
 
             # Outcomes come from the completed session's historical bars.
@@ -131,7 +141,12 @@ def main(argv=None):
                 parser.error(f"cannot score yet: {exc} (bars are final after 20:00 ET)")
         else:
             sessions = _sessions(days, log)
-        print(write_report(run, sessions))
+        if len(runs) == 1:
+            print(write_report(runs[0], sessions))
+        else:  # merged scorecard of several runs: printed, no run directory is overwritten
+            from .evaluate import render_text, score
+
+            print(render_text(score(rows, sessions)))
         return 0
 
     from .data import trading_days
