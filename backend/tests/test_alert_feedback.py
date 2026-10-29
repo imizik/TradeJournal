@@ -88,6 +88,23 @@ def test_save_retry_edit_conflict_and_rebuild(case):
     assert client.get(f"/trades/{current}/phone-alerts").json()["alerts"][0]["feedback"] == edited
 
 
+def test_a_phone_answer_button_is_the_same_one_save(case):
+    """The ping's answer buttons open the trade page, which saves the rating once with base_version 0: the same row
+    the desk, Close the day and Proof read. A second open of that link repeats the identical save harmlessly, and the
+    other button tapped later cannot overwrite it (the page then shows the saved answer)."""
+    from app.engine import position_alerts as engine_alerts
+    client, db_engine, trade, _, alert = case
+    with Session(db_engine) as db:
+        before = exit_habits.build(db)["feedback"]
+    first, second = (rating for _, rating in engine_alerts.ANSWER_ACTIONS)
+    saved = client.put(path(trade, alert), json={"rating": first, "reason": None, "base_version": 0})
+    assert saved.status_code == 200 and saved.json()["version"] == 1
+    assert client.put(path(trade, alert), json={"rating": first, "reason": None, "base_version": 0}).json() == saved.json()
+    assert client.put(path(trade, alert), json={"rating": second, "reason": None, "base_version": 0}).status_code == 409
+    with Session(db_engine) as db:
+        assert exit_habits.build(db)["feedback"] == {**before, "responded": 1, "unanswered": 0, "counts": {first: 1}}
+
+
 @pytest.mark.parametrize("delivery", ["pending", "sending", "held", "expired"])
 def test_unsent_alert_is_not_rateable(case, delivery):
     client, db_engine, trade, _, alert = case

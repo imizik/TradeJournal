@@ -158,9 +158,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     "Open on chart", which deep-links with `Review this trade: <trade id>` as
     the context; an open one offers "Ask copilot about this position" with
     `Review this position: <trade id>` (Review a trade or position, below).
-  - **Position alerts:** with the lab on, each position alert push carries an
-    "Ask copilot" action beside "Open app" that deep-links with the alert's
-    context (Review a trade or position, below).
+  - **Position alerts:** a position alert push's answer actions (Prompted
+    review, Already aware) open the trade page, whose primary action is "Ask
+    copilot about this position" (Review a trade or position, below).
   - **Phone:** the unplanned-entry nudge (`PLAN_NUDGE_ENABLED`) deep-links here with
     `Plan this position: …` when a new position has no plan. When a saved plan
     is suggested for the fill it sends a link ping instead, whose confirm page
@@ -1018,13 +1018,22 @@ alert a position alert's link opens (`TradePhoneAlerts.tsx`), a header link
 otherwise. While the lab is on (`COPILOT_ENABLED=true`), a position alert's
 tap opens the desk on that position's decision (`position_alerts.desk_path`:
 the plan's conversation when a plan card saved the position's plan, else
-`/copilot-lab?symbol=…`, which opens on the decision bar), and the push carries
-**Open trade** (the trade page above) and **Ask copilot** ntfy actions next to
-Open app (all need `ALERT_APP_URL`); with the lab off the tap opens the trade
-page as before. Ask copilot's context adds what the alert saw, e.g.
-`Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
-(at most 300 characters, `position_alerts.ask_copilot_path`). The message box
-holds the context, unsent; the owner sends it, adding a question if they like.
+`/copilot-lab?symbol=…`, which opens on the decision bar); with the lab off the
+tap opens the trade page as before. Either way the push carries two answer
+actions next to Open app (ntfy shows three; all need `ALERT_APP_URL`):
+**Prompted review** and **Already aware** (`position_alerts.ANSWER_ACTIONS`)
+open the trade page on the alert with `&answer=prompted_review` or
+`&answer=already_aware`. The page drops `answer` from the address, then saves
+that rating once through the existing
+`PUT /trades/{trade_id}/phone-alerts/{alert_id}/feedback` with `base_version`
+0, so it is the same feedback row the desk, Close the day and Proof read and the
+alert leaves Close the day's questions. It shows "Saved: …" with Edit feedback
+to change it (or add a reason). An alert already answered keeps its answer: the
+tap is shown as not saved over it, and a stale save gets the usual reload
+prompt. No new route, token or public ingress; Ask copilot is the primary
+action on that page, so the push no longer carries its own Ask copilot or Open
+trade action. The message box holds the context, unsent; the owner sends it,
+adding a question if they like.
 The system prompt asks the model to call:
 
 - `get_trade_review(trade_id)` (read-only, provenance `saved`). The id is

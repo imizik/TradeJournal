@@ -213,3 +213,70 @@ test("a removed position gives a recovery link instead of an endless spinner", a
   await expect(page.getByRole("alert").filter({ hasText: "This position could not be loaded" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Back to Trades" })).toHaveAttribute("href", "/trades");
 });
+
+// A position alert ping's answer buttons (position_alerts.ANSWER_ACTIONS) open the trade page with `answer`: the tap
+// is the answer, saved once through the feedback route, and a saved answer is never overwritten by a later tap.
+for (const width of [375, 1440]) {
+  test(`a ping's answer button saves the alert feedback on open at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    const trade = await openAapl(page);
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    let feedback: object | null = null;
+    const puts: object[] = [];
+    await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+      enabled: true, watch: null, alerts: [{ ...linkedAlert, contract: `${trade.ticker} ${trade.expiration} ${trade.strike}C`, feedback }],
+    } }));
+    await page.route(`**/trades/${trade.id}/phone-alerts/${linkedAlert.id}/feedback`, async route => {
+      const body = route.request().postDataJSON();
+      puts.push(body);
+      if (feedback) return route.fulfill({ status: 409, json: { detail: "Feedback changed in another session." } });
+      feedback = { rating: body.rating, reason: body.reason, version: 1, created_at: alertAt + 60, updated_at: alertAt + 60 };
+      await route.fulfill({ json: feedback });
+    });
+    await page.route(`**/charts/journal/trades/${trade.id}/mark`, route => route.fulfill({ json: nowMark }));
+
+    await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}&answer=prompted_review`);
+    const form = page.getByTestId("position-alert-feedback");
+    await expect(form.getByRole("status")).toContainText("Saved: Prompted a review");
+    await expect(form.getByRole("status")).toContainText("Saved from your phone. Wrong answer? Edit feedback.");
+    await expect(form).toBeInViewport();
+    expect(puts).toEqual([{ rating: "prompted_review", reason: null, base_version: 0 }]);
+    await expect(page).toHaveURL(new RegExp(`/trades/${trade.id}\\?alert=${linkedAlert.id}$`)); // a reload cannot repeat it
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    await page.screenshot({ path: test.info().outputPath(`alert-answer-saved-${width}.png`) });
+
+    await page.reload();
+    await expect(form.getByRole("status")).toContainText("Saved: Prompted a review");
+    await expect(form.getByRole("status")).not.toContainText("from your phone");
+
+    // The other button tapped later: the saved answer stands, and nothing is written.
+    await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}&answer=already_aware`);
+    await expect(form.getByRole("status")).toContainText("Saved: Prompted a review");
+    await expect(form.getByRole("status")).toContainText("Already answered Prompted a review, so your tap did not change it.");
+    expect(puts).toHaveLength(1);
+    await form.getByRole("button", { name: "Edit feedback" }).click();
+    await expect(form.getByRole("radio", { name: "Prompted a review" })).toBeChecked();
+    // An address that is not a rating saves nothing.
+    feedback = null;
+    await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}&answer=great`);
+    await expect(form.getByRole("button", { name: "Save feedback" })).toBeDisabled();
+    expect(puts).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("an answer the server refuses as stale keeps the tap as a draft and offers a reload", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const trade = await openAapl(page);
+  await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: {
+    enabled: true, watch: null, alerts: [{ ...linkedAlert, feedback: null }] } }));
+  await page.route(`**/trades/${trade.id}/phone-alerts/${linkedAlert.id}/feedback`,
+    route => route.fulfill({ status: 409, json: { detail: "Feedback changed in another session." } }));
+  await page.route(`**/charts/journal/trades/${trade.id}/mark`, route => route.fulfill({ json: nowMark }));
+  await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}&answer=already_aware`);
+  const form = page.getByTestId("position-alert-feedback");
+  await expect(form.getByRole("alert")).toContainText("Feedback may have changed");
+  await expect(form.getByRole("radio", { name: "Already aware" })).toBeChecked();
+  await expect(form.getByRole("button", { name: "Reload saved feedback" })).toBeVisible();
+});

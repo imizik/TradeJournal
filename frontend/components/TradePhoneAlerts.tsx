@@ -5,7 +5,7 @@ import { apiUrl } from "@/lib/api";
 import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from "@/lib/chartJournal";
 import PositionAlertFeedback from "./PositionAlertFeedback";
 import { useAppAccess } from "./AccessProvider";
-import type { AlertFeedback } from "@/lib/alertFeedback";
+import { ALERT_FEEDBACK_LABELS, type AlertFeedback, type AlertFeedbackRating } from "@/lib/alertFeedback";
 
 // Older API responses still render their history, but cannot identify a linked event.
 type Sent = { id?: string; contract?: string; quoted_at?: number | null; feedback?: AlertFeedback | null;
@@ -62,7 +62,9 @@ function PositionNow({ tradeId }: { tradeId: string }) {
   </div>;
 }
 
-export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, askHref }: { tradeId: string; alertId?: string; symbol: string; status: string; askHref?: string }) {
+/** ``answer`` is a ping's answer button (position_alerts.ANSWER_ACTIONS): the selected alert's feedback is saved with it. */
+export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, status, askHref }: {
+  tradeId: string; alertId?: string; answer?: string; symbol: string; status: string; askHref?: string }) {
   const { owner } = useAppAccess();
   const [body, setBody] = useState<Body | null>(null);
   const [failed, setFailed] = useState(false);
@@ -122,7 +124,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, symbol, status, ask
       <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}</p>
       {owner && selected.id && selected.feedback !== undefined && ["giveback", "hold_hour", "expiry_first", "expiry_final"].includes(selected.kind)
         && ["sent", "unknown"].includes(selected.delivery) && <PositionAlertFeedback key={`${tradeId}:${selected.id}`}
-          tradeId={tradeId} alertId={selected.id} initial={selected.feedback} />}
+          tradeId={tradeId} alertId={selected.id} initial={selected.feedback}
+          answer={answer && answer in ALERT_FEEDBACK_LABELS ? answer as AlertFeedbackRating : undefined} />}
     </div>}
     {body?.enabled && body.watch && !alertId && <p className="text-muted-foreground">
       {body.watch.fired
