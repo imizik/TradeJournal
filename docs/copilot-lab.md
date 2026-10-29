@@ -686,9 +686,17 @@ of the symbol's first `reflection` (or `plan_ask` answer) today: "Reviewed ·
 command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
-or Skip opens the next; the last one ends it. With none left it puts the
-day's question in the message box, unsent. Nothing is sent to the model. The
-Briefing's line says "N of M reviewed" (one per symbol). Browser proof:
+or Skip opens the next. Then, in the conversation pane (`ClosePass.tsx`), it
+asks the rest one at a time with the same answers the Briefing and thread top
+use: today's position alerts with no feedback, today's Radar hits not rated,
+then the fills waiting to link (the link bar). An answer or Skip moves on, the
+✕ ends the pass, and the last one ends it. Older alerts and hits stay in the
+Briefing's "to answer" lists. With nothing left it puts the day's question in
+the message box, unsent. Nothing is sent to the model, and the answers go
+through the same routes as everywhere else. The button counts all of it
+("Close the day · 6 to review", less what was skipped), and the Briefing's
+line says "N of M done": the close questions (one per symbol), today's alerts
+and hits, and the fills to link, a skip not counting as done. Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
 

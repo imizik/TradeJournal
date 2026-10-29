@@ -356,7 +356,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Review: did you follow the plan?");
   await expect(rail.getByRole("link", { name: /^CRWV/ })).toContainText("Added or not, and why?");
   await expect(rail.getByRole("link", { name: /^APLD/ })).toContainText("Reviewed · Entered at 31.00 as planned, sized…");
-  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 4 reviewed");
+  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 4 done");
   await page.screenshot({ path: test.info().outputPath("close-the-day-1440.png") });
 
   const review = page.getByRole("region", { name: "Close of day" });
@@ -383,5 +383,71 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
   expect(posts).toEqual([expect.objectContaining({ kind: "reflection", symbol: "NBIS", text: "Held above 92.30 all day, as planned." }),
     expect.objectContaining({ kind: "plan_ask", symbol: "TSLA", text: "No plan for now" })]);
+  expect(chats).toEqual([]);
+});
+
+test("after the close questions, Close the day asks today's alerts, Radar hits and fills to link, one at a time", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const DAY = "2026-10-23";
+  const at = epoch("2026-10-23T21:00:00Z"); // 17:00 New York, a Friday
+  const AMD = "77777777-7777-4777-8777-777777777777";
+  const PLAN = "aaaaaaaa-0000-4000-8000-000000000003";
+  const GIVEBACK = { id: "a1111111-1111-4111-8111-111111111111", trade_id: TRADE, symbol: "NBIS", contract: "NBIS 10/23/26 100C",
+    kind: "giveback", at: at - 3600, today: true, feedback: null };
+  const ANSWERED = { ...GIVEBACK, id: "a2222222-2222-4222-8222-222222222222", kind: "hold_hour", at: at - 7200,
+    feedback: { rating: "already_aware", reason: null, version: 1, created_at: at - 7000, updated_at: at - 7000 } };
+  const OLDER = { ...GIVEBACK, id: "a3333333-3333-4333-8333-333333333333", at: at - 86400 * 3, today: false }; // not today: not asked
+  const HIT = `rv1-${DAY}-sec-mu-up-1`;
+  const to_answer = { alerts: { count: 2, rows: [GIVEBACK, ANSWERED, OLDER] },
+    radar: { count: 1, rows: [{ event_id: HIT, symbol: "MU", kind: "vs sector", at: at - 1800, today: true, rating: null }] } };
+  const threads = () => ({ ...DESK, as_of: "2026-10-23T21:00:00Z", day: { phase: "post", need_you: 1, streak: null },
+    threads: [...DESK.threads.map(r => r.symbol === "NBIS" ? { ...r, close: { kind: "position", question: "Review: did you follow the plan?", reviewed: null },
+      status: { text: "Review: did you follow the plan?", tone: "attention" } } : r),
+    row({ key: `trade:${AMD}`, group: "watch", symbol: "AMD", title: "AMD 10/23/26 150C", instrument: "10/23/26 150C", trade_id: AMD,
+      path: "/copilot-lab?symbol=AMD", fill_to_link: AMD, status: { text: "Fill to link", tone: "attention" } })] });
+  await page.route("**/today", (route) => route.fulfill({ json: { as_of: "2026-10-23T21:00:00Z", day: DAY, quotes_at: null, quote_issue: null,
+    act_now: { state: "ok", rows: [], open_positions: 0 }, plans: { state: "ok", rows: [], armed: 0 }, new: {}, held: { state: "ok", rows: [], count: 0 }, week: { state: "unavailable" } } }));
+  await page.route("**/copilot/symbol/*", (route) => route.fulfill({ json: { symbol: "NBIS", as_of: "2026-10-23T21:00:00Z",
+    positions: { state: "ok", rows: [{ symbol: "NBIS" }] }, plans: { state: "ok", rows: [] }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } },
+    quotes_at: null, quote_issue: null } }));
+  await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries: [], trade_plans: {} } }));
+  const writes: string[] = [];
+  await page.route("**/trades/*/phone-alerts/*/feedback", (route) => {
+    const body = route.request().postDataJSON();
+    writes.push(`alert ${route.request().url().split("/phone-alerts/")[1].split("/")[0]} ${body.rating}`);
+    return route.fulfill({ json: { rating: body.rating, reason: body.reason, version: body.base_version + 1, created_at: at, updated_at: at } });
+  });
+  await page.route("**/radar/events/*/feedback", (route) => { writes.push("radar"); return route.fulfill({ json: { event_id: HIT, rating: "useful" } }); });
+  await page.route(`**/trades/${AMD}/plan-link`, (route) => route.fulfill({ json: {
+    trade: { id: AMD, ticker: "AMD", contract: "AMD 10/23/26 150C", status: "open", opened: "opened", fill: "1 at $3.10",
+      opened_at: epoch("2026-10-23T14:31:00Z"), opened_at_reliable: true },
+    candidates: [{ capture_id: PLAN, setup: "AMD breakout", mode: "discretionary", wording: "Entry: crosses 150.", note: null,
+      received_at: epoch("2026-10-23T14:20:00Z"), timing: "pre_entry", investigation_id: null }], linked: [], plan_path: "/copilot-lab?symbol=AMD" } }));
+  await page.route("**/charts/captures/*/link", (route) => { writes.push("link"); return route.fulfill({ json: {} }); });
+  const { chats } = await lab(page, { time: new Date(at * 1000), threads, session: { ...SESSION, now: at, phase: "post", time_stops: [], to_answer } });
+  const rail = page.getByRole("navigation", { name: "Thread list" });
+  // One close question, one alert and one Radar hit from today still unanswered, one fill to link; one alert already answered.
+  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 5 done");
+  await rail.getByRole("button", { name: "Close the day · 4 to review" }).click();
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  await page.getByRole("region", { name: "Close of day" }).getByRole("button", { name: "Skip" }).click();
+
+  const pass = page.getByRole("region", { name: "Close the day" });
+  await expect(pass.getByTestId("alert-answer")).toContainText("Give-back · NBIS 10/23/26 100C");
+  await expect(pass.getByTestId("close-pass-done")).toHaveText("1 of 5 done");
+  await expect(rail.getByRole("button", { name: "Close the day · 3 to review" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("close-the-day-alert-1440.png") });
+  await pass.getByRole("button", { name: "Prompted a review" }).click();
+
+  await expect(pass.getByTestId("hit-to-rate")).toContainText("MU vs sector");
+  await expect(pass.getByTestId("close-pass-done")).toHaveText("2 of 5 done");
+  await pass.getByRole("button", { name: "Skip" }).click(); // nothing saved for the hit
+
+  const fill = pass.getByRole("group", { name: "Fill to link" });
+  await expect(fill).toContainText("Bought AMD 10/23/26 150C");
+  await fill.getByRole("button", { name: "No plan" }).click();
+  await expect(pass).toHaveCount(0); // the last one ends the pass
+  await expect(rail.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  expect(writes).toEqual([`alert ${GIVEBACK.id} prompted_review`]);
   expect(chats).toEqual([]);
 });
