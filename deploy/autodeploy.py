@@ -54,6 +54,10 @@ NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL")
 STATE = Path("/var/lib/tradejournal-autodeploy")
 # Where the state lived before; read once into STATE, never written.
 LEGACY_STATE = Path("/var/lib/tradejournal/autodeploy/state.json")
+# A world-readable copy of the state for the app's Deploys page; nothing here reads it back.
+PUBLIC = Path("/var/lib/tradejournal/autodeploy.json")
+# Decisions kept for that page, newest last.
+HISTORY = 30
 CONTROLLER = Path("/usr/local/sbin/tradejournal-deploy")
 BACKUPS = Path("/var/backups/tradejournal")
 API = "http://127.0.0.1:8080"
@@ -369,13 +373,29 @@ def _write_state(state: dict) -> None:
     pending = STATE / "state.json.new"
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(STATE / "state.json")
+    # The app's user owns PUBLIC's directory, so never write through a name it
+    # could have planted: a fresh, exclusively created file, renamed into place.
+    pending = None
+    try:
+        descriptor, pending = tempfile.mkstemp(dir=PUBLIC.parent, prefix=f".{PUBLIC.name}.")
+        with os.fdopen(descriptor, "w") as handle:
+            os.fchmod(handle.fileno(), 0o644)
+            handle.write(json.dumps(state, indent=2) + "\n")
+        os.replace(pending, PUBLIC)
+    except OSError as exc:
+        print(f"Deploys page status not written: {exc}", flush=True)
+        if pending:
+            Path(pending).unlink(missing_ok=True)
 
 
 def record(settings: Settings, state: dict, build: Build, outcome: str, detail: str, *, title: str) -> None:
     """Remember a decision about a build; notify only the first time it is made."""
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if (state.get("commit"), state.get("outcome")) != (build.commit, outcome):
         notify(settings, title, detail, good_news=outcome == "deployed")
-    state.update(commit=build.commit, release=build.release_id, outcome=outcome, detail=detail, at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        history = state.get("history", []) + [{"at": at, "commit": build.commit, "release": build.release_id, "title": build.title, "outcome": outcome, "detail": detail}]
+        state["history"] = history[-HISTORY:]
+    state.update(commit=build.commit, release=build.release_id, outcome=outcome, detail=detail, at=at)
     if outcome == "deployed":
         state["deployed"] = build.commit
     save_state(state)
@@ -476,8 +496,17 @@ def status(settings: Settings) -> None:
     except Waiting as exc:
         print(f"Newest verified build: unknown; {exc}")
     state = load_state()
-    if state:
+    if "outcome" in state:
         print(f"Last decision: {state['outcome']} for {state['commit'][:12]} at {state['at']}\n  {state['detail']}")
+
+
+def note_check(settings: Settings, result: str) -> None:
+    """Remember what the latest pass concluded, for the Deploys page."""
+    state = load_state()
+    hold = None if settings.hold is None else f"{settings.hold[0]:%H:%M}-{settings.hold[1]:%H:%M}"
+    state["checked"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "result": result, "enabled": settings.enabled,
+                        "hold": hold, "auto_migrate": settings.auto_migrate, "repository": settings.repository}
+    save_state(state)
 
 
 def main() -> None:
@@ -497,21 +526,25 @@ def main() -> None:
     if args.action == "status":
         status(settings)
         return
-    if not settings.enabled:
-        print("Automatic deployment is off (AUTODEPLOY_ENABLED is not true)")
-        return
     with (state_dir() / "run.lock").open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print("Another automatic deployment run is active")
             return
+        if not settings.enabled:
+            print("Automatic deployment is off (AUTODEPLOY_ENABLED is not true)")
+            note_check(settings, "Automatic deployment is off")
+            return
         try:
-            print(deploy(settings, now=datetime.now(timezone.utc), ignore_hold=args.now, allow_migration=args.allow_migration), flush=True)
+            result = deploy(settings, now=datetime.now(timezone.utc), ignore_hold=args.now, allow_migration=args.allow_migration)
         except Waiting as exc:
-            print(f"Waiting: {exc}", flush=True)
+            result = f"Waiting: {exc}"
         except Failed as exc:
+            note_check(settings, f"Failed: {exc}")
             raise SystemExit(str(exc)) from None
+        print(result, flush=True)
+        note_check(settings, result)
 
 
 if __name__ == "__main__":

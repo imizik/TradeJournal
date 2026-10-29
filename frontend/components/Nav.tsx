@@ -8,7 +8,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
-import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Bot, Crosshair, LayoutDashboard, MessagesSquare, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, Rocket, Scale, Target, Telescope, ChevronRight, ClipboardCheck, Menu, Sun, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -65,6 +65,7 @@ const navItems: { href: string; label: string; icon: typeof Bot; heading?: strin
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
   { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
   { href: "/access", label: "Assistant access", icon: FileText },
+  { href: "/deploys", label: "Deploys", icon: Rocket },
 ];
 
 const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }> = {

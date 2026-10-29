@@ -711,6 +711,10 @@ copies it over once, only if root wrote that file; the old copy is left in
 place, unused, for an operator to delete. A release from before this move
 reads only that old copy, so set `AUTODEPLOY_ENABLED=false` before rolling
 back to one: it would not remember a build the newer deployer saw fail.
+The last 30 decisions and the latest check are copied, readable, to
+`/var/lib/tradejournal/autodeploy.json`. The app's **Deploys** page
+(`/deploys`, owner only) shows that copy alongside the running release and
+the releases still installed.
 
 ## Verification boundaries
 

@@ -3,14 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, type DayJournalEntry, type DayJournalWrite } from "@/lib/api";
 import { getSymbolLoop } from "@/lib/copilot";
-import { afterClose, decisionChoice, deskDecision, type DeskActRow, type DeskDecision } from "@/lib/desk";
+import { afterClose, decisionChoice, deskDecision, reviewSkipped, skipReview, type DeskActRow, type DeskDecision } from "@/lib/desk";
 
 const REFRESH_MS = 60_000;
 /** Journal entries are immutable, so Undo is this window before the save is sent. */
 export const UNDO_MS = 5_000;
 const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
-const skipKey = (day: string, symbol: string) => `tradejournal:desk:review-skipped:${day}:${symbol}`;
 
 type TodayBody = { as_of: string; day: string; act_now: { state: "ok"; rows: DeskActRow[] } | { state: "unavailable" } };
 type Pending = { write: DayJournalWrite; choice: DeskDecision["choice"] };
@@ -30,9 +29,12 @@ function save(day: string, write: DayJournalWrite, keepalive = false) {
  * day-journal entry after a short Undo window. After the close it asks one review question instead and saves the answer
  * as a ``reflection``. Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message
  * box, unsent. ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest
- * of the thread (the plan ladder shrinks to one line while it asks).
+ * of the thread (the plan ladder shrinks to one line while it asks). ``onReviewed`` hears the review answered or
+ * skipped, so the desk's close pass can move on.
  */
-export default function DecisionBar({ symbol, fill, onActive }: { symbol: string | null; fill(text: string): void; onActive?(asking: boolean): void }) {
+export default function DecisionBar({ symbol, fill, onActive, onReviewed }: {
+  symbol: string | null; fill(text: string): void; onActive?(asking: boolean): void; onReviewed?(symbol: string): void;
+}) {
   const [today, setToday] = useState<TodayBody | null>(null);
   const [entries, setEntries] = useState<DayJournalEntry[]>([]);
   const [review, setReview] = useState<Review | null>(null);
@@ -56,7 +58,7 @@ export default function DecisionBar({ symbol, fill, onActive }: { symbol: string
     setToday(body);
     setEntries(journal.entries);
     if (afterClose(body.as_of)) {
-      try { setSkipped(localStorage.getItem(skipKey(body.day, symbol)) === "1"); } catch { /* no storage: the prompt shows */ }
+      setSkipped(reviewSkipped(body.day, symbol)); // no storage: the prompt shows
       const loop = await getSymbolLoop(symbol, signal).catch(() => null);
       if (signal?.aborted) return;
       const held = body.act_now.state === "ok" && body.act_now.rows.some(r => r.symbol === symbol)
@@ -117,11 +119,11 @@ export default function DecisionBar({ symbol, fill, onActive }: { symbol: string
     if (reflected) return <p data-testid="desk-review-done" className="text-sm text-muted-foreground">You reviewed {symbol} at {hhmm(reflected.created_at)}.</p>;
     if (skipped) return null;
     const question = review.kind === "position" ? "Review: did you follow the plan?" : "Added or not, and why?";
-    const skip = () => { setSkipped(true); try { localStorage.setItem(skipKey(day, symbol), "1"); } catch { /* skipped for this visit only */ } };
+    const skip = () => { setSkipped(true); skipReview(day, symbol); onReviewed?.(symbol); };
     const submit = async () => {
       const text = answer.trim();
       if (!text) return;
-      if (await send({ operation_id: `reflection-${uid()}`, kind: "reflection", symbol, text })) { setAnswering(false); setAnswer(""); }
+      if (await send({ operation_id: `reflection-${uid()}`, kind: "reflection", symbol, text })) { setAnswering(false); setAnswer(""); onReviewed?.(symbol); }
     };
     return (
       <section aria-label="Close of day" data-testid="desk-review" className="rounded-lg border border-primary/40 bg-card p-3">
