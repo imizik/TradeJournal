@@ -452,7 +452,12 @@ The full page is a desk of three panes beside each other
   entered), once a minute; a thread with no plan shows only the header.
 - **Context**: the open thread's symbol, "today" and Open in Charts →, with
   three small tabs (`components/copilot/Inspector.tsx`, reads in
-  `backend/app/engine/desk_context.py`); empty until a conversation is saved.
+  `backend/app/engine/desk_context.py`). A thread that names a symbol with no
+  saved conversation (a position or plan from the thread list, a `?symbol=`
+  link, a Radar hit) reads them by the symbol at once, as `symbol:<SYMBOL>` on
+  the same routes: its plan's lines when it has one (in a position first, else
+  armed), else the fills of its open trade; once a conversation is saved the
+  pane reads by it.
   Each tab reads only when opened and again when something is confirmed in the
   conversation; nothing here arms or sends.
   - **Chart** (first): the server's ping picture of the symbol

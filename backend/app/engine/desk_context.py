@@ -1,5 +1,6 @@
 """The Copilot desk's Context pane (docs/copilot-lab.md#the-desk): three reads for the open thread, keyed by its saved
-investigation and its symbol.
+investigation and its symbol, or by the symbol alone (``SYMBOL_PREFIX``): a position or plan opened with no saved
+conversation reads its symbol's plan (in a position first, else armed) and, without a linked trade, its open trade.
 
 - ``picture``: the thread's symbol as a PNG, drawn by the ping-picture renderer (``chart_render``), on one of
   ``TIMEFRAMES``: ``2m`` today's minutes (the same cached chart-feed read as a ping picture, ``ping_images.today_bars``),
@@ -17,6 +18,7 @@ investigation and its symbol.
 - ``history``: the owner's own record at the plan's invalidation, from ``copilot_review.level_history`` (the engine
   behind the copilot's ``get_level_history``), as won / not-won counts for the trades that crossed it while held and one
   sentence built from those counts. No plan, or a plan without an invalidation, says what is missing.
+- ``symbol_thread``: the thread for ``SYMBOL_PREFIX`` + a symbol, so the routes take it where they take an investigation.
 - ``market_picture``: the Briefing's chart, today's ``MARKET`` (QQQ) minutes with the day's fills and phone pings sent
   as dots, under the picture route's reserved ``MARKET_ID``.
 
@@ -26,6 +28,7 @@ Read-only: nothing here arms, sends or writes. No account numbers or ids beyond 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 import json
 import logging
@@ -38,7 +41,7 @@ from app.engine import chart_render, copilot_plans, ping_images
 from app.engine.chart_math import ET, chart_bars
 from app.engine.chart_render import Chart, Mark, Time
 from app.models import (Account, CaptureLink, CopilotInvestigation, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent,
-                        PhonePing, PlanTimeStop, ResearchJob, ThesisWatchTrigger, TradeCapture, TradeFill)
+                        PhonePing, PlanTimeStop, ResearchJob, ThesisWatchTrigger, Trade, TradeCapture, TradeFill)
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +67,8 @@ ROLE = {"entry": "Entry", "invalidation": "Invalidation"}
 # The Briefing's chart: the market, read through the picture route under this reserved id (investigation ids are UUIDs).
 MARKET_ID = "market"
 MARKET = "QQQ"
+# A thread named by its symbol alone, read through the same routes as ``symbol:NBIS``.
+SYMBOL_PREFIX = "symbol:"
 
 
 class Unavailable(Exception):
@@ -76,6 +81,20 @@ def investigation(db: Session, investigation_id: str) -> CopilotInvestigation | 
     except ValueError:
         return None
     return db.get(CopilotInvestigation, key)
+
+
+@dataclass(frozen=True)
+class SymbolThread:
+    """A thread named by its symbol: ``id`` is the investigation of the symbol's plan, or empty when it has none."""
+    id: str
+    symbol: str
+
+
+def symbol_thread(db: Session, symbol: str) -> SymbolThread:
+    """The symbol's plan as the Plans board shows it (no quote read): one in a position first, else the nearest armed."""
+    rows = [p for p in copilot_plans.board(db, quotes=lambda _symbols: ({}, None, None))["plans"] if p["symbol"] == symbol]
+    found = min(rows, key=lambda p: p["position"] != "in_position", default=None)
+    return SymbolThread(found["investigation_id"] if found else "", symbol)
 
 
 def _epoch_utc(moment: datetime | None) -> int | None:
@@ -140,6 +159,14 @@ def _linked_fills(db: Session, capture: TradeCapture | None) -> list[Fill]:
         return []
     return list(db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(TradeFill.trade_id == anchor)
                         .order_by(Fill.executed_at)).all())
+
+
+def _open_fills(db: Session, symbol: str) -> list[Fill]:
+    """The fills of the symbol's open trades (Webull left out), for a thread named by its symbol with no linked trade."""
+    webull = select(Account.id).where(Account.broker == "webull")
+    trades = select(Trade.id).where(Trade.ticker == symbol, Trade.status == "open", Trade.account_id.not_in(webull))
+    return list(db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id).where(TradeFill.trade_id.in_(trades))
+                        .order_by(Fill.executed_at).limit(MAX_ROWS)).all())
 
 
 def _not_webull():
@@ -266,7 +293,7 @@ def _event_marks(events: list[dict], shown: list[dict]) -> list[Mark]:
     return marks
 
 
-def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budget: float = BUDGET_SECONDS,
+def picture(db: Session, inv: CopilotInvestigation | SymbolThread, now: float, bars=None, budget: float = BUDGET_SECONDS,
             timeframe: str = "2m", events: list[dict] = ()) -> bytes:
     """The thread's symbol on ``timeframe``: ``2m`` today's minutes (the regular session once it has bars, before that
     the pre-market), ``15m`` recent sessions, ``1D`` the last ``DAILY_DAYS``. The intraday ones carry its plan's levels,
@@ -277,7 +304,7 @@ def picture(db: Session, inv: CopilotInvestigation, now: float, bars=None, budge
         raise Unavailable("This thread has no symbol, so there is no chart.")
     if timeframe not in TIMEFRAMES:
         raise Unavailable(f"No {timeframe} chart; the choices are {', '.join(TIMEFRAMES)}.")
-    found = plan(db, str(inv.id))
+    found = plan(db, str(inv.id)) if inv.id else None
     levels = tuple(sorted((a.plan_role, float(a.price)) for a in (found["entry"], found["invalidation"]) if a)) if found else ()
     today = datetime.fromtimestamp(now, ET).date()
     start = datetime.combine(today, datetime.min.time())
@@ -383,7 +410,7 @@ def _revisit_rows(db: Session, investigation_id: str) -> list[dict]:
     return rows
 
 
-def _fill_rows(fills: list[Fill]) -> list[dict]:
+def _fill_rows(fills: list[Fill], detail: str = "linked to the plan") -> list[dict]:
     from app.engine.chart_journal import contract_label
     rows = []
     for f in fills:
@@ -391,7 +418,7 @@ def _fill_rows(fills: list[Fill]) -> list[dict]:
         qty = f"{float(f.contracts):g}"
         what = contract_label(f.ticker, f.instrument_type, f.option_type, f.strike, f.expiration)
         price = f" at {_price(float(f.price))}" if f.instrument_type == "stock" else ""
-        rows.append(_row("fill", _epoch_ny(f.executed_at), f"{verb} {qty} {what}{price}", "linked to the plan"))
+        rows.append(_row("fill", _epoch_ny(f.executed_at), f"{verb} {qty} {what}{price}", detail))
     return rows
 
 
@@ -427,7 +454,15 @@ def _decision_rows(db: Session, symbol: str, today: date) -> list[dict]:
     return [_row("decision", _epoch_utc(e.created_at), "Decision", e.text[:300]) for e in found]
 
 
-def timeline(db: Session, inv: CopilotInvestigation, now: float) -> dict:
+def _thread_fills(db: Session, inv: CopilotInvestigation | SymbolThread, found: dict | None) -> list[dict]:
+    """The plan's linked trade; a thread named by its symbol with none shows the symbol's open trade instead."""
+    linked = _linked_fills(db, found["capture"] if found else None)
+    if linked or not isinstance(inv, SymbolThread):
+        return _fill_rows(linked)
+    return _fill_rows(_open_fills(db, inv.symbol), "the open position")
+
+
+def timeline(db: Session, inv: CopilotInvestigation | SymbolThread, now: float) -> dict:
     investigation_id, symbol = str(inv.id), inv.symbol
     today = datetime.fromtimestamp(now, ET).date()
     since = datetime.fromtimestamp(now, UTC).replace(tzinfo=None) - timedelta(days=RECENT_DAYS)
@@ -444,7 +479,7 @@ def timeline(db: Session, inv: CopilotInvestigation, now: float) -> dict:
 
     found: dict | None = None
     try:
-        found = plan(db, investigation_id)
+        found = plan(db, investigation_id) if investigation_id else None
     except Exception:  # noqa: BLE001
         log.warning("Desk timeline: the plan could not be read", exc_info=True)
         db.rollback()
@@ -454,10 +489,11 @@ def timeline(db: Session, inv: CopilotInvestigation, now: float) -> dict:
     def alert_rows():
         alerts.extend(_thread_alerts(db, investigation_id))
         return _alert_rows(db, alerts)
-    read("alerts", alert_rows)
-    read("time stop", lambda: _stop_rows(found))
-    read("revisits", lambda: _revisit_rows(db, investigation_id))
-    read("fills", lambda: _fill_rows(_linked_fills(db, found["capture"] if found else None)))
+    if investigation_id:  # a symbol with no plan has no alerts, time stop or revisits of its own
+        read("alerts", alert_rows)
+        read("time stop", lambda: _stop_rows(found))
+        read("revisits", lambda: _revisit_rows(db, investigation_id))
+    read("fills", lambda: _thread_fills(db, inv, found))
     if symbol:
         read("thesis watch", lambda: _thesis_rows(db, symbol, since))
         read("pings", lambda: _ping_rows(db, symbol, since, alerts, found))
@@ -504,10 +540,10 @@ def history_sentence(data: dict, won: int, not_won: int) -> str:
     return text
 
 
-def history(db: Session, inv: CopilotInvestigation, level_history=None) -> dict:
+def history(db: Session, inv: CopilotInvestigation | SymbolThread, level_history=None) -> dict:
     if not inv.symbol:
         return {"state": "missing", "reason": "This thread has no symbol, so there is no level to look up."}
-    found = plan(db, str(inv.id))
+    found = plan(db, str(inv.id)) if inv.id else None
     if found is None or found["invalidation"] is None:
         return {"state": "missing", "symbol": inv.symbol,
                 "reason": "No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here."}

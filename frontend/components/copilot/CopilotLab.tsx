@@ -18,7 +18,7 @@ import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref } from "@/lib/copilot";
-import { afterClose, nyDay, toReview, type DeskCommand, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, deskSymbolThread, nyDay, toReview, type DeskCommand, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -194,6 +194,9 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
   const day = thread ? !thread.symbol : !link?.symbol;
+  // A deep link naming a symbol shows its Context by the symbol until a conversation is saved, then by that conversation.
+  const linkSymbol = link?.symbol;
+  const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
 
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
@@ -260,7 +263,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
-        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} day={day} /></aside>}
+        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} /></aside>}
       </div>
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} />}
     </div>
