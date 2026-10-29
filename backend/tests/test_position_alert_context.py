@@ -33,6 +33,8 @@ def market(tmp_path, monkeypatch):
     monkeypatch.setenv("RADAR_ENABLED", "true")
     monkeypatch.setenv("RADAR_STORE", str(store.path))
     monkeypatch.setattr(context, "load_universe", lambda: deepcopy(UNIVERSE))
+    # Room for a busy CI runner: the 0.1 s budget's fail-fast is tested with explicit deadlines below.
+    monkeypatch.setattr(context, "READ_BUDGET_SECONDS", 1.0)
     return store
 
 
