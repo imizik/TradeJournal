@@ -565,6 +565,25 @@ Radar page. While Radar is off the section is left out; an unreadable Radar
 file reads unavailable and the alert scorecard stands. Read-only. Proof:
 `tests/test_radar_scorecard.py`, `frontend/e2e/copilot-scorecard.spec.ts`.
 
+**Answers for /proof** (`components/copilot/ProofAnswers.tsx`). The two answers
+the [/proof page](product-roadmap.md#end-goal--october-22-2026) measures are
+asked where the pings and hits are seen. A position's thread (a ping opens the
+desk on its decision bar) lists the alerts sent today for its symbol under the
+decision bar, each with Prompted a review, Already aware, Too late and Not useful
+and an optional reason saved with the tap. A Radar hit's thread puts Useful,
+Already knew, Too late and Irrelevant in its own box under the hit's decision,
+not inside it. The Briefing's top says "N alerts to answer" and "N Radar hits
+to rate", in /proof's scope: every sent or delivery-unconfirmed position alert
+with no feedback, and every unrated event of Radar's newest rule version. Each
+opens its waiting rows (today's, then the newest from before, up to 20) to
+answer in place, and its count drops at once. An answer is a line with
+Change. Saves go through the routes the trade page and the Radar feed use
+(`PUT /trades/{trade_id}/phone-alerts/{id}/feedback`,
+`POST /radar/events/{id}/feedback`), so /proof counts each one at once. The rows
+come from the session read's `to_answer` (below); an alert whose position is
+no longer in the journal is counted but not listed. Proof:
+`tests/test_copilot_desk_session.py`, `frontend/e2e/copilot-proof-answers.spec.ts`.
+
 **One main element per thread.** The thread's top reads header, then its
 main element, then the conversation: while the decision bar (below) is
 asking, it sits between the header and the plan ladder, and the ladder
@@ -688,8 +707,10 @@ that already exist: `day_replay.traded` (Webull left out), the notification
 policy's `PhonePing` rows and `daily_cap`, the Radar store's events for today,
 `decision` day-journal entries, scheduled `PlanTimeStop` rows, `today._prep`
 and one `chart_feed.quote_rows` read of SPY, QQQ and VIX (the feed's index
-mapping). Each source fails on its
-own; no ids go out. No futures quote is read yet.
+mapping). Under `to_answer` it adds the position alerts and Radar hits still
+waiting on an answer (see Answers for /proof), with the alert, trade and Radar
+event ids those answers save against; no other ids go out. Each source fails on
+its own. No futures quote is read yet.
 
 **Keys and the palette.** ⌘K (Ctrl+K off a Mac; either works), or the desk bar's
 "Jump to…" button, opens a palette over the desk (`CommandPalette.tsx`, a

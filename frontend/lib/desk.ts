@@ -5,8 +5,10 @@
  */
 
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
+import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
 import type { InvestigationSummary, PlanBoardRow, PlansBoard } from "@/lib/copilot";
+import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
 export type DeskTab = "now" | "thread" | "context";
@@ -345,8 +347,16 @@ export type DeskSession = {
   events: DeskSessionEvent[]; time_stops: { symbol: string; at: number; clock: string }[];
   pings: { sent: number; held: number; cap: number } | null; prep: { at: number | null; line: string | null } | null;
   indices: { symbol: string; last: number | null; change_pct: number | null }[]; quote_issue: string | null;
+  /** What waits on the owner's answer for /proof: ``count`` in the proof's scope, ``rows`` today's then the newest waiting.
+   * Null when that source is off or unavailable; absent from an older backend. */
+  to_answer?: { alerts: { count: number; rows: DeskAlertToAnswer[] } | null; radar: { count: number; rows: DeskHitToRate[] } | null };
   sections: Record<string, "ok" | "unavailable" | "off">;
 };
+/** A sent position alert and the trade its feedback is saved against (``PUT /trades/{trade_id}/phone-alerts/{id}/feedback``). */
+export type DeskAlertToAnswer = { id: string; trade_id: string; symbol: string; contract: string; kind: string; at: number; today: boolean;
+  feedback: AlertFeedback | null };
+/** A Radar event of the newest rule version (``POST /radar/events/{event_id}/feedback``); ``kind`` is the feed's words. */
+export type DeskHitToRate = { event_id: string; symbol: string | null; kind: string; at: number | null; today: boolean; rating: RadarRating | null };
 
 export async function getDeskSession(signal?: AbortSignal): Promise<DeskSession> {
   const response = await fetch(apiUrl("/copilot/desk/session"), { cache: "no-store", signal });
