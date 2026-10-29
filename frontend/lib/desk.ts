@@ -61,6 +61,9 @@ export type DeskThread = {
   /** After 16:00 New York on a weekday, a row its horizon asks about today: its close-of-day question (the decision
    * bar's; ``plan_ask`` is a position with no plan, asked once) and the first words of today's answer once one is saved. */
   close: { kind: "position" | "plan" | "plan_ask" | "exit"; question: string; reviewed: string | null } | null;
+  /** The open trade whose fill waits to be linked to a plan (a position the link ping offers plans for, or the plan the
+   * linker suggests it for); its thread top links it inline (``FillLinkBar``). */
+  fillToLink: string | null;
 };
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
@@ -99,9 +102,9 @@ export type DeskThreads = {
 type Wire = {
   as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
   day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
-  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon"> &
+  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
-      close?: DeskThread["close"]; horizon?: DeskHorizon | null })[];
+      close?: DeskThread["close"]; horizon?: DeskHorizon | null; fill_to_link?: string | null })[];
 };
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
@@ -125,11 +128,30 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
   return {
     asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
     day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
-    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, ...row }) => ({
+    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, fill_to_link, ...row }) => ({
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
-      horizon: horizon ?? null,
+      horizon: horizon ?? null, fillToLink: fill_to_link ?? null,
     })),
   };
+}
+
+// "No plan" for a waiting fill writes nothing, as the confirm page's "Not this plan" does: the fill simply stays
+// unplanned. This browser remembers the answer so the desk stops asking; a blocked store asks again next visit.
+const NO_PLAN_KEY = "desk.no-plan.v1";
+export function readNoPlan(): string[] {
+  try { return JSON.parse(window.localStorage.getItem(NO_PLAN_KEY) ?? "[]") ?? []; } catch { return []; }
+}
+export function saveNoPlan(tradeId: string): string[] {
+  const next = [tradeId, ...readNoPlan().filter(id => id !== tradeId)].slice(0, 50);
+  try { window.localStorage.setItem(NO_PLAN_KEY, JSON.stringify(next)); } catch { /* this visit only */ }
+  return next;
+}
+
+/** The fills waiting to link, one row per trade in list order (a position and its suggested plan are one fill), less
+ * those answered here (``done``: "No plan", or linked before the list reads it back). */
+export function fillsToLink(rows: DeskThread[], done: ReadonlySet<string> | string[] = []) {
+  const skip = new Set(done);
+  return rows.filter(r => r.fillToLink && !skip.has(r.fillToLink) && !!skip.add(r.fillToLink));
 }
 
 /**
