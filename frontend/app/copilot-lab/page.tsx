@@ -12,11 +12,14 @@ const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variabl
 
 export default async function CopilotLabPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   if (!(await requireAccess()).owner) notFound();
-  const link = readDeepLink(await searchParams);
+  const params = await searchParams;
+  const link = readDeepLink(params);
+  // The evening review ping's link (/copilot-lab?close=1) starts Close the day.
+  const close = (Array.isArray(params.close) ? params.close[0] : params.close) === "1";
   return (
     // Full screen beside the nav rail on a wide screen (AppMain), the desk fills the height left under the banner.
     <div className={`${sans.variable} ${mono.variable} lg:flex lg:min-h-0 lg:flex-1 lg:flex-col`}>
-      <CopilotLab key={JSON.stringify(link)} link={link} />
+      <CopilotLab key={JSON.stringify(link)} link={link} close={close} />
     </div>
   );
 }

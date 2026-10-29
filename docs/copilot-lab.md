@@ -688,7 +688,9 @@ order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
 or Skip opens the next; the last one ends it. With none left it puts the
 day's question in the message box, unsent. Nothing is sent to the model. The
-Briefing's line says "N of M reviewed" (one per symbol). Browser proof:
+Briefing's line says "N of M reviewed" (one per symbol). `/copilot-lab?close=1`
+(the [evening review ping](#phone-ping-policy)'s link) starts the pass once the
+list has read, after 16:00 only; any other time it opens the desk as usual. Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
 
@@ -1595,7 +1597,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 
 - **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
   plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-  the automatic week review, Radar alerts, thesis watch, research results) calls
+  the automatic week review, Watch your day, the evening review, Radar alerts,
+  thesis watch, research results) calls
   `notification_policy.decide` right before it hands a message to ntfy, and keeps
   its own at-most-once delivery, caps and expiry. `ntfy.py` stays a transport.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
@@ -1605,7 +1608,8 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   every kind. The priority order keeps the cap from dropping what matters:
   last-day final > invalidation > give-back > time stop (and the 90-minute
   last-day alert) > entry trigger > hold-hour > nudge/link > prep (and the
-  automatic week review) > Radar > thesis watch > research. The first three are
+  automatic week review, Watch your day and the evening review) > Radar >
+  thesis watch > research. The first three are
   never over the cap; the last five are held once only 3 slots are left.
 - **Quiet window:** a second ping anchored to the same position within
   `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
@@ -1614,6 +1618,25 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   more important kind is never held by the window, and a last-day final or an
   invalidation is never held by it at all (a second plan's invalidation in the
   same symbol is its own message).
+- **Evening review:** once a trading day (the market calendar: no weekend or
+  holiday) at `EVENING_REVIEW_PING_AT` (default `16:30` New York; a time before
+  16:00 keeps the default), `app/engine/evening_review.py` reads what the desk
+  has waiting through `copilot_desk.waiting`, the desk's own rules: the symbols
+  still asking their close question (as Close the day counts them), the
+  position alerts waiting on an answer, the Radar hits not rated and the fills
+  waiting to link. When any is waiting it sends one ping, "Close the day: To
+  review: 2 threads, 3 alerts, 1 fill to link.", that opens
+  `/copilot-lab?close=1` on Close the day (kind `evening_review`, ranked with
+  the prep). Nothing waiting, or the lab off, is recorded `skipped` with why
+  and sends nothing. One `evening_review` row a day (unique day, additive
+  migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
+  reached the phone, never resent) or `expired`. A day not counted by two hours
+  after its time waits for the next. A Skip or "No plan" kept only in a browser
+  is not seen by the count. **Switch on:** `EVENING_REVIEW_PING_ENABLED=true`
+  in the API's environment (needs `COPILOT_ENABLED=true` and `NTFY_URL`),
+  restart the API; it runs on the level alert monitor's loop. Off by default.
+  Tests: `backend/tests/test_evening_review.py`,
+  `frontend/e2e/copilot-desk-keys.spec.ts`.
 - **Record:** every decision is one `phone_ping` row (`sent`, `merged`,
   `suppressed`, `over_cap`, with the reason). A held sender row reads `held`
   with the same reason on the trade page's phone-alert list; the Dashboard Plans
@@ -1876,6 +1899,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
+| `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |

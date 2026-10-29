@@ -60,7 +60,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown }: { time?: Date; session?: unknown; threads?(): unknown } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab" }: { time?: Date; session?: unknown; threads?(): unknown; path?: string } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -74,7 +74,7 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/charts/alerts", (route) => route.fulfill({ json: { alerts: [], phone: true } }));
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
-  await page.goto("/copilot-lab");
+  await page.goto(path);
   await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
   return { chats };
 }
@@ -309,6 +309,33 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
   await expect(list).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Arm today's plans: /);
   expect(chats).toEqual([]);
+});
+
+test("the evening review ping's link (?close=1) opens the desk on Close the day", async ({ page }) => {
+  const asking = () => ({ ...DESK, as_of: "2026-10-23T20:30:00Z", day: { phase: "post", need_you: 1, streak: null },
+    threads: DESK.threads.map(r => r.symbol === "NBIS" ? { ...r, horizon: "swing", close: { kind: "position", question: "Review: did you follow the plan?", reviewed: null },
+      status: { text: "Review: did you follow the plan?", tone: "attention" } } : r) });
+  await page.route("**/today", (route) => route.fulfill({ json: { as_of: "2026-10-23T20:30:00Z", day: "2026-10-23", quotes_at: null, quote_issue: null,
+    act_now: { state: "ok", rows: [], open_positions: 0 }, plans: { state: "ok", rows: [], armed: 0 }, new: {}, held: { state: "ok", rows: [], count: 0 }, week: { state: "unavailable" } } }));
+  await page.route("**/copilot/symbol/*", (route) => route.fulfill({ json: { symbol: "NBIS", as_of: "2026-10-23T20:30:00Z", positions: { state: "ok", rows: [{ symbol: "NBIS" }] },
+    plans: { state: "ok", rows: [] }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } }));
+  await page.route("**/day-journal/2026-10-23", (route) => route.fulfill({ json: { day: "2026-10-23", entries: [], trade_plans: {} } }));
+  const { chats } = await lab(page, { time: new Date("2026-10-23T20:30:00Z"), threads: asking, path: "/copilot-lab?close=1", // 16:30 New York
+    session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible(); // the first unreviewed thread
+  await expect(page.getByRole("region", { name: "Close of day" })).toContainText("Review: did you follow the plan?");
+  expect(chats).toEqual([]);
+});
+
+test("the close link with nothing left to review puts the day's question in the box; before the close it opens the desk as usual", async ({ page }) => {
+  await lab(page, { time: new Date("2026-10-23T20:30:00Z"), path: "/copilot-lab?close=1", // 16:30 New York, no close question
+    session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+  await page.clock.setSystemTime(NOW); // 11:00 New York
+  await page.goto("/copilot-lab?close=1");
+  await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("");
+  await expect(page).toHaveURL(/\/copilot-lab\?close=1$/);
 });
 
 test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip opens the next, nothing is sent", async ({ page }) => {

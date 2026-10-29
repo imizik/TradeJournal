@@ -511,7 +511,11 @@ def _pinned(prep: dict, week: dict) -> list[dict]:
 def desk_threads(db: Session = Depends(get_session)):
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    now = today._now()
+    return threads(db, today._now())
+
+
+def threads(db: Session, now: float) -> dict:
+    """The thread list as ``GET /copilot/desk/threads`` returns it, read at ``now``."""
     day = datetime.fromtimestamp(now, ET).date()
     quotes = today.SharedQuotes()
     # The board first: its read covers every armed plan, so the positions' invalidations need no second read.
@@ -762,6 +766,20 @@ def desk_session(db: Session = Depends(get_session)):
             ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices),
             ("alerts_to_answer", alerts_due), ("radar_to_rate", hits_due))},
     }
+
+
+def waiting(db: Session, now: float) -> dict:
+    """What the desk has waiting for review at ``now``, counted as the desk counts it, for the evening review ping
+    (``app/engine/evening_review.py``): ``review``, the symbols still asking their close question (Close the day's
+    ``toReview``, one per symbol); ``fills``, the fills waiting to link (``fillsToLink``, one per trade); ``alerts`` and
+    ``radar``, the ``to_answer`` counts. A Skip or "No plan" kept only in a browser is not seen here."""
+    day = datetime.fromtimestamp(now, ET).date()
+    rows = threads(db, now)["threads"]
+    alerts = today._section(db, "waiting alerts to answer", lambda: _alerts_to_answer(db, now))
+    radar = today._section(db, "waiting radar to rate", lambda: _hits_to_rate(day))
+    return {"review": len({r["symbol"] for r in rows if r["close"] and not r["close"]["reviewed"] and r["symbol"]}),
+            "alerts": alerts.get("count", 0), "radar": radar.get("count", 0),
+            "fills": len({r["fill_to_link"] for r in rows if r["fill_to_link"]})}
 
 
 @router.get("/desk/scorecard")

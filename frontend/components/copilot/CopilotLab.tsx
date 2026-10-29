@@ -49,7 +49,7 @@ function typing(target: EventTarget | null) {
  * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
  * typing, J / K open the next or previous thread, N starts a plan and ] hides or shows the Context pane.
  */
-export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
+export default function CopilotLab({ link = null, close = false }: { link?: PanelLink | null; close?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
   const navFolded = useFoldedNav();
@@ -135,6 +135,17 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     if (next) review(next);
     else fill(CLOSE_PROMPT);
   }, [rows, review, fill, setClosing]);
+  // ``?close=1`` (the evening review ping) starts the pass once the list has read, after the close. Its first step is a
+  // page load of that thread's link, so the conversation opens on its own load (the pass carries on in this tab).
+  const closeLink = useRef(close);
+  useEffect(() => {
+    if (!closeLink.current || !rows.length || dayPhase !== "close") return;
+    closeLink.current = false;
+    const [next] = toReview(rows, nyDay());
+    setClosing(!!next);
+    window.location.replace(!next ? copilotLabHref("", CLOSE_PROMPT) : next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
+      : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
+  }, [rows, dayPhase, setClosing]);
   const onReviewed = useCallback((symbol: string) => {
     reviewed.current.add(symbol);
     setRefresh(n => n + 1);
