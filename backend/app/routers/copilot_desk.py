@@ -14,7 +14,12 @@ that already exist:
   there; a waiting one leaves Watching;
 - ``new``: Radar events since the last Radar visit (``today._radar``) and thesis-watch triggers fired today
   (``today._thesis``), newest first;
-- ``watch``: every other open position, armed plan and open investigation.
+- ``watch``: every other open position, armed plan and open investigation, and each plan whose position closed in the
+  last ``EXIT_DAYS`` days (``copilot_plans.exits``): Exited, asking its one exit review at any hour.
+
+A plan is Done once a ``plan_done`` day-journal entry for its symbol is at or after its newest part (its exit review
+answered or skipped, or Mark done): it leaves every group, and so does a conversation of the owner's about the symbol not
+touched since.
 
 Each row with a position or a plan carries its symbol's ``horizon`` (``day``, ``swing`` or ``long``): its newest
 ``horizon`` day-journal entry (a plan card's Confirm or the thread header), else ``swing``. After 16:00 New York on a
@@ -206,7 +211,14 @@ def _decisions(db: Session, day) -> dict:
 def _check_ins(db: Session) -> dict:
     from app.engine import day_journal
     horizons, asked = day_journal.check_ins(db)
-    return {"state": "ok", "horizons": horizons, "asked": {symbol: (e.day, e.text) for symbol, e in asked.items()}}
+    return {"state": "ok", "horizons": horizons, "asked": {symbol: (e.day, e.text) for symbol, e in asked.items()},
+            "done": {symbol: at.replace(tzinfo=UTC).timestamp() for symbol, at in day_journal.done(db).items()}}
+
+
+def _exits(db: Session, now: float) -> dict:
+    from app.engine import copilot_plans
+    since = datetime.fromtimestamp(now - EXIT_DAYS * 86400, UTC).replace(tzinfo=None)
+    return {"state": "ok", "rows": [{**r, "newest": r["newest"].replace(tzinfo=UTC).timestamp()} for r in copilot_plans.exits(db, since)]}
 
 
 def _touched(db: Session, now: float, day) -> dict:
@@ -239,7 +251,8 @@ def _phase(now: float) -> dict:
 # --------------------------------------------------------------------------- rows
 
 CLOSE_QUESTION = {"position": "Review: did you follow the plan?", "plan": "Added or not, and why?",
-                  "plan_ask": "Want a plan for this?"}  # DecisionBar's
+                  "plan_ask": "Want a plan for this?", "exit": "Did you follow the plan? One lesson?"}  # DecisionBar's
+EXIT_DAYS = 7  # an exited plan asks its review for a week after the exit
 REVIEW_WORDS = 6
 DEFAULT_HORIZON = "swing"
 
@@ -263,7 +276,7 @@ def _closing(rows: list[dict], reflections: dict[str, str], touched: set[str] | 
     position with no plan and the day it opened; ``asked``: each symbol's newest "Want a plan" answer (day, text)."""
     for row in rows:
         symbol, horizon = row["symbol"], row["horizon"]
-        if horizon is None or horizon == "long":
+        if horizon is None or horizon == "long" or row["close"]:  # an exited plan already asks its exit review
             continue
         if row["trade_id"] in unplanned:
             answer = asked.get(symbol)
@@ -343,6 +356,19 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
         else:
             watch.append(_row(f"trade:{trade_id}", "watch", row["contract"], _position_status(row), **common))
     return act, watch, covered
+
+
+def _exit_rows(exits: list[dict]) -> list[dict]:
+    """Exited plans, each asking its one exit review (whatever the hour)."""
+    rows = []
+    for r in exits:
+        clock = datetime.fromtimestamp(_utc_epoch(r["exited_at"]), ET).strftime("%b %-d")
+        row = _row(f"plan:{r['investigation_id']}", "watch", r["thesis"] or f"{r['symbol']} plan",
+                   _say(CLOSE_QUESTION["exit"], "attention"), symbol=r["symbol"], value=_say(f"Exited {clock}", "muted"),
+                   investigation_id=r["investigation_id"], changed_at=_utc_epoch(r["exited_at"]))
+        row["close"] = {"kind": "exit", "question": CLOSE_QUESTION["exit"], "reviewed": None}
+        rows.append(row)
+    return rows
 
 
 PLAN_STATE = {"waiting": _say("Armed", "muted"), "fill_to_link": _say("Fill to link", "attention"),
@@ -448,12 +474,21 @@ def desk_threads(db: Session = Depends(get_session)):
     drafts = today._section(db, "desk drafts", lambda: _drafts(db))
     decisions = today._section(db, "desk decisions", lambda: _decisions(db, day))
     checks = today._section(db, "desk check-ins", lambda: _check_ins(db))
+    ended = today._section(db, "desk exits", lambda: _exits(db, now))
     radar = today._section(db, "desk radar", lambda: today._radar(now))
     thesis = today._section(db, "desk thesis", lambda: today._thesis(db, day))
     prep = today._section(db, "desk prep", lambda: today._prep(db, day))
     week = today._section(db, "desk week", lambda: today._week(db, now))
     phase = today._section(db, "desk phase", lambda: _phase(now))
 
+    # Done plans leave the list; exited ones not yet done ask their exit review instead of their plan row.
+    done = checks.get("done", {})
+    over = lambda symbol, at: symbol in done and done[symbol] >= at  # noqa: E731
+    exited = [r for r in ended.get("rows", []) if not over(r["symbol"], r["newest"])]
+    finished = {r["investigation_id"] for r in ended.get("rows", [])} | {
+        p["investigation_id"] for p in board.get("plans", []) if over(p["symbol"], p["confirmed_at"])}
+    if board["state"] == "ok":
+        board = {**board, "plans": [p for p in board["plans"] if p["investigation_id"] not in finished]}
     act, watch, covered = ([], [], set())
     if found["state"] == "ok":
         # Which investigation each planned position opens; on its own, so a failure here still lists the positions.
@@ -465,12 +500,14 @@ def desk_threads(db: Session = Depends(get_session)):
         near, plan_watch = _plan_rows(board, covered)
         watch += plan_watch
         covered |= {p["investigation_id"] for p in board["plans"]}
+    watch = _exit_rows(exited) + watch  # first in Watching, ahead of the "+N more" cut
+    covered |= finished
     draft = _draft_rows(drafts, covered)
     titles = {r["id"]: r["title"] for r in investigations.get("rows", [])}
     new = _new_rows(radar, thesis, titles)
     covered |= {r["investigation_id"] for r in draft + new if r["investigation_id"]}
     for r in investigations.get("rows", []):
-        if r["id"] in covered:
+        if r["id"] in covered or r["source"] == "copilot" and over(r["symbol"], _epoch(r["updated_at"]) or 0):
             continue
         status = _say(r["conclusion"], "muted") if r["conclusion"] else _say("Research" if r["source"] == "research_job" else "Open investigation", "muted")
         watch.append(_row(f"investigation:{r['id']}", "watch", r["title"], status, symbol=r["symbol"],
@@ -493,7 +530,7 @@ def desk_threads(db: Session = Depends(get_session)):
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
-            ("decisions", decisions), ("check_ins", checks), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
+            ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
 
 

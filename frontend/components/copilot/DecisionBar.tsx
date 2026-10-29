@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, type DayJournalEntry, type DayJournalWrite } from "@/lib/api";
-import { afterClose, decisionChoice, deskDecision, reviewSkipped, skipReview, type DeskActRow, type DeskDecision, type DeskThread } from "@/lib/desk";
+import { afterClose, decisionChoice, deskDecision, reviewSkipped, savePlanDone, skipReview, type DeskActRow, type DeskDecision, type DeskThread } from "@/lib/desk";
 
 const REFRESH_MS = 60_000;
 /** Journal entries are immutable, so Undo is this window before the save is sent. */
@@ -29,6 +29,8 @@ function save(day: string, write: DayJournalWrite, keepalive = false) {
  * day-journal entry after a short Undo window. After the close it asks the thread list row's close question (``close``:
  * its horizon decides whether there is one today) and saves the answer as a ``reflection``; a position with no plan is
  * asked "Want a plan for this?" once, its answer saved as a ``plan_ask`` entry, and Plan it opens planning it (``plan``).
+ * An exited plan asks its one exit review at any hour: the answer is a ``reflection``, and an answer or Skip saves a
+ * ``plan_done`` entry, so the plan is done and never asks again.
  * Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message box, unsent.
  * ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest of the thread
  * (the plan ladder shrinks to one line while it asks). ``onReviewed`` hears the review answered or skipped, so the
@@ -105,6 +107,43 @@ export default function DecisionBar({ symbol, close = null, fill, plan, onActive
       return false;
     }
   };
+
+  // ------------------------------------------------------------------ an exited plan: its one exit review, at any hour
+  if (close?.kind === "exit") {
+    const ended = mine.find(e => e.kind === "plan_done");
+    if (ended) return <p data-testid="desk-review-done" className="text-sm text-muted-foreground">Plan done · {ended.text.toLowerCase()} at {hhmm(ended.created_at)}.</p>;
+    const end = async (text: "Exit reviewed" | "Exit review skipped") => {
+      try {
+        const saved = await savePlanDone(symbol, text, day);
+        setEntries(current => [...current, saved]);
+        onReviewed?.(symbol);
+      } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not save."); }
+    };
+    const submit = async () => {
+      const text = answer.trim();
+      if (!text) return;
+      if (await send({ operation_id: `reflection-${uid()}`, kind: "reflection", symbol, text })) { setAnswering(false); setAnswer(""); await end("Exit reviewed"); }
+    };
+    return (
+      <section aria-label="Exit review" data-testid="desk-review" className="rounded-lg border border-primary/40 bg-card p-3">
+        <p className="text-sm font-medium text-foreground">{close.question}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">The {symbol} position is closed. Asked once: an answer or Skip marks the plan done.</p>
+        {answering ? (
+          <form className="mt-2 flex flex-col gap-2 sm:flex-row" onSubmit={event => { event.preventDefault(); void submit(); }}>
+            <input autoFocus value={answer} onChange={event => setAnswer(event.target.value.slice(0, 2000))} aria-label={close.question}
+              placeholder="Followed it or not, and the one lesson" className="min-h-11 min-w-0 flex-1 rounded border bg-background px-3 text-sm sm:min-h-9" />
+            <button type="submit" disabled={!answer.trim()} className={`${BUTTON} bg-primary text-primary-foreground disabled:opacity-50`}>Save</button>
+          </form>
+        ) : (
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={() => setAnswering(true)} className={`${BUTTON} bg-primary text-primary-foreground`}>Answer</button>
+            <button type="button" onClick={() => void end("Exit review skipped")} className={`${BUTTON} border text-muted-foreground hover:text-foreground`}>Skip</button>
+          </div>
+        )}
+        {error && <p role="status" className="mt-2 text-xs text-primary">Not saved: {error}</p>}
+      </section>
+    );
+  }
 
   // ------------------------------------------------------------------ after the close: one review question
   if (afterClose(today.as_of)) {

@@ -15,7 +15,7 @@ investigation (``LinkedActivity``). Read-only; the only id out is the
 investigation's. Last prices come from one batched quote read.
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 import uuid
 
 from sqlmodel import Session, select
@@ -25,6 +25,7 @@ from app.engine.position_alerts import _epoch
 from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, TradeCapture
 
 PLAN_WINDOW = timedelta(minutes=10)
+ENTRY_DAYS = 14  # with no capture link, a trade in the symbol opened this long after the plan is still its trade
 PLAN_LABEL = "Copilot plan"  # the setup label the plan card saves its capture with
 LONG_SIDES = {"buy_stock", "buy_calls", "sell_puts"}
 THESIS_CHARS = 160
@@ -79,8 +80,9 @@ def _quotes(symbols: list[str]) -> tuple[dict[str, float], float | None, str | N
     return last, fetched_at, issue
 
 
-def board(db: Session, quotes=None) -> dict:
-    """``quotes`` replaces the one batched quote read (the Today screen shares one read across readers)."""
+def _plans(db: Session) -> tuple[list[dict], dict]:
+    """Every confirmed plan, each investigation's latest (its parts within ``PLAN_WINDOW`` of the newest), with its
+    capture and its position from the capture's link alone; and the capture links."""
     alerts = db.exec(select(LevelAlert).where(LevelAlert.source_kind == "copilot", LevelAlert.plan_role.is_not(None),
                                               LevelAlert.source_id.is_not(None))).all()
     stops = db.exec(select(PlanTimeStop)).all()
@@ -115,10 +117,16 @@ def board(db: Session, quotes=None) -> dict:
         plan["capture"] = capture
     captures = [p["capture"] for p in plans if p["capture"] is not None]
     links = capture_links.link_rows(db, captures)
-
-    live = []
     for plan in plans:
         plan["position"] = _position(plan["capture"], links, {})
+    return plans, links
+
+
+def board(db: Session, quotes=None) -> dict:
+    """``quotes`` replaces the one batched quote read (the Today screen shares one read across readers)."""
+    plans, links = _plans(db)
+    live = []
+    for plan in plans:
         armed = any(a is not None and a.state == "active" for a in (plan["entry"], plan["invalidation"]))
         pending = plan["stop"] is not None and plan["stop"].delivery == "scheduled"
         if armed or pending or plan["position"] == "in_position":
@@ -147,7 +155,7 @@ def board(db: Session, quotes=None) -> dict:
             "last": price, "entry": _level(plan["entry"], price), "invalidation": _level(plan["invalidation"], price),
             "time_stop": {"text": stop.text, "due_at": int(_epoch(stop.due_at)),
                           "state": "pending" if stop.delivery == "scheduled" else stop.delivery} if stop else None,
-            "position": plan["position"],
+            "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
         })
     rows.sort(key=_nearest)
     return {"plans": rows, "quotes_at": fetched_at, "quote_issue": issue}
@@ -165,3 +173,36 @@ def _nearest(row: dict) -> tuple:
     gaps = [abs(level["distance_pct"]) for level in (row["entry"], row["invalidation"]) if level and "distance_pct" in level]
     stop = row["time_stop"]["due_at"] if row["time_stop"] and row["time_stop"]["state"] == "pending" else None
     return (min(gaps) if gaps else float("inf"), stop if stop is not None else float("inf"), row["symbol"], row["investigation_id"])
+
+
+def exits(db: Session, since: datetime) -> list[dict]:
+    """Plans whose position is over, the last of it closed at or after ``since`` (naive UTC), newest exit first: the
+    trade linked to the plan's capture, else every trade in the symbol opened within ``ENTRY_DAYS`` after the plan (none
+    still open). A plan with no trade either way has not exited. Webull stays out. Read-only; no quote read."""
+    from sqlalchemy import or_
+    from app.engine.chart_math import ET
+    from app.models import Account, Trade
+    plans, links = _plans(db)
+    wall = lambda moment: moment.replace(tzinfo=UTC).astimezone(ET).replace(tzinfo=None)  # noqa: E731 -- trades keep New York wall time
+    utc = lambda moment: moment.replace(tzinfo=ET).astimezone(UTC).replace(tzinfo=None)  # noqa: E731
+    out = []
+    for plan in plans:
+        link = links.get(plan["capture"].id, {}).get("link") if plan["capture"] is not None else None
+        if link and link.get("trade_id"):
+            trades = [t for t in [db.get(Trade, uuid.UUID(link["trade_id"]))] if t is not None]
+        elif plan["position"] == "waiting":
+            trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)
+                             .where(Trade.ticker == plan["symbol"], Trade.opened_at >= wall(plan["since"]),
+                                    Trade.opened_at <= wall(plan["newest"] + timedelta(days=ENTRY_DAYS)))
+                             .where(or_(Account.broker.is_(None), Account.broker != "webull"))).all()
+        else:
+            continue
+        if not trades or any(t.status == "open" or t.closed_at is None for t in trades):
+            continue
+        exited = utc(max(t.closed_at for t in trades))
+        if exited < since:
+            continue
+        out.append({"investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "newest": plan["newest"],
+                    "exited_at": exited, "thesis": _thesis(plan["capture"].note if plan["capture"] else None)})
+    out.sort(key=lambda row: row["exited_at"], reverse=True)
+    return out

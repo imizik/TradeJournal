@@ -81,7 +81,11 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     if (`${window.location.pathname}${window.location.search}` === PLAN_HREF) window.location.assign(PLAN_HREF);
     else router.push(PLAN_HREF);
   }, [router]);
-  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread }), [command]);
+  const [refresh, setRefresh] = useState(0);
+  // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
+  const [planSymbol, setPlanSymbol] = useState<string | null>(null);
+  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread,
+    planDone: planSymbol ? { symbol: planSymbol, done: () => setRefresh(n => n + 1) } : null }), [command, planSymbol]);
 
   // A row opens the way the thread list opens it: an investigation in place, anything else by its link.
   const pick = useCallback((row: DeskThread) => {
@@ -108,7 +112,6 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   // Close the day: a pass through each thread still asking its close question (``toReview``, list order). Each opens on its
   // question; an answer or Skip opens the next, and the last one ends the pass. With none left it puts the day's
   // question in the box, unsent. Nothing goes to the model.
-  const [refresh, setRefresh] = useState(0);
   const reviewed = useRef(new Set<string>()); // answered or skipped this visit, before the list reads it back
   const closing = useRef(false);
   useEffect(() => {
@@ -199,6 +202,8 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return { close: row?.close ?? null, plan: row ? () => pick(row) : undefined };
   };
   const threadRow = deskRow(thread?.symbol);
+  const markable = threadRow && threadRow.key === `plan:${thread?.id}` && threadRow.value?.text !== "In position" ? threadRow.symbol : null;
+  useEffect(() => { setPlanSymbol(markable); }, [markable]); // eslint-disable-line react-hooks/set-state-in-effect -- from the list's read
   const changeHorizon = useCallback(async (symbol: string | null | undefined, horizon: DeskHorizon) => {
     if (!symbol) return;
     await saveHorizon(symbol, horizon);
@@ -282,7 +287,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
             </div>
           ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} /><AlertScorecard /></> : (
-            <DeskThreadTop thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
+            <DeskThreadTop thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
               <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />} />
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />

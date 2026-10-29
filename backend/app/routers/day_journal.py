@@ -14,7 +14,7 @@ router = APIRouter()
 class EntryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: str = Field(min_length=1, max_length=100)
-    kind: Literal["outlook", "update", "idea", "reflection", "decision", "horizon", "plan_ask"]
+    kind: Literal["outlook", "update", "idea", "reflection", "decision", "horizon", "plan_ask", "plan_done"]
     text: str = Field(min_length=1, max_length=day_journal.MAX_TEXT)
     symbol: str | None = Field(default=None, max_length=16)
     not_traded: bool = False

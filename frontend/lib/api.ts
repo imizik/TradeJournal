@@ -246,7 +246,7 @@ export type DayJournalEntry = {
   id: string;
   operation_id: string;
   day: string;
-  kind: "outlook" | "update" | "idea" | "reflection" | "decision" | "horizon" | "plan_ask";
+  kind: "outlook" | "update" | "idea" | "reflection" | "decision" | "horizon" | "plan_ask" | "plan_done";
   text: string;
   symbol: string | null;
   not_traded: boolean;

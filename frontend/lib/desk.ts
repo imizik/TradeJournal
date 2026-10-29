@@ -18,8 +18,9 @@ export type DeskCommand = { kind: "open"; id: string; n: number } | { kind: "ask
 /** The conversation's open investigation, reported up so the inspector can show its context. */
 export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number };
 
-/** How the conversation and the desk talk: commands down, the open thread up. */
-export type DeskHooks = { command: DeskCommand | null; onThread(thread: DeskThreadRef | null): void };
+/** How the conversation and the desk talk: commands down, the open thread up. ``planDone`` is there while the open
+ * thread has a plan that can be marked done (the thread menu's Mark plan done): its symbol, and ``done`` hears it was. */
+export type DeskHooks = { command: DeskCommand | null; onThread(thread: DeskThreadRef | null): void; planDone?: { symbol: string; done(): void } | null };
 
 /** The thread list's groups, in order: what needs a decision first, what is only being watched last. */
 export type DeskGroup = "pinned" | "act" | "near" | "draft" | "new" | "watch";
@@ -59,7 +60,7 @@ export type DeskThread = {
   horizon: DeskHorizon | null;
   /** After 16:00 New York on a weekday, a row its horizon asks about today: its close-of-day question (the decision
    * bar's; ``plan_ask`` is a position with no plan, asked once) and the first words of today's answer once one is saved. */
-  close: { kind: "position" | "plan" | "plan_ask"; question: string; reviewed: string | null } | null;
+  close: { kind: "position" | "plan" | "plan_ask" | "exit"; question: string; reviewed: string | null } | null;
 };
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
@@ -74,6 +75,10 @@ const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? cryp
 export const saveHorizon = (symbol: string, horizon: DeskHorizon, operationId = `horizon-${uid()}`) =>
   api.addDayJournalEntry(nyDay(), { operation_id: operationId, kind: "horizon", symbol,
     text: HORIZONS.find(h => h.id === horizon)!.label });
+
+/** Ends the symbol's plan from now on (its exit review answered or skipped, or Mark done): a ``plan_done`` entry. */
+export const savePlanDone = (symbol: string, text: "Exit reviewed" | "Exit review skipped" | "Marked done", day = nyDay()) =>
+  api.addDayJournalEntry(day, { operation_id: `plan-done-${uid()}`, kind: "plan_done", symbol, text });
 
 /** The default horizon for a plan card's time stop: a time stop due today makes it a day trade, else a swing. */
 export const horizonFor = (dueAt: number | null | undefined) =>
