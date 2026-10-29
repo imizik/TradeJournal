@@ -592,9 +592,11 @@ def week_review(week_start: str | None = None, session=None) -> dict:
         accounts = {a.id: a for a in db.exec(select(Account)).all()}
         trades = [t for t in trades if getattr(accounts.get(t.account_id), "broker", None) != "webull"]
         week = {"start": start.date().isoformat(), "end": (end.date() - timedelta(days=1)).isoformat(), "default": week_start is None}
+        holds = _section(lambda: _long_holds(db))
         if not trades:
             return {"state": "none", "week": week, "reason": "No closed trades that week.",
-                    "latest_week_with_trades": None if latest is None else _week_of(wall_time(latest).date())[0].date().isoformat()}
+                    "latest_week_with_trades": None if latest is None else _week_of(wall_time(latest).date())[0].date().isoformat(),
+                    **({"long_holds": holds} if holds.get("rows") else {})}
         rows = [_week_trade(db, t, accounts.get(t.account_id)) for t in trades]
         n = len(rows)
         review = {
@@ -621,7 +623,30 @@ def week_review(week_start: str | None = None, session=None) -> dict:
         practice = _section(lambda: practice_goal.week_section(db, start.date(), rows))
         if practice.get("state") != "none":
             review["practice"] = practice
+        if holds.get("rows") or holds.get("state") == "unavailable":
+            review["long_holds"] = holds
     return shed_week(review)
+
+
+MAX_LONG_HOLDS = 10
+
+
+def _long_holds(db) -> dict:
+    """Open positions the owner set to a long hold on the desk (``day_journal.check_ins``): the desk asks nothing about
+    them day to day, so the week review looks at them. Contract, side and opening day only; no quote read."""
+    from sqlmodel import select
+    from app.engine import day_journal
+    from app.engine.chart_journal import contract_label
+    from app.models import Account, Trade
+    horizons, _asked = day_journal.check_ins(db)
+    held = sorted(symbol for symbol, horizon in horizons.items() if horizon == "long")
+    if not held:
+        return {"state": "ok", "rows": []}
+    trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id).where(Trade.status == "open", Trade.ticker.in_(held))
+                     .where(copilot_book._not_webull()).order_by(Trade.opened_at)).all()
+    return {"state": "ok", "rows": [{"symbol": t.ticker, "opened": t.opened_at.date().isoformat(),
+                                     "contract": contract_label(t.ticker, t.instrument_type, t.option_type, t.strike, t.expiration)}
+                                    for t in trades[:MAX_LONG_HOLDS]]}
 
 
 def _week_steps(review: dict):

@@ -5,7 +5,7 @@
  */
 
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
-import { apiUrl } from "@/lib/api";
+import { api, apiUrl } from "@/lib/api";
 import type { InvestigationSummary, PlanBoardRow, PlansBoard } from "@/lib/copilot";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -55,10 +55,29 @@ export type DeskThread = {
   path: string | null;
   /** Epoch seconds of the newest change, for "new since you looked". */
   changedAt: number | null;
-  /** After 16:00 New York on a weekday, a row with a position or a plan: its close-of-day question (the decision bar's)
-   * and the first words of today's ``reflection`` for its symbol once one is saved. */
-  close: { kind: "position" | "plan"; question: string; reviewed: string | null } | null;
+  /** A row with a position or a plan: how often the desk checks in on its symbol (``HORIZONS``); null for any other row. */
+  horizon: DeskHorizon | null;
+  /** After 16:00 New York on a weekday, a row its horizon asks about today: its close-of-day question (the decision
+   * bar's; ``plan_ask`` is a position with no plan, asked once) and the first words of today's answer once one is saved. */
+  close: { kind: "position" | "plan" | "plan_ask"; question: string; reviewed: string | null } | null;
 };
+
+/** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to
+ * it, a long hold never (Review my week looks at it). Saved as a ``horizon`` day-journal entry, its label the text. */
+export type DeskHorizon = "day" | "swing" | "long";
+export const HORIZONS: { id: DeskHorizon; label: string }[] = [
+  { id: "day", label: "Day trade" }, { id: "swing", label: "Swing" }, { id: "long", label: "Long hold" },
+];
+const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+/** Sets the symbol's horizon from today on. ``operationId`` makes a retry save once (a plan card passes its own). */
+export const saveHorizon = (symbol: string, horizon: DeskHorizon, operationId = `horizon-${uid()}`) =>
+  api.addDayJournalEntry(nyDay(), { operation_id: operationId, kind: "horizon", symbol,
+    text: HORIZONS.find(h => h.id === horizon)!.label });
+
+/** The default horizon for a plan card's time stop: a time stop due today makes it a day trade, else a swing. */
+export const horizonFor = (dueAt: number | null | undefined) =>
+  dueAt && nyDate(new Date(dueAt * 1000)) === nyDate(new Date()) ? "day" as const : "swing" as const;
 
 /** A decision logged from the decision bar; saved as a day-journal entry of kind ``decision``. */
 export type DeskDecision = { symbol: string; choice: "holding" | "exiting"; reason: string; investigationId: string | null; at: string };
@@ -75,8 +94,9 @@ export type DeskThreads = {
 type Wire = {
   as_of: string; quotes_at: number | null; quote_issue: string | null; sections: DeskThreads["sections"];
   day: { phase: DeskDay["phase"]; need_you: number; streak: DeskDay["streak"] };
-  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close"> &
-    { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null; close?: DeskThread["close"] })[];
+  threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon"> &
+    { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
+      close?: DeskThread["close"]; horizon?: DeskHorizon | null })[];
 };
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
@@ -100,8 +120,9 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
   return {
     asOf: wire.as_of, quotesAt: wire.quotes_at, quoteIssue: wire.quote_issue, sections: wire.sections,
     day: { phase: wire.day.phase, needYou: wire.day.need_you, streak: wire.day.streak },
-    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, ...row }) => ({
+    threads: wire.threads.map(({ investigation_id, trade_id, radar_event_id, changed_at, close, horizon, ...row }) => ({
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
+      horizon: horizon ?? null,
     })),
   };
 }

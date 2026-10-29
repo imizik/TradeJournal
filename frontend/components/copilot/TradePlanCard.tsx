@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { confirmedElsewhere, createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
+import { HORIZONS, horizonFor, saveHorizon, type DeskHorizon } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const SIDE: Record<string, CaptureSide> = { "long stock": "buy_stock", "short stock": "short_stock", "long calls": "buy_calls", "short puts": "buy_puts" };
@@ -97,6 +98,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   const [stop, setStop] = useState(saved?.fields?.invalidation ?? String(plan.invalidation.price));
   const [timeStop, setTimeStop] = useState(saved?.fields?.time_stop ?? plan.time_stop ?? "");
   const [size, setSize] = useState(saved?.fields?.size_note ?? plan.size_note ?? "");
+  // The owner's pick; until then the time stop sets it (due today: a day trade), else a swing.
+  const [pickedHorizon, setHorizon] = useState<DeskHorizon | null>(saved?.fields?.horizon || null);
   // Size it for me: the risk this browser last used; the card is client-only, so it reads storage on mount.
   const [risk, setRisk] = useState(() => savedRisk());
   const [sizeEdited, setSizeEdited] = useState(false);  // the owner's own size note after sizing wins over the count
@@ -149,6 +152,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   // A restored card also lists the parts it ran, whatever this window reads now.
   const rows = (Object.keys(PART_LABEL) as Part[]).filter(p => parts.includes(p) || results[p].state !== "idle");
   const finished = parts.every(p => results[p].state === "done");
+  const horizon = pickedHorizon ?? horizonFor(timed?.due_at);
   const ready = !problem && !!account && (!alertsSupported || !!investigationId) && !reading;
 
   const sizing = sizeIt();
@@ -202,7 +206,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       .map(([part, r]) => [part, { state: r.state, text: r.text.slice(0, 500) }]));
     // Within what the investigation stores, so an odd input never stops the conversation from saving.
     onOutcome({ state: "confirmed", parts: ran, fields: { thesis: thesis.trim().slice(0, 300), contract: contract.slice(0, 80),
-      entry: entry.slice(0, PRICE_MAX), invalidation: stop.slice(0, PRICE_MAX), time_stop: timeStop.slice(0, 80), size_note: size.slice(0, SIZE_MAX) } });
+      entry: entry.slice(0, PRICE_MAX), invalidation: stop.slice(0, PRICE_MAX), time_stop: timeStop.slice(0, 80), size_note: size.slice(0, SIZE_MAX), horizon } });
   }
 
   async function run(part: Part): Promise<Result> {
@@ -213,6 +217,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         await savePlanCapture({ client_id: clientId.current, underlying: plan.symbol, account_id: account, side, wording, note, investigation_id: investigationId,
           // The lab's own plans point at their investigation.
           origin: !origin || (origin.kind === "copilot" && !origin.ref) ? { kind: "copilot", ref: investigationId, text: origin?.text ?? null } : origin });
+        // How often the desk checks in on it after the close, from today on (one save per card and horizon).
+        await saveHorizon(plan.symbol, horizon, `horizon-${clientId.current}-${horizon}`);
         text = "Saved as your pre-trade plan. It is suggested for the trade when the fill arrives.";
       } else if (part === "timeStop") {
         await saveTimeStop(clientId.current, investigationId!, plan.symbol, stopText);
@@ -263,7 +269,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     const elsewhere = investigationId ? await confirmedElsewhere(investigationId, plan.id) : null;
     if (elsewhere) {
       const f = elsewhere.fields;
-      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); }
+      if (f) { setThesis(f.thesis); setContract(f.contract); setEntry(f.entry); setStop(f.invalidation); setTimeStop(f.time_stop); setSize(f.size_note); setHorizon(f.horizon || null); }
       setResults(restored(elsewhere));
       onOutcome(elsewhere);
       return;
@@ -340,6 +346,17 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
             : `Kept as a note: ${preview?.read && "reason" in preview.read ? preview.read.reason : "the time could not be read."}`}
         </p>
       )}
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Horizon</span>
+        <select value={horizon} onChange={e => setHorizon(e.target.value as DeskHorizon)} disabled={locked} aria-describedby={`horizon-${plan.id}`}
+          className={cn(field, "min-h-11")}>
+          {HORIZONS.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
+        </select>
+        <span id={`horizon-${plan.id}`} className="block text-xs text-muted-foreground">
+          {horizon === "day" ? "The desk asks how it went after every close." : horizon === "swing" ? "The desk asks after a close only when something happened to it."
+            : "No daily question; Review my week looks at it."}
+        </span>
+      </label>
       <div className="grid grid-cols-[6rem_1fr] items-end gap-2">
         <label className="block space-y-1">
           <span className="text-xs text-muted-foreground">Risk $</span>

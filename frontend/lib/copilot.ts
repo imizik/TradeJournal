@@ -78,7 +78,7 @@ export type Proposal = { id: string; client_id?: string; outcome?: ProposalOutco
  * page: restoring one creates nothing. */
 export type ProposalOutcome = { state: "confirmed" | "dismissed"; note?: string; text?: string;
   parts?: Partial<Record<"plan" | "entry" | "invalidation" | "timeStop", { state: "done" | "failed"; text: string }>>;
-  fields?: { thesis: string; contract: string; entry: string; invalidation: string; time_stop: string; size_note: string } };
+  fields?: { thesis: string; contract: string; entry: string; invalidation: string; time_stop: string; size_note: string; horizon?: "" | "day" | "swing" | "long" } };
 export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; price: number; interval: string | null };
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 

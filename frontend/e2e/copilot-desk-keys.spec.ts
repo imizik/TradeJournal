@@ -256,7 +256,8 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   const entries: { kind: string; symbol: string; text: string }[] = [{ kind: "reflection", symbol: "APLD", text: "Entered at 31.00 as planned, sized half" }];
   const position = { kind: "position", question: "Review: did you follow the plan?" };
   const plan = { kind: "plan", question: "Added or not, and why?" };
-  const asks: Record<string, typeof position> = { NBIS: position, TSLA: position, CRWV: plan, APLD: plan };
+  const planAsk = { kind: "plan_ask", question: "Want a plan for this?" }; // TSLA has no plan: asked once
+  const asks: Record<string, typeof position> = { NBIS: position, TSLA: planAsk, CRWV: plan, APLD: plan };
   // The thread list after the close, as the server writes it: each row's question, or "Reviewed · …" once a reflection is saved.
   const threads = () => {
     const tsla = row({ key: `trade:${TSLA}`, group: "act", symbol: "TSLA", title: "TSLA", instrument: "stock", trade_id: TSLA,
@@ -265,7 +266,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
       threads: [...DESK.threads.slice(0, 3), tsla, ...DESK.threads.slice(3)].map(r => {
         const ask = r.symbol ? asks[r.symbol as string] : undefined;
         if (!ask) return r;
-        const text = entries.find(e => e.kind === "reflection" && e.symbol === r.symbol)?.text;
+        const text = entries.find(e => ["reflection", "plan_ask"].includes(e.kind) && e.symbol === r.symbol)?.text;
         const reviewed = text ? text.split(" ").slice(0, 6).join(" ") + "…" : null;
         return { ...r, close: { ...ask, reviewed }, status: reviewed ? { text: `Reviewed · ${reviewed}`, tone: "muted" } : { text: ask.question, tone: "attention" } };
       }) };
@@ -304,14 +305,14 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   await review.getByRole("button", { name: "Answer" }).click();
   await review.getByRole("textbox").fill("Held above 92.30 all day, as planned.");
   await review.getByRole("button", { name: "Save" }).click();
-  // TSLA has no conversation: it opens by its symbol, on its question.
+  // TSLA has no conversation and no plan: it opens by its symbol, on "Want a plan for this?".
   await page.waitForURL(/\/copilot-lab\?symbol=TSLA$/);
-  await expect(review).toContainText("Review: did you follow the plan?");
+  await expect(review).toContainText("Want a plan for this?");
   await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Reviewed · Held above 92.30 all day, as…");
-  await review.getByRole("button", { name: "Skip" }).click();
+  await review.getByRole("button", { name: "Not now" }).click();
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible();
   await expect(review).toContainText("Added or not, and why?");
-  await expect(rail.getByRole("link", { name: /^TSLA/ })).toContainText("Skipped today");
+  await expect(rail.getByRole("link", { name: /^TSLA/ })).toContainText("Reviewed · No plan for now");
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
@@ -319,6 +320,7 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
 
   await page.keyboard.press("j"); // J / K still walk the threads
   await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
-  expect(posts).toEqual([expect.objectContaining({ kind: "reflection", symbol: "NBIS", text: "Held above 92.30 all day, as planned." })]);
+  expect(posts).toEqual([expect.objectContaining({ kind: "reflection", symbol: "NBIS", text: "Held above 92.30 all day, as planned." }),
+    expect.objectContaining({ kind: "plan_ask", symbol: "TSLA", text: "No plan for now" })]);
   expect(chats).toEqual([]);
 });

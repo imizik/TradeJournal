@@ -16,7 +16,7 @@ from app.database import get_session
 from app.engine import plan_streak
 from app.engine.chart_feed import chart_feed
 from app.engine.radar_store import RadarStore
-from app.models import CopilotInvestigation, DayJournalEntry, PhonePing, PremarketPrep, ThesisWatchTrigger
+from app.models import CopilotInvestigation, DayJournalEntry, PhonePing, PlanTimeStop, PremarketPrep, ThesisWatchTrigger
 from app.routers import copilot_desk, radar
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
 from tests.test_copilot_plans import APLD, CRWV, NBIS, T0, WED, alert, engine, quotes  # noqa: F401  (fixtures)
@@ -275,31 +275,88 @@ def test_after_hours_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F811
     assert read(desk)["day"]["phase"] == "closed"
 
 
+def entry(engine, kind, symbol, text, *, day=WED, minute=0):
+    with Session(engine) as db:
+        db.add(DayJournalEntry(operation_id=f"{kind}-{symbol}-{day}-{minute}", day=day, kind=kind, symbol=symbol, text=text,
+                               created_at=T0 + (day - WED) + timedelta(minutes=minute)))
+        db.commit()
+
+
+by_key = lambda body: {r["key"]: r for r in body["threads"]}  # noqa: E731
+WED_CLOSE = datetime(2026, 10, 21, 20, 30, tzinfo=UTC).timestamp()  # 16:30 New York
+THU_CLOSE = datetime(2026, 10, 22, 20, 30, tzinfo=UTC).timestamp()
+
+
 def test_after_the_close_each_position_and_plan_asks_its_review_until_a_reflection_is_saved(desk, engine, clock):  # noqa: F811
     trade = planned_nbis(engine)
     unplanned = buy(engine, 700, "CRWV")
     alert(engine, APLD, "APLD", "entry", 31.0)
     investigation(engine, CRWV, "CRWV", "CRWV capacity terms")
-    by_key = lambda body: {r["key"]: r for r in body["threads"]}  # noqa: E731
     rows = by_key(read(desk))
     assert all(r["close"] is None for r in rows.values())  # 14:49: the session is still on
-    clock["t"] = datetime(2026, 10, 21, 20, 30, tzinfo=UTC).timestamp()  # 16:30 New York
+    assert rows[f"trade:{trade}"]["horizon"] == "swing" and rows[f"plan:{APLD}"]["horizon"] == "swing"  # the default
+    assert rows["briefing"]["horizon"] is None and rows[f"investigation:{CRWV}"]["horizon"] is None
+    clock["t"] = WED_CLOSE
     rows = by_key(read(desk))
+    # A swing asks on a day something happened to it: NBIS was bought today.
     assert rows[f"trade:{trade}"]["close"] == {"kind": "position", "question": "Review: did you follow the plan?", "reviewed": None}
     assert rows[f"trade:{trade}"]["status"] == {"text": "Review: did you follow the plan?", "tone": "attention"}
-    assert rows[f"trade:{unplanned}"]["close"]["kind"] == "position"  # a position with no plan is reviewed too
-    assert rows[f"plan:{APLD}"]["status"] == {"text": "Added or not, and why?", "tone": "attention"}
+    assert rows[f"trade:{unplanned}"]["close"] == {"kind": "plan_ask", "question": "Want a plan for this?", "reviewed": None}
+    assert rows[f"plan:{APLD}"]["close"] is None  # a swing plan nothing happened to stays quiet
     assert rows[f"investigation:{CRWV}"]["close"] is None and rows["briefing"]["close"] is None
-    with Session(engine) as db:
-        db.add(DayJournalEntry(operation_id="r1", day=WED, kind="reflection", symbol="NBIS",
-                               text="Followed it: held above 92.30 and took half at the target", created_at=T0 + timedelta(minutes=395)))
-        db.add(DayJournalEntry(operation_id="r2", day=WED, kind="reflection", symbol="NBIS", text="A later one", created_at=T0 + timedelta(minutes=396)))
-        db.commit()
+    entry(engine, "reflection", "NBIS", "Followed it: held above 92.30 and took half at the target", minute=395)
+    entry(engine, "reflection", "NBIS", "A later one", minute=396)
     row = by_key(read(desk))[f"trade:{trade}"]
     assert row["close"]["reviewed"] == "Followed it: held above 92.30 and…"  # the first reflection's first words
     assert row["status"] == {"text": "Reviewed · Followed it: held above 92.30 and…", "tone": "muted"}
     clock["t"] = datetime(2026, 10, 24, 20, 30, tzinfo=UTC).timestamp()  # a Saturday: no close
     assert all(r["close"] is None for r in read(desk)["threads"])
+
+
+def test_the_horizon_sets_which_rows_ask_after_the_close(desk, engine, clock):  # noqa: F811
+    trade = planned_nbis(engine)  # bought Wednesday
+    alert(engine, APLD, "APLD", "entry", 31.0)
+    with Session(engine) as db:  # its 15:30 time stop went out Wednesday
+        for stop in db.exec(select(PlanTimeStop)).all():
+            stop.delivery = "sent"
+            db.add(stop)
+        db.commit()
+    clock["t"] = THU_CLOSE
+    rows = by_key(read(desk))
+    assert rows[f"trade:{trade}"]["close"] is None and rows[f"plan:{APLD}"]["close"] is None  # swings, a quiet Thursday
+    with Session(engine) as db:  # a give-back ping on NBIS Thursday
+        db.add(PhonePing(sender="position_alerts", source_id="g1", kind="giveback", rank=2, symbol="NBIS", decision="sent",
+                         title="t", body="b", decided_at=T0 + timedelta(days=1, minutes=60)))
+        db.commit()
+    entry(engine, "horizon", "APLD", "Day trade", minute=30)  # the plan card's Confirm, Wednesday
+    rows = by_key(read(desk))
+    assert rows[f"trade:{trade}"]["close"]["kind"] == "position"
+    assert rows[f"plan:{APLD}"]["horizon"] == "day"
+    assert rows[f"plan:{APLD}"]["close"] == {"kind": "plan", "question": "Added or not, and why?", "reviewed": None}
+    entry(engine, "horizon", "NBIS", "Long hold", day=WED + timedelta(days=1), minute=10)  # the thread header, Thursday
+    rows = by_key(read(desk))
+    assert rows[f"trade:{trade}"]["horizon"] == "long" and rows[f"trade:{trade}"]["close"] is None  # never asked daily
+    assert rows[f"trade:{trade}"]["status"]["text"] != "Review: did you follow the plan?"
+
+
+def test_a_position_with_no_plan_asks_for_one_once(desk, engine, clock):  # noqa: F811
+    unplanned = buy(engine, 700, "CRWV")
+    clock["t"] = WED_CLOSE
+    entry(engine, "plan_ask", "CRWV", "No plan for now", minute=391)
+    row = by_key(read(desk))[f"trade:{unplanned}"]
+    assert row["close"] == {"kind": "plan_ask", "question": "Want a plan for this?", "reviewed": "No plan for now"}
+    assert row["status"] == {"text": "Reviewed · No plan for now", "tone": "muted"}
+    clock["t"] = THU_CLOSE
+    assert by_key(read(desk))[f"trade:{unplanned}"]["close"] is None  # answered: quiet from then on
+
+
+def test_an_answer_before_the_position_opened_does_not_count_and_a_long_hold_is_not_asked(desk, engine, clock):  # noqa: F811
+    entry(engine, "plan_ask", "CRWV", "No plan for now", day=WED - timedelta(days=7))
+    unplanned = buy(engine, 700, "CRWV")
+    clock["t"] = WED_CLOSE
+    assert by_key(read(desk))[f"trade:{unplanned}"]["close"]["reviewed"] is None
+    entry(engine, "horizon", "CRWV", "Long hold", minute=300)
+    assert by_key(read(desk))[f"trade:{unplanned}"]["close"] is None
 
 
 def test_one_failing_source_leaves_the_rest(desk, engine, monkeypatch):  # noqa: F811

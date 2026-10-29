@@ -208,3 +208,18 @@ def test_a_desk_decision_saves_once_per_operation_id(journal):
     with pytest.raises(day_journal.EntryError, match="decision"):
         with Session(journal[1]) as session:
             day_journal.append(session, day=DAY, operation_id="y", kind="order", text="t")
+
+
+def test_a_horizon_and_a_plan_answer_are_check_ins_and_the_newest_horizon_wins(journal):
+    client, engine = journal
+    post = lambda op, kind, symbol, text: client.post(f"/day-journal/{DAY}/entries",  # noqa: E731
+                                                      json={"operation_id": op, "kind": kind, "symbol": symbol, "text": text})
+    assert post("h1", "horizon", "NBIS", "Day trade").status_code == 200
+    assert post("h2", "horizon", "NBIS", "Long hold").status_code == 200
+    assert post("h3", "horizon", "APLD", "Swing").status_code == 200
+    assert post("a1", "plan_ask", "CRWV", "No plan for now").status_code == 200
+    assert post("h4", "horizon", "NBIS", "forever").status_code == 422  # only the desk's three words
+    with Session(engine) as session:
+        horizons, asked = day_journal.check_ins(session)
+    assert horizons == {"NBIS": "long", "APLD": "swing"}
+    assert {symbol: e.text for symbol, e in asked.items()} == {"CRWV": "No plan for now"}

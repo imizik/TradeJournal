@@ -274,3 +274,25 @@ def test_an_exit_in_the_firing_minute_counts_as_out(db):
     db.commit()
     [hit] = copilot_review.week_review("2026-10-21", session=db)["follow_through"]["hits"]
     assert (hit["contract"].split()[0], hit["minutes_to_exit"], hit["then"], hit["level"]) == ("APLD", 0, "out_15m", 97.5)
+
+
+def test_long_holds_the_desk_does_not_ask_about_are_in_the_week(db):
+    from app.models import DayJournalEntry
+    db.add(fill(20, "MSFT", "buy", 3, 400, THU))  # still open
+    db.add(DayJournalEntry(operation_id="h1", day=THU.date(), kind="horizon", symbol="MSFT", text="Long hold"))
+    db.add(DayJournalEntry(operation_id="h2", day=THU.date(), kind="horizon", symbol="SPY", text="Long hold"))  # closed: not held
+    db.commit()
+    _rebuild_trades(db, "test")
+    db.commit()
+    week = copilot_review.week_review("2026-10-21", session=db)
+    assert week["long_holds"] == {"state": "ok", "rows": [{"symbol": "MSFT", "opened": THU.date().isoformat(), "contract": "MSFT stock"}]}
+    assert copilot_review.week_review("2026-10-05", session=db)["long_holds"]["rows"][0]["symbol"] == "MSFT"  # a quiet week too
+    assert "long_holds" not in copilot_review.week_review("2026-10-21", session=_without_horizons(db))
+
+
+def _without_horizons(db):
+    from app.models import DayJournalEntry
+    for row in db.exec(select(DayJournalEntry)).all():
+        db.delete(row)
+    db.commit()
+    return db

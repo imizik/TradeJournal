@@ -432,7 +432,8 @@ The full page is a desk of three panes beside each other
   keeps its own header and composer, with the same answers and Sources line.
   Above the conversation, the
   open thread's header (`ThreadHead.tsx`): a status chip (In position,
-  Armed, Draft · not armed, Not planned), one meta line (an option's strike,
+  Armed, Draft · not armed, Not planned), the Horizon menu for a position or
+  a plan (see Horizon below), one meta line (an option's strike,
   expiry and days left, or a stock's days held), the symbol, the thesis on
   one truncated line (full text on hover) and the price. An option shows its
   own mark (a share's premium; the journal keeps a contract's) and P&L %,
@@ -588,17 +589,34 @@ the position in Robinhood, where the fill links to the plan on its own.
 Logging what was decided after each alert is the data that shows whether
 position alerts help.
 
+**Horizon.** Every plan and open position has a horizon that sets how often
+the desk checks in after the close: **Day trade** (every trading day),
+**Swing** (only on a day something happened to it: a phone ping judged, sent
+or held, a level alert fired, a fill, or the decision bar asked or was
+answered) or **Long hold** (never day to day; `get_week_review` lists it under
+`long_holds`, and Review my week gives each a line). It is kept per symbol as
+a `horizon` day-journal entry (text `Day trade`, `Swing` or `Long hold`; the
+newest wins, `day_journal.check_ins`), so no new store or route: the plan card
+saves one at Confirm (its default from the time stop: due today is a day
+trade, otherwise a swing; the owner can pick another on the card), and the
+thread header's Horizon menu saves a new one. A symbol with none is a swing.
+An invalidation hit still raises the decision bar during the session, whatever
+the horizon.
+
 **Close of day.** After 16:00 New York on a weekday (by `/today`'s `as_of`;
-holidays and early closes are not known here), a thread whose symbol has an
-open position asks "Review: did you follow the plan?" and one with an armed
-plan not yet in a position asks "Added or not, and why?" (`GET
-/copilot/symbol/{symbol}`), instead of the bar. Answer opens a one-line input
-that saves a `reflection` entry for the symbol; Skip hides it for the day in
-this browser. The thread list asks the same: after 16:00 on a weekday each Act
-now, Near a trigger and Watching row with a position or a plan shows its
-question as its status line in a muted amber (`GET /copilot/desk/threads`
-gives it as `close`, beside the first words of the symbol's first `reflection`
-today), "Reviewed · <first words>" once one is saved, or "Skipped today".
+holidays and early closes are not known here) the thread list's rows its
+horizon asks about today carry `close` (`GET /copilot/desk/threads`): a
+position asks "Review: did you follow the plan?" and an armed plan not yet in
+a position asks "Added or not, and why?". A position with no plan instead asks
+"Want a plan for this?" once (not for a long hold): **Plan it** opens planning
+it and **Not now** keeps it quiet, both saved as a `plan_ask` day-journal
+entry, so the answer holds across devices; an answer from before the position
+opened does not count. The open thread's decision bar shows its row's
+question instead of the bar. Answer opens a one-line input that saves a
+`reflection` entry for the symbol; Skip hides it for the day in this browser.
+The row's status line says the same in a muted amber, beside the first words
+of the symbol's first `reflection` (or `plan_ask` answer) today: "Reviewed ·
+<first words>" once one is saved, or "Skipped today".
 **Close the day** (the phase button, "Close the day · N to review", or the ⌘K
 command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
@@ -988,6 +1006,10 @@ model to call:
     and exit (New York), P&L $ and %, give-back, plan timing or none, and a
     one-line note (peak and give-back, invalidation, alerts, hold). A trade
     shows once per ranking.
+  - `long_holds` (only when there are some): open positions whose symbol the
+    owner set to a long hold on the desk, up to 10 (symbol, contract, opening
+    day). The desk asks nothing about them day to day, so the review ends with
+    a line on each. A week with no closed trades still carries it.
   - `practice`, only while a practice goal is active (absent otherwise, so
     such a week reads exactly as before): the goal (text, measure, its label,
     target, first week), `practicing` (false when the reviewed week came
@@ -1286,7 +1308,10 @@ nothing exists until the owner confirms.
     thesis, entry and invalidation prices, time stop and size as editable
     fields with phone-sized tap targets. Under the time stop it shows when it
     would ping, read by the server (`GET /copilot/time-stops/preview`), or
-    "Kept as a note" when the words hold no time.
+    "Kept as a note" when the words hold no time. Its **Horizon** (Day trade,
+    Swing, Long hold; see [the desk](#the-desk)) defaults from that reading: a
+    time stop due today makes it a day trade, anything else a swing. The
+    pre-trade plan part saves it as a `horizon` day-journal entry.
   - **Size it for me.** A `Risk $` field beside the size (numeric keypad,
     remembered per browser in `localStorage` key `copilot.risk`, blank until
     typed; no server setting) turns a dollar risk into a size as it is typed,

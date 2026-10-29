@@ -54,6 +54,11 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
     if (server.failCapture) return route.fulfill({ status: 503, json: { detail: "The database is busy." } });
     return route.fulfill({ status: 201, json: { id: "c1", ...route.request().postDataJSON() } });
   });
+  // A Confirm saves the plan's horizon as a day-journal entry (how often the desk checks in after the close).
+  await page.route("**/day-journal/*/entries", (route) => {
+    post("journal", route);
+    return route.fulfill({ json: { id: "j1", day: "2026-10-24", not_traded: false, actor: "owner", created_at: "2026-10-24T14:01:00Z", ...route.request().postDataJSON() } });
+  });
   await page.route("**/copilot/time-stops/preview?*", (route) =>
     route.fulfill({ json: READ(server, new URL(route.request().url()).searchParams.get("text") ?? "") }));
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: server.stops ?? [], enabled: false } }));
@@ -258,16 +263,22 @@ test("a time stop read as a time is previewed before Confirm and set as a timed 
   const server: Server = { alerts: [], posts: [], reads: {
     "out by 15:30 if the entry has not worked": { due_at: DUE, when: "today 15:30 ET", enabled: false },
     "2 days": { due_at: DUE + 2 * 86400, when: "Mon Oct 26, 15:30 ET", enabled: false } } };
+  await page.clock.install({ time: new Date("2026-10-24T14:00:00Z") }); // the plan's day, so "today 15:30" is today
   await lab(page, server);
   const card = await askForPlan(page);
   const reading = card.getByLabel("When it pings");
+  const horizon = card.getByRole("combobox", { name: "Horizon" });
   await expect(reading).toHaveText("Pings today 15:30 ET if you hold NBIS then, from an entry after this plan. Time-stop pings are off on this server for now.");
+  await expect(horizon).toHaveValue("day"); // a time stop due today makes it a day trade
   await card.getByLabel("Time stop").fill("when it feels wrong");
   await expect(reading).toHaveText("Kept as a note: No time or length in it, so it stays a note.");
   await card.getByLabel("Time stop").fill("2 days");
   await expect(reading).toContainText("Pings Mon Oct 26, 15:30 ET if you hold NBIS then");
+  await expect(horizon).toHaveValue("swing"); // a number of days: a swing
   await card.screenshot({ path: test.info().outputPath("time-stop-preview.png") });
   expect(server.posts).toEqual([]); // reading the words saves nothing
+  await horizon.selectOption("long");
+  await expect(card).toContainText("No daily question; Review my week looks at it.");
 
   await card.getByRole("button", { name: "Confirm" }).click();
   const results = card.getByRole("list", { name: "Plan results" });
@@ -278,6 +289,7 @@ test("a time stop read as a time is previewed before Confirm and set as a timed 
   expect(stop).toMatchObject({ investigation_id: INV, symbol: "NBIS", text: "2 days" });
   expect(stop.client_id).toBe(posts(server, "captures")[0].client_id); // one card, one plan, one time stop
   expect(posts(server, "captures")[0].wording).toContain("Time stop: 2 days.");
+  expect(posts(server, "journal")).toEqual([expect.objectContaining({ kind: "horizon", symbol: "NBIS", text: "Long hold" })]);
 
   const linked = await timeline(page);
   await expect(linked).toContainText("Entry armed");
