@@ -6,9 +6,12 @@ import { chartLink, fetchOptionMark, MARK_STALE_SECONDS, type OptionMark } from 
 import PositionAlertFeedback from "./PositionAlertFeedback";
 import { useAppAccess } from "./AccessProvider";
 import { ALERT_FEEDBACK_LABELS, type AlertFeedback, type AlertFeedbackRating } from "@/lib/alertFeedback";
+import { copilotLabHref } from "@/lib/copilot";
 
 // Older API responses still render their history, but cannot identify a linked event.
 type Sent = { id?: string; contract?: string; quoted_at?: number | null; feedback?: AlertFeedback | null;
+  /** Ask copilot's context with what the alert saw (backend position_alerts.ask_context); position alerts only. */
+  ask_context?: string;
   kind: "giveback" | "expiry_first" | "expiry_final" | "hold_hour" | "plan_nudge" | "plan_link"; detected_at: number; entry?: string; contracts: number; mark: number | null; bid?: number | null;
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped" | "held"; error: string | null; delivered_at: number | null;
@@ -80,6 +83,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
   if (!alertId && (!body || (!body.alerts.length && !(body.enabled && body.watch)))) return null;
   const selected = alertId ? body?.alerts.find(a => a.id === alertId) : undefined;
   const history = body?.alerts.filter(a => a !== selected) ?? [];
+  // Opened from an alert, Ask copilot starts from that alert's numbers rather than the bare position.
+  const selectedAsk = askHref && selected?.ask_context ? copilotLabHref(symbol, selected.ask_context) : askHref;
   const rows = <ul className="mt-1 divide-y">{history.map(a => <li key={a.id ?? `${a.kind}-${a.detected_at}`} className="py-2">
     <span className="font-medium">{KIND[a.kind]}</span>
     <span className="text-muted-foreground"> · {time(a.detected_at)} · {((a.kind === "plan_link" && a.delivery === "skipped") || a.delivery === "held") && a.error ? a.error : DELIVERY[a.delivery]}{a.then && <> · then: {a.then}</>}</span>
@@ -116,7 +121,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
       </p>
       {status === "open" && <PositionNow tradeId={tradeId} />}
       <div className="flex flex-wrap gap-2">
-        {askHref && status === "open" && <Link href={askHref}
+        {selectedAsk && status === "open" && <Link href={selectedAsk}
           className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90">Ask copilot about this position</Link>}
         <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>

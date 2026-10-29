@@ -270,6 +270,19 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
     return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0]})
 
 
+ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
+            "expiry_final": "30-minutes-left alert"}
+
+
+def ask_context(alert: PositionAlert) -> str:
+    """Ask copilot's context on the trade page opened from this alert: what the alert saw (docs/copilot-lab.md § Review
+    a trade or position), at most 300 characters."""
+    was = f"was {_money(alert.peak_gain)}, " if alert.kind == "giveback" and alert.peak_gain is not None else ""
+    now = f"now {_money(alert.gain)}" if alert.mark is not None else "no live quote"
+    return (f"Review this position: {alert.trade_id}. {ASK_KIND.get(alert.kind, 'Position alert')} at "
+            f"{_clock_label(_minute_of(_epoch(alert.detected_at)))}: {was}{now}.")[:300]
+
+
 ANSWER_ACTIONS = (("Prompted review", "prompted_review"), ("Already aware", "already_aware"))
 
 
@@ -281,7 +294,7 @@ def answer_path(alert: PositionAlert, rating: str) -> str:
 def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str], ...]]:
     """Where the ping opens, and its answer buttons. While Copilot Lab is on the tap (and ntfy's Open app) opens the
     desk's thread for the position, so it lands on the decision; otherwise the trade page. Either way the two answer
-    buttons open the trade page on the alert with the feedback saved, where Ask copilot is the primary action (ntfy
+    buttons open the trade page on the alert with the feedback saved, where Ask copilot (with ask_context) is the primary action (ntfy
     shows three actions: Open app and these two). A desk link that cannot be built falls back to the trade page, so it
     never holds back the alert."""
     trade = f"/trades/{alert.trade_id}?alert={alert.id}"
@@ -539,7 +552,7 @@ def for_trade(db: Session, trade: Trade) -> dict:
         "giveback_dollar_floor_applies": floor_applies,
         "alerts": [{
             "id": str(a.id), "contract": a.contract,
-            "feedback": feedback.get(a.id),
+            "feedback": feedback.get(a.id), "ask_context": ask_context(a),
             "quoted_at": int(_epoch(a.quoted_at)) if a.quoted_at else None,
             "kind": a.kind, "detected_at": int(_epoch(a.detected_at)), "contracts": a.contracts, "mark": a.mark, "bid": a.bid,
             "gain": a.gain, "gain_pct": a.gain_pct, "peak_gain": a.peak_gain, "peak_gain_pct": a.peak_gain_pct,

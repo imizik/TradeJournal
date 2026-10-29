@@ -160,7 +160,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     `Review this position: <trade id>` (Review a trade or position, below).
   - **Position alerts:** a position alert push's answer actions (Prompted
     review, Already aware) open the trade page, whose primary action is "Ask
-    copilot about this position" (Review a trade or position, below).
+    copilot about this position", prefilled with the alert's numbers (Review a
+    trade or position, below).
   - **Phone:** the unplanned-entry nudge (`PLAN_NUDGE_ENABLED`) deep-links here with
     `Plan this position: …` when a new position has no plan. When a saved plan
     is suggested for the fill it sends a link ping instead, whose confirm page
@@ -1030,10 +1031,14 @@ that rating once through the existing
 alert leaves Close the day's questions. It shows "Saved: …" with Edit feedback
 to change it (or add a reason). An alert already answered keeps its answer: the
 tap is shown as not saved over it, and a stale save gets the usual reload
-prompt. No new route, token or public ingress; Ask copilot is the primary
-action on that page, so the push no longer carries its own Ask copilot or Open
-trade action. The message box holds the context, unsent; the owner sends it,
-adding a question if they like.
+prompt. No new route, token or public ingress. The push no longer carries its
+own Ask copilot or Open trade action: the page's Ask copilot inside the selected
+alert takes the ping's old context instead, what the alert saw, e.g.
+`Review this position: <id>. Give-back alert at 11:02 AM: was +$124, now +$20.`
+(at most 300 characters, `position_alerts.ask_context`, served on each position
+alert in `GET /trades/{trade_id}/phone-alerts`); the header's Ask copilot, with
+no alert, stays `Review this position: <trade id>`. The message box holds the
+context, unsent; the owner sends it, adding a question if they like.
 The system prompt asks the model to call:
 
 - `get_trade_review(trade_id)` (read-only, provenance `saved`). The id is

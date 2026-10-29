@@ -439,6 +439,20 @@ def test_the_trade_page_reads_this_positions_alerts(engine, world, monkeypatch):
     assert body["giveback_dollar_floor_applies"] is True
     assert [(a["kind"], a["gain"], a["peak_gain"], a["delivery"]) for a in body["alerts"]] == [("giveback", 4.0, 124.0, "pending")]
     assert body["watch"] == {"peak_gain": 124.0, "peak_gain_pct": 0.155, "armed": True, "fired": True, "peak_at": body["watch"]["peak_at"]}
+    # The page's Ask copilot carries what the alert saw (the ping's own Ask copilot button before #593).
+    alert = alerts(engine)[0]
+    clock = position_alerts._clock_label(position_alerts._minute_of(position_alerts._epoch(alert.detected_at)))
+    assert body["alerts"][0]["ask_context"] == f"Review this position: {trade_id}. Give-back alert at {clock}: was +$124, now +$4."
+
+
+def test_ask_context_names_each_alert_kind_and_a_missing_quote():
+    at = datetime(2026, 10, 21, 15, 2, tzinfo=UTC)
+    base = dict(trade_id=UUID(int=7), detected_at=at, contracts=2, peak_gain=204.0, gain=24.0, mark=412.0)
+    assert position_alerts.ask_context(PositionAlert(kind="giveback", **base)) == (
+        f"Review this position: {UUID(int=7)}. Give-back alert at 11:02 AM: was +$204, now +$24.")
+    assert position_alerts.ask_context(PositionAlert(kind="hold_hour", **base)).endswith("One-hour alert at 11:02 AM: now +$24.")
+    assert position_alerts.ask_context(PositionAlert(kind="expiry_final", **{**base, "mark": None})).endswith(
+        "30-minutes-left alert at 11:02 AM: no live quote.")
 
 
 def test_trade_page_reports_floorless_exception_for_configured_spy_account(engine, world, monkeypatch):
