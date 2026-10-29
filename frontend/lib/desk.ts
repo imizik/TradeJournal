@@ -7,7 +7,7 @@
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import type { InvestigationSummary, PlanBoardRow, PlansBoard } from "@/lib/copilot";
+import type { InvestigationSummary, PlanBoardLevel, PlanBoardRow, PlansBoard } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -95,9 +95,22 @@ export type DeskDecision = { symbol: string; choice: "holding" | "exiting"; reas
 /** The day's one line above the groups: the market phase (null when unknown), how many rows need a decision, the plan streak. */
 export type DeskDay = { phase: "pre" | "regular" | "post" | "closed" | null; needYou: number; streak: { current: number; best: number } | null };
 
-/** ``GET /copilot/desk/threads``: every row in group order, and each source's state (one failure reads unavailable). */
+/** One plan in the thread list's Plans view, by ``stage``: armed (not yet in a position), in position (a fill waiting to be
+ * linked counts, ``note`` "Fill to link"), exited (its exit review waiting) or done (``note`` the ``plan_done`` text), the
+ * last two over the last seven days. Levels are on the underlying (``PlanBoardLevel``); ``r`` is where the underlying sits
+ * in units of the plan's risk, in a position only; ``at`` (epoch seconds) is the exit or done time. A done plan whose alerts
+ * and time stop were all deleted has no ``investigationId``. */
+export type DeskPlanStage = "armed" | "in_position" | "exited" | "done";
+export type DeskPlan = {
+  stage: DeskPlanStage; symbol: string; investigationId: string | null; instrument: string | null; thesis: string | null;
+  horizon: DeskHorizon; last: number | null; entry: PlanBoardLevel | null; invalidation: PlanBoardLevel | null;
+  timeStop: PlanBoardRow["time_stop"]; r: number | null; at: number | null; note: string | null;
+};
+
+/** ``GET /copilot/desk/threads``: every row in group order, the Plans view, and each source's state (one failure reads
+ * unavailable). */
 export type DeskThreads = {
-  asOf: string; quotesAt: number | null; quoteIssue: string | null; day: DeskDay; threads: DeskThread[];
+  asOf: string; quotesAt: number | null; quoteIssue: string | null; day: DeskDay; threads: DeskThread[]; plans: DeskPlan[];
   sections: Record<string, "ok" | "unavailable" | "off">;
 };
 
@@ -107,6 +120,7 @@ type Wire = {
   threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
       close?: DeskThread["close"]; horizon?: DeskHorizon | null; fill_to_link?: string | null })[];
+  plans?: (Omit<DeskPlan, "investigationId" | "timeStop"> & { investigation_id: string | null; time_stop: DeskPlan["timeStop"] })[];
 };
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
@@ -134,6 +148,7 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
       horizon: horizon ?? null, fillToLink: fill_to_link ?? null,
     })),
+    plans: (wire.plans ?? []).map(({ investigation_id, time_stop, ...plan }) => ({ ...plan, investigationId: investigation_id, timeStop: time_stop })),
   };
 }
 

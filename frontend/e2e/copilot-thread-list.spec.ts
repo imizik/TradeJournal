@@ -248,3 +248,66 @@ test("a busy day stays calm: one new row per symbol, Radar first, five shown, Wa
   await expect(fresh).not.toContainText("New:");
   await page.screenshot({ path: test.info().outputPath("thread-list-busy.png") });
 });
+
+const level = (price: number, extra: Record<string, unknown> = {}) => ({ price, condition: "crosses", interval: null, state: "armed", ...extra });
+const plan = (fields: Record<string, unknown>) => ({
+  investigation_id: null, instrument: null, thesis: null, horizon: "swing", last: null, entry: null, invalidation: null, time_stop: null,
+  r: null, at: null, note: null, ...fields,
+});
+const PLANS = {
+  ...DESK,
+  plans: [
+    plan({ stage: "armed", symbol: "APLD", investigation_id: APLD, instrument: "long", horizon: "day", last: 30, thesis: "APLD base breakout",
+      entry: level(31, { distance_pct: 3.33 }), invalidation: level(29, { distance_pct: -3.33 }),
+      time_stop: { text: "out by 15:30", due_at: epoch("2026-10-23T19:30:00Z"), state: "pending" } }),
+    plan({ stage: "in_position", symbol: "NBIS", investigation_id: NBIS, instrument: "10/23/26 100C", last: 94, r: -0.53,
+      entry: level(95.9, { state: "hit", hit_at: epoch("2026-10-23T14:10:00Z") }), invalidation: level(92.3, { distance_pct: -1.81 }) }),
+    plan({ stage: "exited", symbol: "CRWV", investigation_id: CRWV, instrument: "short", horizon: "long", at: epoch("2026-10-22T17:00:00Z") }),
+    plan({ stage: "done", symbol: "SOFI", note: "Marked done", at: epoch("2026-10-21T14:30:00Z") }),
+  ],
+};
+
+test("the Plans view lists every plan by stage, opens its thread, and is remembered in this browser", async ({ page }) => {
+  const { chats } = await lab(page, PLANS);
+  const threads = list(page);
+  const tab = threads.getByRole("tab", { name: /^Plans/ });
+  await expect(tab).toHaveText("Plans2"); // armed and in position
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  const plans = threads.getByTestId("desk-plans");
+  await expect(plans.locator("section h3")).toHaveText(["Armed", "In position", "Exited this week", "Done this week"]);
+  const apld = plans.getByRole("link", { name: "APLD long Day trade" });
+  await expect(apld).toContainText("3.3% to entry");
+  await expect(apld).toContainText("Entry 31.00 · invalidation 29.00 · time stop 15:30");
+  const nbis = plans.getByRole("link", { name: "NBIS 10/23/26 100C Swing" });
+  await expect(nbis).toContainText("−0.5R");
+  await expect(nbis).toContainText("1.8% to invalidation 92.30");
+  await expect(plans.getByRole("link", { name: "CRWV short Long hold" })).toContainText("Exited Oct 22Exit review waiting");
+  const sofi = plans.getByRole("link", { name: "SOFI Swing" });
+  await expect(sofi).toContainText("Marked done");
+  await expect(sofi).toHaveAttribute("href", "/copilot-lab?symbol=SOFI"); // no saved thread: it opens by its symbol
+  await expect(threads.getByRole("region", { name: "Act now" })).toHaveCount(0);
+
+  await nbis.click();
+  await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toBeVisible();
+  await expect(nbis).toHaveClass(/ring-1/);
+  expect(chats).toEqual([]);
+
+  await page.reload();
+  await expect(list(page).getByTestId("desk-plans")).toBeVisible();
+  await list(page).getByRole("tab", { name: "All" }).click();
+  await expect(list(page).getByRole("region", { name: "Act now" })).toBeVisible();
+});
+
+test("the Plans view fits a 375 px phone inside the Now tab", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await lab(page, PLANS);
+  const threads = list(page);
+  await threads.getByRole("tab", { name: /^Plans/ }).click();
+  for (const link of await threads.getByTestId("desk-plans").getByRole("link").all()) {
+    const box = (await link.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
