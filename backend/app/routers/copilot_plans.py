@@ -2,7 +2,8 @@
 the Dashboard's Plans card (``engine/plan_positions.py``): each open position beside the plan it was entered under,
 the Charts dock's loop for one symbol (``GET /copilot/symbol/{symbol}``): both of those and what is new on it, and the
 desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/picture|timeline|history``,
-``engine/desk_context.py``).
+``engine/desk_context.py``). The picture route's reserved id ``market`` is the Briefing's chart: QQQ today with the day's
+fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``).
 
 Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only.
 """
@@ -84,13 +85,27 @@ def _thread(investigation_id: str, db: Session):
     return found
 
 
+def _market_picture(db: Session) -> bytes:
+    from app.routers import copilot_desk
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    fills = today._section(db, "market picture fills", lambda: copilot_desk._fill_events(db, day))
+    pings = today._section(db, "market picture pings", lambda: copilot_desk._ping_events(db, now))
+    return desk_context.market_picture(fills.get("rows", []) + pings.get("rows", []), now)
+
+
 @router.get("/desk/{investigation_id}/picture")
 def desk_picture(investigation_id: str, db: Session = Depends(get_session)):
     """The Context pane's chart: today's minute bars for the thread's symbol with its plan's levels and today's fills,
-    as a PNG. Unavailable (no symbol, no bars yet, the read failed or ran long) is a 404 whose detail says why."""
-    inv = _thread(investigation_id, db)
+    as a PNG; for ``market``, the Briefing's QQQ with the day's fills and pings. Unavailable (no symbol, no bars yet,
+    the read failed or ran long) is a 404 whose detail says why."""
     try:
-        png = desk_context.picture(db, inv, today._now())
+        if investigation_id == desk_context.MARKET_ID:
+            if not copilot.settings().enabled:
+                raise HTTPException(503, "Copilot Lab is off.")
+            png = _market_picture(db)
+        else:
+            png = desk_context.picture(db, _thread(investigation_id, db), today._now())
     except desk_context.Unavailable as exc:
         raise HTTPException(404, str(exc)) from None
     return Response(png, media_type="image/png", headers={"Cache-Control": "private, no-store"})
