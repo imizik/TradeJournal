@@ -777,6 +777,29 @@ class DayReplay(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class EveningReview(SQLModel, table=True):
+    """One trading day's evening review ping (``engine/evening_review.py``): what the desk had waiting for review
+    after the close and the single ping that opens Close the day. The unique ``day`` is the once-a-day guard; a day
+    with nothing waiting is recorded ``skipped``. Delivery is an outbox on the same row, at most once."""
+
+    __tablename__ = "evening_review"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(unique=True)  # New York trading day
+    detected_at: datetime = Field(default_factory=datetime.utcnow)  # UTC: when the day was counted
+    review: int = 0  # symbols still asking their close question
+    alerts: int = 0  # position alerts waiting on an answer
+    radar: int = 0  # Radar hits not rated
+    fills: int = 0  # fills waiting to link
+    body: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    delivery: str = Field(default="pending", index=True)  # skipped | pending | sending | sent | expired | unknown | held
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class CopilotTurn(SQLModel, table=True):
     """One copilot turn's model and cost (``ai/copilot_spend.py``): what answered, rounds, tokens and the estimated
     USD, so the day's API spend can be capped and shown. Additive; it keeps no prompt or answer text."""

@@ -50,7 +50,7 @@ function typing(target: EventTarget | null) {
  * While the lab is off only the conversation shows, saying so. ⌘K (Ctrl+K) or Jump to… opens the palette; while not
  * typing, J / K open the next or previous thread, N starts a plan and ] hides or shows the Context pane.
  */
-export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
+export default function CopilotLab({ link = null, close = false }: { link?: PanelLink | null; close?: boolean }) {
   const on = useCopilotOn();
   const router = useRouter();
   const navFolded = useFoldedNav();
@@ -162,6 +162,22 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     else if (steps.length) { setAnswering(true); setTab("thread"); }
     else fill(CLOSE_PROMPT);
   }, [rows, review, fill, setClosing, steps.length]);
+  // ``?close=1`` (the evening review ping) starts the pass once the list and the session have read, after the close: the
+  // first unreviewed thread by a page load of its link (the pass carries on in this tab), else today's alerts, Radar hits
+  // and fills here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
+  const closeLink = useRef(close);
+  const sessionRead = !!(session.data || session.error);
+  useEffect(() => {
+    if (!closeLink.current || !rows.length || !sessionRead) return;
+    closeLink.current = false;
+    if (dayPhase !== "close") return;
+    const [next] = toReview(rows, nyDay());
+    if (next) {
+      setClosing(true);
+      window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
+        : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
+    } else if (steps.length) { setAnswering(true); setTab("thread"); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
+  }, [rows, sessionRead, dayPhase, setClosing, steps.length]);
   const onReviewed = useCallback((symbol: string) => {
     reviewed.current.add(symbol);
     setRefresh(n => n + 1);

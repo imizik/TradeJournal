@@ -511,7 +511,11 @@ def _pinned(prep: dict, week: dict) -> list[dict]:
 def desk_threads(db: Session = Depends(get_session)):
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
-    now = today._now()
+    return threads(db, today._now())
+
+
+def threads(db: Session, now: float) -> dict:
+    """The thread list as ``GET /copilot/desk/threads`` returns it, read at ``now``."""
     day = datetime.fromtimestamp(now, ET).date()
     quotes = today.SharedQuotes()
     # The board first: its read covers every armed plan, so the positions' invalidations need no second read.
@@ -762,6 +766,28 @@ def desk_session(db: Session = Depends(get_session)):
             ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices),
             ("alerts_to_answer", alerts_due), ("radar_to_rate", hits_due))},
     }
+
+
+def waiting(db: Session, now: float) -> dict:
+    """What Close the day walks at ``now``, for the evening review ping (``app/engine/evening_review.py``): ``review``,
+    the symbols still asking their close question (``toReview``, one per symbol); ``alerts`` and ``radar``, today's
+    position alerts with no feedback and today's Radar hits not rated (``closeSteps``; older ones stay in the Briefing's
+    lists); ``fills``, the fills waiting to link (``fillsToLink``, one per trade). A Skip or "No plan" kept only in a
+    browser is not seen here. Raises when the positions, plans, alerts or Radar could not be read."""
+    day = datetime.fromtimestamp(now, ET).date()
+    listed = threads(db, now)
+    rows = listed["threads"]
+    alerts = today._section(db, "waiting alerts to answer", lambda: _alerts_to_answer(db, now))
+    radar = today._section(db, "waiting radar to rate", lambda: _hits_to_rate(day))
+    # A source that could not be read is not "nothing waiting": the caller records the failure instead.
+    failed = [name for name in ("positions", "plans") if listed["sections"][name] == "unavailable"]
+    failed += [name for name, part in (("alerts", alerts), ("radar", radar)) if part["state"] == "unavailable"]  # Radar off counts 0
+    if failed:
+        raise RuntimeError(f"Desk sections unavailable: {', '.join(failed)}")
+    return {"review": len({r["symbol"] for r in rows if r["close"] and not r["close"]["reviewed"] and r["symbol"]}),
+            "alerts": sum(r["today"] and not r["feedback"] for r in alerts.get("rows", [])),
+            "radar": sum(r["today"] and not r["rating"] for r in radar.get("rows", [])),
+            "fills": len({r["fill_to_link"] for r in rows if r["fill_to_link"]})}
 
 
 @router.get("/desk/scorecard")

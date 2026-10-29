@@ -136,7 +136,7 @@ function DayLine({ data }: { data: DeskThreads }) {
  * ``DESK_GROUPS`` order, refreshed each minute while the page is visible. Pinned rows ask in the conversation (only
  * when pressed); a row with an investigation opens it in place, any other follows its deep link. Plan meters show
  * on Act now and Near a trigger only. "New since you looked" is remembered in this browser. ``onRows`` gets the rows in
- * the order shown, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
+ * the order shown once the list has read, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
  * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer. ``phase`` (the
  * day's phase button) sits under the day line. A change of ``refresh`` reads the list again (a review just saved).
  * All | Plans switches to the Plans view (``PlanList``) from the same read; the choice is remembered in this browser.
@@ -194,7 +194,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
   // Opening a symbol's new row sees everything new on that symbol, folded rows included.
   const seenRow = (row: DeskThread) => mark(row.group === "new" && row.symbol ? rows.filter(r => r.group === "new" && r.symbol === row.symbol) : [row]);
   const ordered = useMemo(() => DESK_GROUPS.flatMap(g => itemsOf(g.id)), [data, seen]); // eslint-disable-line react-hooks/exhaustive-deps -- rows and unread come from these two
-  useEffect(() => { onRows?.(ordered); }, [ordered, onRows]);
+  useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
   const live = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
   const day = data ? nyDay(new Date(data.asOf)) : null;
