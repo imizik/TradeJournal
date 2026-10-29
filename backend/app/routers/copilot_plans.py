@@ -3,7 +3,8 @@ the Dashboard's Plans card (``engine/plan_positions.py``): each open position be
 the Charts dock's loop for one symbol (``GET /copilot/symbol/{symbol}``): both of those and what is new on it, and the
 desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/picture|timeline|history``,
 ``engine/desk_context.py``). The picture route's reserved id ``market`` is the Briefing's chart: QQQ today with the day's
-fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``).
+fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``). An id of ``symbol:`` and a
+symbol is a thread named by its symbol alone (a position or plan with no saved conversation), on all three.
 
 Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only.
 """
@@ -80,6 +81,11 @@ def symbol_loop(symbol: str, db: Session = Depends(get_session)):
 def _thread(investigation_id: str, db: Session):
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
+    if investigation_id.startswith(desk_context.SYMBOL_PREFIX):
+        symbol = investigation_id.removeprefix(desk_context.SYMBOL_PREFIX).strip().upper()
+        if not SYMBOL_RE.match(symbol):
+            raise HTTPException(400, "Not a symbol.")
+        return desk_context.symbol_thread(db, symbol)
     found = desk_context.investigation(db, investigation_id)
     if found is None:
         raise HTTPException(404, "No such investigation.")
@@ -112,7 +118,7 @@ def _thread_picture(db: Session, investigation_id: str, timeframe: str) -> bytes
 def desk_picture(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
     """The Context pane's chart for the thread's symbol as a PNG, on ``timeframe``: ``2m`` today's minutes, ``15m``
     recent sessions, ``1D`` a few months; the intraday ones with its plan's levels, today's fills and today's pings
-    sent and Radar hits on the symbol. For ``market``, the Briefing's QQQ with the day's fills and pings. Unavailable
+    sent and Radar hits on the symbol. For ``symbol:X``, the symbol's chart with its plan's levels if it has one. For ``market``, the Briefing's QQQ with the day's fills and pings. Unavailable
     (no symbol, no bars yet, the read failed or ran long) is a 404 whose detail says why."""
     try:
         if investigation_id == desk_context.MARKET_ID:

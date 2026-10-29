@@ -24,6 +24,7 @@ from app.engine.radar_store import RadarStore
 from app.models import (CopilotInvestigation, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent, PhonePing, PlanTimeStop,
                         ResearchJob, ThesisWatchTrigger)
 from app.routers import copilot_plans as plan_routes
+from app.routers.fills import _rebuild_trades
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
 from tests.test_copilot_plans import (  # noqa: F401  (fixtures)
     CRWV, NBIS, ROTH, T0, alert, buy_and_link, capture, engine, quotes, time_stop,
@@ -426,6 +427,53 @@ def test_history_says_what_is_missing(lab, engine):  # noqa: F811
     assert lab.get(f"/copilot/desk/{NBIS}/history").json()["state"] == "missing"
     investigation(engine, CRWV, None)
     assert lab.get(f"/copilot/desk/{CRWV}/history").json()["reason"] == "This thread has no symbol, so there is no level to look up."
+
+
+# ------------------------------------------------------------------ a thread named by its symbol
+
+
+def test_a_symbol_with_a_plan_reads_as_its_plans_thread_with_no_conversation_needed(lab, engine, monkeypatch):  # noqa: F811
+    planned(engine)
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars())
+    seen = drawn(monkeypatch)
+    assert lab.get("/copilot/desk/symbol:nbis/picture").status_code == 200
+    [chart] = seen
+    assert chart.title == "NBIS" and [level.price for level in chart.levels] == [95.9, 92.3]
+    assert lab.get("/copilot/desk/symbol:NBIS/timeline").json() == lab.get(f"/copilot/desk/{NBIS}/timeline").json()
+    assert lab.get("/copilot/desk/symbol:NBIS/history").json() == lab.get(f"/copilot/desk/{NBIS}/history").json()
+
+
+def test_a_symbol_with_no_plan_shows_its_open_trade_and_says_what_is_missing(lab, engine, monkeypatch):  # noqa: F811
+    with Session(engine) as db:
+        db.add(Fill(account_id=ROTH, ticker="NBIS", instrument_type="stock", side="buy", contracts=5, price=94.2,
+                    executed_at=datetime(2026, 10, 21, 10, 30), raw_email_id="gmail:800"))
+        db.add(ThesisWatchTrigger(symbol="NBIS", kind="news", dedupe_key="t1", day="2026-10-21", fired_at=T0 + timedelta(minutes=60),
+                                  text="NBIS signs a data-centre lease", path="/copilot-lab"))
+        db.commit()
+        _rebuild_trades(db, "test")
+        db.commit()
+    alert(engine, CRWV, "CRWV", "invalidation", 90.0)  # another symbol's plan
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars())
+    seen = drawn(monkeypatch)
+    assert lab.get("/copilot/desk/symbol:NBIS/picture").status_code == 200
+    [chart] = seen
+    assert chart.levels == () and [(m.price, m.label) for m in chart.marks] == [(94.2, "IN")]
+    body = lab.get("/copilot/desk/symbol:NBIS/timeline").json()
+    assert body["symbol"] == "NBIS" and body["unavailable"] == []
+    assert [(r["kind"], r["text"], r["detail"]) for r in body["rows"]] == [
+        ("thesis", "News · thesis watch", "NBIS signs a data-centre lease"),
+        ("fill", "Bought 5 NBIS stock at 94.20", "the open position"),
+    ]
+    assert lab.get("/copilot/desk/symbol:NBIS/history").json() == {
+        "state": "missing", "symbol": "NBIS",
+        "reason": "No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here."}
+
+
+def test_a_symbol_thread_refuses_a_non_symbol_and_the_lab_off(lab, monkeypatch):
+    assert lab.get("/copilot/desk/symbol:not a symbol!/timeline").status_code == 400
+    monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
+    for part in ("picture", "timeline", "history"):
+        assert lab.get(f"/copilot/desk/symbol:NBIS/{part}").status_code == 503
 
 
 # ------------------------------------------------------------------ access

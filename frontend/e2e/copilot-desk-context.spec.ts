@@ -138,6 +138,31 @@ test("on a 375 px phone the Context tab shows the pane, and its tabs fit", async
   await page.screenshot({ path: test.info().outputPath("desk-context-375.png"), fullPage: true });
 });
 
+test("a symbol opened with no saved conversation shows its Context by the symbol, with no chat needed", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
+  await page.route("**/copilot/chat", (route) => route.abort());
+  await page.route(/\/copilot\/desk\/symbol(:|%3A)NBIS\//, (route) => {
+    const part = new URL(route.request().url()).pathname.split("/").pop()!;
+    reads.push(`${route.request().method()} ${part}`);
+    if (part === "picture") return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+    return route.fulfill({ json: part === "timeline"
+      ? { ...TIMELINE, count: 1, rows: [{ kind: "fill", at: now - 900, text: "Bought 5 NBIS stock at 94.20", detail: "the open position" }] }
+      : { state: "missing", symbol: "NBIS", reason: "No plan invalidation yet. Once you confirm a plan card, your record at its invalidation shows here." } });
+  });
+  await page.goto("/copilot-lab?symbol=NBIS");
+  const pane = page.getByRole("complementary", { name: "Context" });
+  await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
+  await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
+  const tabs = pane.getByRole("tablist", { name: "Context" });
+  await tabs.getByRole("tab", { name: "Timeline" }).click();
+  await expect(pane.getByRole("list", { name: "Timeline" }).getByRole("listitem")).toHaveText([/Bought 5 NBIS stock at 94.20.*the open position/]);
+  await tabs.getByRole("tab", { name: "Your history" }).click();
+  await expect(pane).toContainText("No plan invalidation yet.");
+  expect(reads).toEqual(["GET picture", "GET timeline", "GET history"]); // reads only, nothing posted
+});
+
 test("on the Briefing the pane shows the day: QQQ with your fills and pings, the day's timeline and this week's record", async ({ page }) => {
   const reads: string[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
