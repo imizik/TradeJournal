@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
-from app.engine import ntfy, position_alerts, reconstructor
+from app.engine import alert_feedback, ntfy, position_alerts, reconstructor
 from app.engine.chart_math import ET
 from app.engine.position_alerts import PositionAlerts
 from app.engine.tradier import TradierError, TradierQuote
@@ -313,7 +313,7 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     assert alerts(engine)[0].delivery == "sent"
 
 
-def test_while_the_lab_is_on_a_ping_opens_the_desk_with_the_trade_and_ask_copilot_as_buttons(engine, world, monkeypatch):
+def test_a_ping_carries_two_answer_buttons_and_opens_the_desk_while_the_lab_is_on(engine, world, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     clock, _, watcher = world
     alert = fired(engine, world)
@@ -322,7 +322,12 @@ def test_while_the_lab_is_on_a_ping_opens_the_desk_with_the_trade_and_ask_copilo
     sent, buttons = [], []
     sent_to(monkeypatch, sent, buttons)
     watcher.deliver()
-    assert sent[0][1] == trade and buttons == [()]  # lab off: the trade page, and only the Open app action ntfy adds
+    assert sent[0][1] == trade  # lab off: the trade page
+    assert [label for label, _ in buttons[0]] == ["Prompted review", "Already aware"]  # with ntfy's Open app: three
+    for (_, path), rating in zip(buttons[0], ("prompted_review", "already_aware")):
+        assert urlsplit(path).path == f"/trades/{alert.trade_id}"
+        assert parse_qs(urlsplit(path).query) == {"alert": [str(alert.id)], "answer": [rating]}
+        assert rating in alert_feedback.RATINGS and len("https://isaac-trading-alerts.duckdns.org" + path) <= 500
 
     with Session(engine) as db:
         db.get(PositionAlert, alert.id).delivery = "pending"
@@ -330,22 +335,14 @@ def test_while_the_lab_is_on_a_ping_opens_the_desk_with_the_trade_and_ask_copilo
     monkeypatch.setenv("COPILOT_ENABLED", "true")
     watcher.deliver()
     assert sent[1][1] == "/copilot-lab?symbol=SNDK"  # no plan card saved this position: the desk opens on the symbol
-    (open_label, open_path), (label, path) = buttons[1]
-    assert (open_label, open_path) == ("Open trade", trade)
-    query = parse_qs(urlsplit(path).query)
-    assert label == "Ask copilot" and path.startswith("/copilot-lab?") and query["symbol"] == ["SNDK"]
-    assert query["context"] == [f"Review this position: {alert.trade_id}. Give-back alert at "
-                                f"{position_alerts._clock_label(position_alerts._minute_of(position_alerts._epoch(alert.detected_at)))}: "
-                                f"was {position_alerts._money(alert.peak_gain)}, now {position_alerts._money(alert.gain)}."]
-    assert len(query["context"][0]) <= 300 and len("https://isaac-trading-alerts.duckdns.org" + path) <= 500
+    assert buttons[1] == buttons[0]  # the answers still open the trade page, where Ask copilot is the primary action
 
     with Session(engine) as db:
         db.get(PositionAlert, alert.id).delivery = "pending"
         db.commit()
-    monkeypatch.setattr(position_alerts, "ask_copilot_path", lambda alert: 1 / 0)
     monkeypatch.setattr(position_alerts, "desk_path", lambda db, alert: 1 / 0)
-    watcher.deliver()  # a broken link or button never holds back the alert
-    assert sent[2][1] == trade and buttons[2] == () and alerts(engine)[0].delivery == "sent"
+    watcher.deliver()  # a broken desk link never holds back the alert
+    assert sent[2][1] == trade and buttons[2] == buttons[0] and alerts(engine)[0].delivery == "sent"
 
 
 def test_the_desk_link_opens_the_plan_conversation_a_plan_card_saved(engine, world, monkeypatch):

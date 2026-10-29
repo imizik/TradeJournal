@@ -252,31 +252,6 @@ def message(alert: PositionAlert, close_label: str | None = None, minutes_left: 
     return title, body + ("\n\n" + context if context else ""), priority
 
 
-ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
-            "expiry_final": "30-minutes-left alert"}
-
-
-def ask_copilot_path(alert: PositionAlert) -> str:
-    """The lab, prefilled to review this position with what the alert saw (docs/copilot-lab.md § Review a trade or position)."""
-    was = f"was {_money(alert.peak_gain)}, " if alert.kind == "giveback" and alert.peak_gain is not None else ""
-    now = f"now {_money(alert.gain)}" if alert.mark is not None else "no live quote"
-    context = (f"Review this position: {alert.trade_id}. {ASK_KIND.get(alert.kind, 'Position alert')} at "
-               f"{_clock_label(_minute_of(_epoch(alert.detected_at)))}: {was}{now}.")
-    return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0], "context": context[:300]})
-
-
-def _ask_copilot(alert: PositionAlert) -> tuple[tuple[str, str], ...]:
-    """The extra push action, only while Copilot Lab is on (its own switch, read here without loading the lab).
-    Optional, so it can never stop the alert itself from going out."""
-    if os.environ.get("COPILOT_ENABLED") != "true":
-        return ()
-    try:
-        return (("Ask copilot", ask_copilot_path(alert)),)
-    except Exception:  # noqa: BLE001 - the alert matters more than its extra button
-        log.warning("Ask copilot action skipped for a position alert", exc_info=True)
-        return ()
-
-
 def desk_path(db: Session, alert: PositionAlert) -> str:
     """The Copilot desk's thread for this position (docs/copilot-lab.md § The desk), which opens on its decision bar:
     the plan's conversation when a plan card saved the position's plan (its oldest linked capture, as the Plans card
@@ -295,20 +270,30 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
     return "/copilot-lab?" + urlencode({"symbol": (alert.contract or "").split(" ")[0]})
 
 
+ANSWER_ACTIONS = (("Prompted review", "prompted_review"), ("Already aware", "already_aware"))
+
+
+def answer_path(alert: PositionAlert, rating: str) -> str:
+    """The trade page on this alert; with ``answer`` the page saves that feedback once (alert_feedback.save) on open."""
+    return f"/trades/{alert.trade_id}?" + urlencode({"alert": alert.id, "answer": rating})
+
+
 def _links(db: Session, alert: PositionAlert) -> tuple[str, tuple[tuple[str, str], ...]]:
-    """Where the ping opens, and its extra buttons. While Copilot Lab is on: the desk's thread for the position, so a
-    tap lands on the decision, with the trade page and Ask copilot as buttons; otherwise the trade page. A link that
-    cannot be built falls back to the trade page, so it never holds back the alert."""
+    """Where the ping opens, and its answer buttons. While Copilot Lab is on the tap (and ntfy's Open app) opens the
+    desk's thread for the position, so it lands on the decision; otherwise the trade page. Either way the two answer
+    buttons open the trade page on the alert with the feedback saved, where Ask copilot is the primary action (ntfy
+    shows three actions: Open app and these two). A desk link that cannot be built falls back to the trade page, so it
+    never holds back the alert."""
     trade = f"/trades/{alert.trade_id}?alert={alert.id}"
+    answers = tuple((label, answer_path(alert, rating)) for label, rating in ANSWER_ACTIONS)
     if os.environ.get("COPILOT_ENABLED") != "true":
-        return trade, ()
+        return trade, answers
     try:
         with Session(db.get_bind()) as own:  # its own session: a failed read cannot abort the alert's transaction
-            desk = desk_path(own, alert)
+            return desk_path(own, alert), answers
     except Exception:  # noqa: BLE001 - the alert matters more than where it opens
         log.warning("Desk link skipped for a position alert", exc_info=True)
-        return trade, _ask_copilot(alert)
-    return desk, (("Open trade", trade),) + _ask_copilot(alert)
+        return trade, answers
 
 
 def _minute_of(stamp: float) -> int:
