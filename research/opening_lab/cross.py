@@ -47,7 +47,13 @@ def ensure_cross(days, *, fetch=False):
 
     closes = data._read_json(_daily_path()) or {}
     needed = [d for d in days if data._session_complete(d)]
-    if needed and any(_prior_close_date(closes, s, d) is None for s in CROSS_SYMBOLS for d in needed):
+    if not needed:
+        return
+    cal, _ = data.calendar((date.fromisoformat(min(needed)) - timedelta(days=10)).isoformat(), max(needed),
+                           fetch=True)
+    sessions = sorted(cal)
+    previous = {d: max([s for s in sessions if s < d], default=None) for d in needed}
+    if any(p and p not in (closes.get(s) or {}) for s in CROSS_SYMBOLS for p in previous.values()):
         start = (date.fromisoformat(min(needed)) - timedelta(days=10)).isoformat()
         raw = data._fetch_bars("1Day", et_datetime(start, "00:00"), et_datetime(max(needed), "20:00"),
                                CROSS_SYMBOLS)

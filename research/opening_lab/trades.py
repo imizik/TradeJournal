@@ -294,11 +294,8 @@ class FakeTrader:
 
 # Scoring -----------------------------------------------------------------------
 def _rule_trade(session, fn):
-    for cp in ENTRY_CHECKPOINTS:
-        try:
-            f = validate_forecast(fn(pk.build_packet(session, cp, "market")))
-        except Exception:
-            continue
+    for cp in ENTRY_CHECKPOINTS:  # rules are deterministic: an exception is a bug, so it propagates
+        f = validate_forecast(fn(pk.build_packet(session, cp, "market")))
         if f["action"] != "WAIT":
             return {"symbol": f["symbol"], "side": f["action"], "entry_cp": cp, "exit_cp": None}
     return None
@@ -342,7 +339,7 @@ def score_trades(rows, sessions, *, rules=None, draws=BOOTSTRAP_DRAWS, seed=BOOT
     # coin never trades, so it would duplicate "no trade"
     rules = {k: v for k, v in BASELINES.items() if k != "coin"} if rules is None else rules
     days = sorted(sessions)
-    strategies, models, asks = {}, [], {}
+    strategies, models, asks, unfinished = {}, [], {}, {}
 
     def graded(trade, session, kind):
         if trade is None:
@@ -363,13 +360,20 @@ def score_trades(rows, sessions, *, rules=None, draws=BOOTSTRAP_DRAWS, seed=BOOT
             trade, decisions = walk(day, answer)
             n_asks += len(decisions)
             failed += sum(1 for cp, _ in decisions if (got.get(cp) or {}).get("status") != "ok")
+            # An unasked checkpoint or a provider failure is not an answer (the run
+            # stopped or will retry): the morning is unscorable, not "no trade".
+            # "invalid" is the model's own answer and counts as WAIT/HOLD.
+            if any((got.get(cp) or {}).get("status", "error") in ("error", "timeout") for cp, _ in decisions):
+                unfinished[name] = unfinished.get(name, 0) + 1
+                own[day] = fixed[day] = held[day] = None
+                continue
             own[day] = graded(trade, sessions[day], "model")
             fixed[day] = graded(trade, sessions[day], "fixed")
             held[day] = graded(trade, sessions[day], "max")
         strategies[name] = own
         strategies[f"{name} entries, exit {FIXED_HOLD_MINUTES}m"] = fixed
         strategies[f"{name} entries, hold {MAX_HOLD_MINUTES}m"] = held
-        asks[name] = {"asked": n_asks, "not_ok": failed}
+        asks[name] = {"asked": n_asks, "not_ok": failed, "unscored_mornings": unfinished.get(name, 0)}
 
     for rule, fn in sorted(rules.items()):
         strategies[f"rule {rule}, exit {FIXED_HOLD_MINUTES}m"] = {
@@ -420,7 +424,8 @@ def render_trades(report):
                      f"{f(s['right_direction']):>7}{f(s['net_per_trade']):>10}{f(s['net_per_morning']):>12}"
                      f"{f(s['minutes'], 1):>6}{s['own_exits']:>10}{f(s['long_share']):>6}")
     if report["asks"]:
-        lines += ["", "Model answers: " + "; ".join(f"{k}: {v['asked']} asked, {v['not_ok']} not ok"
+        lines += ["", "Model answers: " + "; ".join(f"{k}: {v['asked']} asked, {v['not_ok']} not ok, "
+                                                   f"{v['unscored_mornings']} mornings unscored (unanswered)"
                                                    for k, v in report["asks"].items())]
     lines += ["", "Paired per-morning comparisons (A - B, bps per morning; session bootstrap 95% CI):"]
     for c in report["comparisons"]:

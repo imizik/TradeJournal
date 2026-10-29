@@ -150,3 +150,18 @@ def test_cross_rows_use_previous_close_and_visible_bars(session):
     assert gap == pytest.approx(100 * (first_open / 99.0 - 1), abs=1e-3)
     assert since_open is not None and last5 is None                   # one RTH bar: no 5-minute change yet
     assert block["macro"]["UUP"] == [None, None, None]                 # not in the cache: unavailable
+
+
+def test_unanswered_mornings_are_unscored_not_zero(tmp_path, session):
+    class Fails(trades.FakeTrader):
+        def forecast(self, packet):
+            if packet["checkpoint_et"] == "09:45":
+                return {"status": "error", "forecast": None, "error": "timeout", "cost_usd": None}
+            return super().forecast(packet)
+
+    run = trades.replay(tmp_path, [DAY], sessions={DAY: session}, model=Fails(), model_name="m",
+                        variants=["bars"], log=lambda _m: None)
+    report = trades.score_trades(run.rows(), {DAY: session}, rules={}, draws=50)
+    s = report["strategies"]["m/bars"]
+    assert s["mornings"] == 0 and s["trades"] == 0          # not counted as a 0 bp morning
+    assert report["asks"]["m/bars"]["unscored_mornings"] == 1
