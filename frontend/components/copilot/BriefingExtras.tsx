@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CalendarCheck } from "lucide-react";
 import WatchDayLink from "@/components/replay/WatchDayLink";
 import { HELD, clock, type Today } from "@/components/today/TodayView";
 import { apiUrl } from "@/lib/api";
 
+const BUTTON = "inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground hover:text-foreground sm:min-h-8";
+
 /**
  * What the Today screen showed that the Briefing did not, now that the desk is home: pings the notification policy held
  * back today (merged, quiet window or over the daily cap), behind a disclosure, and today's replay when a clip is kept.
- * One read of ``GET /today`` when the Briefing opens.
+ * One read of ``GET /today`` when the Briefing opens. Review my week (one turn, ``onReviewWeek``) sits beside them.
  */
-export default function BriefingExtras() {
+export default function BriefingExtras({ onReviewWeek }: { onReviewWeek(): void }) {
   const [body, setBody] = useState<Pick<Today, "day" | "held"> | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -19,10 +22,9 @@ export default function BriefingExtras() {
       .catch(() => { /* the Briefing stands without it */ });
     return () => controller.abort();
   }, []);
-  if (!body) return null;
-  const held = body.held.state === "ok" && body.held.count > 0 ? body.held : null;
+  const held = body?.held.state === "ok" && body.held.count > 0 ? body.held : null;
   return (
-    <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2 border-b pb-4 text-sm empty:hidden" data-testid="briefing-extras">
+    <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2 border-b pb-4 text-sm" data-testid="briefing-extras">
       {held && (
         <details className="min-w-0 flex-1">
           <summary className="w-fit cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -39,7 +41,13 @@ export default function BriefingExtras() {
           </ul>
         </details>
       )}
-      <WatchDayLink from={body.day} className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground hover:text-foreground sm:min-h-8" />
+      <div className="ml-auto flex flex-wrap gap-2">
+        <button type="button" onClick={onReviewWeek} className={BUTTON}
+          title="One copilot turn reviewing your latest trading week: planned vs unplanned, follow-through, alerts and exits">
+          <CalendarCheck size={14} aria-hidden />Review my week
+        </button>
+        {body && <WatchDayLink from={body.day} className={BUTTON} />}
+      </div>
     </div>
   );
 }

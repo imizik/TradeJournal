@@ -172,15 +172,17 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 - **Thread list**, the desk's left pane (page only, lab on;
   `components/copilot/ThreadRail.tsx`). One grouped list, in `DESK_GROUPS`
   order, with one line for the day above it: the market phase, how many rows
-  need a decision, and the plan streak. Groups:
-  - **Pinned**: Briefing (today's pre-market prep when there is one) and
-    Review my week (this week's planned/total entries, the practice line).
-    Pressing one sends one turn: Briefing the fixed **What matters right
+  need a decision, and the plan streak. Each group's heading carries a
+  coloured dot (rose Act now, sky Near a trigger and New, amber Waiting for
+  you) and its row count. Groups:
+  - **Pinned**: the Briefing only (today's pre-market prep when there is
+    one). Pressing it sends one turn, the fixed **What matters right
     now?** prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`, "What matters
     right now across my open positions, armed watches and open
     investigations? Lead with anything that needs a decision today; say
-    plainly if nothing does."), Review my week its prompt. Opening the list
-    never sends.
+    plainly if nothing does."). Review my week is in ⌘K and on the
+    Briefing (beside Watch today); the server's pinned week row is not
+    listed. Opening the list never sends.
   - **Act now**: open positions the Today screen flags (within 1% of an
     armed invalidation or past a hit one, expiring today, give-back fired,
     time stop within 30 minutes). Empty, it says "Clear. Nothing needs a
@@ -192,12 +194,21 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   - **Waiting for you**: unarmed plan drafts. No store keeps them yet, so it
     stays hidden.
   - **New since you looked**: Radar events since the last Radar visit and
-    the newest thesis-watch trigger today per investigation. What the owner
-    has opened or marked seen is remembered in this browser only
-    (`localStorage`); seen rows stay, dimmed, below the new ones.
+    the newest thesis-watch trigger today per investigation, one row per
+    symbol (a Radar hit ahead of thesis news, newest first), five shown and
+    the rest behind "+N more". What the owner has opened or marked seen is
+    remembered in this browser only (`localStorage`); seen rows stay,
+    dimmed, and opening a symbol's row sees its folded rows too.
   - **Watching**: every other open position (its plan's nearest line, or "No
     plan yet"), armed plan and open investigation (a research job's
-    conclusion is never shown: a model that read web pages wrote it).
+    conclusion is never shown: a model that read web pages wrote it); three
+    shown and the rest behind "+N more", so a busy day reads as about ten
+    rows.
+
+  Under the groups, a collapsed **Closed this week** footer with its count:
+  saved conversations closed and last touched since Monday (New York), from
+  the latest 50 in `GET /copilot/investigations`, each opening in place; then
+  the key hint.
 
   Each row: symbol, instrument (contract, direction or "research"), one value
   and one status line coloured by what it needs (amber: needs you). A
@@ -625,9 +636,16 @@ The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
 Context tabs. A phone lands on Now unless a deep link brings a conversation.
 While the lab is off only the conversation shows, saying so. On a wide screen
-(1024 px and up) the desk takes the whole screen beside the navigation rail,
-as Charts does (`AppMain.fullScreenRoute`), and each pane scrolls on its own.
-The desk bar holds Jump to… (⌘K), New plan and the Context toggle; the
+(1024 px and up) the desk takes the whole screen, as Charts does
+(`AppMain.fullScreenRoute`), and each pane scrolls on its own. From 768 px the
+app's navigation folds into one **Menu** button at the left of the desk bar
+(`useFoldedNav` / `openNavMenu` in `Nav.tsx`), so the desk gets the full
+width; it opens the labelled menu (every page, sync, the plan streak), whose
+**Keep the sidebar open** shows the full sidebar instead, remembered in this
+browser with the same key as Charts' expanded rail (its Collapse folds it
+back). A phone keeps its tab bar. Every icon in the Charts rail names itself
+on hover or focus (`NavHint`), the sync dot included.
+The desk bar holds Menu, Jump to… (⌘K), New plan and the Context toggle; the
 read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
@@ -897,7 +915,7 @@ While the lab is on, **Review my week** sits on the Dashboard header and on a
 Friday's Daily Review (`components/copilot/ReviewMyWeek.tsx`), opening
 `/copilot-lab?context=Review my week` (a Friday's adds `of <its Monday>`) with
 the text in the message box, unsent. On the lab home it sits beside "What
-matters right now?" and sends the turn at once. The system prompt asks the
+matters right now?" (the desk's Briefing and ⌘K) and sends the turn at once. The system prompt asks the
 model to call:
 
 - `get_week_review(week_start?)` (read-only, provenance `saved`;
@@ -1043,7 +1061,7 @@ additive table `practice_goal`).
   - `max_trades_per_day`: trading days with at most the cap of trades opened.
 - `GET /copilot/practice` (owner-only) returns the active goal and its score
   for the week holding today (the week just ended, on a weekend), or no score
-  before its first week. The lab home shows it under Review my week and the
+  before its first week. The desk shows it in the Briefing's session line and the
   Dashboard's Review my week button carries it as a second line:
   "Practicing: exit at my invalidation · 2 of 3 this week" (or "starts Mon,
   Oct 26"). Nothing shows while no goal is active.

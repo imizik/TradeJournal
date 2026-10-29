@@ -5,9 +5,10 @@ import Link from "next/link";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
-import { PracticeLine, WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
-import { WHAT_MATTERS_PROMPT } from "@/lib/copilot";
-import { DESK_GROUPS, getDeskThreads, type DeskDay, type DeskGroup, type DeskThread, type DeskThreads, type DeskTone } from "@/lib/desk";
+import { WHAT_MATTERS_PROMPT, type InvestigationSummary } from "@/lib/copilot";
+import {
+  DESK_GROUPS, getClosedThisWeek, getDeskThreads, type DeskDay, type DeskGroup, type DeskThread, type DeskThreads, type DeskTone,
+} from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
@@ -18,18 +19,22 @@ export const TONE: Record<DeskTone, string> = {
 const BAR: Record<DeskTone, string> = {
   attention: "bg-primary", loss: "bg-rose-400", gain: "bg-emerald-400", info: "bg-foreground", muted: "bg-muted-foreground",
 };
+/** Each group's dot: rose for what needs a decision, sky for what is near or new, amber for what waits on the owner. */
+const DOT: Record<DeskGroup, string> = {
+  pinned: "bg-muted-foreground", act: "bg-rose-400", near: "bg-sky-400", draft: "bg-primary", new: "bg-sky-400", watch: "bg-muted-foreground",
+};
+/** New since you looked and Watching show this many rows, the rest behind "+N more", so a busy day reads as about ten. */
+const SHOWN: Partial<Record<DeskGroup, number>> = { new: 5, watch: 3 };
 const PHASE: Record<NonNullable<DeskDay["phase"]>, string> = { pre: "Pre-market", regular: "Market open", post: "After hours", closed: "Market closed" };
 const SOURCE: Record<string, string> = { positions: "positions", plans: "plans", investigations: "investigations", radar: "Radar", thesis: "thesis watch" };
-/** Shown before the first read and when it fails: the two pinned rows still work. */
+/** Shown before the first read and when it fails: the pinned Briefing still works. Review my week lives in ⌘K and the
+ * Briefing, so the server's pinned week row is not listed. */
 const PINNED: DeskThread[] = [
   { key: "briefing", group: "pinned", symbol: null, title: "Briefing", instrument: null, value: null, meter: null, investigationId: null,
     tradeId: null, radarEventId: null, path: null, changedAt: null, status: { text: "What matters right now? One turn across everything", tone: "muted" } },
-  { key: "week", group: "pinned", symbol: null, title: "Review my week", instrument: null, value: null, meter: null, investigationId: null,
-    tradeId: null, radarEventId: null, path: null, changedAt: null, status: { text: "Planned vs unplanned, follow-through, exits", tone: "muted" } },
 ];
 const ASKS: Record<string, { name: string; prompt: string; hint: string }> = {
   briefing: { name: "What matters right now?", prompt: WHAT_MATTERS_PROMPT, hint: "One copilot turn across your positions, watches and open investigations" },
-  week: { name: "Review my week", prompt: WEEK_REVIEW_CONTEXT, hint: "One copilot turn reviewing your latest trading week: planned vs unplanned, follow-through, alerts and exits" },
 };
 /** A real number sets in the desk's mono face; a word never does. */
 export const numeric = (text: string) => /^[+−-]?\$?\d/.test(text);
@@ -40,6 +45,15 @@ function readSeen(): Record<string, number> {
 }
 function writeSeen(seen: Record<string, number>) {
   try { window.localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch { /* a private window keeps nothing */ }
+}
+
+/** New since you looked, calm: one row per symbol, a Radar hit ahead of thesis news, newest first. A row with no symbol
+ * stands alone. */
+function onePerSymbol(items: DeskThread[]) {
+  const radar = (row: DeskThread) => row.key.startsWith("radar:");
+  const ranked = [...items].sort((a, b) => Number(radar(b)) - Number(radar(a)) || (b.changedAt ?? 0) - (a.changedAt ?? 0));
+  const kept = new Set<string>();
+  return ranked.filter(row => !row.symbol || (!kept.has(row.symbol) && !!kept.add(row.symbol)));
 }
 
 const plain = (event: MouseEvent) => !event.metaKey && !event.ctrlKey && !event.shiftKey && event.button === 0;
@@ -83,7 +97,6 @@ function Row({ row, unread, active, actions, seen }: {
     return (
       <li>
         <button type="button" aria-label={ask.name} className={box} title={ask.hint} onClick={() => actions.ask(ask.prompt)}>{body}</button>
-        {row.key === "week" && <PracticeLine className="px-2.5 pb-1 text-xs text-muted-foreground" />}
       </li>
     );
   const href = row.investigationId ? `/copilot-lab?investigation=${row.investigationId}` : row.path;
@@ -117,13 +130,17 @@ function DayLine({ data }: { data: DeskThreads }) {
  * ``DESK_GROUPS`` order, refreshed each minute while the page is visible. Pinned rows ask in the conversation (only
  * when pressed); a row with an investigation opens it in place, any other follows its deep link. Plan meters show
  * on Act now and Near a trigger only. "New since you looked" is remembered in this browser. ``onRows`` gets the rows in
- * the order shown, for the desk's J / K and its palette. ``phase`` (the day's phase button) sits under the day line.
+ * the order shown, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
+ * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer. ``phase`` (the
+ * day's phase button) sits under the day line.
  */
 export default function ThreadRail({ actions, active = null, onRows, phase = null }: {
   actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void; phase?: ReactNode;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [closed, setClosed] = useState<InvestigationSummary[]>([]);
+  const [more, setMore] = useState<Partial<Record<DeskGroup, boolean>>>({});
   // Rows arrive only after the first client read, so reading the store at first render cannot mismatch the server's.
   const [seen, setSeen] = useState<Record<string, number>>(() => typeof window === "undefined" ? {} : readSeen());
   useEffect(() => {
@@ -135,6 +152,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
       getDeskThreads(signal).then(next => { setData(next); setError(null); }).catch(failure => {
         if (!signal.aborted) setError(failure instanceof Error ? failure.message : "Threads are unavailable.");
       });
+      getClosedThisWeek(signal).then(setClosed).catch(() => { /* the footer is extra */ });
     };
     read();
     const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, REFRESH_MS);
@@ -152,11 +170,14 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
   }), []);
 
   const rows = data?.threads ?? [];
-  const pinned = rows.some(r => r.group === "pinned") ? rows.filter(r => r.group === "pinned") : PINNED;
+  const served = rows.filter(r => r.group === "pinned" && r.key !== "week");
+  const pinned = served.length ? served : PINNED;
   const itemsOf = (id: DeskGroup) => {
     const items = id === "pinned" ? pinned : rows.filter(r => r.group === id);
-    return id === "new" ? [...items.filter(unread), ...items.filter(r => !unread(r))] : items;
+    return id === "new" ? onePerSymbol(items) : items;
   };
+  // Opening a symbol's new row sees everything new on that symbol, folded rows included.
+  const seenRow = (row: DeskThread) => mark(row.group === "new" && row.symbol ? rows.filter(r => r.group === "new" && r.symbol === row.symbol) : [row]);
   const ordered = useMemo(() => DESK_GROUPS.flatMap(g => itemsOf(g.id)), [data, seen]); // eslint-disable-line react-hooks/exhaustive-deps -- rows and unread come from these two
   useEffect(() => { onRows?.(ordered); }, [ordered, onRows]);
   const jumpKey = useJumpKey();
@@ -167,14 +188,18 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
     const fresh = id === "new" ? items.filter(unread).length : 0;
     if (id !== "pinned" && id !== "act" && !items.length) return null;
     if (id === "act" && !data) return null;
+    const limit = SHOWN[id] ?? items.length;
+    const capped = items.length > limit;
+    const shown = capped && !more[id] ? items.slice(0, limit) : items;
     return (
       <section key={id} aria-label={title} className="space-y-0.5">
-        <div className="flex items-baseline gap-2 px-2.5">
+        <div className="flex items-center gap-2 px-2.5">
+          <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[id])} />
           <h3 className={cn("text-[11px] font-medium uppercase tracking-wide", id === "act" && items.length ? "text-primary" : "text-muted-foreground")}>{title}</h3>
-          {id !== "pinned" && items.length > 0 && <span className="text-[11px] tabular-nums text-muted-foreground">{id === "new" ? fresh : items.length}</span>}
           {fresh > 0 && (
-            <button type="button" onClick={() => mark(items)} className="-my-3 ml-auto min-h-11 px-1 text-[11px] text-muted-foreground hover:text-foreground sm:my-0 sm:min-h-0">Mark seen</button>
+            <button type="button" onClick={() => mark(rows.filter(r => r.group === "new"))} className="-my-3 min-h-11 px-1 text-[11px] text-muted-foreground hover:text-foreground sm:my-0 sm:min-h-0">Mark seen</button>
           )}
+          {id !== "pinned" && items.length > 0 && <span className="ml-auto text-[11px] tabular-nums text-muted-foreground" aria-label={`${items.length} ${items.length === 1 ? "thread" : "threads"}`}>{items.length}</span>}
         </div>
         {id === "act" && !items.length ? (
           <p className="px-2.5 py-1 text-xs text-muted-foreground">
@@ -182,11 +207,17 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
           </p>
         ) : (
           <ul className="space-y-0.5">
-            {items.map(row => (
-              <Row key={row.key} row={row} unread={unread(row)} actions={actions} seen={r => mark([r])}
+            {shown.map(row => (
+              <Row key={row.key} row={row} unread={unread(row)} actions={actions} seen={seenRow}
                 active={!!active && row.investigationId === active} />
             ))}
           </ul>
+        )}
+        {capped && (
+          <button type="button" aria-expanded={!!more[id]} onClick={() => setMore(open => ({ ...open, [id]: !open[id] }))}
+            className="min-h-11 w-full rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">
+            {more[id] ? "Show fewer" : <>+<span className="tabular-nums">{items.length - limit}</span> more</>}
+          </button>
         )}
       </section>
     );
@@ -201,6 +232,28 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
       {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}
+      {closed.length > 0 && (
+        <details className="group border-t pt-2">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center rounded-md px-2.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8 [&::-webkit-details-marker]:hidden">
+            Closed this week<span className="ml-auto tabular-nums">{closed.length}</span>
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {closed.map(row => (
+              <li key={row.id}>
+                <Link href={`/copilot-lab?investigation=${row.id}`} title={row.title}
+                  onClick={event => { if (plain(event)) { event.preventDefault(); actions.open(row.id); } }}
+                  className={cn("block min-h-11 rounded-md px-2.5 py-1.5 text-sm hover:bg-secondary", active === row.id && "bg-secondary ring-1 ring-border")}>
+                  <span className="flex min-w-0 items-baseline gap-1.5">
+                    <span className="shrink-0 font-semibold text-foreground">{row.symbol ?? row.title}</span>
+                    {row.symbol && <span className="min-w-0 truncate text-xs text-muted-foreground">{row.title}</span>}
+                  </span>
+                  {row.conclusion && <span className="block truncate text-xs text-muted-foreground">{row.conclusion}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <p data-testid="desk-keys" className="hidden items-center gap-1 whitespace-nowrap border-t px-2.5 pt-3 text-[11px] text-muted-foreground md:flex">
         <kbd className={KBD}>J</kbd><kbd className={KBD}>K</kbd>move<kbd className={cn(KBD, "ml-1.5")}>{jumpKey}</kbd>jump
         <kbd className={cn(KBD, "ml-1.5")}>N</kbd>plan<kbd className={cn(KBD, "ml-1.5")}>]</kbd>context

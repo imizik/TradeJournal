@@ -72,13 +72,13 @@ test("Daily Review offers it on a Friday, naming that week, and not on other day
   await expect(page.getByRole("link", { name: "Review my week" })).toHaveCount(0);
 });
 
-test("the lab home's Review my week sends one turn and shows the week review tool", async ({ page }) => {
+test("the Briefing's Review my week sends one turn and shows the week review tool", async ({ page }) => {
   const chats = await labOn(page);
   await page.goto("/copilot-lab");
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
   expect(chats).toHaveLength(0);
-  await home.getByRole("button", { name: "Review my week" }).click();
+  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
   await expect(page.getByText("Planned vs unplanned first.")).toBeVisible();
   expect(chats).toHaveLength(1);
   expect(chats[0].messages.at(-1)?.content).toContain("Review my week");

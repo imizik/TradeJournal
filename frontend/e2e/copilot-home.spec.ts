@@ -106,7 +106,7 @@ test("on a phone the desk shows one pane at a time, and opening a thread moves t
   expect(chats).toEqual([]);
 });
 
-test("the list says so when its read fails, and the pinned rows still work", async ({ page }) => {
+test("the list says so when its read fails, and the Briefing and Review my week still work", async ({ page }) => {
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ status: 503, json: { detail: "Copilot Lab is off." } }));
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -114,5 +114,34 @@ test("the list says so when its read fails, and the pinned rows still work", asy
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
   await expect(threads.getByRole("button", { name: "What matters right now?" })).toBeEnabled();
-  await expect(threads.getByRole("button", { name: "Review my week" })).toBeEnabled();
+  await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
+  await expect(page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
+});
+
+test("on a wide screen the app's navigation folds into the desk bar's Menu, and keeping the sidebar open is remembered", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await lab(page);
+  const desk = page.getByRole("heading", { name: "Desk", level: 1 });
+  await expect(desk).toBeVisible();
+  // No icon rail and no sidebar: the desk starts at the left edge.
+  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeHidden();
+  expect((await page.getByRole("navigation", { name: "Thread list" }).boundingBox())!.x).toBeLessThan(40);
+  const menu = page.getByRole("button", { name: "Open menu" }).first();
+  await menu.click();
+  const dialog = page.getByRole("dialog", { name: "Menu" });
+  for (const name of ["Desk", "Dashboard", "Charts", "Radar", "Strategy Lab"]) await expect(dialog.getByRole("link", { name, exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("desk-menu-1440.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await menu.click();
+  await dialog.getByRole("button", { name: "Keep the sidebar open" }).click();
+  await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open menu" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await expect(page.getByRole("button", { name: "Open menu" }).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
 });
