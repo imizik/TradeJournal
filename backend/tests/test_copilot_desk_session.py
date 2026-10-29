@@ -5,18 +5,19 @@ from readers that already exist. Owner-only, refused while the lab is off, read-
 from datetime import UTC, datetime, timedelta
 import json
 from types import SimpleNamespace
+import uuid
 
 from sqlmodel import Session, select
 
 from app.engine import day_replay
 from app.engine.chart_feed import chart_feed
 from app.engine.radar_store import RadarStore
-from app.models import DayJournalEntry, PhonePing, PremarketPrep
-from app.routers import copilot_desk
+from app.models import DayJournalEntry, PhonePing, PositionAlert, PositionAlertFeedback, PremarketPrep
+from app.routers import copilot_desk, position_alerts, radar
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
 from tests.test_copilot_desk import desk  # noqa: F401  (the desk app over the shared fixtures)
 from tests.test_copilot_plans import APLD, NBIS, T0, WED, engine, quotes, time_stop  # noqa: F401  (fixtures)
-from tests.test_today import RADAR_EVENT, UUID_RE, buy, clock, marks  # noqa: F401  (fixtures)
+from tests.test_today import RADAR_EVENT, ROTH, UUID_RE, buy, clock, marks  # noqa: F401  (fixtures)
 
 OPEN = int(datetime(2026, 10, 21, 13, 30, tzinfo=UTC).timestamp())  # 9:30 New York
 CLOSE = int(datetime(2026, 10, 21, 20, 0, tzinfo=UTC).timestamp())  # 16:00
@@ -108,6 +109,63 @@ def test_no_ids_out(desk, engine):  # noqa: F811
     time_stop(engine, NBIS, "NBIS")
     text = json.dumps(read(desk))
     assert UUID_RE.findall(text) == [] and "gmail:" not in text and "card-1" not in text
+
+
+def sent(db, key, kind, minute, delivery="sent", answer=None, generation=0):
+    alert = PositionAlert(account_id=ROTH, source_key=key, kind=kind, generation=generation, trade_id=uuid.uuid4(),
+                          contract=f"{'APLD' if key == 'gmail:501' else 'NBIS'} 10/23/26 100C", contracts=2, avg_cost=310,
+                          delivery=delivery, detected_at=T0 + timedelta(minutes=minute))
+    db.add(alert)
+    if answer:
+        db.flush()
+        db.add(PositionAlertFeedback(alert_id=alert.id, rating=answer, version=1, created_at=T0, updated_at=T0))
+    return str(alert.id)
+
+
+def test_what_waits_on_an_answer_counts_as_proof_does(desk, engine, tmp_path, monkeypatch):  # noqa: F811
+    nbis, apld = buy(engine, 500), buy(engine, 501, "APLD")
+    with Session(engine) as db:
+        waiting = sent(db, "gmail:500", "giveback", 31)
+        answered = sent(db, "gmail:500", "hold_hour", 60, answer="already_aware")
+        older = sent(db, "gmail:501", "expiry_final", -1200, delivery="unknown")
+        sent(db, "gmail:501", "expiry_first", -1300, answer="prompted_review")  # answered before today: counted, not listed
+        sent(db, "gmail:500", "giveback", 20, delivery="expired", generation=1)  # never sent: outside the proof's scope
+        sent(db, "gmail:999", "giveback", -1400)  # its position left the journal: counted, not answerable here
+        db.commit()
+    path = tmp_path / "radar.sqlite"
+    monkeypatch.setenv("RADAR_ENABLED", "true")
+    monkeypatch.setenv("RADAR_STORE", str(path))
+    store = RadarStore(path)
+    version = {"rule_version": "radar-rules-v0"}
+    store.append_event({**RADAR_EVENT, "event_id": "old-rules"})  # an earlier rule version: outside the proof's scope
+    store.append_event({**RADAR_EVENT, **version, "event_id": "yesterday-rated"})
+    store.append_event({**RADAR_EVENT, **version, "event_id": "yesterday-unrated", "first_seen_at": "2026-10-20T16:00:00.000Z"})
+    store.append_event({**RADAR_EVENT, **version, "event_id": "today-1", "session_date": "2026-10-21", "first_seen_at": "2026-10-21T14:12:04.000Z"})
+    store.append_feedback("yesterday-rated", "useful", "2026-10-20T20:00:00Z")
+
+    body = read(desk)["to_answer"]
+    assert body["alerts"]["count"] == 3
+    assert [(r["id"], r["trade_id"], r["symbol"], r["kind"], r["today"]) for r in body["alerts"]["rows"]] == [
+        (answered, nbis, "NBIS", "hold_hour", True), (waiting, nbis, "NBIS", "giveback", True), (older, apld, "APLD", "expiry_final", False)]
+    assert body["alerts"]["rows"][0]["feedback"]["rating"] == "already_aware" and body["alerts"]["rows"][1]["feedback"] is None
+    assert body["radar"]["count"] == 2
+    assert [(r["event_id"], r["symbol"], r["kind"], r["today"], r["rating"]) for r in body["radar"]["rows"]] == [
+        ("today-1", "MU", "vs sector", True, None), ("yesterday-unrated", "MU", "vs sector", False, None)]
+
+    # The same answers move the counts, through the routes the trade page and the Radar feed save with.
+    desk.app.include_router(position_alerts.router, prefix="/trades")
+    desk.app.include_router(radar.router, prefix="/radar")
+    assert desk.put(f"/trades/{nbis}/phone-alerts/{waiting}/feedback", json={"rating": "too_late", "base_version": 0}).status_code == 200
+    assert desk.post("/radar/events/today-1/feedback", json={"rating": "too_late"}).status_code == 200
+    body = read(desk)["to_answer"]
+    assert (body["alerts"]["count"], body["radar"]["count"]) == (2, 1)
+    assert body["radar"]["rows"][0]["rating"] == "too_late"
+
+
+def test_nothing_to_answer_while_radar_is_off(desk):  # noqa: F811
+    body = read(desk)
+    assert body["to_answer"] == {"alerts": {"count": 0, "rows": []}, "radar": None}
+    assert (body["sections"]["alerts_to_answer"], body["sections"]["radar_to_rate"]) == ("ok", "off")
 
 
 def test_refused_while_the_lab_is_off(desk, monkeypatch):  # noqa: F811

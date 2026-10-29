@@ -2,18 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { CalendarCheck } from "lucide-react";
+import { BriefingToAnswer } from "@/components/copilot/ProofAnswers";
 import WatchDayLink from "@/components/replay/WatchDayLink";
 import { HELD, clock, type Today } from "@/components/today/TodayView";
 import { apiUrl } from "@/lib/api";
+import type { DeskSession } from "@/lib/desk";
 
 const BUTTON = "inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground hover:text-foreground sm:min-h-8";
 
 /**
  * What the Today screen showed that the Briefing did not, now that the desk is home: pings the notification policy held
  * back today (merged, quiet window or over the daily cap), behind a disclosure, and today's replay when a clip is kept.
- * One read of ``GET /today`` when the Briefing opens. Review my week (one turn, ``onReviewWeek``) sits beside them.
+ * One read of ``GET /today`` when the Briefing opens. Review my week (one turn, ``onReviewWeek``) sits beside them. First,
+ * the alerts and Radar hits still waiting on an answer for /proof (the session read's ``to_answer``), answered in place.
  */
-export default function BriefingExtras({ onReviewWeek }: { onReviewWeek(): void }) {
+export default function BriefingExtras({ onReviewWeek, toAnswer }: { onReviewWeek(): void; toAnswer?: DeskSession["to_answer"] }) {
   const [body, setBody] = useState<Pick<Today, "day" | "held"> | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -25,6 +28,7 @@ export default function BriefingExtras({ onReviewWeek }: { onReviewWeek(): void 
   const held = body?.held.state === "ok" && body.held.count > 0 ? body.held : null;
   return (
     <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2 border-b pb-4 text-sm" data-testid="briefing-extras">
+      <BriefingToAnswer toAnswer={toAnswer} />
       {held && (
         <details className="min-w-0 flex-1">
           <summary className="w-fit cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">

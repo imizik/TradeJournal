@@ -45,7 +45,7 @@ levels and meter are on the underlying, and the status line says so by naming it
 ``GET /copilot/desk/scorecard`` is the alert scorecard (``app/engine/alert_scorecard.py``), with the Radar scorecard
 (``app/engine/radar_scorecard.py``) under ``radar``.
 ``GET /copilot/desk/session`` (at the end) is the Briefing's session timeline: today's regular session and what
-happened in it, from the same kind of existing readers.
+happened in it, from the same kind of existing readers, and the alerts and Radar hits still waiting on an answer.
 """
 
 from datetime import UTC, datetime
@@ -55,6 +55,7 @@ import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
 from app.ai import copilot
@@ -579,6 +580,7 @@ def desk_threads(db: Session = Depends(get_session)):
 
 INDICES = ("SPY", "QQQ", "VIX")  # VIX through the chart feed's index mapping (chart_indices)
 MAX_EVENTS = 80
+TO_ANSWER_ROWS = 20  # each answer list: today's, then the newest still waiting
 
 
 def _utc_epoch(moment: datetime) -> int:
@@ -648,6 +650,60 @@ def _time_stops(db: Session, now: float) -> dict:
     return {"state": "ok", "rows": [{"symbol": r.symbol, "at": _utc_epoch(r.due_at), "clock": _clock(_utc_epoch(r.due_at))} for r in found]}
 
 
+def _alert_trades(db: Session, alerts: list) -> dict:
+    """Each alert's current trade, by its position's identity (``position_alerts.anchor``: the first entry fill's source
+    key), the one the feedback route binds it to; the stored ``trade_id`` may predate a rebuild."""
+    from app.models import Fill, TradeFill
+    keys = {a.source_key for a in alerts}
+    if not keys:
+        return {}
+    ids = []
+    for key in keys:
+        try:
+            ids.append(uuid.UUID(key))
+        except ValueError:
+            pass  # a source id, not a fill id
+    found = db.exec(select(TradeFill.trade_id, Fill.account_id, Fill.raw_email_id, Fill.id).join(Fill, Fill.id == TradeFill.fill_id)
+                    .where(TradeFill.role == "entry", or_(col(Fill.raw_email_id).in_(keys), col(Fill.id).in_(ids)))).all()
+    return {(account, key): str(trade_id) for trade_id, account, email, fill in found for key in (email, str(fill)) if key in keys}
+
+
+def _alerts_to_answer(db: Session, now: float) -> dict:
+    """Position alerts for the owner's feedback, in /proof's scope (``exit_habits.build``): ``count`` is every sent or
+    delivery-unconfirmed alert with no feedback yet. ``rows`` are today's (answered or not), then the newest still
+    unanswered, each with the trade its feedback is saved against; one whose position is no longer in the journal is left out."""
+    from app.engine import alert_feedback, notification_policy as policy
+    from app.models import PositionAlert
+    alerts = db.exec(select(PositionAlert).where(col(PositionAlert.delivery).in_(alert_feedback.ELIGIBLE_DELIVERIES))
+                     .order_by(col(PositionAlert.detected_at).desc())).all()
+    feedback = alert_feedback.for_alerts(db, [a.id for a in alerts])
+    start, _end = policy.day_bounds(now)
+    shown = [a for a in alerts if a.detected_at >= start or a.id not in feedback][:TO_ANSWER_ROWS]
+    trades = _alert_trades(db, shown)
+    rows = [{"id": str(a.id), "trade_id": trades[(a.account_id, a.source_key)], "symbol": (a.contract or "").split(" ")[0],
+             "contract": a.contract, "kind": a.kind, "at": _utc_epoch(a.detected_at), "today": a.detected_at >= start,
+             "feedback": feedback.get(a.id)} for a in shown if (a.account_id, a.source_key) in trades]
+    return {"state": "ok", "count": len(alerts) - len(feedback), "rows": rows}
+
+
+def _hits_to_rate(day) -> dict:
+    """Radar events for the owner's rating, in /proof's scope (``radar_proof.build``): ``count`` is the events of the newest
+    rule version not rated yet. ``rows`` are today's (rated or not), then the newest still unrated."""
+    from app.routers import radar
+    store, _reason = radar._store(read_only=True)
+    if store is None:
+        return {"state": "off"}
+    events = sorted(store.events(), key=lambda e: _epoch(e.get("first_seen_at")) or 0, reverse=True)
+    version = events[0]["rule_version"] if events else None
+    events = [e for e in events if e["rule_version"] == version]
+    rated = store.latest_ratings()
+    session = day.isoformat()
+    shown = [e for e in events if e["session_date"] == session or e["event_id"] not in rated][:TO_ANSWER_ROWS]
+    rows = [{"event_id": e["event_id"], "symbol": (e.get("symbols") or [None])[0], "kind": RADAR_KIND.get(e.get("kind"), ""),
+             "at": _epoch(e.get("first_seen_at")), "today": e["session_date"] == session, "rating": rated.get(e["event_id"])} for e in shown]
+    return {"state": "ok", "count": sum(e["event_id"] not in rated for e in events), "rows": rows}
+
+
 def _indices() -> dict:
     from app.engine.chart_feed import chart_feed
     rows, _at, issue = chart_feed.quote_rows(list(INDICES))
@@ -660,8 +716,10 @@ def _indices() -> dict:
 def desk_session(db: Session = Depends(get_session)):
     """The Briefing's day at a glance (docs/copilot-lab.md § The desk): today's regular session, what happened in it
     (fills, phone pings sent, Radar events, logged decisions), the time stops still ahead, the pings against the daily
-    cap, the pre-market prep and SPY/QQQ/VIX. Composed from readers that already exist; each source fails on its own.
-    Read-only, owner-only, refused while the lab is off; no ids out."""
+    cap, the pre-market prep and SPY/QQQ/VIX, and under ``to_answer`` the position alerts and Radar hits still waiting
+    on the owner's answer for /proof. Composed from readers that already exist; each source fails on its own.
+    Read-only, owner-only, refused while the lab is off. The only ids out are the ``to_answer`` rows' alert, trade and
+    Radar event ids, each the target of its own answer."""
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     now = today._now()
@@ -675,6 +733,8 @@ def desk_session(db: Session = Depends(get_session)):
     stops = today._section(db, "session time stops", lambda: _time_stops(db, now))
     prep = today._section(db, "session prep", lambda: today._prep(db, day))
     indices = today._section(db, "session indices", _indices)
+    alerts_due = today._section(db, "session alerts to answer", lambda: _alerts_to_answer(db, now))
+    hits_due = today._section(db, "session radar to rate", lambda: _hits_to_rate(day))
     events = sorted((row for part in (fills, pings, radar, decisions) for row in part.get("rows", [])), key=lambda r: r["at"])
     written = (prep.get("prep") or {})
     return {
@@ -684,9 +744,12 @@ def desk_session(db: Session = Depends(get_session)):
         "pings": {k: pings[k] for k in ("sent", "held", "cap")} if pings["state"] == "ok" else None,
         "prep": {"at": _epoch(written.get("at")), "line": (written.get("lines") or [None])[0]} if written else None,
         "indices": indices.get("rows", []), "quote_issue": indices.get("issue"),
+        "to_answer": {name: {"count": part["count"], "rows": part["rows"]} if part["state"] == "ok" else None
+                      for name, part in (("alerts", alerts_due), ("radar", hits_due))},
         "sections": {name: part["state"] for name, part in (
             ("hours", regular), ("phase", phase), ("fills", fills), ("pings", pings), ("radar", radar),
-            ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices))},
+            ("decisions", decisions), ("time_stops", stops), ("prep", prep), ("indices", indices),
+            ("alerts_to_answer", alerts_due), ("radar_to_rate", hits_due))},
     }
 
 
