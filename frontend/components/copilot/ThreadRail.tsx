@@ -26,7 +26,7 @@ const DOT: Record<DeskGroup, string> = {
 /** New since you looked and Watching show this many rows, the rest behind "+N more", so a busy day reads as about ten. */
 const SHOWN: Partial<Record<DeskGroup, number>> = { new: 5, watch: 3 };
 const PHASE: Record<NonNullable<DeskDay["phase"]>, string> = { pre: "Pre-market", regular: "Market open", post: "After hours", closed: "Market closed" };
-const SOURCE: Record<string, string> = { positions: "positions", plans: "plans", investigations: "investigations", radar: "Radar", thesis: "thesis watch" };
+const SOURCE: Record<string, string> = { positions: "positions", plans: "plans", investigations: "investigations", drafts: "waiting cards", radar: "Radar", thesis: "thesis watch" };
 /** Shown before the first read and when it fails: the pinned Briefing still works. Review my week lives in ⌘K and the
  * Briefing, so the server's pinned week row is not listed. */
 const PINNED: DeskThread[] = [

@@ -191,8 +191,16 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     unless the invalidation was hit after it.
   - **Near a trigger**: armed plans not yet in a position within 1% of their
     entry or invalidation.
-  - **Waiting for you**: unarmed plan drafts. No store keeps them yet, so it
-    stays hidden.
+  - **Waiting for you**: the owner's open conversations with plan or alert
+    cards (`trade_plan`, `watch`; a plan card carries its time stop) still
+    waiting on Confirm or Dismiss, read from each saved transcript (a card
+    with no `outcome`), newest first. The value is "N to confirm" (amber),
+    the status the first waiting card ("Alert · APLD crosses 31.20", "Plan ·
+    APLD long calls · entry crosses 31.20"). A row opens the conversation in
+    place, on its cards: only a card's own Confirm makes anything. A
+    conversation already shown as an armed plan or a position stays there,
+    a waiting one leaves Watching, and a research job's cards are not read.
+    Hidden when nothing waits.
   - **New since you looked**: Radar events since the last Radar visit and
     the newest thesis-watch trigger today per investigation, one row per
     symbol (a Radar hit ahead of thesis news, newest first), five shown and
