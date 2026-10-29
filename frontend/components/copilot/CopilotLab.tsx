@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
+import { Menu, MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
+import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
@@ -45,6 +46,7 @@ function typing(target: EventTarget | null) {
 export default function CopilotLab({ link = null }: { link?: PanelLink | null }) {
   const on = useCopilotOn();
   const router = useRouter();
+  const navFolded = useFoldedNav();
   // A deep link (a ping, a Radar row, a chip) opens on its conversation, so a phone's composer is on the first screen.
   const [tab, setTab] = useState<DeskTab>(link ? "thread" : "now");
   const [command, setCommand] = useState<DeskCommand | null>(null);
@@ -152,6 +154,13 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
+        {/* A wide screen folds the app's navigation into this button, so the desk has the full width; a phone keeps its tabs. */}
+        {navFolded && (
+          <button type="button" onClick={openNavMenu} aria-label="Open menu" title="All pages, sync and the plan streak"
+            className="-ml-1.5 hidden h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground md:inline-flex">
+            <Menu size={15} aria-hidden />Menu
+          </button>
+        )}
         <h1 className={styles.title}><MessagesSquare size={17} aria-hidden />Desk</h1>
         {on && (
           <div className={styles.barActions}>

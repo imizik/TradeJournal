@@ -4,7 +4,7 @@ import { useAppAccess } from "@/components/AccessProvider";
 import Link, { useLinkStatus } from "next/link";
 import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanStreakChip from "@/components/PlanStreak";
@@ -23,8 +23,24 @@ function Pending({ corner = false }: { corner?: boolean }) {
     className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-primary transition-opacity", pending ? "animate-pulse opacity-100" : "opacity-0", corner ? "absolute right-1 top-1" : "ml-auto")} />;
 }
 
-/** Whether the charts page shows the full sidebar instead of the icon rail, on this device only (C7.3). */
+/** Whether the charts page and the desk show the full sidebar instead of the icon rail (or the desk's Menu button), on
+ * this device only (C7.3). */
 const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
+
+// On the desk the rail folds into one Menu button in the desk bar, so the desk gets the full width: the bar reads whether
+// the navigation is folded and opens the menu through this small store.
+let folded = false;
+let opener: (() => void) | null = null;
+const foldListeners = new Set<() => void>();
+function setFolded(next: boolean) {
+  if (folded === next) return;
+  folded = next;
+  foldListeners.forEach(listener => listener());
+}
+const subscribeFolded = (listener: () => void) => { foldListeners.add(listener); return () => { foldListeners.delete(listener); }; };
+/** True while the navigation is folded into the desk bar's Menu button (a wide screen on the desk, rail not expanded). */
+export const useFoldedNav = () => useSyncExternalStore(subscribeFolded, () => folded, () => false);
+export const openNavMenu = () => opener?.();
 
 /** The sidebar's pages; ``heading`` starts a new group (everyday pages come first, without one). */
 const navItems: { href: string; label: string; icon: typeof Bot; heading?: string }[] = [
@@ -77,10 +93,12 @@ function SyncStatusDot() {
   const { label, dot } = SYNC_STATUS[health.status];
   const text = health.action === "reconnect_gmail" ? "Gmail disconnected" : label;
   return (
-    <span role="status" title={`${text}. ${health.message}`} className="flex h-6 w-10 items-center justify-center">
-      <span className={cn("inline-block h-2 w-2 rounded-full", dot)} />
-      <span className="sr-only">{text}</span>
-    </span>
+    <NavHint label={`${text}. ${health.message}`}>
+      <span role="status" className="flex h-6 w-10 items-center justify-center">
+        <span className={cn("inline-block h-2 w-2 rounded-full", dot)} />
+        <span className="sr-only">{text}</span>
+      </span>
+    </NavHint>
   );
 }
 
@@ -228,7 +246,14 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
     setWide(next);
     try { localStorage.setItem(CHARTS_NAV_KEY, next ? "expanded" : "collapsed"); } catch { /* remembered for this visit only */ }
   };
-  const rail = chartsRoute && !wide;
+  // The desk folds the rail into its bar's Menu button; the full sidebar still shows when this device asked for it.
+  const deskMenu = pathname === "/copilot-lab" && !wide;
+  const rail = chartsRoute && !wide && !deskMenu;
+  useEffect(() => {
+    setFolded(deskMenu);
+    opener = () => setMenuOpen(true);
+    return () => { setFolded(false); opener = null; };
+  }, [deskMenu]);
 
   // A tap on a link should land on the page, not leave the menu covering it.
   useEffect(() => setMenuOpen(false), [pathname]);
@@ -253,7 +278,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       </header>
 
       {menuOpen && (
-        <div role="dialog" aria-modal="true" aria-label="Menu" className="fixed inset-0 z-50 md:hidden">
+        <div role="dialog" aria-modal="true" aria-label="Menu" className={cn("fixed inset-0 z-50", !deskMenu && "md:hidden")}>
           <div className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} aria-hidden />
           <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-card p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="mb-6 flex items-start justify-between gap-2">
@@ -263,6 +288,11 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
                 {owner && <PlanStreakChip variant="menu" onNavigate={() => setMenuOpen(false)} />}
                 {/* The charts page hides the phone title bar; the Sync drawer stays reachable here. */}
                 {owner && <div className="mt-2 -ml-2"><SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => { setMenuOpen(false); setPanelOpen(true); }} /></div>}
+                {/* The desk's wide-screen menu: the remembered choice to keep the labelled sidebar open instead. */}
+                {deskMenu && <button onClick={() => { setMenuOpen(false); expand(true); }}
+                  className="mt-1 -ml-2 hidden min-h-11 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground md:flex md:min-h-8">
+                  <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden />Keep the sidebar open
+                </button>}
               </div>
               <button
                 onClick={() => setMenuOpen(false)}
@@ -312,7 +342,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       )}
 
       {/* Desktop sidebar */}
-      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-card p-4", !rail && "md:flex")}>
+      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-card p-4", !rail && !deskMenu && "md:flex")}>
         <div className="mb-6 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
