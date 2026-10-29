@@ -116,12 +116,14 @@ export function FillsToLink({ count, onStart }: { count: number; onStart(): void
 /**
  * The desk's fills waiting to link (``fillsToLink``, less those answered here): ``bar(symbol)`` is the bar for the open
  * symbol's thread, ``start`` opens the first through ``pick`` and each answer then opens the next, ``linked`` counts the
- * links made (the desk remounts its thread top on it). ``read`` asks the list to read again.
+ * links made (the desk remounts its thread top on it) and ``answeredHere`` the fills answered on this page. ``answer``
+ * and ``titles`` serve a bar shown elsewhere (Close the day's). ``read`` asks the list to read again.
  */
 export function useFillLinks(rows: DeskThread[], pick: (row: DeskThread) => void, read: () => void) {
   const [answered, setAnswered] = useState<string[]>([]); // linked or No plan here, before the list reads it back
   useEffect(() => { setAnswered(readNoPlan()); }, []); // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
   const [linked, setLinked] = useState(0);
+  const [answeredHere, setAnsweredHere] = useState(0);
   const passing = useRef(false);
   useEffect(() => {
     try { passing.current = window.sessionStorage.getItem(PASS_KEY) === "1"; } catch { /* no pass to resume */ }
@@ -137,6 +139,7 @@ export function useFillLinks(rows: DeskThread[], pick: (row: DeskThread) => void
     const now = how === "no_plan" ? saveNoPlan(tradeId) : [tradeId];
     setAnswered(current => [...new Set([...current, ...now])]);
     if (how === "linked") setLinked(n => n + 1);
+    setAnsweredHere(n => n + 1);
     read();
     const [next] = fillsToLink(rows, [...answered, ...now]);
     if (passing.current && next) pick(next);
@@ -146,5 +149,5 @@ export function useFillLinks(rows: DeskThread[], pick: (row: DeskThread) => void
     const tradeId = symbol ? waiting.find(r => r.symbol === symbol)?.fillToLink : null;
     return tradeId ? <FillLinkBar key={tradeId} tradeId={tradeId} titles={titles} onDone={done} /> : null;
   };
-  return { waiting, start, bar, linked };
+  return { waiting, start, bar, linked, answer: done, titles, answeredHere };
 }
