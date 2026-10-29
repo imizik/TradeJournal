@@ -327,10 +327,12 @@ test("the evening review ping's link (?close=1) opens the desk on Close the day"
   expect(chats).toEqual([]);
 });
 
-test("the close link with nothing left to review puts the day's question in the box; before the close it opens the desk as usual", async ({ page }) => {
+test("the close link with nothing left to review, or before the close, opens the desk as usual", async ({ page }) => {
   await lab(page, { time: new Date("2026-10-23T20:30:00Z"), path: "/copilot-lab?close=1", // 16:30 New York, no close question
     session: { ...SESSION, now: epoch("2026-10-23T20:30:00Z"), phase: "post", time_stops: [] } });
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Close the day: /);
+  await expect(page.getByRole("navigation", { name: "Thread list" }).getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("");
+  await expect(page).toHaveURL(/\/copilot-lab\?close=1$/);
   await page.clock.setSystemTime(NOW); // 11:00 New York
   await page.goto("/copilot-lab?close=1");
   await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();

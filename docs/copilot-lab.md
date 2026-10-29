@@ -690,7 +690,8 @@ or Skip opens the next; the last one ends it. With none left it puts the
 day's question in the message box, unsent. Nothing is sent to the model. The
 Briefing's line says "N of M reviewed" (one per symbol). `/copilot-lab?close=1`
 (the [evening review ping](#phone-ping-policy)'s link) starts the pass once the
-list has read, after 16:00 only; any other time it opens the desk as usual. Browser proof:
+list has read, after 16:00 only, opening the first unreviewed thread by its
+link; with none left, or any other time, it opens the desk as usual. Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
 

@@ -136,14 +136,16 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     else fill(CLOSE_PROMPT);
   }, [rows, review, fill, setClosing]);
   // ``?close=1`` (the evening review ping) starts the pass once the list has read, after the close. Its first step is a
-  // page load of that thread's link, so the conversation opens on its own load (the pass carries on in this tab).
+  // page load of that thread's link, so the conversation opens on its own load (the pass carries on in this tab). With
+  // none left to review the desk just opens.
   const closeLink = useRef(close);
   useEffect(() => {
     if (!closeLink.current || !rows.length || dayPhase !== "close") return;
     closeLink.current = false;
     const [next] = toReview(rows, nyDay());
-    setClosing(!!next);
-    window.location.replace(!next ? copilotLabHref("", CLOSE_PROMPT) : next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
+    if (!next) return;
+    setClosing(true);
+    window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
       : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
   }, [rows, dayPhase, setClosing]);
   const onReviewed = useCallback((symbol: string) => {
