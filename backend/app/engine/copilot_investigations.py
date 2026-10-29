@@ -57,6 +57,7 @@ class PlanFields(_Strict):
     invalidation: str = Field("", max_length=24)
     time_stop: str = Field("", max_length=80)
     size_note: str = Field("", max_length=120)
+    horizon: Literal["", "day", "swing", "long"] = ""  # how often the desk checks in (day_journal.HORIZONS)
 
 
 class ProposalOutcome(_Strict):

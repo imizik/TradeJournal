@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, type DayJournalEntry, type DayJournalWrite } from "@/lib/api";
-import { getSymbolLoop } from "@/lib/copilot";
-import { afterClose, decisionChoice, deskDecision, reviewSkipped, skipReview, type DeskActRow, type DeskDecision } from "@/lib/desk";
+import { afterClose, decisionChoice, deskDecision, reviewSkipped, skipReview, type DeskActRow, type DeskDecision, type DeskThread } from "@/lib/desk";
 
 const REFRESH_MS = 60_000;
 /** Journal entries are immutable, so Undo is this window before the save is sent. */
@@ -13,7 +12,8 @@ const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZo
 
 type TodayBody = { as_of: string; day: string; act_now: { state: "ok"; rows: DeskActRow[] } | { state: "unavailable" } };
 type Pending = { write: DayJournalWrite; choice: DeskDecision["choice"] };
-type Review = { kind: "position" | "plan" };
+/** "Want a plan for this?": the answers, saved as the ``plan_ask`` entry's text. */
+const PLAN_IT = "Planning it", NOT_NOW = "No plan for now";
 
 const BUTTON = "min-h-11 w-full rounded px-4 text-sm font-medium sm:w-auto sm:min-h-9";
 
@@ -26,18 +26,20 @@ function save(day: string, write: DayJournalWrite, keepalive = false) {
 /**
  * The open thread's decision bar (docs/copilot-lab.md#the-desk). While the market is open and the thread's position has an
  * Act-now reason (``GET /today``), it says what fired and what the plan says, and logs Holding or Exiting as a ``decision``
- * day-journal entry after a short Undo window. After the close it asks one review question instead and saves the answer
- * as a ``reflection``. Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message
- * box, unsent. ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest
- * of the thread (the plan ladder shrinks to one line while it asks). ``onReviewed`` hears the review answered or
- * skipped, so the desk's close pass can move on.
+ * day-journal entry after a short Undo window. After the close it asks the thread list row's close question (``close``:
+ * its horizon decides whether there is one today) and saves the answer as a ``reflection``; a position with no plan is
+ * asked "Want a plan for this?" once, its answer saved as a ``plan_ask`` entry, and Plan it opens planning it (``plan``).
+ * Advice only: Exiting never places, sizes or sends an order. ``fill`` puts a question in the message box, unsent.
+ * ``onActive`` reports whether the bar is asking for a decision right now, so the desk can quiet the rest of the thread
+ * (the plan ladder shrinks to one line while it asks). ``onReviewed`` hears the review answered or skipped, so the
+ * desk's close pass can move on.
  */
-export default function DecisionBar({ symbol, fill, onActive, onReviewed }: {
-  symbol: string | null; fill(text: string): void; onActive?(asking: boolean): void; onReviewed?(symbol: string): void;
+export default function DecisionBar({ symbol, close = null, fill, plan, onActive, onReviewed }: {
+  symbol: string | null; close?: DeskThread["close"]; fill(text: string): void; plan?(): void; onActive?(asking: boolean): void;
+  onReviewed?(symbol: string): void;
 }) {
   const [today, setToday] = useState<TodayBody | null>(null);
   const [entries, setEntries] = useState<DayJournalEntry[]>([]);
-  const [review, setReview] = useState<Review | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [sending, setSending] = useState(false); // past the Undo window: the save is on its way
   const [error, setError] = useState<string | null>(null);
@@ -57,15 +59,7 @@ export default function DecisionBar({ symbol, fill, onActive, onReviewed }: {
     if (signal?.aborted) return;
     setToday(body);
     setEntries(journal.entries);
-    if (afterClose(body.as_of)) {
-      setSkipped(reviewSkipped(body.day, symbol)); // no storage: the prompt shows
-      const loop = await getSymbolLoop(symbol, signal).catch(() => null);
-      if (signal?.aborted) return;
-      const held = body.act_now.state === "ok" && body.act_now.rows.some(r => r.symbol === symbol)
-        || loop?.positions.state === "ok" && loop.positions.rows.length > 0;
-      const planned = loop?.plans.state === "ok" && loop.plans.rows.length > 0;
-      setReview(held ? { kind: "position" } : planned ? { kind: "plan" } : null);
-    }
+    if (afterClose(body.as_of)) setSkipped(reviewSkipped(body.day, symbol)); // no storage: the prompt shows
   }, [symbol]);
 
   useEffect(() => {
@@ -114,11 +108,31 @@ export default function DecisionBar({ symbol, fill, onActive, onReviewed }: {
 
   // ------------------------------------------------------------------ after the close: one review question
   if (afterClose(today.as_of)) {
-    if (!review) return null;
+    if (!close) return null;
+    if (close.kind === "plan_ask") {
+      const answered = mine.find(e => e.kind === "plan_ask");
+      if (answered) return <p data-testid="desk-review-done" className="text-sm text-muted-foreground">{answered.text} · answered at {hhmm(answered.created_at)}.</p>;
+      const choose = async (text: string) => {
+        if (!await send({ operation_id: `plan-ask-${uid()}`, kind: "plan_ask", symbol, text })) return;
+        onReviewed?.(symbol);
+        if (text === PLAN_IT) plan?.();
+      };
+      return (
+        <section aria-label="Close of day" data-testid="desk-review" className="rounded-lg border border-primary/40 bg-card p-3">
+          <p className="text-sm font-medium text-foreground">{close.question}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{symbol} has no plan. Asked once: either answer keeps it quiet.</p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={() => void choose(PLAN_IT)} className={`${BUTTON} bg-primary text-primary-foreground`}>Plan it</button>
+            <button type="button" onClick={() => void choose(NOT_NOW)} className={`${BUTTON} border text-muted-foreground hover:text-foreground`}>Not now</button>
+          </div>
+          {error && <p role="status" className="mt-2 text-xs text-primary">Not saved: {error}</p>}
+        </section>
+      );
+    }
     const reflected = mine.find(e => e.kind === "reflection");
     if (reflected) return <p data-testid="desk-review-done" className="text-sm text-muted-foreground">You reviewed {symbol} at {hhmm(reflected.created_at)}.</p>;
     if (skipped) return null;
-    const question = review.kind === "position" ? "Review: did you follow the plan?" : "Added or not, and why?";
+    const question = close.question;
     const skip = () => { setSkipped(true); skipReview(day, symbol); onReviewed?.(symbol); };
     const submit = async () => {
       const text = answer.trim();

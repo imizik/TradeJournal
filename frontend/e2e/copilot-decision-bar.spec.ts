@@ -26,11 +26,19 @@ const today = (asOf: string, rows: unknown[] = [GIVEBACK]) => ({
   as_of: asOf, day: DAY, quotes_at: null, quote_issue: null, act_now: { state: "ok", rows, open_positions: rows.length },
   plans: { state: "ok", rows: [], armed: 0 }, new: {}, held: { state: "ok", rows: [], count: 0 }, week: { state: "unavailable" },
 });
+// The thread list's NBIS row as the server writes it after the close (its horizon decides whether there is a question).
+const closeRow = (close: { kind: string; question: string } | null, extra: Record<string, unknown> = {}) => ({
+  key: `trade:${GIVEBACK.trade_id}`, group: "watch", symbol: "NBIS", title: "NBIS 11/21/26 100C", instrument: "100C", value: null,
+  status: { text: close?.question ?? "On plan", tone: close ? "attention" : "muted" }, meter: null, investigation_id: INV, trade_id: GIVEBACK.trade_id,
+  radar_event_id: null, path: null, changed_at: null, horizon: "swing", close: close && { ...close, reviewed: null }, ...extra,
+});
+const POSITION = { kind: "position", question: "Review: did you follow the plan?" };
 const OPEN = "2026-10-27T14:44:00Z"; // 10:44 New York
 const CLOSED = "2026-10-27T20:05:00Z"; // 16:05 New York
 
 async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], loop = { positions: [GIVEBACK] as unknown[], plans: [] as unknown[] },
-  logged = [] as unknown[], symbol = "NBIS", board = { plans: [] as unknown[], quotes_at: null, quote_issue: null }, path = `/copilot-lab?investigation=${INV}` } = {}) {
+  logged = [] as unknown[], symbol = "NBIS", board = { plans: [] as unknown[], quotes_at: null, quote_issue: null }, path = `/copilot-lab?investigation=${INV}`,
+  threads = [] as unknown[] } = {}) {
   const posts: { kind: string; text: string; symbol: string; operation_id: string }[] = [];
   const chats: unknown[] = [];
   const entries: unknown[] = [...logged];
@@ -38,6 +46,8 @@ async function desk(page: Page, { asOf = OPEN, rows = [GIVEBACK] as unknown[], l
   await page.route("**/copilot/threads", (route) => route.fulfill({ json: { as_of: asOf, positions: { state: "ok", count: 0, positions: [] },
     investigations: { state: "ok", investigations: [] }, watches: { state: "ok", watches: [] } } }));
   await page.route("**/copilot/plans", (route) => route.fulfill({ json: board }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: { as_of: asOf, quotes_at: null, quote_issue: null, sections: {},
+    day: { phase: asOf === OPEN ? "regular" : "post", need_you: 0, streak: null }, threads } }));
   await page.route("**/copilot/plans/positions", (route) => route.fulfill({ json: { count: 0, quotes_at: null, quote_issue: null, positions: [] } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: { ...saved, symbol } }));
@@ -166,7 +176,7 @@ test("on a 375 px phone the two choices are full-width and thumb-sized", async (
 });
 
 test("after the close a position's thread asks one review question and saves the answer as a reflection", async ({ page }) => {
-  const { posts } = await desk(page, { asOf: CLOSED });
+  const { posts } = await desk(page, { asOf: CLOSED, threads: [closeRow(POSITION)] });
   const review = page.getByRole("region", { name: "Close of day" });
   await expect(review).toContainText("Review: did you follow the plan?");
   await expect(page.getByRole("region", { name: "Decision" })).toHaveCount(0); // the review replaces the bar
@@ -179,7 +189,8 @@ test("after the close a position's thread asks one review question and saves the
 });
 
 test("after the close a plan's thread asks whether it was added, and Skip hides the prompt", async ({ page }) => {
-  const { posts } = await desk(page, { asOf: CLOSED, rows: [], loop: { positions: [], plans: [{ symbol: "NBIS", position: "waiting" }] } });
+  const { posts } = await desk(page, { asOf: CLOSED, rows: [], loop: { positions: [], plans: [{ symbol: "NBIS", position: "waiting" }] },
+    threads: [closeRow({ kind: "plan", question: "Added or not, and why?" }, { key: `plan:${INV}`, trade_id: null })] });
   const review = page.getByRole("region", { name: "Close of day" });
   await expect(review).toContainText("Added or not, and why?");
   await review.getByRole("button", { name: "Skip" }).click();
@@ -188,4 +199,25 @@ test("after the close a plan's thread asks whether it was added, and Skip hides 
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   await expect(page.getByRole("region", { name: "Close of day" })).toHaveCount(0); // skipped for the day
   expect(posts).toEqual([]);
+});
+
+test("after the close a quiet swing or a long hold asks nothing: the question follows the thread list's row", async ({ page }) => {
+  await desk(page, { asOf: CLOSED, threads: [closeRow(null, { horizon: "long" })] });
+  await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
+  const header = page.getByRole("group", { name: "Thread header" });
+  await expect(header.getByRole("combobox", { name: "Horizon" })).toHaveValue("long");
+  await expect(page.getByRole("region", { name: "Close of day" })).toHaveCount(0);
+});
+
+test("a position with no plan is asked once whether it wants one: Plan it saves the answer and opens planning it", async ({ page }) => {
+  const plan = "/copilot-lab?symbol=NBIS&context=Plan+this+position%3A+NBIS+11%2F21%2F26+100C.";
+  const { posts } = await desk(page, { asOf: CLOSED, path: "/copilot-lab?symbol=NBIS",
+    threads: [closeRow({ kind: "plan_ask", question: "Want a plan for this?" }, { investigation_id: null, path: plan })] });
+  const review = page.getByRole("region", { name: "Close of day" });
+  await expect(review).toContainText("Want a plan for this?");
+  await expect(review).toContainText("NBIS has no plan. Asked once");
+  await page.screenshot({ path: test.info().outputPath("plan-ask-1440.png") });
+  await review.getByRole("button", { name: "Plan it" }).click();
+  await page.waitForURL(/context=Plan\+this\+position/);
+  expect(posts).toEqual([expect.objectContaining({ kind: "plan_ask", symbol: "NBIS", text: "Planning it" })]);
 });

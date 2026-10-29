@@ -10,8 +10,11 @@ from sqlmodel import Session, select
 
 from app.models import DailyReviewRecord, DayJournalEntry
 
-# ``decision``: what the owner chose after an alert, logged from the Copilot desk's decision bar.
-KINDS = {"outlook", "update", "idea", "reflection", "decision"}
+# ``decision``: what the owner chose after an alert, logged from the Copilot desk's decision bar. ``horizon``: how often
+# the desk checks in on a symbol's plan or position (``HORIZONS``' words), from a plan card's Confirm or the thread
+# header. ``plan_ask``: the answer to the desk's one "Want a plan for this?" about a position with no plan.
+KINDS = {"outlook", "update", "idea", "reflection", "decision", "horizon", "plan_ask"}
+HORIZONS = {"Day trade": "day", "Swing": "swing", "Long hold": "long"}
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 MAX_TEXT = 10_000
 
@@ -29,12 +32,28 @@ def entries(session: Session, day: date) -> list[DayJournalEntry]:
                               .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all())
 
 
+def check_ins(session: Session) -> tuple[dict[str, str], dict[str, DayJournalEntry]]:
+    """Each symbol's horizon (``day``, ``swing`` or ``long``: its newest ``horizon`` entry) and its newest
+    ``plan_ask`` entry, across every day."""
+    horizons, asked = {}, {}
+    for row in session.exec(select(DayJournalEntry).where(DayJournalEntry.kind.in_(("horizon", "plan_ask")),
+                                                          DayJournalEntry.symbol.is_not(None))
+                            .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all():
+        if row.kind == "plan_ask":
+            asked[row.symbol] = row
+        elif row.text in HORIZONS:
+            horizons[row.symbol] = HORIZONS[row.text]
+    return horizons, asked
+
+
 def append(session: Session, *, day: date, operation_id: str, kind: str, text: str,
            symbol: str | None = None, not_traded: bool = False) -> DayJournalEntry:
     if not operation_id.strip() or len(operation_id) > 100:
         raise EntryError("operation_id must contain 1 to 100 characters")
     if kind not in KINDS:
-        raise EntryError("kind must be outlook, update, idea, reflection, or decision")
+        raise EntryError("kind must be outlook, update, idea, reflection, decision, horizon, or plan_ask")
+    if kind == "horizon" and text not in HORIZONS:
+        raise EntryError(f"a horizon is one of {', '.join(HORIZONS)}")
     if not text.strip() or len(text) > MAX_TEXT:
         raise EntryError(f"text must contain 1 to {MAX_TEXT} characters")
     symbol = symbol.strip().upper() if symbol is not None else None

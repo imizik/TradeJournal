@@ -2,14 +2,16 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import PlanLadder, { daysTo } from "@/components/copilot/PlanLadder";
-import { getThreadPlan, type DeskPosition, type DeskThreadPlan, type DeskThreadRef } from "@/lib/desk";
+import { getThreadPlan, HORIZONS, type DeskHorizon, type DeskPosition, type DeskThreadPlan, type DeskThreadRef } from "@/lib/desk";
 import type { PlanBoardRow } from "@/lib/copilot";
 import { cn } from "@/lib/utils";
 
 /*
  * The open thread's header on the Copilot desk: what state it is in, what it is (instrument, expiry or days held), the
  * symbol, the thesis on one line, and the price. An option shows its own mark and P&L, with the underlying's price
- * beneath, labelled, so the two are never read as one. Read-only; nothing here places, sizes or arms an order.
+ * beneath, labelled, so the two are never read as one. A position or a plan shows its horizon, which the owner can
+ * change (how often the desk checks in after the close; saved as a day-journal entry). Nothing here places, sizes or
+ * arms an order.
  */
 
 const REFRESH_MS = 60_000;
@@ -83,8 +85,32 @@ function PriceBlock({ symbol, position, plan }: { symbol: string; position: Desk
   return null;
 }
 
+/** The horizon, changed in place; a failed save puts the old one back and says so. */
+export function HorizonPick({ horizon, onChange }: { horizon: DeskHorizon; onChange(horizon: DeskHorizon): Promise<void> }) {
+  const [shown, setShown] = useState(horizon);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setShown(horizon); }, [horizon]); // eslint-disable-line react-hooks/set-state-in-effect -- the list's read wins
+  const change = (next: DeskHorizon) => {
+    setShown(next);
+    setFailed(false);
+    onChange(next).catch(() => { setShown(horizon); setFailed(true); });
+  };
+  return (
+    <label className="inline-flex items-center gap-1" title="How often the desk checks in after the close: a day trade every day, a swing when something happened, a long hold in Review my week">
+      <span className="sr-only">Horizon</span>
+      <select value={shown} onChange={event => change(event.target.value as DeskHorizon)} aria-label="Horizon"
+        className="h-5 rounded border-0 bg-secondary px-1 text-[11px] font-medium text-foreground">
+        {HORIZONS.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
+      </select>
+      {failed && <span role="status" className="text-primary">Not saved</span>}
+    </label>
+  );
+}
+
 /** The header alone, for a thread whose plan and position were already read. */
-export function ThreadHead({ thread, data, draft = false }: { thread: DeskThreadRef; data: DeskThreadPlan | null; draft?: boolean }) {
+export function ThreadHead({ thread, data, draft = false, horizon = null, onHorizon }: {
+  thread: DeskThreadRef; data: DeskThreadPlan | null; draft?: boolean; horizon?: DeskHorizon | null; onHorizon?(horizon: DeskHorizon): Promise<void>;
+}) {
   const chip = chipOf(data, draft), meta = metaOf(data);
   const symbol = thread.symbol ?? data?.plan?.symbol ?? thread.title;
   const thesis = data?.position?.plan?.thesis ?? data?.plan?.thesis ?? null;
@@ -93,6 +119,7 @@ export function ThreadHead({ thread, data, draft = false }: { thread: DeskThread
       <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           {chip && <span className={cn("inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium", chip.tone)}>{chip.text}</span>}
+          {horizon && onHorizon && !draft && <HorizonPick horizon={horizon} onChange={onHorizon} />}
           {meta && <span>{meta}</span>}
         </div>
         <h2 className="text-3xl font-semibold leading-none tracking-tight text-foreground">{symbol}</h2>
@@ -108,8 +135,9 @@ export function ThreadHead({ thread, data, draft = false }: { thread: DeskThread
  * Reads ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` when the thread opens or its activity changes, then
  * each minute while the page is visible. Nothing for a conversation across everything with no plan.
  */
-export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false }: {
-  thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean;
+export default function DeskThreadTop({ thread, draft = false, hero = null, compact = false, horizon = null, onHorizon }: {
+  thread: DeskThreadRef | null; draft?: boolean; hero?: ReactNode; compact?: boolean; horizon?: DeskHorizon | null;
+  onHorizon?(horizon: DeskHorizon): Promise<void>;
 }) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
   const id = thread?.id, symbol = thread?.symbol ?? null, refreshKey = thread?.refreshKey;
@@ -132,7 +160,7 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
   if (!thread.symbol && !data?.plan) return null;
   return (
     <div className="mb-4 space-y-4 border-b pb-4">
-      <ThreadHead thread={thread} data={data} draft={draft} />
+      <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} />
       {hero}
       {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact} />}
     </div>

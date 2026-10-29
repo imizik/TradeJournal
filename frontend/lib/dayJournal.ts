@@ -70,6 +70,9 @@ export function chartPathLink(symbol: string, day: string) {
 export function kindLabel(kind: DayJournalEntry["kind"]) {
   // ``decision`` is logged from the Copilot desk's decision bar, never added here, so it has a label but no button.
   if (kind === "decision") return "Decision after an alert";
+  // ``horizon`` and ``plan_ask`` are the desk's check-ins (a plan card, the thread header, "Want a plan for this?").
+  if (kind === "horizon") return "Horizon";
+  if (kind === "plan_ask") return "Plan question";
   return DAY_JOURNAL_KINDS.find(([value]) => value === kind)?.[1] ?? kind;
 }
 

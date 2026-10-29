@@ -15,10 +15,10 @@ import AlertScorecard from "@/components/copilot/AlertScorecard";
 import BriefingExtras from "@/components/copilot/BriefingExtras";
 import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/SessionTape";
 import ThreadRail from "@/components/copilot/ThreadRail";
-import DeskThreadTop from "@/components/copilot/ThreadHead";
+import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref } from "@/lib/copilot";
-import { afterClose, deskSymbolThread, nyDay, toReview, type DeskCommand, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, deskSymbolThread, nyDay, saveHorizon, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
@@ -191,6 +191,21 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return () => window.removeEventListener("keydown", onKey);
   }, [on, step, planTrade, toggleContext]);
 
+  // The open symbol's row in the thread list (a position or a plan): its close question and horizon, as the list shows them.
+  const deskRow = useCallback((symbol: string | null | undefined) =>
+    symbol ? rows.find(r => r.symbol === symbol && r.close) ?? rows.find(r => r.symbol === symbol && r.horizon) ?? null : null, [rows]);
+  const barFor = (symbol: string | null) => {
+    const row = deskRow(symbol);
+    return { close: row?.close ?? null, plan: row ? () => pick(row) : undefined };
+  };
+  const threadRow = deskRow(thread?.symbol);
+  const changeHorizon = useCallback(async (symbol: string | null | undefined, horizon: DeskHorizon) => {
+    if (!symbol) return;
+    await saveHorizon(symbol, horizon);
+    setRefresh(n => n + 1);
+  }, []);
+  const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
+
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
   const day = thread ? !thread.symbol : !link?.symbol;
@@ -256,10 +271,19 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           {on && (!thread && link?.symbol && link.radar ? (
             <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
           ) : !thread && link?.symbol && !link.investigation ? (
-            <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} onReviewed={onReviewed} /></div>
+            <div className="mb-4 space-y-3">
+              {/* No conversation, so no thread header: the symbol's horizon sits on its own line. */}
+              {linkRow?.horizon && (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{link.symbol}</span>
+                  <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />
+                </p>
+              )}
+              <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
+            </div>
           ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} /><AlertScorecard /></> : (
-            <DeskThreadTop thread={thread} compact={deciding} hero={
-              <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />} />
+            <DeskThreadTop thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
+              <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />} />
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>

@@ -16,9 +16,14 @@ that already exist:
   (``today._thesis``), newest first;
 - ``watch``: every other open position, armed plan and open investigation.
 
-After 16:00 New York on a weekday (the decision bar's rule, ``frontend/lib/desk.ts`` ``afterClose``) each row of these
-three groups with a position or a plan carries ``close``: its close-of-day question, and the first words of the
-``reflection`` entry saved for its symbol today once there is one; the row's status line says the same.
+Each row with a position or a plan carries its symbol's ``horizon`` (``day``, ``swing`` or ``long``): its newest
+``horizon`` day-journal entry (a plan card's Confirm or the thread header), else ``swing``. After 16:00 New York on a
+weekday (the decision bar's rule, ``frontend/lib/desk.ts`` ``afterClose``) the horizon sets which rows carry ``close``,
+the close-of-day question: a day trade every trading day; a swing only on a day something happened to it (a phone ping
+or a level alert fired, a fill, or the decision bar asked or was answered); a long hold never (Review my week looks at
+it). A position with no plan asks "Want a plan for this?" instead, once: a ``plan_ask`` entry since it opened answers
+it. ``close`` carries the first words of the ``reflection`` (or the ``plan_ask`` answer) saved for the symbol today once
+there is one, and the row's status line says the same.
 
 Each source is read on its own (``today._section``): one failure reads ``unavailable`` in ``sections`` and the rest
 stand. The board reads first, so one batched underlying quote read serves the plans and the positions. Read-only: no
@@ -87,7 +92,7 @@ def _row(key: str, group: str, title: str, status: dict, *, symbol: str | None =
          changed_at: int | None = None) -> dict:
     return {"key": key, "group": group, "symbol": symbol, "title": title, "instrument": instrument, "value": value,
             "status": status, "meter": meter, "investigation_id": investigation_id, "trade_id": trade_id,
-            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "close": None}
+            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "horizon": None, "close": None}
 
 
 def meter(entry: float | None, invalidation: float | None, last: float | None, tone: str) -> dict | None:
@@ -198,6 +203,32 @@ def _decisions(db: Session, day) -> dict:
     return {"state": "ok", "symbols": found, "reflections": reflections}
 
 
+def _check_ins(db: Session) -> dict:
+    from app.engine import day_journal
+    horizons, asked = day_journal.check_ins(db)
+    return {"state": "ok", "horizons": horizons, "asked": {symbol: (e.day, e.text) for symbol, e in asked.items()}}
+
+
+def _touched(db: Session, now: float, day) -> dict:
+    """Symbols something happened to today: a phone ping judged (sent or held), a level alert fired, a fill."""
+    from app.engine import day_replay, notification_policy as policy
+    from app.models import LevelAlert, PhonePing
+    start, end = policy.day_bounds(now)
+    found = set(db.exec(select(PhonePing.symbol).where(PhonePing.decided_at >= start, PhonePing.decided_at < end)).all())
+    found |= set(db.exec(select(LevelAlert.symbol).where(LevelAlert.fired_at >= start, LevelAlert.fired_at < end)).all())
+    found |= set(day_replay.traded(db, day))
+    found.discard(None)
+    return {"state": "ok", "symbols": found}
+
+
+def _opened(db: Session, trade_ids: list[str]) -> dict:
+    """Each trade's New York opening day (the journal keeps ``opened_at`` in New York wall time)."""
+    from app.models import Trade
+    if not trade_ids:
+        return {}
+    return {str(t.id): t.opened_at.date() for t in db.exec(select(Trade).where(col(Trade.id).in_([uuid.UUID(i) for i in trade_ids]))).all()}
+
+
 def _phase(now: float) -> dict:
     local = datetime.fromtimestamp(now, ET)
     minute = local.hour * 60 + local.minute
@@ -207,8 +238,10 @@ def _phase(now: float) -> dict:
 
 # --------------------------------------------------------------------------- rows
 
-CLOSE_QUESTION = {"position": "Review: did you follow the plan?", "plan": "Added or not, and why?"}  # DecisionBar's
+CLOSE_QUESTION = {"position": "Review: did you follow the plan?", "plan": "Added or not, and why?",
+                  "plan_ask": "Want a plan for this?"}  # DecisionBar's
 REVIEW_WORDS = 6
+DEFAULT_HORIZON = "swing"
 
 
 def _after_close(now: float) -> bool:
@@ -217,17 +250,37 @@ def _after_close(now: float) -> bool:
     return local.weekday() < 5 and local.hour >= 16
 
 
-def _closing(rows: list[dict], reflections: dict[str, str]) -> None:
-    """Each row with a position or a plan asks its close-of-day question, or says it was reviewed (in place)."""
+def _horizons(rows: list[dict], horizons: dict[str, str]) -> None:
     for row in rows:
-        if not row["symbol"] or not (row["trade_id"] or row["key"].startswith("plan:")):
+        if row["symbol"] and (row["trade_id"] or row["key"].startswith("plan:")):
+            row["horizon"] = horizons.get(row["symbol"], DEFAULT_HORIZON)
+
+
+def _closing(rows: list[dict], reflections: dict[str, str], touched: set[str] | None, unplanned: dict[str, object],
+             asked: dict[str, tuple], day) -> None:
+    """The rows whose horizon asks today ask their close-of-day question, or say it was answered (in place).
+    ``touched``: the symbols something happened to today (None when unknown: every swing asks); ``unplanned``: each
+    position with no plan and the day it opened; ``asked``: each symbol's newest "Want a plan" answer (day, text)."""
+    for row in rows:
+        symbol, horizon = row["symbol"], row["horizon"]
+        if horizon is None or horizon == "long":
             continue
-        kind = "position" if row["trade_id"] or row["value"] == PLAN_STATE["in_position"] else "plan"
-        text = reflections.get(row["symbol"])
+        if row["trade_id"] in unplanned:
+            answer = asked.get(symbol)
+            if answer and answer[0] >= unplanned[row["trade_id"]] and answer[0] != day:
+                continue  # answered on an earlier day: it stays quiet
+            text = answer[1] if answer and answer[0] == day else None
+            kind = "plan_ask"
+        else:
+            text = reflections.get(symbol)
+            if not text and horizon == "swing" and touched is not None and symbol not in touched:
+                continue
+            kind = "position" if row["trade_id"] or row["value"] == PLAN_STATE["in_position"] else "plan"
         words = text.split() if text else []
         reviewed = " ".join(words[:REVIEW_WORDS]) + ("…" if len(words) > REVIEW_WORDS else "") if text else None
         row["close"] = {"kind": kind, "question": CLOSE_QUESTION[kind], "reviewed": reviewed}
         row["status"] = _say(f"Reviewed · {reviewed}", "muted") if text else _say(CLOSE_QUESTION[kind], "attention")
+
 
 def _instrument(contract: str, symbol: str, instrument: str) -> str:
     return "stock" if instrument == "stock" else contract.removeprefix(symbol).strip() or instrument
@@ -394,6 +447,7 @@ def desk_threads(db: Session = Depends(get_session)):
     investigations = today._section(db, "desk investigations", lambda: _investigations(db))
     drafts = today._section(db, "desk drafts", lambda: _drafts(db))
     decisions = today._section(db, "desk decisions", lambda: _decisions(db, day))
+    checks = today._section(db, "desk check-ins", lambda: _check_ins(db))
     radar = today._section(db, "desk radar", lambda: today._radar(now))
     thesis = today._section(db, "desk thesis", lambda: today._thesis(db, day))
     prep = today._section(db, "desk prep", lambda: today._prep(db, day))
@@ -423,8 +477,15 @@ def desk_threads(db: Session = Depends(get_session)):
                           instrument="research" if r["source"] == "research_job" else None, investigation_id=r["id"],
                           changed_at=_epoch(r["updated_at"])))
 
+    _horizons(act + near + watch, checks.get("horizons", {}))
     if _after_close(now):
-        _closing(act + near + watch, decisions.get("reflections", {}))
+        touched = today._section(db, "desk touched", lambda: _touched(db, now, day))
+        happened = None
+        if touched["state"] == "ok" and found["state"] == "ok":  # the decision bar asked (Act now) or was answered
+            happened = touched["symbols"] | set(decisions.get("symbols", {})) | {
+                p["symbol"] for p in found["positions"] if p["trade_id"] in found["flagged"]}
+        unplanned = _opened(db, [p["trade_id"] for p in found.get("positions", []) if p["plan"] is None])
+        _closing(act + near + watch, decisions.get("reflections", {}), happened, unplanned, checks.get("asked", {}), day)
     streak = {"current": week["current"], "best": week["best"]} if week["state"] == "ok" and week["show"] else None
     return {
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
@@ -432,7 +493,7 @@ def desk_threads(db: Session = Depends(get_session)):
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
-            ("decisions", decisions), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
+            ("decisions", decisions), ("check_ins", checks), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
 
 
