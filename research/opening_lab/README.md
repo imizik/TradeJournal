@@ -1,0 +1,93 @@
+# Opening lab
+
+Does Claude's judgment add value when deciding SPY/QQQ setups in the first half
+hour of the US session — beyond simple rules and calibrated coin flips — and
+does more context (gap, premarket, prior day, headlines, scheduled releases)
+change that? This lab answers it on many sessions quickly, by replaying stored
+history causally, and runs the identical pipeline live when wanted.
+
+It replaces the earlier passive-cache design (`codex/opening-session-runner`),
+whose opening data depended on someone having the right charts open and whose
+scoring produced at most one data point per morning.
+
+## How it works
+
+At each checkpoint 09:30–10:00 ET (every five minutes) a **packet** is frozen
+from data available at that instant (`packet.py`). Claude and every rule
+baseline read packets and return the same **forecast** (`contract.py`):
+
+- `spy_p_up`, `qqq_p_up` — probability that the return from the next minute's
+  open to the close ten minutes later is above zero;
+- `action` WAIT / LONG / SHORT on one symbol, and a short `reason`.
+
+Every checkpoint is scored on its own (`evaluate.py`), so one session gives 14
+probability forecasts and 7 take/skip choices. The scorecard reports Brier
+score, log loss, calibration, directional accuracy, net take returns at 5/10/15
+minutes after a 1 bp round-trip cost, selectivity (were the takes better than
+what it skipped?), latency and cost. Every comparison is **paired** on the same
+checkpoints, with confidence intervals that resample whole sessions, and says
+"no detectable difference" unless the interval excludes zero. It also prints the
+smallest effect the sample could have detected.
+
+Three information **variants** isolate what context adds:
+
+| Variant | Packet |
+| --- | --- |
+| `bars` | today's completed regular-session 1-minute bars only (the original narrow design) |
+| `market` | + prior close and gap, premarket range/volume, prior-day levels, ATR, VWAP, session range, relative volume |
+| `full` | + headlines visible by then (Alpaca/Benzinga, one-minute lag) and the day's scheduled CPI/FOMC/jobs releases |
+
+Baselines (`baselines.py`, fixed parameters, never tuned on the replay window):
+coin, always_long, momentum, fade_open, opening-range breakout, VWAP side, gap
+fill. They always read the `market` packet.
+
+Causality is tested, not assumed: rewriting any future bar, later news or later
+daily row leaves every packet byte-identical (`tests/test_packet.py`). The
+calendar date never reaches the model; replay sessions are after the models'
+training cutoffs (July 2026 on).
+
+## Data
+
+- Minute and daily SIP bars: the app's Alpaca cache in the main checkout, read
+  only; anything missing is fetched from Alpaca into `.cache/` (gitignored).
+  July 1 – October 27, 2026 is prefetched: 83 sessions, no gaps.
+- Headlines: Alpaca news, cached per date in `.cache/news/`.
+- Macro: `backend/app/data/macro_calendar.json` (CPI, FOMC, jobs only; no GDP,
+  ISM, PCE or other 10:00 releases).
+- No Tradier requests, streams or production routes. Nothing here touches the
+  journal, a broker or the production server.
+
+## Run
+
+From the repository root, with the backend virtualenv:
+
+```bash
+backend/.venv/bin/python -m pytest research/opening_lab/tests -q
+backend/.venv/bin/python -m research.opening_lab prefetch --start 2026-07-01 --end 2026-10-27
+backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/baselines --start 2026-07-01 --end 2026-10-27 --model none
+backend/.venv/bin/python -m research.opening_lab replay --run research/opening_lab/runs/sonnet --start 2026-07-01 --end 2026-10-27 --estimate
+```
+
+A model replay (`--model claude-sonnet-5-5`, or `--fake` for a free dry run)
+writes `run.json`, `records.jsonl`, `packets/` and `report.txt`/`report.json`
+into the run directory. Re-running the same command resumes; model answers are
+cached by packet, so nothing is billed twice. `--max-cost-usd` stops new calls
+at a spend cap (an unknown cost also stops them). A different model, effort or
+code version needs a new run directory. `--backend cli` uses `claude -p` on the
+Claude plan instead of the API key.
+
+`live --run DIR --model … --variant full` runs one morning on live Alpaca data
+(start before 09:30 ET): each packet freezes at checkpoint + 5 s and an answer
+after 45 s is recorded as late. Score it after the close with `report --run DIR`.
+Live SIP bars from Alpaca need a paid data plan; `--feed iex` is a partial tape.
+
+## What this does not show
+
+- Replay measures judgment on causally frozen history, not live latency or feed
+  reliability; a handful of live mornings checks those separately.
+- Outcomes are underlying markouts from 1-minute bars with an assumed 1 bp cost,
+  not fills. Options need their own contract selection and point-in-time option
+  quotes, and a target that clears an option's spread and decay, not just the
+  sign of the move.
+- Eighty sessions can detect only moderate effects (the report prints the
+  minimum). A null result means "no detectable edge at this size", not "none".
