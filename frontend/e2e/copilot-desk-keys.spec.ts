@@ -60,11 +60,11 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION }: { time?: Date; session?: unknown } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown }: { time?: Date; session?: unknown; threads?(): unknown } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
-  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: threads() }));
   await page.route("**/copilot/desk/session", (route) => route.fulfill({ json: session }));
   await page.route("**/copilot/practice*", (route) => route.fulfill({ json: PRACTICE }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -247,5 +247,78 @@ test("before the open on a weekday the thread list offers Arm today's plans, whi
   await expect(page.getByTestId("session-facts")).toContainText("Next: the open 9:30");
   await arm.click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(/^Arm today's plans: /);
+  expect(chats).toEqual([]);
+});
+
+test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip opens the next, nothing is sent", async ({ page }) => {
+  const DAY = "2026-10-23";
+  const TSLA = "66666666-6666-4666-8666-666666666666";
+  const entries: { kind: string; symbol: string; text: string }[] = [{ kind: "reflection", symbol: "APLD", text: "Entered at 31.00 as planned, sized half" }];
+  const position = { kind: "position", question: "Review: did you follow the plan?" };
+  const plan = { kind: "plan", question: "Added or not, and why?" };
+  const asks: Record<string, typeof position> = { NBIS: position, TSLA: position, CRWV: plan, APLD: plan };
+  // The thread list after the close, as the server writes it: each row's question, or "Reviewed · …" once a reflection is saved.
+  const threads = () => {
+    const tsla = row({ key: `trade:${TSLA}`, group: "act", symbol: "TSLA", title: "TSLA", instrument: "stock", trade_id: TSLA,
+      path: `/trades/${TSLA}`, status: { text: "", tone: "muted" } });
+    return { ...DESK, as_of: "2026-10-23T21:00:00Z", day: { phase: "post", need_you: 2, streak: null },
+      threads: [...DESK.threads.slice(0, 3), tsla, ...DESK.threads.slice(3)].map(r => {
+        const ask = r.symbol ? asks[r.symbol as string] : undefined;
+        if (!ask) return r;
+        const text = entries.find(e => e.kind === "reflection" && e.symbol === r.symbol)?.text;
+        const reviewed = text ? text.split(" ").slice(0, 6).join(" ") + "…" : null;
+        return { ...r, close: { ...ask, reviewed }, status: reviewed ? { text: `Reviewed · ${reviewed}`, tone: "muted" } : { text: ask.question, tone: "attention" } };
+      }) };
+  };
+  await page.route("**/today", (route) => route.fulfill({ json: { as_of: "2026-10-23T21:00:00Z", day: DAY, quotes_at: null, quote_issue: null,
+    act_now: { state: "ok", rows: [], open_positions: 0 }, plans: { state: "ok", rows: [], armed: 0 }, new: {}, held: { state: "ok", rows: [], count: 0 }, week: { state: "unavailable" } } }));
+  await page.route("**/copilot/symbol/*", (route) => {
+    const symbol = route.request().url().split("/").pop()!;
+    const held = asks[symbol]?.kind === "position";
+    return route.fulfill({ json: { symbol, as_of: "2026-10-23T21:00:00Z", positions: { state: "ok", rows: held ? [{ symbol }] : [] },
+      plans: { state: "ok", rows: held ? [] : [{ symbol, position: "waiting" }] }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } },
+      quotes_at: null, quote_issue: null } });
+  });
+  await page.route(`**/day-journal/${DAY}`, (route) => route.fulfill({ json: { day: DAY, entries: entries.map((e, i) => ({ id: `e${i}`, day: DAY,
+    operation_id: `op${i}`, not_traded: false, actor: "owner", created_at: "2026-10-23T20:30:00Z", ...e })), trade_plans: {} } }));
+  const posts: { kind: string; symbol: string; text: string }[] = [];
+  await page.route(`**/day-journal/${DAY}/entries`, (route) => {
+    const body = route.request().postDataJSON();
+    posts.push(body);
+    entries.push(body);
+    return route.fulfill({ json: { id: `new-${posts.length}`, day: DAY, not_traded: false, actor: "owner", created_at: "2026-10-23T21:01:00Z", ...body } });
+  });
+  const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), threads, // 17:00 New York, a Friday
+    session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
+  const rail = page.getByRole("navigation", { name: "Thread list" });
+  await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Review: did you follow the plan?");
+  await expect(rail.getByRole("link", { name: /^CRWV/ })).toContainText("Added or not, and why?");
+  await expect(rail.getByRole("link", { name: /^APLD/ })).toContainText("Reviewed · Entered at 31.00 as planned, sized…");
+  await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 4 reviewed");
+  await page.screenshot({ path: test.info().outputPath("close-the-day-1440.png") });
+
+  const review = page.getByRole("region", { name: "Close of day" });
+  await rail.getByRole("button", { name: "Close the day · 3 to review" }).click();
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible(); // the first unreviewed thread
+  await expect(review).toContainText("Review: did you follow the plan?");
+  await review.getByRole("button", { name: "Answer" }).click();
+  await review.getByRole("textbox").fill("Held above 92.30 all day, as planned.");
+  await review.getByRole("button", { name: "Save" }).click();
+  // TSLA has no conversation: it opens by its symbol, on its question.
+  await page.waitForURL(/\/copilot-lab\?symbol=TSLA$/);
+  await expect(review).toContainText("Review: did you follow the plan?");
+  await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Reviewed · Held above 92.30 all day, as…");
+  await review.getByRole("button", { name: "Skip" }).click();
+  await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible();
+  await expect(review).toContainText("Added or not, and why?");
+  await expect(rail.getByRole("link", { name: /^TSLA/ })).toContainText("Skipped today");
+  await review.getByRole("button", { name: "Skip" }).click();
+  await expect(review).toHaveCount(0);
+  await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here
+  await expect(rail.getByRole("button", { name: "Close the day", exact: true })).toBeVisible();
+
+  await page.keyboard.press("j"); // J / K still walk the threads
+  await expect(conversation(page).getByText("APLD answer: enter at 31.00.")).toBeVisible();
+  expect(posts).toEqual([expect.objectContaining({ kind: "reflection", symbol: "NBIS", text: "Held above 92.30 all day, as planned." })]);
   expect(chats).toEqual([]);
 });

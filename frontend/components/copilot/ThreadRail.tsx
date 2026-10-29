@@ -7,7 +7,7 @@ import PlanATrade from "@/components/copilot/PlanATrade";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { WHAT_MATTERS_PROMPT, type InvestigationSummary } from "@/lib/copilot";
 import {
-  DESK_GROUPS, getClosedThisWeek, getDeskThreads, type DeskDay, type DeskGroup, type DeskThread, type DeskThreads, type DeskTone,
+  DESK_GROUPS, getClosedThisWeek, getDeskThreads, nyDay, reviewSkipped, type DeskDay, type DeskGroup, type DeskThread, type DeskThreads, type DeskTone,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,7 @@ const SOURCE: Record<string, string> = { positions: "positions", plans: "plans",
  * Briefing, so the server's pinned week row is not listed. */
 const PINNED: DeskThread[] = [
   { key: "briefing", group: "pinned", symbol: null, title: "Briefing", instrument: null, value: null, meter: null, investigationId: null,
-    tradeId: null, radarEventId: null, path: null, changedAt: null, status: { text: "What matters right now? One turn across everything", tone: "muted" } },
+    tradeId: null, radarEventId: null, path: null, changedAt: null, close: null, status: { text: "What matters right now? One turn across everything", tone: "muted" } },
 ];
 const ASKS: Record<string, { name: string; prompt: string; hint: string }> = {
   briefing: { name: "What matters right now?", prompt: WHAT_MATTERS_PROMPT, hint: "One copilot turn across your positions, watches and open investigations" },
@@ -69,9 +69,12 @@ function Meter({ meter }: { meter: NonNullable<DeskThread["meter"]> }) {
   );
 }
 
-function Row({ row, unread, active, actions, seen }: {
-  row: DeskThread; unread: boolean; active: boolean; actions: HomeActions; seen(row: DeskThread): void;
+function Row({ row, unread, active, actions, seen, skipped }: {
+  row: DeskThread; unread: boolean; active: boolean; actions: HomeActions; seen(row: DeskThread): void; skipped: boolean;
 }) {
+  // After the close a row still asking its review says so in a muted amber; one skipped today says that instead.
+  const asking = !!row.close && !row.close.reviewed;
+  const status = asking && skipped ? { text: "Skipped today", tone: "muted" as const } : row.status;
   const label = [row.symbol, row.symbol ? row.instrument ?? row.title : row.title].filter(Boolean).join(" ");
   const body = (
     <>
@@ -86,7 +89,7 @@ function Row({ row, unread, active, actions, seen }: {
           </span>
         )}
       </div>
-      <p className={cn("truncate text-xs", TONE[row.status.tone])} title={row.status.text}>{row.status.text}</p>
+      <p className={cn("truncate text-xs", TONE[status.tone], asking && !skipped && "text-primary/75")} title={status.text}>{status.text}</p>
       {row.meter && (row.group === "act" || row.group === "near") && <Meter meter={row.meter} />}
     </>
   );
@@ -132,10 +135,10 @@ function DayLine({ data }: { data: DeskThreads }) {
  * on Act now and Near a trigger only. "New since you looked" is remembered in this browser. ``onRows`` gets the rows in
  * the order shown, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
  * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer. ``phase`` (the
- * day's phase button) sits under the day line.
+ * day's phase button) sits under the day line. A change of ``refresh`` reads the list again (a review just saved).
  */
-export default function ThreadRail({ actions, active = null, onRows, phase = null }: {
-  actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void; phase?: ReactNode;
+export default function ThreadRail({ actions, active = null, onRows, phase = null, refresh = 0 }: {
+  actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void; phase?: ReactNode; refresh?: number;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +162,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
     const shown = () => { if (document.visibilityState === "visible") read(); };
     document.addEventListener("visibilitychange", shown);
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", shown); };
-  }, []);
+  }, [refresh]);
 
   const unread = (row: DeskThread) => row.group === "new" && row.changedAt !== null && row.changedAt > (seen[row.key] ?? 0);
   const mark = useCallback((rows: DeskThread[]) => setSeen(current => {
@@ -181,6 +184,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
   const ordered = useMemo(() => DESK_GROUPS.flatMap(g => itemsOf(g.id)), [data, seen]); // eslint-disable-line react-hooks/exhaustive-deps -- rows and unread come from these two
   useEffect(() => { onRows?.(ordered); }, [ordered, onRows]);
   const jumpKey = useJumpKey();
+  const day = data ? nyDay(new Date(data.asOf)) : null;
   const missing = Object.entries(data?.sections ?? {}).filter(([name, state]) => state === "unavailable" && SOURCE[name]).map(([name]) => SOURCE[name]);
 
   const group = (id: DeskGroup, title: string) => {
@@ -209,6 +213,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
           <ul className="space-y-0.5">
             {shown.map(row => (
               <Row key={row.key} row={row} unread={unread(row)} actions={actions} seen={seenRow}
+                skipped={!!(day && row.symbol && row.close && reviewSkipped(day, row.symbol))}
                 active={!!active && row.investigationId === active} />
             ))}
           </ul>

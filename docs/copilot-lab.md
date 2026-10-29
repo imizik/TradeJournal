@@ -586,7 +586,20 @@ open position asks "Review: did you follow the plan?" and one with an armed
 plan not yet in a position asks "Added or not, and why?" (`GET
 /copilot/symbol/{symbol}`), instead of the bar. Answer opens a one-line input
 that saves a `reflection` entry for the symbol; Skip hides it for the day in
-this browser. Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
+this browser. The thread list asks the same: after 16:00 on a weekday each Act
+now, Near a trigger and Watching row with a position or a plan shows its
+question as its status line in a muted amber (`GET /copilot/desk/threads`
+gives it as `close`, beside the first words of the symbol's first `reflection`
+today), "Reviewed · <first words>" once one is saved, or "Skipped today".
+**Close the day** (the phase button, "Close the day · N to review", or the ⌘K
+command) is a pass through them: it opens the first unreviewed thread in list
+order on its question (a position with no conversation opens by its symbol,
+`/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
+or Skip opens the next; the last one ends it. With none left it puts the
+day's question in the message box, unsent. Nothing is sent to the model. The
+Briefing's line says "N of M reviewed" (one per symbol). Browser proof:
+`frontend/e2e/copilot-decision-bar.spec.ts` and
+`frontend/e2e/copilot-desk-keys.spec.ts`.
 
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
@@ -607,10 +620,11 @@ the line leads with whether the pre-market prep is written; after the close it
 shows the whole day; a closed day says so. The desk bar shows the same read
 beside its title: **Live** (green dot) in the regular session, **Pre-market**,
 or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
-QQQ and VIX's change. At the top of the thread list a phase button puts a
-question in the message box, unsent: **Arm today's plans** before 9:30 on a
-weekday (check each plan's entry, invalidation and time stop and propose what
-is missing, for the owner to confirm) and **Close the day** after 16:00. On a
+QQQ and VIX's change. At the top of the thread list sits a phase button:
+**Arm today's plans** before 9:30 on a weekday puts a question in the message
+box, unsent (check each plan's entry, invalidation and time stop and propose
+what is missing, for the owner to confirm), and **Close the day** after 16:00
+walks each thread's close question (see Close of day). On a
 phone Jump to… and New plan show as icons so the bar stays on one line. One
 read, `GET /copilot/desk/session` (owner only, refused while the lab is off),
 once a minute while the page is visible, read once by the desk

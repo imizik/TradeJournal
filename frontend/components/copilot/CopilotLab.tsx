@@ -18,12 +18,14 @@ import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { WHAT_MATTERS_PROMPT, copilotLabHref } from "@/lib/copilot";
-import { afterClose, type DeskCommand, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, nyDay, toReview, type DeskCommand, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
 const TABS: { id: DeskTab; label: string }[] = [{ id: "now", label: "Now" }, { id: "thread", label: "Thread" }, { id: "context", label: "Context" }];
 const CONTEXT_KEY = "desk.context.v1";
+/** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
+const CLOSING_KEY = "desk.closing.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
 const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null });
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
@@ -103,19 +105,53 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return () => clearInterval(timer);
   }, []);
 
-  // The thread list's phase button: before the open on a weekday, Arm today's plans; after 16:00, Close the day. Each only
-  // puts its question in the message box, unsent; nothing is armed until a card is confirmed.
+  // Close the day: a pass through each thread still asking its close question (``toReview``, list order). Each opens on its
+  // question; an answer or Skip opens the next, and the last one ends the pass. With none left it puts the day's
+  // question in the box, unsent. Nothing goes to the model.
+  const [refresh, setRefresh] = useState(0);
+  const reviewed = useRef(new Set<string>()); // answered or skipped this visit, before the list reads it back
+  const closing = useRef(false);
+  useEffect(() => {
+    try { closing.current = window.sessionStorage.getItem(CLOSING_KEY) === nyDay(); } catch { /* no pass to resume */ }
+  }, []);
+  const setClosing = useCallback((on: boolean) => {
+    closing.current = on;
+    try { if (on) window.sessionStorage.setItem(CLOSING_KEY, nyDay()); else window.sessionStorage.removeItem(CLOSING_KEY); } catch { /* this page only */ }
+  }, []);
+  const review = useCallback((row: DeskThread) => {
+    if (row.investigationId) actions.open(row.investigationId);
+    else router.push(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol! })}`); // opens on the symbol's question
+  }, [actions, router]);
+  const left = toReview(rows, nyDay()); // the list reads a review back on the refresh it triggers
+  const closeDay = useCallback(() => {
+    const [next] = toReview(rows, nyDay(), reviewed.current);
+    setClosing(!!next);
+    if (next) review(next);
+    else fill(CLOSE_PROMPT);
+  }, [rows, review, fill, setClosing]);
+  const onReviewed = useCallback((symbol: string) => {
+    reviewed.current.add(symbol);
+    setRefresh(n => n + 1);
+    if (!closing.current) return;
+    const [next] = toReview(rows, nyDay(), reviewed.current);
+    setClosing(!!next);
+    if (next) review(next);
+  }, [rows, review, setClosing]);
+
+  // The thread list's phase button: before the open on a weekday, Arm today's plans (its question in the message box,
+  // unsent; nothing is armed until a card is confirmed); after 16:00, Close the day.
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Puts a question about today's plans in the box, unsent" }
-    : dayPhase === "close" ? { label: "Close the day", hint: "Puts a close-of-day question in the box, unsent" } : null;
-  const runPhase = useCallback(() => fill(dayPhase === "pre" ? ARM_PROMPT : CLOSE_PROMPT), [fill, dayPhase]);
+    : dayPhase === "close" ? { label: left.length ? `Close the day · ${left.length} to review` : "Close the day",
+      hint: left.length ? "Opens each thread on its close question, one at a time" : "Puts a close-of-day question in the box, unsent" } : null;
+  const runPhase = useCallback(() => { if (dayPhase === "pre") fill(ARM_PROMPT); else closeDay(); }, [fill, dayPhase, closeDay]);
 
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: "plan", name: "Plan a trade", hint: "A new plan; you name the symbol. Nothing is sent.", key: "N", run: planTrade },
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
     { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
     ...(dayPhase === "pre" ? [{ id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
-    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Puts a close-of-day question in the box, unsent", run: () => fill(CLOSE_PROMPT) }] : []),
-  ], [actions, dayPhase, fill, planTrade]);
+    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each thread's close question, one at a time. Nothing is sent.", run: closeDay }] : []),
+  ], [actions, dayPhase, fill, planTrade, closeDay]);
 
   // J / K walk the threads that open in place, in list order; pinned rows ask and other rows leave the page, so they are skipped.
   const step = useCallback((by: 1 | -1) => {
@@ -201,7 +237,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} phase={phaseAction && (
+            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} refresh={refresh} phase={phaseAction && (
               <button type="button" onClick={runPhase} title={phaseAction.hint}
                 className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
                 {phaseAction.label}
@@ -217,10 +253,10 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           {on && (!thread && link?.symbol && link.radar ? (
             <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
           ) : !thread && link?.symbol && !link.investigation ? (
-            <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} /></div>
+            <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} onReviewed={onReviewed} /></div>
           ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} /><AlertScorecard /></> : (
             <DeskThreadTop thread={thread} compact={deciding} hero={
-              <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} />} />
+              <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />} />
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>

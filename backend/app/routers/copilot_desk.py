@@ -14,6 +14,10 @@ that already exist:
   (``today._thesis``), newest first;
 - ``watch``: every other open position, armed plan and open investigation.
 
+After 16:00 New York on a weekday (the decision bar's rule, ``frontend/lib/desk.ts`` ``afterClose``) each row of these
+three groups with a position or a plan carries ``close``: its close-of-day question, and the first words of the
+``reflection`` entry saved for its symbol today once there is one; the row's status line says the same.
+
 Each source is read on its own (``today._section``): one failure reads ``unavailable`` in ``sections`` and the rest
 stand. The board reads first, so one batched underlying quote read serves the plans and the positions. Read-only: no
 store, no pings, no Radar visit. Owner-only like every ``/copilot`` route; refuses while the lab is off. The only ids
@@ -78,7 +82,7 @@ def _row(key: str, group: str, title: str, status: dict, *, symbol: str | None =
          changed_at: int | None = None) -> dict:
     return {"key": key, "group": group, "symbol": symbol, "title": title, "instrument": instrument, "value": value,
             "status": status, "meter": meter, "investigation_id": investigation_id, "trade_id": trade_id,
-            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at}
+            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "close": None}
 
 
 def meter(entry: float | None, invalidation: float | None, last: float | None, tone: str) -> dict | None:
@@ -144,14 +148,17 @@ def _investigations(db: Session) -> dict:
 
 
 def _decisions(db: Session, day) -> dict:
-    """Symbols with a ``decision`` day-journal entry today (the decision bar's log), newest time each. Read by the
-    kind's name, so a journal without that kind yet reads as none."""
+    """Symbols with a ``decision`` day-journal entry today (the decision bar's log), newest time each, and the first
+    ``reflection`` entry's text each (the close-of-day review). Read by the kinds' names, so a journal without them yet
+    reads as none."""
     from app.engine import day_journal
-    found = {}
+    found, reflections = {}, {}
     for entry in day_journal.entries(db, day):
         if entry.kind == "decision" and entry.symbol:
             found[entry.symbol] = entry.created_at
-    return {"state": "ok", "symbols": found}
+        elif entry.kind == "reflection" and entry.symbol:
+            reflections.setdefault(entry.symbol, entry.text)
+    return {"state": "ok", "symbols": found, "reflections": reflections}
 
 
 def _phase(now: float) -> dict:
@@ -162,6 +169,28 @@ def _phase(now: float) -> dict:
 
 
 # --------------------------------------------------------------------------- rows
+
+CLOSE_QUESTION = {"position": "Review: did you follow the plan?", "plan": "Added or not, and why?"}  # DecisionBar's
+REVIEW_WORDS = 6
+
+
+def _after_close(now: float) -> bool:
+    """After 16:00 New York on a weekday; holidays and early closes are not known here, as in the decision bar."""
+    local = datetime.fromtimestamp(now, ET)
+    return local.weekday() < 5 and local.hour >= 16
+
+
+def _closing(rows: list[dict], reflections: dict[str, str]) -> None:
+    """Each row with a position or a plan asks its close-of-day question, or says it was reviewed (in place)."""
+    for row in rows:
+        if not row["symbol"] or not (row["trade_id"] or row["key"].startswith("plan:")):
+            continue
+        kind = "position" if row["trade_id"] or row["value"] == PLAN_STATE["in_position"] else "plan"
+        text = reflections.get(row["symbol"])
+        words = text.split() if text else []
+        reviewed = " ".join(words[:REVIEW_WORDS]) + ("…" if len(words) > REVIEW_WORDS else "") if text else None
+        row["close"] = {"kind": kind, "question": CLOSE_QUESTION[kind], "reviewed": reviewed}
+        row["status"] = _say(f"Reviewed · {reviewed}", "muted") if text else _say(CLOSE_QUESTION[kind], "attention")
 
 def _instrument(contract: str, symbol: str, instrument: str) -> str:
     return "stock" if instrument == "stock" else contract.removeprefix(symbol).strip() or instrument
@@ -355,6 +384,8 @@ def desk_threads(db: Session = Depends(get_session)):
                           instrument="research" if r["source"] == "research_job" else None, investigation_id=r["id"],
                           changed_at=_epoch(r["updated_at"])))
 
+    if _after_close(now):
+        _closing(act + near + watch, decisions.get("reflections", {}))
     streak = {"current": week["current"], "best": week["best"]} if week["state"] == "ok" and week["show"] else None
     return {
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
