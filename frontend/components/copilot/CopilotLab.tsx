@@ -145,6 +145,10 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
     return () => window.removeEventListener("keydown", onKey);
   }, [on, step, planTrade, toggleContext]);
 
+  // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
+  // (a deep link naming a symbol waits for its thread instead).
+  const day = thread ? !thread.symbol : !link?.symbol;
+
   return (
     <div ref={desk} className={styles.desk} data-on={on} data-tab={tab} data-context={contextShown ? "shown" : "hidden"}>
       <header className={styles.bar}>
@@ -196,7 +200,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />
         </section>
-        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} /></aside>}
+        {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={thread} day={day} /></aside>}
       </div>
       {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} />}
     </div>

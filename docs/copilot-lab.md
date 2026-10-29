@@ -472,6 +472,19 @@ The full page is a desk of three panes beside each other
     planned entry, says what is missing; the pane never measures from a live
     quote.
 
+  While the Briefing (or a thread about no symbol, or no thread) is open the
+  pane shows the day instead, with its own three tabs: **Chart**, QQQ today
+  with the day's fills (any symbol, amber, first labelled FILL) and phone pings
+  sent (violet, PING) as dots on the bar of their minute, from the picture
+  route's reserved id (`GET /copilot/desk/market/picture`,
+  `desk_context.market_picture`, fed by the session timeline's own fill and
+  ping readers) and read again each minute; **Timeline**, the day across
+  everything newest first from `GET /copilot/desk/session` (time stops still
+  ahead, fills, pings sent, Radar events, decisions, the prep); and **This
+  week**, the plan streak's counts (`GET /charts/captures/streak`): a tile per
+  entry this week, planned before entry or not, the streak and best, and what
+  one more planned entry makes.
+
 **Pings open on the decision.** A position alert's phone ping opens the
 desk thread for that position (see Review a trade or position), so a tap
 lands on the decision bar: on the plan's conversation when there is one, else
@@ -644,7 +657,7 @@ Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
 the cleaned conversation and the 375 px composer) and
 `frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
-states, the 375 px Context tab).
+states, the 375 px Context tab, the Briefing's day).
 
 ## How the copilot reasons (system prompt)
 
