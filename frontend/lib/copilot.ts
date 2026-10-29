@@ -569,6 +569,9 @@ export type PlanBoardRow = {
 };
 export type PlansBoard = { plans: PlanBoardRow[]; quotes_at: number | null; quote_issue: string | null };
 export const getPlansBoard = (signal?: AbortSignal) => request<PlansBoard>("/copilot/plans", { signal });
+/** A symbol's newest answered exit review (``copilot_plans.last_exit_lessons``): ``exited``, the New York date of the
+ * plan's last exit; ``followed``, what the answer opens with; ``lesson``, the owner's own words. */
+export type ExitLesson = { exited: string; followed: "yes" | "partly" | "no" | null; lesson: string };
 /** The Charts dock's Copilot tab for one symbol (``GET /copilot/symbol/{symbol}``): its open positions with their plans
  * (the Dashboard Plans card's rows), its armed plans not yet in a position (the board's rows), and what is new on it.
  * A section whose source failed reads ``unavailable``; Radar reads ``off`` while it is not running. */
@@ -576,6 +579,8 @@ type LoopSection<T> = { state: "ok"; rows: T[] } | { state: "unavailable" };
 export type SymbolLoop = {
   symbol: string; as_of: string;
   positions: LoopSection<PlanPosition>; plans: LoopSection<PlanBoardRow>;
+  /** The symbol's newest answered exit review (null without one), for the plan card. */
+  last_exit?: { state: "ok"; lesson: ExitLesson | null } | { state: "unavailable" };
   new: {
     radar: { state: "ok"; count: number; rows: { event_id: string; summary: string | null; first_seen_at: string }[] } | { state: "off" | "unavailable" };
     thesis: { state: "ok"; count: number; rows: { kind: string; text: string; fired_at: string | null }[] } | { state: "unavailable" };

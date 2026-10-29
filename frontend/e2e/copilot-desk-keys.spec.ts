@@ -249,7 +249,8 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
       status: { text: "Earnings · APLD reports after the close", tone: "info" }, investigation_id: APLD, changed_at: epoch("2026-10-23T12:00:00Z") })],
     plans: [
       plan({ stage: "armed", symbol: "APLD", investigation_id: APLD, instrument: "11/20/26 35C", entry: level(31, { distance_pct: 3.3 }),
-        invalidation: level(29), time_stop: { text: "out by 15:30", due_at: epoch("2026-10-23T19:30:00Z"), state: "pending" } }),
+        invalidation: level(29), time_stop: { text: "out by 15:30", due_at: epoch("2026-10-23T19:30:00Z"), state: "pending" },
+        last_exit: { exited: "2026-10-21", followed: "partly", lesson: "Partly. Took half at the target, gave the rest back." } }),
       plan({ stage: "armed", symbol: "CRWV", investigation_id: CRWV, instrument: "short", entry: level(99), invalidation: level(103) }),
       plan({ stage: "in_position", symbol: "NBIS", investigation_id: NBIS, r: 0.4 }),
     ] });
@@ -277,6 +278,9 @@ test("before the open Arm today's plans is a checklist: still good logs, drop as
   const apld = list.getByRole("listitem", { name: "APLD" });
   await expect(apld).toContainText("Entry 31.00 · invalidation 29.00 · time stop 15:30");
   await expect(apld).toContainText("⚑ Earnings · APLD reports after the close");
+  // The symbol's last answered exit review, in the owner's words; a plan with none shows no line.
+  await expect(apld.getByLabel("Last APLD exit lesson")).toHaveText("Last APLD exit (Oct 21): partly followed · “Partly. Took half at the target, gave the rest back.”");
+  await expect(list.getByRole("listitem", { name: "CRWV" }).getByLabel("Last CRWV exit lesson")).toHaveCount(0);
   await apld.getByRole("button", { name: "Still good" }).click();
   await expect(apld).toContainText("✓ Still good");
   await expect(list.getByTestId("arm-progress")).toHaveText("1 of 2 checked");

@@ -44,7 +44,8 @@ def plan_positions_view(db: Session = Depends(get_session)):
 @router.get("/symbol/{symbol}")
 def symbol_loop(symbol: str, db: Session = Depends(get_session)):
     """The Charts dock's Copilot tab for one symbol: its open positions with their plans, its armed plans not yet in a
-    position, and what is new on it (Radar events since the last Radar visit, thesis triggers fired today). Composed
+    position, what is new on it (Radar events since the last Radar visit, thesis triggers fired today) and its newest
+    answered exit review (``last_exit``, ``copilot_plans.last_exit_lessons``; ``lesson`` null without one). Composed
     in-process from the Plans board, the Plans card and the Today screen's readers, each section on its own so one
     failing source reads ``{"state": "unavailable"}``. Quotes are read for this symbol only. Read-only."""
     if not copilot.settings().enabled:
@@ -72,6 +73,8 @@ def symbol_loop(symbol: str, db: Session = Depends(get_session)):
     return {
         "symbol": symbol, "as_of": today._iso(now),
         "positions": today._section(db, "symbol positions", positions), "plans": armed,
+        "last_exit": today._section(db, "symbol last exit", lambda: {
+            "state": "ok", "lesson": copilot_plans.last_exit_lessons(db, {symbol}).get(symbol)}),
         "new": {"radar": today._section(db, "symbol radar", lambda: today._radar(now, symbol)),
                 "thesis": today._section(db, "symbol thesis", lambda: today._thesis(db, day, symbol))},
         "quotes_at": shared.at, "quote_issue": shared.issue,

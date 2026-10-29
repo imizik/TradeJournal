@@ -248,3 +248,33 @@ def done(db: Session, since: datetime) -> list[dict]:
             for found in marks.values() for e in found if e.created_at >= since and e.id not in used]
     out.sort(key=lambda row: row["done_at"], reverse=True)
     return out
+
+
+def last_exit_lessons(db: Session, symbols: set[str]) -> dict[str, dict]:
+    """Each symbol's newest answered exit review, for the plan card and Arm today's plans: of the plans exited
+    (``exits``, newest first), the first whose review was answered, read as Review my week reads it
+    (``copilot_review.exit_reviews``: the ``reflection`` saved with the first "Exit reviewed" ``plan_done`` at or after
+    the plan's newest part). ``exited``: the New York date of its last exit; ``followed``: what the answer opens with;
+    ``lesson``: the owner's own words. A symbol with none is absent. Read-only; no quote read, no model call."""
+    from app.ai.copilot_review import LESSON_TEXT, REVIEW_PAIR, _followed, _trim
+    from app.engine.chart_math import ET
+    from app.models import DayJournalEntry
+    exited = [r for r in exits(db, datetime.min) if r["symbol"] in symbols] if symbols else []
+    if not exited:
+        return {}
+    entries = db.exec(select(DayJournalEntry).where(DayJournalEntry.kind.in_(("plan_done", "reflection")),
+                                                    DayJournalEntry.symbol.in_({r["symbol"] for r in exited}))
+                      .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all()
+    out: dict[str, dict] = {}
+    for r in exited:
+        if r["symbol"] in out:
+            continue
+        mine = [e for e in entries if e.symbol == r["symbol"]]
+        done = next((e for e in mine if e.kind == "plan_done" and e.created_at >= r["newest"]), None)
+        if done is None or done.text != "Exit reviewed":
+            continue
+        said = [e for e in mine if e.kind == "reflection" and done.created_at - REVIEW_PAIR <= e.created_at <= done.created_at]
+        if said:
+            out[r["symbol"]] = {"exited": r["exited_at"].replace(tzinfo=UTC).astimezone(ET).date().isoformat(),
+                                "followed": _followed(said[-1].text), "lesson": _trim(said[-1].text, LESSON_TEXT)}
+    return out

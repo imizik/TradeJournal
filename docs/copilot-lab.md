@@ -107,7 +107,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       entered under (contract, P&L now, invalidation distance, time stop,
       give-back state), its armed plans not yet in a position (distance to
       entry and invalidation), and one line of what is new on it (a Radar
-      event since the last Radar visit, or a thesis trigger fired today). Each
+      event since the last Radar visit, or a thesis trigger fired today). The
+      same read's `last_exit` (the symbol's newest answered exit review) feeds
+      the plan card's lesson line; the dock does not show it. Each
       is a dock section with its count, folded per device; an empty one is
       left out. A position opens its review (`Review this position: <trade
       id>`), a plan its investigation, and the new line a conversation about
@@ -733,6 +735,22 @@ list, and so does an owner conversation about the symbol not touched since;
 closing the conversation puts it in the Context pane's This week record. A
 plan confirmed after that is a new plan.
 
+**The last lesson comes back to the next plan.** A new plan on a symbol shows
+that symbol's newest answered exit review as one quiet line, "Last NBIS exit
+(Oct 21): didn't follow · “No, sold the give-back too early.”"
+(`LastExitLine.tsx`): the date of that plan's last exit, what the answer opens
+with (followed, partly followed or didn't follow; left out when it says
+neither) and the owner's own words, cut at 200 characters. It sits under a
+draft plan card (not a confirmed or dismissed one), read from
+`GET /copilot/symbol/{symbol}`'s `last_exit`, and on each Arm today's plans
+row, from the Plans read's `last_exit` on an armed plan.
+`copilot_plans.last_exit_lessons` reads it as Review my week does
+(`copilot_review.exit_reviews`'s pairing and helpers): of the symbol's exited
+plans, newest exit first, the first whose `plan_done` says Exit reviewed, with
+the `reflection` saved just before it. A skipped or unanswered review falls
+back to the one before; a symbol with none shows nothing. Read-only, no model
+call; a failed read leaves the line out (`last_exit` unavailable).
+
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
 at a glance instead of a header and plan ladder (`SessionTape.tsx`): "Today",
@@ -760,7 +778,8 @@ QQQ and VIX's change. At the top of the thread list sits a phase button:
 (`ArmChecklist.tsx`; on a phone it moves to the Thread tab): each armed plan
 from the thread list's Plans read, with its contract, entry, invalidation and
 time stop, flagged (⚑) with any thesis-watch trigger fired today on the
-symbol, earnings first, and three answers. **Still good** logs a `decision`
+symbol, earnings first, the symbol's last exit lesson (see Plans end), and
+three answers. **Still good** logs a `decision`
 day-journal entry, "Armed for today. Entry … · invalidation … · time stop …."
 (the decision bar's Holding/Exiting parser does not read it). **Change** opens
 the plan's thread with "Change my <symbol> plan before the open: … What should
@@ -1359,7 +1378,9 @@ that section as "why this is evidence, not a rule".
   the entry the line says to re-ask the copilot rather than refetching on every
   keystroke; a
   reloaded investigation has no row (evidence references keep no results).
-  The Evidence strip labels the read "Your history here".
+  The Evidence strip labels the read "Your history here". A draft card also
+  shows the symbol's last exit lesson (see The desk § The last lesson comes
+  back to the next plan).
 
 ## Option candidates
 
