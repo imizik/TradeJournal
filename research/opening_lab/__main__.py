@@ -128,6 +128,14 @@ def main(argv=None):
                        help="cap on the run directory's TOTAL reported spend (required for --backend api)")
     model_options(trade)
 
+    mytrades = commands.add_parser("mytrades", help="Ask Claude, blind, at the owner's own opening "
+                                                     "option entries and compare (resumable)")
+    mytrades.add_argument("--journal", required=True, type=Path,
+                          help="JSON list of trades exported from the journal API (/trades)")
+    mytrades.add_argument("--run", required=True, type=Path)
+    mytrades.add_argument("--workers", type=int, default=2)
+    model_options(mytrades)
+
     trade_report = commands.add_parser("trade-report", help="Score trade runs and the benchmarks")
     trade_report.add_argument("--run", required=True, type=Path, action="append",
                               help="trade run directory; repeat to score several runs together")
@@ -153,6 +161,9 @@ def main(argv=None):
         print(json.dumps({"bars": prefetch_bars(args.start, args.end),
                           "news": prefetch_news(args.start, args.end)}, indent=2, default=str))
         return 0
+
+    if args.command == "mytrades":
+        return _mytrades_command(args, parser, log)
 
     if args.command in ("trade", "trade-report"):
         return _trade_command(args, parser, log)
@@ -220,6 +231,42 @@ def main(argv=None):
                      variants=variants if model else [], baselines=baselines, workers=args.workers,
                      max_cost_usd=args.max_cost_usd, log=log)
     print(write_report(run, sessions))
+    return 0
+
+
+def _mytrades_command(args, parser, log):
+    from .context import attach_context
+    from .cross import attach_cross
+    from .data import load_session
+    from .model import ClaudeForecaster
+    from .mytrades import DECISION_SCHEMA, ensure_stocks, render, replay, score, select_trades, validate_call
+
+    if args.model in ("none", "fake"):
+        parser.error("mytrades needs a Claude model")
+    picks = select_trades(json.loads(args.journal.read_text()))
+    sessions = {}
+    for day in sorted({p["date"] for p in picks}):
+        try:
+            sessions[day] = attach_cross(attach_context(load_session(day, fetch=True), fetch=True), fetch=True)
+        except Exception as exc:
+            log(f"skip {day}: {type(exc).__name__}: {exc}")
+    picks = [p for p in picks if p["date"] in sessions]   # e.g. today, before its data is final
+    ensure_stocks(picks, fetch=True)
+    thinking = 2048 if args.thinking == "adaptive" else 0
+    model = ClaudeForecaster(args.model, Path(__file__).with_name("prompt_mytrades.txt").read_text(),
+                             backend=args.backend, thinking_budget=thinking, effort=args.effort,
+                             max_tokens=args.max_tokens, max_retries=args.retries,
+                             schema=DECISION_SCHEMA, validate=validate_call)
+    model.settings = {"model": args.model, "backend": args.backend, "effort": args.effort,
+                      "thinking": args.thinking, "mode": "mytrades"}
+    if args.backend == "api":
+        parser.error("mytrades runs on the Claude plan only (--backend cli)")
+    name = f"{args.model}@{args.effort}+cli"
+    run, results = replay(args.run, picks, sessions=sessions, model=model, model_name=name,
+                          workers=args.workers, log=log)
+    text = render(score(results), results)
+    (run.dir / "mytrades_report.txt").write_text(text + "\n")
+    print(text)
     return 0
 
 

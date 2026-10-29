@@ -129,6 +129,28 @@ backend/.venv/bin/python -m research.opening_lab trade --run research/opening_la
 backend/.venv/bin/python -m research.opening_lab trade-report --run research/opening_lab/runs/sonnet-trade-cli
 ```
 
+## Your own entries
+
+`mytrades` (`mytrades.py`, `prompt_mytrades.txt`) replays Claude at each
+journal option trade opened between 09:30 and 10:29 ET, from July 2026 on.
+
+- **Blind question.** At the entry minute, Claude is asked whether to buy
+  CALLS, buy PUTS or PASS on that stock. It isn't told what the owner did.
+- **Same information as then.** The packet uses the same visibility rule as the
+  lab. It holds the stock's bars and features, the stock's own headlines,
+  SPY/QQQ, the cross-market section and market-wide headlines and macro.
+  Single-stock minutes and raw daily bars are fetched into `.cache/stocks/`.
+- **Report.** It splits the owner's real P&L by Claude's call (agree, other
+  side, pass), and shows who called the underlying's 15- and 30-minute
+  direction.
+
+The journal export, from the API's `/trades`, is read from a file and kept in
+the gitignored `.cache/`. It runs on the Claude plan only (`--backend cli`).
+
+```bash
+backend/.venv/bin/python -m research.opening_lab mytrades --journal research/opening_lab/.cache/journal_trades.json --run research/opening_lab/runs/sonnet-mytrades-cli --model claude-sonnet-5-5 --backend cli
+```
+
 `live --run DIR --model … --variant full` runs one morning on live Alpaca data
 (start before 09:30 ET): each packet freezes at checkpoint + 5 s and an answer
 after 45 s is recorded as late. Score it after the close with `report --run DIR`.
