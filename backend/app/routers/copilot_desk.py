@@ -9,7 +9,9 @@ that already exist:
   hit after it;
 - ``near``: armed plans not yet in a position within ``today.NEAR_PCT`` of their entry or invalidation (the Today
   screen's rule, on the same board read);
-- ``draft``: unarmed plan drafts. No store keeps them yet, so the group stays empty;
+- ``draft``: the owner's open conversations with plan or alert cards still waiting on Confirm or Dismiss (no
+  ``outcome`` in the saved transcript), newest first. A conversation already shown as an armed plan or a position stays
+  there; a waiting one leaves Watching;
 - ``new``: Radar events since the last Radar visit (``today._radar``) and thesis-watch triggers fired today
   (``today._thesis``), newest first;
 - ``watch``: every other open position, armed plan and open investigation.
@@ -29,6 +31,7 @@ happened in it, from the same kind of existing readers.
 """
 
 from datetime import UTC, datetime
+import json
 import logging
 import uuid
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -46,6 +49,8 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_INVESTIGATIONS = 20
+DRAFT_KINDS = ("watch", "trade_plan")  # alerts and plans (a plan card carries its time stop); not memories or revisits
+CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}  # ProposalCard's words
 RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "group_move": "Group move"}  # RadarFeedView's words
 
 
@@ -141,6 +146,38 @@ def _investigations(db: Session) -> dict:
         rows.append({"id": r["id"], "source": r["source"], "symbol": r["symbol"], "title": r["title"],
                      "conclusion": r["conclusion"] if r["source"] == "copilot" else None, "updated_at": r["updated_at"]})
     return {"state": "ok", "rows": rows}
+
+
+def _card_text(card: dict) -> str:
+    """A waiting card in a few words: "Alert · APLD crosses 31.20", "Plan · APLD long calls · entry crosses 31.20"."""
+    level = card if card["kind"] == "watch" else card["entry_trigger"]
+    words = f"{level['interval']} close beyond" if level["condition"] == "closes_beyond" else CONDITION.get(level["condition"], level["condition"])
+    if card["kind"] == "watch":
+        return f"Alert · {card['symbol']} {words} {level['price']:.2f}"
+    return f"Plan · {card['symbol']} {card['direction']} {card['instrument']} · entry {words} {level['price']:.2f}"
+
+
+def _drafts(db: Session) -> dict:
+    """Open conversations whose plan or alert cards still wait on the owner (no ``outcome``), newest first, each with
+    its waiting cards in transcript order. Only the owner's own conversations: a research job's cards are not read."""
+    from app.models import CopilotInvestigation
+    found = db.exec(select(CopilotInvestigation).where(CopilotInvestigation.status == "open", CopilotInvestigation.source == "copilot")
+                    .order_by(col(CopilotInvestigation.updated_at).desc()).limit(MAX_INVESTIGATIONS)).all()
+    rows = []
+    for row in found:
+        waiting = [card for message in json.loads(row.transcript_json) if message.get("role") == "assistant"
+                   for card in message.get("proposals") or () if card.get("kind") in DRAFT_KINDS and not card.get("outcome")]
+        if waiting:
+            rows.append({"id": str(row.id), "symbol": row.symbol or waiting[0].get("symbol"), "title": row.title,
+                         "cards": [_card_text(card) for card in waiting], "updated_at": row.updated_at.isoformat() + "Z"})
+    return {"state": "ok", "rows": rows}
+
+
+def _draft_rows(drafts: dict, covered: set[str]) -> list[dict]:
+    return [_row(f"draft:{r['id']}", "draft", r["title"], _say(r["cards"][0], "muted"), symbol=r["symbol"],
+                 value=_say(f"{len(r['cards'])} to confirm", "attention"), investigation_id=r["id"],
+                 changed_at=_epoch(r["updated_at"]))
+            for r in drafts.get("rows", []) if r["id"] not in covered]
 
 
 def _decisions(db: Session, day) -> dict:
@@ -326,6 +363,7 @@ def desk_threads(db: Session = Depends(get_session)):
     board = today._section(db, "desk board", lambda: _board(db, quotes))
     found = today._section(db, "desk positions", lambda: _positions(db, quotes, now, day))
     investigations = today._section(db, "desk investigations", lambda: _investigations(db))
+    drafts = today._section(db, "desk drafts", lambda: _drafts(db))
     decisions = today._section(db, "desk decisions", lambda: _decisions(db, day))
     radar = today._section(db, "desk radar", lambda: today._radar(now))
     thesis = today._section(db, "desk thesis", lambda: today._thesis(db, day))
@@ -344,9 +382,10 @@ def desk_threads(db: Session = Depends(get_session)):
         near, plan_watch = _plan_rows(board, covered)
         watch += plan_watch
         covered |= {p["investigation_id"] for p in board["plans"]}
+    draft = _draft_rows(drafts, covered)
     titles = {r["id"]: r["title"] for r in investigations.get("rows", [])}
     new = _new_rows(radar, thesis, titles)
-    covered |= {r["investigation_id"] for r in new if r["investigation_id"]}
+    covered |= {r["investigation_id"] for r in draft + new if r["investigation_id"]}
     for r in investigations.get("rows", []):
         if r["id"] in covered:
             continue
@@ -359,10 +398,10 @@ def desk_threads(db: Session = Depends(get_session)):
     return {
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
         "day": {"phase": phase.get("phase"), "need_you": len(act), "streak": streak},
-        "threads": _pinned(prep, week) + act + near + new + watch,
+        "threads": _pinned(prep, week) + act + near + draft + new + watch,
         "sections": {name: part["state"] for name, part in (
-            ("positions", found), ("plans", board), ("investigations", investigations), ("decisions", decisions),
-            ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
+            ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
+            ("decisions", decisions), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
 
 

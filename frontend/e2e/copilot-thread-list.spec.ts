@@ -148,6 +148,44 @@ test("the list fits a 375 px phone with thumb-sized rows", async ({ page }) => {
   expect(chats).toEqual([]);
 });
 
+// A conversation with an alert and a plan card the owner has not confirmed or dismissed yet.
+const DRAFT = row({ key: `draft:${APLD}`, group: "draft", symbol: "APLD", title: "APLD base", investigation_id: APLD,
+  value: { text: "2 to confirm", tone: "attention" }, status: { text: "Alert · APLD crosses 31.20", tone: "muted" }, changed_at: epoch("2026-10-23T14:30:00Z") });
+const waiting = {
+  ...saved, id: APLD, title: "APLD base", symbol: "APLD", transcript: [{ role: "user", content: "Watch APLD's base" }, {
+    role: "assistant", content: "Two cards for the base.", proposals: [
+      { id: "w1", kind: "watch", symbol: "APLD", condition: "crosses", price: 31.2, interval: null, label: "APLD base", why: "the base's top", last: 30.4 },
+      { id: "w0", kind: "watch", symbol: "APLD", condition: "touches", price: 29.5, interval: null, label: "APLD floor", why: "the floor",
+        outcome: { state: "dismissed" } },
+    ] }],
+};
+
+test("Waiting for you lists a conversation with cards to confirm and opens it on them; nothing arms from the list", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => { if (request.method() !== "GET") posts.push(request.url()); });
+  const { chats } = await lab(page, { ...DESK, threads: [...DESK.threads.slice(0, 4), DRAFT, ...DESK.threads.slice(4)] });
+  await page.route(`**/copilot/investigations/${APLD}`, (route) => route.fulfill({ json: waiting }));
+  const threads = list(page);
+  const titles = await threads.locator("section h3").allTextContents();
+  expect(titles).toEqual(["Pinned", "Act now", "Near a trigger", "Waiting for you", "New since you looked", "Watching"]);
+  const drafts = threads.getByRole("region", { name: "Waiting for you" });
+  await expect(drafts.getByLabel("1 thread")).toBeVisible();
+  const apld = drafts.getByRole("link", { name: "APLD APLD base" });
+  await expect(apld).toContainText("2 to confirm");
+  await expect(apld).toContainText("Alert · APLD crosses 31.20");
+  await expect(apld).toHaveAttribute("href", `/copilot-lab?investigation=${APLD}`);
+  await page.screenshot({ path: test.info().outputPath("thread-list-drafts.png") });
+
+  await apld.click();
+  const card = page.getByRole("region", { name: "Proposed watch" });
+  await expect(card).toHaveCount(1); // the dismissed card stays hidden
+  await expect(card).toContainText("APLD crosses 31.2");
+  await expect(card.getByRole("button", { name: /Confirm/ })).toBeVisible(); // the card's own Confirm, not the row's
+  await expect(apld).toHaveClass(/ring-1/);
+  expect(posts.filter((url) => !url.includes("/copilot/chat"))).toEqual([]);
+  expect(chats).toEqual([]);
+});
+
 test("no thread list while the lab is off", async ({ page }) => {
   let reads = 0;
   await page.route("**/copilot/desk/threads", (route) => { reads += 1; return route.fulfill({ json: DESK }); });

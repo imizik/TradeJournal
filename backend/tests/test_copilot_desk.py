@@ -50,11 +50,36 @@ def groups(body):
     return {g: [r["key"] for r in body["threads"] if r["group"] == g] for g in ("pinned", "act", "near", "draft", "new", "watch")}
 
 
-def investigation(engine, inv, symbol, title, *, source="copilot", conclusion=None, status="open"):  # noqa: F811
+def investigation(engine, inv, symbol, title, *, source="copilot", conclusion=None, status="open", transcript=(),  # noqa: F811
+                  updated_at=None):
     with Session(engine) as db:
         db.add(CopilotInvestigation(id=UUID(inv), title=title, symbol=symbol, source=source, conclusion=conclusion, status=status,
-                                    transcript_json="[]", evidence_json="[]"))
+                                    transcript_json=json.dumps(list(transcript)), evidence_json="[]",
+                                    **({"updated_at": updated_at} if updated_at else {})))
         db.commit()
+
+
+def watch_card(pid, symbol, price, outcome=None, condition="crosses"):
+    card = {"id": pid, "kind": "watch", "symbol": symbol, "condition": condition, "price": price,
+            "interval": "5m" if condition == "closes_beyond" else None, "label": f"{symbol} level", "why": "the level",
+            "client_id": f"client-{pid}"}
+    return {**card, "outcome": outcome} if outcome else card
+
+
+def plan_card(pid, symbol, outcome=None):
+    card = {"id": pid, "kind": "trade_plan", "symbol": symbol, "direction": "long", "instrument": "calls", "contract": None,
+            "thesis": "Holds the base", "entry_trigger": {"condition": "crosses", "price": 31.2, "interval": None},
+            "invalidation": {"condition": "touches", "price": 29.5, "interval": None}, "time_stop": "15:30", "size_note": None}
+    return {**card, "outcome": outcome} if outcome else card
+
+
+def db_rows(engine):  # noqa: F811
+    with Session(engine) as db:
+        return db.exec(select(CopilotInvestigation)).all()
+
+
+def answer(*cards):
+    return [{"role": "user", "content": "plan it"}, {"role": "assistant", "content": "Here are the cards.", "proposals": list(cards)}]
 
 
 def test_a_quiet_day_is_the_two_pinned_rows_and_one_day_line(desk):
@@ -182,6 +207,51 @@ def test_new_since_you_looked_and_open_investigations(desk, engine, tmp_path, mo
     assert body["threads"][0]["status"] == {"text": "Prep: NBIS 100C expires Friday.", "tone": "info"}
     with Session(engine) as db:
         assert db.exec(select(PhonePing)).all() == []
+
+
+def test_conversations_with_cards_still_waiting_are_waiting_for_you(desk, engine):  # noqa: F811
+    from app.engine import copilot_investigations
+    done = {"state": "confirmed", "note": "Alert set"}
+    investigation(engine, APLD, "APLD", "APLD base", updated_at=T0 + timedelta(minutes=30),
+                  transcript=answer(watch_card("w1", "APLD", 31.2), plan_card("p1", "APLD"), watch_card("w0", "APLD", 30, done)))
+    investigation(engine, NBIS, "NBIS", "NBIS recovery", updated_at=T0 + timedelta(minutes=60),
+                  transcript=answer(watch_card("w2", "NBIS", 92.3, condition="closes_beyond")))
+    investigation(engine, CRWV, "CRWV", "All handled", transcript=answer(
+        watch_card("w3", "CRWV", 100, done), watch_card("w4", "CRWV", 99, {"state": "dismissed"}),
+        {"id": "m1", "kind": "memory", "memory_kind": "lesson", "symbol": "CRWV", "text": "a memory card is not a draft"}))
+    for row in db_rows(engine):  # the saved transcripts are what the investigation store itself accepts
+        copilot_investigations.SavedMessage.model_validate(json.loads(row.transcript_json)[1])
+    body = read(desk)
+    assert groups(body)["draft"] == [f"draft:{NBIS}", f"draft:{APLD}"]  # newest first
+    nbis, apld = [r for r in body["threads"] if r["group"] == "draft"]
+    assert (apld["symbol"], apld["title"], apld["investigation_id"], apld["path"]) == ("APLD", "APLD base", APLD, None)
+    assert apld["value"] == {"text": "2 to confirm", "tone": "attention"}  # the confirmed card is done
+    assert apld["status"] == {"text": "Alert · APLD crosses 31.20", "tone": "muted"}  # the first waiting card
+    assert nbis["status"]["text"] == "Alert · NBIS 5m close beyond 92.30" and nbis["value"]["text"] == "1 to confirm"
+    assert groups(body)["watch"] == [f"investigation:{CRWV}"]  # a waiting conversation shows once, under Waiting for you
+    assert body["sections"]["drafts"] == "ok" and "client-w1" not in json.dumps(body)
+
+
+def test_a_plan_card_names_its_entry_and_an_armed_plan_or_a_research_job_stays_out(desk, engine):  # noqa: F811
+    investigation(engine, APLD, "APLD", "APLD base", transcript=answer(plan_card("p1", "APLD")))
+    alert(engine, CRWV, "CRWV", "entry", 104)  # CRWV's plan is armed: its row stays the plan
+    investigation(engine, CRWV, "CRWV", "CRWV breakout", transcript=answer(watch_card("w1", "CRWV", 98)))
+    investigation(engine, NBIS, "NBIS", "NBIS job", source="research_job", transcript=answer(watch_card("w2", "NBIS", 92)))
+    body = read(desk)
+    [row] = [r for r in body["threads"] if r["group"] == "draft"]
+    assert row["key"] == f"draft:{APLD}" and row["status"]["text"] == "Plan · APLD long calls · entry crosses 31.20"
+    assert groups(body)["watch"] == [f"plan:{CRWV}", f"investigation:{NBIS}"]
+
+
+def test_a_failing_draft_read_leaves_the_conversation_watching(desk, engine, monkeypatch):  # noqa: F811
+    investigation(engine, APLD, "APLD", "APLD base", transcript=answer(watch_card("w1", "APLD", 31.2)))
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(copilot_desk, "_drafts", broken)
+    body = read(desk)
+    assert body["sections"]["drafts"] == "unavailable" and groups(body)["draft"] == []
+    assert groups(body)["watch"] == [f"investigation:{APLD}"]
 
 
 def test_an_unplanned_position_links_to_planning_it(desk, engine):  # noqa: F811
