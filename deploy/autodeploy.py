@@ -49,6 +49,10 @@ CONFIG = Path("/etc/tradejournal/autodeploy.env")
 ALERTS_CONFIG = Path("/etc/tradejournal/alerts.env")
 NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "NTFY_IPV4_ONLY", "ALERT_APP_URL")
 STATE = Path("/var/lib/tradejournal/autodeploy")
+# A world-readable copy of the state for the app's Deploys page; nothing here reads it back.
+PUBLIC = Path("/var/lib/tradejournal/autodeploy.json")
+# Decisions kept for that page, newest last.
+HISTORY = 30
 CONTROLLER = Path("/usr/local/sbin/tradejournal-deploy")
 BACKUPS = Path("/var/backups/tradejournal")
 API = "http://127.0.0.1:8080"
@@ -308,13 +312,23 @@ def save_state(state: dict) -> None:
     pending = STATE / "state.json.new"
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(STATE / "state.json")
+    try:
+        pending = PUBLIC.with_name(PUBLIC.name + ".new")
+        pending.write_text(json.dumps(state, indent=2) + "\n")
+        pending.chmod(0o644)
+        pending.replace(PUBLIC)
+    except OSError as exc:
+        print(f"Deploys page status not written: {exc}", flush=True)
 
 
 def record(settings: Settings, state: dict, build: Build, outcome: str, detail: str, *, title: str) -> None:
     """Remember a decision about a build; notify only the first time it is made."""
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if (state.get("commit"), state.get("outcome")) != (build.commit, outcome):
         notify(settings, title, detail, good_news=outcome == "deployed")
-    state.update(commit=build.commit, release=build.release_id, outcome=outcome, detail=detail, at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        history = state.get("history", []) + [{"at": at, "commit": build.commit, "release": build.release_id, "title": build.title, "outcome": outcome, "detail": detail}]
+        state["history"] = history[-HISTORY:]
+    state.update(commit=build.commit, release=build.release_id, outcome=outcome, detail=detail, at=at)
     if outcome == "deployed":
         state["deployed"] = build.commit
     save_state(state)
@@ -420,6 +434,15 @@ def status(settings: Settings) -> None:
         print(f"Last decision: {state['outcome']} for {state['commit'][:12]} at {state['at']}\n  {state['detail']}")
 
 
+def note_check(settings: Settings, result: str) -> None:
+    """Remember what the latest pass concluded, for the Deploys page."""
+    state = load_state()
+    hold = None if settings.hold is None else f"{settings.hold[0]:%H:%M}-{settings.hold[1]:%H:%M}"
+    state["checked"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "result": result, "enabled": settings.enabled,
+                        "hold": hold, "auto_migrate": settings.auto_migrate, "repository": settings.repository}
+    save_state(state)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="action", required=True)
@@ -439,6 +462,7 @@ def main() -> None:
         return
     if not settings.enabled:
         print("Automatic deployment is off (AUTODEPLOY_ENABLED is not true)")
+        note_check(settings, "Automatic deployment is off")
         return
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (STATE / "run.lock").open("a+b") as lock:
@@ -448,11 +472,14 @@ def main() -> None:
             print("Another automatic deployment run is active")
             return
         try:
-            print(deploy(settings, now=datetime.now(timezone.utc), ignore_hold=args.now, allow_migration=args.allow_migration), flush=True)
+            result = deploy(settings, now=datetime.now(timezone.utc), ignore_hold=args.now, allow_migration=args.allow_migration)
         except Waiting as exc:
-            print(f"Waiting: {exc}", flush=True)
+            result = f"Waiting: {exc}"
         except Failed as exc:
+            note_check(settings, f"Failed: {exc}")
             raise SystemExit(str(exc)) from None
+        print(result, flush=True)
+        note_check(settings, result)
 
 
 if __name__ == "__main__":

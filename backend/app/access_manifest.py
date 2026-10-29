@@ -102,6 +102,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /copilot/research-jobs',
     'POST /copilot/research-jobs/reassess',
     'POST /copilot/research-jobs/{job_id}/cancel',
+    'GET /deploys',
     'GET /radar/feed',
     'GET /radar/groups/compare',
     'GET /radar/movers',

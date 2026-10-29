@@ -123,6 +123,7 @@ def autodeploy(tmp_path, monkeypatch):
     module = load()
     monkeypatch.setattr(module, "ROOT", tmp_path / "opt")
     monkeypatch.setattr(module, "STATE", tmp_path / "state")
+    monkeypatch.setattr(module, "PUBLIC", tmp_path / "autodeploy.json")
     old = make_release(module.ROOT, "old", OLD)
     (module.ROOT / "current").symlink_to(old)
     return module
@@ -158,6 +159,18 @@ def test_deploys_the_newest_verified_build_through_the_controller(autodeploy, se
     assert server.notes == [("TradeJournal updated", "Refresh signals while visible\nNow running bbbbbbbbbbbb.")]
     state = json.loads((autodeploy.STATE / "state.json").read_text())
     assert (state["outcome"], state["deployed"]) == ("deployed", NEW)
+
+
+def test_decisions_are_kept_in_a_readable_copy_for_the_deploys_page(autodeploy, server):
+    server.new_revisions = ("001_initial.py", "002_more.py")
+    autodeploy.deploy(settings(autodeploy), now=THURSDAY_5PM_NEW_YORK)
+    autodeploy.deploy(settings(autodeploy), now=THURSDAY_5PM_NEW_YORK)  # the same decision is not repeated
+    autodeploy.deploy(settings(autodeploy, auto_migrate=True), now=THURSDAY_5PM_NEW_YORK)
+    autodeploy.note_check(settings(autodeploy), "Up to date with bbbbbbbbbbbb")
+    public = json.loads(autodeploy.PUBLIC.read_text())
+    assert [(entry["outcome"], entry["title"]) for entry in public["history"]] == [("needs-migration", "Refresh signals while visible"), ("deployed", "Refresh signals while visible")]
+    assert public["checked"]["result"] == "Up to date with bbbbbbbbbbbb" and public["checked"]["hold"] == "09:25-16:15"
+    assert oct(autodeploy.PUBLIC.stat().st_mode & 0o777) == "0o644"
 
 
 def test_up_to_date_server_touches_nothing(autodeploy, server):
