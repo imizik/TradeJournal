@@ -708,7 +708,9 @@ subdirectory there for one of its own. Each pass refuses to run unless that
 directory and its parent are owned by root and writable by nobody else. A
 server upgraded from the old `/var/lib/tradejournal/autodeploy/state.json`
 copies it over once, only if root wrote that file; the old copy is left in
-place, unused, for an operator to delete.
+place, unused, for an operator to delete. A release from before this move
+reads only that old copy, so set `AUTODEPLOY_ENABLED=false` before rolling
+back to one: it would not remember a build the newer deployer saw fail.
 
 ## Verification boundaries
 
