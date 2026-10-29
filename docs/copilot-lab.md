@@ -600,9 +600,16 @@ The panes follow the desk's own width: three from 1100 px, two below that
 (Context under Threads), and below 760 px one at a time behind Now / Thread /
 Context tabs. A phone lands on Now unless a deep link brings a conversation.
 While the lab is off only the conversation shows, saying so. On a wide screen
-(1024 px and up) the desk takes the whole screen beside the navigation rail,
-as Charts does (`AppMain.fullScreenRoute`), and each pane scrolls on its own.
-The desk bar holds Jump to… (⌘K), New plan and the Context toggle; the
+(1024 px and up) the desk takes the whole screen, as Charts does
+(`AppMain.fullScreenRoute`), and each pane scrolls on its own. From 768 px the
+app's navigation folds into one **Menu** button at the left of the desk bar
+(`useFoldedNav` / `openNavMenu` in `Nav.tsx`), so the desk gets the full
+width; it opens the labelled menu (every page, sync, the plan streak), whose
+**Keep the sidebar open** shows the full sidebar instead, remembered in this
+browser with the same key as Charts' expanded rail (its Collapse folds it
+back). A phone keeps its tab bar. Every icon in the Charts rail names itself
+on hover or focus (`NavHint`), the sync dot included.
+The desk bar holds Menu, Jump to… (⌘K), New plan and the Context toggle; the
 read-only note sits under the message box.
 
 **The desk is home.** While the lab is on, the desk takes the Today screen's
