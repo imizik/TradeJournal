@@ -1,5 +1,5 @@
 {
-  "commit": "e40b122cd213bd231237db591c2ef8f11c84667f",
-  "date": "2026-10-28",
-  "note": "Reconciled cc8cf4a7..e40b122c (31 code commits, #499-#547: Copilot desk shell, thread list, header, Context pane and kept proposal cards; model and backend pickers with the daily API budget; images, Read it back, Explain this candle, Watch your day, pings with pictures, draw the plan, Size it for me; shadow book; Radar rules v1 kit; Duet profiles; CI shards). Most PRs updated their own docs. Fixed in feature-map: copilot tool count (seventeen), the proposal outcome route, the backend picker test. Not checked: every prose claim in the per-PR sections of copilot-lab, radar and charts-workspace; deploy/duet notes; research notes; live host states."
+  "commit": "9cff89c23e00a7284cf4a27efa509e65cdec8293",
+  "date": "2026-10-29",
+  "note": "Reconciled e40b122c..9cff89c2 (39 code commits, #543-#585: Copilot desk decision bar, keys, Radar and alert decisions and scorecards, thread list, Plans view, horizons, exit reviews, fill links, desk as home, graphite surfaces; alert feedback on Proof; Radar evidence receipts; Deploys page; autodeploy state move; opening lab). Most PRs updated their own docs. Fixed in feature-map: added the Deploys page row, the Radar evidence receipts/census module and test, and alert feedback on the Proof card. Not checked: every prose claim in the per-PR sections of copilot-lab and radar; deploy/README; research notes; live host states."
 }
