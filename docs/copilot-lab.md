@@ -1145,8 +1145,11 @@ model to call:
     shows once per ranking.
   - `long_holds` (only when there are some): open positions whose symbol the
     owner set to a long hold on the desk, up to 10 (symbol, contract, opening
-    day). The desk asks nothing about them day to day, so the review ends with
-    a line on each. A week with no closed trades still carries it.
+    day, days held in New York calendar days, and the thesis of the plan
+    linked to the position in the owner's words: the plan card's `Thesis:`,
+    else the captured wording; absent without a plan). No quote read, so no
+    open P&L. The desk asks nothing about them day to day, so the review ends
+    with a line on each. A week with no closed trades still carries it.
   - `exit_reviews`, only when a plan exited that week (absent otherwise):
     the plans whose position closed that week (`copilot_plans.exits`, by
     the last exit), counted `exited`, `answered`, `skipped` and `waiting`
@@ -1187,13 +1190,20 @@ model to call:
   (`ExitLessons.tsx`). The tool event carries it as `lessons`
   (`copilot.week_lessons_card`, a second read through the evidence's
   `week_exit_reviews`), the only place the plan's investigation id appears;
-  the model's result never has it. A reopened saved conversation shows the
-  answer without the block (saved evidence keeps no tool data).
+  the model's result never has it. Beside it, **Your long holds** ("2 held,
+  not asked about day to day") lists each long hold on one line (symbol, days
+  held, the thesis in quotes or the contract and "no plan") with "Still the
+  thesis?" opening its plan's thread, else its symbol (`LongHolds.tsx`). The
+  tool event carries it as `long_holds` (`copilot.long_holds_card`, a second
+  read through the evidence's `week_long_holds`). A reopened saved
+  conversation shows the answer without either block (saved evidence keeps no
+  tool data).
 - The review is held under 5,800 characters: over that, it drops the
   provenance labels, the time-stop rows, the follow-through rows, then trims
   the give-back and P&L rankings to two each, drops the notes, and finally
   the give-back ranking, cuts the exit lessons to 80 characters and then to
-  three rows, then the practice note, marking itself `trimmed`.
+  three rows, then the practice note, then cuts the long holds' theses to 60
+  characters, marking itself `trimmed`.
   Totals, planned vs unplanned, the follow-through counts and the practice
   score always stay. One failing section reads `unavailable`.
 - No trade, fill, account, plan or investigation id is returned. Research
