@@ -481,9 +481,12 @@ The full page is a desk of three panes beside each other
   ping readers) and read again each minute; **Timeline**, the day across
   everything newest first from `GET /copilot/desk/session` (time stops still
   ahead, fills, pings sent, Radar events, decisions, the prep); and **This
-  week**, the plan streak's counts (`GET /charts/captures/streak`): a tile per
-  entry this week, planned before entry or not, the streak and best, and what
-  one more planned entry makes.
+  week**, the plan streak's record (`GET /charts/captures/streak`): a tile per
+  entry this week in time order (+ planned before entry, − no plan or a plan
+  saved late, · a suggested plan waiting to be linked), each titled like
+  "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
+  linked plan shows; then the counts, the streak and best, and what one more
+  planned entry makes.
 
 **Pings open on the decision.** A position alert's phone ping opens the
 desk thread for that position (see Review a trade or position), so a tap

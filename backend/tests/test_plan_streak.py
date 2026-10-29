@@ -1,6 +1,7 @@
 """The plan streak: entries planned before entry, newest first, in Robinhood accounts;
 a suggested plan holds the streak open for 30 minutes, a late plan breaks it."""
 
+import json
 import re
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -107,6 +108,21 @@ def test_streak_counts_pre_entry_plans_and_breaks_on_late_or_missing(week):
     assert result["this_week"]["pending"] == 1
 
 
+def test_this_week_lists_each_entry_in_time_order_with_its_trade_and_plan(week):
+    entries = plan_streak.streak(week, NOW)["this_week"]["entries"]
+    assert [(e["short"], e["state"]) for e in entries] == [
+        ("NVDA 900C", "planned"), ("NVDA 901C", "planned"), ("NVDA 902C", "unplanned"), ("NVDA 903C", "planned"), ("NVDA 904C", "late"),
+        ("NVDA 905C", "planned"), ("NVDA 906C", "planned"), ("NVDA 907C", "planned"), ("NVDA 908C", "pending")]
+    assert entries[0]["contract"] == "NVDA 1/15/99 900C"
+    assert entries[0]["entry_time"] == int(datetime(2026, 9, 14, 13, 40, tzinfo=UTC).timestamp())
+    trades = {t.strike: str(t.id) for t in week.exec(select(Trade)).all()}
+    captures = {c.strike: str(c.id) for c in week.exec(select(TradeCapture)).all()}
+    assert [e["trade_id"] for e in entries] == [trades[s] for s in range(900, 909)]
+    # A linked plan, on time or late, names its capture; no plan, or a suggestion not yet linked, names none.
+    assert entries[4]["capture_id"] == captures[904] and entries[0]["capture_id"] == captures[900]
+    assert "capture_id" not in entries[2] and "capture_id" not in entries[8]
+
+
 def test_pending_expires_after_thirty_minutes_and_linking_extends(week):
     later = NOW + timedelta(minutes=20)  # 11:20, 35 minutes after the 10:45 entry
     result = plan_streak.streak(week, later)
@@ -156,7 +172,7 @@ def test_hidden_until_tracking_or_a_plan_exists(db):
     assert plan_streak.streak(db, NOW)["show"] is True
 
 
-def test_route_returns_no_ids(week, monkeypatch):
+def test_route_returns_no_ids_but_the_week_entries(week, monkeypatch):
     class Clock(datetime):
         @staticmethod
         def utcnow():
@@ -169,6 +185,10 @@ def test_route_returns_no_ids(week, monkeypatch):
     with TestClient(app) as client:
         response = client.get("/charts/captures/streak")
     assert response.status_code == 200
-    assert response.json()["current"] == 3
-    assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", response.text)
-    assert "id" not in {key.split("_")[-1] for key in response.json()}
+    body = response.json()
+    assert body["current"] == 3
+    # Only this week's entries carry ids, so a tile can open its trade.
+    entries = body["this_week"].pop("entries")
+    assert len(entries) == 9 and all(re.fullmatch(r"[0-9a-f-]{36}", e["trade_id"]) for e in entries)
+    assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", json.dumps(body))
+    assert "id" not in {key.split("_")[-1] for key in body}
