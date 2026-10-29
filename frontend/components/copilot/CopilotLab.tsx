@@ -7,6 +7,7 @@ import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
+import { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
 import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
@@ -213,6 +214,9 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
   const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
   const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread asks about its alerts sent today
 
+  // Fills waiting for their plan: one bar at the top of the symbol's thread, and "N fills to link" opening each in turn.
+  const fills = useFillLinks(rows, pick, () => setRefresh(n => n + 1));
+
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
   const day = thread ? !thread.symbol : !link?.symbol;
@@ -262,12 +266,15 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} refresh={refresh} phase={phaseAction && (
-              <button type="button" onClick={runPhase} title={phaseAction.hint}
-                className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
-                {phaseAction.label}
-              </button>
-            )} />
+            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} refresh={refresh} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
+              {phaseAction && (
+                <button type="button" onClick={runPhase} title={phaseAction.hint}
+                  className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
+                  {phaseAction.label}
+                </button>
+              )}
+              <FillsToLink count={fills.waiting.length} onStart={fills.start} />
+            </div>} />
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
@@ -286,12 +293,13 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
                   <HorizonPick horizon={linkRow.horizon} onChange={horizon => changeHorizon(link.symbol, horizon)} />
                 </p>
               )}
+              {fills.bar(link.symbol)}
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
-            <DeskThreadTop thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
-              <><DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
+            <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
+              <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ))}
           <CopilotPanel variant="page" link={link} desk={hooks} />

@@ -33,7 +33,10 @@ there is one, and the row's status line says the same.
 Each source is read on its own (``today._section``): one failure reads ``unavailable`` in ``sections`` and the rest
 stand. The board reads first, so one batched underlying quote read serves the plans and the positions. Read-only: no
 store, no pings, no Radar visit. Owner-only like every ``/copilot`` route; refuses while the lab is off. The only ids
-out are investigation, trade and Radar event ids, each the row's own link.
+out are investigation, trade and Radar event ids, each the row's own link, and ``fill_to_link``: the open trade whose fill
+waits to be linked to a plan (an unplanned position the link ping would offer plans for, or the armed plan the linker
+suggests that fill for, matched by symbol). The desk links it inline through the capture link routes; a position row
+with one opens on the desk (``/copilot-lab?symbol=``), not on the confirm page.
 
 An option position's value is its own unrealized P&L (the option's mark), never the underlying's price; its plan
 levels and meter are on the underlying, and the status line says so by naming it.
@@ -95,10 +98,11 @@ def _epoch(iso: str | None) -> int | None:
 def _row(key: str, group: str, title: str, status: dict, *, symbol: str | None = None, instrument: str | None = None,
          value: dict | None = None, meter: dict | None = None, investigation_id: str | None = None,
          trade_id: str | None = None, radar_event_id: str | None = None, path: str | None = None,
-         changed_at: int | None = None) -> dict:
+         changed_at: int | None = None, fill_to_link: str | None = None) -> dict:
     return {"key": key, "group": group, "symbol": symbol, "title": title, "instrument": instrument, "value": value,
             "status": status, "meter": meter, "investigation_id": investigation_id, "trade_id": trade_id,
-            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "horizon": None, "close": None}
+            "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "horizon": None, "close": None,
+            "fill_to_link": fill_to_link}
 
 
 def meter(entry: float | None, invalidation: float | None, last: float | None, tone: str) -> dict | None:
@@ -304,7 +308,7 @@ def _position_status(row: dict) -> dict:
     """A position not flagged for Act now: its plan's nearest line, or that it has none."""
     plan = row["plan"]
     if plan is None:
-        return _say("No plan yet", "muted")
+        return _say("Fill to link", "attention") if row["link_path"] else _say("No plan yet", "muted")
     where = f" ({row['symbol']})" if row["instrument"] == "option" else ""  # an option's levels are on the underlying
     level = plan.get("invalidation")
     if level and level["state"] == "armed" and "distance_pct" in level:
@@ -339,8 +343,9 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
         pnl = row["unrealized_usd"]
         value = None if pnl is None else _say(_usd(pnl), "gain" if pnl > 0 else "loss" if pnl < 0 else "muted")
         common = {"symbol": symbol, "instrument": _instrument(row["contract"], symbol, row["instrument"]), "value": value,
-                  "investigation_id": investigation, "trade_id": trade_id,
-                  "path": None if investigation else row["plan_path"] or row["link_path"] or f"/trades/{trade_id}"}
+                  "investigation_id": investigation, "trade_id": trade_id, "fill_to_link": trade_id if row["link_path"] else None,
+                  "path": None if investigation else f"/copilot-lab?{urlencode({'symbol': symbol})}" if row["link_path"]
+                  else row["plan_path"] or f"/trades/{trade_id}"}
         flagged = found["flagged"].get(trade_id)
         reasons = " · ".join(r["text"] for r in flagged["reasons"]) if flagged else None
         at = _decided(row, decided) if flagged else None
@@ -383,15 +388,17 @@ def _near(plan: dict) -> tuple[str, dict] | None:
     return min(near, key=lambda pair: abs(pair[1]["distance_pct"])) if near else None
 
 
-def _plan_rows(board: dict, covered: set[str]) -> tuple[list[dict], list[dict]]:
-    """(near rows, watch rows) for the armed plans no position row covers."""
+def _plan_rows(board: dict, covered: set[str], waiting: dict[str, str]) -> tuple[list[dict], list[dict]]:
+    """(near rows, watch rows) for the armed plans no position row covers. ``waiting``: by symbol, an open trade with a fill
+    to link (the first such position row)."""
     near_rows, watch = [], []
     for plan in board["plans"]:
         inv = plan["investigation_id"]
         if inv in covered:
             continue
         common = {"symbol": plan["symbol"], "instrument": plan["direction"], "value": PLAN_STATE.get(plan["position"]),
-                  "investigation_id": inv}
+                  "investigation_id": inv,
+                  "fill_to_link": waiting.get(plan["symbol"]) if plan["position"] == "fill_to_link" else None}
         title = plan["thesis"] or f"{plan['symbol']} plan"
         close = _near(plan)
         entry, invalidation = plan["entry"], plan["invalidation"]
@@ -498,7 +505,11 @@ def desk_threads(db: Session = Depends(get_session)):
                                              decisions.get("symbols", {}))
     near = []
     if board["state"] == "ok":
-        near, plan_watch = _plan_rows(board, covered)
+        waiting = {}
+        for r in act + watch:
+            if r["fill_to_link"]:
+                waiting.setdefault(r["symbol"], r["fill_to_link"])
+        near, plan_watch = _plan_rows(board, covered, waiting)
         watch += plan_watch
         covered |= {p["investigation_id"] for p in board["plans"]}
     watch = _exit_rows(exited) + watch  # first in Watching, ahead of the "+N more" cut

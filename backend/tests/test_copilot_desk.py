@@ -261,6 +261,21 @@ def test_an_unplanned_position_links_to_planning_it(desk, engine):  # noqa: F811
     assert row["investigation_id"] is None and row["path"].startswith("/copilot-lab?symbol=CRWV")
 
 
+def test_a_fill_waiting_for_its_plan_names_its_trade_on_the_position_and_the_plan(desk, engine):  # noqa: F811
+    from tests.test_copilot_plans import capture, time_stop
+    capture(engine, "NBIS", minute=5)  # 10:04:55, unlinked: the linker suggests it for the 10:05 fill
+    time_stop(engine, NBIS, "NBIS")
+    alert(engine, NBIS, "NBIS", "entry", 95.9)
+    trade = buy(engine, 500)
+    body = read(desk)
+    [position] = [r for r in body["threads"] if r["key"] == f"trade:{trade}"]
+    assert position["status"] == {"text": "Fill to link", "tone": "attention"} and position["fill_to_link"] == trade
+    assert position["investigation_id"] is None and position["path"] == "/copilot-lab?symbol=NBIS"  # opens on the desk
+    [plan] = [r for r in body["threads"] if r["key"] == f"plan:{NBIS}"]
+    assert plan["value"]["text"] == "Fill to link" and plan["fill_to_link"] == trade
+    assert all(r["fill_to_link"] is None for r in body["threads"] if r["key"] not in (f"trade:{trade}", f"plan:{NBIS}"))
+
+
 def test_the_week_and_the_streak(desk, engine):  # noqa: F811
     planned_nbis(engine)
     body = read(desk)
