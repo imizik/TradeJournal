@@ -35,7 +35,7 @@ def _sha(value):
 
 def source_fingerprint():
     """Hash of the lab's code and prompt, so a run cannot silently mix versions."""
-    files = sorted(p for p in PACKAGE.glob("*.py")) + [PACKAGE / "prompt.txt"]
+    files = sorted(PACKAGE.glob("*.py")) + sorted(PACKAGE.glob("prompt*.txt"))
     return {p.name: _sha(p.read_bytes()) for p in files if p.exists()}
 
 

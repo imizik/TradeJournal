@@ -89,6 +89,12 @@ effort or code version needs a new run directory. `--backend cli` uses
 `claude -p` on the Claude plan instead of the API key (its cache entries are
 kept separate).
 
+`--prompt forced` (`prompt_forced.txt`) makes Claude pick LONG or SHORT at every
+checkpoint, so its picks are graded even where the standard prompt would WAIT;
+the agent is named with a `+forced` suffix. `report --run A --run B` prints one
+scorecard over several runs, including model-vs-model comparisons on the same
+variant (no run directory's report is overwritten).
+
 `live --run DIR --model … --variant full` runs one morning on live Alpaca data
 (start before 09:30 ET): each packet freezes at checkpoint + 5 s and an answer
 after 45 s is recorded as late. Score it after the close with `report --run DIR`.

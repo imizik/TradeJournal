@@ -353,3 +353,14 @@ def test_prompt_file_present_and_bounded():
     for phrase in ("OPEN of the bar", "CLOSE ten minutes after entry", "untrusted", "WAIT",
                    "calendar date", "300 characters"):
         assert phrase in text
+
+
+def test_forced_prompt_differs_only_in_the_trade_decision():
+    here = Path(pk.__file__).parent
+    standard, forced = (here / "prompt.txt").read_text(), (here / "prompt_forced.txt").read_text()
+    assert len(forced.split()) < 600
+    assert "WAIT is not allowed" in forced and "never WAIT" in forced
+    changed = [line for line in forced.splitlines() if line not in standard.splitlines()]
+    assert len(changed) == 3   # trade decision, release risk, output
+    for phrase in ("OPEN of the bar", "CLOSE ten minutes after entry", "untrusted", "calendar date"):
+        assert phrase in forced
