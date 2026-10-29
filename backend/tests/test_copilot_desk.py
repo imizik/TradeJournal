@@ -275,7 +275,7 @@ def test_after_hours_and_a_closed_day(desk, clock, monkeypatch):  # noqa: F811
     assert read(desk)["day"]["phase"] == "closed"
 
 
-def entry(engine, kind, symbol, text, *, day=WED, minute=0):
+def entry(engine, kind, symbol, text, *, day=WED, minute=0):  # noqa: F811
     with Session(engine) as db:
         db.add(DayJournalEntry(operation_id=f"{kind}-{symbol}-{day}-{minute}", day=day, kind=kind, symbol=symbol, text=text,
                                created_at=T0 + (day - WED) + timedelta(minutes=minute)))
