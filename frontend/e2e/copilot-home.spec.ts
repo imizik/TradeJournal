@@ -106,7 +106,7 @@ test("on a phone the desk shows one pane at a time, and opening a thread moves t
   expect(chats).toEqual([]);
 });
 
-test("the list says so when its read fails, and the pinned rows still work", async ({ page }) => {
+test("the list says so when its read fails, and the Briefing and Review my week still work", async ({ page }) => {
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ status: 503, json: { detail: "Copilot Lab is off." } }));
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -114,5 +114,6 @@ test("the list says so when its read fails, and the pinned rows still work", asy
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
   await expect(threads.getByRole("button", { name: "What matters right now?" })).toBeEnabled();
-  await expect(threads.getByRole("button", { name: "Review my week" })).toBeEnabled();
+  await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
+  await expect(page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
 });

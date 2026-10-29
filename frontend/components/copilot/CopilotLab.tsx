@@ -194,7 +194,7 @@ export default function CopilotLab({ link = null }: { link?: PanelLink | null })
             <RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} />
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4"><DecisionBar key={link.symbol} symbol={link.symbol} onActive={setDeciding} fill={fill} /></div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><BriefingExtras /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <><SessionTape /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} /><AlertScorecard /></> : (
             <DeskThreadTop thread={thread} compact={deciding} hero={
               <DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} onActive={setDeciding} fill={fill} />} />
           ))}
