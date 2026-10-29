@@ -21,6 +21,10 @@ A plan is Done once a ``plan_done`` day-journal entry for its symbol is at or af
 answered or skipped, or Mark done): it leaves every group, and so does a conversation of the owner's about the symbol not
 touched since.
 
+``plans`` is the thread list's Plans view: every plan by stage (``armed``, ``in_position``, ``exited`` and ``done``
+in the last ``EXIT_DAYS`` days, ``copilot_plans.done``), each with its instrument, horizon, levels, time stop and, in
+a position, where the underlying sits in units of the plan's risk (``r``).
+
 Each row with a position or a plan carries its symbol's ``horizon`` (``day``, ``swing`` or ``long``): its newest
 ``horizon`` day-journal entry (a plan card's Confirm or the thread header), else ``swing``. After 16:00 New York on a
 weekday (the decision bar's rule, ``frontend/lib/desk.ts`` ``afterClose``) the horizon sets which rows carry ``close``,
@@ -221,6 +225,12 @@ def _exits(db: Session, now: float) -> dict:
     return {"state": "ok", "rows": [{**r, "newest": r["newest"].replace(tzinfo=UTC).timestamp()} for r in copilot_plans.exits(db, since)]}
 
 
+def _done(db: Session, now: float) -> dict:
+    from app.engine import copilot_plans
+    since = datetime.fromtimestamp(now - EXIT_DAYS * 86400, UTC).replace(tzinfo=None)
+    return {"state": "ok", "rows": copilot_plans.done(db, since)}
+
+
 def _touched(db: Session, now: float, day) -> dict:
     """Symbols something happened to today: a phone ping judged (sent or held), a level alert fired, a fill."""
     from app.engine import day_replay, notification_policy as policy
@@ -416,6 +426,35 @@ def _plan_rows(board: dict, covered: set[str]) -> tuple[list[dict], list[dict]]:
     return near_rows, watch
 
 
+def _r(plan: dict) -> float | None:
+    """Where the underlying is in units of the plan's risk: 0 at the entry, -1 at the invalidation."""
+    entry, invalidation, last = plan["entry"], plan["invalidation"], plan["last"]
+    if not entry or not invalidation or last is None or entry["price"] == invalidation["price"]:
+        return None
+    return round((last - entry["price"]) / (entry["price"] - invalidation["price"]), 2)
+
+
+def _plan_list(board: dict, exited: list[dict], done: list[dict], horizons: dict[str, str]) -> list[dict]:
+    """The thread list's Plans view: every plan by stage (armed, in_position, exited, done), each with what its line
+    needs. ``board`` holds the plans not yet exited or done; a plan whose fill waits to be linked is in position."""
+    def row(stage, symbol, investigation_id, instrument, thesis, **more):
+        base = {"stage": stage, "symbol": symbol, "investigation_id": investigation_id, "instrument": instrument,
+                "thesis": thesis, "horizon": horizons.get(symbol, DEFAULT_HORIZON), "last": None, "entry": None,
+                "invalidation": None, "time_stop": None, "r": None, "at": None, "note": None}
+        return {**base, **more}
+    rows = []
+    for p in board.get("plans", []):
+        held = p["position"] in ("in_position", "fill_to_link")
+        rows.append(row("in_position" if held else "armed", p["symbol"], p["investigation_id"], p["instrument"] or p["direction"],
+                        p["thesis"], last=p["last"], entry=p["entry"], invalidation=p["invalidation"], time_stop=p["time_stop"],
+                        r=_r(p) if held else None, note="Fill to link" if p["position"] == "fill_to_link" else None))
+    rows += [row("exited", r["symbol"], r["investigation_id"], r["instrument"], r["thesis"], at=_utc_epoch(r["exited_at"]))
+             for r in exited]
+    rows += [row("done", r["symbol"], r["investigation_id"], r["instrument"], r["thesis"], at=_utc_epoch(r["done_at"]), note=r["text"])
+             for r in done]
+    return rows
+
+
 def _investigation_of(path: str | None) -> str | None:
     found = parse_qs(urlparse(path or "").query).get("investigation")
     return found[0] if found else None
@@ -475,6 +514,7 @@ def desk_threads(db: Session = Depends(get_session)):
     decisions = today._section(db, "desk decisions", lambda: _decisions(db, day))
     checks = today._section(db, "desk check-ins", lambda: _check_ins(db))
     ended = today._section(db, "desk exits", lambda: _exits(db, now))
+    finals = today._section(db, "desk done plans", lambda: _done(db, now))
     radar = today._section(db, "desk radar", lambda: today._radar(now))
     thesis = today._section(db, "desk thesis", lambda: today._thesis(db, day))
     prep = today._section(db, "desk prep", lambda: today._prep(db, day))
@@ -528,9 +568,10 @@ def desk_threads(db: Session = Depends(get_session)):
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
         "day": {"phase": phase.get("phase"), "need_you": len(act), "streak": streak},
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
+        "plans": _plan_list(board if board["state"] == "ok" else {}, exited, finals.get("rows", []), checks.get("horizons", {})),
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
-            ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
+            ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("done", finals), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},
     }
 
 

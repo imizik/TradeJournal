@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactN
 import Link from "next/link";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
+import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { WHAT_MATTERS_PROMPT, type InvestigationSummary } from "@/lib/copilot";
 import {
@@ -13,6 +14,8 @@ import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
 const SEEN_KEY = "desk.seen.v1";
+/** All threads or Plans, remembered in this browser. */
+const VIEW_KEY = "desk.rail.v1";
 export const TONE: Record<DeskTone, string> = {
   attention: "text-primary", loss: "text-rose-300", gain: "text-emerald-300", info: "text-foreground", muted: "text-muted-foreground",
 };
@@ -136,6 +139,7 @@ function DayLine({ data }: { data: DeskThreads }) {
  * the order shown, for the desk's J / K and its palette. New since you looked keeps one row per symbol; it and Watching
  * show their ``SHOWN`` rows and "+N more". Conversations closed this week wait in a collapsed footer. ``phase`` (the
  * day's phase button) sits under the day line. A change of ``refresh`` reads the list again (a review just saved).
+ * All | Plans switches to the Plans view (``PlanList``) from the same read; the choice is remembered in this browser.
  */
 export default function ThreadRail({ actions, active = null, onRows, phase = null, refresh = 0 }: {
   actions: HomeActions; active?: string | null; onRows?(rows: DeskThread[]): void; phase?: ReactNode; refresh?: number;
@@ -144,6 +148,14 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState<InvestigationSummary[]>([]);
   const [more, setMore] = useState<Partial<Record<DeskGroup, boolean>>>({});
+  const [view, setView] = useState<"threads" | "plans">("threads");
+  useEffect(() => {
+    try { if (window.localStorage.getItem(VIEW_KEY) === "plans") setView("plans"); } catch { /* threads */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  }, []);
+  const pickView = (next: "threads" | "plans") => {
+    setView(next);
+    try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* this visit only */ }
+  };
   // Rows arrive only after the first client read, so reading the store at first render cannot mismatch the server's.
   const [seen, setSeen] = useState<Record<string, number>>(() => typeof window === "undefined" ? {} : readSeen());
   useEffect(() => {
@@ -184,6 +196,7 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
   const ordered = useMemo(() => DESK_GROUPS.flatMap(g => itemsOf(g.id)), [data, seen]); // eslint-disable-line react-hooks/exhaustive-deps -- rows and unread come from these two
   useEffect(() => { onRows?.(ordered); }, [ordered, onRows]);
   const jumpKey = useJumpKey();
+  const live = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
   const day = data ? nyDay(new Date(data.asOf)) : null;
   const missing = Object.entries(data?.sections ?? {}).filter(([name, state]) => state === "unavailable" && SOURCE[name]).map(([name]) => SOURCE[name]);
 
@@ -233,7 +246,15 @@ export default function ThreadRail({ actions, active = null, onRows, phase = nul
       {data ? <DayLine data={data} /> : !error && <p className="px-2.5 text-xs text-muted-foreground">Reading what is live…</p>}
       {error && <p className="px-2.5 text-xs text-muted-foreground">{data ? "Not refreshed" : "Threads unavailable"}: {error}</p>}
       {phase && <div className="px-2.5">{phase}</div>}
-      {DESK_GROUPS.map(g => group(g.id, g.title))}
+      <div role="tablist" aria-label="Thread list view" className="mx-2.5 grid grid-cols-2 gap-1 rounded-md border p-0.5 text-xs">
+        {(["threads", "plans"] as const).map(id => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => pickView(id)}
+            className={cn("min-h-11 rounded px-2 sm:min-h-7", view === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            {id === "threads" ? "All" : <>Plans{live > 0 && <span className="ml-1 tabular-nums text-muted-foreground" aria-label={`, ${live} live`}>{live}</span>}</>}
+          </button>
+        ))}
+      </div>
+      {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : DESK_GROUPS.map(g => group(g.id, g.title))}
       {data && missing.length > 0 && <p className="px-2.5 text-xs text-muted-foreground">Unavailable right now: {missing.join(", ")}.</p>}
       {data?.quoteIssue && <p className="px-2.5 text-xs text-muted-foreground">Prices: {data.quoteIssue}</p>}
       {data && <div className="px-2.5"><PlanATrade origin="copilot" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0" /></div>}

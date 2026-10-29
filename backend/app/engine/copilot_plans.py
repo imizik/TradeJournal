@@ -21,6 +21,7 @@ import uuid
 from sqlmodel import Session, select
 
 from app.engine import capture_links
+from app.engine.chart_journal import contract_label
 from app.engine.position_alerts import _epoch
 from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, TradeCapture
 
@@ -41,6 +42,18 @@ def _thesis(note: str | None) -> str | None:
         if (cut := text.rfind(tail)) >= 0:
             text = text[:cut]
     return text.strip()[:THESIS_CHARS] or None
+
+
+def _instrument(capture: TradeCapture | None) -> str | None:
+    """What the plan's capture means to trade: ``stock``, the option contract without its symbol, or ``calls``/``puts``."""
+    if capture is None:
+        return None
+    if capture.instrument != "option":
+        return "stock"
+    kind = "put" if capture.side.endswith("puts") else "call"
+    if capture.strike is None or capture.expiration is None:
+        return f"{kind}s"
+    return contract_label(capture.underlying, "option", kind, capture.strike, capture.expiration).removeprefix(capture.underlying).strip()
 
 
 def _level(alert: LevelAlert | None, last: float | None) -> dict | None:
@@ -151,7 +164,7 @@ def board(db: Session, quotes=None) -> dict:
             direction = None
         rows.append({
             "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": direction,
-            "thesis": _thesis(capture.note if capture else None) or titles.get(plan["investigation_id"]),
+            "instrument": _instrument(capture), "thesis": _thesis(capture.note if capture else None) or titles.get(plan["investigation_id"]),
             "last": price, "entry": _level(plan["entry"], price), "invalidation": _level(plan["invalidation"], price),
             "time_stop": {"text": stop.text, "due_at": int(_epoch(stop.due_at)),
                           "state": "pending" if stop.delivery == "scheduled" else stop.delivery} if stop else None,
@@ -203,6 +216,32 @@ def exits(db: Session, since: datetime) -> list[dict]:
         if exited < since:
             continue
         out.append({"investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "newest": plan["newest"],
-                    "exited_at": exited, "thesis": _thesis(plan["capture"].note if plan["capture"] else None)})
+                    "exited_at": exited, "thesis": _thesis(plan["capture"].note if plan["capture"] else None),
+                    "instrument": _instrument(plan["capture"])})
     out.sort(key=lambda row: row["exited_at"], reverse=True)
+    return out
+
+
+def done(db: Session, since: datetime) -> list[dict]:
+    """Plans made done at or after ``since`` (naive UTC), newest first: each plan is done by the first ``plan_done``
+    day-journal entry for its symbol at or after its newest part. A plan whose alerts and time stop were all deleted
+    cannot be found any more; its entry stands alone, with no investigation. Read-only; no quote read."""
+    from app.models import DayJournalEntry
+    marks: dict[str, list] = {}
+    for entry in db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "plan_done", DayJournalEntry.symbol.is_not(None))
+                         .order_by(DayJournalEntry.created_at, DayJournalEntry.id)).all():
+        marks.setdefault(entry.symbol, []).append(entry)
+    plans, _links = _plans(db)
+    out, used = [], set()
+    for plan in plans:
+        entry = next((e for e in marks.get(plan["symbol"], []) if e.created_at >= plan["newest"]), None)
+        if entry is None or entry.created_at < since:
+            continue
+        used.add(entry.id)
+        out.append({"investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "done_at": entry.created_at,
+                    "text": entry.text, "thesis": _thesis(plan["capture"].note if plan["capture"] else None),
+                    "instrument": _instrument(plan["capture"])})
+    out += [{"investigation_id": None, "symbol": e.symbol, "done_at": e.created_at, "text": e.text, "thesis": None, "instrument": None}
+            for found in marks.values() for e in found if e.created_at >= since and e.id not in used]
+    out.sort(key=lambda row: row["done_at"], reverse=True)
     return out

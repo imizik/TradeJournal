@@ -457,3 +457,39 @@ def test_mark_done_takes_a_plan_never_entered_off_the_list_and_a_new_plan_comes_
     assert not [r for r in read(desk)["threads"] if r["symbol"] == "APLD"]
     alert(engine, APLD, "APLD", "entry", 30.5, minute=60)  # planned again after it was done
     assert by_key(read(desk))[f"plan:{APLD}"]["group"] in ("watch", "near")
+
+
+SOFI = "44444444-4444-4444-8444-444444444444"
+
+
+def test_the_plans_view_lists_every_plan_by_stage_with_its_distance_or_r(desk, engine):  # noqa: F811
+    alert(engine, APLD, "APLD", "entry", 31.0)  # APLD 30.00: 3.33% below the entry
+    alert(engine, APLD, "APLD", "invalidation", 29.0)
+    entry(engine, "horizon", "APLD", "Day trade")
+    planned_nbis(engine)  # NBIS 94.00 in position: entry 95.90, invalidation 92.30
+    alert(engine, NBIS, "NBIS", "entry", 95.9, state="fired", fired=T0 + timedelta(minutes=10))
+    alert(engine, CRWV, "CRWV", "entry", 99.0)
+    buy(engine, 800, "CRWV")
+    sell(engine, 801, "CRWV")  # exited, its review not answered
+    alert(engine, SOFI, "SOFI", "entry", 20.0)
+    entry(engine, "plan_done", "SOFI", "Marked done", minute=30)
+    entry(engine, "plan_done", "PLTR", "Marked done", day=WED - timedelta(days=10))  # not this week
+    plans = {p["symbol"]: p for p in read(desk)["plans"]}
+    assert set(plans) == {"APLD", "NBIS", "CRWV", "SOFI"}
+    armed, held, exited, done = plans["APLD"], plans["NBIS"], plans["CRWV"], plans["SOFI"]
+    assert (armed["stage"], armed["investigation_id"], armed["instrument"], armed["horizon"]) == ("armed", APLD, "long", "day")
+    assert (armed["entry"]["price"], armed["entry"]["distance_pct"], armed["r"]) == (31.0, 3.33, None)
+    assert (held["stage"], held["instrument"], held["horizon"], held["r"]) == ("in_position", "calls", "swing", -0.53)  # -1.90 / 3.60
+    assert held["invalidation"]["distance_pct"] == -1.81 and held["time_stop"]["state"] == "pending"
+    assert (exited["stage"], exited["investigation_id"], exited["at"]) == ("exited", CRWV, int(datetime(2026, 10, 21, 17, 0, tzinfo=UTC).timestamp()))
+    assert (done["stage"], done["investigation_id"], done["note"]) == ("done", SOFI, "Marked done")
+    assert done["at"] == int((T0 + timedelta(minutes=30)).replace(tzinfo=UTC).timestamp())
+    entry(engine, "plan_done", "CRWV", "Exit reviewed", minute=300)
+    plans = {p["symbol"]: p for p in read(desk)["plans"]}
+    assert (plans["CRWV"]["stage"], plans["CRWV"]["note"]) == ("done", "Exit reviewed")
+
+
+def test_a_done_plan_whose_parts_were_all_deleted_stands_alone_without_its_thread(desk, engine):  # noqa: F811
+    entry(engine, "plan_done", "SOFI", "Marked done", minute=30)
+    [row] = read(desk)["plans"]
+    assert (row["stage"], row["symbol"], row["investigation_id"], row["note"]) == ("done", "SOFI", None, "Marked done")

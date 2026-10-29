@@ -213,6 +213,22 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     shown and the rest behind "+N more", so a busy day reads as about ten
     rows.
 
+  **All | Plans** under the day line switches the list to the **Plans**
+  view and back; the choice is remembered in this browser (`localStorage`),
+  and on a phone it sits inside the Now tab. The Plans view lists every plan
+  from the same read (`plans` in `GET /copilot/desk/threads`), grouped
+  **Armed**, **In position** (a fill waiting to be linked counts), **Exited
+  this week** (its exit review waiting) and **Done this week** (the
+  `plan_done` text: Exit reviewed, Exit review skipped or Marked done), the
+  last two over the last seven days. One row each: symbol, instrument
+  (contract, direction or stock), horizon, and on the right the distance to
+  the entry (armed) or where the underlying sits in units of the plan's risk,
+  `R`, 0 at the entry and −1 at the invalidation (in position); under it
+  the entry, invalidation and time stop, or the distance to the invalidation.
+  The tab's count is the armed and in-position plans. A row opens its thread
+  in place; a done plan whose alerts and time stop were all deleted has no
+  saved thread to find and opens by its symbol.
+
   Under the groups, a collapsed **Closed this week** footer with its count:
   saved conversations closed and last touched since Monday (New York), from
   the latest 50 in `GET /copilot/investigations`, each opening in place; then
