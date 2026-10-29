@@ -39,6 +39,7 @@ type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
 
 async function lab(page: Page, desk: Desk = {}) {
   const reads: string[] = [];
+  const timeframes: (string | null)[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.route(`**/copilot/investigations/${INV}`, (route) => route.fulfill({ json: record }));
@@ -47,6 +48,7 @@ async function lab(page: Page, desk: Desk = {}) {
     const part = new URL(route.request().url()).pathname.split("/").pop()!;
     reads.push(`${route.request().method()} ${part}`);
     if (part === "picture") {
+      timeframes.push(new URL(route.request().url()).searchParams.get("timeframe"));
       const picture = desk.picture ?? "ok";
       return picture === "ok" ? route.fulfill({ status: 200, contentType: "image/png", body: PNG })
         : route.fulfill({ status: 404, json: { detail: picture } });
@@ -55,7 +57,7 @@ async function lab(page: Page, desk: Desk = {}) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
-  return { reads, pane: page.getByRole("complementary", { name: "Context" }) };
+  return { reads, timeframes, pane: page.getByRole("complementary", { name: "Context" }) };
 }
 
 test("the Context pane opens on today's chart, and Timeline and Your history read only when asked", async ({ page }) => {
@@ -85,6 +87,26 @@ test("the Context pane opens on today's chart, and Timeline and Your history rea
   await expect(pane).toContainText("At 92.3, 3.8% below the planned entry 95.9, over the last 180 days. Evidence to weigh, not a rule.");
   expect(reads).toEqual(["GET picture", "GET timeline", "GET history"]); // reads only, nothing posted
   await pane.screenshot({ path: test.info().outputPath("desk-context-history.png") });
+});
+
+test("the chart's timeframe buttons switch the picture read, and the legend names fills, pings and Radar", async ({ page }) => {
+  const { reads, timeframes, pane } = await lab(page);
+  const group = pane.getByRole("group", { name: "Timeframe" });
+  await expect(group.getByRole("button", { name: "2m" })).toHaveAttribute("aria-pressed", "true");
+  await expect(pane.getByRole("img", { name: /NBIS today: minute bars with .*pings and Radar hits/ })).toBeVisible();
+  const legend = pane.getByLabel("Legend");
+  await expect(legend).toContainText("your fills");
+  await expect(legend).toContainText("pings");
+  await expect(legend).toContainText("Radar");
+
+  await group.getByRole("button", { name: "15m" }).click();
+  await expect(group.getByRole("button", { name: "15m" })).toHaveAttribute("aria-pressed", "true");
+  await expect(pane.getByRole("img", { name: /NBIS recent sessions: 15-minute bars/ })).toBeVisible();
+  await group.getByRole("button", { name: "1D" }).click();
+  await expect(pane.getByRole("img", { name: "NBIS the last few months: daily bars" })).toBeVisible();
+  await expect(legend).toContainText("marked on 2m and 15m");
+  expect(timeframes).toEqual(["2m", "15m", "1D"]);
+  expect(reads).toEqual(["GET picture", "GET picture", "GET picture"]); // reads only
 });
 
 test("each tab says what is unavailable or missing", async ({ page }) => {

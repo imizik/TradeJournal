@@ -18,6 +18,9 @@ from app.ai.copilot_fixture import FixtureEvidence
 from app.database import get_session
 from app.engine import chart_render, desk_context, ping_images
 from app.engine.chart_feed import chart_feed
+from app.engine.chart_history import HistoryError, chart_history
+from app.engine.chart_math import ET
+from app.engine.radar_store import RadarStore
 from app.models import (CopilotInvestigation, DayJournalEntry, Fill, LevelAlert, LevelAlertEvent, PhonePing, PlanTimeStop,
                         ResearchJob, ThesisWatchTrigger)
 from app.routers import copilot_plans as plan_routes
@@ -25,7 +28,7 @@ from tests.test_browser_access import boundary, signin  # noqa: F401  (the share
 from tests.test_copilot_plans import (  # noqa: F401  (fixtures)
     CRWV, NBIS, ROTH, T0, alert, buy_and_link, capture, engine, quotes, time_stop,
 )
-from tests.test_today import clock, epoch  # noqa: F401  (fixtures)
+from tests.test_today import RADAR_EVENT, clock, epoch  # noqa: F401  (fixtures)
 
 NOW = epoch(T0 + timedelta(minutes=289))  # 14:49 New York, Wednesday Oct 21 (the clock fixture)
 NONE = "44444444-4444-4444-8444-444444444444"
@@ -123,7 +126,7 @@ def test_an_option_fill_with_its_underlying_price_is_a_point_and_webull_is_left_
     assert lab.get(f"/copilot/desk/{NBIS}/picture").status_code == 200
     [chart] = seen
     assert chart.levels == ()  # no plan, no lines
-    assert [(m.price, m.label, m.tone) for m in chart.marks] == [(94.4, "IN", "amber"), (94.9, "OUT", "violet")]
+    assert [(m.price, m.label, m.tone) for m in chart.marks] == [(94.4, "IN", "amber"), (94.9, "OUT", "amber")]
 
 
 def test_the_picture_says_why_it_is_unavailable(lab, engine, monkeypatch):  # noqa: F811
@@ -137,7 +140,7 @@ def test_the_picture_says_why_it_is_unavailable(lab, engine, monkeypatch):  # no
         raise RuntimeError("Tradier unavailable")
     monkeypatch.setattr(ping_images, "today_bars", broken)
     response = lab.get(f"/copilot/desk/{NBIS}/picture")
-    assert response.status_code == 404 and response.json() == {"detail": "Today's NBIS bars could not be read."}
+    assert response.status_code == 404 and response.json() == {"detail": "The NBIS minute bars for today could not be read."}
     # Bars from an earlier day are not today's picture.
     monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars(start=T0 - timedelta(days=1)))
     assert lab.get(f"/copilot/desk/{NBIS}/picture").json() == {"detail": "No NBIS minute bars for today yet."}
@@ -173,6 +176,112 @@ def test_the_market_picture_says_why_it_is_unavailable_and_is_refused_while_the_
     assert lab.get("/copilot/desk/market/picture").json() == {"detail": "No QQQ minute bars for today yet."}
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=False))
     assert lab.get("/copilot/desk/market/picture").status_code == 503
+
+
+def sent(db, symbol, minute, decision="sent", day=0):
+    db.add(PhonePing(sender="level_alerts", source_id=f"{symbol}-{minute}-{day}", kind="giveback", rank=1, symbol=symbol,
+                     decision=decision, title=f"{symbol} gave back", body="",
+                     decided_at=T0 + timedelta(days=day, minutes=minute)))
+
+
+def radar_hits(tmp_path, monkeypatch, *hits):
+    """A Radar store with ``(symbol, iso first_seen_at)`` events, read through the desk's Radar reader."""
+    path = tmp_path / "radar.sqlite"
+    monkeypatch.setenv("RADAR_ENABLED", "true")
+    monkeypatch.setenv("RADAR_STORE", str(path))
+    store = RadarStore(path)
+    for i, (symbol, at) in enumerate(hits):
+        store.append_event({**RADAR_EVENT, "event_id": f"hit-{i}", "symbols": [symbol], "session_date": at[:10], "first_seen_at": at})
+
+
+def test_the_thread_picture_marks_todays_pings_and_radar_hits_on_its_symbol(lab, engine, tmp_path, monkeypatch):  # noqa: F811
+    investigation(engine)
+    with Session(engine) as db:  # pings keep UTC
+        sent(db, "NBIS", 20)
+        sent(db, "NBIS", 21, decision="merged")  # held back: not drawn
+        sent(db, "APLD", 25)  # another symbol
+        sent(db, "NBIS", 50)
+        sent(db, "NBIS", 20, day=-1)  # yesterday's
+        db.commit()
+    radar_hits(tmp_path, monkeypatch, ("NBIS", "2026-10-21T14:30:00.000Z"), ("MU", "2026-10-21T14:31:00.000Z"),
+               ("NBIS", "2026-10-20T14:30:00.000Z"))
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars())
+    seen = drawn(monkeypatch)
+    assert lab.get(f"/copilot/desk/{NBIS}/picture").status_code == 200
+    [chart] = seen
+    # On the bar of their minute, the first of each kind labelled.
+    assert [(m.time, m.price, m.label, m.tone) for m in chart.marks] == [
+        (int(epoch(T0 + timedelta(minutes=20))), 94.2, "PING", "violet"),
+        (int(epoch(T0 + timedelta(minutes=30))), 94.3, "RADAR", "blue"),
+        (int(epoch(T0 + timedelta(minutes=50))), 94.5, "", "violet"),
+    ]
+
+
+def test_a_missing_radar_store_means_no_radar_marks(lab, engine, monkeypatch):  # noqa: F811
+    investigation(engine)
+    monkeypatch.setenv("RADAR_ENABLED", "false")
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: bars())
+    seen = drawn(monkeypatch)
+    assert lab.get(f"/copilot/desk/{NBIS}/picture").status_code == 200
+    assert seen[0].marks == ()
+
+
+def test_the_timeframes_read_their_own_bars_and_only_the_intraday_ones_carry_marks(lab, engine, monkeypatch):  # noqa: F811
+    planned(engine)
+    with Session(engine) as db:
+        sent(db, "NBIS", 20)
+        db.commit()
+    first = int(epoch(T0 - timedelta(days=1)))  # yesterday 10:00, then today: 15-minute bars
+    fifteen = [{"time": first + 900 * i, "open": 94.0, "high": 94.2, "low": 93.8, "close": 94.0 + i / 100} for i in range(24)]
+    fifteen += [{"time": int(epoch(T0)) + 900 * i, "open": 95.0, "high": 95.2, "low": 94.8, "close": 95.0 + i / 100} for i in range(24)]
+    day = 86400
+    daily = [{"time": int(NOW) - day * i, "open": 90.0, "high": 91.0, "low": 89.0, "close": 90.0 + i / 100} for i in range(200, -1, -1)]
+    monkeypatch.setattr(desk_context, "fifteen_bars", lambda symbol: fifteen)
+    monkeypatch.setattr(desk_context, "daily_bars", lambda symbol: daily)
+    monkeypatch.setattr(ping_images, "today_bars", lambda symbol: pytest.fail("the 2m read is not the 15m or 1D read"))
+    seen = drawn(monkeypatch)
+
+    assert lab.get(f"/copilot/desk/{NBIS}/picture?timeframe=15m").status_code == 200
+    chart = seen[-1]
+    assert chart.title == "NBIS 15m" and chart.bars[0]["time"] == first
+    assert all(b["time"] <= NOW for b in chart.bars) and len(chart.bars) == 24 + 20  # nothing after now
+    assert [lv.label for lv in chart.levels] == ["TRIG 95.90", "INV 92.30"]
+    # The ping at 10:20 sits on the 10:15 bar.
+    assert [(m.price, m.label, m.tone) for m in chart.marks] == [(95.01, "PING", "violet")]
+
+    assert lab.get(f"/copilot/desk/{NBIS}/picture?timeframe=1D").status_code == 200
+    chart = seen[-1]
+    assert chart.title == "NBIS 1D" and len(chart.bars) == desk_context.DAILY_DAYS + 1
+    assert chart.levels == () and chart.marks == () and chart.times == ()
+
+    assert lab.get(f"/copilot/desk/{NBIS}/picture?timeframe=1h").status_code == 422
+    monkeypatch.setattr(desk_context, "daily_bars", lambda symbol: [])
+    assert lab.get(f"/copilot/desk/{NBIS}/picture?timeframe=1D").json() == {"detail": "No NBIS daily bars yet."}
+
+
+def test_the_15m_read_joins_the_completed_sessions_before_today(monkeypatch):
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed as feed
+    monkeypatch.setattr(chart_calendar, "hours", lambda day: None)  # clock hours, no provider read
+    monkeypatch.setattr(chart_history, "splits", None)
+    today_bar = {"time": 1, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}
+    monkeypatch.setattr(feed, "workspace", lambda symbol, intervals, *a, **k: {"panels": {"15m": {"bars": [today_bar]}}})
+    asked = []
+
+    def session(symbol, day):
+        asked.append(day)
+        start = int(datetime.combine(day, datetime.min.time(), ET).timestamp()) + 10 * 3600  # 10:00 New York
+        return [{"time": start + 60 * i, "open": 2.0, "high": 2.0, "low": 2.0, "close": 2.0, "volume": 1} for i in range(30)]
+    monkeypatch.setattr(chart_history, "session", session)
+    found = desk_context.fifteen_bars("NBIS")
+    assert len(asked) == desk_context.SESSIONS_15M - 1 and all(d.weekday() < 5 for d in asked) and asked == sorted(asked, reverse=True)
+    assert found[-1] == today_bar and len(found) == 2 * (desk_context.SESSIONS_15M - 1) + 1  # two 15m bars a session, oldest first
+    assert found[0]["time"] < found[2]["time"]
+
+    def refused(symbol, day):
+        raise HistoryError("History is still loading.", "pending")
+    monkeypatch.setattr(chart_history, "session", refused)
+    assert desk_context.fifteen_bars("NBIS") == [today_bar]  # the older sessions are a bonus
 
 
 def test_a_slow_read_is_cut_off_at_the_budget(engine):  # noqa: F811
