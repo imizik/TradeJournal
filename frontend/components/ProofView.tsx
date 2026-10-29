@@ -12,7 +12,7 @@ import { ExitHabitsView, EXIT_HABIT_VERDICT, EXIT_HABIT_CAVEAT, RESPONSE, type E
 // (not a third proof), planned against unplanned trades, from /analytics/plan-proof.
 // Every verdict defaults to "not enough data" and shows its rule and sample. See app/engine/radar_proof.py and plan_proof.py.
 type Verdict = "helping" | "not_helping" | "not_enough_data";
-type RadarProof = { state: string; reason: string | null; rule_version?: string | null; sessions?: number; events?: number;
+export type RadarProof = { state: string; reason: string | null; rule_version?: string | null; sessions?: number; events?: number;
   alerted?: { events: number; ratings: Record<string, number> };
   /** Events a pre-trade plan names as its origin, and those whose plan was traded. */
   plans?: { planned: number; traded: number };
@@ -26,7 +26,7 @@ type PlanGroup = { key: "planned" | "unplanned" | "late"; label: string; in_verd
 type PlanProof = { go_live: string; trades: number; groups: PlanGroup[]; caveat: string;
   verdict: { verdict: Verdict; reason: string; rule: string; planned: number; unplanned: number; caveat: string } };
 
-const VERDICT: Record<Verdict, { label: string; tone: string }> = {
+export const VERDICT: Record<Verdict, { label: string; tone: string }> = {
   helping: { label: "Helping", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
   not_helping: { label: "Not helping", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
   not_enough_data: { label: "Not enough data", tone: "border-border bg-muted text-muted-foreground" },
@@ -37,7 +37,7 @@ const MOVERS: [string, string][] = [["radar_first", "Radar first"], ["not_in_mov
 const BRIEF: [string, string][] = [["radar_first", "Radar first"], ["brief_first", "Brief had it first"], ["not_in_brief", "Not in a brief within 5 days"]];
 const share = (v: number | null | undefined) => v == null ? "—" : `${Math.round(v * 100)}%`;
 
-function useJson<T>(path: string) {
+export function useJson<T>(path: string) {
   const [body, setBody] = useState<T | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {

@@ -525,7 +525,13 @@ The full page is a desk of three panes beside each other
   ping readers) and read again each minute; **Timeline**, the day across
   everything newest first from `GET /copilot/desk/session` (time stops still
   ahead, fills, pings sent, Radar events, decisions, the prep); and **This
-  week**, the plan streak's record (`GET /charts/captures/streak`): a tile per
+  week**, which opens on the two proofs as /proof reads them, read-only and
+  never recomputed: "Alerts: <habit label> · based on 9 of 14 alerts
+  answered" (`GET /analytics/exit-habits`, its feedback counts, or its trade
+  sample when there are none) and "Radar: <label> · 6 hits rated"
+  (`GET /radar/proof`, or its reason when there is no verdict), each saying
+  "could not load" when its read fails, and Open Proof →; then the plan
+  streak's record (`GET /charts/captures/streak`): a tile per
   entry this week in time order (+ planned before entry, − no plan or a plan
   saved late, · a suggested plan waiting to be linked), each titled like
   "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
