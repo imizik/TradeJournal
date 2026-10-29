@@ -280,3 +280,39 @@ test("an answer the server refuses as stale keeps the tap as a draft and offers 
   await expect(form.getByRole("radio", { name: "Already aware" })).toBeChecked();
   await expect(form.getByRole("button", { name: "Reload saved feedback" })).toBeVisible();
 });
+
+// Opened from a ping's answer button, Ask copilot starts from what the alert saw (position_alerts.ask_context), the
+// context the ping's own Ask copilot carried before the answer buttons took its place. Lab status is faked (the e2e
+// backend runs with it off); opening the lab never sends a turn.
+const COPILOT_ON = { enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted", effort: "medium", fallbacks: false,
+  key_configured: false, tools: [], limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 } };
+for (const width of [375, 1440]) {
+  test(`from a ping's answer, Ask copilot carries the alert's numbers at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    await page.route("**/copilot/status", route => route.fulfill({ json: COPILOT_ON }));
+    await page.route("**/copilot/investigations?*", route => route.fulfill({ json: { investigations: [] } }));
+    let chats = 0;
+    await page.route("**/copilot/chat", route => { chats += 1; return route.abort(); });
+    const trade = await openAapl(page);
+    const context = `Review this position: ${trade.id}. Give-back alert at 11:02 AM: was +$204, now +$24.`;
+    await page.route(`**/trades/${trade.id}/phone-alerts`, route => route.fulfill({ json: { enabled: true, watch: null,
+      alerts: [{ ...linkedAlert, feedback: { rating: "prompted_review", reason: null, version: 1, created_at: alertAt + 60, updated_at: alertAt + 60 },
+        ask_context: context }] } }));
+    await page.route(`**/charts/journal/trades/${trade.id}/mark`, route => route.fulfill({ json: nowMark }));
+
+    await page.goto(`/trades/${trade.id}?alert=${linkedAlert.id}&answer=prompted_review`);
+    const ask = page.getByRole("link", { name: "Ask copilot about this position", exact: true });
+    await expect(ask).toHaveCount(1);
+    await expect(ask).toHaveAttribute("href", `/copilot-lab?${new URLSearchParams({ symbol: "AAPL", context })}`);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    await page.getByTestId("selected-position-alert").screenshot({ path: test.info().outputPath(`alert-ask-context-${width}.png`) });
+    await ask.click();
+    await expect(page.getByLabel("Message")).toHaveValue(`Context: ${context}\n\n`);
+    expect(chats).toBe(0);
+
+    // Without an alert the header's Ask copilot stays the bare position.
+    await page.goto(`/trades/${trade.id}`);
+    await expect(page.getByRole("link", { name: "Ask copilot about this position", exact: true }))
+      .toHaveAttribute("href", `/copilot-lab?${new URLSearchParams({ symbol: "AAPL", context: `Review this position: ${trade.id}` })}`);
+  });
+}
