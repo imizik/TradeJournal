@@ -207,7 +207,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     the rest behind "+N more". What the owner has opened or marked seen is
     remembered in this browser only (`localStorage`); seen rows stay,
     dimmed, and opening a symbol's row sees its folded rows too.
-  - **Watching**: every other open position (its plan's nearest line, or "No
+  - **Watching**: every other open position (its plan's nearest line, "Fill
+    to link" in amber when a saved plan is suggested for its fill, or "No
     plan yet"), armed plan and open investigation (a research job's
     conclusion is never shown: a model that read web pages wrote it); three
     shown and the rest behind "+N more", so a busy day reads as about ten
@@ -243,7 +244,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   Empty groups other than Act now are left out. A row with an investigation
   opens it in place; any other follows its link (a stock Radar hit opens the
   desk on its decision, `/copilot-lab?symbol=<symbol>&radar=<id>`; a group
-  event its `/radar?event=<id>`; planning an unplanned position; a trade). **Plan a
+  event its `/radar?event=<id>`; a position with a fill to link the desk on
+  its symbol, `/copilot-lab?symbol=<symbol>`; planning an unplanned position;
+  a trade). **Plan a
   trade** sits under the groups. It refreshes every minute while visible and
   reads one owner-only `GET /copilot/desk/threads`
   (`app/routers/copilot_desk.py`), composed in-process from the Plans board
@@ -528,6 +531,26 @@ The full page is a desk of three panes beside each other
   "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
   linked plan shows; then the counts, the streak and best, and what one more
   planned entry makes.
+
+**Link a fill where you are** (`components/copilot/FillLinkBar.tsx`). A row
+whose open trade has a fill waiting for its plan carries `fill_to_link` (that
+trade's id): the unplanned position the link ping would offer plans for, and
+the armed plan its fill is suggested for (matched by symbol), so both open on
+the same bar. At the top of that symbol's thread (the plan's conversation, or
+the symbol alone) one compact bar reads "Bought NBIS 10/23/26 100C 10:05 ·
+Link to plan "…" / No plan", with the plans the linker suggests: the link
+ping's confirm page data (`GET /trades/{id}/plan-link`), each plan named by
+its desk thread when a plan card saved it. **Link** calls the capture link
+route (`POST /charts/captures/{id}/link`) at once, so every linking rule
+holds, and offers **Undo** (the unlink route) for 8 seconds; then the list
+reads again and the plan's thread top reads its position (header, ladder).
+**No plan** writes nothing, as the confirm page's "Not this plan" does: the
+fill stays unplanned in the plan streak and This week, and this browser
+remembers the answer (`localStorage` `desk.no-plan.v1`) so the desk stops
+asking. The thread list (under the day line) and the Briefing count the fills
+still waiting, one per trade ("2 fills to link"); pressing it opens the first,
+and each Link or No plan opens the next. Proof: `tests/test_copilot_desk.py`,
+`frontend/e2e/copilot-desk-fill-link.spec.ts`.
 
 **Pings open on the decision.** A position alert's phone ping opens the
 desk thread for that position (see Review a trade or position), so a tap

@@ -34,7 +34,7 @@ const SOURCE: Record<string, string> = { positions: "positions", plans: "plans",
  * Briefing, so the server's pinned week row is not listed. */
 const PINNED: DeskThread[] = [
   { key: "briefing", group: "pinned", symbol: null, title: "Briefing", instrument: null, value: null, meter: null, investigationId: null,
-    tradeId: null, radarEventId: null, path: null, changedAt: null, horizon: null, close: null, status: { text: "What matters right now? One turn across everything", tone: "muted" } },
+    tradeId: null, radarEventId: null, path: null, changedAt: null, horizon: null, close: null, fillToLink: null, status: { text: "What matters right now? One turn across everything", tone: "muted" } },
 ];
 const ASKS: Record<string, { name: string; prompt: string; hint: string }> = {
   briefing: { name: "What matters right now?", prompt: WHAT_MATTERS_PROMPT, hint: "One copilot turn across your positions, watches and open investigations" },
