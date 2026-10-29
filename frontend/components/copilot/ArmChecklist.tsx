@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LastExitLine from "@/components/copilot/LastExitLine";
 import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { api } from "@/lib/api";
 import { getDeskThreads, nyDay, type DeskPlan, type DeskThreads } from "@/lib/desk";
@@ -30,7 +31,7 @@ function flags(data: DeskThreads, symbol: string) {
 
 /**
  * Arm today's plans (docs/copilot-lab.md § The desk): before the open, each armed plan with its entry, invalidation and
- * time stop and today's earnings or thesis-watch flags, and three answers. **Still good** logs a ``decision`` day-journal
+ * time stop, today's earnings or thesis-watch flags and the symbol's last exit lesson, and three answers. **Still good** logs a ``decision`` day-journal
  * entry ("Armed for today. …"); **Change** opens the plan's thread with a question in the box, unsent; **Drop** is Mark
  * plan done, asking first while its alerts are armed. "N of M checked" counts the plans answered today (a Still good
  * read back from today's journal, or dropped on this visit). Ask the copilot puts the old question in the box instead.
@@ -100,6 +101,7 @@ export default function ArmChecklist({ change, ask, onClose, onDropped }: {
                   {answer && <span className="ml-auto shrink-0 text-xs text-emerald-300">✓ {answer}</span>}
                 </div>
                 <p className="text-xs text-foreground">{line}</p>
+                <LastExitLine symbol={plan.symbol} lesson={plan.lastExit} />
                 {notes.map(note => <p key={note} className="truncate text-xs text-primary" title={note}>⚑ {note}</p>)}
                 {!answer && (
                   <div className="flex flex-wrap gap-1.5 [&_[role=group]]:basis-full">

@@ -7,7 +7,7 @@
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import type { InvestigationSummary, PlanBoardLevel, PlanBoardRow, PlansBoard } from "@/lib/copilot";
+import type { ExitLesson, InvestigationSummary, PlanBoardLevel, PlanBoardRow, PlansBoard } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -105,6 +105,8 @@ export type DeskPlan = {
   stage: DeskPlanStage; symbol: string; investigationId: string | null; instrument: string | null; thesis: string | null;
   horizon: DeskHorizon; last: number | null; entry: PlanBoardLevel | null; invalidation: PlanBoardLevel | null;
   timeStop: PlanBoardRow["time_stop"]; r: number | null; at: number | null; note: string | null;
+  /** An armed plan's symbol's newest answered exit review, for Arm today's plans; null without one. */
+  lastExit: ExitLesson | null;
 };
 
 /** ``GET /copilot/desk/threads``: every row in group order, the Plans view, and each source's state (one failure reads
@@ -120,7 +122,8 @@ type Wire = {
   threads: (Omit<DeskThread, "investigationId" | "tradeId" | "radarEventId" | "changedAt" | "close" | "horizon" | "fillToLink"> &
     { investigation_id: string | null; trade_id: string | null; radar_event_id: string | null; changed_at: number | null;
       close?: DeskThread["close"]; horizon?: DeskHorizon | null; fill_to_link?: string | null })[];
-  plans?: (Omit<DeskPlan, "investigationId" | "timeStop"> & { investigation_id: string | null; time_stop: DeskPlan["timeStop"] })[];
+  plans?: (Omit<DeskPlan, "investigationId" | "timeStop" | "lastExit"> &
+    { investigation_id: string | null; time_stop: DeskPlan["timeStop"]; last_exit?: ExitLesson | null })[];
 };
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
@@ -148,7 +151,8 @@ export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads>
       ...row, investigationId: investigation_id, tradeId: trade_id, radarEventId: radar_event_id, changedAt: changed_at, close: close ?? null,
       horizon: horizon ?? null, fillToLink: fill_to_link ?? null,
     })),
-    plans: (wire.plans ?? []).map(({ investigation_id, time_stop, ...plan }) => ({ ...plan, investigationId: investigation_id, timeStop: time_stop })),
+    plans: (wire.plans ?? []).map(({ investigation_id, time_stop, last_exit, ...plan }) =>
+      ({ ...plan, investigationId: investigation_id, timeStop: time_stop, lastExit: last_exit ?? null })),
   };
 }
 

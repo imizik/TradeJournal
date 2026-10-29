@@ -23,7 +23,8 @@ touched since.
 
 ``plans`` is the thread list's Plans view: every plan by stage (``armed``, ``in_position``, ``exited`` and ``done``
 in the last ``EXIT_DAYS`` days, ``copilot_plans.done``), each with its instrument, horizon, levels, time stop and, in
-a position, where the underlying sits in units of the plan's risk (``r``).
+a position, where the underlying sits in units of the plan's risk (``r``); an armed plan, its symbol's newest answered
+exit review (``last_exit``).
 
 Each row with a position or a plan carries its symbol's ``horizon`` (``day``, ``swing`` or ``long``): its newest
 ``horizon`` day-journal entry (a plan card's Confirm or the thread header), else ``swing``. After 16:00 New York on a
@@ -442,25 +443,34 @@ def _r(plan: dict) -> float | None:
     return round((last - entry["price"]) / (entry["price"] - invalidation["price"]), 2)
 
 
-def _plan_list(board: dict, exited: list[dict], done: list[dict], horizons: dict[str, str]) -> list[dict]:
+def _plan_list(board: dict, exited: list[dict], done: list[dict], horizons: dict[str, str], lessons: dict[str, dict]) -> list[dict]:
     """The thread list's Plans view: every plan by stage (armed, in_position, exited, done), each with what its line
-    needs. ``board`` holds the plans not yet exited or done; a plan whose fill waits to be linked is in position."""
+    needs. ``board`` holds the plans not yet exited or done; a plan whose fill waits to be linked is in position. An
+    armed plan carries ``last_exit``, its symbol's newest answered exit review (``copilot_plans.last_exit_lessons``),
+    for Arm today's plans."""
     def row(stage, symbol, investigation_id, instrument, thesis, **more):
         base = {"stage": stage, "symbol": symbol, "investigation_id": investigation_id, "instrument": instrument,
                 "thesis": thesis, "horizon": horizons.get(symbol, DEFAULT_HORIZON), "last": None, "entry": None,
-                "invalidation": None, "time_stop": None, "r": None, "at": None, "note": None}
+                "invalidation": None, "time_stop": None, "r": None, "at": None, "note": None, "last_exit": None}
         return {**base, **more}
     rows = []
     for p in board.get("plans", []):
         held = p["position"] in ("in_position", "fill_to_link")
         rows.append(row("in_position" if held else "armed", p["symbol"], p["investigation_id"], p["instrument"] or p["direction"],
                         p["thesis"], last=p["last"], entry=p["entry"], invalidation=p["invalidation"], time_stop=p["time_stop"],
-                        r=_r(p) if held else None, note="Fill to link" if p["position"] == "fill_to_link" else None))
+                        r=_r(p) if held else None, note="Fill to link" if p["position"] == "fill_to_link" else None,
+                        last_exit=None if held else lessons.get(p["symbol"])))
     rows += [row("exited", r["symbol"], r["investigation_id"], r["instrument"], r["thesis"], at=_utc_epoch(r["exited_at"]))
              for r in exited]
     rows += [row("done", r["symbol"], r["investigation_id"], r["instrument"], r["thesis"], at=_utc_epoch(r["done_at"]), note=r["text"])
              for r in done]
     return rows
+
+
+def _exit_lessons(db: Session, plans: list[dict]) -> dict[str, dict]:
+    from app.engine import copilot_plans
+    armed = {p["symbol"] for p in plans if p["position"] not in ("in_position", "fill_to_link")}
+    return copilot_plans.last_exit_lessons(db, armed) if armed else {}
 
 
 def _investigation_of(path: str | None) -> str | None:
@@ -541,6 +551,8 @@ def threads(db: Session, now: float) -> dict:
         p["investigation_id"] for p in board.get("plans", []) if over(p["symbol"], p["confirmed_at"])}
     if board["state"] == "ok":
         board = {**board, "plans": [p for p in board["plans"] if p["investigation_id"] not in finished]}
+    # The armed plans' last exit lessons, on their own: a failure here leaves the Plans view without them.
+    lessons = today._section(db, "desk exit lessons", lambda: {"state": "ok", "map": _exit_lessons(db, board.get("plans", []))})
     act, watch, covered = ([], [], set())
     if found["state"] == "ok":
         # Which investigation each planned position opens; on its own, so a failure here still lists the positions.
@@ -584,7 +596,8 @@ def threads(db: Session, now: float) -> dict:
         "as_of": today._iso(now), "quotes_at": quotes.at, "quote_issue": quotes.issue,
         "day": {"phase": phase.get("phase"), "need_you": len(act), "streak": streak},
         "threads": _pinned(prep, week) + act + near + draft + new + watch,
-        "plans": _plan_list(board if board["state"] == "ok" else {}, exited, finals.get("rows", []), checks.get("horizons", {})),
+        "plans": _plan_list(board if board["state"] == "ok" else {}, exited, finals.get("rows", []), checks.get("horizons", {}),
+                            lessons.get("map", {})),
         "sections": {name: part["state"] for name, part in (
             ("positions", found), ("plans", board), ("investigations", investigations), ("drafts", drafts),
             ("decisions", decisions), ("check_ins", checks), ("exits", ended), ("done", finals), ("radar", radar), ("thesis", thesis), ("prep", prep), ("week", week), ("phase", phase))},

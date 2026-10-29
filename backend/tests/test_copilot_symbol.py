@@ -122,3 +122,23 @@ def test_assistant_sessions_cannot_reach_it(boundary, monkeypatch):  # noqa: F81
     assert boundary.owner.get("/copilot/symbol/NBIS").status_code == 200
     assert signin(boundary).status_code == 200
     assert boundary.public.get("/copilot/symbol/NBIS").status_code == 403
+
+
+def test_the_symbols_last_answered_exit_lesson_for_a_draft_plan_card(lab, engine, monkeypatch):  # noqa: F811
+    from tests.test_copilot_desk import entry, sell
+    from tests.test_today import buy as buy_at
+    assert lab.get("/copilot/symbol/CRWV").json()["last_exit"] == {"state": "ok", "lesson": None}  # none yet
+    alert(engine, CRWV, "CRWV", "entry", 99.0)
+    buy_at(engine, 800, "CRWV")
+    sell(engine, 801, "CRWV")
+    entry(engine, "reflection", "CRWV", "Partly. Took half at the target, gave the rest back.", minute=299)
+    entry(engine, "plan_done", "CRWV", "Exit reviewed", minute=300)
+    assert lab.get("/copilot/symbol/CRWV").json()["last_exit"] == {"state": "ok", "lesson": {
+        "exited": "2026-10-21", "followed": "partly", "lesson": "Partly. Took half at the target, gave the rest back."}}
+    assert lab.get("/copilot/symbol/NBIS").json()["last_exit"]["lesson"] is None  # another symbol's lesson stays its own
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(copilot_plans, "last_exit_lessons", broken)
+    body = lab.get("/copilot/symbol/CRWV").json()
+    assert body["last_exit"] == {"state": "unavailable"} and body["plans"]["state"] == "ok"

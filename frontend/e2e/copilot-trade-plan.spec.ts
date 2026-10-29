@@ -32,7 +32,7 @@ const TURN = sse([
 ]);
 
 type Server = { alerts: object[]; posts: { path: string; body: Record<string, unknown> }[]; failAlert?: (body: Record<string, unknown>) => boolean;
-  failCapture?: boolean; last?: number; stops?: object[]; reads?: Record<string, object> };
+  failCapture?: boolean; last?: number; stops?: object[]; reads?: Record<string, object>; lastExit?: object | null; loopReads?: string[] };
 // The server's reading of a time stop; anything not listed stays a note.
 const DUE = Date.UTC(2026, 9, 24, 19, 30) / 1000;
 const READ = (server: Server, text: string) => server.reads?.[text] ?? { due_at: null, reason: "No time or length in it, so it stays a note.", enabled: true };
@@ -58,6 +58,12 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
   await page.route("**/day-journal/*/entries", (route) => {
     post("journal", route);
     return route.fulfill({ json: { id: "j1", day: "2026-10-24", not_traded: false, actor: "owner", created_at: "2026-10-24T14:01:00Z", ...route.request().postDataJSON() } });
+  });
+  // The draft's last exit lesson for its symbol (GET /copilot/symbol/{symbol}'s last_exit; tests/test_copilot_symbol.py).
+  await page.route("**/copilot/symbol/*", (route) => {
+    server.loopReads?.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { symbol: "NBIS", as_of: "2026-10-24T14:00:00Z", positions: { state: "ok", rows: [] }, plans: { state: "ok", rows: [] },
+      last_exit: { state: "ok", lesson: server.lastExit ?? null }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } });
   });
   await page.route("**/copilot/time-stops/preview?*", (route) =>
     route.fulfill({ json: READ(server, new URL(route.request().url()).searchParams.get("text") ?? "") }));
@@ -172,6 +178,28 @@ test("the plan card is edited, then Confirm saves the pre-trade plan and arms bo
   expect(posts(server, "time-stops")).toEqual([]); // a time stop the server does not read as a time stays a note
   await expect(card.getByLabel("Thesis")).toBeDisabled(); // the saved plan is what the card shows now
   await expect(await timeline(page)).toContainText("NBIS invalidation: crosses 92.1");
+});
+
+test("a draft shows the symbol's last exit lesson in the owner's words, and a confirmed card does not", async ({ page }) => {
+  const lesson = "No, sold the give-back too early; hold to the time stop next time.";
+  const server: Server = { alerts: [], posts: [], lastExit: { exited: "2026-10-21", followed: "no", lesson }, loopReads: [] };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  const line = card.getByLabel("Last NBIS exit lesson");
+  await expect(line).toHaveText(`Last NBIS exit (Oct 21): didn't follow · “${lesson}”`);
+  expect(server.loopReads).toEqual([expect.stringMatching(/\/copilot\/symbol\/NBIS$/)]);
+  await page.screenshot({ path: test.info().outputPath("plan-card-last-exit-1440.png") });
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByText("Set: NBIS crosses 92.3.")).toBeVisible();
+  await expect(line).toBeHidden();
+});
+
+test("a draft for a symbol with no answered exit review shows no lesson line", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await expect(card.getByLabel("Invalidation (crosses)")).toHaveValue("92.3");
+  await expect(card.getByLabel("Last NBIS exit lesson")).toHaveCount(0);
 });
 
 test("a partial failure names the failed part and retries only that part", async ({ page }) => {

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { confirmedElsewhere, createPlanAlert, freshQuote, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
+import LastExitLine from "@/components/copilot/LastExitLine";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { HORIZONS, horizonFor, saveHorizon, type DeskHorizon } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,16 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   // One plan per card, its id kept with it: a save retried here, after a reload or from another window returns the first one.
   const clientId = useRef(plan.client_id ?? newClientId());
   useEffect(() => { fetchSetup().then(setSetup).catch(() => setSetupError(true)); }, []);
+  // A draft shows the symbol's last exit lesson; a confirmed or dismissed card never reads it.
+  const [lastExit, setLastExit] = useState<ExitLesson | null>(null);
+  const drafting = !saved && !dismissed;
+  useEffect(() => {
+    if (!drafting) return;
+    const controller = new AbortController();
+    getSymbolLoop(plan.symbol, controller.signal)
+      .then(loop => setLastExit(loop.last_exit?.state === "ok" ? loop.last_exit.lesson : null)).catch(() => undefined);
+    return () => controller.abort();
+  }, [drafting, plan.symbol]);
   const stopText = timeStop.trim();
   useEffect(() => {
     if (!stopText || !alertsSupported) return;
@@ -300,6 +311,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         </label>
       )}
       {plan.last !== undefined && <p className="text-xs text-muted-foreground">{plan.symbol} was {plan.last} when this was drafted.</p>}
+      {drafting && <LastExitLine symbol={plan.symbol} lesson={lastExit} />}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">Thesis</span>
         <textarea value={thesis} onChange={e => setThesis(e.target.value.slice(0, 300))} rows={3} disabled={locked} className={field} />

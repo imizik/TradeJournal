@@ -508,3 +508,34 @@ def test_a_done_plan_whose_parts_were_all_deleted_stands_alone_without_its_threa
     entry(engine, "plan_done", "SOFI", "Marked done", minute=30)
     [row] = read(desk)["plans"]
     assert (row["stage"], row["symbol"], row["investigation_id"], row["note"]) == ("done", "SOFI", None, "Marked done")
+
+
+def test_a_new_armed_plan_carries_the_symbols_last_answered_exit_lesson(desk, engine):  # noqa: F811
+    alert(engine, CRWV, "CRWV", "entry", 99.0)
+    buy(engine, 800, "CRWV")
+    sell(engine, 801, "CRWV")  # out 13:00 New York, reviewed at 15:00
+    lesson = "No, sold the give-back too early; hold to the time stop next time."
+    entry(engine, "reflection", "CRWV", lesson, minute=299)
+    entry(engine, "plan_done", "CRWV", "Exit reviewed", minute=300)
+    again = "55555555-5555-4555-8555-555555555555"
+    alert(engine, again, "CRWV", "entry", 101.0, minute=320)  # planned again after the review
+    alert(engine, APLD, "APLD", "entry", 31.0)  # never exited: no lesson
+    alert(engine, SOFI, "SOFI", "entry", 20.0)
+    buy(engine, 900, "SOFI")
+    sell(engine, 901, "SOFI")
+    entry(engine, "plan_done", "SOFI", "Exit review skipped", minute=300)  # skipped: nothing to show
+    alert(engine, "66666666-6666-4666-8666-666666666666", "SOFI", "entry", 21.0, minute=320)
+    plans = {(p["symbol"], p["investigation_id"]): p for p in read(desk)["plans"]}
+    assert plans[("CRWV", again)]["stage"] == "armed"
+    assert plans[("CRWV", again)]["last_exit"] == {"exited": "2026-10-21", "followed": "no", "lesson": lesson}
+    assert plans[("CRWV", CRWV)]["stage"] == "done" and plans[("CRWV", CRWV)]["last_exit"] is None  # only an armed plan
+    assert plans[("APLD", APLD)]["last_exit"] is None
+    assert plans[("SOFI", "66666666-6666-4666-8666-666666666666")]["last_exit"] is None
+
+
+def test_a_failing_lesson_read_leaves_the_plans_view(desk, engine, monkeypatch):  # noqa: F811
+    from app.engine import copilot_plans
+    alert(engine, APLD, "APLD", "entry", 31.0)
+    monkeypatch.setattr(copilot_plans, "last_exit_lessons", lambda db, symbols: 1 / 0)
+    [row] = read(desk)["plans"]
+    assert (row["stage"], row["last_exit"]) == ("armed", None)
