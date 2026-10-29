@@ -187,10 +187,10 @@ test("a draft shows the symbol's last exit lesson in the owner's words, and a co
   const card = await askForPlan(page);
   const line = card.getByLabel("Last NBIS exit lesson");
   await expect(line).toHaveText(`Last NBIS exit (Oct 21): didn't follow · “${lesson}”`);
-  expect(server.loopReads).toContain("/copilot/symbol/NBIS");
+  expect(server.loopReads).toEqual([expect.stringMatching(/\/copilot\/symbol\/NBIS$/)]);
   await page.screenshot({ path: test.info().outputPath("plan-card-last-exit-1440.png") });
   await card.getByRole("button", { name: "Confirm" }).click();
-  await expect(card.getByText("Set: NBIS 5m close beyond 95.90.")).toBeVisible();
+  await expect(card.getByText("Set: NBIS crosses 92.3.")).toBeVisible();
   await expect(line).toBeHidden();
 });
 
