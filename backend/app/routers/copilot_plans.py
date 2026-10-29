@@ -10,6 +10,7 @@ Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-onl
 
 from datetime import datetime
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlmodel import Session
@@ -94,18 +95,32 @@ def _market_picture(db: Session) -> bytes:
     return desk_context.market_picture(fills.get("rows", []) + pings.get("rows", []), now)
 
 
+def _thread_picture(db: Session, investigation_id: str, timeframe: str) -> bytes:
+    from app.routers import copilot_desk
+    inv = _thread(investigation_id, db)
+    now = today._now()
+    day = datetime.fromtimestamp(now, ET).date()
+    events = []
+    if inv.symbol and timeframe != "1D":
+        pings = today._section(db, "thread picture pings", lambda: copilot_desk._ping_events(db, now))
+        radar = today._section(db, "thread picture radar", lambda: copilot_desk._radar_events(day))
+        events = [r for r in pings.get("rows", []) + radar.get("rows", []) if r.get("symbol") == inv.symbol]
+    return desk_context.picture(db, inv, now, timeframe=timeframe, events=events)
+
+
 @router.get("/desk/{investigation_id}/picture")
-def desk_picture(investigation_id: str, db: Session = Depends(get_session)):
-    """The Context pane's chart: today's minute bars for the thread's symbol with its plan's levels and today's fills,
-    as a PNG; for ``market``, the Briefing's QQQ with the day's fills and pings. Unavailable (no symbol, no bars yet,
-    the read failed or ran long) is a 404 whose detail says why."""
+def desk_picture(investigation_id: str, timeframe: Literal["2m", "15m", "1D"] = "2m", db: Session = Depends(get_session)):
+    """The Context pane's chart for the thread's symbol as a PNG, on ``timeframe``: ``2m`` today's minutes, ``15m``
+    recent sessions, ``1D`` a few months; the intraday ones with its plan's levels, today's fills and today's pings
+    sent and Radar hits on the symbol. For ``market``, the Briefing's QQQ with the day's fills and pings. Unavailable
+    (no symbol, no bars yet, the read failed or ran long) is a 404 whose detail says why."""
     try:
         if investigation_id == desk_context.MARKET_ID:
             if not copilot.settings().enabled:
                 raise HTTPException(503, "Copilot Lab is off.")
             png = _market_picture(db)
         else:
-            png = desk_context.picture(db, _thread(investigation_id, db), today._now())
+            png = _thread_picture(db, investigation_id, timeframe)
     except desk_context.Unavailable as exc:
         raise HTTPException(404, str(exc)) from None
     return Response(png, media_type="image/png", headers={"Cache-Control": "private, no-store"})

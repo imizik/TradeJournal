@@ -447,15 +447,24 @@ The full page is a desk of three panes beside each other
   `backend/app/engine/desk_context.py`); empty until a conversation is saved.
   Each tab reads only when opened and again when something is confirmed in the
   conversation; nothing here arms or sends.
-  - **Chart** (first): today's minute bars as the server's ping picture
-    (`GET /copilot/desk/{id}/picture`, `chart_render` over the same cached
-    chart-feed read as a ping), the regular session once it has bars, with the
-    plan's entry (TRIG) and invalidation (INV) lines and the owner's fills in
-    the symbol today (IN and OUT; an option fill at the underlying's recorded
-    price, else a line at its time; a pre-market fill is left off once the
-    regular session shows). No timeframes yet. No bars, a failed read, a read
-    past 6 seconds, or both workers still busy with earlier reads says why
-    instead of a blank picture.
+  - **Chart** (first): the server's ping picture of the symbol
+    (`GET /copilot/desk/{id}/picture?timeframe=`, `chart_render`) with
+    timeframe buttons **2m** (the default: today's minute bars from the same
+    cached chart-feed read as a ping, the regular session once it has bars),
+    **15m** (regular-session 15-minute bars of today and the two completed
+    sessions before it, those from the chart history: disk, or fetched once
+    and stored) and **1D** (the last 120 days of the chart feed's daily bars).
+    The intraday views carry the plan's entry (TRIG) and invalidation (INV)
+    lines, the owner's fills in the symbol today (amber, IN and OUT; an option
+    fill at the underlying's recorded price, else a line at its time; a
+    pre-market fill is left off once the regular session shows), the phone
+    pings sent today on the symbol (violet, first labelled PING; the session
+    strip's ping reader) and today's Radar hits on it (blue, first labelled
+    RADAR; the Radar store read-only, none when it is off or missing), each
+    on the bar of its time, so an alert can be judged against what price did
+    next. 1D has no marks. A legend under the picture names fills, pings and
+    Radar. No bars, a failed read, a read past 6 seconds, or both workers
+    still busy with earlier reads says why instead of a blank picture.
   - **Timeline** (`/timeline`): one list, newest first, New York time on the
     right and a dot by kind: the investigation's alerts (armed, hit; a sent
     ping for one rides on its row, a held one shows with why), time stop (set,
@@ -675,8 +684,9 @@ Browser proof: `frontend/e2e/copilot-home.spec.ts` (including a 375 px phone),
 `frontend/e2e/copilot-thread-head.spec.ts` (option and stock, 375 px),
 `frontend/e2e/copilot-answer-format.spec.ts` (the answer format, Sources,
 the cleaned conversation and the 375 px composer) and
-`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, unavailable
-states, the 375 px Context tab, the Briefing's day).
+`frontend/e2e/copilot-desk-context.spec.ts` (each Context tab, the chart's
+timeframe buttons and legend, unavailable states, the 375 px Context tab, the
+Briefing's day).
 
 ## How the copilot reasons (system prompt)
 

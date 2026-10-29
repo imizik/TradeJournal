@@ -336,9 +336,12 @@ def _gutter(canvas: _Canvas, wanted: list[tuple[float, str, str]], kind: str) ->
 
 
 def _time_axis(canvas: _Canvas, first: int, last: int) -> None:
+    """The first and last bar's time: the clock within a day, the date as well across days, the date alone when both ends share a clock (daily bars all start 09:30)."""
     y = PLOT[3] + 10
-    canvas.text(PLOT[0], y, _clock(first), "muted", 2, kind="axis")
-    end = _clock(last)
+    a, b = datetime.fromtimestamp(first, ET), datetime.fromtimestamp(last, ET)
+    shape = "%H:%M" if a.date() == b.date() else "%b %d" if a.time() == b.time() else "%b %d %H:%M"
+    canvas.text(PLOT[0], y, a.strftime(shape), "muted", 2, kind="axis")
+    end = b.strftime(shape)
     canvas.text(PLOT[2] - text_width(end, 2), y, end, "muted", 2, kind="axis")
 
 
@@ -384,15 +387,21 @@ def _plot(canvas: _Canvas, chart: Chart, mode: str, columns: list[tuple[float, d
         text = fit(when.label, 2, 200)
         left = min(max(x + 6, x0), x1 - text_width(text, 2))
         canvas.text(left, y0 + 4 + 20 * (chart.times.index(when) % 2), text, when.tone, 2, kind="time", backdrop=True)
+    taken: list[tuple[float, float, float, float]] = []
     for mark in chart.marks:
         x, y = x_of_time(mark.time), y_of(mark.price)
         canvas.dot(x, y, 7, "bg")
         canvas.dot(x, y, 5, mark.tone)
         if mark.label:
             text = fit(mark.label, 2, 200)
-            below = y < y0 + 40
-            left = min(max(x - text_width(text, 2) / 2, x0), x1 - text_width(text, 2))
-            canvas.text(left, y + 12 if below else y - 26, text, mark.tone, 2, kind="mark", backdrop=True)
+            width = text_width(text, 2)
+            left = min(max(x - width / 2, x0), x1 - width)
+            # Above the dot, or below it near the top or where an earlier mark's label already sits.
+            tops = (y + 12, y - 26) if y < y0 + 40 else (y - 26, y + 12)
+            top = next((t for t in tops if not any(left < b[2] + 6 and b[0] < left + width + 6 and t < b[3] + 4 and b[1] < t + 18
+                                                   for b in taken)), tops[0])
+            taken.append((left, top, left + width, top + 14))
+            canvas.text(left, top, text, mark.tone, 2, kind="mark", backdrop=True)
     _gutter(canvas, [(y_of(lv.price), lv.label, lv.tone) for lv in chart.levels], "level")
 
 

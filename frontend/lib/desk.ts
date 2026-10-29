@@ -265,9 +265,15 @@ export const getDeskHistory = (id: string, signal?: AbortSignal) => deskRead<Des
 /** The picture route's reserved id for the Briefing's chart: QQQ today with the day's fills and pings. */
 export const DESK_MARKET = "market";
 
-/** Today's picture for the thread as an object URL (the caller revokes it), or the server's reason it is unavailable. */
-export async function getDeskPicture(id: string, signal?: AbortSignal): Promise<{ url: string } | { reason: string }> {
-  const response = await fetch(deskPath(id, "picture"), { cache: "no-store", signal });
+/** The thread chart's timeframes: today's minutes, recent sessions' 15-minute bars, a few months of daily bars. */
+export const DESK_TIMEFRAMES = ["2m", "15m", "1D"] as const;
+export type DeskTimeframe = (typeof DESK_TIMEFRAMES)[number];
+
+/** The thread's picture (today's, or on ``timeframe``) as an object URL (the caller revokes it), or the server's reason
+ * it is unavailable. */
+export async function getDeskPicture(id: string, signal?: AbortSignal, timeframe?: DeskTimeframe): Promise<{ url: string } | { reason: string }> {
+  const part = timeframe ? `picture?timeframe=${encodeURIComponent(timeframe)}` : "picture";
+  const response = await fetch(deskPath(id, part), { cache: "no-store", signal });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     return { reason: typeof body?.detail === "string" ? body.detail : `The chart is unavailable (${response.status}).` };
