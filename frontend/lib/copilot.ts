@@ -26,6 +26,15 @@ export type ToolEvent = {
   candidates?: OptionCandidates;
   /** get_trade_review only: the images it showed the model ("plan chart"). */
   looked_at?: string[];
+  /** get_week_review only: the week's answered exit reviews, each opening its plan's thread (never sent to the model). */
+  lessons?: WeekLessons;
+};
+
+/** The owner's exit lessons for the reviewed week: ``followed`` is what the answer opens with; ``thread`` the plan's
+ * investigation, null in the simulated fixture (the row opens its symbol instead). */
+export type WeekLessons = {
+  exited: number; answered: number; simulated: boolean;
+  rows: { symbol: string; followed: "yes" | "partly" | "no" | null; lesson: string; thread: string | null }[];
 };
 
 /** Real contracts from the option chain for the plan card's contract pick list: a short label ("Nov 13 '26 95C"), days to

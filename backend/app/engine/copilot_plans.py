@@ -191,7 +191,8 @@ def _nearest(row: dict) -> tuple:
 def exits(db: Session, since: datetime) -> list[dict]:
     """Plans whose position is over, the last of it closed at or after ``since`` (naive UTC), newest exit first: the
     trade linked to the plan's capture, else every trade in the symbol opened within ``ENTRY_DAYS`` after the plan (none
-    still open). A plan with no trade either way has not exited. Webull stays out. Read-only; no quote read."""
+    still open). A plan with no trade either way has not exited. Webull stays out. Read-only; no quote read. Each row also
+    carries its ``trades``, ``invalidation`` alert and time ``stop`` (ORM rows) for the week review."""
     from sqlalchemy import or_
     from app.engine.chart_math import ET
     from app.models import Account, Trade
@@ -217,7 +218,9 @@ def exits(db: Session, since: datetime) -> list[dict]:
             continue
         out.append({"investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "newest": plan["newest"],
                     "exited_at": exited, "thesis": _thesis(plan["capture"].note if plan["capture"] else None),
-                    "instrument": _instrument(plan["capture"])})
+                    "instrument": _instrument(plan["capture"]),
+                    # For the week review's measured facts; never sent out as they are.
+                    "trades": trades, "invalidation": plan["invalidation"], "stop": plan["stop"]})
     out.sort(key=lambda row: row["exited_at"], reverse=True)
     return out
 

@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
 import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { useAppAccess } from "@/components/AccessProvider";
+import ExitLessons from "@/components/copilot/ExitLessons";
 import LinkedActivity from "@/components/copilot/LinkedActivity";
 import ProposalCard from "@/components/copilot/ProposalCard";
 import ResearchDeeper from "@/components/copilot/ResearchDeeper";
@@ -1042,6 +1043,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}
+            {(message.tools ?? []).filter(t => t.lessons).slice(-1).map(t => <ExitLessons key={t.id} lessons={t.lessons!} />)}
             {message.proposals?.map(proposal => proposal.kind === "trade_plan" ? (
               <TradePlanCard key={proposal.id} plan={proposal} investigationId={current?.id ?? null} origin={origin} drawn={drawn}
                 history={historyFor(message.tools ?? [], proposal)} candidates={candidatesFor(message.tools ?? [], proposal)}

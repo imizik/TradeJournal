@@ -108,7 +108,9 @@ function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
  * it says whether the prep is written; after the close it shows the whole day. ``data`` is the desk's one session read
  * (``useDeskSession``); read-only.
  */
-export default function SessionTape({ data, error, rows }: { data: DeskSession | null; error: string | null; rows: DeskThread[] }) {
+export default function SessionTape({ data, error, rows, tally }: {
+  data: DeskSession | null; error: string | null; rows: DeskThread[]; tally: { done: number; total: number };
+}) {
   const practice = usePracticeLine(true);
 
   if (!data) return error ? <p className="mb-4 text-xs text-muted-foreground">Today&apos;s session is unavailable: {error}</p> : null;
@@ -132,9 +134,8 @@ export default function SessionTape({ data, error, rows }: { data: DeskSession |
   const next = ahead[0] ? <>{ahead[0].symbol} time stop {num(ahead[0].clock)}</>
     : before && open !== null ? <>the open {num(hhmm(open))}</> : live && close !== null ? <>the close {num(hhmm(close))}</> : null;
   if (next) facts.push(<>Next: <span className="text-foreground/80">{next}</span></>);
-  // After the close: how many of the day's positions and plans have their review written (one per symbol).
-  const asked = new Map(rows.filter(r => r.close && r.symbol).map(r => [r.symbol, !!r.close!.reviewed]));
-  if (asked.size) facts.unshift(<span data-testid="briefing-reviewed">{num([...asked.values()].filter(Boolean).length)} of {num(asked.size)} reviewed</span>);
+  // After the close: how much of Close the day is answered (the desk's tally: close questions, alerts, Radar hits, fills).
+  if (tally.total) facts.unshift(<span data-testid="briefing-reviewed">{num(tally.done)} of {num(tally.total)} done</span>);
   if (practice) facts.push(practice);
 
   return (

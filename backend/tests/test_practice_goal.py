@@ -129,7 +129,8 @@ def test_the_scripted_week_proposes_one_practice_and_a_small_week_none():
     events = _turn([{"role": "user", "content": "Context: Review my week"}], copilot.FakeAdapter(0), BigWeek())
     [card] = [e for e in events if e["type"] == "proposal"]
     assert (card["kind"], card["measure"], card["target"]) == ("practice", "exit_at_invalidation", 1.0)
-    assert card["why"] == "2 of 3 invalidation hits this week were held past 15 minutes."
+    assert card["why"] == ("2 of 3 invalidation hits this week were held past 15 minutes. You wrote: \"No. The invalidation broke at "
+                           "13:59 and I waited for a bounce. Out when it breaks, not after.\"")  # his exit lesson, quoted
     text = "".join(e["delta"] for e in events if e["type"] == "text")
     assert "To practice next week" in text and "on the card below" in text
 

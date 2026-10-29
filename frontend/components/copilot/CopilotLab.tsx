@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
+import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
 import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
-import { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
+import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
 import Inspector from "@/components/copilot/Inspector";
-import { ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
+import { AlertAnswer, HitToRate, ThreadAlertAnswers, ThreadHitRating } from "@/components/copilot/ProofAnswers";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { WEEK_REVIEW_CONTEXT } from "@/components/copilot/ReviewMyWeek";
 import AlertScorecard from "@/components/copilot/AlertScorecard";
@@ -96,6 +97,9 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     else if (row.path) router.push(row.path);
   }, [actions, router]);
 
+  // Fills waiting for their plan: one bar at the top of the symbol's thread, and "N fills to link" opening each in turn.
+  const fills = useFillLinks(rows, pick, () => setRefresh(n => n + 1));
+
   // The day's phase command: Prep the day before the open on a weekday, Close the day after 16:00 (New York clock).
   const [dayPhase, setDayPhase] = useState<"pre" | "close" | null>(null);
   useEffect(() => {
@@ -113,8 +117,9 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   }, []);
 
   // Close the day: a pass through each thread still asking its close question (``toReview``, list order). Each opens on its
-  // question; an answer or Skip opens the next, and the last one ends the pass. With none left it puts the day's
-  // question in the box, unsent. Nothing goes to the model.
+  // question; an answer or Skip opens the next. Then, in the conversation pane, today's unanswered alerts, unrated Radar
+  // hits and fills waiting to link (``closeSteps``), one at a time; the last one ends the pass. With none left it puts
+  // the day's question in the box, unsent. Nothing goes to the model.
   const reviewed = useRef(new Set<string>()); // answered or skipped this visit, before the list reads it back
   const closing = useRef(false);
   useEffect(() => {
@@ -128,26 +133,51 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     if (row.investigationId) actions.open(row.investigationId);
     else router.push(`/copilot-lab?${new URLSearchParams({ symbol: row.symbol! })}`); // opens on the symbol's question
   }, [actions, router]);
-  const left = toReview(rows, nyDay()); // the list reads a review back on the refresh it triggers
+  const toAnswer = session.data?.to_answer;
+  const [passed, setPassed] = useState<ReadonlySet<string>>(() => new Set()); // answered or skipped this visit
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set()); // answered this visit, before the session reads it back
+  const steps = dayPhase === "close" ? closeSteps(toAnswer?.alerts?.rows, toAnswer?.radar?.rows, fills.waiting, passed) : [];
+  const [answering, setAnswering] = useState(false);
+  const pass = useCallback((id: string, saved: boolean) => {
+    setPassed(prev => new Set(prev).add(id));
+    if (saved) setAnswered(prev => new Set(prev).add(id));
+  }, []);
+  const left = toReview(rows, nyDay()).length + steps.length; // the list reads a review back on the refresh it triggers
+  // "N of M done": every thread asked today (one per symbol) and, after 16:00, today's alerts and Radar hits and the fills
+  // to link. A skip is not done.
+  const asked = new Map(rows.filter(r => r.close && r.symbol).map(r => [r.symbol, !!r.close!.reviewed]));
+  const todays = <T extends { today: boolean }>(list: T[] | undefined) => (dayPhase === "close" ? list ?? [] : []).filter(r => r.today);
+  const alertsToday = todays(toAnswer?.alerts?.rows);
+  const hitsToday = todays(toAnswer?.radar?.rows);
+  const fillsHere = dayPhase === "close" ? fills.answeredHere : 0;
+  const tally = {
+    done: [...asked.values()].filter(Boolean).length + alertsToday.filter(a => a.feedback || answered.has(a.id)).length
+      + hitsToday.filter(h => h.rating || answered.has(h.event_id)).length + fillsHere,
+    total: asked.size + alertsToday.length + hitsToday.length + (dayPhase === "close" ? fills.waiting.length : 0) + fillsHere,
+  };
   const closeDay = useCallback(() => {
     const [next] = toReview(rows, nyDay(), reviewed.current);
     setClosing(!!next);
     if (next) review(next);
+    else if (steps.length) { setAnswering(true); setTab("thread"); }
     else fill(CLOSE_PROMPT);
-  }, [rows, review, fill, setClosing]);
-  // ``?close=1`` (the evening review ping) starts the pass once the list has read, after the close. Its first step is a
-  // page load of that thread's link, so the conversation opens on its own load (the pass carries on in this tab). With
-  // none left to review the desk just opens.
+  }, [rows, review, fill, setClosing, steps.length]);
+  // ``?close=1`` (the evening review ping) starts the pass once the list and the session have read, after the close: the
+  // first unreviewed thread by a page load of its link (the pass carries on in this tab), else today's alerts, Radar hits
+  // and fills here. With nothing left, or read before the close (a tab kept open stays as it is), the desk just opens.
   const closeLink = useRef(close);
+  const sessionRead = !!(session.data || session.error);
   useEffect(() => {
-    if (!closeLink.current || !rows.length || dayPhase !== "close") return;
+    if (!closeLink.current || !rows.length || !sessionRead) return;
     closeLink.current = false;
+    if (dayPhase !== "close") return;
     const [next] = toReview(rows, nyDay());
-    if (!next) return;
-    setClosing(true);
-    window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
-      : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
-  }, [rows, dayPhase, setClosing]);
+    if (next) {
+      setClosing(true);
+      window.location.replace(next.investigationId ? `/copilot-lab?investigation=${next.investigationId}`
+        : `/copilot-lab?${new URLSearchParams({ symbol: next.symbol! })}`);
+    } else if (steps.length) { setAnswering(true); setTab("thread"); } // eslint-disable-line react-hooks/set-state-in-effect -- the link starts the pass once
+  }, [rows, sessionRead, dayPhase, setClosing, steps.length]);
   const onReviewed = useCallback((symbol: string) => {
     reviewed.current.add(symbol);
     setRefresh(n => n + 1);
@@ -155,15 +185,19 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     const [next] = toReview(rows, nyDay(), reviewed.current);
     setClosing(!!next);
     if (next) review(next);
-  }, [rows, review, setClosing]);
+    else if (steps.length) setAnswering(true);
+  }, [rows, review, setClosing, steps.length]);
+  const closeStep = answering ? steps[0] : undefined;
+  useEffect(() => { if (answering && !steps.length) setAnswering(false); }, [answering, steps.length]); // eslint-disable-line react-hooks/set-state-in-effect -- the last answer ends the pass
 
   // The thread list's phase button: before the open on a weekday, Arm today's plans (a checklist of the armed plans in
   // the conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
   const [arming, setArming] = useState(false);
-  useEffect(() => { setArming(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist
+  useEffect(() => { setArming(false); setAnswering(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist or the pass
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }
-    : dayPhase === "close" ? { label: left.length ? `Close the day · ${left.length} to review` : "Close the day",
-      hint: left.length ? "Opens each thread on its close question, one at a time" : "Puts a close-of-day question in the box, unsent" } : null;
+    : dayPhase === "close" ? { label: left ? `Close the day · ${left} to review` : "Close the day",
+      hint: left ? "Each thread's close question, then today's alerts, Radar hits and fills to link, one at a time"
+        : "Puts a close-of-day question in the box, unsent" } : null;
   const runPhase = useCallback(() => {
     if (dayPhase !== "pre") closeDay();
     else { setArming(true); setTab("thread"); }
@@ -174,7 +208,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     { id: "week", name: "Review my week", hint: "One turn: planned vs unplanned, follow-through, exits", run: () => actions.ask(WEEK_REVIEW_CONTEXT) },
     { id: "matters", name: "What matters right now?", hint: "One turn across your positions, watches and investigations", run: () => actions.ask(WHAT_MATTERS_PROMPT) },
     ...(dayPhase === "pre" ? [{ id: "prep", name: "Prep the day", hint: "Puts a prep question in the box, unsent", run: () => fill(PREP_PROMPT) }] : []),
-    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each thread's close question, one at a time. Nothing is sent.", run: closeDay }] : []),
+    ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question, alert, Radar hit and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
   ], [actions, dayPhase, fill, planTrade, closeDay]);
 
   // J / K walk the threads that open in place, in list order; pinned rows ask and other rows leave the page, so they are skipped.
@@ -232,9 +266,6 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   }, []);
   const linkRow = !thread && link?.symbol ? deskRow(link.symbol) : null;
   const alertRows = session.data?.to_answer?.alerts?.rows; // a position's thread asks about its alerts sent today
-
-  // Fills waiting for their plan: one bar at the top of the symbol's thread, and "N fills to link" opening each in turn.
-  const fills = useFillLinks(rows, pick, () => setRefresh(n => n + 1));
 
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
@@ -306,7 +337,14 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               ask={() => { setArming(false); fill(ARM_PROMPT); }}
               change={(plan, text) => { setArming(false); setCommand({ kind: "open", id: plan.investigationId!, text, n: ++sent.current }); setTab("thread"); }} />
           )}
-          {on && !arming && (!thread && link?.symbol && link.radar ? (
+          {on && !arming && closeStep && (
+            <ClosePass key={closeStep.id} step={closeStep} done={tally.done} total={tally.total}
+              onSkip={() => pass(closeStep.id, false)} onEnd={() => { setAnswering(false); setClosing(false); }} body={
+                closeStep.kind === "alert" ? <AlertAnswer alert={closeStep.alert} onAnswered={id => pass(id, true)} />
+                  : closeStep.kind === "hit" ? <HitToRate hit={closeStep.hit} onRated={id => pass(id, true)} />
+                    : <FillLinkBar tradeId={closeStep.id} titles={fills.titles} onDone={(id, how) => { fills.answer(id, how); pass(id, true); }} />} />
+          )}
+          {on && !arming && !closeStep && (!thread && link?.symbol && link.radar ? (
             <><RadarDecision key={link.radar} eventId={link.radar} symbol={link.symbol} fill={fill} /><ThreadHitRating key={`rate-${link.radar}`} eventId={link.radar} /></>
           ) : !thread && link?.symbol && !link.investigation ? (
             <div className="mb-4 space-y-3">
@@ -321,7 +359,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} tally={tally} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
             <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />

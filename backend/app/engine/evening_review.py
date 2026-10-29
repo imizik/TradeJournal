@@ -3,8 +3,8 @@ Copilot desk, opening Close the day.
 
 At ``EVENING_REVIEW_PING_AT`` New York (``16:30`` by default; a time before 16:00 or unreadable keeps the default) on a
 trading day (the market calendar: no weekend or holiday ping) the desk's counts are read once through
-``copilot_desk.waiting``, the same rules the desk shows: the symbols still asking their close question, the position
-alerts waiting on an answer, the Radar hits not rated and the fills waiting to link. Nothing waiting, the lab off, or a
+``copilot_desk.waiting``, what the desk's Close the day pass walks: the symbols still asking their close question,
+today's position alerts with no feedback, today's Radar hits not rated and the fills waiting to link. Nothing waiting, the lab off, or a
 desk source that could not be read is recorded ``skipped`` with the reason and nothing is sent. Otherwise one ping, "To review: 2 threads, 3 alerts,
 1 fill to link.", goes through ``notification_policy.decide`` (kind ``evening_review``, ranked with the prep, so the
 daily cap holds it first) and opens ``/copilot-lab?close=1``, which starts the desk's Close the day pass.

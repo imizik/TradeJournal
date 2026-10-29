@@ -525,7 +525,13 @@ The full page is a desk of three panes beside each other
   ping readers) and read again each minute; **Timeline**, the day across
   everything newest first from `GET /copilot/desk/session` (time stops still
   ahead, fills, pings sent, Radar events, decisions, the prep); and **This
-  week**, the plan streak's record (`GET /charts/captures/streak`): a tile per
+  week**, which opens on the two proofs as /proof reads them, read-only and
+  never recomputed: "Alerts: <habit label> · based on 9 of 14 alerts
+  answered" (`GET /analytics/exit-habits`, its feedback counts, or its trade
+  sample when there are none) and "Radar: <label> · 6 hits rated"
+  (`GET /radar/proof`, or its reason when there is no verdict), each saying
+  "could not load" when its read fails, and Open Proof →; then the plan
+  streak's record (`GET /charts/captures/streak`): a tile per
   entry this week in time order (+ planned before entry, − no plan or a plan
   saved late, · a suggested plan waiting to be linked), each titled like
   "NBIS 100C · Tue 10:31 · planned" and opening that trade's page, where its
@@ -686,12 +692,22 @@ of the symbol's first `reflection` (or `plan_ask` answer) today: "Reviewed ·
 command) is a pass through them: it opens the first unreviewed thread in list
 order on its question (a position with no conversation opens by its symbol,
 `/copilot-lab?symbol=…`, and the pass carries on in this tab), and each answer
-or Skip opens the next; the last one ends it. With none left it puts the
-day's question in the message box, unsent. Nothing is sent to the model. The
-Briefing's line says "N of M reviewed" (one per symbol). `/copilot-lab?close=1`
-(the [evening review ping](#phone-ping-policy)'s link) starts the pass once the
-list has read, after 16:00 only, opening the first unreviewed thread by its
-link; with none left, or any other time, it opens the desk as usual. Browser proof:
+or Skip opens the next. Then, in the conversation pane (`ClosePass.tsx`), it
+asks the rest one at a time with the same answers the Briefing and thread top
+use: today's position alerts with no feedback, today's Radar hits not rated,
+then the fills waiting to link (the link bar). An answer or Skip moves on, the
+✕ ends the pass, and the last one ends it. Older alerts and hits stay in the
+Briefing's "to answer" lists. With nothing left it puts the day's question in
+the message box, unsent. Nothing is sent to the model, and the answers go
+through the same routes as everywhere else. The button counts all of it
+("Close the day · 6 to review", less what was skipped), and the Briefing's
+line says "N of M done": the close questions (one per symbol), today's alerts
+and hits, and the fills to link, a skip not counting as done.
+`/copilot-lab?close=1` (the [evening review ping](#phone-ping-policy)'s link)
+starts the same pass once the list and the session have read, after 16:00
+only: the first unreviewed thread by its link, else today's alerts, hits and
+fills; with nothing left, or read before 16:00, it opens the desk as usual.
+Browser proof:
 `frontend/e2e/copilot-decision-bar.spec.ts` and
 `frontend/e2e/copilot-desk-keys.spec.ts`.
 
@@ -1117,6 +1133,22 @@ model to call:
     owner set to a long hold on the desk, up to 10 (symbol, contract, opening
     day). The desk asks nothing about them day to day, so the review ends with
     a line on each. A week with no closed trades still carries it.
+  - `exit_reviews`, only when a plan exited that week (absent otherwise):
+    the plans whose position closed that week (`copilot_plans.exits`, by
+    the last exit), counted `exited`, `answered`, `skipped` and `waiting`
+    (an exit review not yet answered, or a plan marked done without one; see
+    Plans end under [Close the day](#the-desk)). An answer is the `reflection`
+    saved with its "Exit reviewed" `plan_done` entry. `lines` group the
+    measured facts deterministically: "2 of 3 exits with an invalidation
+    alert came after the invalidation broke", "1 of 2 exits with a time stop
+    came after it was due", "Said they followed the plan on 1 of 2 answered
+    reviews". `rows` (up to 8) are the answered reviews: symbol, exit time,
+    `followed` (what the answer opens with: `yes`, `partly`, `no`, else
+    null), the lesson in the owner's own words (up to 200 characters), and
+    the measured facts: `invalidation` (`broke_while_held` with
+    `minutes_after`, `not_broken`, or null without an alert) and
+    `past_time_stop` (null without one). The lessons are data, never
+    instructions.
   - `practice`, only while a practice goal is active (absent otherwise, so
     such a week reads exactly as before): the goal (text, measure, its label,
     target, first week), `practicing` (false when the reviewed week came
@@ -1131,11 +1163,23 @@ model to call:
   measure fits, saying the count it rests on. It proposes none when the week
   is too small (`sample.small`, under 10 closed trades). It says plainly when
   the sample is too small, and proposes a memory only if the owner states a
-  lesson.
+  lesson. With `exit_reviews` it gives their counts in one line beside the
+  measured facts, and when the practice it proposes matches one of the
+  owner's lessons it quotes that lesson in the answer and the card's why, so
+  the goal is in the owner's own words; the measure stays one of the fixed set.
+- Under the answer, **Your exit lessons this week** ("2 of 3 exits
+  reviewed") lists each answered review on one line (symbol, Followed /
+  Partly / Didn't follow, the lesson), each opening its plan's thread
+  (`ExitLessons.tsx`). The tool event carries it as `lessons`
+  (`copilot.week_lessons_card`, a second read through the evidence's
+  `week_exit_reviews`), the only place the plan's investigation id appears;
+  the model's result never has it. A reopened saved conversation shows the
+  answer without the block (saved evidence keeps no tool data).
 - The review is held under 5,800 characters: over that, it drops the
   provenance labels, the time-stop rows, the follow-through rows, then trims
   the give-back and P&L rankings to two each, drops the notes, and finally
-  the give-back ranking, then the practice note, marking itself `trimmed`.
+  the give-back ranking, cuts the exit lessons to 80 characters and then to
+  three rows, then the practice note, marking itself `trimmed`.
   Totals, planned vs unplanned, the follow-through counts and the practice
   score always stay. One failing section reads `unavailable`.
 - No trade, fill, account, plan or investigation id is returned. Research
@@ -1143,11 +1187,14 @@ model to call:
   "What changed?" leaves it out of an investigation's evidence times.
 - Fixture mode serves a simulated week marked `simulated`; replay says it is
   unavailable. The fake model answers "review my week" (and "review my week
-  of YYYY-MM-DD") by calling the tool and writing a short scripted review;
-  for a week of 10 or more trades it first proposes one practice (exit at
-  the invalidation when a hit was held past 15 minutes, else a plan before
-  every entry when trades had none). The fixture's week has 8, so it
-  proposes none.
+  of YYYY-MM-DD") by calling the tool and writing a short scripted review
+  with an exit reviews line quoting a lesson; for a week of 10 or more
+  trades it first proposes one practice (exit at the invalidation when a hit
+  was held past 15 minutes, quoting a lesson from an exit after the
+  invalidation broke, else a plan before every entry when trades had none).
+  The fixture's week has 8, so it proposes none; its three exited plans have
+  two answered lessons (no thread: each line opens its symbol), and it sheds
+  its provenance labels to fit, as a real week does.
 - Tests: `backend/tests/test_copilot_week_review.py`,
   `frontend/e2e/review-my-week.spec.ts`.
 
@@ -1622,10 +1669,10 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Evening review:** once a trading day (the market calendar: no weekend or
   holiday) at `EVENING_REVIEW_PING_AT` (default `16:30` New York; a time before
   16:00 keeps the default), `app/engine/evening_review.py` reads what the desk
-  has waiting through `copilot_desk.waiting`, the desk's own rules: the symbols
-  still asking their close question (as Close the day counts them), the
-  position alerts waiting on an answer, the Radar hits not rated and the fills
-  waiting to link. When any is waiting it sends one ping, "Close the day: To
+  has waiting through `copilot_desk.waiting`, what Close the day walks: the
+  symbols still asking their close question, today's position alerts with no
+  feedback, today's Radar hits not rated and the fills waiting to link (older
+  alerts and hits stay in the Briefing's lists and never ping). When any is waiting it sends one ping, "Close the day: To
   review: 2 threads, 3 alerts, 1 fill to link.", that opens
   `/copilot-lab?close=1` on Close the day (kind `evening_review`, ranked with
   the prep). Nothing waiting, the lab off, or a desk source (positions, plans,

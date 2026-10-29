@@ -197,3 +197,16 @@ def test_a_desk_source_that_cannot_be_read_is_a_skip_with_why_not_nothing_waitin
     (row,) = rows(engine)
     assert row.delivery == "skipped" and row.last_error == "The desk's counts could not be read (RuntimeError), so nothing was sent."
     assert phone.sent == []
+
+
+def test_alerts_count_as_close_the_day_walks_them_today_only(desk, engine, clock):  # noqa: F811
+    from tests.test_copilot_desk_session import sent
+    buy(engine, 500)
+    with Session(engine) as db:
+        sent(db, "gmail:500", "giveback", 31)  # today, no feedback: counted
+        sent(db, "gmail:500", "hold_hour", 60, answer="already_aware")  # today, answered
+        sent(db, "gmail:500", "expiry_final", -1200)  # yesterday, still unanswered: the Briefing's list, not the ping
+        db.commit()
+    clock["t"] = WED_CLOSE
+    with Session(engine) as db:
+        assert copilot_desk.waiting(db, WED_CLOSE)["alerts"] == 1

@@ -87,3 +87,27 @@ test("the Briefing's Review my week sends one turn and shows the week review too
   await sources.locator("summary").click();
   await expect(sources.getByText("Week review · simulated")).toBeVisible();
 });
+
+test("the week review shows your exit lessons, each opening its plan's thread", async ({ page }) => {
+  await labOn(page);
+  const lessons = { exited: 3, answered: 2, simulated: false, rows: [
+    { symbol: "NBIS", followed: "no", lesson: "No. The invalidation broke at 13:59 and I waited for a bounce. Out when it breaks, not after.",
+      thread: "44444444-4444-4444-8444-444444444444" },
+    { symbol: "CRWV", followed: "yes", lesson: "Yes, took it at the time stop.", thread: null },
+  ] };
+  const turn = TURN.replace('"name":"get_week_review",', `"name":"get_week_review","lessons":${JSON.stringify(lessons)},`);
+  await page.unroute("**/copilot/chat");
+  await page.route("**/copilot/chat", (route) =>
+    route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turn }));
+  await page.goto("/copilot-lab");
+  await page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" }).click();
+  const block = page.getByRole("region", { name: "Your exit lessons this week" });
+  await expect(block).toContainText("2 of 3 exits reviewed");
+  const rows = block.getByRole("link");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("NBIS");
+  await expect(rows.nth(0)).toContainText("Didn't follow");
+  await expect(rows.nth(0)).toHaveAttribute("href", "/copilot-lab?investigation=44444444-4444-4444-8444-444444444444");
+  await expect(rows.nth(1)).toHaveAttribute("href", "/copilot-lab?symbol=CRWV"); // no thread: its symbol
+  await page.screenshot({ path: test.info().outputPath("review-my-week-lessons.png") });
+});

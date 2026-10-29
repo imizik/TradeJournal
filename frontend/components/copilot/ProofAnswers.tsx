@@ -113,6 +113,19 @@ export function HitRating({ eventId, initial, onRated }: { eventId: string; init
   );
 }
 
+/** A waiting Radar hit: what and when, then its rating. */
+export function HitToRate({ hit, onRated }: { hit: DeskHitToRate; onRated?(id: string): void }) {
+  return (
+    <div data-testid="hit-to-rate" className="min-w-0 space-y-1.5">
+      <p className="text-xs">
+        <span className="font-medium text-foreground">{hit.symbol ?? "Group"} {hit.kind}</span>
+        <span className="text-muted-foreground"> · {when(hit.at, hit.today)}</span>
+      </p>
+      <HitRating eventId={hit.event_id} initial={hit.rating} onRated={onRated} />
+    </div>
+  );
+}
+
 const SECTION = "rounded-lg border bg-card p-3";
 
 /** A position's thread: the alerts sent today for its symbol, each asking whether it was useful. Nothing when none. */
@@ -176,15 +189,7 @@ export function BriefingToAnswer({ toAnswer }: { toAnswer: { alerts: { count: nu
             {hitsLeft} Radar hit{hitsLeft === 1 ? "" : "s"} to rate ▾
           </summary>
           <div className="mt-2 space-y-3">
-            {hitRows.map(hit => (
-              <div key={hit.event_id} data-testid="hit-to-rate" className="min-w-0 space-y-1.5">
-                <p className="text-xs">
-                  <span className="font-medium text-foreground">{hit.symbol ?? "Group"} {hit.kind}</span>
-                  <span className="text-muted-foreground"> · {when(hit.at, hit.today)}</span>
-                </p>
-                <HitRating eventId={hit.event_id} initial={hit.rating} onRated={mark} />
-              </div>
-            ))}
+            {hitRows.map(hit => <HitToRate key={hit.event_id} hit={hit} onRated={mark} />)}
             {more(hitsLeft, hitRows.filter(r => !r.rating && !answered.has(r.event_id)).length)}
           </div>
         </details>
