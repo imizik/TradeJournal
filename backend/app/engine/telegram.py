@@ -74,8 +74,9 @@ def caption_fits(title: str, message: str) -> bool:
     return len(text_for(title, message, limit=TEXT_MAX)) <= CAPTION_MAX
 
 
-def keyboard(path: str = "", buttons: tuple[tuple[str, str], ...] = (), links: tuple[tuple[str, str], ...] = ()) -> dict | None:
-    """The inline keyboard: reply buttons first, then Open (and ``links``) when ``ALERT_APP_URL`` is set."""
+def keyboard(path: str = "", buttons: tuple[tuple[str, str], ...] = (), links: tuple[tuple[str, str], ...] = (),
+             open_label: str = "Open") -> dict | None:
+    """The inline keyboard: reply buttons first, then Open (``open_label``, and ``links``) when ``ALERT_APP_URL`` is set."""
     rows = []
     reply = []
     for label, data in buttons:
@@ -85,22 +86,28 @@ def keyboard(path: str = "", buttons: tuple[tuple[str, str], ...] = (), links: t
     if reply:
         rows.append(reply)
     if app_url := os.environ.get("ALERT_APP_URL", "").strip():
-        rows.append([{"text": label, "url": app_url.rstrip("/") + link} for label, link in (("Open", path), *links)])
+        rows.append([{"text": label, "url": app_url.rstrip("/") + link} for label, link in ((open_label, path), *links)])
     return {"inline_keyboard": rows} if rows else None
 
 
 def publish(title: str, message: str, *, path: str = "", buttons: tuple[tuple[str, str], ...] = (), image: bytes | None = None,
-            priority: int = 4, links: tuple[tuple[str, str], ...] = ()) -> str | None:
+            priority: int = 4, links: tuple[tuple[str, str], ...] = (), reply_to: str | None = None, open_label: str = "Open") -> str | None:
     """Send one message to the configured chat; raises ``TelegramError`` when Telegram did not accept it (``ImageRefused``
-    for a refused picture). Priority 2 or lower sends silently. Returns the message id: proof Telegram accepted it."""
+    for a refused picture). Priority 2 or lower sends silently. ``reply_to``: a message id this one replies to, so one
+    conversation reads as one thread (sent anyway when that message is gone). Returns the message id: proof Telegram
+    accepted it."""
     if not configured():
         raise TelegramError("Telegram is not set up on this server (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).")
-    markup = keyboard(path, buttons, links)
+    markup = keyboard(path, buttons, links, open_label)
     fields: dict = {"chat_id": chat_id(), "parse_mode": "HTML", "disable_notification": priority <= 2}
+    if reply_to:
+        fields["reply_parameters"] = {"message_id": int(reply_to), "allow_sending_without_reply": True}
     if image is not None:
         fields["caption"] = text_for(title, message, limit=CAPTION_MAX)
         if markup:
             fields["reply_markup"] = json.dumps(markup)
+        if "reply_parameters" in fields:
+            fields["reply_parameters"] = json.dumps(fields["reply_parameters"])
         data = {k: (str(v).lower() if isinstance(v, bool) else str(v)) for k, v in fields.items()}
         result = call("sendPhoto", data=data, files={"photo": ("chart.png", image, "image/png")}, image=True)
     else:

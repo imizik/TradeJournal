@@ -13,6 +13,9 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
   nothing new and a different answer after the first is refused as the page refuses it;
 - ``rr:<Radar alert id>:<rating>``: a Radar event's rating through the Radar page's own route
   (``POST /radar/events/{event_id}/feedback``, what ``&rate=`` posts), skipped when it is already the latest rating;
+- ``pc:<companion id>:confirm|ignore``: the position companion's adopt message (``engine/position_companion.py``):
+  Confirm arms the draft plan's invalidation alert as a confirmed plan card does, Ignore stops its updates;
+- ``pu:<companion id>:<update>:closed|holding``: the owner's answer to a companion update, recorded on its row;
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
@@ -68,9 +71,10 @@ def rating_buttons(radar_alert_id, ratings: tuple[str, ...] = ("useful", "irrele
 
 
 class Replies:
-    def __init__(self, engine, *, call=None):
+    def __init__(self, engine, *, call=None, alerts_changed=None):
         self.engine = engine
         self.call = call or telegram.call
+        self.alerts_changed = alerts_changed  # tells the level alert monitor a Confirm armed an alert
         self.offset: int | None = None
         self.last_error: str | None = None
         self._tasks: set[asyncio.Task] = set()
@@ -115,6 +119,12 @@ class Replies:
             reply, chosen = await asyncio.to_thread(self._feedback, *rest.partition(":")[::2])
         elif verb == "rr":
             reply, chosen = await asyncio.to_thread(self._rating, *rest.partition(":")[::2])
+        elif verb == "pc":
+            reply, chosen = await asyncio.to_thread(self._companion, *rest.partition(":")[::2])
+        elif verb == "pu":
+            from app.engine import position_companion
+            companion_id, _, tail = rest.partition(":")
+            reply, chosen = await asyncio.to_thread(position_companion.answer, self.engine, companion_id, *tail.partition(":")[::2])
         elif verb == "why":
             if message.get("message_id") in self._asked:  # once per message
                 reply, chosen = "Already asked; the answer comes in the chat.", None
@@ -197,6 +207,17 @@ class Replies:
         except HTTPException as exc:
             return str(exc.detail), None
         return f"Saved: {RADAR_LABELS[rating]}.", RADAR_LABELS[rating]
+
+    def _companion(self, companion_id: str, action: str) -> tuple[str, str | None]:
+        from app.engine import position_companion
+        if action == "confirm":
+            reply, chosen = position_companion.confirm(self.engine, companion_id)
+            if chosen and self.alerts_changed is not None:
+                self.alerts_changed()
+            return reply, chosen
+        if action == "ignore":
+            return position_companion.ignore(self.engine, companion_id)
+        return "That button is not one the app knows.", None
 
     async def _why(self, alert_id: str, message: dict) -> None:
         try:
