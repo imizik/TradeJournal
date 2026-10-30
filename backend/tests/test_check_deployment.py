@@ -218,6 +218,15 @@ def test_check_modules_never_import_the_owner_api_or_database_engine():
     assert result.stdout == b""
 
 
+def test_company_research_runtime_contains_only_connector_side_modules():
+    required = {"company_research_common.py", "company_research_exchange.py", "company_research_tools.py"}
+    assert required <= set(control.RUNTIME_FILES)
+    assert "company_research_owner.py" not in control.RUNTIME_FILES
+    for name in required:
+        text = (REPO / "backend" / name).read_text()
+        assert "app.database" not in text and "app.main" not in text
+
+
 def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, host, monkeypatch):
     approved = control.digest(staged / "manifest.json")
     record = control.install(staged, approved, dns_servers=["1.1.1.1"], host_ips=["203.0.113.5"])
