@@ -756,7 +756,8 @@ call; a failed read leaves the line out (`last_exit` unavailable).
 **Your record for this setup.** A draft option plan (calls or puts, not stock)
 also shows how the owner's own closed option trades opened in the session's
 first hour went in the same setup (`SetupRecordLines.tsx`), from the same
-read's `setup` (`setup_record.for_symbol`):
+read's `setup` (`setup_record.for_symbol`), which the card asks for with
+`?setup=true` so the Charts dock's polling never computes it:
 - **Gap.** "Gap −2.4%. Your opening calls bought against a gap down of 1%+:
   12 trades, 67% won, +$1,240." Against, with or a gap under 1%, from today's
   gap.
