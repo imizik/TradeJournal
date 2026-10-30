@@ -16,7 +16,6 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
 from app.engine import level_alerts, ntfy, plan_time_stops, reconstructor
-from app.engine import level_alert_monitor as monitor_module
 from app.engine.chart_math import ET
 from app.engine.level_alert_monitor import LevelAlertMonitor, create_alert
 from app.engine.plan_time_stops import PlanTimeStops, parse
@@ -157,7 +156,7 @@ def fire_all(engine, when):
 def test_a_plan_alert_fires_with_the_plan_message_and_a_plain_copilot_watch_does_not(engine, monkeypatch):
     calls = []
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
-    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, body, **kw: calls.append((title, body, kw)))
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: calls.append((title, body, kw)))
     plan_alert(engine, "entry")
     plan_alert(engine, None, price=97.0)  # a copilot watch: no role
     fire_all(engine, at("10:42"))

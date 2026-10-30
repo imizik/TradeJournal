@@ -636,7 +636,7 @@ class QueueRunner:
     async def _notify(self, job: dict, record: dict) -> dict:
         """One phone ping for a material result, at most. A failed ping is recorded and never retried; it never fails
         the job."""
-        from app.engine import ntfy
+        from app.engine import phone
         try:
             push = await asyncio.to_thread(plan_notification, job["id"], record, self.cfg)
             if push is None:
@@ -645,9 +645,9 @@ class QueueRunner:
             if ticket.held:
                 return await asyncio.to_thread(record_delivery, job["id"], status="held", error=ticket.reason)
             try:
-                message_id = await asyncio.to_thread(ntfy.publish, push["title"], push["message"] + ticket.append, path=push["path"],
-                                                     direct_click=True)
-            except Exception as exc:  # noqa: BLE001 - ntfy refused or was unreachable: recorded, the job stays done
+                message_id, _ = await asyncio.to_thread(phone.send, push["title"], push["message"] + ticket.append, kind="research",
+                                                        path=push["path"], direct_click=True)
+            except Exception as exc:  # noqa: BLE001 - the phone transport refused or was unreachable: recorded, the job stays done
                 return await asyncio.to_thread(record_delivery, job["id"], status="failed", error=f"{type(exc).__name__}: {exc}")
             await asyncio.to_thread(mark_delivered, ticket)
             return await asyncio.to_thread(record_delivery, job["id"], status="sent", message_id=message_id)

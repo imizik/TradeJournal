@@ -568,6 +568,56 @@ five-minute period and ten-minute grace that notifies the same ntfy topic.
 Every check pings it, or pings `/fail` when a notification could not be
 delivered, and the outside service alerts when the pings stop.
 
+### Telegram
+
+The API's own trading pings (the senders above: plan nudges, time stops, level
+and plan alerts, thesis watch, the week review, Watch your day, research
+results; the remaining senders move over in later changes) can go to a Telegram
+bot instead of ntfy, with reply buttons whose answers are saved in the app
+(`backend/app/engine/telegram.py`, `phone.py`, `telegram_replies.py`). The
+health, deploy and watchdog alerts in this section stay on ntfy. Telegram is
+used only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; nothing
+changes until then. The API only calls out to `api.telegram.org`: it reads the
+button taps by long polling, so no webhook or inbound port is opened and the
+private API stays private. Only taps from that one chat are acted on.
+
+Owner steps (nothing here is switched on by the code):
+
+1. In Telegram, open `@BotFather`, send `/newbot`, pick a name, and copy the
+   token it gives you. Do not set a webhook for this bot: the API polls.
+2. Open the new bot and send it any message (for example `hi`).
+3. Read your chat id from that message, before the API is polling (the poll
+   only asks for button taps). On the server, run the two commands below,
+   paste the token at the silent prompt (so it stays out of the shell
+   history), and copy `"chat":{"id":...}` from the output. Use your private
+   chat with the bot: taps are accepted only from that chat's own id.
+
+   ```bash
+   read -rs TOKEN
+   ```
+
+   ```bash
+   curl -s "https://api.telegram.org/bot$TOKEN/getUpdates"; unset TOKEN
+   ```
+
+4. Add both to `/etc/tradejournal/alerts.env` (root owned, mode 0600) and keep
+   `ALERT_APP_URL` set, so each message gets an Open button:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456:REPLACE
+   TELEGRAM_CHAT_ID=REPLACE
+   ```
+
+5. Restart the API so it reads them:
+
+   ```bash
+   sudo systemctl restart tradejournal-api.service
+   ```
+
+To go back to ntfy, empty either value and restart `tradejournal-api.service`.
+The token gives control of the bot: keep it only in `alerts.env`, and revoke it
+with `@BotFather` (`/revoke`) if it leaks.
+
 ## Retired TradingView webhook ingress
 
 C5.2 removes the public webhook application, its 8090 listener, deployment

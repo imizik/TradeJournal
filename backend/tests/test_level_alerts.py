@@ -18,7 +18,6 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
 from app.engine import chart_stream, level_alerts, ntfy
-from app.engine import level_alert_monitor as monitor_module
 from app.engine.chart_math import ET
 from app.engine.level_alert_monitor import LevelAlertMonitor, alert_rows, create_alert
 from app.models import LevelAlert, LevelAlertEvent
@@ -294,7 +293,7 @@ def phone(monkeypatch):
         sent.append((title, message))
 
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
-    monkeypatch.setattr(monitor_module.ntfy, "publish", publish)
+    monkeypatch.setattr(ntfy, "publish", publish)
     return sent, failures
 
 
@@ -459,7 +458,7 @@ def test_active_alerts_list_first_and_fired_ones_newest_first(engine):
 def test_an_alert_confirmed_in_the_copilot_lab_opens_its_investigation_on_tap(engine, monkeypatch):
     calls = []
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
-    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
     investigation = "33333333-3333-4333-8333-333333333333"
     with Session(engine) as db:
         create_alert(db, symbol="SPY", price=100.0, reference=99.0, condition="crosses", interval=None, session="regular",
@@ -492,7 +491,7 @@ def test_the_route_accepts_copilot_alerts_and_still_refuses_unknown_sources(clie
 def test_a_copilot_alert_without_a_real_investigation_id_still_links_to_charts(engine, monkeypatch):
     calls = []
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
-    monkeypatch.setattr(monitor_module.ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(ntfy, "publish", lambda title, message, **kwargs: calls.append(kwargs))
     with Session(engine) as db:  # a row the route would refuse, written some other way
         create_alert(db, symbol="SPY", price=100.0, reference=99.0, condition="crosses", interval=None, session="regular",
                      source_kind="copilot", source_id="../trades?x=1", label="Odd", now=TEN)
