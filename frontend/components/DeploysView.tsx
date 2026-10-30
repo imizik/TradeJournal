@@ -48,6 +48,16 @@ function Commit({ commit, repository }: { commit: string; repository?: string })
   return <a href={`https://github.com/${repository}/commit/${commit}`} target="_blank" rel="noreferrer" className="font-mono text-xs text-primary hover:underline">{short(commit)}</a>;
 }
 
+/** A build title ends with its pull request, "Title (#605)", like the squash commit; link that number. */
+function Title({ text, repository }: { text: string; repository?: string }) {
+  const match = /^(.*) \(#(\d+)\)$/.exec(text);
+  if (!match) return <>{text}</>;
+  const pr = `#${match[2]}`;
+  return <>{match[1]}{" "}{repository
+    ? <a href={`https://github.com/${repository}/pull/${match[2]}`} target="_blank" rel="noreferrer" className="text-primary hover:underline">{pr}</a>
+    : <span className="text-muted-foreground">{pr}</span>}</>;
+}
+
 function Badge({ label, tone }: { label: string; tone: string }) {
   return <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${tone}`}>{label}</span>;
 }
@@ -91,7 +101,7 @@ export default function DeploysView() {
   return <div className="space-y-4">
     <DashboardCard title="Live now">
       <div className="space-y-1.5" data-testid="deploys-live">
-        <p className="text-base font-semibold">{liveTitle ?? "Deployed by hand, or before this page kept history"}</p>
+        <p className="text-base font-semibold">{liveTitle ? <Title text={liveTitle} repository={repository} /> : "Deployed by hand, or before this page kept history"}</p>
         <p className="text-sm text-muted-foreground">
           <Commit commit={running.commit} repository={repository} /> · {running.release_id} · live since {timeET(running.live_since)}
         </p>
@@ -122,7 +132,7 @@ export default function DeploysView() {
             return <li key={`${d.at}-${d.commit}-${d.outcome}`} className="py-2.5 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge {...outcome} />
-                <span className="min-w-0 text-sm">{d.title}</span>
+                <span className="min-w-0 text-sm"><Title text={d.title} repository={repository} /></span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground"><Commit commit={d.commit} repository={repository} /> · {timeET(d.at)}</p>
               {d.outcome !== "deployed" && <p className="mt-1 whitespace-pre-line break-words text-xs text-muted-foreground">{d.detail}</p>}

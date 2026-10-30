@@ -117,9 +117,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ steps.gate.outputs.tag }}"
-          # The merged pull request's title reads better on a phone than
-          # "Merge pull request #N from ...". The VPS uses the first line.
-          TITLE=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[0].title // empty')
+          # The merged pull request's title and number, like the squash commit
+          # subject, read better on a phone than "Merge pull request #N from ...".
+          # The VPS uses the first line; its Deploys page links the "(#N)".
+          TITLE=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[0] | select(.) | "\(.title) (#\(.number))"')
           [ -n "$TITLE" ] || TITLE=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
           printf '%s\n\nCommit %s passed CI and the Deployment package smoke test (%s/%s/actions/runs/%s).\nThe VPS installs the newest build-* release by itself; see deploy/README.md.\n' \
             "$TITLE" "$SHA" "$GITHUB_SERVER_URL" "$REPO" "${{ steps.gate.outputs.package_run }}" > notes.md
