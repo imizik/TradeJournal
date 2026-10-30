@@ -577,10 +577,9 @@ def threads(db: Session, now: float) -> dict:
     for r in investigations.get("rows", []):
         if r["id"] in covered or r["source"] == "copilot" and over(r["symbol"], _epoch(r["updated_at"]) or 0):
             continue
-        research = r["source"] in ("research_job", "jo")
-        status = _say(r["conclusion"], "muted") if r["conclusion"] else _say("Research" if research else "Open investigation", "muted")
+        status = _say(r["conclusion"], "muted") if r["conclusion"] else _say("Research" if r["source"] == "research_job" else "Open investigation", "muted")
         watch.append(_row(f"investigation:{r['id']}", "watch", r["title"], status, symbol=r["symbol"],
-                          instrument="research" if research else None, investigation_id=r["id"],
+                          instrument="research" if r["source"] == "research_job" else None, investigation_id=r["id"],
                           changed_at=_epoch(r["updated_at"])))
 
     _horizons(act + near + watch, checks.get("horizons", {}))

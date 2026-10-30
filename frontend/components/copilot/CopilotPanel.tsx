@@ -176,7 +176,7 @@ function FindingsView({ findings, source, createdAt }: { findings: Findings; sou
       <p className="text-xs text-muted-foreground">
         {source === "research_job" ? "Background research result" : source === "jo" ? "Jo's research (OpenAI, saved by Jo)" : "Saved findings"} · saved {shortTime(createdAt)} ET · text, not live data
       </p>
-      <p>{findings.summary}</p>
+      {findings.report ? <p className="whitespace-pre-wrap">{findings.report}</p> : <p>{findings.summary}</p>}
       {list("Key findings", findings.key_findings)}
       {list("Counterpoints", findings.counterpoints)}
       {list("What would change the view", findings.what_would_change)}

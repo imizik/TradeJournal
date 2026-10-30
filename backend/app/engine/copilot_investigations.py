@@ -168,6 +168,8 @@ class Findings(_Strict):
     counterpoints: list[str] = Field(default_factory=list, max_length=12)
     what_would_change: list[str] = Field(default_factory=list, max_length=8)
     citations: list[Citation] = Field(default_factory=list, max_length=30)
+    # Jo's full research text (source "jo"): kept here, a tool result, never as a transcript answer.
+    report: str | None = Field(None, max_length=12_000)
     # The market moment the evidence describes, when it is not "now" (a replay job): ISO 8601 with an offset.
     evidence_at: str | None = Field(None, max_length=40)
 
@@ -384,9 +386,11 @@ def save_research_result(*, title: str, symbol: str | None, findings: Findings |
 def save_jo_result(*, investigation_id: uuid.UUID, title: str, symbol: str | None, findings: Findings | dict,
                    transcript: list[SavedMessage | dict], conclusion: str | None = None, also: list = (),
                    session: Session) -> dict:
-    """Save one imported Jo research submission as an open record (source ``jo``), committed together with ``also``
-    (its import row and, for a red team, the answered request). Raises pydantic.ValidationError on bad input."""
-    fields = InvestigationFields(title=title, symbol=symbol, conclusion=conclusion, findings=findings,
+    """Save one imported Jo research submission as a closed record (source ``jo``), committed together with ``also``
+    (its import row and, for a red team, the answered request). Closed, because open records are what the thesis
+    watch pings about, the research queue reassesses and the desk lists as the owner's threads; Jo's research is read
+    through ``get_saved_research`` and the plan card instead. Raises pydantic.ValidationError on bad input."""
+    fields = InvestigationFields(title=title, symbol=symbol, status="closed", conclusion=conclusion, findings=findings,
                                  transcript=list(transcript))
     row = CopilotInvestigation(id=investigation_id, source="jo", title=fields.title, transcript_json="[]", evidence_json="[]")
     _fill(row, fields)

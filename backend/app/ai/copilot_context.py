@@ -213,7 +213,7 @@ def _investigations(db, symbol: str | None) -> dict:
             row["conclusion"] = _trim(r["conclusion"], 200)
         rows.append(row)
     return {"state": "ok", "investigations": rows,
-            "note": "research_job records show title and status only; read their findings with get_saved_research"}
+            "note": "research_job and jo (an external model's research) records show title and status only; read their findings with get_saved_research"}
 
 
 def _watches(db, symbol: str | None, investigation_ids: set[str]) -> dict:

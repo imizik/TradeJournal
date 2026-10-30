@@ -10,8 +10,12 @@ market hours (09:30–16:00 America/New_York) and never advises an order.
 **Nothing here is activated by the pull request that adds it.** The owner's
 steps, in order:
 
-1. Merge; the app side autodeploys. Research publication/import rides the
-   existing Jo switch (`enabled` in the file `JO_MORNING_CONFIG` names). To stop
+1. Approve the audit's scope: its counts and percentages come from the
+   copilot's week review across every non-Webull account (no dollar amounts or
+   account names), wider than the accounts approved for Jo. Then merge; the app
+   side autodeploys and starts publishing contexts, because research
+   publication/import rides the existing Jo switch (`enabled` in the file
+   `JO_MORNING_CONFIG` names). To stop
    the morning brief while keeping research, remove the morning ChatGPT task;
    turning the switch off stops research too.
 2. Upgrade the Check runtime by hand with

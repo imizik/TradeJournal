@@ -214,7 +214,14 @@ def test_dossier_import_record_shape_and_saved_research(check):
     assert record["conclusion"] == "NBIS: capacity story intact" and record["symbol"] == "NBIS"
     assert record["findings"]["summary"] == "Capacity deal confirmed by two outlets."
     assert record["findings"]["citations"] == [SOURCE] and record["findings"]["evidence_at"].startswith("2026-10-09T14:00")
-    assert record["transcript"][1] == {"role": "assistant", "content": research()["body"]}
+    # Jo's text is a finding (a tool result for the copilot), never an answer a follow-up would replay as the copilot's.
+    assert record["findings"]["report"] == research()["body"]
+    # Closed: the thesis watch, the research queue's reassessments and the desk's threads read open records only.
+    assert record["status"] == "closed"
+    from app.engine import thesis_watch
+    with Session(engine) as db:
+        assert not [w for w in thesis_watch.watched_set(db) if "investigation" in w.reasons]  # Jo never pings
+    assert [m["role"] for m in record["transcript"]] == ["user"]
     seen = copilot_tools.saved_research("NBIS")["items"]
     assert seen[0]["source"] == "jo" and seen[0]["findings"]["citations"][0]["publisher"] == "Reuters"
 
@@ -256,7 +263,7 @@ def test_audit_context_strips_ids_and_answer_text(check, monkeypatch):
     plan_thread()
     from app.ai import copilot_review
     monkeypatch.setattr(copilot_review, "week_review", lambda week, session=None: {
-        "state": "ok", "totals": {"trades": 3, "pnl_usd": 12.5},
+        "state": "ok", "totals": {"trades": 3, "pnl_usd": 12.5, "pnl_on_premium_pct": 4.1, "accounts": ["Roth IRA"]},
         "alerts": {"by_kind": {"give_back": 2}, "then": {"held": 2}, "rows": [{"trade_id": "t", "thread": "x", "kind": "give_back"}]}})
     with Session(engine) as db:
         audit = jo_research.audit_context(db, datetime.now(timezone.utc))
@@ -265,26 +272,32 @@ def test_audit_context_strips_ids_and_answer_text(check, monkeypatch):
     assert plan["card"] == "confirmed" and UUID(plan["plan_id"])
     assert audit["verdict_counts"] == {"Draft": 1}
     assert audit["week_review"]["alerts"]["rows"] == [{"kind": "give_back"}]
+    assert audit["week_review"]["totals"] == {"trades": 3, "pnl_on_premium_pct": 4.1}  # no dollars, no account names
     assert SECRET not in json.dumps(audit)
 
 
-def test_dossier_context_held_without_sizes(check):
+def test_dossier_context_held_without_sizes_in_approved_accounts_only(check):
     from app.models import Account, Trade
     with Session(engine) as db:
         account = Account(name="Roth", type="roth_ira", last4="0001", broker="robinhood")
-        db.add(account)
+        other = Account(name="Individual", type="individual", last4="0002", broker="robinhood")
+        db.add_all([account, other])
         db.commit()
         db.add(Trade(account_id=account.id, ticker="NBIS", instrument_type="option", contracts=3, option_type="call",
                      strike=100, expiration=datetime(2026, 11, 20).date(), avg_entry_premium=2.5, total_premium_paid=750,
                      opened_at=datetime(2026, 10, 8, 14)))
+        db.add(Trade(account_id=other.id, ticker="ZZZQ", instrument_type="stock", contracts=10, avg_entry_premium=5,
+                     total_premium_paid=50, opened_at=datetime(2026, 10, 8, 14)))
         db.commit()
         try:
-            dossier = jo_research.dossier_context(db, RECEIPT)
+            dossier = jo_research.dossier_context(db, RECEIPT, [account.id])
         finally:
-            for trade in db.exec(select(Trade).where(Trade.account_id == account.id)).all():
+            for trade in db.exec(select(Trade).where(Trade.account_id.in_([account.id, other.id]))).all():
                 db.delete(trade)
             db.delete(account)
+            db.delete(other)
             db.commit()
+    assert all(r["symbol"] != "ZZZQ" for r in dossier["held"])  # not an account approved for Jo
     held = [r for r in dossier["held"] if r["symbol"] == "NBIS"]
     assert held == [{"symbol": "NBIS", "held": True, "instruments": ["calls"], "option_expiry_weeks": ["2026-11-16"]}]
     assert "750" not in json.dumps(dossier["held"]) and str(account.id) not in json.dumps(dossier)
@@ -293,9 +306,9 @@ def test_dossier_context_held_without_sizes(check):
 
 def test_runner_publishes_on_schedule_and_imports(check, monkeypatch):
     _, config, actor = check
-    morning = SimpleNamespace(enabled=True, check_config=str(check[0].config_path))
-    monkeypatch.setitem(jo_research.BUILDERS, "dossier", lambda db, now: {"day": "fixture"})
-    monkeypatch.setitem(jo_research.BUILDERS, "audit", lambda db, now: {"week": "fixture"})
+    morning = SimpleNamespace(enabled=True, check_config=str(check[0].config_path), account_ids=[uuid4()])
+    monkeypatch.setitem(jo_research.BUILDERS, "dossier", lambda db, now, accounts: {"day": "fixture"})
+    monkeypatch.setitem(jo_research.BUILDERS, "audit", lambda db, now, accounts: {"week": "fixture"})
     runner = jo_research.ResearchRunner(engine, config_loader=lambda: morning, calendar=lambda day: {"status": "open"})
     thursday_noon = datetime(2026, 10, 8, 16, 0, tzinfo=timezone.utc)
     assert runner.run_once(thursday_noon)["published"] == ["red_team"]
@@ -310,3 +323,15 @@ def test_runner_publishes_on_schedule_and_imports(check, monkeypatch):
     assert out["imported"] == 1 and out["errors"] == 0
     assert runner.run_once(friday_evening + timedelta(minutes=2))["imported"] == 0
     assert jo_research.ResearchRunner(engine, config_loader=lambda: None).run_once() == {"status": "disabled"}
+
+
+def test_daily_cap_rejects_beyond_the_bound(check, monkeypatch):
+    _, config, actor = check
+    monkeypatch.setattr(jo_research, "DAILY_IMPORTS", 1)
+    for operation_id in ("first", "second"):
+        exchange.submit(config.market_watch_snapshots_dir, config.market_watch_outbox_dir, actor, research(operation_id), RECEIPT)
+    with Session(engine) as db:
+        assert jo_research.import_submission(db, config, actor, keyed(actor, "first"), RECEIPT)["status"] == "saved"
+        capped = jo_research.import_submission(db, config, actor, keyed(actor, "second"), RECEIPT)
+        assert capped["status"] == "rejected" and "Daily cap" in capped["reason"]
+        assert len(db.exec(select(CopilotInvestigation)).all()) == 1

@@ -60,6 +60,8 @@ def register(server, config, authenticated, scopes, clock):
         except ValidationError as error:
             reason = error.errors()[0].get("msg", "invalid")[:200]
             raise ToolError(f"Research refused [invalid]: {reason}. Nothing was saved.") from None
+        except KeyError:
+            raise ToolError("Research refused or unavailable. No claim of an app save.") from None
         except LookupError:
             raise ToolError("Research refused [no_pending_request]: that request_id is not pending in the current "
                             "red_team context. Nothing was saved.") from None

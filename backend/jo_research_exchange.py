@@ -67,8 +67,8 @@ def context(snapshots, actor, kind, now):
 def pending_requests(snapshots, actor, now):
     try:
         return {row["request_id"] for row in context(snapshots, actor, "red_team", now)["data"]["requests"]}
-    except FileNotFoundError:
-        return set()
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        return set()  # no current red-team context: nothing is pending
 
 
 class Submission(Strict):

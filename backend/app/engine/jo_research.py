@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine import copilot_investigations as inv
-from app.models import Account, CopilotInvestigation, JoRedTeamRequest, JoResearchImport, Trade, utc_now_naive
+from app.models import CopilotInvestigation, JoRedTeamRequest, JoResearchImport, Trade, utc_now_naive
 import jo_briefing_exchange as briefing_exchange
 import jo_research_exchange as exchange
 
@@ -42,6 +42,7 @@ KEEP = timedelta(days=7)
 LABEL = {"dossier": "Jo dossier", "audit": "Jo audit", "narrative": "Jo narrative", "red_team": "Jo red team"}
 MAX_PLANS = 40
 MAX_VERDICTS = 80
+DAILY_IMPORTS = 40  # Jo research records saved per New York day; more are rejected so they cannot crowd out the rest
 STAMP = re.compile(r"-(\d{8}T\d{12}Z)\.json$")
 
 
@@ -71,10 +72,11 @@ def request_red_team(db: Session, investigation_id: str, proposal_id: str) -> tu
         raise RedTeamError("not_found", "No such investigation.") from None
     card = next((p for m in record["transcript"] for p in m.get("proposals") or () if p.get("id") == proposal_id), None)
     if card is None or card.get("kind") != "trade_plan":
-        raise RedTeamError("not_found", "That plan card is not saved with this investigation.")
+        raise RedTeamError("not_found", "That plan card is not saved with this investigation yet; try again in a moment.")
     outcome = card.get("outcome") or {}
     if outcome.get("state") != "confirmed":
-        raise RedTeamError("not_confirmed", "Confirm the plan before asking Jo to argue against it.")
+        raise RedTeamError("not_confirmed", "This plan is not saved as confirmed yet (a Confirm may still be saving); "
+                                            "try again in a moment.")
     existing = _request_for(db, record["id"], proposal_id)
     if existing is not None:
         return view(db, existing), False
@@ -109,8 +111,9 @@ def view(db: Session, row: JoRedTeamRequest) -> dict:
            "requested_at": _utc(row.created_at), "answered_at": _utc(row.answered_at), "answer": None}
     if row.answer_investigation_id is not None:
         answer = inv.get(row.answer_investigation_id, session=db)
-        body = next((m["content"] for m in answer["transcript"] if m["role"] == "assistant"), "")
-        out["answer"] = {"investigation_id": answer["id"], "title": answer["conclusion"] or answer["title"], "body": body,
+        findings = answer["findings"] or {}
+        out["answer"] = {"investigation_id": answer["id"], "title": answer["conclusion"] or answer["title"],
+                         "body": findings.get("report") or findings.get("summary", ""),
                          "citations": (answer["findings"] or {}).get("citations", [])}
     return out
 
@@ -127,15 +130,10 @@ def _iso(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _webull(db: Session) -> list[UUID]:
-    return list(db.exec(select(Account.id).where(Account.broker == "webull")).all())
-
-
-def _held(db: Session) -> list[dict]:
-    """Open positions by symbol: held, the instrument and each option's expiry week. No accounts, sizes or prices."""
-    query = select(Trade).where(Trade.status == "open")
-    if webull := _webull(db):
-        query = query.where(Trade.account_id.not_in(webull))
+def _held(db: Session, accounts: list[UUID]) -> list[dict]:
+    """Open positions by symbol in the approved accounts: held, the instrument and each option's expiry week. No
+    accounts, sizes or prices."""
+    query = select(Trade).where(Trade.status == "open", Trade.account_id.in_(list(accounts) or [None]))
     by_symbol: dict[str, dict] = {}
     for trade in db.exec(query).all():
         row = by_symbol.setdefault(trade.ticker, {"symbol": trade.ticker, "held": True, "instruments": set(), "option_expiry_weeks": set()})
@@ -179,10 +177,10 @@ def _radar(day: date, now: datetime) -> dict:
     return {"state": feed["state"], "session": feed["session"], "groups": groups[:30], "stock_events": stocks[:60]}
 
 
-def dossier_context(db: Session, now: datetime) -> dict:
+def dossier_context(db: Session, now: datetime, accounts: list[UUID]) -> dict:
     day = now.astimezone(ET).date()
-    return {"day": day.isoformat(), "held": _held(db), "armed_plans": _armed(db), "radar": _radar(day, now),
-            "provenance": {"held": "journal open positions, Webull excluded; no accounts, quantities or prices",
+    return {"day": day.isoformat(), "held": _held(db, accounts), "armed_plans": _armed(db), "radar": _radar(day, now),
+            "provenance": {"held": "journal open positions in the accounts approved for Jo; no accounts, quantities or prices",
                            "armed_plans": "confirmed copilot plans still armed or in a position; thesis as confirmed",
                            "radar": "the day's saved Radar events as the Radar feed shows them"}}
 
@@ -191,13 +189,15 @@ def _week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
-def _strip_ids(value, keep=("plan_id",)):
-    """Drop identifiers (``id``, ``*_id``, ``thread``) everywhere except plan ids."""
+def _scrub(value, keep=("plan_id",)):
+    """Drop identifiers (``id``, ``*_id``, ``thread``) except plan ids, account names and dollar amounts (``*_usd``),
+    everywhere: counts and percentages stay, so no position's size can be read back."""
     if isinstance(value, dict):
-        return {k: _strip_ids(v, keep) for k, v in value.items()
-                if k in keep or not (k == "id" or k.endswith("_id") or k in ("thread", "threads"))}
+        return {k: _scrub(v, keep) for k, v in value.items()
+                if k in keep or not (k == "id" or k.endswith("_id") or k.endswith("_usd")
+                                     or k in ("thread", "threads", "account", "accounts"))}
     if isinstance(value, list):
-        return [_strip_ids(v, keep) for v in value]
+        return [_scrub(v, keep) for v in value]
     return value
 
 
@@ -227,8 +227,7 @@ def _plan_outcomes(db: Session) -> dict[str, dict]:
             trade = trades.get(link["trade_id"]) or db.get(Trade, UUID(link["trade_id"]))
             trades[link["trade_id"]] = trade
             if trade is not None:
-                row.update(trade_status=trade.status, realized_pnl_usd=None if trade.realized_pnl is None else round(float(trade.realized_pnl), 2),
-                           pnl_pct=None if trade.pnl_pct is None else round(float(trade.pnl_pct), 1),
+                row.update(trade_status=trade.status, pnl_pct=None if trade.pnl_pct is None else round(float(trade.pnl_pct), 1),
                            entry_timing=link.get("timing"))
         out[plan["investigation_id"]] = row
     return out
@@ -277,13 +276,14 @@ def audit_context(db: Session, now: datetime) -> dict:
                                    "pings", "units") if k in week}
     return {"week": {"start": monday.isoformat(), "end": (monday + timedelta(days=4)).isoformat()},
             "plans": plans[:MAX_PLANS], "other_verdicts": verdicts[-MAX_VERDICTS:], "verdict_counts": dict(words),
-            "week_review": _strip_ids(review),
+            "week_review": _scrub(review),
             "provenance": {"plans": "trade plan cards the copilot drafted this week, the Verdict and Read lines of the "
                                     "answer that drafted each, what the owner did with the card and, once confirmed, "
                                     "its alerts, position and linked trade",
                            "other_verdicts": "the Verdict and Read lines of the week's other copilot answers",
                            "week_review": "the copilot's own week review: measured totals, plans' follow-through, "
-                                          "phone alerts by kind and what followed, pings"}}
+                                          "phone alerts by kind and what followed, pings; counts and percentages "
+                                          "only, no dollar amounts or account names"}}
 
 
 def red_team_context(db: Session) -> dict:
@@ -295,7 +295,8 @@ def red_team_context(db: Session) -> dict:
             "provenance": "confirmed copilot plans the owner asked Jo to argue against: the plan's own fields only"}
 
 
-BUILDERS = {"dossier": dossier_context, "audit": lambda db, now: audit_context(db, now), "red_team": lambda db, now: red_team_context(db)}
+BUILDERS = {"dossier": dossier_context, "audit": lambda db, now, accounts: audit_context(db, now),
+            "red_team": lambda db, now, accounts: red_team_context(db)}
 
 
 # --------------------------------------------------------------------------- publication
@@ -342,7 +343,7 @@ def save(db: Session, key: str, data: dict, received_at: datetime) -> str:
     findings = {"summary": _summary(data["body"]),
                 "citations": [{"url": s["url"], "publisher": s["publisher"], "published_at": s["published_at"]}
                               for s in data["sources"]],
-                "evidence_at": as_of.isoformat()}
+                "evidence_at": as_of.isoformat(), "report": data["body"]}
     ask = (f"{LABEL[data['kind']]} from Jo's research run" + (f" on {', '.join(symbols)}" if symbols else "")
            + f". Received {received_at.astimezone(ET):%b %d %H:%M} ET; evidence as of {as_of.astimezone(ET):%b %d %H:%M} ET."
            + (f" The case against the {request.direction} {request.symbol} plan." if request else ""))
@@ -354,16 +355,31 @@ def save(db: Session, key: str, data: dict, received_at: datetime) -> str:
         rows.append(request)
     inv.save_jo_result(investigation_id=investigation_id, title=_title(data["kind"], symbols, as_of),
                        symbol=symbols[0] if symbols else None, conclusion=data["title"][:280], findings=findings,
-                       transcript=[{"role": "user", "content": ask}, {"role": "assistant", "content": data["body"]}],
+                       # Jo's text stays in the findings, a tool result for the copilot (get_saved_research), never a
+                       # transcript answer a follow-up would replay to the copilot as its own words.
+                       transcript=[{"role": "user", "content": ask}],
                        also=rows, session=db)
     return str(investigation_id)
+
+
+class Capped(ValueError):
+    pass
+
+
+class Foreign(ValueError):
+    """A request file this profile cannot import (another profile's, or named for another operation)."""
+
+
+def _imported_today(db: Session, now: datetime) -> int:
+    midnight = datetime.combine(now.astimezone(ET).date(), time(), ET).astimezone(timezone.utc).replace(tzinfo=None)
+    return len(db.exec(select(JoResearchImport.submission_key).where(JoResearchImport.imported_at >= midnight)).all())
 
 
 def import_submission(db: Session, check, actor: str, key: str, now: datetime) -> dict:
     snapshots, outbox = check.market_watch_snapshots_dir, check.market_watch_outbox_dir
     request = exchange.Submission.model_validate(briefing_exchange.read(outbox, exchange.request_name(key)))
     if request.profile_id != actor or briefing_exchange.operation_key(actor, request.operation_id) != key:
-        raise ValueError("Submission identity mismatch")
+        raise Foreign("Submission identity mismatch")
     current = exchange.status(snapshots, outbox, actor, request.operation_id)
     if current["status"] != "pending_import":
         return current
@@ -376,8 +392,13 @@ def import_submission(db: Session, check, actor: str, key: str, now: datetime) -
             raise ValueError("Submission body changed")
         data = exchange.validate_body(request.body, request.received_at)
         done = db.get(JoResearchImport, key)
+        if done is None and _imported_today(db, now) >= DAILY_IMPORTS:
+            raise Capped(f"Daily cap of {DAILY_IMPORTS} Jo research records reached; resubmit tomorrow under a new operation_id")
         record_id = str(done.investigation_id) if done else save(db, key, data, request.received_at)
         ack.update(status="saved", record_id=record_id)
+    except Capped as exc:
+        db.rollback()
+        ack.update(status="rejected", reason=str(exc))
     except (ValueError, LookupError, ValidationError, inv.InvestigationError):
         db.rollback()
         ack.update(status="rejected", reason="Invalid research, or no pending red-team request with that ID")
@@ -405,6 +426,7 @@ class ResearchRunner:
         self.calendar = calendar
         self.red_team_digest = None
         self.last_error = None
+        self.scan_cursor = ""
 
     def due(self, check, actor: str, kind: str, now: datetime, data_digest: str | None = None) -> bool:
         local = now.astimezone(ET)
@@ -433,16 +455,21 @@ class ResearchRunner:
             keys = [key for path in Path(check.market_watch_outbox_dir).glob("jo-research-request-*.json")
                     if re.fullmatch(r"[0-9a-f]{64}", key := path.name.removeprefix("jo-research-request-").removesuffix(".json"))
                     and not (Path(check.market_watch_snapshots_dir) / exchange.receipt_name(key)).exists()]
-            for key in sorted(keys)[:100]:
+            # Rotate: files that never import (another profile's, unreadable) cannot hold the first 100 places.
+            for key in sorted(keys, key=lambda k: (k <= self.scan_cursor, k))[:100]:
+                self.scan_cursor = key
                 try:
                     import_submission(db, check, actor, key, now)
                     imported += 1
+                except Foreign:
+                    continue  # never this profile's to import; the rotation keeps it from holding a place
                 except Exception:
                     db.rollback()
                     errors += 1
             for kind in ("red_team", "dossier", "audit"):
                 try:
-                    data = BUILDERS[kind](db, now) if kind == "red_team" or self.due(check, actor, kind, now) else None
+                    due = kind == "red_team" or self.due(check, actor, kind, now)
+                    data = BUILDERS[kind](db, now, config.account_ids) if due else None
                     digest = briefing_exchange.digest(data) if kind == "red_team" else None
                     if data is not None and self.due(check, actor, kind, now, digest):
                         publish(check, actor, kind, data, now)

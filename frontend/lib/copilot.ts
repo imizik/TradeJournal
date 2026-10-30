@@ -368,6 +368,8 @@ export type EvidenceRef = { tool: string; as_of?: string | number | null; kind?:
 export type Findings = {
   summary: string; key_findings: string[]; counterpoints: string[]; what_would_change: string[];
   citations: { url: string; publisher?: string | null; published_at?: string | null; title?: string | null }[];
+  /** Jo's full research text (source "jo"). */
+  report?: string | null;
 };
 export type InvestigationSummary = {
   id: string; source: "copilot" | "research_job" | "jo"; has_findings: boolean; title: string; symbol: string | null; status: "open" | "closed"; conclusion: string | null;

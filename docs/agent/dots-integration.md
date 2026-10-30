@@ -59,7 +59,7 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0–D2 sample reads and choices ([scope](cloud-mcp-integration-scope.md)) | Yes | Sample trial | Synthetic OAuth call and sample reads | Sample only | Do not infer later write/UI/restart gates from an earlier sample |
 | D3 follow-through | Design only | No | No | No | No accepted subscription or scheduled follow-through; maintenance timers do not count |
 | Conditional price-plan follow-through ([contract](setup-scanner-contract.md#conditional-price-plan-follow-through)) | Yes (#335; owner price-watches screen #359). Refused-request receipts shown on Jo's day and the watches screen merged in #384; Check runtime/tool deployment remains a separate verification | Oct 21 ~01:52 ET with owner authorization: `CONDITIONAL_PLAN_ENABLED=true` in the VPS `backend.env` and `conditional_plan_enabled=true` in the Check configuration; monitor heartbeat fresh with 11 eligible scanner tickers. The owner refreshed the Check tools in ChatGPT at ~09:14 ET and added the Jo instructions from [`jo-conditional-plans.md`](../../deploy/market-watch/jo-conditional-plans.md) | Local lifecycle, scope, restart and delivery-burst regressions passed; live proof (save → trigger → phone → cancel → restart) pending | No | Actual Jo save, monitored future transition, phone confirmation, cancellation and restart; separate from S1 and the pilot study |
-| Jo research role, jo-research-v1 ([section](#jo-research-role--october-29-2026)) | Yes (this PR): `jo_research_context` / `jo_research_submit` on Check, app publisher/importer, plan-card red-team request | No: merging activates nothing. The app side rides the existing Jo switch; the Check runtime upgrade and the three ChatGPT tasks ([instructions](../../deploy/market-watch/jo-research-tasks.md)) are owner steps | Fixture tests only | No | Check upgrade, task installation, a nightly dossier saved and read by the copilot, a Friday audit and one red-team answer on a plan card |
+| Jo research role, jo-research-v1 ([section](#jo-research-role--october-29-2026)) | Yes (this PR): `jo_research_context` / `jo_research_submit` on Check, app publisher/importer, plan-card red-team request | Partly: the app side rides the existing Jo switch (on in production), so after merge it publishes the contexts and would import submissions; Jo cannot read or submit until the Check runtime upgrade. That upgrade and the three ChatGPT tasks ([instructions](../../deploy/market-watch/jo-research-tasks.md)) are owner steps | Fixture tests only | No | Check upgrade, task installation, a nightly dossier saved and read by the copilot, a Friday audit and one red-team answer on a plan card |
 | Personal follow-ups, followup-v1 ([section](#personal-follow-through--october-23-2026)) | Yes (#423); explore-first conversation instructions #425 | Not recorded here: app `JO_FOLLOWUPS_ENABLED` and Check `followup_enabled` default off | No | No | App/Check deployment, Jo instruction rollout ([instructions](../../deploy/market-watch/jo-followups.md)) and a natural owner question → review → phone observation are separate gates |
 | Saved advice → journal links ([contract](advisor-pretrade-check-contract.md#saved-advice-links-to-later-journal-activity--october-20-2026)) | Built (#363, #364) | Read-only journal reader enabled Oct 20 with owner authorization | Live list/detail/grades and peer/write refusals passed; existing units/configs preserved; UI list visible; structured-condition detail crash fix merged in #365; fixture link/unlink only | No | Explicit owner link/unlink plus "Later activity — review needed" possible matches; no grading, notifications, assumed links, reassessment or new Jo access |
 | Personalized morning briefing and explicit memory ([roadmap](#personalized-morning-briefing-and-memory)) | #342–#344 merged; briefing layout, memory-revision display, saved-memories screen and delivery watchdog through #356 | Roth-only publisher/importer and existing Jo task, Oct 19. `JO_MORNING_ALERTS=true` and `HEALTHCHECK_PING_URL` in the VPS `alerts.env` (read-only check Oct 21) | Packet/UI observed; instructed afternoon Jo save receipt-confirmed Oct 19 15:31 ET; first natural scheduled run Oct 20 failed connector validation, manual recovery saved 09:26:56 (late). **Oct 21, first scored morning on time:** packet 08:45:18, Jo read recorded 08:55:45, Check receipt 08:56:43, in the journal 08:56:52 (9 s import lag); watchdog on, no notices (correct) | No | Five-morning acceptance so far: delivery 1/5, watchdog 1/5; no phone push exercised yet. The owner judged Oct 21's content weak (no macro context); the [market backdrop](#market-backdrop--october-21) (#377) is merged, and its Check upgrade (scheduled after 16:15 ET Oct 21) was pending at the last check. Existing Jo/auth reused; shared-context limitation accepted; [delivery honesty and the morning watchdog](#delivery-honesty-and-the-morning-watchdog); ten-morning owner ratings tracked below |
@@ -109,15 +109,25 @@ per operation ID, sealed into the outbox; a dossier must cite sources; a red
 team must name a pending request). The app (`app/engine/jo_research.py`, inside
 the existing Jo pass and its switch) publishes the dossier after 18:30 New York
 on trading days, the audit after 17:00 on Fridays and the red-team list when it
-changes, each as an immutable file that expires in 24 hours; contexts carry no
-account ids or sizes, and the red-team list never carries the copilot's answer
-text. Each sealed submission becomes one saved research record with source `jo`
-(title like "Jo dossier · NBIS · Oct 29", Jo's title as its conclusion, sources
-as citations), which `get_saved_research` and the desk list surface; a red-team
-answer is linked to its request and shown collapsed on the plan card as "Jo's
-case against: …". A multi-symbol dossier is filed under its first symbol.
+changes, each as an immutable file that expires in 24 hours. Holdings come from
+the accounts approved for Jo (`account_ids` in the Jo configuration); no context
+carries account ids or names, quantities, prices paid or dollar amounts. The
+audit's counts and percentages come from the copilot's week review, which spans
+every non-Webull account (an owner-approved widening is needed before
+activation). The red-team list never carries the copilot's answer text. Each
+sealed submission becomes one saved research record with source `jo` (title like
+"Jo dossier · NBIS · Oct 29", Jo's title as its conclusion, sources as
+citations, Jo's text in the findings, never as a transcript answer), which
+`get_saved_research` and the lab's saved list surface; at most 40 a New York day
+are saved. Records are saved closed: the thesis watch, the research queue's
+reassessments and the desk's thread list read open records only, so Jo's
+research never pings or queues paid work, and it stays off the desk list until
+those readers exclude source `jo`. A red-team answer is linked to its request and shown collapsed on the
+plan card as "Jo's case against: …". A multi-symbol dossier is filed under its
+first symbol.
 
-Built, not activated. The Check runtime upgrade (`deploy/check_control.py`) and
+Built; the app side publishes once merged (the Jo switch is on), Jo's side is
+not activated. The Check runtime upgrade (`deploy/check_control.py`) and
 the [task texts](../../deploy/market-watch/jo-research-tasks.md) are owner steps.
 
 ### Functionality sequence
