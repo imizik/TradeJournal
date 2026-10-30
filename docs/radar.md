@@ -743,6 +743,18 @@ Isaac's call, because it runs unattended plan turns in a new worker.
   than ten minutes after Radar first saw it, one in the session's last half
   hour, and one past the cap is recorded `not_decided` with the reason and no
   turn. Between sessions it is quiet. Phone pings are not built.
+- **Filter:** before any of that, `eligible(event)` keeps the turns for events
+  worth one, so the cap lasts the session (on October 29 the 12 turns were gone
+  by 10:05 ET on 17 events). An event is eligible when it clears the same bar as
+  a Radar single ping, `radar_alerts.strong` (a stock at least
+  `RADAR_SINGLE_MIN_RELATIVE_PCT`, default 7%, against SPY, or a group with
+  every member the same way and a median at least
+  `RADAR_SINGLE_MIN_GROUP_PCT`, default 3%), or is a dip-buy candidate (kind
+  `dip_turn`). Any other event is recorded once as `filtered` with a short
+  reason ("Below the strong-event bar: NBIS +2.1% vs SPY") and costs no turn;
+  the cap counts eligible events only. The week summary's `filtered` is that
+  count, and the screen folds those rows into one line ("9 events below the
+  bar, no turn spent") that opens to the list.
 - **Decision:** one turn through `backend/app/ai/shadow_turn.py` on Isaac's
   Claude plan only, never an API key (`research_job.prepare("plan")`, whatever
   `RESEARCH_AUTH` says). It refuses on a hosted database unless
@@ -777,8 +789,8 @@ Isaac's call, because it runs unattended plan turns in a new worker.
   fills, trades, accounts, alerts, Radar rules or the strategy factory.
 - **Screen:** the Shadow book section under the feed on `/radar` (`GET
   /radar/shadow-book?week=`): each decision with its event, the plan or the
-  reason, the fill, the exit and the result, and a week line with the shadow
-  P&L and counts beside Isaac's own week from the week review, side by side and
+  reason, the fill, the exit and the result (filtered events folded into one
+  line), and a week line with the shadow P&L and counts beside Isaac's own week from the week review, side by side and
   not compared.
 
 Switching on: add `SHADOW_BOOK_ENABLED=true` (and `SHADOW_BOOK_MAX_TURNS` if not

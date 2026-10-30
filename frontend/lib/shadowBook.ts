@@ -8,8 +8,8 @@ export type ShadowPlan = {
 export type ShadowDecision = {
   id: string; radar_event_id: string; session_date: string;
   event: { kind: string; direction: "up" | "down"; symbols: string[]; first_seen_at: string; summary: string };
-  decision: "deciding" | "plan" | "skip" | "error" | "not_decided";
-  status: "deciding" | "skip" | "error" | "not_decided" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  decision: "deciding" | "plan" | "skip" | "error" | "not_decided" | "filtered";
+  status: "deciding" | "skip" | "error" | "not_decided" | "filtered" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
   reason: string | null; plan: ShadowPlan | null; model: string | null; decided_at: string | null;
   entry: { price: number; at: string; shares: number | null } | null;
   exit: { price: number; at: string; reason: string } | null;
@@ -19,7 +19,7 @@ export type ShadowDecision = {
 export type ShadowWeek = {
   enabled: boolean; max_turns: number; week: { start: string; end: string };
   summary: {
-    shadow: { decisions: number; turns: number; plans: number; closed: number; pnl_usd: number };
+    shadow: { decisions: number; turns: number; filtered: number; plans: number; closed: number; pnl_usd: number };
     owner: { state: "ok"; trades: number; pnl_usd: number } | { state: "unavailable" };
     note: string;
   };

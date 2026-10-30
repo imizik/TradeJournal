@@ -151,11 +151,17 @@ def engine():
     engine.dispose()
 
 
+STRONG = {**FIXTURE["measures"], "spy_relative_pct": 7.5}  # over the strong-event bar (7% vs SPY)
+WEAK = {**FIXTURE["measures"], "spy_relative_pct": 2.1}
+
+
 def radar_store(tmp_path, *events):
+    """Events as (symbol, first seen) or (symbol, first seen, overrides); strong unless the overrides say otherwise."""
     store = RadarStore(tmp_path / "radar.sqlite")
-    for i, (symbol, seen) in enumerate(events):
+    for i, (symbol, seen, *extra) in enumerate(events):
         store.append_event({**FIXTURE, "event_id": f"e{i}", "session_date": DAY.isoformat(), "symbols": [symbol],
-                            "first_seen_at": stamp(seen), "summary": f"{symbol} up 3.1% vs SPY"})
+                            "first_seen_at": stamp(seen), "summary": f"{symbol} up 3.1% vs SPY", "measures": STRONG,
+                            **(extra[0] if extra else {})})
     return str(tmp_path / "radar.sqlite")
 
 
@@ -217,6 +223,36 @@ def test_skip_stale_cap_and_late_events_are_recorded_without_extra_turns(engine,
     assert worker.claim_next() is None  # quiet outside the session
 
 
+def test_eligible_is_the_radar_strong_bar_or_a_dip():
+    assert book.eligible({**FIXTURE, "measures": STRONG}) == (True, "")
+    assert book.eligible({**FIXTURE, "symbols": ["NBIS"], "measures": WEAK}) == (False, "Below the strong-event bar: NBIS +2.1% vs SPY")
+    assert book.eligible({"kind": "dip_turn", "symbols": ["AMD"], "measures": {"day_change_pct": -1.2}}) == (True, "")
+    group = {"kind": "group_move", "group": "Semis", "measures": {"median_relative_pct": 3.4, "members_with_data": 6,
+                                                                  "members_same_direction": 5}}
+    assert book.eligible(group) == (False, "Below the strong-event bar: Semis +3.4% vs SPY (5 of 6 the same way)")
+    assert book.eligible({**group, "measures": {**group["measures"], "members_same_direction": 6}}) == (True, "")
+
+
+def test_a_weak_event_is_filtered_without_a_turn_and_the_cap_counts_eligible_events_only(engine, tmp_path):
+    dip = {"kind": "dip_turn", "rule_version": "radar-dip-v0", "measures": {"day_change_pct": -1.2, "low_change_pct": -2.4}}
+    store = radar_store(tmp_path, ("NBIS", at(10, 38), {"measures": WEAK}), ("CRWV", at(10, 38, 30)),
+                        ("APLD", at(10, 39), {"measures": WEAK}), ("AMD", at(10, 39, 10), dip), ("LAD", at(10, 39, 20)))
+    worker, _, seen = shadow(engine, store, at(10, 40), [{"answer": {"decision": "skip", "reason": "Extended."}}] * 2, turns=2)
+    strong = worker.claim_next()  # NBIS is below the bar: recorded on the way, no turn
+    assert (strong.radar_event_id, strong.status) == ("e1", "deciding")
+    asyncio.run(worker.decide_one(strong))
+    dip_row = worker.claim_next()  # APLD filtered on the way; the dip claims the second turn
+    assert (dip_row.radar_event_id, dip_row.status) == ("e3", "deciding")
+    asyncio.run(worker.decide_one(dip_row))
+    assert worker.claim_next() is None and len(seen) == 2
+    got = {r.radar_event_id: (r.status, r.reason) for r, _ in decisions(engine)}
+    assert got["e0"] == ("filtered", "Below the strong-event bar: NBIS +2.1% vs SPY")
+    assert got["e2"] == ("filtered", "Below the strong-event bar: APLD +2.1% vs SPY")
+    assert got["e1"][0] == got["e3"][0] == "skip"
+    assert got["e4"] == ("not_decided", "This session's 2 turns were used.")  # two filtered events never used the cap
+    assert worker.book(DAY)["turns_today"] == 2
+
+
 def test_no_new_position_in_the_last_half_hour(engine, tmp_path):
     store = radar_store(tmp_path, ("NBIS", at(15, 44)))
     worker, _, _ = shadow(engine, store, at(15, 45), [])
@@ -271,7 +307,7 @@ def test_no_entry_quote_within_two_minutes_is_unresolved(engine, tmp_path):
 
 
 def test_the_week_route_lists_each_decision_and_a_side_by_side_summary(engine, tmp_path, monkeypatch):
-    store = radar_store(tmp_path, ("NBIS", at(10, 38)), ("CRWV", at(10, 39)))
+    store = radar_store(tmp_path, ("NBIS", at(10, 38)), ("APLD", at(10, 38, 30), {"measures": WEAK}), ("CRWV", at(10, 39)))
     worker, clock, _ = shadow(engine, store, at(10, 40), [{"answer": plan_answer()}, {"answer": {"decision": "skip", "reason": "Wide spread."}}])
     asyncio.run(worker.decide_one(worker.claim_next()))
     worker.feed.minutes = [(at(10, 41), 118.4, 121.3)]
@@ -290,9 +326,11 @@ def test_the_week_route_lists_each_decision_and_a_side_by_side_summary(engine, t
     app.dependency_overrides[get_session] = session
     out = TestClient(app).get("/radar/shadow-book", params={"week": DAY.isoformat()}).json()
     assert out["week"] == {"start": "2026-10-19", "end": "2026-10-23"} and out["enabled"] is False
-    assert out["summary"]["shadow"] == {"decisions": 2, "turns": 2, "plans": 1, "closed": 1, "pnl_usd": 58.7}
+    assert out["summary"]["shadow"] == {"decisions": 3, "turns": 2, "filtered": 1, "plans": 1, "closed": 1, "pnl_usd": 58.7}
     assert out["summary"]["owner"] == {"state": "ok", "trades": 4, "pnl_usd": -80.0} and "not compared" in out["summary"]["note"]
-    skip, plan = out["decisions"]  # newest first
+    skip, plan = [d for d in out["decisions"] if d["decision"] != "filtered"]  # newest first
+    [filtered] = [d for d in out["decisions"] if d["decision"] == "filtered"]  # claimed in NBIS's pass
+    assert (filtered["reason"], filtered["plan"]) == ("Below the strong-event bar: APLD +2.1% vs SPY", None)
     assert (skip["decision"], skip["reason"], skip["plan"]) == ("skip", "Wide spread.", None)
     assert plan["event"]["summary"] == "NBIS up 3.1% vs SPY" and plan["plan"]["contract"] == "2026-10-24 120 call"
     assert plan["entry"]["price"] == 2.4 and plan["exit"] == {"price": 3.0, "at": plan["exit"]["at"], "reason": "target"}

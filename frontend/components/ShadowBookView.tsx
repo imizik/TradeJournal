@@ -9,6 +9,7 @@ const BADGE: Record<ShadowDecision["decision"], { label: string; className: stri
   plan: { label: "Plan", className: "bg-sky-500/10 text-sky-300" },
   skip: { label: "Skip", className: "bg-muted text-muted-foreground" },
   not_decided: { label: "Not decided", className: "bg-muted text-muted-foreground" },
+  filtered: { label: "Below the bar", className: "bg-muted text-muted-foreground" },
   error: { label: "Error", className: "bg-amber-500/10 text-amber-300" },
   deciding: { label: "Deciding…", className: "bg-muted text-muted-foreground" },
 };
@@ -51,6 +52,24 @@ function Decision({ d }: { d: ShadowDecision }) {
   );
 }
 
+/** Events below the strong-event bar: one line, opened to a short list; no turn was spent on them. */
+function Filtered({ rows }: { rows: ShadowDecision[] }) {
+  return (
+    <details className="rounded-lg border bg-card px-3 py-2 text-sm" data-testid="shadow-filtered">
+      <summary className="cursor-pointer text-muted-foreground">
+        {rows.length} event{rows.length === 1 ? "" : "s"} below the bar, no turn spent
+      </summary>
+      <ul className="mt-2 space-y-1 text-xs">
+        {rows.map((d) => (
+          <li key={d.id} className="break-words">
+            <span className="tabular-nums text-muted-foreground">{d.session_date} {nyTime(d.event.first_seen_at)}</span> {d.reason}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export default function ShadowBookView() {
   const [week, setWeek] = useState<string | undefined>();
   const [data, setData] = useState<ShadowWeek | null>(null);
@@ -66,6 +85,8 @@ export default function ShadowBookView() {
   if (!data) return null;
   const { shadow, owner, note } = data.summary;
   const thisWeek = week === undefined;
+  const filtered = data.decisions.filter((d) => d.decision === "filtered");
+  const decided = data.decisions.filter((d) => d.decision !== "filtered");
   return (
     <section aria-label="Shadow book" className="space-y-2" data-testid="shadow-book">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -80,14 +101,17 @@ export default function ShadowBookView() {
         {!data.enabled && " Off now (SHADOW_BOOK_ENABLED)."}
       </p>
       <p className="rounded-lg border bg-card px-3 py-2.5 text-sm" data-testid="shadow-week-line">
-        Week of {data.week.start}: shadow {money(shadow.pnl_usd)} on {shadow.closed} closed of {shadow.plans} plans ({shadow.turns} turns)
+        Week of {data.week.start}: shadow {money(shadow.pnl_usd)} on {shadow.closed} closed of {shadow.plans} plans ({shadow.turns} turns{shadow.filtered ? `, ${shadow.filtered} below the bar` : ""})
         {" · "}{owner.state === "ok" ? `you ${money(owner.pnl_usd)} on ${owner.trades} trades` : "your week unavailable"}
         <span className="block text-xs text-muted-foreground">{note}</span>
       </p>
       {data.decisions.length === 0 ? (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No shadow decisions {thisWeek ? "this" : "that"} week.</p>
       ) : (
-        <ul className="space-y-2">{data.decisions.map((d) => <Decision key={d.id} d={d} />)}</ul>
+        <>
+          {filtered.length > 0 && <Filtered rows={filtered} />}
+          {decided.length > 0 && <ul className="space-y-2">{decided.map((d) => <Decision key={d.id} d={d} />)}</ul>}
+        </>
       )}
     </section>
   );

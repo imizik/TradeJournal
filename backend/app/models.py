@@ -1897,7 +1897,7 @@ class ShadowBookDecision(SQLModel, table=True):
     session_date: date = Field(index=True)  # New York trading day
     symbol: Optional[str] = None  # the plan's symbol, else the event's first
     event_json: str = Field(sa_column=Column(Text, nullable=False))  # the Radar event as the turn saw it
-    status: str  # deciding | plan | skip | error | not_decided
+    status: str  # deciding | plan | skip | error | not_decided | filtered
     reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # skip, error or not-decided reason
     plan_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     model: Optional[str] = None

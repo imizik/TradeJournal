@@ -177,3 +177,31 @@ test("Radar empty events and stale rankings remain explicit on phone", async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: test.info().outputPath("radar-empty-stale-phone.png") });
 });
+
+test("Shadow book folds events below the bar into one line on phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const event = (symbol: string, at: string) => ({ kind: "relative_to_spy", direction: "up", symbols: [symbol], first_seen_at: at,
+                                                  summary: `${symbol} up vs SPY` });
+  const row = (id: string, decision: string, reason: string, symbol: string, at: string) => ({
+    id, radar_event_id: id, session_date: "2026-10-29", event: event(symbol, at), decision, status: decision, reason, plan: null,
+    model: null, decided_at: null, entry: null, exit: null, result: null, unresolved: null });
+  await page.route("**/radar/shadow-book*", (route) => route.fulfill({ json: {
+    enabled: true, max_turns: 12, week: { start: "2026-10-26", end: "2026-10-30" },
+    summary: { shadow: { decisions: 3, turns: 1, filtered: 2, plans: 0, closed: 0, pnl_usd: 0 },
+               owner: { state: "ok", trades: 2, pnl_usd: 40 }, note: "Side by side, not compared." },
+    decisions: [row("e3", "skip", "Already extended.", "LAD", "2026-10-29T14:20:00Z"),
+                row("e2", "filtered", "Below the strong-event bar: NBIS +2.1% vs SPY", "NBIS", "2026-10-29T14:10:00Z"),
+                row("e1", "filtered", "Below the strong-event bar: APLD −4.6% vs SPY", "APLD", "2026-10-29T14:05:00Z")],
+  } }));
+  await page.goto("/radar");
+  const section = page.getByTestId("shadow-book");
+  await expect(section.getByTestId("shadow-week-line")).toContainText("(1 turns, 2 below the bar)");
+  await expect(section.getByTestId("shadow-decision")).toHaveCount(1);  // the filtered rows are not full rows
+  const folded = section.getByTestId("shadow-filtered");
+  await expect(folded.locator("summary")).toHaveText("2 events below the bar, no turn spent");
+  await expect(folded.getByText("NBIS +2.1% vs SPY", { exact: false })).toBeHidden();
+  await folded.locator("summary").click();
+  await expect(folded.getByText("NBIS +2.1% vs SPY", { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await section.screenshot({ path: test.info().outputPath("shadow-book-filtered-phone.png") });
+});
