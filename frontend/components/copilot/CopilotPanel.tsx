@@ -174,7 +174,7 @@ function FindingsView({ findings, source, createdAt }: { findings: Findings; sou
   return (
     <section aria-label="Findings" className="space-y-2 rounded border bg-card/40 p-3 text-sm text-foreground/90">
       <p className="text-xs text-muted-foreground">
-        {source === "research_job" ? "Background research result" : "Saved findings"} · saved {shortTime(createdAt)} ET · text, not live data
+        {source === "research_job" ? "Background research result" : source === "jo" ? "Jo's research (OpenAI, saved by Jo)" : "Saved findings"} · saved {shortTime(createdAt)} ET · text, not live data
       </p>
       <p>{findings.summary}</p>
       {list("Key findings", findings.key_findings)}
@@ -1024,7 +1024,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
               className={cn("min-h-11 max-w-[16rem] truncate rounded border px-2 py-0.5 text-left disabled:opacity-40 sm:min-h-0",
                 item.id === current?.id ? "border-primary/60 text-foreground" : "text-muted-foreground hover:text-foreground")}
               title={`${item.title}${item.conclusion ? ` — ${item.conclusion}` : ""} · ${shortTime(item.updated_at)}`}>
-              {item.symbol ? `${item.symbol} · ` : ""}{item.source === "research_job" ? "research · " : ""}{item.status === "closed" ? "closed · " : ""}{item.title}
+              {item.symbol ? `${item.symbol} · ` : ""}{item.source === "research_job" ? "research · " : item.source === "jo" ? "Jo · " : ""}{item.status === "closed" ? "closed · " : ""}{item.title}
             </button>
           ))}
         </nav>

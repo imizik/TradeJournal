@@ -488,3 +488,47 @@ test("size it for me on a stock plan: shares from the invalidation distance, cos
   const [capture] = posts(server, "captures");
   expect(capture.wording).toContain("Size: half size, earnings week.");
 });
+
+// Jo's red team (GET/POST /copilot/plans/{id}/red-team, tests/test_jo_research.py): a pending request, then Jo's answer.
+async function redTeam(page: Page, answered: boolean) {
+  const asked: object[] = [];
+  const pending = { request_id: "r1", proposal_id: "p1", symbol: "NBIS", status: "pending", requested_at: "2026-10-24T14:02:00Z", answered_at: null, answer: null };
+  await page.route(`**/copilot/plans/${INV}/red-team`, (route) => {
+    if (route.request().method() === "POST") {
+      asked.push(route.request().postDataJSON());
+      return route.fulfill({ status: 201, json: pending });
+    }
+    return route.fulfill({ json: { requests: answered ? [{ ...pending, status: "answered", answered_at: "2026-10-24T23:10:00Z",
+      answer: { investigation_id: "j1", title: "Dilution risk is underpriced", body: "A secondary is likely after the run.\n\nDetails.",
+        citations: [{ url: "https://www.reuters.com/x", publisher: "Reuters", published_at: "2026-10-24" }] } }] : [] } });
+  });
+  return asked;
+}
+
+test("a confirmed plan asks Jo to argue against it and then waits for Jo's run", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  const asked = await redTeam(page, false);
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await expect(card.getByRole("button", { name: "Ask Jo to argue against this" })).toBeHidden(); // a draft has no button
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByText("Plan confirmed.")).toBeVisible();
+  await card.getByRole("button", { name: "Ask Jo to argue against this" }).click();
+  await expect(card.getByText("Waiting for Jo: it answers in its next research run, outside market hours.")).toBeVisible();
+  expect(asked).toEqual([{ proposal_id: "p1" }]);
+});
+
+test("Jo's answer shows on the confirmed plan card, folded until opened", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [] };
+  await redTeam(page, true);
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await card.getByRole("button", { name: "Confirm" }).click();
+  const against = card.getByRole("group", { name: "Jo's case against" });
+  await expect(against.locator("summary")).toHaveText("Jo's case against: Dilution risk is underpriced");
+  await expect(against.getByText("A secondary is likely after the run.", { exact: false })).toBeHidden();
+  await against.locator("summary").click();
+  await expect(against.getByText("A secondary is likely after the run.", { exact: false })).toBeVisible();
+  await expect(against.getByRole("link", { name: "Reuters" })).toHaveAttribute("href", "https://www.reuters.com/x");
+  await page.screenshot({ path: test.info().outputPath("plan-card-jo-case-against.png") });
+});

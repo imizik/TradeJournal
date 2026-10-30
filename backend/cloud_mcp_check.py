@@ -62,6 +62,8 @@ TOOL_ARGUMENTS = {
     "jo_memory_propose": ({"packet_id", "memory"}, set()),
     "jo_briefing_submit": ({"briefing"}, set()),
     "jo_receipt": ({"operation_id"}, set()),
+    "jo_research_context": ({"kind"}, set()),
+    "jo_research_submit": ({"operation_id", "kind", "symbols", "title", "body", "sources", "as_of"}, {"request_id"}),
     "followup_create": ({"followup"}, set()),
     "followup_list": (set(), {"followup_id"}),
     "followup_due": (set(), set()),
@@ -101,7 +103,7 @@ def scopes(name):
     if name.startswith("followup_"):
         return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("followup_create", "followup_review", "followup_cancel") else [])
     if name.startswith("jo_"):
-        return [READ_SCOPE, JO_READ_SCOPE] + ([JO_SUBMIT_SCOPE] if name in ("jo_memory_propose", "jo_briefing_submit") else [])
+        return [READ_SCOPE, JO_READ_SCOPE] + ([JO_SUBMIT_SCOPE] if name in ("jo_memory_propose", "jo_briefing_submit", "jo_research_submit") else [])
     if name.startswith("conditional_plan_"):
         return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("conditional_plan_create", "conditional_plan_cancel") else [])
     if name in ("market_watch_snapshot", "market_watch_submit", "stock_alert", "stock_alert_submit"):
@@ -495,6 +497,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
     if config.jo_briefing_enabled:
         from jo_briefing_tools import register as register_jo
         register_jo(server, config, authenticated, scopes, clock)
+        from jo_research_tools import register as register_research
+        register_research(server, config, authenticated, scopes, clock)
     server.market_watch_enabled = bool(config.market_watch_snapshots_dir)
     if config.followup_enabled:
         from followup_tools import register as register_followups

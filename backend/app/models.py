@@ -1954,7 +1954,7 @@ class CopilotInvestigation(SQLModel, table=True):
     __tablename__ = "copilot_investigation"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
-    source: str = Field(default="copilot", index=True)  # "copilot" | "research_job"
+    source: str = Field(default="copilot", index=True)  # "copilot" | "research_job" | "jo"
     title: str
     symbol: Optional[str] = Field(default=None, index=True)
     status: str = Field(default="open")      # "open" | "closed"
@@ -1965,6 +1965,44 @@ class CopilotInvestigation(SQLModel, table=True):
     revision: int = Field(default=1)         # bumped on every save; a stale save is refused
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class JoRedTeamRequest(SQLModel, table=True):
+    """The owner's request that Jo argue against one confirmed copilot plan (docs/agent/dots-integration.md § Jo
+    research role). The plan's fields are copied at request time; the copilot's answer text never is. Jo's answer is a
+    saved research record (``answer_investigation_id``, source ``jo``) shown on the plan card."""
+
+    __tablename__ = "jo_red_team_request"
+    __table_args__ = (UniqueConstraint("investigation_id", "proposal_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    investigation_id: str = Field(index=True)  # the plan's thread (the plan id on the Plans board)
+    proposal_id: str                            # the confirmed plan card within it
+    symbol: str
+    direction: str                              # "long" | "short"
+    instrument: str                             # "stock" | "calls" | "puts"
+    contract: Optional[str] = None
+    thesis: str
+    entry: str
+    invalidation: str
+    time_stop: Optional[str] = None
+    status: str = Field(default="pending", index=True)  # "pending" | "answered"
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    answered_at: Optional[datetime] = None
+    answer_investigation_id: Optional[uuid.UUID] = None
+
+
+class JoResearchImport(SQLModel, table=True):
+    """One imported Jo research submission, committed with the research record it became, so a re-run of the
+    importer after a lost receipt finds it instead of saving it twice."""
+
+    __tablename__ = "jo_research_import"
+
+    submission_key: str = Field(primary_key=True)  # the Check operation key (64 hex)
+    kind: str
+    investigation_id: uuid.UUID
+    request_id: Optional[uuid.UUID] = None
+    imported_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class ResearchJob(SQLModel, table=True):

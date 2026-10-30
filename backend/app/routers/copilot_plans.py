@@ -6,7 +6,9 @@ desk's Context pane for the open thread (``GET /copilot/desk/{investigation_id}/
 fills and phone pings sent, from the Briefing session timeline's own readers (``copilot_desk``). An id of ``symbol:`` and a
 symbol is a thread named by its symbol alone (a position or plan with no saved conversation), on all three.
 
-Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only.
+Owner-only like every ``/copilot`` route; refuses while the lab is off. Read-only, except the one write here: asking
+Jo to argue against a confirmed plan (``POST /copilot/plans/{investigation_id}/red-team``, ``engine/jo_research.py``),
+which only records a pending request for Jo's next research run; no model call, no ping.
 """
 
 from datetime import datetime
@@ -14,11 +16,12 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import copilot_plans, desk_context, plan_positions
+from app.engine import copilot_plans, desk_context, jo_research, plan_positions
 from app.engine.chart_math import ET
 from app.routers import today
 
@@ -32,6 +35,32 @@ def plans(db: Session = Depends(get_session)):
     if not copilot.settings().enabled:
         raise HTTPException(503, "Copilot Lab is off.")
     return copilot_plans.board(db)
+
+
+class RedTeamBody(BaseModel):
+    proposal_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,120}$")
+
+
+@router.post("/plans/{investigation_id}/red-team")
+def ask_red_team(investigation_id: str, body: RedTeamBody, response: Response, db: Session = Depends(get_session)):
+    """Ask Jo to argue against the confirmed plan card ``proposal_id``: a pending request Jo answers in its next research
+    run (201), or the existing one (200). 404 without that card, 409 before it is confirmed."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    try:
+        found, created = jo_research.request_red_team(db, investigation_id, body.proposal_id)
+    except jo_research.RedTeamError as exc:
+        raise HTTPException(404 if exc.code == "not_found" else 409, str(exc)) from None
+    response.status_code = 201 if created else 200
+    return found
+
+
+@router.get("/plans/{investigation_id}/red-team")
+def red_team(investigation_id: str, db: Session = Depends(get_session)):
+    """This investigation's red-team requests, each with Jo's answer once imported."""
+    if not copilot.settings().enabled:
+        raise HTTPException(503, "Copilot Lab is off.")
+    return {"requests": jo_research.red_team_for(db, investigation_id)}
 
 
 @router.get("/plans/positions")
