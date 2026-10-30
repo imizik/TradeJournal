@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { apiUrl } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import type { InvestigationSummary } from "@/lib/copilot";
 import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefOpportunity, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 import DayJournal from "@/components/DayJournal";
@@ -73,6 +75,15 @@ function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery;
   </section>;
 }
 
+/** The copilot's 08:30 morning brief for ``day`` (backend/app/engine/premarket_prep.py), found by its saved title among the
+ * latest saved conversations; null when there is none or the lab is off. Earlier days were titled "Pre-market prep". */
+async function getCopilotBrief(day: string, signal: AbortSignal): Promise<InvestigationSummary | null> {
+  const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
+  if (!response.ok) return null;
+  const { investigations } = await response.json() as { investigations: InvestigationSummary[] };
+  return investigations.find((row) => row.title === `Morning brief ${day}` || row.title === `Pre-market prep ${day}`) ?? null;
+}
+
 function joReference(briefId: string, packetId: string | undefined, day: string, question: string, item: BriefItem | null, index: number, memoryIds: string[] = []) {
   const lines = ["TradeJournal morning briefing — continue from this saved context.", `Briefing ID: ${briefId}`, `Packet ID: ${packetId ?? "unavailable"}`, `Briefing date: ${day} ET`];
   if (item) {
@@ -101,6 +112,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   const [copy, setCopy] = useState<"copied" | "failed" | null>(null);
   const [fullSummary, setFullSummary] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [copilotBrief, setCopilotBrief] = useState<InvestigationSummary | null>(null);
   const opened = useRef<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -113,6 +125,12 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
     }).catch((reason) => { if (!controller.signal.aborted) setError(reason.message); });
     return () => controller.abort();
   }, [day, id, compact, refresh]);
+  useEffect(() => {
+    if (!compact) return;
+    const controller = new AbortController();
+    getCopilotBrief(day, controller.signal).then(setCopilotBrief).catch(() => { /* Jo's briefing stands without it */ });
+    return () => controller.abort();
+  }, [day, compact, refresh]);
   useEffect(() => {
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") setRefresh((r) => r + 1); }, 60_000);
     return () => window.clearInterval(timer);
@@ -249,9 +267,14 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   if (compact) return <DashboardCard title="Morning briefing" action={<Link href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</Link>}>
     <div className="min-w-0 space-y-3 break-words" data-testid="morning-briefing">
       {error && <p role="alert" className="text-sm text-amber-300">{error}{data && " Showing the previously loaded record; current status is unknown."}</p>}
+      {copilotBrief && <section aria-label="Copilot morning brief" data-testid="copilot-morning-brief" className="space-y-1 rounded-md border p-3">
+        <p className="text-xs text-muted-foreground"><span className="font-medium text-foreground">Copilot morning brief</span> · <time dateTime={copilotBrief.created_at}>{clock(copilotBrief.created_at, day)}</time></p>
+        {copilotBrief.conclusion && <p className="line-clamp-3 text-sm leading-relaxed">{copilotBrief.conclusion}</p>}
+        <Link href={`/copilot-lab?investigation=${encodeURIComponent(copilotBrief.id)}`} className={dashboardLink}>Open the brief →</Link>
+      </section>}
       {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading saved briefing…</p>}
       {status}
-      {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{messages[data.state]}</p>}
+      {data && data.state !== "ready" && <p className="text-sm text-muted-foreground">{copilotBrief && data.state === "unavailable" ? "No briefing from Jo has been saved for this date." : messages[data.state]}</p>}
       {focus}
       {body && <section aria-label="Things worth investigating" className="space-y-2 border-t pt-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{opportunityFirst ? "Things worth investigating" : "Saved priorities"}</h2>
