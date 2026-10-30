@@ -88,7 +88,7 @@ function Prose({ text }: { text: string }) {
 }
 
 /** An answer in the copilot's format (docs/copilot-lab.md § How the copilot reasons): the verdict and the headline, the
- * body, and a plain Changes if line. An answer without the format reads as plain text, as before. */
+ * thesis · timing · contract read, the body, the case against set off, and a plain Changes if line. An answer without the format reads as plain text, as before. */
 function Answer({ text }: { text: string }) {
   const parts = answerParts(text);
   if (!parts) return <Prose text={text} />;
@@ -100,7 +100,19 @@ function Answer({ text }: { text: string }) {
         </span>
         <strong className="text-sm font-semibold leading-snug text-foreground">{parts.headline}</strong>
       </p>
+      {parts.read && (
+        <p data-testid="copilot-read" className="text-xs text-muted-foreground">
+          {parts.read.map((part, i) => (
+            <span key={part.label}>{i > 0 && " · "}{part.label} <span className="font-medium text-foreground">{part.value}</span></span>
+          ))}
+        </p>
+      )}
       {parts.body && <Prose text={parts.body} />}
+      {parts.against && (
+        <p data-testid="copilot-against" className="border-l-2 border-amber-300/60 pl-2 text-sm">
+          <span className="font-medium text-amber-300">Against</span> {parts.against}
+        </p>
+      )}
       {parts.changesIf && <p className="text-sm text-muted-foreground">Changes if {parts.changesIf}</p>}
     </div>
   );

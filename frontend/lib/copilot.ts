@@ -237,7 +237,9 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
     if (/^_?\(Simulated model[\s\S]*\)_?$/.test(block.trim())) continue;
     for (const raw of block.split("\n")) {
       // The answer format's labels: "Verdict: Hold — The thesis…" reads "Hold. The thesis…", "Changes if: …" as a clause.
-      const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ");
+      const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ")
+        // "Read: Thesis holds · Timing early · Contract n/a" reads as a list; "Against: …" as the case against.
+        .replace(/^\s*\**read\**\s*:\**\s*(?=thesis\b)/i, "").replace(/\s+·\s+/g, ", ").replace(/^\s*\**against\**\s*:\**\s*/i, "Against that, ");
       const line = speakLine(said.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*•]\s+|\d+[.)]\s+)/, ""));
       if (!line) continue;
       sentences.push(/[.!?:;,]$/.test(line) ? line : `${line}.`);
@@ -301,12 +303,17 @@ export function asOfText(value: string | number | null | undefined): string {
 /** The words an answer may lead with, in step with ``SYSTEM_PROMPT``'s answer format (backend/app/ai/copilot.py). */
 export const VERDICTS = ["Hold", "Wait", "Pass", "Focus", "Draft", "Pattern", "Broken", "Unclear"] as const;
 export type Verdict = (typeof VERDICTS)[number];
-/** An answer in the copilot's format: ``Verdict: Hold — The thesis has not broken.`` first, then the body, then an
- * optional ``Changes if: …`` last line, kept apart from the body. */
-export type AnswerParts = { verdict: Verdict; headline: string; body: string; changesIf: string | null };
+/** An answer in the copilot's format: ``Verdict: Hold — The thesis has not broken.`` first, an optional
+ * ``Read: Thesis holds · Timing early · Contract n/a`` line, then the body, then optional ``Against: …`` and
+ * ``Changes if: …`` closing lines, kept apart from the body. */
+export type AnswerParts = { verdict: Verdict; headline: string; read: { label: string; value: string }[] | null; body: string;
+  against: string | null; changesIf: string | null };
 
 const VERDICT_LINE = /^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*(.+)$/i;
 const CHANGES_LINE = /^(?:[-*]\s+)?\**changes if\**\s*:\**\s*(.+?)\**$/i;
+const AGAINST_LINE = /^(?:[-*]\s+)?\**against\**\s*:\**\s*(.+?)\**$/i;
+const READ_LINE = /^\**read\**\s*:\**\s*(.+?)\**$/i;
+const READ_PART = /^(thesis|timing|contract)\s+(.+)$/i;
 const NOTE_LINE = /^_\(.*\)_$/; // the scripted model's own labels ("Simulated model …"), which a server may put first
 
 /**
@@ -322,12 +329,25 @@ export function answerParts(text: string): AnswerParts | null {
   const verdict = found && VERDICTS.find(v => v.toLowerCase() === found[1].toLowerCase());
   if (!found || !verdict) return null;
   const rest = [...lines.slice(0, at), ...lines.slice(at + 1)];
-  // Only the answer's last line is its Changes if; one inside the body stays where the model put it.
-  let last = rest.length - 1;
-  while (last >= 0 && !rest[last].trim()) last -= 1;
-  const changesIf = last >= 0 && CHANGES_LINE.test(rest[last].trim()) ? CHANGES_LINE.exec(rest[last].trim())![1].trim() : null;
-  if (changesIf !== null) rest.splice(last, 1);
-  return { verdict, headline: found[2].replace(/\*\*/g, "").trim(), body: rest.join("\n").trim(), changesIf: changesIf || null };
+  // The Read line is the first line after the Verdict line and any note; it counts only when all three parts parse.
+  let next = at;
+  while (next < rest.length && (!rest[next].trim() || NOTE_LINE.test(rest[next].trim()))) next += 1;
+  const readLine = READ_LINE.exec(rest[next]?.trim() ?? "");
+  const parts = readLine ? readLine[1].split(/\s*[·|;]\s*/).map(part => READ_PART.exec(part.trim())) : [];
+  const read = parts.length === 3 && parts.every(Boolean)
+    ? parts.map(part => ({ label: part![1][0].toUpperCase() + part![1].slice(1).toLowerCase(), value: part![2].trim() })) : null;
+  if (read) rest.splice(next, 1);
+  // Only the answer's closing lines are its Changes if and, before it, its Against; one inside the body stays put.
+  const closing = (pattern: RegExp) => {
+    let last = rest.length - 1;
+    while (last >= 0 && !rest[last].trim()) last -= 1;
+    const hit = last >= 0 ? pattern.exec(rest[last].trim()) : null;
+    if (hit) rest.splice(last, 1);
+    return hit ? hit[1].trim() || null : null;
+  };
+  const changesIf = closing(CHANGES_LINE);
+  const against = closing(AGAINST_LINE);
+  return { verdict, headline: found[2].replace(/\*\*/g, "").trim(), read, body: rest.join("\n").trim(), against, changesIf };
 }
 
 /** While an answer streams in, a first line that could still become the Verdict line ("Verd", "Verdict: Hold —") is not

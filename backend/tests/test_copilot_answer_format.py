@@ -37,6 +37,23 @@ def test_the_prompt_keeps_answers_short_unless_more_is_asked_for():
     assert 'when they ask for more ("more", "why", "go deeper") or for a trade review or a week review' in prompt
 
 
+def test_the_prompt_asks_for_the_read_line_the_case_against_and_unsupported_claims():
+    prompt = " ".join(copilot.SYSTEM_PROMPT.split())
+    assert '"Read: Thesis <word> · Timing <word> · Contract <word>"' in prompt
+    assert '"Against: <the strongest case against your verdict, with its number or source>"' in prompt
+    assert "never a strawman" in prompt and '"Against: nothing in the evidence" only when that is true' in prompt
+    assert '"Unsupported: <the claim> — <what would support it>" instead of reasoning from it' in prompt
+    assert '"Changes if: <that thing>", after any Against line' in prompt
+
+
+def test_a_scripted_group_read_carries_the_read_line_and_the_case_against_before_changes_if():
+    answer = copilot.scripted("Wait", "Not yet.", "The body.", "a longer window agrees.", against="the window is short.",
+                              read="Thesis unclear · Timing early · Contract n/a")
+    lines = [line for line in _lines(answer) if line]
+    assert lines == ["Verdict: Wait — Not yet.", copilot.SCRIPTED_NOTE, "Read: Thesis unclear · Timing early · Contract n/a",
+                     "The body.", "Against: the window is short.", "Changes if: a longer window agrees."]
+
+
 def test_every_scripted_answer_leads_with_a_verdict_and_keeps_the_simulated_note():
     fake = copilot.FakeAdapter
     answers = [
