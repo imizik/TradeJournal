@@ -74,3 +74,26 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: test.info().outputPath(`company-thesis-${width}.png`), fullPage: true });
   });
 }
+
+test("owner can address a frozen research question to configured Duet", async ({ page }) => {
+  const actor = "check_11111111-1111-4111-8111-111111111111";
+  let addressed = "";
+  await page.route("**/api/backend/company-research/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/companies")) return route.fulfill({ json: [{ id: "company-1", symbol: "NVDA", name: "Sample", followed: true, revision: 0, thesis: "", assumptions: [], latest: {} }] });
+    if (path.endsWith("/researchers")) return route.fulfill({ json: [{ id: actor, label: "Duet" }] });
+    if (path.endsWith("/assignments") && route.request().method() === "POST") {
+      addressed = route.request().postDataJSON().actor;
+      return route.fulfill({ json: { id: "task-1", question: "Explain the guidance change", context_hash: "a".repeat(64), context: {}, actor, status: "queued" } });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/research/companies/NVDA");
+  await page.getByRole("button", { name: "Thesis & research" }).click();
+  await expect(page.getByLabel("Researcher")).toContainText("Duet");
+  await page.getByLabel("Researcher").selectOption(actor);
+  await page.getByLabel("Research question", { exact: true }).fill("Explain the guidance change");
+  await page.getByRole("button", { name: "Prepare question" }).click();
+  await expect(page.getByText("Explain the guidance change", { exact: true })).toBeVisible();
+  expect(addressed).toBe(actor);
+});
