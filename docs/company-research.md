@@ -65,5 +65,10 @@ Focused checks live in `backend/tests/test_company_research.py` and
 `frontend/e2e/company-research.spec.ts`. Browser coverage exercises desktop and
 phone, persistence, explicit source gaps and citation links with invented data.
 Fixture checks do not establish live provider coverage or trading usefulness.
-The [implementation plan](company-research-plan.md) records the broader
-acceptance criteria and the remaining gated connector/scheduling work.
+The optional actor-scoped MCP exchange and daily refresh package are implemented
+and disabled by default. The [activation runbook](../deploy/company-research/README.md)
+records the exact connector grants, import pass and timer controls for owner
+approval. Synthetic exchange and recovery checks live in
+`backend/tests/test_company_research_exchange.py`; they do not establish a live
+agent connection. The [implementation plan](company-research-plan.md) records
+the acceptance criteria, including the separately approved live walkthrough.
