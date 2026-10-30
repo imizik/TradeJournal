@@ -722,3 +722,19 @@ def test_a_failed_read_or_turn_at_the_close_still_closes_the_thread(world, engin
     [row] = companions(engine)
     saved = investigation(engine, row)
     assert row.state == "closed" and saved["status"] == "closed" and saved["conclusion"].startswith("Unclear")
+
+
+def test_an_interrupt_at_the_fill_delays_the_adopt_instead_of_losing_it(world, engine, phone):
+    fill(engine, "10:00")
+    with Session(engine) as db:
+        key = db.exec(select(Fill.raw_email_id)).one()
+        db.add(PhonePing(sender="fill_interrupts", source_id="i1", kind="interrupt", rank=notification_policy.rank("interrupt"), symbol="NBIS",
+                         anchor=notification_policy.anchor(ROTH, key), title="NBIS 160C", body="Your record.", decided_at=utc("10:00"),
+                         decision="sent", delivered_at=utc("10:00")))
+        db.commit()
+    world.tick("10:03")
+    assert companions(engine) == [] and world.turns.questions == []
+    world.tick("10:11")
+    [row] = companions(engine)
+    assert row.delivery == "sent" and row.watched and len(phone.sent) == 1
+

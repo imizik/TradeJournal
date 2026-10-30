@@ -636,6 +636,12 @@ class Companion:
                     continue
                 if capture_links.for_trade(db, trade.id):
                     continue  # planned: the plan's own alerts and desk thread have it
+                # A fill-time pattern interrupt or other ping just went out: wait, or the policy's quiet window holds the adopt
+                # ping and the position would go unwatched. The turn is spent only once the ping can be sent.
+                if db.exec(select(PhonePing.id).where(
+                        PhonePing.anchor == notification_policy.anchor(trade.account_id, position["source_key"]), PhonePing.decision == "sent",
+                        PhonePing.decided_at >= _utc(now - notification_policy.quiet_seconds()))).first():
+                    continue
                 row = PositionCompanion(account_id=trade.account_id, source_key=position["source_key"], trade_id=trade.id,
                                         ticker=trade.ticker, contract=position["contract"], option_type=trade.option_type or "call",
                                         expiration=trade.expiration, opened_at=opened, detected_at=_utc(now))

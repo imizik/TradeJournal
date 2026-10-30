@@ -129,18 +129,31 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 # ------------------------------------------------------------------ the gate
 
 def test_the_priority_order_and_what_the_cap_never_drops():
-    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "companion_update",
+    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update",
                                      "nudge", "prep", "evening_review", "radar_event", "radar_digest", "thesis_watch",
-                                     "research")] == list(range(14))
+                                     "research")] == list(range(15))
     assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
     assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
     assert policy.rank("radar_something") == 14  # an unknown kind goes last
     assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
-    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4,
+    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4,
                                                              "radar_digest": 2, "thesis_watch": 2, "research": 1}
     assert policy.budget("companion_adopt") == 2
     assert (policy.budget("link"), policy.budget("week_review"), policy.budget("hold_hour"), policy.budget("evening_review")) == (2, 1, None, None)
+
+
+def test_a_pattern_interrupt_ranks_below_the_one_hour_alert_and_has_its_own_budget(engine):
+    assert policy.rank("hold_hour") < policy.rank("interrupt") < policy.rank("nudge")
+    with Session(engine) as db:
+        for i in range(4):
+            assert decide(db, "interrupt", f"i{i}", anchor=f"p{i}").action == "send"
+        held = decide(db, "interrupt", "i4", anchor="p4")
+        assert held.action == "hold" and held.reason == "Not sent: Pattern interrupts' 4 messages for today are spent."
+        assert decide(db, "nudge", "n1", anchor="p-n1").action == "send"  # nothing taken from the nudges
+        # The quiet window is per position: a one-hour alert outranks it, a nudge after it yields.
+        assert decide(db, "hold_hour", "h0", anchor="p0").action == "send"
+        assert decide(db, "nudge", "n0", anchor="p1").held  # merged into the interrupt still being sent
 
 
 def test_each_low_kind_spends_only_its_own_budget_and_the_ceiling_holds_the_rest(engine):

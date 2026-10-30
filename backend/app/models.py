@@ -677,6 +677,38 @@ class PlanNudge(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class FillInterrupt(SQLModel, table=True):
+    """One judged entry fill (``engine/fill_interrupts.py``): the habit rules it fired, if any, and the phone
+    message's outbox. Written once per fill: the unique fill anchor (its source identity, never the fill or trade
+    UUID, which a re-import or rebuild replaces) keeps a rebuild, restart or second process from judging it twice.
+    A fill that fired nothing is kept as ``none`` so it is never judged again."""
+
+    __tablename__ = "fill_interrupt"
+    __table_args__ = (
+        UniqueConstraint("account_id", "fill_key", name="uq_fill_interrupt_fill"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID
+    fill_key: str = Field(index=True)  # the judged entry fill's source identity
+    position_key: str = Field(index=True)  # the position's first entry fill's source identity (the policy anchor)
+    trade_id: uuid.UUID  # the trade when it fired (trades are rebuilt; read by position_key)
+    ticker: str
+    contract: str  # e.g. "NBIS 11/21/26 160C"
+    kinds: str  # comma-separated rules fired, newest-first order (fill_interrupts.KINDS); empty when none
+    title: str
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    executed_at: datetime  # the fill, a New York wall clock
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # none | pending | sending | sent | expired | unknown | held
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    noted_at: Optional[datetime] = None  # the owner tapped Noted
+
+
 class PositionCompanion(SQLModel, table=True):
     """One unplanned long option the copilot adopted (``engine/position_companion.py``): its saved investigation, the
     provisional plan (``plan_json``), the Telegram thread's root message and each update (``updates_json``). Written once
@@ -711,6 +743,7 @@ class PositionCompanion(SQLModel, table=True):
     decided_at: Optional[datetime] = None  # the Confirm or Ignore tap
     closed_at: Optional[datetime] = None
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
 
 
 class PlanTimeStop(SQLModel, table=True):
