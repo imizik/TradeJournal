@@ -1,13 +1,13 @@
 """Outcome attribution (additive): one row per app output with what price and the owner did next.
 
 Revision ID: 924f38989575
-Revises: fa98b2a82e10
+Revises: c6e2a8f4d1b7
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "924f38989575"
-down_revision = "fa98b2a82e10"
+down_revision = "c6e2a8f4d1b7"
 branch_labels = None
 depends_on = None
 
