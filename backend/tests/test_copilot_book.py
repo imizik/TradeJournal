@@ -122,6 +122,27 @@ def test_chart_context_is_bounded_at_its_worst_and_reads_nothing_new():
     assert out["bars"]["rows"][0][0] == "10-22 16:13" and out["quote"]["previous_close"] == 94.0 and out["rvol"]["baseline_sessions"] == 20
 
 
+def test_chart_context_before_4am_reads_the_last_sessions_after_hours(monkeypatch):
+    from app.engine import chart_feed as feed
+    from app.engine import chart_history as history
+
+    empty = {**_workspace(bars=0, zones=0), "intraday_as_of": None}
+    stamp = 1793318400  # after hours on the prior session
+    bar = {"time": stamp, "open": 60.0, "high": 61.0, "low": 59.5, "close": 58.25, "volume": 1200, "extended": True}
+    monkeypatch.setattr(feed.chart_feed, "workspace", lambda *a, **k: empty)
+    monkeypatch.setattr(history.chart_history, "page", lambda *a, **k: {"bars": [bar]})
+    out = copilot_book.chart_context("CRWV", "5m")
+    assert out["state"] == "ok" and out["last"] == 58.25 and out["bars"]["rows"][0][-1] is True
+    assert "after-hours" in out["bars_from"] and out["as_of"]
+
+    def refuse(*args, **kwargs):
+        raise history.HistoryError("no history")
+
+    monkeypatch.setattr(history.chart_history, "page", refuse)
+    out = copilot_book.chart_context("CRWV", "5m")
+    assert out["state"] == "no_bars" and "bars_from" not in out
+
+
 def test_chart_context_reports_an_unavailable_feed(monkeypatch):
     from app.engine import chart_feed as feed
 

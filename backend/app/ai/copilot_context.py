@@ -86,6 +86,9 @@ def _section(name: str, build):
 
 # --------------------------------------------------------------------------- sections
 
+MAX_ROLL_NOTES = 5
+
+
 def _positions(db, symbol: str | None, now_et: datetime) -> dict:
     from app.engine import capture_links, position_alerts
     pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol, now=now_et)
@@ -117,7 +120,13 @@ def _positions(db, symbol: str | None, now_et: datetime) -> dict:
                 "setup": _trim(plan.setup_label, 60), "wording": _trim(plan.wording), "note": _trim(plan.note),
                 "captured_at": copilot_book._iso(plan.received_at)}.items() if v}
         rows.append(out)
+    from app.engine.option_rolls import unresolved_rolls
+    unresolved = unresolved_rolls(db)
+    rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
+              "at": copilot_book._journal_time(r.executed_at)} for r in unresolved[-MAX_ROLL_NOTES:]]
     return {"state": "ok", "count": total, "shown": len(rows), "positions": rows,
+            **({"unresolved_rolls": rolls, "unresolved_rolls_total": len(unresolved), "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
+                "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
             "units": "Options: avg_entry, mark and peak are dollars per contract (premium x 100). Stocks: per share."}
 
 

@@ -157,7 +157,8 @@ def score(db: Session, measure: str, target: float | None, monday: date, rows: l
             hits = [r["follow"] for r in rows if isinstance(r["follow"], dict) and r["follow"].get("invalidation") == "hit_while_held"]
             hit, of, source = sum(f["then"] == "out_15m" for f in hits), len(hits), "plan follow-through"
     elif measure == "respond_to_giveback_15m":
-        alerts = [a for r in rows for a in ((r["alerts"] or {}).get("alerts") or []) if a.get("kind") == "giveback"]
+        # A roll is neither taking the gain nor ignoring the alert, so it does not count either way.
+        alerts = [a for r in rows for a in ((r["alerts"] or {}).get("alerts") or []) if a.get("kind") == "giveback" and a.get("then") != "rolled"]
         hit, of = sum(a.get("then") in OUT for a in alerts), len(alerts)
     elif measure in HABIT:
         flags = [r["flags"][HABIT[measure]] for r in rows if r["flags"] and r["flags"].get(HABIT[measure]) is not None]

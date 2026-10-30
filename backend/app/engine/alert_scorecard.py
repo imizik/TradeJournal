@@ -92,6 +92,8 @@ def _outcome(db: Session, alert: PositionAlert, trade: Trade | None) -> dict:
     after = _ny(alert.detected_at).replace(second=0, microsecond=0)  # fills are recorded to the minute
     exits = sorted((f for f in _fills(db, trade.id, "exit") if f.executed_at >= after),
                    key=lambda f: (f.executed_at, f.raw_email_id or "", str(f.id)))
+    if any((f.raw_email_id or "").startswith("roll:") for f in exits):
+        return {"state": "not_measured", "why": "rolled: the derived close is not a sale price"}
     taken = proceeds = 0.0
     ended = None
     for fill in exits:

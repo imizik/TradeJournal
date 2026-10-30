@@ -189,6 +189,23 @@ is verifiable rather than hopeful.
   From/Subject headers first; anything that is not a Robinhood execution email
   is never downloaded in full.
 
+- Robinhood's two-leg email ("Option Order Executed", "2 CRWV 2-Option
+  Strategies") names no contracts and no price per leg. `optionrollorder`
+  keeps its facts, and `option_rolls.resolve_rolls` runs before each rebuild.
+  With exactly one open contract of the quantity that later sales leave unsold,
+  and one contract with no earlier fill whose later sales reach exactly the
+  quantity before any buy or next two-leg order, same account and type, it adds
+  two `roll:` fills: the old leg closes at FIFO cost and the new leg opens at cost
+  plus the debit. The total is exact; the per-contract split is not a broker
+  price. Otherwise, or if the email says "credit" next to its usual "average
+  price" wording, the order and every later
+  one on that ticker stay unresolved and the copilot's position read says so. A
+  resolved roll is not revisited and its fills are never rewritten by a rebuild, so
+  a two-leg order that was not a roll can still pair wrongly while its other
+  contract is unsold, and one unrelated orphan sale of the same
+  quantity is indistinguishable from the new leg: the email cannot tell them apart.
+  A two-leg email in any other wording is only logged as a parse failure.
+
 ## Enrichment
 
 - Every enrichment field is nullable. Guard before display, calculation, or

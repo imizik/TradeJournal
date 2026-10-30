@@ -17,6 +17,7 @@ Webull stays out, as the owner chose (dormant).
 from __future__ import annotations
 
 import re
+import time
 from contextlib import nullcontext
 from datetime import UTC, datetime
 
@@ -126,13 +127,24 @@ def compact_chart(symbol: str, timeframe: str, data: dict) -> dict:
 def chart_context(symbol: str, timeframe: str) -> dict:
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_feed import ChartFeedError, chart_feed
-    from app.engine.chart_history import chart_history
+    from app.engine.chart_history import HistoryError, chart_history
     try:
         data = chart_feed.workspace(symbol, [timeframe], [], "extended", calendar=chart_calendar,
                                     stored_session=chart_history.stored, volume_profile=chart_history.volume_profile)
     except ChartFeedError as exc:
         return {"symbol": symbol, "timeframe": timeframe, "state": "unavailable", "reason": str(exc)[:200], "as_of": _now()}
-    return compact_chart(symbol, timeframe, data)
+    panel = (data.get("panels") or {}).get(timeframe)
+    if panel is None or panel.get("bars") or timeframe == "1D":
+        return compact_chart(symbol, timeframe, data)
+    # Today has no minutes yet (before 04:00, a weekend, a holiday): the last session still holds its after-hours.
+    try:
+        bars = chart_history.page(symbol, timeframe, "extended", int(time.time()), MAX_BARS)["bars"]
+    except HistoryError:
+        bars = []
+    if not bars:
+        return compact_chart(symbol, timeframe, data)
+    out = compact_chart(symbol, timeframe, {**data, "panels": {timeframe: {**panel, "bars": bars}}, "intraday_as_of": bars[-1]["time"]})
+    return {**out, "bars_from": "the last completed session, including its after-hours; today has no bars yet"}
 
 
 # --------------------------------------------------------------------------- the book

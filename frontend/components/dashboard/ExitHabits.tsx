@@ -21,7 +21,7 @@ export type ExitHabitsBody = { go_live: string; window: number; since_go_live: n
 const KIND: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes",
   hold_hour: "Held an hour", wrong_way: "Wrong way at 30 min" };
 export const RESPONSE: Record<string, string> = { closed_15m: "Closed within 15 min", trimmed_15m: "Trimmed within 15 min",
-  closed_later: "Closed later that day", held_overnight: "Held overnight", expired: "Let it expire", still_open: "Still open" };
+  closed_later: "Closed later that day", held_overnight: "Held overnight", expired: "Let it expire", still_open: "Still open", rolled: "Rolled it" };
 const ALERTS_SHOWN = 3;
 
 const kindLabel = (kind: string) => KIND[kind] ?? kind.replace(/_/g, " ");
