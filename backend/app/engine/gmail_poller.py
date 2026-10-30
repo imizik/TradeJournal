@@ -21,7 +21,6 @@ from app.engine.email_parser import (
     OPTION_PARTIAL_SUBJECT,
     OPTION_SUBJECT,
     ParsedFill,
-    ParsedRoll,
     ROLL_SUBJECT,
     STOCK_SUBJECT,
     parse_option_email,

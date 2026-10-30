@@ -792,6 +792,7 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None, keep_exi
                 and fill.strike is not None
                 and fill.expiration is not None
                 and fill.option_type is not None
+                and not (fill.raw_email_id or "").startswith("roll:")  # a derived price, not a market premium
             ):
                 T = _time_to_expiry(fill.executed_at, fill.expiration)
                 # fill.price is total premium per contract; BS uses per-share price

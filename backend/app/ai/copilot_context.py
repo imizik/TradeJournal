@@ -86,6 +86,9 @@ def _section(name: str, build):
 
 # --------------------------------------------------------------------------- sections
 
+ROLL_NOTE_DAYS, MAX_ROLL_NOTES = 45, 5
+
+
 def _positions(db, symbol: str | None, now_et: datetime) -> dict:
     from app.engine import capture_links, position_alerts
     pairs, total = copilot_book.position_rows(db, limit=MAX_POSITIONS, first=symbol, now=now_et)
@@ -119,7 +122,8 @@ def _positions(db, symbol: str | None, now_et: datetime) -> dict:
         rows.append(out)
     from app.engine.option_rolls import unresolved_rolls
     rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
-              "at": copilot_book._iso(r.executed_at)} for r in unresolved_rolls(db)]
+              "at": copilot_book._journal_time(r.executed_at)} for r in unresolved_rolls(db)
+             if (now_et.replace(tzinfo=None) - r.executed_at).days <= ROLL_NOTE_DAYS][-MAX_ROLL_NOTES:]
     return {"state": "ok", "count": total, "shown": len(rows), "positions": rows,
             **({"unresolved_rolls": rolls, "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
                 "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),

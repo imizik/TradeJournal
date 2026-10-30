@@ -135,3 +135,8 @@ def test_two_leg_email_becomes_a_roll_and_other_mail_with_that_subject_stays_ign
 def test_two_leg_email_with_a_total_that_disagrees_refuses_to_parse() -> None:
     with pytest.raises(EmailParseError):
         parse_option_email(ROLL_SUBJECT, ROLL_BODY.replace("$264.00", "$26.40"), "uid-bad")
+
+
+def test_a_rounded_average_on_several_fills_still_parses_from_its_total() -> None:
+    roll = parse_option_email(ROLL_SUBJECT, ROLL_BODY.replace("for 2", "for 3").replace("$1.32", "$1.33").replace("$264.00", "$398.00"), "uid-avg")
+    assert roll.contracts == Decimal("3") and round(roll.net_per_contract, 2) == Decimal("132.67")

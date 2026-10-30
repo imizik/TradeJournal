@@ -199,7 +199,9 @@ is verifiable rather than hopeful.
   plus the debit. The total is exact; the per-contract split is not a broker
   price. Otherwise, or if the email mentions a credit, the order and every later
   one on that ticker stay unresolved and the copilot's position read says so. A
-  resolved roll is not revisited, and one unrelated orphan sale of the same
+  resolved roll is not revisited and its fills are never rewritten by a rebuild, so
+  a two-leg order that was not a roll can still pair wrongly while its other
+  contract is unsold, and one unrelated orphan sale of the same
   quantity is indistinguishable from the new leg: the email cannot tell them apart.
 
 ## Enrichment

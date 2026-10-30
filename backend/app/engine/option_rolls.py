@@ -18,6 +18,7 @@ from app.models import FILL_LIGHT, Fill, OptionRollOrder
 
 _OPENS = {"buy_to_open", "sell_to_open"}
 _PRICE = Decimal("0.000001")
+_MAX_SALE_DAYS = 30  # a sale later than this is no evidence about this order
 
 
 def _derived_id(roll: OptionRollOrder, leg: str) -> str:
@@ -101,7 +102,7 @@ def _match(roll: OptionRollOrder, fills: list[Fill], next_roll_at) -> _Match | N
         return None
     from_key, to_key = pairs[0]
     sold_at = _new_leg_sold_at(to_key, quantity, fills, at)
-    if sold_at is None or (next_roll_at is not None and sold_at >= next_roll_at):
+    if sold_at is None or (next_roll_at is not None and sold_at >= next_roll_at) or (sold_at - at).days > _MAX_SALE_DAYS:
         return None
     remaining, cost = quantity, Decimal(0)
     for contracts, price in lots[from_key]:

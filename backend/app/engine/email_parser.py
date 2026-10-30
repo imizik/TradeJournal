@@ -131,7 +131,8 @@ def _parse_roll(body: str, imap_uid: str) -> ParsedRoll | None:
     if not dt_match:
         raise EmailParseError(f"Could not parse datetime from email uid={imap_uid!r}")
     contracts, price, total = (_to_decimal(match.group(i)) for i in (1, 3, 4))
-    if not contracts or contracts * price * 100 != total:
+    # The average is shown to the cent, so several fills can round it by up to half a cent a share.
+    if not contracts or abs(contracts * price * 100 - total) > contracts / 2:
         raise EmailParseError(f"Two-leg total does not match its price in email uid={imap_uid!r}")
     return ParsedRoll(ticker=match.group(2).upper(), contracts=contracts, net_per_contract=total / contracts,
                       credit_mentioned="credit" in body[max(0, match.start() - 80):match.end() + 80].lower(),

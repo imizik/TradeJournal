@@ -201,3 +201,12 @@ def test_an_earlier_unresolved_order_blocks_later_ones_on_the_ticker_only():
     db.add(OptionRollOrder(raw_email_id="roll-2", ticker="CRWV", contracts=Decimal(2), net_per_contract=Decimal(30), executed_at=datetime(2026, 10, 30, 11, 0), credit_mentioned=False))
     db.flush()
     assert resolve_rolls(db) == 0 and len(unresolved_rolls(db)) == 2
+
+
+def test_a_sale_long_after_the_order_is_no_evidence():
+    db = _db()
+    account = _account(db)
+    _fill(db, account, "buy_to_open", (OLD[0], date(2027, 1, 15)), "2", "100", datetime(2026, 10, 27, 10, 0))
+    _roll(db)
+    _fill(db, account, "sell_to_close", NEW, "2", "270", datetime(2026, 12, 15, 10, 0))
+    assert resolve_rolls(db) == 0
