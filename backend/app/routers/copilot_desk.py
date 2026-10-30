@@ -815,6 +815,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
     from app.engine import alert_scorecard, radar_scorecard
     from app.routers import radar
     now = today._now()
+    alerts = alert_scorecard.scorecard(db, now)  # first: a failed Radar query below can leave the transaction aborted
     store, reason = radar._store(read_only=True)
     if store is None:
         hits = {"state": "off", "reason": reason}
@@ -822,6 +823,7 @@ def desk_scorecard(db: Session = Depends(get_session)):
         try:
             hits = radar_scorecard.scorecard(store, db, now)
         except Exception as exc:  # noqa: BLE001 -- a busy or damaged Radar file or odd event must not take the alert card down
+            db.rollback()  # Postgres refuses every later statement in an aborted transaction; this route wrote nothing
             log.warning("radar scorecard unreadable: %s", exc)
             hits = {"state": "unavailable", "reason": "The Radar file could not be read right now."}
-    return {**alert_scorecard.scorecard(db, now), "radar": hits}
+    return {**alerts, "radar": hits}
