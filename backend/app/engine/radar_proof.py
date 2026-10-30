@@ -27,6 +27,7 @@ from statistics import median
 from sqlmodel import Session, select
 
 from app.engine.radar_comparison import epoch
+from app.engine.radar_dip import is_dip
 from app.engine.radar_movers import build_movers
 from app.engine.radar_store import RATINGS, RadarStore
 from app.models import CaptureLink, MorningBriefingPacket, MorningBriefingRecord, RadarAlert, TradeCapture
@@ -124,7 +125,7 @@ def planned_events(db: Session, event_ids: list[str]) -> dict[str, dict]:
 
 
 def build(store: RadarStore, db: Session, universe: dict) -> dict:
-    events = store.events()
+    events = [e for e in store.events() if not is_dip(e)]  # the dip rule is scored on its own, never here
     newest = max(events, key=lambda e: epoch(e["first_seen_at"]), default=None)
     version = newest["rule_version"] if newest else None
     events = [e for e in events if e["rule_version"] == version]

@@ -12,7 +12,8 @@ actions; the "Open app" one ``ntfy.publish`` adds is the third.
 Only a new event pings; revisions (extended, faded, reversed) never do. The recorder calls ``record``
 inside regular hours only, right after the pass that wrote the events, then ``deliver`` every pass. Caps:
 at most ``RADAR_ALERTS_DAILY_CAP`` (default 8) a session and one per stock or group an hour; an event
-past a cap is written ``skipped`` with the reason and never sent later. Right before the send, the app's
+past a cap is written ``skipped`` with the reason and never sent later. Both caps count one rule version's
+alerts only, so the dip rule's pings (``radar_dip``, ``alert`` mode) never use up the trial rules' allowance. Right before the send, the app's
 notification policy (``notification_policy.decide``, kind ``radar_event``, anchored to the stock's open
 position or the stock, or to the group) may hold it: the shared daily cap or the quiet window after a ping
 for the same position. A held alert is written ``held`` with the reason, never sent later, and does not
@@ -99,7 +100,10 @@ def _clock(stamp: float) -> str:
 def message(event: dict) -> tuple[str, str]:
     """Title and body: the event's own numbers, then the feed's summary and the time it was first seen."""
     m = event["measures"]
-    if event["kind"] == "group_move":
+    if event["kind"] == "dip_turn":
+        title = (f"Radar dip: {event['symbols'][0]} turning up, {_signed(m['day_change_pct'])} "
+                 f"(low {_signed(m['low_change_pct'])})")
+    elif event["kind"] == "group_move":
         title = (f"Radar: {event['group']} {_signed(m['median_relative_pct'])} vs SPY "
                  f"({m['members_same_direction']} of {m['members_with_data']} {'up' if event['direction'] == 'up' else 'down'})")
     else:
@@ -149,11 +153,12 @@ class RadarAlerts:
 
     def _cap_reason(self, db: Session, alert: RadarAlert, now: float) -> str | None:
         cap = daily_cap()
+        mine = RadarAlert.rule_version == alert.rule_version
         today = db.exec(select(func.count()).select_from(RadarAlert)
-                        .where(RadarAlert.session_date == alert.session_date, COUNTED)).one()
+                        .where(RadarAlert.session_date == alert.session_date, mine, COUNTED)).one()
         if today >= cap:
             return f"Daily cap of {cap} Radar alerts reached, so this one was not sent."
-        recent = db.exec(select(RadarAlert.detected_at).where(RadarAlert.subject == alert.subject, COUNTED,
+        recent = db.exec(select(RadarAlert.detected_at).where(RadarAlert.subject == alert.subject, mine, COUNTED,
                                                               RadarAlert.detected_at > _utc(now - SUBJECT_HOUR_SECONDS))
                          .order_by(RadarAlert.detected_at.desc())).first()
         if recent is not None:

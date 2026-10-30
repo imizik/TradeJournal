@@ -73,7 +73,7 @@ CREATE TRIGGER IF NOT EXISTS revision_no_delete BEFORE DELETE ON event_revision 
 """
 
 PassStatus = Literal["ok", "partial", "failed", "skipped"]
-EventKind = Literal["relative_to_spy", "relative_to_sector", "group_move"]
+EventKind = Literal["relative_to_spy", "relative_to_sector", "group_move", "dip_turn"]
 EventDirection = Literal["up", "down"]
 
 
@@ -233,22 +233,40 @@ class RadarStore:
             db.close()
 
     def append_detection(self, pass_id: int, *, universe: dict, rules: dict, hours: dict | None,
-                         status: str, event_ids: list[str], recorded_at: str, origin: str = "replay") -> None:
+                         status: str, event_ids: list[str], recorded_at: str, origin: str = "replay",
+                         side: dict[str, dict] | None = None) -> None:
         """No backfill: only the live runner explicitly supplies origin=live after detection.
 
         A crash before this receipt leaves the pass unverified. Config bytes are saved
         once by content digest, so a reused version label cannot rewrite history.
+        ``side`` adds a separate rule's own result under its name (``{"dip": {"rules",
+        "status", "event_ids"}}``), with its config saved the same way; without it the
+        receipt is exactly the trial rules' own.
         """
         if origin not in ("live", "replay") or status not in ("ok", "failed", "skipped"):
             raise ValueError("invalid detection receipt")
-        config = _json({"universe": universe, "rules": rules})
-        digest = hashlib.sha256(config.encode()).hexdigest()
-        payload = _json({"pass_id": pass_id, "config_digest": digest, "origin": origin, "status": status,
-                         "event_ids": event_ids, "hours": hours, "recorded_at": recorded_at})
+        configs = {}
+
+        def frozen(rules: dict) -> str:
+            config = _json({"universe": universe, "rules": rules})
+            digest = hashlib.sha256(config.encode()).hexdigest()
+            configs[digest] = config
+            return digest
+
+        digest = frozen(rules)
+        record = {"pass_id": pass_id, "config_digest": digest, "origin": origin, "status": status,
+                  "event_ids": event_ids, "hours": hours, "recorded_at": recorded_at}
+        for name, result in (side or {}).items():
+            if name in record or result["status"] not in ("ok", "failed", "skipped"):
+                raise ValueError("invalid detection receipt")
+            record[name] = {"config_digest": frozen(result["rules"]), "status": result["status"],
+                            "event_ids": result["event_ids"]}
+        payload = _json(record)
         with self._db() as db:
             if db.execute("SELECT 1 FROM pass WHERE id=?", (pass_id,)).fetchone() is None:
                 raise ValueError("detection pass missing")
-            db.execute("INSERT OR IGNORE INTO detection_config VALUES(?,?)", (digest, config))
+            for key, config in configs.items():
+                db.execute("INSERT OR IGNORE INTO detection_config VALUES(?,?)", (key, config))
             db.execute("INSERT INTO detection_receipt VALUES(?,?,?)", (pass_id, digest, payload))
 
     def detection_evidence(self) -> tuple[dict[int, dict], dict[str, dict]]:

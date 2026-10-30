@@ -9,7 +9,7 @@ import { radarChoice, type RadarChoice } from "@/lib/desk";
 import { planContext } from "@/components/copilot/PlanATrade";
 import { UNDO_MS } from "@/components/copilot/DecisionBar";
 
-const KIND: Record<string, string> = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector" };
+const KIND: Record<string, string> = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", dip_turn: "Dip turning up" };
 const BUTTON = "min-h-11 w-full rounded px-4 text-sm font-medium sm:w-auto sm:min-h-9";
 const uid = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });

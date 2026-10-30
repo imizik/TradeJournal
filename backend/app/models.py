@@ -631,7 +631,7 @@ class RadarAlert(SQLModel, table=True):
     event_id: str = Field(index=True)  # the Radar event, e.g. rv0-2026-10-22-spy-lad-up-1
     session_date: str = Field(index=True)
     rule_version: str
-    kind: str  # relative_to_spy | relative_to_sector | group_move
+    kind: str  # relative_to_spy | relative_to_sector | group_move | dip_turn
     subject: str = Field(index=True)  # the stock, or the group name: the hourly cap's key
     title: str  # e.g. "Radar: LAD +5.3% vs SPY +0.1%"
     body: str  # the feed's summary and the time
