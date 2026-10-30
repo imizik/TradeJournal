@@ -1778,18 +1778,19 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 
 - **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
   plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-  the automatic week review, Watch your day, the evening review, Radar alerts,
-  thesis watch, research results) calls
+  the automatic week review, Watch your day, the evening review, fill-time
+  pattern interrupts, Radar alerts, thesis watch, research results) calls
   `notification_policy.decide` right before it hands a message to ntfy, and keeps
   its own at-most-once delivery, caps and expiry. `ntfy.py` stays a transport.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
-- **Budgets:** each kind from nudge down has its own budget a New York day, so
+- **Budgets:** each kind from interrupt down has its own budget a New York day, so
   one kind spending its pings never takes another's (on October 29, 2026 the old
   shared pool was spent by 09:50 on prep, thesis watch, research and nudges, and
   every Radar ping and the evening review were held). Defaults, each overridden
-  by `PING_BUDGET_<KIND>`: `nudge` 2 (link pings share it), `prep` 1 (shared
+  by `PING_BUDGET_<KIND>`: `interrupt` 4 ([pattern interrupts](#pattern-interrupts)),
+  `nudge` 2 (link pings share it), `prep` 1 (shared
   with the automatic week review and Watch your day), `radar_event` 4 (Radar's
   single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
@@ -1798,7 +1799,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
   across every kind. Priority order: last-day final > invalidation > give-back
   > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
-  trigger > hold-hour > nudge/link > prep > evening review > Radar single >
+  trigger > hold-hour > pattern interrupt > nudge/link > prep > evening review > Radar single >
   Radar digest > thesis watch > research. The first three are never over the
   ceiling; time stop, entry, hold-hour and the budgeted kinds are held once it
   is reached. The evening review is never held, by the ceiling or the quiet
@@ -1860,6 +1861,57 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   than lost, so there is nothing to prove before switching it on; `false` passes
   everything through (still recorded). Settings in the table below.
 - Tests: `backend/tests/test_notification_policy.py`.
+
+## Pattern interrupts
+
+When an entry fill repeats one of the owner's own costly habits from the
+[October 21 behavior audit](../backend/reports/behavior_audit_2026-10-21.md), the
+phone gets one message carrying the owner's own record for that habit: no
+advice, no model call, nothing ordered (`backend/app/engine/fill_interrupts.py`).
+Four rules judge each new entry fill:
+
+- **Adding to a loser:** a second or later `buy_to_open` into a long option
+  position still open, below the open lots' average cost (first in, first out).
+- **Put entry:** a `buy_to_open` of a put.
+- **Day already green:** the account's realized P&L for the New York day is
+  already above zero at the fill (the rule the exit-habit `opened_green` reads).
+- **Late short-dated buy:** a `buy_to_open` of an option with 0 to 2 trading
+  days to expiry (weekdays) at or after 14:00 New York.
+
+A stock (or a short) can fire only the green-day rule. A fill that fires
+several sends one message, one line per rule in that order, ending "Your
+record, not advice.":
+
+```
+Pattern: NBIS 160P
+Adding to a loser: 12 past adds, 3 ended green, −$2,140
+Put entry: puts −$6,480 over 210 trades; calls +$8,710 over 1,120
+Day already green (+$420 today): 85 past trades opened green, −$9,050
+Late short-dated buy: 64 past buys after 2 PM with 0–2 days left, 48% expired worthless, −$5,210
+Your record, not advice.
+```
+
+Each line's record comes from closed trades in every account but Webull,
+never counting the position being judged; a record under 5 trades says "too
+few to read". The records are built once and kept in memory for the New York
+day, rebuilt only when the closed trades' count or realized total moves (a new
+close or a rebuild), so a fill never waits on a heavy query. The message opens
+the trade page on the interrupt; **Noted** opens it with the acknowledgement
+recorded once (`POST /trades/{trade_id}/fill-interrupts/{id}/noted`, owner only).
+
+It runs on the level alert monitor's loop every 30 seconds in the regular
+session; only fills since the process started and in the last 15 minutes
+count; Webull is left out. Each entry fill is judged once, anchored in its own
+source identity (`fill_interrupt` table, additive migration `c6e2a8f4d1b7`), so a
+rebuild never re-sends; a fill that fired nothing is kept as `none`. Delivery is
+at most once, and a message not sent within 3 minutes or before the close is
+dropped. The policy kind is `interrupt`, below hold-hour, with its own budget
+(`PING_BUDGET_INTERRUPT`, default 4 a day); the quiet window is per position,
+so a plan nudge right after an interrupt for the same position yields to it.
+
+**Switch on (the owner's switch):** `FILL_INTERRUPTS_ENABLED=true` in the API's
+environment (needs `NTFY_URL` or Telegram), restart the API. Off by default.
+Tests: `backend/tests/test_fill_interrupts.py`.
 
 ## Pre-market prep
 
