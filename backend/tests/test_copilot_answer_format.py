@@ -104,3 +104,25 @@ def test_the_lock_screen_drops_the_verdict_label_and_the_saved_answer_keeps_it()
     _, body, _ = premarket_prep.message(row)
     assert body == "Focus — NBIS 95C expires today.\nNBIS 2% from its trigger."
     assert premarket_prep.unlabelled("**Verdict:** Hold — Nothing expires today.") == "Hold — Nothing expires today."  # the saved conclusion too
+
+
+def test_the_prompt_asks_for_a_compare_block_when_two_choices_are_weighed():
+    prompt = " ".join(copilot.SYSTEM_PROMPT.split())
+    assert "When the owner asks you to compare two choices (A vs B, A or B, which of two" in prompt
+    assert 'the body is a compare block instead of the bullets, under the same length limit: a line "Compare: <A> | <B>"' in prompt
+    assert '"Needs: <what A needs> | <what B needs>", "Risks: … | …", "Breaks if: … | …", and, when a contract is involved, "Costs: … | …"' in prompt
+    assert "from get_option_candidates, never estimated" in prompt
+    assert "the Verdict headline says which side the evidence favours, or that it is a coin flip" in prompt
+    assert "never a contract recommended as advice" in prompt
+
+
+def test_a_scripted_compare_names_both_sides_and_keeps_the_row_order():
+    answer = _text(_turn([{"role": "user", "content": "Which: NBIS 10/30 vs 11/6 calls?"}], copilot.FakeAdapter(0)))
+    lines = [line for line in _lines(answer) if line]
+    assert VERDICT_LINE.match(lines[0]) and lines[1] == copilot.SCRIPTED_NOTE
+    assert lines[2] == "Read: Thesis unclear · Timing unclear · Contract unclear"
+    assert lines[3] == "Compare: NBIS 10/30 | 11/6 calls"
+    assert [line.split(":")[0] for line in lines[4:]] == ["Needs", "Risks", "Breaks if", "Costs", "Against", "Changes if"]
+    assert all(line.count(" | ") == 1 for line in lines[3:8])
+    plain = copilot.FakeAdapter._compare("Which is better, enter now or wait for 95.9?")
+    assert "Compare: enter now | wait for 95.9\n" in plain and "Costs:" not in plain and "Contract n/a" in plain

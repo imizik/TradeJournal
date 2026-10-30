@@ -24,6 +24,13 @@ test.describe("what is spoken", () => {
     expect(speechText({ content })).toBe("Wait. Not yet. Thesis holds, Timing early, Contract mismatch. The group leads. Against that, C R W V is fading.");
   });
 
+  test("a compare block reads each row as its two sides", () => {
+    const content = "Verdict: Unclear — A coin flip.\n\nCompare: enter now | wait for 95.9\nNeeds: the group to hold | a reclaim on volume\n"
+      + "Risks: being early | missing it\n\nAgainst: CRWV is fading.";
+    expect(speechText({ content })).toBe("Unclear. A coin flip. Compare A, enter now, and B, wait for 95.9. "
+      + "Needs: A, the group to hold; B, a reclaim on volume. Risks: A, being early; B, missing it. Against that, C R W V is fading.");
+  });
+
   test("option contracts, ranges, cents, losses, links and code", () => {
     expect(speechText({ content: "Buy the `NBIS 95C` if it holds $100–$102. Premium $0.85; P&L -$1,234 on $2.5M. See [the news](https://example.com/a). Earnings 2026-10-29." }))
       .toBe("Buy the N B I S 95 call if it holds 100 dollars to 102 dollars. Premium 85 cents; P and L minus 1234 dollars on 2.5 million dollars. See the news. Earnings October 29, 2026.");

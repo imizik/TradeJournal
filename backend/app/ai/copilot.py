@@ -198,7 +198,13 @@ evidence cannot answer it, or a read failed). The headline is one plain sentence
 answer about a trade idea, a thesis or a position decision, the next line is "Read: Thesis <word> · Timing <word> · \
 Contract <word>", one or two plain words each (for example "Read: Thesis holds · Timing early · Contract mismatch", with \
 "n/a" when no contract is in question), so the owner sees at a glance which of the first three questions is the \
-problem. Then the body: at most three one-sentence bullets (the length rule above). When the owner's idea rests on something no tool result or owner \
+problem. Then the body: at most three one-sentence bullets (the length rule above). When the owner asks you to compare \
+two choices (A vs B, A or B, which of two: "10/30 vs 11/6 calls?", "enter now or wait for 95.9?", "add or replace?"), the \
+body is a compare block instead of the bullets, under the same length limit: a line "Compare: <A> | <B>" naming each side \
+in a few words, then exactly these rows, one short phrase per cell: "Needs: <what A needs> | <what B needs>", "Risks: … | \
+…", "Breaks if: … | …", and, when a contract is involved, "Costs: … | …" (premium, break-even move or time value, from \
+get_option_candidates, never estimated). On a compare the Verdict headline says which side the evidence favours, or that \
+it is a coin flip; that is a read of the evidence, never a contract recommended as advice. When the owner's idea rests on something no tool result or owner \
 context shows (a rumour, a flow they assume, a level nobody measured), say so in a body line "Unsupported: <the claim> \
 — <what would support it>" instead of reasoning from it. On those same trade, thesis and position answers, the body \
 ends with a line "Against: <the strongest case against your verdict, with its number or source>": the counter-case \
@@ -605,6 +611,14 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if any(w in lower for w in (" vs ", " or ")) and any(w in lower for w in ("which", "compare")):
+            text = self._compare(prompt)
+            for piece in re.findall(r"\S+\s*", text):
+                if self.delay_s:
+                    await asyncio.sleep(self.delay_s)
+                yield "text", piece
+            yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+            return
         horizon = re.search(r"\b(\d{1,3})[\s-]*(days?|weeks?|wks?|months?)\b", lower)
         if horizon and any(w in lower for w in ("which strike", "which expiry", "calls", "puts")):
             if isinstance(last["content"], str) and allow_tools:
@@ -649,6 +663,27 @@ class FakeAdapter:
                 await asyncio.sleep(self.delay_s)
             yield "text", piece
         yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+
+    @staticmethod
+    def _compare(prompt: str) -> str:
+        """A scripted compare block (SYSTEM_PROMPT's answer format): the two sides named from the question, template rows,
+        and a coin-flip verdict, since nothing was read. Costs only when a contract is in question."""
+        line = prompt.strip().splitlines()[0] if prompt.strip() else ""
+        cut = re.search(r"\s(?:vs\.?|or)\s", line, flags=re.I)
+        left = re.split(r"[:,;]", line[:cut.start()])[-1] if cut else ""
+        left = re.sub(r"^\s*(?:which(?: is better| one)?|compare|should i|is it better to)\b\s*", "", left, flags=re.I)
+        right = re.split(r"[?!;,]|\.(?!\d)", line[cut.end():])[0] if cut else ""
+        a, b = " ".join(left.split()[-4:]) or "the first choice", " ".join(right.split()[:4]) or "the second choice"
+        contract = bool(re.search(r"\b(calls?|puts?|expiry|expiries|strike|\d+[CP])\b|\d{1,2}/\d{1,2}", line, flags=re.I))
+        rows = [("Needs", "its trigger to fire soon", "its trigger to fire later"), ("Risks", "being early", "being late"),
+                ("Breaks if", "the level fails first", "the move leaves without it")]
+        if contract:
+            rows.append(("Costs", "more time value paid now", "less time value, less room"))
+        body = f"Compare: {a} | {b}\n" + "\n".join(f"{label}: {x} | {y}" for label, x, y in rows)
+        return scripted("Unclear", "A coin flip: the scripted model weighs no evidence for either side.", body,
+                        "a real model reads the chart, the chain and your plan for both sides.",
+                        against="no tool was read, so neither side has a number behind it.",
+                        read=f"Thesis unclear · Timing unclear · Contract {'unclear' if contract else 'n/a'}")
 
     @staticmethod
     def _moment_args(symbol: str, asked) -> dict:

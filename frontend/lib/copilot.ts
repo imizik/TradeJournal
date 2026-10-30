@@ -242,7 +242,10 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
       // The answer format's labels: "Verdict: Hold — The thesis…" reads "Hold. The thesis…", "Changes if: …" as a clause.
       const said = raw.replace(/^\s*\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*/i, "$1. ").replace(/^\s*\**changes if\**\s*:\**\s*/i, "Changes if ")
         // "Read: Thesis holds · Timing early · Contract n/a" reads as a list; "Against: …" as the case against.
-        .replace(/^\s*\**read\**\s*:\**\s*(?=thesis\b)/i, "").replace(/\s+·\s+/g, ", ").replace(/^\s*\**against\**\s*:\**\s*/i, "Against that, ");
+        .replace(/^\s*\**read\**\s*:\**\s*(?=thesis\b)/i, "").replace(/\s+·\s+/g, ", ").replace(/^\s*\**against\**\s*:\**\s*/i, "Against that, ")
+        // A compare block: "Compare: 10/30 | 11/6" reads "Compare A, 10/30, and B, 11/6"; "Needs: x | y" as "Needs: A, x; B, y".
+        .replace(/^\s*\**compare\**\s*:\**\s*(.+?)\s+\|\s+(.+)$/i, "Compare A, $1, and B, $2")
+        .replace(/^\s*\**(needs|risks|breaks if|costs)\**\s*:\**\s*(.+?)\s+\|\s+(.+)$/i, "$1: A, $2; B, $3");
       const line = speakLine(said.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*•]\s+|\d+[.)]\s+)/, ""));
       if (!line) continue;
       sentences.push(/[.!?:;,]$/.test(line) ? line : `${line}.`);
@@ -310,13 +313,17 @@ export type Verdict = (typeof VERDICTS)[number];
  * ``Read: Thesis holds · Timing early · Contract n/a`` line, then the body, then optional ``Against: …`` and
  * ``Changes if: …`` closing lines, kept apart from the body. */
 export type AnswerParts = { verdict: Verdict; headline: string; read: { label: string; value: string }[] | null; body: string;
-  against: string | null; changesIf: string | null };
+  compare: Compare | null; against: string | null; changesIf: string | null };
+/** A compare block in place of the bullets: ``Compare: 10/30 | 11/6`` then ``Needs: … | …`` rows. */
+export type Compare = { a: string; b: string; rows: { label: string; a: string; b: string }[] };
 
 const VERDICT_LINE = /^\**verdict\**\s*:\s*\**([a-z]+)\**\s*(?:—|–|--|-|:)\s*(.+)$/i;
 const CHANGES_LINE = /^(?:[-*]\s+)?\**changes if\**\s*:\**\s*(.+?)\**$/i;
 const AGAINST_LINE = /^(?:[-*]\s+)?\**against\**\s*:\**\s*(.+?)\**$/i;
 const READ_LINE = /^\**read\**\s*:\**\s*(.+?)\**$/i;
 const READ_PART = /^(thesis|timing|contract)\s+(.+)$/i;
+const COMPARE_LINE = /^\**compare\**\s*:\**\s*(.+?)\s+\|\s+(.+?)\**$/i;
+const COMPARE_ROW = /^(?:[-*]\s+)?\**(needs|risks|breaks if|costs)\**\s*:\**\s*(.+?)\s+\|\s+(.+?)\**$/i;
 const NOTE_LINE = /^_\(.*\)_$/; // the scripted model's own labels ("Simulated model …"), which a server may put first
 
 /**
@@ -350,7 +357,23 @@ export function answerParts(text: string): AnswerParts | null {
   };
   const changesIf = closing(CHANGES_LINE);
   const against = closing(AGAINST_LINE);
-  return { verdict, headline: found[2].replace(/\*\*/g, "").trim(), read, body: rest.join("\n").trim(), against, changesIf };
+  // A compare block: the Compare line and the rows right under it; it counts only with at least two rows.
+  let compare: Compare | null = null;
+  const start = rest.findIndex(line => COMPARE_LINE.test(line.trim()));
+  if (start >= 0) {
+    const sides = COMPARE_LINE.exec(rest[start].trim())!;
+    const rows: Compare["rows"] = [];
+    for (let i = start + 1; i < rest.length; i += 1) {
+      const row = COMPARE_ROW.exec(rest[i].trim());
+      if (!row) break;
+      rows.push({ label: row[1][0].toUpperCase() + row[1].slice(1).toLowerCase(), a: row[2].trim(), b: row[3].trim() });
+    }
+    if (rows.length >= 2) {
+      compare = { a: sides[1].trim(), b: sides[2].trim(), rows };
+      rest.splice(start, rows.length + 1);
+    }
+  }
+  return { verdict, headline: found[2].replace(/\*\*/g, "").trim(), read, body: rest.join("\n").trim(), compare, against, changesIf };
 }
 
 /** While an answer streams in, a first line that could still become the Verdict line ("Verd", "Verdict: Hold —") is not
