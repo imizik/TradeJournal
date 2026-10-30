@@ -260,14 +260,14 @@ def test_feedback_tap_saves_once_answers_and_marks_the_keyboard(case):
     assert bot.named("answerCallbackQuery")[0] == {"callback_query_id": "q1", "text": "Saved: Prompted review."}
     edit = bot.named("editMessageReplyMarkup")[0]
     assert edit["chat_id"] == CHAT and edit["message_id"] == 55
-    assert edit["reply_markup"]["inline_keyboard"] == [[{"text": "✓ Prompted review", "callback_data": "done"},
+    assert edit["reply_markup"]["inline_keyboard"] == [[{"text": "✓ Prompted review", "callback_data": f"done:{alert}"},
                                                         {"text": "Why?", "callback_data": f"why:{alert}"}],
                                                        [{"text": "Open", "url": "https://journal.example/x"}]]
     # The other answer tapped later cannot overwrite it; the keyboard shows what was saved.
     assert run(replies.handle(tap(f"fb:{alert}:already_aware", update_id=3, keyboard=keyboard))) == "fb"
     assert bot.named("answerCallbackQuery")[-1]["text"] == "Already answered: Prompted review."
     assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"][0][0] == {
-        "text": "✓ Prompted review", "callback_data": "done"}
+        "text": "✓ Prompted review", "callback_data": f"done:{alert}"}
     with Session(db_engine) as db:
         assert db.exec(select(PositionAlertFeedback.rating)).all() == ["prompted_review"]
 
@@ -329,7 +329,7 @@ def test_why_runs_one_fake_copilot_turn_and_replies_in_the_chat(case, monkeypatc
     assert reply["chat_id"] == CHAT and reply["reply_parameters"]["message_id"] == 55
     assert reply["text"].startswith("Verdict:") and len(reply["text"]) <= telegram_replies.ANSWER_MAX
     row = bot.named("editMessageReplyMarkup")[0]["reply_markup"]["inline_keyboard"][0]
-    assert row[-1] == {"text": "✓ Why? (answer below)", "callback_data": "done"} and len(row) == 3
+    assert row[-1] == {"text": "✓ Why? (answer below)", "callback_data": f"done:{alert}"} and len(row) == 3
 
 
 def test_why_with_the_lab_off_says_so(case):
@@ -420,12 +420,16 @@ def test_a_reply_to_a_ping_carries_that_ping_as_context(case, monkeypatch):
     run(replies.question_text("why now?", alert_ping))
     run(replies.question_text("is this real?", radar_ping))
     run(replies.question_text("hello", None))
+    answered = {"message_id": 57, "text": "SNDK give-back", "reply_markup": {"inline_keyboard": [
+        [{"text": "✓ Prompted review", "callback_data": f"done:{alert}"}, {"text": "✓ Why? (answer below)", "callback_data": f"done:{alert}"}]]}}
+    run(replies.question_text("what if it gaps?", answered))  # both buttons used: the alert is still found
     with Session(db_engine) as db:
         from app.engine import position_alerts
         context = position_alerts.ask_context(db.get(PositionAlert, alert))
     assert asked[0] == (f"{context}\n\nMy question about this: why now?", "SNDK")
     assert asked[1] == ("Radar: AAA +7.3% vs SPY\n\nMy question about this: is this real?", None)
     assert asked[2] == ("hello", None)
+    assert asked[3] == (f"{context}\n\nMy question about this: what if it gaps?", "SNDK")
 
 
 def test_commands_get_the_help_note_and_the_lab_off_says_so(case):
@@ -435,3 +439,33 @@ def test_commands_get_the_help_note_and_the_lab_off_says_so(case):
     assert run(replies.handle(said("/start"))) == "help"
     assert bot.named("sendMessage")[0]["text"] == telegram_replies.HELP
     assert run(replies.question_text("hi", None)) == "Copilot Lab is off on this server, so there is no answer here."
+
+
+def test_why_while_a_question_runs_says_busy_and_can_be_asked_later(case, monkeypatch):
+    db_engine, alert = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        await replies.handle(said("how's my book?"))
+        assert await replies.handle(tap(f"why:{alert}")) == "why"
+        await asyncio.gather(*replies._tasks)
+        await replies.handle(tap(f"why:{alert}", update_id=2))
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    assert [a["text"] for a in bot.named("answerCallbackQuery")] == [telegram_replies.BUSY, "Asking copilot…"]
+    assert len(bot.named("sendMessage")) == 2  # the question's answer, then Why?'s
+
+
+def test_a_typed_question_past_the_daily_budget_is_refused_before_any_turn(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    monkeypatch.setenv("COPILOT_BACKEND", "anthropic")
+    monkeypatch.setenv("COPILOT_DAILY_BUDGET_USD", "1.5")
+    from app.ai import copilot, copilot_spend
+    monkeypatch.setattr(copilot_spend, "spent_today", lambda: 1.5)
+    monkeypatch.setattr(copilot, "adapter_for", lambda cfg: pytest.fail("a turn was built past the budget"))
+    replies = telegram_replies.Replies(db_engine, call=Bot())
+    assert run(replies.question_text("hi", None)) == "Today's copilot API budget ($1.50) is spent."

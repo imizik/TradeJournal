@@ -579,7 +579,9 @@ instead of ntfy, with reply buttons whose answers are saved in the app
 (position alerts: Prompted review, Already aware and Why?; Radar singles:
 Useful and Not useful; `backend/app/engine/telegram.py`, `phone.py`,
 `telegram_replies.py`). A message typed to the bot is a question for copilot,
-answered in the chat; typed as a reply to a ping, that ping is its context. The
+answered in the chat (one copilot turn at a time, within Copilot Lab's daily
+budget; with the Lab off the bot says so); typed as a reply to a ping, that ping
+is its context. The
 health, deploy and watchdog alerts in this section stay on ntfy. Telegram is
 used only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; nothing
 changes until then. The API only calls out to `api.telegram.org`: it reads the

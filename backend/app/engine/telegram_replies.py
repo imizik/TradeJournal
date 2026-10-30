@@ -18,7 +18,7 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
 
 A typed message is a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
-reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:`` button) is
+reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:``/``done:`` button) is
 ``ask_context`` on that alert, any other ping's is its text. ``/start`` and ``/help`` (or any command) get a short
 note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
 reply says so. A question is cut to ``QUESTION_MAX`` characters.
@@ -52,7 +52,7 @@ BUSY = "Copilot is still answering the last question; ask again in a moment."
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
                    "not_useful": "Not useful"}
 RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": "Too late", "irrelevant": "Not useful"}
-DONE = "done"  # the data of a button that shows a chosen answer; a tap on it does nothing
+DONE = "done"  # a button that shows a chosen answer (``done:<id>``, so a reply still finds the alert); a tap does nothing
 WHY = object()  # _mark's marker for a Why? tap
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
@@ -116,8 +116,10 @@ class Replies:
         elif verb == "rr":
             reply, chosen = await asyncio.to_thread(self._rating, *rest.partition(":")[::2])
         elif verb == "why":
-            if self._tasks or message.get("message_id") in self._asked:  # one turn at a time, once per message
+            if message.get("message_id") in self._asked:  # once per message
                 reply, chosen = "Already asked; the answer comes in the chat.", None
+            elif self._tasks:  # one turn at a time
+                reply, chosen = BUSY, None
             else:
                 self._asked.add(message.get("message_id"))
                 reply, chosen = "Asking copilot…", WHY
@@ -242,7 +244,8 @@ class Replies:
         context, symbol = None, None
         if replied:
             alert_id = next((data.split(":")[1] for row in ((replied.get("reply_markup") or {}).get("inline_keyboard") or [])
-                             for data in (str(b.get("callback_data") or "") for b in row) if data.startswith(("fb:", "why:"))), None)
+                             for data in (str(b.get("callback_data") or "") for b in row)
+                             if data.startswith(("fb:", "why:", f"{DONE}:"))), None)
             found = await asyncio.to_thread(self._alert_context, alert_id) if alert_id else None
             if found is not None:
                 context, symbol = found
@@ -314,16 +317,17 @@ class Replies:
     def _mark(self, message: dict, data: str, chosen: str) -> None:
         """Edit the message's keyboard: an answer replaces its row with "✓ <the saved answer>"; Why? is marked asked."""
         rows = ((message.get("reply_markup") or {}).get("inline_keyboard")) or []
+        done = f"{DONE}:{data.split(':')[1]}" if data.count(":") >= 1 else DONE  # keeps the alert for a typed reply
         edited = []
         for row in rows:
             tapped = next((b for b in row if b.get("callback_data") == data), None)
             if tapped is None:
                 edited.append(row)
             elif chosen == WHY:
-                edited.append([{"text": "✓ Why? (answer below)", "callback_data": DONE} if b is tapped else b for b in row])
+                edited.append([{"text": "✓ Why? (answer below)", "callback_data": done} if b is tapped else b for b in row])
             else:  # the answers give way to the saved one; Why? stays
                 kept = [b for b in row if str(b.get("callback_data", "")).startswith(("why:", DONE)) and b is not tapped]
-                edited.append([{"text": f"✓ {chosen}", "callback_data": DONE}, *kept])
+                edited.append([{"text": f"✓ {chosen}", "callback_data": done}, *kept])
         if edited == rows:
             return
         try:
