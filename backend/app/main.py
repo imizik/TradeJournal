@@ -541,3 +541,6 @@ app.include_router(research_jobs_router.router, prefix="/copilot/research-jobs",
 
 # Inspect the finalized route catalog; permission checks precede all handlers.
 app.add_middleware(AccessMiddleware, routes=app.router.routes)
+
+from app.routers import company_research as company_research_router
+app.include_router(company_research_router.router, prefix="/company-research", tags=["company research"])

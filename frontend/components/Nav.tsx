@@ -63,6 +63,7 @@ const navItems: { href: string; label: string; icon: typeof Bot; heading?: strin
   { href: "/copilot-lab", label: "Copilot", icon: MessagesSquare },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
+  { href: "/research/companies", label: "Company Research", icon: FileText },
   { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
   { href: "/access", label: "Assistant access", icon: FileText },
   { href: "/deploys", label: "Deploys", icon: Rocket },

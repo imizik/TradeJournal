@@ -2058,3 +2058,6 @@ class ThesisWatchTrigger(SQLModel, table=True):
     reason: Optional[str] = None  # why skipped or failed
     message_id: Optional[str] = None  # ntfy's receipt: accepted, not shown
     reassess_job_id: Optional[uuid.UUID] = None  # the research_job queued for it, when the queue is on
+
+# Register the isolated company-research tables in the shared metadata.
+from app import company_research_models  # noqa: E402,F401
