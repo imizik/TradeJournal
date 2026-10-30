@@ -166,6 +166,32 @@ def test_a_failing_ping_never_touches_the_recorded_pass(tmp_path, engine, monkey
 
 # ------------------------------------------------------------ caps and messages
 
+def test_on_telegram_a_single_carries_rating_buttons_and_a_digest_none(tmp_path, engine, monkeypatch):
+    from app.engine import telegram
+    monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "5")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: pytest.fail("ntfy used while Telegram is set up"))
+    sent = []
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append(kw) or "9")
+    store = _store_with(tmp_path, 36)
+    alerts = RadarAlerts(engine)
+    _runner(store, 37, alerts).run_once()
+    [row] = rows(engine)
+    [single] = sent
+    assert single["buttons"] == (("Useful", f"rr:{row.id}:useful"), ("Not useful", f"rr:{row.id}:irrelevant"))
+    assert single["links"] == () and single["path"] == f"/radar?event={EVENT}" and row.delivery == "sent"
+    with Session(engine) as db:
+        digest = RadarAlert(event_id="digest-x", session_date=row.session_date, rule_version=row.rule_version, kind=radar_alerts.DIGEST,
+                            subject="", title="Radar digest", body="AAA", first_seen_at=row.first_seen_at, detected_at=row.detected_at)
+        db.add(digest)
+        db.commit()
+        digest_id = digest.id
+    alerts.clock = lambda: at(38)
+    alerts._send(digest_id)
+    assert sent[1]["buttons"] == () and sent[1]["path"] == "/radar" and sent[1]["priority"] == 3
+
+
 def test_one_single_per_subject_an_hour_and_the_rest_wait_for_the_digest(engine, monkeypatch):
     clock = Clock(at(20))
     alerts = RadarAlerts(engine, clock=clock)

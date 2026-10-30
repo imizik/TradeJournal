@@ -138,12 +138,15 @@ def test_phone_prefers_telegram_and_carries_buttons_and_links(bot, monkeypatch):
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(ntfy, "publish", lambda *a, **k: pytest.fail("ntfy used while Telegram is set up"))
     assert phone.configured() and phone.transport() == "telegram"
-    receipt, state = phone.send("T", "m", kind="nudge", path="/p", buttons=(("Why?", "why:a"),), image=b"png", priority=3,
-                                tags=("memo",), direct_click=True, more=(("Plan", "/plans/1"),))
+    receipt, state = phone.send("T", "m", kind="nudge", path="/p", image=b"png", priority=3, tags=("memo",), direct_click=True,
+                                more=(("Plan", "/plans/1"),))
     assert (receipt, state) == ("77", "attached")
     keyboard = json.loads(bot[0]["data"]["reply_markup"])["inline_keyboard"]
-    assert keyboard == [[{"text": "Why?", "callback_data": "why:a"}],
-                        [{"text": "Open", "url": "https://journal.example/p"}, {"text": "Plan", "url": "https://journal.example/plans/1"}]]
+    assert keyboard == [[{"text": "Open", "url": "https://journal.example/p"}, {"text": "Plan", "url": "https://journal.example/plans/1"}]]
+    # Reply buttons answer in place, so ntfy's answer links for the same answers are left off.
+    phone.send("T", "m", kind="giveback", path="/p", buttons=(("Useful", "rr:a:useful"),), more=(("Useful", "/radar?rate=useful"),))
+    assert bot[1]["json"]["reply_markup"]["inline_keyboard"] == [[{"text": "Useful", "callback_data": "rr:a:useful"}],
+                                                                [{"text": "Open", "url": "https://journal.example/p"}]]
 
 
 def test_phone_sends_text_when_the_caption_is_too_long_or_the_picture_is_refused(bot, monkeypatch):

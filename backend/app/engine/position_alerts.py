@@ -72,7 +72,9 @@ never suppresses an alert; retries reuse the saved observations, not newer data.
 
 Positions are anchored in their first entry fill's source identity (account
 plus ``raw_email_id``), as saved-advice links are, so a trade rebuild does not
-re-send anything. Delivery is at-most-once: a send that may have reached ntfy
+re-send anything. With Telegram set up (``engine/phone.py``) the alert goes there instead, and its two
+answers and Why? are reply buttons that save or ask in place (``engine/telegram_replies.py``).
+Delivery is at-most-once: a send that may have reached ntfy
 is recorded ``unknown`` and never resent, and an alert not sent within
 ``EXPIRE_SECONDS`` is dropped, since a late give-back alert is wrong advice.
 Right before the send, ``notification_policy.decide`` may hold it (``held``, with
@@ -94,7 +96,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import alert_feedback, notification_policy, ntfy, ping_images, position_alert_context
+from app.engine import alert_feedback, notification_policy, ntfy, phone, ping_images, position_alert_context, telegram_replies
 from app.engine.chart_journal import OPEN_SIDES, contract_label, open_lots
 from app.engine.chart_math import ET, session_windows
 from app.engine.occ import occ_symbol
@@ -644,7 +646,7 @@ class PositionAlerts:
                 alert.delivery, alert.last_error = "expired", "The market had closed, so it was not sent."
                 db.commit()
                 return
-            if not ntfy.configured():
+            if not phone.configured():
                 alert.delivery, alert.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 alert.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
@@ -665,9 +667,10 @@ class PositionAlerts:
             image = ping_images.picture(ping_images.prepare(db, _picture, alert, now)) if alert.attempts == 0 else None  # a retry goes as text
             alert.attempts += 1
             try:
-                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=priority, tags=("warning",),
-                                                     path=path, direct_click=True, more=more)
-            except ntfy.NtfyError as exc:
+                _, image_state = phone.send(title, body + ticket.append, kind=alert.kind, image=image, priority=priority, tags=("warning",),
+                                            path=path, direct_click=True, more=more,
+                                            buttons=telegram_replies.feedback_buttons(alert.id, tuple(r for _, r in ANSWER_ACTIONS)))
+            except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
                     notification_policy.delivered(db, ticket, now)

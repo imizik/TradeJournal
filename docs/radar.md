@@ -688,7 +688,9 @@ digests a session, and only a strong one is pinged on its own:
   repeat it. No new server route, token or public ingress. "Not useful" is
   saved as `irrelevant`; the card is open, so "Already knew" or "Too late" is
   one more tap and the latest rating wins. ntfy shows three actions: Open app,
-  Useful, Not useful.
+  Useful, Not useful. With Telegram set up ([deploy/README.md](../deploy/README.md#telegram))
+  the ping goes there instead, and Useful and Not useful are reply buttons that
+  save the rating in place without opening the app.
 - **Only a new event pings.** Revisions (extended, faded, reversed) never do.
   Regular hours only: the recorder detects only inside the session and sends
   pending pings only on a pass.

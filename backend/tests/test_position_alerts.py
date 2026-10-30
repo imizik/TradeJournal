@@ -313,6 +313,23 @@ def test_delivery_sends_once_with_a_link_to_the_trade(engine, world, monkeypatch
     assert alerts(engine)[0].delivery == "sent"
 
 
+def test_on_telegram_the_answers_and_why_are_reply_buttons_not_links(engine, world, monkeypatch):
+    from app.engine import telegram
+    _, _, watcher = world
+    alert = fired(engine, world)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setattr(ntfy, "publish", lambda *a, **k: pytest.fail("ntfy used while Telegram is set up"))
+    sent = []
+    monkeypatch.setattr(telegram, "publish", lambda title, body, **kw: sent.append((title, kw)) or "9")
+    watcher.deliver()
+    [(title, kw)] = sent
+    assert title == "SNDK 10/23/26 230C: give-back triggered" and kw["path"] == f"/trades/{alert.trade_id}?alert={alert.id}"
+    assert kw["buttons"] == (("Prompted review", f"fb:{alert.id}:prompted_review"), ("Already aware", f"fb:{alert.id}:already_aware"),
+                             ("Why?", f"why:{alert.id}")) and kw["links"] == ()
+    assert alerts(engine)[0].delivery == "sent"
+
+
 def test_a_ping_carries_two_answer_buttons_and_opens_the_desk_while_the_lab_is_on(engine, world, monkeypatch):
     from urllib.parse import parse_qs, urlsplit
     clock, _, watcher = world

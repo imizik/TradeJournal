@@ -9,7 +9,8 @@ stay on ntfy and never come here.
 
 ``send`` returns ``(receipt, image state)`` as ``ping_images.publish`` does, and raises ``SendError`` (ntfy's error,
 which Telegram's extends) with the same at-most-once meaning on either transport. On Telegram ``more`` becomes extra
-link buttons beside Open, and a picture whose text is too long for a photo caption goes as text alone.
+link buttons beside Open, unless the ping has reply ``buttons``: then ``more`` holds ntfy's answer links for the same
+answers, and the buttons replace them. A picture whose text is too long for a photo caption goes as text alone.
 """
 
 import logging
@@ -34,7 +35,7 @@ def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[
     """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring."""
     if telegram.configured():
         options = {"path": path, "buttons": tuple(buttons), "priority": 4 if priority is None else priority,
-                   "links": tuple(ntfy_options.get("more", ()))}
+                   "links": () if buttons else tuple(ntfy_options.get("more", ()))}
         if image is not None and telegram.caption_fits(title, message):
             try:
                 return telegram.publish(title, message, image=image, **options), "attached"

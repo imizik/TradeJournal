@@ -9,7 +9,8 @@ default 7.0, against SPY, or a group with every member moving the same way and a
 the event on ``/radar`` (where its "Ask copilot" and "Plan a trade" buttons are), and two actions,
 **Useful** and **Not useful**, which open the same event with that rating in the link; the page posts it
 through the existing feedback route. ntfy shows at most three actions; the "Open app" one
-``ntfy.publish`` adds is the third. At most one single a stock or group an hour; a strong event inside
+``ntfy.publish`` adds is the third. With Telegram set up (``engine/phone.py``) the ping goes there instead and
+the two ratings are reply buttons that save in place (``engine/telegram_replies.py``). At most one single a stock or group an hour; a strong event inside
 that hour, and every other event, waits for the digest (``digest``, its body the event's digest line).
 
 At each ``RADAR_DIGEST_AT`` time (default ``10:00,14:00`` New York) one **digest** ping (kind
@@ -49,7 +50,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, ping_images, radar_dip
+from app.engine import notification_policy, ntfy, phone, ping_images, radar_dip, telegram_replies
 from app.engine.chart_math import ET
 from app.models import RadarAlert
 
@@ -324,7 +325,7 @@ class RadarAlerts:
                 self._settle(db, alert)
                 db.commit()
                 return
-            if not ntfy.configured():
+            if not phone.configured():
                 alert.delivery, alert.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 alert.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
@@ -349,13 +350,15 @@ class RadarAlerts:
             alert.attempts += 1
             try:
                 if digest:
-                    _, image_state = ping_images.publish(alert.title, alert.body + ticket.append, None, priority=3, tags=("satellite",),
-                                                         path="/radar", direct_click=True)
+                    _, image_state = phone.send(alert.title, alert.body + ticket.append, kind=kind, priority=3, tags=("satellite",),
+                                                path="/radar", direct_click=True)
                 else:
-                    _, image_state = ping_images.publish(
-                        alert.title, alert.body + ticket.append, image, priority=4, tags=("satellite",), path=event_path(alert.event_id),
-                        direct_click=True, more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS))
-            except ntfy.NtfyError as exc:
+                    _, image_state = phone.send(
+                        alert.title, alert.body + ticket.append, kind=kind, image=image, priority=4, tags=("satellite",),
+                        path=event_path(alert.event_id), direct_click=True,
+                        more=tuple((label, event_path(alert.event_id, rating)) for label, rating in RATING_ACTIONS),
+                        buttons=telegram_replies.rating_buttons(alert.id, tuple(r for _, r in RATING_ACTIONS)))
+            except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     alert.delivery, alert.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
                     notification_policy.delivered(db, ticket, now)

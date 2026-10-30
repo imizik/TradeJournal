@@ -572,11 +572,13 @@ delivered, and the outside service alerts when the pings stop.
 
 ### Telegram
 
-The API's own trading pings (the senders above: plan nudges, time stops, level
-and plan alerts, thesis watch, the week review, Watch your day, research
-results; the remaining senders move over in later changes) can go to a Telegram
-bot instead of ntfy, with reply buttons whose answers are saved in the app
-(`backend/app/engine/telegram.py`, `phone.py`, `telegram_replies.py`). The
+The API's own trading pings (position alerts, Radar, the morning prep, the
+evening review, plan nudges, time stops, level and plan alerts, thesis watch,
+the week review, Watch your day, research results) can go to a Telegram bot
+instead of ntfy, with reply buttons whose answers are saved in the app
+(position alerts: Prompted review, Already aware and Why?; Radar singles:
+Useful and Not useful; `backend/app/engine/telegram.py`, `phone.py`,
+`telegram_replies.py`). The
 health, deploy and watchdog alerts in this section stay on ntfy. Telegram is
 used only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; nothing
 changes until then. The API only calls out to `api.telegram.org`: it reads the
