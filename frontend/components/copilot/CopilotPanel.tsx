@@ -6,7 +6,7 @@ import {
   type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
 } from "@/lib/copilot";
 import Link from "next/link";
-import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
 import MarkPlanDone from "@/components/copilot/MarkPlanDone";
 import { useAppAccess } from "@/components/AccessProvider";
 import ExitLessons from "@/components/copilot/ExitLessons";
@@ -63,8 +63,23 @@ function inline(text: string) {
 const BULLET = /^\s*[-*] /;
 const NOTE = /^_\(([\s\S]*)\)_$/; // a label the server adds ("Simulated model …"), shown quietly
 
-/** Paragraphs and bullet lists; a run of bullet lines is a list even under a heading line in the same block. */
-function Prose({ text }: { text: string }) {
+/** The message box's words for disputing one line of an answer: the line quoted, the owner's reason still to write. */
+const pushBackText = (line: string) => `Push back on "${line.replace(/\*\*/g, "").trim().slice(0, 300)}": `;
+
+/** A small reply button after a line of an answer: puts that line in the message box to dispute, unsent. */
+function PushBack({ line, onPushBack }: { line: string; onPushBack?: (line: string) => void }) {
+  if (!onPushBack) return null;
+  return (
+    <button type="button" aria-label="Push back on this" title="Push back on this" onClick={() => onPushBack(line)}
+      className="ml-1 inline-flex size-6 items-center justify-center rounded align-middle text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:text-foreground sm:size-5">
+      <Reply className="size-3.5" aria-hidden />
+    </button>
+  );
+}
+
+/** Paragraphs and bullet lists; a run of bullet lines is a list even under a heading line in the same block. With
+ * ``onPushBack``, each bullet gets a Push back button. */
+function Prose({ text, onPushBack }: { text: string; onPushBack?: (line: string) => void }) {
   const runs: { list: boolean; lines: string[] }[] = [];
   for (const block of text.split(/\n{2,}/)) {
     let fresh = true;
@@ -79,7 +94,9 @@ function Prose({ text }: { text: string }) {
   return (
     <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
       {runs.map((run, i) => run.list
-        ? <ul key={i} className="list-disc space-y-1 pl-5">{run.lines.map((line, j) => <li key={j}>{inline(line.replace(BULLET, ""))}</li>)}</ul>
+        ? <ul key={i} className="list-disc space-y-1 pl-5">{run.lines.map((line, j) => (
+          <li key={j}>{inline(line.replace(BULLET, ""))}<PushBack line={line.replace(BULLET, "")} onPushBack={onPushBack} /></li>
+        ))}</ul>
         : NOTE.test(run.lines.join("\n"))
           ? <p key={i} className="text-xs text-muted-foreground">{run.lines.join("\n").replace(NOTE, "($1)")}</p>
           : <p key={i} className="whitespace-pre-wrap">{inline(run.lines.join("\n"))}</p>)}
@@ -89,16 +106,16 @@ function Prose({ text }: { text: string }) {
 
 /** An answer in the copilot's format (docs/copilot-lab.md § How the copilot reasons): the verdict and the headline, the
  * thesis · timing · contract read, the body, the case against set off, and a plain Changes if line. An answer without the format reads as plain text, as before. */
-function Answer({ text }: { text: string }) {
+function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string) => void }) {
   const parts = answerParts(text);
-  if (!parts) return <Prose text={text} />;
+  if (!parts) return <Prose text={text} onPushBack={onPushBack} />;
   return (
     <div className="space-y-2" data-testid="copilot-answer">
       <p className="flex items-baseline gap-2">
         <span data-testid="copilot-verdict" className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
           {parts.verdict}
         </span>
-        <strong className="text-sm font-semibold leading-snug text-foreground">{parts.headline}</strong>
+        <strong className="text-sm font-semibold leading-snug text-foreground">{parts.headline}<PushBack line={parts.headline} onPushBack={onPushBack} /></strong>
       </p>
       {parts.read && (
         <p data-testid="copilot-read" className="text-xs text-muted-foreground">
@@ -107,10 +124,10 @@ function Answer({ text }: { text: string }) {
           ))}
         </p>
       )}
-      {parts.body && <Prose text={parts.body} />}
+      {parts.body && <Prose text={parts.body} onPushBack={onPushBack} />}
       {parts.against && (
         <p data-testid="copilot-against" className="border-l-2 border-amber-300/60 pl-2 text-sm">
-          <span className="font-medium text-amber-300">Against</span> {parts.against}
+          <span className="font-medium text-amber-300">Against</span> {parts.against}<PushBack line={`Against: ${parts.against}`} onPushBack={onPushBack} />
         </p>
       )}
       {parts.changesIf && <p className="text-sm text-muted-foreground">Changes if {parts.changesIf}</p>}
@@ -1082,7 +1099,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </div>
         ) : (
           <div key={i} className="max-w-[95%]">
-            {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content} /> : !message.error && !message.metrics && (
+            {message.content && !(busy && i === messages.length - 1 && verdictPending(message.content)) ? <Answer text={message.content}
+              onPushBack={busy && i === messages.length - 1 ? undefined : line => fill(pushBackText(line))} /> : !message.error && !message.metrics && (
               <p className="text-sm italic text-muted-foreground" aria-label="Progress">{message.progress || waiting(message.tools ?? [])}</p>
             )}
             {message.error && <p role="alert" className="mt-1 text-sm text-rose-300">{message.error.message}</p>}

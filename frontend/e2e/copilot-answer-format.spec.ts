@@ -112,6 +112,13 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect(answer).not.toContainText("Verdict:"); // the structure, not the raw lines
   await expect(answer).not.toContainText("Read:");
   await expect(answer).not.toContainText("Against:");
+  // Any line can be disputed: its Push back button puts it in the box, quoted and unsent.
+  await expect(answer.getByRole("button", { name: "Push back on this" })).toHaveCount(4); // headline, two bullets, Against
+  await answer.getByTestId("copilot-against").getByRole("button", { name: "Push back on this" }).click();
+  await expect(page.getByLabel("Message")).toHaveValue('Push back on "Against: QQQ is down 1.4% today, and NBIS has given back half its morning gain.": ');
+  await expect(page.getByLabel("Message")).toBeFocused();
+  expect(seen.chats).toHaveLength(1);
+  await page.getByLabel("Message").fill("");
   await expect(answer).toContainText("(Simulated model — scripted text from the tool results, not Claude.)");
   expect(seen.chats[0].symbol).toBe("NBIS");
 
