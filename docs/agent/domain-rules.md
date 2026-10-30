@@ -197,12 +197,14 @@ is verifiable rather than hopeful.
   quantity before any buy or next two-leg order, same account and type, it adds
   two `roll:` fills: the old leg closes at FIFO cost and the new leg opens at cost
   plus the debit. The total is exact; the per-contract split is not a broker
-  price. Otherwise, or if the email mentions a credit, the order and every later
+  price. Otherwise, or if the email says "credit" next to its usual "average
+  price" wording, the order and every later
   one on that ticker stay unresolved and the copilot's position read says so. A
   resolved roll is not revisited and its fills are never rewritten by a rebuild, so
   a two-leg order that was not a roll can still pair wrongly while its other
   contract is unsold, and one unrelated orphan sale of the same
   quantity is indistinguishable from the new leg: the email cannot tell them apart.
+  A two-leg email in any other wording is only logged as a parse failure.
 
 ## Enrichment
 

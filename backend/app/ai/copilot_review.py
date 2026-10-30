@@ -171,7 +171,7 @@ def _alerts(db, trade, fills: list[dict]) -> dict:
             "note": after["note"],
         }.items() if v is not None})
     return {"state": "ok", "sent": len(sent), "shown": len(rows), "alerts": rows,
-            "then": "closed_15m, trimmed_15m, closed_later (same day), held_overnight, expired; vs_closing_at_alert_usd > 0 "
+            "then": "closed_15m, trimmed_15m, closed_later (same day), held_overnight, expired, rolled (no sale price to compare); vs_closing_at_alert_usd > 0 "
                     "means what was done beat closing at the alert's mark"}
 
 
