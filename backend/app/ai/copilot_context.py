@@ -121,8 +121,8 @@ def _positions(db, symbol: str | None, now_et: datetime) -> dict:
     rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
               "at": copilot_book._iso(r.executed_at)} for r in unresolved_rolls(db)]
     return {"state": "ok", "count": total, "shown": len(rows), "positions": rows,
-            **({"unresolved_rolls": rolls, "unresolved_rolls_note": "The broker's email names no contracts, so these positions "
-                "may be stale: the rolled-out contract can still show as held until the new one is sold."} if rolls else {}),
+            **({"unresolved_rolls": rolls, "unresolved_rolls_note": "The broker's email names no contracts, so these positions and "
+                "their realized P&L may be wrong until this resolves: the rolled-out contract can still show as held, or as expired worthless."} if rolls else {}),
             "units": "Options: avg_entry, mark and peak are dollars per contract (premium x 100). Stocks: per share."}
 
 

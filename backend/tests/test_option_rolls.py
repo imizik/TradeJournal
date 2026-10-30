@@ -127,3 +127,77 @@ def test_a_fill_missing_its_contract_details_does_not_break_a_rebuild():
     _roll(db)
     _fill(db, account, "sell_to_close", NEW, "2", "270", datetime(2026, 10, 29, 12, 17))
     assert resolve_rolls(db) == 1
+
+
+def _setup(db, account):
+    _fill(db, account, "buy_to_open", OLD, "2", "100", datetime(2026, 10, 27, 10, 0))
+
+
+Z = (Decimal("70"), date(2026, 11, 6))
+C = (Decimal("75"), date(2026, 11, 13))
+
+
+def test_a_same_minute_sale_of_a_held_contract_is_not_the_new_leg():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _fill(db, account, "buy_to_open", Z, "2", "80", datetime(2026, 10, 28, 10, 0))
+    _fill(db, account, "sell_to_close", Z, "2", "90", ROLL_AT)
+    _roll(db, net="50")
+    _fill(db, account, "sell_to_close", NEW, "2", "300", datetime(2026, 10, 29, 12, 0))
+    assert resolve_rolls(db) == 1
+    assert sum(t.realized_pnl for t in _trades(db).trades) == Decimal("320")
+
+
+def test_a_chain_of_rolls_stays_unresolved_in_any_order():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db, net="50")
+    db.add(OptionRollOrder(raw_email_id="roll-2", ticker="CRWV", contracts=Decimal(2), net_per_contract=Decimal(30), executed_at=datetime(2026, 10, 29, 11, 40)))
+    _fill(db, account, "sell_to_close", C, "2", "300", datetime(2026, 10, 29, 12, 0))
+    assert resolve_rolls(db) == 0 and len(unresolved_rolls(db)) == 2
+
+
+def test_a_later_sale_of_the_old_contract_proves_it_was_not_rolled():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db)
+    _fill(db, account, "sell_to_close", OLD, "2", "300", datetime(2026, 10, 29, 12, 0))
+    _fill(db, account, "sell_to_close", NEW, "2", "270", datetime(2026, 10, 29, 12, 1))
+    assert resolve_rolls(db) == 0
+
+
+def test_a_partial_sale_or_two_candidates_stay_unresolved_until_clear():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db, net="50")
+    _fill(db, account, "sell_to_close", NEW, "1", "200", datetime(2026, 10, 29, 12, 0))
+    assert resolve_rolls(db) == 0
+    _fill(db, account, "sell_to_close", Z, "2", "70", datetime(2026, 10, 29, 12, 5))
+    assert resolve_rolls(db) == 0
+    _fill(db, account, "sell_to_close", NEW, "1", "220", datetime(2026, 10, 29, 12, 6))
+    assert resolve_rolls(db) == 0  # the new leg now adds up, but so does the unrelated sale
+
+
+def test_a_rebuy_before_the_sale_is_not_a_new_leg():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db, net="50")
+    _fill(db, account, "sell_to_close", NEW, "1", "200", datetime(2026, 10, 29, 12, 0))
+    _fill(db, account, "buy_to_open", NEW, "1", "120", datetime(2026, 10, 29, 12, 5))
+    _fill(db, account, "sell_to_close", NEW, "1", "150", datetime(2026, 10, 29, 12, 9))
+    assert resolve_rolls(db) == 0
+
+
+def test_an_earlier_unresolved_order_blocks_later_ones_on_the_ticker_only():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db, net="50")
+    db.add(OptionRollOrder(raw_email_id="roll-2", ticker="CRWV", contracts=Decimal(2), net_per_contract=Decimal(30), executed_at=datetime(2026, 10, 30, 11, 0), credit_mentioned=False))
+    db.flush()
+    assert resolve_rolls(db) == 0 and len(unresolved_rolls(db)) == 2

@@ -192,12 +192,15 @@ is verifiable rather than hopeful.
 - Robinhood's two-leg email ("Option Order Executed", "2 CRWV 2-Option
   Strategies") names no contracts and no price per leg. `optionrollorder`
   keeps its facts, and `option_rolls.resolve_rolls` runs before each rebuild.
-  With exactly one open contract of the quantity and one later sale of a
-  never-opened contract of the same account and type, it adds two `roll:` fills:
-  the old leg closes at FIFO cost and the new leg opens at cost plus the debit.
-  The total is exact; the per-contract split is not a broker price. Otherwise, or
-  if the email mentions a credit, the order stays unresolved and the copilot's
-  position read says so.
+  With exactly one open contract of the quantity that later sales leave unsold,
+  and one contract with no earlier fill whose later sales reach exactly the
+  quantity before any buy or next two-leg order, same account and type, it adds
+  two `roll:` fills: the old leg closes at FIFO cost and the new leg opens at cost
+  plus the debit. The total is exact; the per-contract split is not a broker
+  price. Otherwise, or if the email mentions a credit, the order and every later
+  one on that ticker stay unresolved and the copilot's position read says so. A
+  resolved roll is not revisited, and one unrelated orphan sale of the same
+  quantity is indistinguishable from the new leg: the email cannot tell them apart.
 
 ## Enrichment
 

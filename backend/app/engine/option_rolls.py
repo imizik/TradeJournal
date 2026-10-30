@@ -58,23 +58,51 @@ def _open_lots(fills: list[Fill]) -> dict[tuple, deque]:
     return lots
 
 
-def _match(roll: OptionRollOrder, fills: list[Fill]) -> _Match | None:
-    quantity = Decimal(str(roll.contracts))
-    before = [f for f in fills if f.executed_at <= roll.executed_at]
-    lots = _open_lots(before)
-    shorted = {_key(f) for f in fills if f.side == "sell_to_open"}
-    old = [k for k, rows in lots.items() if sum(r[0] for r in rows) >= quantity
-           and k not in shorted and k[3] >= roll.executed_at.date()]
-    first_after: dict[tuple, Fill] = {}
+def _still_held(key: tuple, quantity: Decimal, lots: deque, fills: list[Fill], at) -> bool:
+    """The contract can have been rolled only if later real sales leave the rolled quantity unsold."""
+    held = sum(r[0] for r in lots)
     for fill in fills:
-        if fill.executed_at >= roll.executed_at:
-            first_after.setdefault(_key(fill), fill)
-    new = [k for k, fill in first_after.items() if fill.side == "sell_to_close" and not lots.get(k)
-           and Decimal(str(fill.contracts)) <= quantity]
+        if _key(fill) != key or fill.executed_at <= at:
+            continue
+        if fill.side in _OPENS:
+            break
+        held -= Decimal(str(fill.contracts))
+    return held >= quantity
+
+
+def _new_leg_sold_at(key: tuple, quantity: Decimal, fills: list[Fill], at):
+    """When a never-opened contract's sales first add up to exactly the quantity, with no buy before that; else None."""
+    sold = Decimal(0)
+    for fill in fills:
+        if _key(fill) != key:
+            continue
+        if fill.executed_at < at or fill.side != "sell_to_close":
+            return None
+        sold += Decimal(str(fill.contracts))
+        if sold >= quantity:
+            return fill.executed_at if sold == quantity else None
+    return None
+
+
+def _match(roll: OptionRollOrder, fills: list[Fill], next_roll_at) -> _Match | None:
+    """``next_roll_at``: the ticker's next two-leg order. One before the new leg is fully sold could be a chain, so no match."""
+    quantity = Decimal(str(roll.contracts))
+    at = roll.executed_at
+    lots = _open_lots([f for f in fills if f.executed_at <= at])
+    shorted = {_key(f) for f in fills if f.side == "sell_to_open"}
+    old = [k for k, rows in lots.items() if k not in shorted and k[3] >= at.date() and _still_held(k, quantity, rows, fills, at)]
+    first_fill: dict[tuple, Fill] = {}
+    for fill in fills:
+        first_fill.setdefault(_key(fill), fill)
+    # Every sale of something never opened is a candidate, even a part sale that cannot qualify yet: it could be the real leg.
+    new = [k for k, f in first_fill.items() if f.executed_at >= at and f.side == "sell_to_close"]
     pairs = [(o, n) for o in old for n in new if o != n and o[:2] == n[:2]]
     if len(pairs) != 1:
         return None
     from_key, to_key = pairs[0]
+    sold_at = _new_leg_sold_at(to_key, quantity, fills, at)
+    if sold_at is None or (next_roll_at is not None and sold_at >= next_roll_at):
+        return None
     remaining, cost = quantity, Decimal(0)
     for contracts, price in lots[from_key]:
         used = min(contracts, remaining)
@@ -94,14 +122,20 @@ def resolve_rolls(session: Session) -> int:
     rolls = session.exec(select(OptionRollOrder).order_by(OptionRollOrder.executed_at)).all()
     known = set(session.exec(select(Fill.raw_email_id).where(Fill.raw_email_id.like("roll:%"))).all())
     added = 0
-    for roll in rolls:
-        if roll.credit_mentioned or _is_resolved(roll, known):
+    blocked: set[str] = set()  # an unresolved order may have moved contracts, so nothing later on that ticker can be trusted
+    for index, roll in enumerate(rolls):
+        if _is_resolved(roll, known):
+            continue
+        if roll.credit_mentioned or roll.ticker in blocked:
+            blocked.add(roll.ticker)
             continue
         fills = sorted(session.exec(select(Fill).options(*FILL_LIGHT).where(
             Fill.ticker == roll.ticker, Fill.instrument_type == "option", Fill.option_type.is_not(None),
             Fill.strike.is_not(None), Fill.expiration.is_not(None))).all(), key=_order)
-        found = _match(roll, fills)
+        next_roll_at = next((r.executed_at for r in rolls[index + 1:] if r.ticker == roll.ticker), None)
+        found = _match(roll, fills, next_roll_at)
         if found is None:
+            blocked.add(roll.ticker)
             continue
         net = Decimal(str(roll.net_per_contract))
         legs = (("close", "sell_to_close", found.old, found.cost),
