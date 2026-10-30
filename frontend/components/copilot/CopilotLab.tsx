@@ -6,7 +6,7 @@ import { Menu, MessagesSquare, PanelRight, Plus, Search } from "lucide-react";
 import { openNavMenu, useFoldedNav } from "@/components/Nav";
 import ClosePass, { closeSteps } from "@/components/copilot/ClosePass";
 import CommandPalette, { KBD, useJumpKey, type PaletteCommand } from "@/components/copilot/CommandPalette";
-import CopilotPanel, { type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
+import CopilotPanel, { remember, rememberedThread, type HomeActions, type PanelLink } from "@/components/copilot/CopilotPanel";
 import DecisionBar from "@/components/copilot/DecisionBar";
 import FillLinkBar, { FillsToLink, useFillLinks } from "@/components/copilot/FillLinkBar";
 import RadarDecision from "@/components/copilot/RadarDecision";
@@ -22,11 +22,11 @@ import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
-import { afterClose, deskSymbolThread, nyDay, saveHorizon, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
+import { afterClose, deskSymbolThread, nyDay, saveHorizon, threadInUrl, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
 
-const TABS: { id: DeskTab; label: string }[] = [{ id: "now", label: "Now" }, { id: "thread", label: "Thread" }, { id: "context", label: "Context" }];
+const TABS: { id: DeskTab; label: string }[] = [{ id: "now", label: "Threads" }, { id: "thread", label: "Thread" }, { id: "context", label: "Context" }];
 const CONTEXT_KEY = "desk.context.v1";
 /** The close pass in progress (its New York day), kept for this tab: a thread with no conversation opens by its link. */
 const CLOSING_KEY = "desk.closing.v1";
@@ -99,10 +99,10 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     // Main: a deep link leaves for the bare desk (a new link remounts the lab); otherwise the open conversation stays saved.
     home: () => {
       setTab("thread");
-      if (window.location.search) router.push("/copilot-lab");
+      if (link) { remember(null); router.push("/copilot-lab"); }
       else setCommand({ kind: "home", n: ++sent.current });
     },
-  }), [router]);
+  }), [router, link]);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setTab("thread"); }, []);
   // The thread list's Plan a trade link: a new conversation with "Plan a trade: " in the box, unsent. Already there,
   // the same link would not remount the lab, so the page reloads it.
@@ -117,6 +117,34 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const asking = deciding || !!session.data?.to_answer?.alerts?.rows.some(a => a.today && !a.feedback && a.symbol === thread?.symbol);
   const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread, holdTop: asking,
     planDone: planSymbol ? { symbol: planSymbol, done: () => setRefresh(n => n + 1) } : null }), [command, planSymbol, asking]);
+
+  // The open thread is in the address, so Back and a reload come back to it: opening another adds a step, and the thread
+  // the desk reopened by itself takes the bare address's place. Only the address changes, so the lab stays mounted.
+  const addressed = useRef<string | null>(null);
+  const reopened = useRef<string | null>(null);
+  useEffect(() => {
+    reopened.current = rememberedThread();
+    if (threadInUrl()) setTab("thread"); // eslint-disable-line react-hooks/set-state-in-effect -- the address is read after hydration
+  }, []);
+  const threadId = thread?.id ?? null;
+  useEffect(() => {
+    if (threadId === addressed.current) return;
+    const quiet = !addressed.current && threadId === reopened.current;
+    addressed.current = threadId;
+    reopened.current = null;
+    if (threadId === threadInUrl() || (!threadId && !window.location.search)) return;
+    window.history[quiet ? "replaceState" : "pushState"](null, "", threadId ? `/copilot-lab?thread=${threadId}` : "/copilot-lab");
+  }, [threadId]);
+  useEffect(() => {
+    const back = () => {
+      const id = threadInUrl();
+      if (id) actions.open(id);
+      else if (!window.location.search && !link) actions.home();
+      else window.location.reload(); // a deep link's address: its question comes back with it
+    };
+    window.addEventListener("popstate", back);
+    return () => window.removeEventListener("popstate", back);
+  }, [actions, link]);
 
   // A row opens the way the thread list opens it: an investigation in place, anything else by its link.
   const pick = useCallback((row: DeskThread) => {
@@ -238,14 +266,14 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
     ...(dayPhase === "close" ? [{ id: "close", name: "Close the day", hint: "Each close question, alert, Radar hit and fill to link, one at a time. Nothing is sent.", run: closeDay }] : []),
   ], [actions, dayPhase, fill, planTrade, closeDay]);
 
-  // J / K walk the threads that open in place, in list order; pinned rows ask and other rows leave the page, so they are skipped.
+  // J / K walk the conversations the thread list shows, subthreads included, in its order.
+  const [walk, setWalk] = useState<string[]>([]);
   const step = useCallback((by: 1 | -1) => {
-    const openable = rows.filter(r => r.investigationId);
-    if (!openable.length) return;
-    const at = openable.findIndex(r => r.investigationId === thread?.id);
-    const next = at < 0 ? (by > 0 ? 0 : openable.length - 1) : (at + by + openable.length) % openable.length;
-    actions.open(openable[next].investigationId!);
-  }, [rows, thread?.id, actions]);
+    if (!walk.length) return;
+    const at = walk.indexOf(thread?.id ?? "");
+    const next = at < 0 ? (by > 0 ? 0 : walk.length - 1) : (at + by + walk.length) % walk.length;
+    actions.open(walk[next]);
+  }, [walk, thread?.id, actions]);
 
   useEffect(() => {
     if (!on) return;
@@ -344,8 +372,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main}
-              pick={pick} onRows={setRows} onSaved={setSaved} refresh={refresh}
+            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main && (!thread || thread.title === BRIEFING_TITLE)}
+              pick={pick} onRows={setRows} onWalk={setWalk} onSaved={setSaved} refresh={refresh}
               toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
               {phaseAction && (
                 <button type="button" onClick={runPhase} title={phaseAction.hint}
@@ -399,7 +427,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
         </section>
         {on && <aside aria-label="Context" className={styles.inspector}><Inspector thread={context} day={day} /></aside>}
       </div>
-      {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} />}
+      {on && <CommandPalette open={palette} onClose={() => setPalette(false)} threads={rows.filter(r => r.group !== "pinned")} commands={commands} onThread={pick} onConversation={actions.open} />}
     </div>
   );
 }

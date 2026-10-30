@@ -229,7 +229,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
 
   **All | Plans** under the day line switches the list to the **Plans**
   view and back; the choice is remembered in this browser (`localStorage`),
-  and on a phone it sits inside the Now tab. The Plans view lists every plan
+  and on a phone it sits inside the Threads tab. The Plans view lists every plan
   from the same read (`plans` in `GET /copilot/desk/threads`), grouped
   **Armed**, **In position** (a fill waiting to be linked counts), **Exited
   this week** (its exit review waiting) and **Done this week** (the
@@ -838,7 +838,10 @@ its own. No futures quote is read yet.
 **Keys and the palette.** ⌘K (Ctrl+K off a Mac; either works), or the desk bar's
 "Jump to…" button, opens a palette over the desk (`CommandPalette.tsx`, a
 modal dialog): a search box, then Threads (the thread list's rows in list
-order, each with its status line and value) and Commands (Plan a trade, Review
+order, each with its status line and value), Conversations (from two letters
+typed, every saved conversation whose title, symbol or conclusion holds the
+words, up to the newest 50 matches, from `GET /copilot/investigations?q=`, so a
+closed or old thread stays reachable) and Commands (Plan a trade, Review
 my week, What matters right now?, and the day's phase command: Prep the day
 before 9:30 on a weekday, Close the day after 16:00). Type to filter, arrows
 and Enter to choose, Escape or a click outside to close. A thread opens through
@@ -846,9 +849,12 @@ the list's own path (in place, or its deep link); Plan a trade opens the same
 unsent "Plan a trade: " link as the list's button; Review my week and What
 matters right now? send their one turn exactly as their pinned rows do; Prep
 the day and Close the day only put a question in the message box, unsent.
-While not typing in a field: J / K open the next or previous thread in list
-order (rows that open in place; a Radar or trade-link row is skipped, since it
-leaves the page), N opens Plan a trade (not while the message box holds unsent words), and `]` hides or shows the Context pane
+The open thread is in the address (`/copilot-lab?thread=<id>`), so Back returns
+to the thread before it and a reload stays on it. The bare address reopens the
+last thread only on the New York day it was open; on a new day the desk starts
+on Main. While not typing in a field: J / K open the next or previous
+conversation as the list shows it (those under Main, then each ticker's
+subthreads when shown, else its newest; folded ones are skipped), N opens Plan a trade (not while the message box holds unsent words), and `]` hides or shows the Context pane
 where the panes sit side by side (remembered in this browser; the desk bar's
 pane button does the same, and a phone keeps its tabs). No desk key fires in an
 input, text area or editable field, ⌘K included, and no other browser shortcut
@@ -858,8 +864,8 @@ J/K order, `]` remembered, keys ignored while typing, the timeline at 1440 and
 375 px).
 
 The panes follow the desk's own width: three from 1100 px, two below that
-(Context under Threads), and below 760 px one at a time behind Now / Thread /
-Context tabs. A phone lands on Now unless a deep link brings a conversation.
+(Context under Threads), and below 760 px one at a time behind Threads / Thread /
+Context tabs. A phone lands on Threads unless a deep link or `?thread=` brings a conversation.
 While the lab is off only the conversation shows, saying so. On a wide screen
 (1024 px and up) the desk takes the whole screen, as Charts does
 (`AppMain.fullScreenRoute`), and each pane scrolls on its own. From 768 px the

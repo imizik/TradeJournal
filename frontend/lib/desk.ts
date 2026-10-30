@@ -7,7 +7,7 @@
 import type { PlanPosition } from "@/components/dashboard/PlansCard";
 import type { AlertFeedback } from "@/lib/alertFeedback";
 import { api, apiUrl } from "@/lib/api";
-import type { ExitLesson, InvestigationSummary, PlanBoardLevel, PlanBoardRow, PlansBoard } from "@/lib/copilot";
+import { UUID_RE, type ExitLesson, type InvestigationSummary, type PlanBoardLevel, type PlanBoardRow, type PlansBoard } from "@/lib/copilot";
 import type { RadarRating } from "@/lib/radar";
 
 /** The phone's three tabs; on a wide screen every pane shows at once. */
@@ -136,6 +136,13 @@ const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Ameri
 /** The latest 50 saved conversations, open and closed, newest first: the thread list's subthreads and the breadcrumb. */
 export async function getSavedConversations(signal?: AbortSignal): Promise<InvestigationSummary[]> {
   const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return ((await response.json()) as { investigations: InvestigationSummary[] }).investigations;
+}
+
+/** Every saved conversation whose title, symbol or conclusion holds the words, newest first; Jump's reach past the list. */
+export async function searchConversations(query: string, signal?: AbortSignal): Promise<InvestigationSummary[]> {
+  const response = await fetch(apiUrl(`/copilot/investigations?limit=50&q=${encodeURIComponent(query)}`), { cache: "no-store", signal });
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
   return ((await response.json()) as { investigations: InvestigationSummary[] }).investigations;
 }
@@ -272,6 +279,21 @@ export function toReview(rows: DeskThread[], day: string, done: ReadonlySet<stri
 
 /** Today in New York, YYYY-MM-DD. */
 export const nyDay = (at: Date = new Date()) => nyDate(at);
+
+/** Does this row put a "needs you" dot on its ticker: a decision to make, a card waiting, a fill to link or a close
+ * question not answered or skipped today. */
+export const needsYou = (row: DeskThread, day: string | null) => row.group === "act" || row.group === "draft" || !!row.fillToLink
+  || (!!row.close && !row.close.reviewed && !(day && row.symbol && reviewSkipped(day, row.symbol)));
+/** The desk's one "needs you" count: tickers with the dot. */
+export const needingCount = (rows: DeskThread[], day: string | null) =>
+  new Set(rows.filter(r => r.symbol && r.group !== "pinned" && !r.key.startsWith("radar:") && needsYou(r, day)).map(r => r.symbol)).size;
+
+/** The conversation the address names (?thread=, or a deep link's ?investigation=), lower case; null when none. */
+export function threadInUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("thread") ?? params.get("investigation");
+  return id && UUID_RE.test(id) ? id.toLowerCase() : null;
+}
 
 /**
  * The open thread's plan and position, for the thread header and plan ladder. An option's ``mark`` and ``avg_entry``

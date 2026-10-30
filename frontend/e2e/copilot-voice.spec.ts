@@ -83,6 +83,7 @@ async function hold(page: Page, ms = 700) {
   const mic = page.getByTestId("copilot-mic");
   // The thread list loads in after the mic appears (beside it, or on its own tab on a phone): let it settle first.
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeAttached();
+  await page.waitForLoadState("networkidle"); // the Briefing's lines read in above the box and move the mic down
   await mic.hover();
   const box = (await mic.boundingBox())!;
   await page.mouse.down();
