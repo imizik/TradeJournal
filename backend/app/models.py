@@ -2063,8 +2063,8 @@ class ThesisWatchTrigger(SQLModel, table=True):
 class Outcome(SQLModel, table=True):
     """What followed one output of the app (``engine/outcomes.py``, docs/analytics.md § Outcomes): the underlying's
     price 1 hour, 1 trading day and 5 trading days after it, what the owner did in the fills, and the dollars against
-    the obvious alternative. Filled in by the morning sync pipeline from stored bars and the journal, no model or
-    provider call; a row with a window still open stays ``complete`` false and is recomputed next run. Additive: one
+    the obvious alternative. Filled in by the sync pipeline (08:00 and 17:00 New York) from stored bars and the journal, no
+    model or price provider call; a row with a window still open stays ``complete`` false and is recomputed next run. Additive: one
     row per (``subject_kind``, ``subject_id``), nothing else reads or writes the sources through it."""
 
     __tablename__ = "outcome"

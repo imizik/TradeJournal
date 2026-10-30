@@ -1,7 +1,7 @@
 """Outcome attribution (docs/analytics.md § Outcomes): for every output the app makes, what the underlying did 1 hour,
 1 trading day and 5 trading days later, what the owner did in the fills, and the dollars against the obvious
-alternative. One ``Outcome`` row per output, filled in by the morning sync pipeline (``compute_outcomes``, after
-fills and enrichment). Python only: no model call, and prices come from stored bars, never a price provider request
+alternative. One ``Outcome`` row per output, filled in by the sync pipeline the timer runs at 08:00 and 17:00 New York
+(``compute_outcomes``, after fills and enrichment). Python only: no model call, and prices come from stored bars, never a price provider request
 (the market calendar is its usual cached read: at most one Tradier calendar request a New York day per month).
 
 **Subjects**, anchored at the output's moment (naive UTC), since ``OUTCOMES_SINCE`` (default 2026-10-21, the alerts'
@@ -11,7 +11,7 @@ go-live):
   suppressed, over cap) are rows too, ``held`` true, so they can serve as a control.
 - ``plan``: every pre-trade plan (``TradeCapture``, the copilot's plan card included), anchored when it was saved.
 - ``radar_event``: every Radar event (the store, read-only), anchored at its first sighting; a stock event on its
-  stock, a group event on its top member (the evidence that moved most in the event's direction).
+  stock, a group event on its top member (Radar's first listed).
 - ``research``: each saved Jo research record (``CopilotInvestigation.source == "jo"``) on its symbol; d1 and d5.
 - ``shadow_decision``: each Shadow book plan or skip on its symbol; d1 and d5 (its own paper fills give its result).
 - ``companion_update``: reserved for the position companion's updates once that table exists.
@@ -23,7 +23,7 @@ Each is ``{price, pct, high, low, complete}``: the last minute's close before th
 in percent, and the highest and lowest minute inside the window. A window still open, or one whose sessions are not
 stored yet, is incomplete and recomputed next run; one still missing sessions ``STALE_DAYS`` after it ended is closed
 with what there is (``missing`` says so). The reference price is the source's own price when it recorded the
-underlying (Radar's evidence), else the close of the stored minute at or before the anchor.
+underlying (Radar's evidence at first sight), else the close of the last stored minute at or before the anchor.
 
 **Action**, from the fills (naive New York): ``closed``, ``trimmed``, ``added`` or ``held`` when a position in the
 symbol was open at the anchor, else ``entered`` or ``none``; ``unknown`` when it cannot be told (a ping with no symbol
@@ -32,7 +32,7 @@ or a position that can no longer be found). Windows: 15 minutes for an exit-kind
 it is linked to a trade (else ``none``), a Shadow decision reads its paper book (``entered``, ``closed`` or ``none``).
 
 **Alternative** (``alt_usd``): an open-trade alert's proceeds against closing its contracts at the alert's midpoint
-mark (``exit_habits.follow_up``'s ``vs_alert``); a Radar event, one share taken at first sight in Radar's direction,
+mark (``exit_habits.follow_up``'s ``vs_alert``), for alerts sent or possibly sent, as ``exit_habits`` counts them; a Radar event, one share taken at first sight in Radar's direction,
 the scorecard's move against SPY to the session's last pass (``radar_scorecard``) times the price at first sight.
 Nothing for the other kinds. Counts and price paths, not causation.
 """
@@ -48,7 +48,7 @@ import uuid
 
 from sqlmodel import Session, select
 
-from app.engine import capture_links, exit_habits, notification_policy
+from app.engine import alert_feedback, capture_links, exit_habits, notification_policy
 from app.engine.analytics import wall_time
 from app.engine.chart_journal import OPEN_SIDES
 from app.engine.chart_math import ET
@@ -61,6 +61,7 @@ log = logging.getLogger(__name__)
 VERSION = 1
 SINCE = date(2026, 10, 21)  # POSITION_ALERTS_ENABLED=true on the VPS; OUTCOMES_SINCE overrides
 RUN_CAP = 400  # subjects computed per run, oldest first; the rest wait for the next run
+LOOKBACK_DAYS = 5  # calendar days searched back for a reference minute: a long weekend
 STALE_DAYS = 10  # a window still missing stored sessions this long after it ended is closed with what there is
 KINDS = ("ping", "plan", "radar_event", "research", "shadow_decision", "companion_update")
 ACTIONS = ("closed", "trimmed", "added", "held", "entered", "none", "unknown")
@@ -124,10 +125,14 @@ def trading_days_after(hours: Hours, day: date, n: int) -> list[date]:
 # ------------------------------------------------------------------ price paths
 
 def reference(bars: Bars, symbol: str, anchor: float) -> float | None:
-    """The close of the stored minute at or before ``anchor`` on its New York day."""
-    minutes = bars(symbol, datetime.fromtimestamp(anchor, ET).date()) or []
-    before = [b for b in minutes if b["time"] <= anchor]
-    return float(before[-1]["close"]) if before else None
+    """The close of the last stored minute at or before ``anchor``: on its New York day, else the latest stored session
+    in the ``LOOKBACK_DAYS`` before it (a weekend, or before 04:00)."""
+    day = datetime.fromtimestamp(anchor, ET).date()
+    for back in range(LOOKBACK_DAYS + 1):
+        before = [b for b in bars(symbol, day - timedelta(days=back)) or [] if b["time"] <= anchor]
+        if before:
+            return float(before[-1]["close"])
+    return None
 
 
 def path(minutes: list[dict], ref: float | None, start: float, end: float, *, final: bool) -> dict:
@@ -241,7 +246,8 @@ def ping_row(db: Session, ping: PhonePing, bars: Bars, hours: Hours, now: float)
         else:
             fills = notification_policy._fills(db, trade)
             did = action(fills, start, start + timedelta(minutes=EXIT_MINUTES), now_ny)
-            if (alert := _alert(db, ping)) is not None:
+            # As exit_habits counts it: only alerts that reached, or may have reached, the phone; a held one is a control.
+            if (alert := _alert(db, ping)) is not None and alert.delivery in alert_feedback.ELIGIBLE_DELIVERIES:
                 alt = exit_habits.follow_up({"detected_at": alert.detected_at, "contracts": float(alert.contracts),
                                              "mark": None if alert.mark is None else float(alert.mark)},
                                             fills, trade.status)["vs_alert"]
@@ -283,12 +289,9 @@ def plan_row(db: Session, capture: TradeCapture, link: dict | None, bars: Bars, 
 
 
 def top_member(event: dict) -> str | None:
-    """A stock event's stock; a group event's member that moved most in the event's direction."""
-    if event.get("kind") in ("relative_to_spy", "relative_to_sector") or not event.get("evidence"):
-        return (event.get("symbols") or [None])[0]
-    sign = 1 if event.get("direction") == "up" else -1
-    members = [e for e in event["evidence"] if e.get("symbol") in (event.get("symbols") or [])] or event["evidence"]
-    return max(members, key=lambda e: (sign * e["change_pct"], e["symbol"]))["symbol"]
+    """A stock event's stock; a group event's top member, Radar's own first (its members are ordered by the move in the
+    rule's window, the one its chart link opens)."""
+    return (event.get("symbols") or [None])[0]
 
 
 def radar_alt(store, event: dict, symbol: str, price: float | None, passes: list[dict], session_over: bool, prices: dict) -> float | None:
@@ -304,7 +307,8 @@ def radar_alt(store, event: dict, symbol: str, price: float | None, passes: list
 def radar_row(db: Session, store, event: dict, passes: list[dict], bars: Bars, hours: Hours, now: float, prices: dict) -> dict:
     symbol = top_member(event)
     seen = datetime.fromtimestamp(_iso_epoch(event["first_seen_at"]), UTC).replace(tzinfo=None)
-    evidence = next((e for e in event.get("evidence") or [] if e.get("symbol") == symbol), None)
+    # The rules record each symbol at the window's start and then at first sight: the price at first sight is the last.
+    evidence = next((e for e in reversed(event.get("evidence") or []) if e.get("symbol") == symbol), None)
     ref = float(evidence["last"]) if evidence and evidence.get("last") else None
     today = datetime.fromtimestamp(now, ET).date().isoformat()
     start, now_ny = _ny(seen), _ny(datetime.fromtimestamp(now, UTC).replace(tzinfo=None))
@@ -338,10 +342,10 @@ def research_row(db: Session, record: CopilotInvestigation, bars: Bars, hours: H
 def shadow_row(db: Session, decision: ShadowBookDecision, bars: Bars, hours: Hours, now: float) -> dict:
     """A Shadow book decision on its symbol: d1 and d5 of the underlying; the action is its own paper book's."""
     kinds = set(db.exec(select(ShadowBookEvent.event_type).where(ShadowBookEvent.decision_id == decision.id)).all())
-    did = "closed" if "exit" in kinds else "entered" if "entry" in kinds else "none"
+    did = "closed" if "exit" in kinds else "entered" if "entry" in kinds else "none"  # ``unresolved`` ends it too
     row = _row("shadow_decision", str(decision.id), symbol=decision.symbol, anchored_at=decision.decided_at or decision.claimed_at,
                bars=bars, hours=hours, now=now, which=("d1", "d5"), source_kind=decision.status, action=did)
-    if decision.status == "plan" and did == "entered":
+    if decision.status == "plan" and did == "entered" and "unresolved" not in kinds:
         row["complete"] = False  # the paper position is still open
     return row
 
@@ -389,23 +393,26 @@ def compute(db: Session, now: float, *, bars: Bars | None = None, hours: Hours |
         found = have.get((kind, subject_id))
         return found is None or not found.complete or found.version < VERSION
 
-    work: list[tuple[datetime, str, Callable[[], dict]]] = []
+    work: list[tuple[datetime, str, Callable[[], dict], bool]] = []
     for ping in db.exec(select(PhonePing).where(PhonePing.decided_at >= begin)).all():
         if due("ping", str(ping.id)):
-            work.append((ping.delivered_at or ping.decided_at, "ping", lambda p=ping: ping_row(db, p, bars, hours, now)))
+            work.append((ping.delivered_at or ping.decided_at, "ping", lambda p=ping: ping_row(db, p, bars, hours, now),
+                         ("ping", str(ping.id)) in have))
     captures = [c for c in db.exec(select(TradeCapture).where(TradeCapture.received_at >= begin)).all() if due("plan", str(c.id))]
     links = capture_links.link_rows(db, captures)
     for c in captures:
-        work.append((c.received_at, "plan", lambda c=c: plan_row(db, c, links.get(c.id, {}).get("link"), bars, hours, now)))
+        work.append((c.received_at, "plan", lambda c=c: plan_row(db, c, links.get(c.id, {}).get("link"), bars, hours, now),
+                     ("plan", str(c.id)) in have))
     for record in db.exec(select(CopilotInvestigation).where(CopilotInvestigation.source == "jo",
                                                               CopilotInvestigation.created_at >= begin)).all():
         if due("research", f"{record.id}:{record.symbol or ''}"):
-            work.append((record.created_at, "research", lambda r=record: research_row(db, r, bars, hours, now)))
+            work.append((record.created_at, "research", lambda r=record: research_row(db, r, bars, hours, now),
+                         ("research", f"{record.id}:{record.symbol or ''}") in have))
     for decision in db.exec(select(ShadowBookDecision).where(ShadowBookDecision.status.in_(("plan", "skip")),
                                                              ShadowBookDecision.claimed_at >= begin)).all():
         if due("shadow_decision", str(decision.id)):
             work.append((decision.decided_at or decision.claimed_at, "shadow_decision",
-                         lambda d=decision: shadow_row(db, d, bars, hours, now)))
+                         lambda d=decision: shadow_row(db, d, bars, hours, now), ("shadow_decision", str(decision.id)) in have))
     radar_note = None
     radar = _radar_store() if store is None else store or None
     if radar is not None:
@@ -424,14 +431,15 @@ def compute(db: Session, now: float, *, bars: Bars | None = None, hours: Hours |
                                                key=lambda p: (p["started_at"], p["id"]))
                         return radar_row(db, radar, e, passes[s], bars, hours, now, prices)
                     work.append((datetime.fromtimestamp(_iso_epoch(event["first_seen_at"]), UTC).replace(tzinfo=None),
-                                 "radar_event", build))
+                                 "radar_event", build, ("radar_event", event["event_id"]) in have))
         except Exception:  # noqa: BLE001 - a busy or damaged Radar file must not stop the other kinds
             log.warning("Outcomes: the Radar file could not be read", exc_info=True)
             radar_note = "Radar file unreadable; its events wait for the next run."
-    work.sort(key=lambda w: w[0])
+    # New subjects first, then rows waiting on a window, each oldest first: a long-open row never starves today's.
+    work.sort(key=lambda w: (w[3], w[0]))
     done = Counter()
     failed = 0
-    for _, kind, build in work[:cap]:
+    for _, kind, build, _ in work[:cap]:
         # One commit per subject: a failed read rolls back only its own subject (Postgres refuses every later
         # statement in an aborted transaction).
         try:

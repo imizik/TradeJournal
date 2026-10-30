@@ -138,12 +138,17 @@ def test_another_contract_left_open_is_a_trim():
     assert outcomes.action(fills, START, START + timedelta(minutes=15), LATER) == "trimmed"
 
 
-def test_a_group_event_is_read_on_its_top_member():
-    group = {"kind": "group_move", "direction": "down", "symbols": ["AAA", "BBB"],
-             "evidence": [{"symbol": "AAA", "change_pct": -1.0}, {"symbol": "BBB", "change_pct": -3.0}]}
-    assert outcomes.top_member(group) == "BBB"
-    assert outcomes.top_member({**group, "direction": "up"}) == "AAA"
+def test_a_group_event_is_read_on_radars_top_member():
+    group = {"kind": "group_move", "direction": "down", "symbols": ["BBB", "AAA"],
+             "evidence": [{"symbol": "AAA", "change_pct": -5.0}, {"symbol": "BBB", "change_pct": -3.0}]}
+    assert outcomes.top_member(group) == "BBB"  # Radar orders members by the window's move, not the day's change
     assert outcomes.top_member({"kind": "relative_to_spy", "symbols": ["CCC"], "evidence": []}) == "CCC"
+
+
+def test_a_weekend_anchor_takes_the_last_stored_minute_before_it():
+    assert outcomes.reference(BARS, "SNDK", at(date(2026, 10, 24), "11:00")) == 95.0  # Saturday: Friday's close
+    assert outcomes.reference(BARS, "SNDK", at(date(2026, 10, 22), "03:00")) == 96.0  # before 04:00: the day before
+    assert outcomes.reference(BARS, "SNDK", at(date(2026, 11, 20), "11:00")) is None  # nothing in five days
 
 
 def test_the_trade_page_text():
@@ -327,6 +332,47 @@ def test_the_cap_leaves_the_rest_for_the_next_run(db, store):
 def test_without_a_radar_file_the_rest_still_run(db):
     seed(db)
     assert run(db, False)["by_kind"] == {"ping": 2, "plan": 1, "research": 1, "shadow_decision": 1}
+
+
+def test_the_radar_reference_is_the_price_at_first_sight(db, store):
+    event = store.event("sndk-up")
+    early = {**event["evidence"][0], "last": 97.0}
+    event = {**event, "evidence": [early, *event["evidence"]]}  # the rule's window start, then first sight
+    passes = sorted(store.passes(WED.isoformat()), key=lambda p: (p["started_at"], p["id"]))
+    row = outcomes.radar_row(db, store, event, passes, BARS, NO_CALENDAR, NOW, {})
+    assert row["reference_price"] == 100.0 and row["alt_usd"] == 4.0
+
+
+def test_a_held_position_alert_is_a_control_with_no_alternative(db, store):
+    seeded = seed(db)
+    seeded["alert"].delivery = "held"
+    ping = db.exec(select(PhonePing).where(PhonePing.kind == "giveback")).one()
+    ping.decision = "suppressed"
+    db.commit()
+    run(db, store)
+    held = db.exec(select(Outcome).where(Outcome.subject_kind == "ping", Outcome.source_kind == "giveback")).one()
+    assert (held.held, held.action, held.alt_usd) == (True, "closed", None)  # exit_habits leaves held alerts out too
+
+
+def test_an_unresolved_shadow_position_is_final(db, store):
+    seeded = seed(db)
+    exit_row = db.exec(select(ShadowBookEvent).where(ShadowBookEvent.event_type == "exit")).one()
+    exit_row.event_type = "unresolved"
+    db.commit()
+    run(db, store)
+    shadow = rows(db)["shadow_decision"]
+    assert (shadow.action, shadow.complete) == ("entered", True) and seeded["decision"].status == "plan"
+
+
+def test_new_subjects_go_before_rows_waiting_on_a_window(db, store):
+    seed(db)
+    run(db, store, now=EARLY)  # every row waits on d1
+    db.add(PhonePing(sender="research", source_id="new", kind="research", rank=12, symbol="SNDK", decision="sent",
+                     title="t", body="b", decided_at=utc("2026-10-22T12:00"), delivered_at=utc("2026-10-22T12:00")))
+    db.commit()
+    assert run(db, store, now=EARLY + 60, cap=1)["by_kind"] == {"ping": 1}
+    assert db.exec(select(Outcome).where(Outcome.subject_id == str(
+        db.exec(select(PhonePing.id).where(PhonePing.source_id == "new")).one()))).first() is not None
 
 
 def test_one_row_per_subject(db):

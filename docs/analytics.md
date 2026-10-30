@@ -78,8 +78,8 @@ freshness.
 
 Every output the app makes gets one `outcome` row (`app/engine/outcomes.py`):
 what the underlying did after it, what the owner did in the fills, and the
-dollars against the obvious alternative. Python fills it in once a day at the
-end of the morning sync pipeline (`compute_outcomes`); no model call, and
+dollars against the obvious alternative. Python fills it in at the end of the
+sync pipeline the timer runs at 08:00 and 17:00 New York (`compute_outcomes`); no model call, and
 prices come only from the minute sessions the charts already store on disk
 (the only provider read is the market calendar's usual cached one, at most
 once a New York day).
@@ -90,9 +90,9 @@ each ping's "+1h −4% · +1d −12%", and the week review reads it per kind.
 
 | Subject (`subject_kind`) | Anchored at | Action window | Alternative (`alt_usd`) |
 |---|---|---|---|
-| `ping`: every phone ping; those the policy held are rows too, `held` true, as a control | delivered (else decided) | 15 min on the position's own fills for an exit-kind ping; 30 min on the symbol's fills otherwise | open-trade alerts: proceeds minus closing the alert's contracts at its midpoint mark (`exit_habits.follow_up`'s `vs_alert`) |
+| `ping`: every phone ping; those the policy held are rows too, `held` true, as a control | delivered (else decided) | 15 min on the position's own fills for an exit-kind ping; 30 min on the symbol's fills otherwise | open-trade alerts sent or possibly sent (as `exit_habits` counts them): proceeds minus closing the alert's contracts at its midpoint mark (`follow_up`'s `vs_alert`) |
 | `plan`: every pre-trade plan, the copilot's plan card included | saved | the trade's life: `entered` once linked, else `none` (final 14 days on with no link) | none |
-| `radar_event`: stock events on the stock, group events on the member that moved most in the event's direction | first sighting | 30 min on the symbol's fills | one share at first sight in Radar's direction: the scorecard's move against SPY to the session's last pass times the price then |
+| `radar_event`: stock events on the stock, group events on their top member (Radar's first listed) | first sighting | 30 min on the symbol's fills | one share at first sight in Radar's direction: the scorecard's move against SPY to the session's last pass times the price then |
 | `research`: each Jo research record, on its symbol; d1 and d5 only | saved | to the next session's close | none |
 | `shadow_decision`: each Shadow book plan or skip; d1 and d5 only | decided | its own paper book (`entered`, `closed`, `none`) | none: its paper fills are its result |
 
@@ -103,8 +103,9 @@ regular close of the 1st and 5th trading day after the anchor's New York date
 (the market calendar, else weekdays). Each holds the last minute's close
 before the end, its change from the reference price in percent, the highest
 and lowest minute inside, and `complete`. The reference price is the source's
-own recorded price of the underlying (Radar's evidence), else the stored minute
-at or before the anchor. Stored minutes include extended hours.
+own recorded price of the underlying (Radar's evidence at first sight), else
+the last stored minute at or before the anchor (up to five days back, for a
+weekend or an anchor before 04:00). Stored minutes include extended hours.
 
 **Action.** With a position in the symbol open at the anchor: `closed` (all of
 it), `trimmed`, `added` or `held`; with none, `entered` or `none`. `unknown`
@@ -113,7 +114,8 @@ carry the broker's minute, so a fill in the anchor's own minute counts as after.
 
 **Incomplete rows.** A window still open, a session not stored yet, an open
 position behind an alert or a plan, or a Radar session still trading leaves
-the row incomplete; the next run recomputes it. A window still missing a
+the row incomplete; the next run recomputes it. New subjects are computed
+before rows waiting on a window, at most 400 a run. A window still missing a
 session ten days after it ended is closed with what there is, and says which
 sessions were missing. Symbols the charts never stored have no prices.
 

@@ -169,7 +169,7 @@ function OutcomesCard() {
             <td className="py-1.5 pr-3">{Object.entries(k.actions).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([a, n]) => `${a} ${n}`).join(" · ")}</td>
             <td className="py-1.5">{k.alt_usd_total == null ? "—" : money(k.alt_usd_total, { signed: true, cents: false })}</td>
           </tr>; })}</tbody>
-      </table></div> : <p className="text-sm text-muted-foreground">No outcomes recorded yet; the morning sync fills them in.</p>}
+      </table></div> : <p className="text-sm text-muted-foreground">No outcomes recorded yet; the sync pipeline fills them in.</p>}
       <p className="text-xs text-muted-foreground">Median +1d is the underlying&apos;s change to the next session&apos;s close. Vs alternative: pings against
         closing at the alert&apos;s midpoint mark; Radar, one share taken at first sight in its direction, against SPY to the session&apos;s close.</p>
     </div> : <Status error={error} what="Outcomes" />}

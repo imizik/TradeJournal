@@ -46,13 +46,13 @@ morning; its first run, 20 sessions for each watchlist name at 30 requests a
 minute, stops after ten minutes and the next run continues.
 
 The full sync pipeline (Sync Everything, and the `tradejournal-sync-pipeline`
-timer each morning) runs seven steps: Gmail import, the fill check, the trade
+timer at 08:00 and 17:00 New York) runs seven steps: Gmail import, the fill check, the trade
 rebuild (only when the import saved new fills), Polygon enrichment (queued, not
 waited on), Alpaca enrichment, path metrics, then `compute_outcomes`
 (`app/engine/outcomes.py`, [definitions](../analytics.md#outcomes)). The last
 step reads only the journal, the Radar file, stored minute sessions and the
 cached market calendar: no price provider or model call, nothing sent. It computes at most 400 new or incomplete
-subjects a run, oldest first, and a failure there is recorded on its own run
+subjects a run, new ones first, and a failure there is recorded on its own run
 row without failing the pipeline. The Sync Center can also run it alone.
 
 On worker startup and each idle poll:
