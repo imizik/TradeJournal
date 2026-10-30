@@ -32,7 +32,9 @@ def test_the_prompt_asks_for_the_verdict_line_the_fixed_words_and_changes_if():
 def test_the_prompt_keeps_answers_short_unless_more_is_asked_for():
     # After a tool result the whole answer is generated before any of it streams, so length is the wait.
     prompt = " ".join(copilot.SYSTEM_PROMPT.split())
-    assert "After the Verdict line, use at most about 120 words" in prompt
+    assert "This is a hard limit, not a target" in prompt and "the whole answer stays under 120 words" in prompt
+    assert "The body is at most three bullets, each one sentence" in prompt
+    assert "Then the body: at most three one-sentence bullets (the length rule above)." in prompt
     assert "do not repeat them in the text" in prompt
     assert 'when they ask for more ("more", "why", "go deeper") or for a trade review or a week review' in prompt
 
