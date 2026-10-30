@@ -227,7 +227,8 @@ class PlanAdapter:
         replay = getattr(evidence, "label", "") == "replay"
         if replay:
             now = evidence.at
-        earlier = copilot.carried(carry_id) if len(history) > 1 else []
+        mode = getattr(evidence, "label", "")
+        earlier = copilot.carried(carry_id, mode) if len(history) > 1 else []
 
         def elapsed() -> int:
             return round((time.monotonic() - started) * 1000)
@@ -319,4 +320,4 @@ class PlanAdapter:
                  metrics["model"], metrics["first_text_ms"], metrics["total_ms"], metrics["rounds"],
                  ",".join(t["name"] for t in metrics["tool_calls"]), usage["input_tokens"], usage["output_tokens"],
                  usage["cache_read_input_tokens"], cost)
-        yield {"type": "done", "metrics": metrics, "carry_id": copilot.keep_carry(copilot.carry_items(state["ran"], earlier, now))}
+        yield {"type": "done", "metrics": metrics, "carry_id": copilot.keep_carry(copilot.carry_items(state["ran"], earlier, now), mode)}

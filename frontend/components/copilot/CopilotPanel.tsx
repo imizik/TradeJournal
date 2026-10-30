@@ -675,7 +675,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       total += size;
     }
     // The evidence the latest answer read, kept on the server: the copilot reuses it for a follow-up instead of reading again.
-    const carry = [...messages].reverse().find(m => m.role === "assistant")?.carry ?? null;
+    const carry = [...messages].reverse().find(m => m.role === "assistant" && m.carry)?.carry ?? null;
     turns.current += 1;
     running.current = true;
     typed.current = false;

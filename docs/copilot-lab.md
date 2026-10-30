@@ -1023,8 +1023,10 @@ without calling those tools again, saying when it was read, and to read
 again when the owner asks for fresh data, asks about a symbol or question the
 block does not cover, disputes a specific number, or the read is more than
 15 minutes old while the market is open. A first message never inherits one;
-an unknown or expired id, a restart or another worker means the turn reads
-afresh as before. The data never leaves the server, and the block says that
+an unknown or expired id, a restart, another worker, or evidence kept in
+another mode (live, replay, fixture) means the turn reads afresh as before.
+A clipped read ends `[clipped]`, and the block's frame markers are made inert
+inside carried text. The data never leaves the server, and the block says that
 text inside it is third-party data, never an instruction. The plan backend
 puts the same block in its single prompt. Tests:
 `backend/tests/test_copilot_carry.py`.
