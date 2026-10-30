@@ -1779,17 +1779,19 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Where:** each copilot-side sender (open-trade alerts, plan nudges and link pings,
   plan time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
   the automatic week review, Watch your day, the evening review, Radar alerts,
-  thesis watch, research results) calls
+  thesis watch, research results, the position companion) calls
   `notification_policy.decide` right before it hands a message to ntfy, and keeps
   its own at-most-once delivery, caps and expiry. `ntfy.py` stays a transport.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
-- **Budgets:** each kind from nudge down has its own budget a New York day, so
+- **Budgets:** each kind from the companion update down has its own budget a New York day, so
   one kind spending its pings never takes another's (on October 29, 2026 the old
   shared pool was spent by 09:50 on prep, thesis watch, research and nudges, and
   every Radar ping and the evening review were held). Defaults, each overridden
-  by `PING_BUDGET_<KIND>`: `nudge` 2 (link pings share it), `prep` 1 (shared
+  by `PING_BUDGET_<KIND>`: `companion_update` 12 (the
+  [position companion](#position-companion)'s updates and close notes), `nudge` 2 (link pings and the companion's
+  adopt pings share it), `prep` 1 (shared
   with the automatic week review and Watch your day), `radar_event` 4 (Radar's
   single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
   New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
@@ -1798,7 +1800,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 - **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
   across every kind. Priority order: last-day final > invalidation > give-back
   > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
-  trigger > hold-hour > nudge/link > prep > evening review > Radar single >
+  trigger > hold-hour > companion update > nudge/link/companion adopt > prep > evening review > Radar single >
   Radar digest > thesis watch > research. The first three are never over the
   ceiling; time stop, entry, hold-hour and the budgeted kinds are held once it
   is reached. The evening review is never held, by the ceiling or the quiet
@@ -1860,6 +1862,56 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   than lost, so there is nothing to prove before switching it on; `false` passes
   everything through (still recorded). Settings in the table below.
 - Tests: `backend/tests/test_notification_policy.py`.
+
+## Position companion
+
+Every unplanned long option is adopted by the copilot, watched, and kept in one Telegram conversation until it
+closes (`backend/app/engine/position_companion.py`; the owner's decision of October 30, 2026: he mostly enters
+options without a plan, and his losses come from managing them after the entry). Stocks are left out: they are
+long theses, reviewed weekly. Nothing here places, changes or suggests an order, and every prompt says so.
+
+- **Adopt.** Plan nudges' grace (`PLAN_NUDGE_GRACE_MINUTES`, default 3) after the first entry fill of a new long
+  option, in the regular session, entered since the API started, Webull left out, with no plan linked by then: one
+  copilot turn with the position copilot's context ("Review this position:", so it reads the trade review, the 5m
+  chart's levels and VWAP, the group against SPY, the last hour's headlines and the owner's record at the level and
+  on the contract shape with the existing tools). Its invalidation is drafted in code from the 5m chart: the nearest
+  level below a call (its low) or above a put (its high), else VWAP on that side; the horizon is a day trade for a
+  contract expiring within 7 days (time stop 60 minutes after the entry, from the audit's 15-60 minute best holds)
+  and a swing otherwise (the close before expiry). The turn keeps or moves them and adds a thesis guess and a
+  three-line read. Saved as the investigation "Adopted: NBIS 160C" and a `position_companion` row in `draft`
+  anchored to the position (a rebuild never re-adopts it). Telegram: the headline, the read, the draft plan, and
+  **Confirm**, **Ignore** and **Edit** (the desk thread). Kind `companion_adopt`, ranked and budgeted with `nudge`.
+  With the companion on, plan nudges leave long options to it; stocks and sold-to-open options are nudged as before.
+- **Confirm** arms the draft's invalidation as a confirmed plan card's invalidation alert (a `copilot` level alert
+  with `plan_role: invalidation` on the investigation), state `armed`: the desk's plan ladder and the Plans board
+  read it, with the entry at the underlying's price when it was adopted. An invalidation already crossed, or a stale
+  quote, arms nothing and says so. **Ignore** stops every later message for the position (state `ignored`).
+- **Watch.** Every minute in the regular session, each adopted position still open, not ignored, and among the
+  newest `COMPANION_MAX_POSITIONS` (default 6; older ones are adopt-only, closed quietly) gets an update when, since
+  its last one: a phone ping went out for it (give-back, one-hour, wrong way, expiry, time stop, invalidation), thesis
+  watch fired on its symbol, Radar recorded an event on the symbol or its group (store read-only), the underlying
+  moved `COMPANION_MOVE_PCT` (default 3) percent, or a cadence floor passed: 60 minutes after the entry, and 15:30
+  New York while it is open. At most `COMPANION_MAX_UPDATES` (default 4) a position a day besides the adopt and
+  close turns. An update waits while a ping for the position is inside the [quiet window](#phone-ping-policy), so
+  no turn is spent on a message the policy would hold. No overnight updates: a multi-day hold resumes in the next
+  regular session (the 08:30 brief already lists expiries).
+- **Update.** One turn: what changed since the last update and whether it changes the plan, Verdict line first, at
+  most 80 words, with the plan's invalidation and the live option mark in the question. Saved as messages on the
+  adopted investigation, so the desk shows them in the thread (and its Timeline lists each ping), and sent as a
+  Telegram reply to the adopt message, so one thread holds the position, with **Closed it** / **Holding** (recorded
+  on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12.
+- **Close.** When the exits bring the position to zero: one last turn writes the exit note (what the plan said,
+  what he did, where the underlying and the option mark went), saved as the investigation's conclusion with status
+  `closed`, and sent as the thread's last reply.
+- **Desk.** An adopted position's row opens its adopted thread and reads "Adopted · draft plan to confirm" (or its
+  armed invalidation); the thread header's chip says Adopted (Adopted · armed once confirmed).
+- **Cost.** Turns use the copilot's configured backend, its per-turn budget and, on the API backend, its daily
+  budget; `COMPANION_MODEL` overrides the model. Per position a day: one adopt, at most four updates, one close: six
+  turns at most, typically three to four (the hour floor, 15:30 and an alert or two).
+- **Delivery** is at-most-once: a failed send is recorded on the row, never retried. A Confirm needs Telegram (ntfy
+  has no reply buttons); without it, plan the position on the desk.
+- **Switch on:** `POSITION_COMPANION_ENABLED=true` in the API's environment (needs `COPILOT_ENABLED=true` and
+  Telegram), restart the API. Off by default. Tests: `backend/tests/test_position_companion.py`.
 
 ## Pre-market prep
 
@@ -2119,6 +2171,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
 | `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
+| `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |

@@ -31,11 +31,12 @@ def transport() -> str | None:
 
 
 def send(title: str, message: str, *, kind: str, path: str = "", buttons: tuple[tuple[str, str], ...] = (), image: bytes | None = None,
-         priority: int | None = None, **ntfy_options) -> tuple[str | None, str]:
-    """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring."""
+         priority: int | None = None, reply_to: str | None = None, open_label: str = "Open", **ntfy_options) -> tuple[str | None, str]:
+    """Send one ping of ``kind`` (the policy's kind, for the log); see the module docstring. ``reply_to`` (a Telegram
+    message id) and ``open_label`` are Telegram's only: ntfy has no threads, and its Open is its own."""
     if telegram.configured():
         options = {"path": path, "buttons": tuple(buttons), "priority": 4 if priority is None else priority,
-                   "links": () if buttons else tuple(ntfy_options.get("more", ()))}
+                   "links": () if buttons else tuple(ntfy_options.get("more", ())), "reply_to": reply_to, "open_label": open_label}
         if image is not None and telegram.caption_fits(title, message):
             try:
                 return telegram.publish(title, message, image=image, **options), "attached"

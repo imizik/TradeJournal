@@ -390,7 +390,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
           ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} tally={tally} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)} toAnswer={session.data?.to_answer} radar={rows.filter(r => r.key.startsWith("radar:"))} /><AlertScorecard /></> : (
-            <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
+            <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} adopted={threadRow?.adopted ?? false} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />
           ))}

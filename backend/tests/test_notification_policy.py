@@ -129,14 +129,17 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 # ------------------------------------------------------------------ the gate
 
 def test_the_priority_order_and_what_the_cap_never_drops():
-    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep",
-                                     "evening_review", "radar_event", "radar_digest", "thesis_watch", "research")] == list(range(13))
+    assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "companion_update",
+                                     "nudge", "prep", "evening_review", "radar_event", "radar_digest", "thesis_watch",
+                                     "research")] == list(range(14))
     assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
+    assert policy.rank("companion_adopt") == policy.rank("nudge")
     assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
-    assert policy.rank("radar_something") == 13  # an unknown kind goes last
+    assert policy.rank("radar_something") == 14  # an unknown kind goes last
     assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
-    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2,
-                                                             "thesis_watch": 2, "research": 1}
+    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4,
+                                                             "radar_digest": 2, "thesis_watch": 2, "research": 1}
+    assert policy.budget("companion_adopt") == 2
     assert (policy.budget("link"), policy.budget("week_review"), policy.budget("hold_hour"), policy.budget("evening_review")) == (2, 1, None, None)
 
 
@@ -165,6 +168,22 @@ def test_each_low_kind_spends_only_its_own_budget_and_the_ceiling_holds_the_rest
     decisions = [(r.kind, r.decision) for r in rows(engine)]
     assert decisions.count(("radar_event", "sent")) == 4 and ("evening_review", "sent") in decisions
     assert sum(d == "sent" for _, d in decisions) == 16 and sum(d == "over_cap" for _, d in decisions) == 7
+
+
+def test_the_position_companion_adopts_on_the_nudge_budget_and_updates_on_its_own(engine, monkeypatch):
+    monkeypatch.setenv("PING_DAILY_CAP", "40")
+    with Session(engine) as db:
+        assert decide(db, "companion_adopt", "a1", anchor="p-a1").action == "send"
+        assert decide(db, "nudge", "n1", anchor="p-n1").action == "send"
+        assert decide(db, "companion_adopt", "a2", anchor="p-a2").reason == "Not sent: Plan nudges' 2 pings for today are spent."
+        for i in range(12):
+            assert decide(db, "companion_update", f"u{i}", anchor=f"p-u{i}").action == "send"
+        assert decide(db, "companion_update", "u12", anchor="p-u12").reason == (
+            "Not sent: The position companion's 12 updates for today are spent.")
+        # An update never holds the position's more important alerts, and yields to them inside the quiet window.
+        assert decide(db, "hold_hour", "h1", anchor="p-u0").action == "send"
+        assert decide(db, "giveback", "g1", anchor="p-q").action == "send"
+        assert decide(db, "companion_update", "u14", anchor="p-q").reason.startswith("Merged into the give-back ping")
 
 
 def test_before_the_open_the_budgeted_kinds_share_the_pre_open_allowance(engine, monkeypatch):

@@ -379,9 +379,31 @@ async def _maybe_start_telegram_replies(app_: FastAPI):
     if not telegram.configured() or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
         return None
     from app.engine.telegram_replies import Replies
-    replies = Replies(engine)
+    def alerts_changed():  # a companion Confirm armed an alert: the monitor reloads now instead of on its next pass
+        monitor = getattr(app_.state, "level_alerts", None)
+        if monitor is not None:
+            monitor.changed()
+
+    replies = Replies(engine, alerts_changed=alerts_changed)
     app_.state.telegram_replies = replies
     return asyncio.create_task(replies.loop())
+
+
+async def _maybe_start_position_companion(app_: FastAPI):
+    """The options position companion (docs/copilot-lab.md § Position companion): adopts unplanned long options and
+    keeps each in one Telegram thread; off unless POSITION_COMPANION_ENABLED=true."""
+    app_.state.position_companion = None
+    if os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.position_companion import companion_from_env
+    try:
+        companion = companion_from_env(engine)
+    except Exception:
+        # A bad calendar must not keep the journal API (and S1, alerts, fills) from starting.
+        logging.getLogger(__name__).exception("Position companion could not start; it stays off")
+        companion = None
+    app_.state.position_companion = companion
+    return None if companion is None else asyncio.create_task(companion.loop())
 
 
 @asynccontextmanager
@@ -413,9 +435,12 @@ async def lifespan(_app: FastAPI):
     research = await _maybe_start_research_queue(_app)
     thesis_watch = await _maybe_start_thesis_watch(_app)
     shadow_book = await _maybe_start_shadow_book(_app)
+    companion = await _maybe_start_position_companion(_app)
     try:
         yield
     finally:
+        if companion is not None:
+            companion.cancel()
         if shadow_book is not None:
             shadow_book.cancel()
         if thesis_watch is not None:

@@ -96,6 +96,17 @@ def test_a_picture_goes_as_a_photo_with_the_text_as_caption(bot):
     assert json.loads(call["data"]["reply_markup"])["inline_keyboard"][0] == [{"text": "Why?", "callback_data": "why:a"}]
 
 
+def test_a_reply_threads_under_its_message_and_open_can_be_renamed(bot):
+    telegram.publish("NBIS 160C · update", "Hold", path="/copilot-lab?investigation=1", reply_to="501", open_label="Edit")
+    telegram.publish("NBIS 160C · closed", "Out", image=b"\x89PNG", reply_to="501")
+    text, photo = bot
+    assert text["json"]["reply_parameters"] == {"message_id": 501, "allow_sending_without_reply": True}
+    assert text["json"]["reply_markup"]["inline_keyboard"] == [[{"text": "Edit", "url": "https://journal.example/copilot-lab?investigation=1"}]]
+    assert json.loads(photo["data"]["reply_parameters"]) == {"message_id": 501, "allow_sending_without_reply": True}
+    telegram.publish("Plain", "No thread")
+    assert "reply_parameters" not in bot[2]["json"]
+
+
 @pytest.mark.parametrize("raised, unsent", [(httpx.ConnectError("no"), True), (httpx.ConnectTimeout("no"), True),
                                             (httpx.ReadTimeout("slow"), False)])
 def test_network_failures_say_whether_the_message_surely_went_nowhere(monkeypatch, raised, unsent):
@@ -348,8 +359,8 @@ def test_startup_polls_only_when_telegram_is_set_up(monkeypatch):
     started = []
 
     class Fake:
-        def __init__(self, _engine):
-            pass
+        def __init__(self, _engine, alerts_changed=None):
+            self.alerts_changed = alerts_changed
 
         async def loop(self):
             started.append(1)
