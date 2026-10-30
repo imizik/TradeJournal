@@ -88,6 +88,51 @@ def test_company_research_stale_restore_and_refresh_coalescing(migrated):
     assert queued[0] == queued[1]
 
 
+def test_company_restore_serializes_against_thesis_patch(migrated):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlalchemy import event
+    from fastapi import HTTPException
+    from app.engine import company_research as research
+    with Session(migrated) as db:
+        company = research.add(db, "RESTORETEST")
+        company = research.patch(db, company.id, company.revision, "Original", [], False)
+        identifier, revision = company.id, company.revision
+    locked, patch_attempt, release = Event(), Event(), Event()
+    def after(_conn, _cursor, statement, _params, _context, _many):
+        if "company_research_company" in statement and "FOR UPDATE" in statement:
+            locked.set()
+            assert release.wait(10)
+    def before(_conn, _cursor, statement, _params, _context, _many):
+        if statement.startswith("UPDATE company_research_company SET") and "thesis=" in statement:
+            patch_attempt.set()
+    def restore():
+        with Session(migrated) as db:
+            return research.add(db, "RESTORETEST").revision
+    def edit():
+        with Session(migrated) as db:
+            try:
+                research.patch(db, identifier, revision, "Stale edit", [], False)
+                return 200
+            except HTTPException as exc:
+                return exc.status_code
+    event.listen(migrated, "after_cursor_execute", after)
+    event.listen(migrated, "before_cursor_execute", before)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            restoring = pool.submit(restore)
+            assert locked.wait(10)
+            editing = pool.submit(edit)
+            assert patch_attempt.wait(10)
+            release.set()
+            assert restoring.result(timeout=10) == revision + 1
+            assert editing.result(timeout=10) == 409
+    finally:
+        release.set()
+        event.remove(migrated, "after_cursor_execute", after)
+        event.remove(migrated, "before_cursor_execute", before)
+
+
 def test_position_alert_feedback_concurrent_save_and_stale_update(migrated):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

@@ -114,6 +114,7 @@ def test_annual_and_quarter_are_incompatible_and_margins_use_points():
     result = compare(observation(metric="gross_margin", value="0.40", unit="ratio"), observation(metric="gross_margin", value="0.30", unit="ratio"))
     assert result["difference"] == "10.00" and result["difference_unit"] == "percentage points"
     assert result["percent"] is None
+    assert compare(observation(metric="gross_margin", value="40", unit="percent"), observation(metric="gross_margin", value="30", unit="percent"))["state"] == "incompatible"
 
 
 def test_valid_older_estimate_is_not_hidden_by_newer_ineligible_records(monkeypatch):

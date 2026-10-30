@@ -14,6 +14,8 @@ def number(value):
 
 
 def compare(actual, reference):
+    if actual.get("metric") in {"gross_margin", "operating_margin"} and (actual.get("unit") != "ratio" or reference.get("unit") != "ratio"):
+        return {"state": "incompatible", "reason": "Margin values require canonical ratio units (0.40 means 40%)"}
     keys = ("issuer", "metric", "period_start", "period_end", "fiscal_year", "fiscal_period", "scope", "currency", "unit", "basis", "share_basis")
     for key in keys:
         if key not in actual or key not in reference or actual[key] in (None, "unknown", "unresolved") or actual[key] != reference[key]:

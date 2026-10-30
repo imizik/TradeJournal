@@ -20,6 +20,7 @@ for (const width of [1440, 390]) {
       }
       if (path.includes("/findings/") && method === "PATCH") { findings[0].disposition = route.request().postDataJSON().disposition; return route.fulfill({ json: { status: findings[0].disposition } }); }
       if (path.endsWith("/findings")) return route.fulfill({ json: findings });
+      if (path.endsWith("/comparisons")) return route.fulfill({ json: [{ actual: { metric: "gross_margin", period_end: "2026-04-30", unit: "ratio" }, reference: { role: "estimate" }, comparison: { state: "ready", difference: "10", percent: null, difference_unit: "percentage points", reference: "point value" } }] });
       if (path.endsWith("/numbers")) return route.fulfill({ json: findings.filter(f => f.disposition === "accepted").flatMap(f => (f.data.numbers as Record<string, unknown>[]).map(n => ({ ...n, id: f.id, origin: "owner accepted extraction", source: (f.data.sources as Record<string, unknown>[])[0] }))) });
       if (path.endsWith("/companies") && method === "POST") { added = true; return route.fulfill({ json: company }); }
       if (path.endsWith("/companies")) return route.fulfill({ json: added ? [company] : [] });
@@ -67,6 +68,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("accepted", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Results & expectations" }).click();
     await expect(page.getByText("owner accepted extraction", { exact: true })).toBeVisible();
+    await expect(page.getByText("Difference from point value: 10 percentage points", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Thesis & research" }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
     await page.screenshot({ path: test.info().outputPath(`company-thesis-${width}.png`), fullPage: true });

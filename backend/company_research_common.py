@@ -58,6 +58,8 @@ class NumericEvidence(BaseModel):
 
     @model_validator(mode="after")
     def point_or_range(self):
+        if self.metric in {"gross_margin", "operating_margin"} and self.unit != "ratio":
+            raise ValueError("Margin values must use canonical ratio units (0.40 means 40%)")
         if self.period_end < self.period_start:
             raise ValueError("Period end precedes its start")
         if self.scope == "segment" and not self.segment:

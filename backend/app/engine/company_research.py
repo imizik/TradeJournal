@@ -37,7 +37,7 @@ def add(db, symbol):
         db.execute(text("SELECT pg_advisory_xact_lock(741963852)"))
     if db.bind.dialect.name == "sqlite":
         db.execute(update(ResearchCompany).where(ResearchCompany.symbol == symbol).values(updated_at=ResearchCompany.updated_at))
-    existing = db.exec(select(ResearchCompany).where(ResearchCompany.symbol == symbol).execution_options(populate_existing=True)).first()
+    existing = db.exec(select(ResearchCompany).where(ResearchCompany.symbol == symbol).with_for_update().execution_options(populate_existing=True)).first()
     if existing and existing.followed:
         return existing
     rows = db.exec(select(ResearchCompany).where(ResearchCompany.followed.is_(True))).all()
