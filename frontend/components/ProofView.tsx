@@ -142,6 +142,40 @@ function PlanningProofCard() {
   </DashboardCard>;
 }
 
+type OutcomeKind = { count: number; complete: number; held: number; median_d1_pct: number | null; d1_measured: number;
+  actions: Record<string, number>; alt_usd_total: number | null; alt_usd_n: number };
+type Outcomes = { since: string; summary: Record<string, OutcomeKind>; note: string };
+const OUTCOME_KINDS: [string, string][] = [["ping", "Phone pings"], ["plan", "Plans"], ["radar_event", "Radar events"],
+  ["research", "Jo research"], ["shadow_decision", "Shadow decisions"]];
+
+// What followed each output (app/engine/outcomes.py), per kind: no verdict, only counts and the underlying's path.
+function OutcomesCard() {
+  const { body, error } = useJson<Outcomes>("/analytics/outcomes");
+  const kinds = body ? OUTCOME_KINDS.filter(([key]) => body.summary[key]) : [];
+  return <DashboardCard title="Outcomes">
+    {body ? <div className="space-y-3">
+      <p className="text-sm" data-testid="proof-outcomes-caveat">Counts and price paths, not causation.</p>
+      {kinds.length ? <div className="overflow-x-auto"><table className="w-full text-xs tabular-nums" data-testid="proof-outcomes">
+        <thead className="text-left text-muted-foreground"><tr>
+          <th className="py-1 pr-3 font-medium">Since {body.since}</th><th className="py-1 pr-3 font-medium">Count</th>
+          <th className="py-1 pr-3 font-medium">Median +1d</th><th className="py-1 pr-3 font-medium">What you did</th>
+          <th className="py-1 font-medium">Vs alternative</th></tr></thead>
+        <tbody className="divide-y">{kinds.map(([key, label]) => { const k = body.summary[key];
+          return <tr key={key} data-testid={`outcome-kind-${key}`}>
+            <td className="py-1.5 pr-3">{label}</td>
+            <td className="py-1.5 pr-3">{k.count}{k.complete < k.count && <span className="text-muted-foreground"> ({k.count - k.complete} open)</span>}
+              {k.held > 0 && <span className="text-muted-foreground"> · {k.held} held</span>}</td>
+            <td className="py-1.5 pr-3">{points(k.median_d1_pct)}{k.d1_measured > 0 && <span className="text-muted-foreground"> of {k.d1_measured}</span>}</td>
+            <td className="py-1.5 pr-3">{Object.entries(k.actions).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([a, n]) => `${a} ${n}`).join(" · ")}</td>
+            <td className="py-1.5">{k.alt_usd_total == null ? "—" : money(k.alt_usd_total, { signed: true, cents: false })}</td>
+          </tr>; })}</tbody>
+      </table></div> : <p className="text-sm text-muted-foreground">No outcomes recorded yet; the morning sync fills them in.</p>}
+      <p className="text-xs text-muted-foreground">Median +1d is the underlying&apos;s change to the next session&apos;s close. Vs alternative: pings against
+        closing at the alert&apos;s midpoint mark; Radar, one share taken at first sight in its direction, against SPY to the session&apos;s close.</p>
+    </div> : <Status error={error} what="Outcomes" />}
+  </DashboardCard>;
+}
+
 export default function ProofView() {
-  return <div className="space-y-4"><AlertsProof /><RadarProofCard /><PlanningProofCard /></div>;
+  return <div className="space-y-4"><AlertsProof /><RadarProofCard /><PlanningProofCard /><OutcomesCard /></div>;
 }

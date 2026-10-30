@@ -51,6 +51,7 @@ JOB_RESYNC_ALL = "resync_all"
 JOB_OPTIONS_SNAPSHOT = "options_snapshot"
 JOB_RVOL_HISTORY = "rvol_history"
 JOB_MARKET_CONTEXT = "market_context"
+JOB_OUTCOMES = "compute_outcomes"
 
 JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
@@ -62,6 +63,7 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_OPTIONS_SNAPSHOT, "label": "Options positioning snapshot", "description": "Keep today's option open interest and volume for SPY, QQQ, SPX, open positions and watchlist names (16:15-20:00 New York).", "advanced": False, "progress_unit": "underlying", "api_provider": "Tradier", "rate_limit_per_minute": 30.0},
     {"job_type": JOB_MARKET_CONTEXT, "label": "Earnings and VIX for Jo", "description": "Read the next earnings date for each held, recently traded or watched name and a live VIX quote, for the pre-trade check.", "advanced": True, "progress_unit": "symbol", "api_provider": "Tradier", "rate_limit_per_minute": 10.0},
+    {"job_type": JOB_OUTCOMES, "label": "Outcomes", "description": "Record what price and you did 1 hour, 1 day and 5 trading days after each ping, plan, Radar event, Jo research record and Shadow decision, from stored bars and fills (no provider or model call).", "advanced": False, "progress_unit": "subject"},
     {"job_type": JOB_RVOL_HISTORY, "label": "Relative volume history", "description": "Store the 40 sessions before today for each chart watchlist name, so the charts' relative volume is ready at the open and older sessions have their own.", "advanced": False, "progress_unit": "symbol", "api_provider": "Alpaca", "rate_limit_per_minute": 30.0},
 ]
 
@@ -69,7 +71,7 @@ _EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
     JOB_FULL_PIPELINE: {
         "job_type": JOB_FULL_PIPELINE,
         "label": "Full sync pipeline",
-        "description": "Import, rebuild, enrich, and calculate path metrics.",
+        "description": "Import, rebuild, enrich, calculate path metrics and record outcomes.",
         "advanced": False,
         "progress_unit": "step",
     },
@@ -235,6 +237,11 @@ def _run_market_context(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
     return refresh(session)
 
 
+def _run_outcomes(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
+    from app.engine import outcomes
+    return outcomes.run(session)
+
+
 def _run_rvol_history(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
     # Each session is published to disk as it arrives, so a restart resumes.
     return store_rvol_history(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
@@ -274,6 +281,9 @@ def _wait_for_job(job_id: uuid.UUID) -> JobRun:
         time.sleep(1)
 
 
+PIPELINE_STEPS = 7
+
+
 def _run_pipeline(pipeline_id: uuid.UUID) -> None:
     try:
         _set_job(pipeline_id, status="running", phase="starting", started_at=_now(), current="Starting full sync pipeline")
@@ -295,7 +305,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
             _set_job(
                 pipeline_id,
                 done=index - 1,
-                total=6,
+                total=PIPELINE_STEPS,
                 phase="pipeline_step",
                 current=f"Running {step_config.get('label', job_type)}",
             )
@@ -319,7 +329,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         # (e.g. yesterday's fills whose bars only became available today) and
         # no-op instantly when there is nothing to do.
 
-        _set_job(pipeline_id, done=3, total=6, phase="pipeline_step", current="Running market enrichment")
+        _set_job(pipeline_id, done=3, total=PIPELINE_STEPS, phase="pipeline_step", current="Running market enrichment")
         # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can
         # take many minutes. Launch it but do NOT block the pipeline on it — it
         # runs in the Polygon execution lane and the UI polls /fills/enrich/status. Path
@@ -330,10 +340,17 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         if alpaca.total:
             _wait_for_job(alpaca.id)
 
-        _set_job(pipeline_id, done=5, total=6, phase="pipeline_step", current="Calculating path metrics")
+        _set_job(pipeline_id, done=5, total=PIPELINE_STEPS, phase="pipeline_step", current="Calculating path metrics")
         path = _run_existing_enrichment(JOB_TRADE_PATH, "all", False)
         if path.total:
             _wait_for_job(path.id)
+
+        # Last, once the fills and their enrichment are in: stored bars and the journal only, no provider call. Its
+        # own run row records a failure; the sync above still succeeded (Gmail health reads this pipeline's success).
+        try:
+            _run_step(7, JOB_OUTCOMES, _run_outcomes)
+        except RuntimeError:
+            pass
 
         # Daily review is intentionally NOT part of "Sync Everything". It is only
         # generated on explicit request: from the daily page, or by running the
@@ -341,8 +358,8 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         _set_job(
             pipeline_id,
             status="succeeded",
-            done=6,
-            total=6,
+            done=PIPELINE_STEPS,
+            total=PIPELINE_STEPS,
             enriched=processed,
             phase="complete",
             current="Full sync pipeline completed",
@@ -583,7 +600,7 @@ async def list_sync_runs(limit: int = 50, session: Session = Depends(get_session
 async def run_sync_pipeline(session: Session = Depends(get_session)):
     if _active_job(session):
         raise HTTPException(status_code=409, detail="A sync or enrichment job is already running")
-    job = _create_run(session, JOB_FULL_PIPELINE, "Queued full sync pipeline", total=6)
+    job = _create_run(session, JOB_FULL_PIPELINE, "Queued full sync pipeline", total=PIPELINE_STEPS)
     submit_job(job.id)
     return {"pipeline_run_id": str(job.id)}
 
@@ -604,6 +621,7 @@ async def run_sync_job(job_type: str, range: str = "week", force: bool = False, 
         JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
         JOB_RVOL_HISTORY: _run_rvol_history,
         JOB_MARKET_CONTEXT: _run_market_context,
+        JOB_OUTCOMES: _run_outcomes,
     }
     runner = runners.get(job_type)
     if not runner:
@@ -679,6 +697,7 @@ def execute_sync_job(job: JobRun) -> None:
             JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
             JOB_RVOL_HISTORY: _run_rvol_history,
             JOB_MARKET_CONTEXT: _run_market_context,
+            JOB_OUTCOMES: _run_outcomes,
         }
         runner = runners.get(job.job_type)
         if runner is None:
