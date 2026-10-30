@@ -75,7 +75,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "radar_event",
             "thesis_watch", "research")
-ALIASES = {"expiry_first": "time_stop", "link": "nudge", "no_plan": "nudge", "week_review": "prep", "day_replay": "prep",
+ALIASES = {"expiry_first": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge", "week_review": "prep", "day_replay": "prep",
            "evening_review": "prep"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
@@ -90,7 +90,7 @@ LOOKBACK_DAYS = 2  # pings older than this are no longer judged
 ACTED = ("entered", "closed", "trimmed", "linked")
 EPS = 1e-9
 # What answers each kind: an entry fill in the symbol, an exit of the position, or a plan link.
-TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit",
+TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit", "wrong_way": "exit",
            "expiry_first": "exit", "expiry_final": "exit", "nudge": "link", "link": "link", "no_plan": "link"}
 WINDOW = {"entry": ENTRY_MINUTES, "exit": EXIT_MINUTES, "link": LINK_MINUTES}
 
@@ -259,7 +259,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 
 
 def _label(kind: str) -> str:
-    return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour",
+    return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way",
             "time_stop": "time stop", "entry": "entry trigger", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review",
@@ -439,7 +439,7 @@ def then_text(then: str | None, minutes: int | None) -> str | None:
 
 
 SENDER_OF_KIND = {"giveback": "position_alerts", "expiry_first": "position_alerts", "expiry_final": "position_alerts",
-                  "hold_hour": "position_alerts", "plan_nudge": "plan_nudges", "plan_link": "plan_nudges"}
+                  "hold_hour": "position_alerts", "wrong_way": "position_alerts", "plan_nudge": "plan_nudges", "plan_link": "plan_nudges"}
 
 
 def annotate(db: Session, rows: list[dict]) -> list[dict]:

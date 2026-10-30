@@ -574,7 +574,7 @@ class PositionAlert(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID
     source_key: str = Field(index=True)
-    kind: str  # giveback | expiry_first | expiry_final | hold_hour
+    kind: str  # giveback | expiry_first | expiry_final | hold_hour | wrong_way
     generation: int  # the give-back arming (hold_hour: the one current when it fired); 0 for expiry alerts
     trade_id: uuid.UUID  # the trade when it fired, for the notification's link (trades are rebuilt; read by source_key)
     contract: str  # e.g. "SNDK 9/18/26 230C"
@@ -837,7 +837,7 @@ class PhonePing(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     sender: str  # position_alerts | plan_nudges | plan_time_stops | level_alerts | research | premarket_prep
     source_id: str  # the sender's own row id
-    kind: str  # expiry_final | invalidation | giveback | expiry_first | time_stop | entry | hold_hour | nudge | link | prep | research
+    kind: str  # expiry_final | invalidation | giveback | expiry_first | time_stop | entry | hold_hour | wrong_way | nudge | link | prep | research
     rank: int  # the kind's place in the priority order, 0 first
     symbol: Optional[str] = None
     anchor: Optional[str] = Field(default=None, index=True)  # the position: "<account id>:<first entry fill's source key>"

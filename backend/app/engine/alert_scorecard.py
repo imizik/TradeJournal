@@ -31,7 +31,8 @@ from app.models import DayJournalEntry, Fill, PositionAlert, Trade, TradeFill
 WINDOW_DAYS = 30
 MAX_ROWS = 60
 SENT = ("sent", "unknown")
-KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left"}
+KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left",
+        "wrong_way": "Wrong way at 30 min"}
 EPSILON = 1e-9
 
 

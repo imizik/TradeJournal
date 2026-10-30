@@ -32,7 +32,7 @@ export function heldBackText(held: PlanPositions["held_back_today"]): string | n
 }
 
 const REFRESH_MS = 60_000;
-const ALERT: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes", hold_hour: "Held an hour" };
+const ALERT: Record<string, string> = { giveback: "Gave back its gain", expiry_first: "Expires today", expiry_final: "Last 30 minutes", hold_hour: "Held an hour", wrong_way: "Wrong way at 30 min" };
 const STOP: Record<string, string> = { sent: "sent", skipped: "skipped", expired: "not sent", unknown: "may have sent", sending: "sending" };
 const hhmm = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" });
 
