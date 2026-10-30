@@ -111,6 +111,36 @@ def exit_habits_seed():
     return {"seeded": True}
 
 
+@core_app.post("/__test/outcomes-seed", include_in_schema=False)
+def outcomes_seed():
+    """Three outcome rows as the morning pipeline would write them: the NVDA give-back's ping closed against its mark
+    (after the exit-habits seed, so the trade page lists it), a held entry ping, and a Radar hit one share made $4 on."""
+    import json
+    from datetime import datetime
+    from sqlmodel import Session, select
+    from app.database import engine
+    from app.models import Outcome, PhonePing, PositionAlert
+
+    def window(pct):
+        return json.dumps({"price": 100 + pct, "pct": pct, "high": None, "low": None, "complete": True})
+
+    with Session(engine) as db:
+        if db.exec(select(Outcome)).first():
+            return {"seeded": False}
+        nvda = db.exec(select(PositionAlert).where(PositionAlert.contract.startswith("NVDA"))).one()
+        ping = PhonePing(sender="position_alerts", source_id=str(nvda.id), kind="giveback", rank=2, symbol="NVDA", decision="sent",
+                         title="NVDA", body="Gave back its gain", decided_at=nvda.detected_at, delivered_at=nvda.detected_at)
+        db.add(ping)
+        db.flush()
+        for kind, sid, held, d1, did, alt in (("ping", str(ping.id), False, -12.0, "closed", -40.0), ("ping", "p2", True, -8.0, "entered", None),
+                                              ("radar_event", "r1", False, 3.0, "none", 4.0)):
+            db.add(Outcome(subject_kind=kind, subject_id=sid, held=held, symbol="NVDA", anchored_at=datetime(2026, 10, 22, 15),
+                           reference_price=100.0, h1=window(-4.0), d1=window(d1), d5=window(5.0), action=did, alt_usd=alt,
+                           complete=True))
+        db.commit()
+    return {"seeded": True}
+
+
 @core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state
