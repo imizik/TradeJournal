@@ -57,7 +57,8 @@ class _Wednesday(date):
 @pytest.fixture(autouse=True)
 def on_wednesday(monkeypatch):
     monkeypatch.setattr(reconstructor, "date", _Wednesday)
-    for name in ("PLAN_NUDGE_GRACE_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PLAN_NUDGE_ENABLED"):
+    for name in ("PLAN_NUDGE_GRACE_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PLAN_NUDGE_ENABLED", "POSITION_COMPANION_ENABLED",
+                 "COPILOT_ENABLED"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -134,6 +135,21 @@ def test_fires_once_after_the_grace_period_for_an_unplanned_entry(engine, world)
     buy(engine, "10:12", qty=1, price=290)  # adding to it is the same position
     tick(clock, nudger, "10:20")
     assert len(nudges(engine)) == 1
+
+
+def test_with_the_companion_on_long_options_are_left_to_it_and_stock_is_still_nudged(engine, world, monkeypatch):
+    monkeypatch.setenv("POSITION_COMPANION_ENABLED", "true")
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    clock, nudger = world
+    buy(engine, "10:00")  # a bought call: the position companion adopts it
+    buy(engine, "10:00", ticker="AMD", side="sell_to_open")  # a sold option: the companion does not adopt it
+    buy(engine, "10:00", ticker="MSFT", side="buy", price=420)
+    tick(clock, nudger, "10:03")
+    assert sorted((r.ticker, r.kind) for r in nudges(engine)) == [("AMD", "no_plan"), ("MSFT", "no_plan")]
+    monkeypatch.setenv("COPILOT_ENABLED", "false")
+    buy(engine, "10:05", ticker="TSM")
+    tick(clock, nudger, "10:08")
+    assert "TSM" in {r.ticker for r in nudges(engine)}  # the lab off: the companion cannot run, so options are nudged
 
 
 def test_positions_opened_before_the_feature_started_are_left_alone(engine, world):
