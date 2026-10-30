@@ -1,4 +1,5 @@
-"""Radar phone alerts: one ping per new event in regular hours, capped, at-most-once, off by default."""
+"""Radar phone alerts: two digests a session and a single ping for a strong event, in regular hours, through the
+notification policy, at-most-once, off by default."""
 from datetime import timedelta
 
 import httpx
@@ -38,8 +39,9 @@ def engine():
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    for name in ("RADAR_ALERTS_ENABLED", "RADAR_ALERTS_DAILY_CAP", "ALERT_APP_URL", "COPILOT_ENABLED", "ALERT_POLICY_ENABLED",
-                 "PING_DAILY_CAP", "PING_QUIET_MINUTES"):
+    for name in ("RADAR_ALERTS_ENABLED", "RADAR_DIGEST_AT", "RADAR_SINGLE_MIN_RELATIVE_PCT", "RADAR_SINGLE_MIN_GROUP_PCT", "ALERT_APP_URL",
+                 "COPILOT_ENABLED", "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE",
+                 "PING_BUDGET_RADAR_EVENT", "PING_BUDGET_RADAR_DIGEST"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
 
@@ -64,17 +66,26 @@ def _runner(store, minute: int, alerts: RadarAlerts | None, paths=PATHS):
 
 
 def rows(engine) -> list[RadarAlert]:
+    """The events' rows; the digests are ``digests``."""
     with Session(engine) as db:
-        return db.exec(select(RadarAlert).order_by(RadarAlert.detected_at)).all()
+        return db.exec(select(RadarAlert).where(RadarAlert.kind != "digest").order_by(RadarAlert.detected_at)).all()
 
 
-def _event(event_id: str, symbol: str, minute: int, kind="relative_to_spy", group=None, direction="up") -> dict:
-    """The fields a ping reads, in the shape the rules write."""
+def digests(engine) -> list[RadarAlert]:
+    with Session(engine) as db:
+        return db.exec(select(RadarAlert).where(RadarAlert.kind == "digest").order_by(RadarAlert.detected_at)).all()
+
+
+def _event(event_id: str, symbol: str, minute: int, kind="relative_to_spy", group=None, direction="up", relative=7.2, median=2.3,
+           same=4) -> dict:
+    """The fields a ping reads, in the shape the rules write; by default a stock strong enough for a single ping and a
+    group that is not."""
     stock = kind != "group_move"
-    measures = ({"relative_pct": 4.9, "change_pct": 5.0, "benchmark_change_pct": 0.1, "day_change_pct": 5.0, "window_minutes": 30} if stock
-                else {"median_relative_pct": 2.3, "members_same_direction": 4, "members_with_data": 5, "members_total": 5, "window_minutes": 30})
-    summary = (f"{symbol} ahead of SPY by 4.9% over 30 min ({symbol} +5.0%, SPY +0.1%)" if stock
-               else f"{group} ahead of SPY: 4 of 5 members up vs SPY over 30 min, median +2.3% (biggest {symbol} +3.1%; SPY +0.1%)")
+    measures = ({"relative_pct": relative, "change_pct": 5.0, "benchmark_change_pct": 0.1, "day_change_pct": 5.0, "window_minutes": 30}
+                if stock else {"median_relative_pct": median, "members_same_direction": same, "members_with_data": 5, "members_total": 5,
+                               "window_minutes": 30})
+    summary = (f"{symbol} ahead of SPY by {relative}% over 30 min ({symbol} +5.0%, SPY +0.1%)" if stock
+               else f"{group} ahead of SPY: {same} of 5 members up vs SPY over 30 min, median +{median}% (biggest {symbol} +3.1%; SPY +0.1%)")
     return {"event_id": event_id, "session_date": DAY, "rule_version": "radar-rules-v0", "universe_version": "radar-universe-test",
             "kind": kind, "direction": direction, "symbols": [symbol], "benchmark": "SPY", "group": group,
             "first_seen_at": _iso(OPEN + timedelta(minutes=minute, seconds=2)), "summary": summary, "measures": measures,
@@ -85,6 +96,7 @@ def _event(event_id: str, symbol: str, minute: int, kind="relative_to_spy", grou
 # ------------------------------------------------------------ the trigger, through the recorder
 
 def test_a_new_event_pings_once_with_its_read_and_rating_actions(tmp_path, engine, monkeypatch):
+    monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "5")  # the fixture's AAA is +6.0% against SPY
     store = _store_with(tmp_path, 36)
     sent = []
     sent_to(monkeypatch, sent)
@@ -154,27 +166,133 @@ def test_a_failing_ping_never_touches_the_recorded_pass(tmp_path, engine, monkey
 
 # ------------------------------------------------------------ caps and messages
 
-def test_daily_cap_and_one_per_subject_an_hour(engine, monkeypatch):
-    monkeypatch.setenv("RADAR_ALERTS_DAILY_CAP", "3")
-    clock = Clock(at(30))
+def test_one_single_per_subject_an_hour_and_the_rest_wait_for_the_digest(engine, monkeypatch):
+    clock = Clock(at(20))
     alerts = RadarAlerts(engine, clock=clock)
-    [first] = alerts.record([_event("e1", "AAA", 30)])
+    [first] = alerts.record([_event("e1", "AAA", 20)])
     assert first.delivery == "pending"
-    assert alerts.record([_event("e1", "AAA", 30)]) == []  # already written: left alone
-    clock.now = at(60)
-    [again] = alerts.record([_event("e2", "AAA", 60, direction="down")])
-    assert again.delivery == "skipped" and again.last_error == "AAA was already alerted at 10:00 AM ET; one an hour, so this one was not sent."
-    clock.now = at(91)
-    [later, other] = alerts.record([_event("e3", "AAA", 91), _event("e4", "Test group", 91, kind="group_move", group="Test group")])
-    assert later.delivery == "pending" and other.delivery == "pending" and other.subject == "Test group"
-    [capped] = alerts.record([_event("e5", "CCC", 91)])
-    assert capped.delivery == "skipped" and capped.last_error == "Daily cap of 3 Radar alerts reached, so this one was not sent."
-    assert [r.delivery for r in rows(engine)] == ["pending", "skipped", "pending", "pending", "skipped"]
+    assert alerts.record([_event("e1", "AAA", 20)]) == []  # already written: left alone
+    clock.now = at(50)
+    [again] = alerts.record([_event("e2", "AAA", 50, direction="down")])
+    assert again.delivery == "digest" and again.body == "AAA down 7.2% vs SPY · 10:20 AM"
+    assert again.last_error == "AAA was already alerted at 9:50 AM ET; one an hour, so this one waits for the digest."
+    clock.now = at(81)
+    [later, group, weak] = alerts.record([_event("e3", "AAA", 81), _event("e4", "Test group", 81, kind="group_move", group="Test group"),
+                                          _event("e5", "CCC", 81, relative=6.9)])
+    assert (later.delivery, group.delivery, weak.delivery) == ("pending", "digest", "digest")
+    assert group.body == "Test group up 2.3% vs SPY (4 of 5) · 10:51 AM" and weak.last_error is None
     sent = []
     sent_to(monkeypatch, sent)
-    alerts.deliver()  # the 10:00 ping is over 15 minutes old by now: dropped, not sent late
-    assert [p["title"] for p in sent] == ["Radar: AAA +5.0% vs SPY +0.1%", "Radar: Test group +2.3% vs SPY (4 of 5 up)"]
-    assert [r.delivery for r in rows(engine)] == ["expired", "skipped", "sent", "sent", "skipped"]
+    alerts.deliver()  # the 9:50 ping is over 15 minutes old by now: dropped, not sent late
+    assert [p["title"] for p in sent] == ["Radar: AAA +5.0% vs SPY +0.1%"]
+    assert [r.delivery for r in rows(engine)] == ["expired", "digest", "sent", "digest", "digest"]
+
+
+def test_strong_is_one_pure_test_of_the_event(monkeypatch):
+    assert radar_alerts.strong(_event("a", "AAA", 30, relative=7.0)) and radar_alerts.strong(_event("b", "AAA", 30, relative=-7.4))
+    assert not radar_alerts.strong(_event("c", "AAA", 30, relative=6.99))
+    sector = _event("d", "AAA", 30, kind="relative_to_sector", relative=9.0)
+    sector["measures"]["spy_relative_pct"] = 4.0  # strong against its sector, not against SPY
+    assert not radar_alerts.strong(sector)
+    sector["measures"]["spy_relative_pct"] = -7.1
+    assert radar_alerts.strong(sector)
+    assert not radar_alerts.strong(_event("e", "AAA", 30, kind="group_move", group="G", median=4.0, same=4))  # 4 of 5
+    assert not radar_alerts.strong(_event("f", "AAA", 30, kind="group_move", group="G", median=2.9, same=5))
+    assert radar_alerts.strong(_event("g", "AAA", 30, kind="group_move", group="G", median=-3.0, same=5))
+    monkeypatch.setenv("RADAR_SINGLE_MIN_RELATIVE_PCT", "6.5")
+    monkeypatch.setenv("RADAR_SINGLE_MIN_GROUP_PCT", "junk")
+    assert radar_alerts.strong(_event("h", "AAA", 30, relative=6.6))
+    assert radar_alerts.strong(_event("i", "AAA", 30, kind="group_move", group="G", median=3.0, same=5))
+
+
+def test_the_digest_lists_every_waiting_event_newest_first_and_opens_radar(engine, monkeypatch):
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.2)])
+    clock.now = at(20)
+    alerts.record([_event("e2", "BBB", 20, direction="down", relative=-4.6), _event("e3", "LAD", 20)])  # LAD is strong: a single
+    alerts.deliver()
+    clock.now = at(25)
+    alerts.record([_event("g1", "AAA", 25, kind="group_move", group="Semis")])
+    assert [p["title"] for p in sent] == ["Radar: LAD +5.0% vs SPY +0.1%"]
+    clock.now = at(30) + 5  # 10:00
+    alerts.deliver()
+    digest = sent[-1]
+    assert digest["title"] == "Radar digest: 3 events since the open"
+    assert digest["body"] == "Semis up 2.3% vs SPY (4 of 5) · 9:55 AM\nBBB down 4.6% vs SPY · 9:50 AM\nAAA up 5.2% vs SPY · 9:40 AM"
+    assert digest["path"] == "/radar" and digest["more"] == () and digest["priority"] == 3
+    assert [(r.subject, r.delivery) for r in rows(engine)] == [("AAA", "sent"), ("BBB", "sent"), ("LAD", "sent"), ("Semis", "sent")]
+    [row] = digests(engine)
+    assert (row.event_id, row.delivery, row.attempts) == (f"digest-{DAY}-1000", "sent", 1)
+    [ping] = [p for p in pings(engine) if p.kind == "radar_digest"]
+    assert (ping.sender, ping.decision, ping.anchor, ping.source_id) == ("radar_alerts", "sent", None, str(row.id))
+    # Once a slot: later passes in its window write nothing more; the 14:00 digest takes what came since.
+    clock.now = at(33)
+    alerts.record([_event("e4", "CCC", 33, relative=4.8)])
+    alerts.deliver()
+    assert len(sent) == 2 and len(digests(engine)) == 1
+    clock.now = at(270)
+    alerts.deliver()
+    assert sent[-1]["title"] == "Radar digest: 1 event since 10:00 AM" and sent[-1]["body"] == "CCC up 4.8% vs SPY · 10:03 AM"
+    assert [r.delivery for r in rows(engine)] == ["sent"] * 5
+
+
+def test_a_long_digest_shows_twelve_lines_and_nothing_waiting_skips_its_slot(engine, monkeypatch):
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(5))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event(f"e{i}", f"S{i:02d}", 5 + i, relative=4.5) for i in range(15)])
+    clock.now = at(30)
+    alerts.deliver()
+    lines = sent[0]["body"].split("\n")
+    assert sent[0]["title"] == "Radar digest: 15 events since the open" and len(lines) == 13 and lines[-1] == "+3 more"
+    assert lines[0].startswith("S14 ") and lines[11].startswith("S03 ")
+    clock.now = at(270)
+    alerts.deliver()
+    assert len(sent) == 1
+    assert [(d.event_id[-4:], d.delivery, d.last_error) for d in digests(engine)][1] == (
+        "1400", "skipped", "Nothing new on Radar since 10:00 AM, so no digest was sent.")
+
+
+def test_a_held_digest_holds_its_events_and_a_late_start_writes_no_digest(engine, monkeypatch):
+    monkeypatch.setenv("PING_BUDGET_RADAR_DIGEST", "0")
+    sent = []
+    sent_to(monkeypatch, sent)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.0)])
+    clock.now = at(30)
+    alerts.deliver()
+    assert sent == [] and digests(engine)[0].delivery == "held"
+    [row] = rows(engine)
+    assert row.delivery == "held" and row.last_error == "In the 10:00 AM Radar digest: Not sent: Radar's 0 digests for today are spent."
+    # The recorder started at 14:20: the 14:00 digest's window has passed, and nothing is sent late.
+    monkeypatch.delenv("PING_BUDGET_RADAR_DIGEST")
+    alerts.record([_event("e2", "BBB", 290, relative=5.0)])
+    clock.now = at(290)
+    alerts.deliver()
+    assert sent == [] and len(digests(engine)) == 1 and rows(engine)[1].delivery == "digest"
+
+
+def test_the_digest_times_are_configurable_and_an_earlier_session_s_leftovers_are_skipped(engine, monkeypatch):
+    assert radar_alerts.digest_minutes() == (600, 840)
+    monkeypatch.setenv("RADAR_DIGEST_AT", "15:45, 9:45,bad,25:00")
+    assert radar_alerts.digest_minutes() == (585, 945)
+    monkeypatch.setenv("RADAR_DIGEST_AT", "nonsense")
+    assert radar_alerts.digest_minutes() == (600, 840)
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    old = _event("old", "OLD", 10, relative=4.0)
+    old["session_date"] = "2030-01-14"
+    alerts.record([old])
+    sent_to(monkeypatch, [])
+    clock.now = at(30)
+    alerts.deliver()
+    [row] = rows(engine)
+    assert row.delivery == "skipped" and "only in the feed" in row.last_error and digests(engine)[0].delivery == "skipped"
 
 
 def test_group_and_down_messages():
@@ -265,15 +383,15 @@ def test_a_sent_alert_is_recorded_on_the_notification_policy(engine, monkeypatch
     assert ping.source_id == str(rows(engine)[0].id) and ping.delivered_at is not None
 
 
-def test_over_the_shared_cap_the_alert_is_held_and_never_sent_later(engine, monkeypatch):
-    monkeypatch.setenv("PING_DAILY_CAP", "3")  # every slot is reserved for position and plan pings
+def test_over_its_budget_the_alert_is_held_and_never_sent_later(engine, monkeypatch):
+    monkeypatch.setenv("PING_BUDGET_RADAR_EVENT", "0")
     sent = []
     sent_to(monkeypatch, sent)
     clock = Clock(at(30))
     alerts = _pending(engine, clock)
     alerts.deliver()
     [row] = rows(engine)
-    assert sent == [] and row.delivery == "held" and row.last_error.startswith("Not sent: 0 pings already went out today (cap 3).")
+    assert sent == [] and row.delivery == "held" and row.last_error == "Not sent: Radar's 0 single pings for today are spent."
     assert [p.decision for p in pings(engine)] == ["over_cap"]
     clock.now = at(31)
     alerts.deliver()
@@ -297,17 +415,47 @@ def test_inside_the_quiet_window_it_is_held_and_a_held_alert_does_not_use_up_its
     assert again.delivery == "pending"
     alerts.deliver()
     assert [p["title"] for p in sent] == ["Radar: AAA +5.0% vs SPY +0.1%"] and rows(engine)[1].delivery == "sent"
-    # The alerts' own caps still hold: a third AAA event inside the hour is skipped and never reaches the gate.
+    # The hourly rule still holds: a third AAA event inside the hour waits for the digest and never reaches the gate alone.
     clock.now = at(60)
     [third] = alerts.record([_event("e3", "AAA", 60)])
-    assert third.delivery == "skipped" and "one an hour" in third.last_error
+    assert third.delivery == "digest" and "one an hour" in third.last_error
     assert [p.decision for p in pings(engine) if p.sender == "radar_alerts"] == ["suppressed", "sent"]
 
 
 def test_a_group_event_is_anchored_to_its_group(engine, monkeypatch):
     sent_to(monkeypatch, [])
     alerts = RadarAlerts(engine, clock=Clock(at(30)))
-    alerts.record([_event("g1", "AAA", 30, kind="group_move", group="Test group")])
+    alerts.record([_event("g1", "AAA", 30, kind="group_move", group="Test group", median=3.4, same=5)])
     alerts.deliver()
     [ping] = pings(engine)
     assert (ping.anchor, ping.symbol, ping.decision) == ("group:Test group", None, "sent")
+
+
+def test_an_interrupted_digest_is_unknown_and_so_are_its_events(engine, monkeypatch):
+    clock = Clock(at(10))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 10, relative=5.0)])
+    clock.now = at(30)
+    alerts.digest()
+    with Session(engine) as db:
+        row = db.exec(select(RadarAlert).where(RadarAlert.kind == "digest")).one()
+        row.delivery, row.claimed_at = "sending", radar_alerts._utc(clock.now - 200)
+        db.commit()
+    sent = []
+    sent_to(monkeypatch, sent)
+    alerts.deliver()
+    assert sent == [] and digests(engine)[0].delivery == "unknown"
+    [event] = rows(engine)
+    assert event.delivery == "unknown" and event.last_error.startswith("In the 10:00 AM Radar digest: The send was interrupted")
+
+
+def test_a_dip_candidate_is_always_a_single_and_its_hour_counts_its_own_rule_only(engine, monkeypatch):
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 20)])  # a strong trial-rule single for AAA
+    dip = _event("rd0-1", "AAA", 22, kind="dip_turn")
+    dip.update(rule_version="radar-dip-v0", measures={"day_change_pct": -3.1, "low_change_pct": -4.6})
+    clock.now = at(22)
+    [row] = alerts.record([dip])
+    assert row.delivery == "pending" and row.title == "Radar dip: AAA turning up, −3.1% (low −4.6%)"
+    assert radar_alerts.digest_line(dip) == "AAA dip turning up, −3.1% (low −4.6%) · 9:52 AM"

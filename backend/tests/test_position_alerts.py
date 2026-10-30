@@ -899,3 +899,71 @@ def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, 
     assert ("1 contract open. Your past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
             "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in sent[0][1]
     assert position_alerts.ask_context(alert).endswith("Wrong-way alert at 10:31 AM: now -$24.")
+
+
+# ------------------------------------------------------------ the day before expiry
+
+THU = date(2026, 10, 22)
+
+
+class Weekdays(Calendar):
+    def hours(self, day):
+        return {"status": "closed"} if day.weekday() >= 5 else super().hours(day)
+
+
+def test_the_trading_day_before_expiry_gets_one_alert_with_this_weeks_premium_at_risk(engine, world, monkeypatch):
+    clock, quotes, watcher = world
+    watcher.calendar = Weekdays()
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 2, 400, "2026-10-21T09:45")  # expires Friday the 23rd: $800
+        fill(db, "buy_to_open", 1, 300, "2026-10-21T10:15", expiration=date(2026, 10, 27))  # next Tuesday: $300
+        fill(db, "buy_to_open", 4, 100, "2026-10-21T10:20", expiration=date(2026, 11, 6))  # two weeks out: not this week
+    quotes.set(4.50)  # mid $4.52
+    for hhmm in ("15:29", "15:30", "15:31", "15:44"):
+        clock.now, watcher._last_run = at(THU, hhmm), 0
+        watcher.run()
+    with Session(engine) as db:
+        _rebuild_trades(db, "test")
+        db.commit()
+    clock.now, watcher._last_run = at(THU, "15:40"), 0
+    watcher.run()
+    [eve] = [a for a in alerts(engine) if a.kind == "expiry_eve"]
+    assert len(alerts(engine)) == 1 and (eve.contract, eve.contracts, eve.avg_cost, eve.mark) == ("SNDK 10/23/26 230C", 2, 400, 452)
+    sent = []
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", lambda title, body, **kw: sent.append((title, body, kw["priority"])))
+    clock.now = at(THU, "15:41")
+    watcher.deliver()
+    [(title, body, priority)] = sent
+    assert (title, priority) == ("SNDK 10/23/26 230C expires tomorrow, still open", 4)
+    assert body.startswith("Mark $4.52 vs cost $4.00: +$104 (+13%). 2 contracts open. Expiring this week: 3 contracts, $1,100 "
+                           "premium at risk.\n\nSince-entry context unavailable")  # an overnight position has no since-entry context
+    with Session(engine) as db:
+        from app.models import PhonePing
+        ping = db.exec(select(PhonePing)).one()
+        assert (ping.kind, ping.rank, ping.decision) == ("expiry_eve", 3, "sent")  # ranked with the time stop
+    assert position_alerts.ask_context(eve).endswith("Day-before-expiry alert at 3:30 PM: now +$104.")
+
+
+def test_a_monday_expiry_is_alerted_friday_and_a_half_day_moves_it_before_the_close(engine, world):
+    clock, quotes, watcher = world
+    watcher.calendar = Weekdays()
+    monday, friday = date(2026, 10, 26), date(2026, 10, 23)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 150, "2026-10-21T10:00", expiration=monday)
+    clock.now = at(THU, "15:30")  # Thursday is not Monday's eve
+    watcher.run()
+    assert alerts(engine) == []
+
+    class HalfFriday(Weekdays):
+        def hours(self, day):
+            return {"status": "open", "open": 570, "close": 780} if day == friday else super().hours(day)
+    watcher.calendar, watcher._last_run = HalfFriday(), 0
+    clock.now = at(friday, "12:30")  # 30 minutes before a 1:00 PM close
+    watcher.run()
+    [eve] = alerts(engine)
+    assert eve.kind == "expiry_eve" and eve.mark is None
+    title, body, _ = position_alerts.message(eve, facts={"expires": "Monday", "week": {"contracts": 1, "premium": 150.0}})
+    assert title == "SNDK 10/26/26 230C expires Monday, still open"
+    assert body.startswith("Cost $1.50, no reliable quote. 1 contract open. Expiring this week: 1 contract, $150 premium at risk.")
+    assert position_alerts.trading_days_after(Weekdays(), friday, 2) == [monday, date(2026, 10, 27)]

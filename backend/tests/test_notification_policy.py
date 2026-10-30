@@ -67,7 +67,8 @@ class _Wednesday(date):
 @pytest.fixture(autouse=True)
 def settings(monkeypatch):
     monkeypatch.setattr(reconstructor, "date", _Wednesday)
-    for name in ("ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PLAN_NUDGE_DAILY_CAP"):
+    for name in ("ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PLAN_NUDGE_DAILY_CAP", "PING_PREOPEN_ALLOWANCE",
+                 *(f"PING_BUDGET_{kind.upper()}" for kind in policy.BUDGETS)):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("RADAR_ENABLED", "false")
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
@@ -129,29 +130,78 @@ def sell(engine, when, qty=2, ticker="SNDK", strike=230):
 
 def test_the_priority_order_and_what_the_cap_never_drops():
     assert [policy.rank(k) for k in ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep",
-                                     "radar_event", "thesis_watch", "research")] == list(range(11))
-    assert policy.rank("expiry_first") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
-    assert policy.rank("radar_something") == 11  # an unknown kind goes last
-    assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600
+                                     "evening_review", "radar_event", "radar_digest", "thesis_watch", "research")] == list(range(13))
+    assert policy.rank("expiry_first") == policy.rank("expiry_eve") == policy.rank("time_stop") and policy.rank("link") == policy.rank("nudge")
+    assert policy.rank("week_review") == policy.rank("day_replay") == policy.rank("prep")
+    assert policy.rank("radar_something") == 13  # an unknown kind goes last
+    assert policy.enabled() and policy.daily_cap() == 12 and policy.quiet_seconds() == 600 and policy.preopen_allowance() == 2
+    assert {k: policy.budget(k) for k in policy.BUDGETS} == {"nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2,
+                                                             "thesis_watch": 2, "research": 1}
+    assert (policy.budget("link"), policy.budget("week_review"), policy.budget("hold_hour"), policy.budget("evening_review")) == (2, 1, None, None)
 
 
-def test_the_daily_cap_holds_low_priority_pings_first_and_never_the_top_three(engine):
+def test_each_low_kind_spends_only_its_own_budget_and_the_ceiling_holds_the_rest(engine):
     with Session(engine) as db:
-        for i in range(9):
+        for i in range(4):
+            assert decide(db, "radar_event", f"r{i}", anchor=f"sym-{i}").action == "send"
+        held = decide(db, "radar_event", "r4", anchor="sym-4")
+        assert held.action == "hold" and held.reason == "Not sent: Radar's 4 single pings for today are spent."
+        # Radar's singles being spent takes nothing from the digest, the nudges or research.
+        assert decide(db, "radar_digest", "d1", anchor=None).action == "send"
+        assert decide(db, "nudge", "n1", anchor="p-n1").action == "send"
+        assert decide(db, "link", "l1", anchor="p-l1").action == "send"  # a link ping shares the nudges' budget
+        assert decide(db, "nudge", "n2", anchor="p-n2").reason == "Not sent: Plan nudges' 2 pings for today are spent."
+        assert decide(db, "prep", "prep1", anchor=None).action == "send"
+        assert decide(db, "week_review", "w1", anchor=None).reason == "Not sent: The prep and review pings' 1 ping for today is spent."
+        assert decide(db, "research", "q1", anchor=None).action == "send"
+        assert decide(db, "research", "q2", anchor=None).reason == "Not sent: Research's 1 ping for today is spent."
+        for i in range(3):  # 9 sent; the ceiling of 12 holds the time stop and one-hour alerts too
             assert decide(db, "hold_hour", f"h{i}", anchor=f"p{i}").action == "send"
-        held = decide(db, "nudge", "n1", anchor="p-n1")  # the last 3 of 12 are kept for position and plan pings
-        assert held.action == "hold" and "9 pings already went out today (cap 12)" in held.reason and "last 3 of 12" in held.reason
-        assert decide(db, "prep", "prep1", anchor=None).action == "hold"
-        assert decide(db, "research", "r1", anchor=None).action == "hold"
-        for i in range(9, 12):
-            assert decide(db, "time_stop" if i % 2 else "entry", f"h{i}", anchor=f"p{i}").action == "send"
-        assert decide(db, "hold_hour", "h12", anchor="p12").action == "hold"
-        assert decide(db, "expiry_first", "e1", anchor="p13").action == "hold"
-        for kind in ("giveback", "invalidation", "expiry_final"):  # never over cap
-            assert decide(db, kind, f"top-{kind}", anchor=f"p-{kind}").action == "send"
+        assert decide(db, "radar_digest", "d2", anchor=None).reason == "Not sent: 12 pings already went out today (cap 12)."
+        assert decide(db, "time_stop", "t1", anchor="p-t1").action == "hold"
+        assert decide(db, "expiry_eve", "e1", anchor="p-e1").action == "hold"
+        for kind in ("giveback", "invalidation", "expiry_final", "evening_review"):  # never over the ceiling
+            assert decide(db, kind, f"top-{kind}", anchor=f"p-{kind}" if kind != "evening_review" else None).action == "send"
     decisions = [(r.kind, r.decision) for r in rows(engine)]
-    assert decisions.count(("hold_hour", "sent")) == 9 and ("nudge", "over_cap") in decisions and ("expiry_final", "sent") in decisions
-    assert sum(d == "sent" for _, d in decisions) == 15 and sum(d == "over_cap" for _, d in decisions) == 5
+    assert decisions.count(("radar_event", "sent")) == 4 and ("evening_review", "sent") in decisions
+    assert sum(d == "sent" for _, d in decisions) == 16 and sum(d == "over_cap" for _, d in decisions) == 7
+
+
+def test_before_the_open_the_budgeted_kinds_share_the_pre_open_allowance(engine, monkeypatch):
+    with Session(engine) as db:
+        assert decide(db, "prep", "prep1", anchor=None, now=at("08:30")).action == "send"
+        assert decide(db, "thesis_watch", "t1", anchor="symbol:NBIS", now=at("08:50")).action == "send"
+        held = decide(db, "thesis_watch", "t2", anchor="symbol:SNDK", now=at("09:10"))
+        assert held.action == "hold" and "the 2 pre-open pings" in held.reason and "before 9:30 AM New York" in held.reason
+        assert decide(db, "hold_hour", "h1", anchor="p1", now=at("09:20")).action == "send"  # not a budgeted kind
+        # At the open the kind's own budget is what is left: thesis watch has its second ping.
+        assert decide(db, "thesis_watch", "t3", anchor="symbol:SNDK", now=at("09:31")).action == "send"
+        assert decide(db, "thesis_watch", "t4", anchor="symbol:AMD", now=at("09:40")).reason == (
+            "Not sent: Thesis watch's 2 pings for today are spent.")
+    monkeypatch.setenv("PING_PREOPEN_ALLOWANCE", "0")
+    monkeypatch.setenv("PING_BUDGET_RESEARCH", "3")
+    assert policy.preopen_allowance() == 0 and policy.budget("research") == 3
+    with Session(engine) as db:
+        assert decide(db, "research", "q1", anchor=None, now=at("09:00")).action == "hold"
+        assert decide(db, "research", "q2", anchor=None, now=at("10:00")).action == "send"
+
+
+def test_october_29_pre_open_pings_no_longer_hold_radar_or_the_evening_review(engine):
+    """Oct 29, 2026: nine pings by 09:50 (prep, thesis watch on pre-open headlines, research, nudges) spent the shared
+    pool, and every Radar ping and the 16:30 evening review were held."""
+    morning = [("prep", "08:30"), ("thesis_watch", "08:41"), ("thesis_watch", "08:55"), ("thesis_watch", "09:05"),
+               ("thesis_watch", "09:12"), ("research", "09:20"), ("research", "09:34"), ("nudge", "09:41"), ("nudge", "09:49")]
+    with Session(engine) as db:
+        for i, (kind, hhmm) in enumerate(morning):
+            decide(db, kind, f"m{i}", anchor=f"symbol:S{i}", now=at(hhmm))
+        digest = decide(db, "radar_digest", "digest-1000", anchor=None, now=at("10:00"))
+        single = decide(db, "radar_event", "r1", anchor="symbol:LAD", now=at("10:12"))
+        second = decide(db, "radar_digest", "digest-1400", anchor=None, now=at("14:00"))
+        evening = decide(db, "evening_review", "ev", anchor=None, now=at("16:30"))
+        assert (digest.action, single.action, second.action, evening.action) == ("send", "send", "send", "send")
+        assert policy.held_text(db, at("16:30")) == "4 pings held today (thesis watch 3, research 1)"
+    morning_sent = [r.kind for r in rows(engine) if r.decision == "sent" and r.decided_at < utc(at("09:50"))]
+    assert morning_sent == ["prep", "thesis_watch", "research", "nudge", "nudge"]
 
 
 def test_the_quiet_window_merges_an_undelivered_different_kind_and_suppresses_the_rest(engine):
@@ -225,9 +275,10 @@ def test_the_cap_counts_a_new_york_day_not_a_utc_one(engine):
 def test_settings_are_read_from_the_environment(engine, monkeypatch):
     monkeypatch.setenv("PING_DAILY_CAP", "2")
     monkeypatch.setenv("PING_QUIET_MINUTES", "1")
-    assert policy.daily_cap() == 2 and policy.quiet_seconds() == 60
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "0")
+    assert policy.daily_cap() == 2 and policy.quiet_seconds() == 60 and policy.budget("nudge") == 0
     with Session(engine) as db:
-        assert decide(db, "nudge", "n1", now=at("10:00")).action == "hold"  # 2 - 3 reserved: nothing left for a nudge
+        assert decide(db, "nudge", "n1", now=at("10:00")).reason == "Not sent: Plan nudges' 0 pings for today are spent."
         assert decide(db, "hold_hour", "h1", anchor="p1", now=at("10:00")).action == "send"
         assert decide(db, "hold_hour", "h2", anchor="p2", now=at("10:00")).action == "send"
         assert decide(db, "hold_hour", "h3", anchor="p3", now=at("10:00")).action == "hold"
@@ -235,7 +286,8 @@ def test_settings_are_read_from_the_environment(engine, monkeypatch):
         assert decide(db, "giveback", "g2", anchor="p1", now=at("10:00") + 45).action == "hold"  # its duplicate, 15 s later
         assert decide(db, "giveback", "g3", anchor="p1", now=at("10:02")).action == "send"  # the 1-minute window has passed
     monkeypatch.setenv("PING_DAILY_CAP", "lots")
-    assert policy.daily_cap() == 12
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "some")
+    assert policy.daily_cap() == 12 and policy.budget("nudge") == 2
 
 
 def test_a_broken_policy_table_sends_the_ping_unjudged(engine):
@@ -325,7 +377,7 @@ def test_plan_nudges_and_link_pings_ride_the_same_policy(engine, phone, monkeypa
         assert ping.trade_id == trade_id and ping.delivered_at is not None
     assert phone[0][0] == "SNDK 10/23 230C: no plan yet"
     # Over the cap: held with the reason, the nudge's own daily cap untouched.
-    monkeypatch.setenv("PING_DAILY_CAP", "3")
+    monkeypatch.setenv("PING_DAILY_CAP", "1")
     with Session(engine) as db:
         db.add(PlanNudge(account_id=ROTH, source_key="gmail:other", trade_id=trade_id, ticker="SNDK", contract="SNDK 10/23/26 230C",
                          side="buy_to_open", contracts=2, price=310, opened_at=datetime.combine(WED, datetime.strptime("09:50", "%H:%M").time()),
@@ -334,7 +386,7 @@ def test_plan_nudges_and_link_pings_ride_the_same_policy(engine, phone, monkeypa
     nudges.deliver()
     with Session(engine) as db:
         held = db.exec(select(PlanNudge).where(PlanNudge.source_key == "gmail:other")).one()
-        assert held.delivery == "held" and held.last_error == "Not sent: 1 ping already went out today (cap 3)."
+        assert held.delivery == "held" and held.last_error == "Not sent: 1 ping already went out today (cap 1)."
     assert len(phone) == 1
 
 
@@ -406,7 +458,7 @@ def test_a_held_plan_ping_is_recorded_on_the_event_and_not_retried(engine, phone
 
 
 def test_pre_market_prep_and_research_are_held_before_position_pings(engine, phone, monkeypatch):
-    monkeypatch.setenv("PING_DAILY_CAP", "3")  # the whole cap is the reserve
+    monkeypatch.setenv("PING_PREOPEN_ALLOWANCE", "0")  # nothing budgeted goes out before the open
     clock = Clock(at("08:31"))
     monkeypatch.setattr(research_queue, "time", SimpleNamespace(time=clock))
     preps = PremarketPreps(engine, Calendar(), clock=clock, spawn=lambda work: None)
@@ -416,13 +468,13 @@ def test_pre_market_prep_and_research_are_held_before_position_pings(engine, pho
     preps.deliver()
     with Session(engine) as db:
         prep = db.exec(select(PremarketPrep)).one()
-        assert prep.delivery == "held" and "cap 3" in prep.last_error
+        assert prep.delivery == "held" and "pre-open pings" in prep.last_error
         ticket = research_queue.gate("job-1", {"title": "Research: NBIS – guidance cut", "message": "Summary.", "path": "/copilot-lab"}, session=db)
-        assert ticket.held and "cap 3" in ticket.reason
+        assert ticket.held and "pre-open pings" in ticket.reason
         assert decide(db, "hold_hour", "h1", anchor="p1").action == "send"
         assert policy.held_back_today(db, at("09:00")) == {"count": 2, "by_kind": {"pre-market prep": 1, "research": 1}}
     assert phone == []
-    monkeypatch.setenv("PING_DAILY_CAP", "12")
+    monkeypatch.delenv("PING_PREOPEN_ALLOWANCE")
     with Session(engine) as db:
         db.add(PremarketPrep(day=date(2026, 10, 22), detected_at=utc(at("08:30")), body="Line one\nLine two", delivery="pending"))
         db.commit()

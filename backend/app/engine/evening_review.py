@@ -4,10 +4,12 @@ Copilot desk, opening Close the day.
 At ``EVENING_REVIEW_PING_AT`` New York (``16:30`` by default; a time before 16:00 or unreadable keeps the default) on a
 trading day (the market calendar: no weekend or holiday ping) the desk's counts are read once through
 ``copilot_desk.waiting``, what the desk's Close the day pass walks: the symbols still asking their close question,
-today's position alerts with no feedback, today's Radar hits not rated and the fills waiting to link. Nothing waiting, the lab off, or a
-desk source that could not be read is recorded ``skipped`` with the reason and nothing is sent. Otherwise one ping, "To review: 2 threads, 3 alerts,
-1 fill to link.", goes through ``notification_policy.decide`` (kind ``evening_review``, ranked with the prep, so the
-daily cap holds it first) and opens ``/copilot-lab?close=1``, which starts the desk's Close the day pass.
+today's position alerts with no feedback, today's Radar hits not rated and the fills waiting to link, and the pings the
+notification policy held today (``notification_policy.held_text``). Nothing waiting, the lab off, or a desk source that
+could not be read is recorded ``skipped`` with the reason and nothing is sent. Otherwise one ping, "To review: 2 threads ·
+3 alerts unanswered · 5 Radar hits unrated · 1 fill to link · 12 pings held today (Radar 11, evening 1)", goes through
+``notification_policy.decide`` (kind ``evening_review``, which the policy never holds: it is the ping that reports what
+was held) and opens ``/copilot-lab?close=1``, which starts the desk's Close the day pass.
 
 Off unless ``EVENING_REVIEW_PING_ENABLED=true``. On the level alert monitor's loop. The unique ``EveningReview.day`` is
 the once-a-day guard; a day not counted by ``WINDOW_MINUTES`` after its time waits for the next. Delivery is
@@ -65,11 +67,13 @@ def _part(count: int, one: str, many: str) -> str | None:
     return f"{count} {one if count == 1 else many}" if count else None
 
 
-def message(counts: dict) -> str | None:
-    """"To review: 2 threads, 3 alerts, 1 Radar hit, 1 fill to link." or None when nothing waits."""
-    parts = [p for p in (_part(counts["review"], "thread", "threads"), _part(counts["alerts"], "alert", "alerts"),
-                         _part(counts["radar"], "Radar hit", "Radar hits"), _part(counts["fills"], "fill to link", "fills to link")) if p]
-    return f"To review: {', '.join(parts)}." if parts else None
+def message(counts: dict, held: str | None = None) -> str | None:
+    """"To review: 2 threads · 3 alerts unanswered · 1 Radar hit unrated · 1 fill to link · 12 pings held today (Radar 11,
+    evening 1)" or None when nothing waits."""
+    parts = [p for p in (_part(counts["review"], "thread", "threads"), _part(counts["alerts"], "alert unanswered", "alerts unanswered"),
+                         _part(counts["radar"], "Radar hit unrated", "Radar hits unrated"),
+                         _part(counts["fills"], "fill to link", "fills to link"), held) if p]
+    return f"To review: {' · '.join(parts)}" if parts else None
 
 
 def count(db: Session, now: float) -> dict | None:
@@ -117,7 +121,7 @@ class EveningReviews:
                 row.delivery, row.last_error = "skipped", "The Copilot Lab is off, so there is no desk to open."
             elif counts:
                 row.review, row.alerts, row.radar, row.fills = counts["review"], counts["alerts"], counts["radar"], counts["fills"]
-                row.body = message(counts)
+                row.body = message(counts, notification_policy.held_text(db, now))
                 if row.body is None:
                     row.delivery, row.last_error = "skipped", "Nothing was waiting for review, so nothing was sent."
             db.add(row)

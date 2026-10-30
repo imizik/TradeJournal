@@ -83,9 +83,11 @@ class Phone:
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
     for name in ("THESIS_WATCH_ENABLED", "THESIS_WATCH_MOVE_PCT", "THESIS_WATCH_DAILY_CAP", "RESEARCH_QUEUE_ENABLED",
-                 "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES"):
+                 "ALERT_POLICY_ENABLED", "PING_DAILY_CAP", "PING_QUIET_MINUTES", "PING_PREOPEN_ALLOWANCE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NTFY_URL", "https://ntfy.example/trade-journal")
+    # Thesis watch's own caps are under test here; the policy's thesis-watch budget is tested in test_notification_policy.
+    monkeypatch.setenv("PING_BUDGET_THESIS_WATCH", "20")
 
 
 @pytest.fixture
@@ -545,12 +547,12 @@ def test_a_sent_trigger_is_recorded_on_the_notification_policy(engine, world):
 def test_over_the_shared_cap_a_trigger_is_held_keyed_to_its_day_and_does_not_use_up_the_symbol_s_day(engine, world, monkeypatch):
     watch, readers, phone, clock = world
     investigate(engine, "NBIS")
-    monkeypatch.setenv("PING_DAILY_CAP", "3")  # every slot is reserved for position and plan pings
+    monkeypatch.setenv("PING_DAILY_CAP", "0")
     readers.articles = [article("NBIS", "Nebius news", "https://benzinga.com/n1", at("09:55"))]
     result = watch.run_once()
     [row] = triggers(engine)
     assert phone.sent == [] and result["fired"] == [] and [s["delivery"] for s in result["skipped"]] == ["held"]
-    assert row.delivery == "held" and row.reason.startswith("Not sent: 0 pings already went out today (cap 3).")
+    assert row.delivery == "held" and row.reason.startswith("Not sent: 0 pings already went out today (cap 0).")
     assert row.dedupe_key == "news:NBIS:https://benzinga.com/n1#skipped:2026-10-21"
     assert [p.decision for p in pings(engine)] == ["over_cap"]
     # Not told, so the symbol's one ping a day is still there for the next headline once the cap allows it.

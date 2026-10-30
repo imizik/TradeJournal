@@ -1,5 +1,6 @@
 """Open-trade phone alerts: a long option that was up gives its gain back, one
-has been held an hour, or one is still open on its expiration day.
+has been held an hour, one expires on the next trading day, or one is still
+open on its expiration day.
 
 From the October 21, 2026 behavior audit (``backend/reports/behavior_audit_2026-10-21.md``):
 trades that were green and were ridden back into losses, trades held from an
@@ -28,6 +29,16 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   ``FIRST_GRACE_MINUTES`` late is skipped, and none is sent after the close;
   the last one states the minutes actually left. A contract too thin to price
   shows its bid rather than "no quote".
+- **Day before expiry.** At ``EVE_MINUTE`` (15:30 New York, or
+  ``FINAL_MINUTES`` before an earlier close) on the trading day before a long
+  option's expiration (the market calendar: a Friday expiry's eve is Thursday,
+  a Monday expiry's the Friday before), one alert per position: the contract,
+  its mark against its cost in dollars and percent, then everything expiring
+  this week: the open long options expiring within the next
+  ``WEEK_TRADING_DAYS`` trading days and their cost basis, as premium at risk
+  (there are no account balances, so never a share of the account). Regular
+  hours only, within ``FIRST_GRACE_MINUTES`` of its time; a quote that cannot
+  be judged still sends, saying so.
 - **Held an hour.** Also off unless ``POSITION_HOLD_ALERTS=true``. Trades the
   audit found held from an hour to the same-day close lost $17,558, and 53 of
   those losers had been up 10% within their first hour; its suggestion was to
@@ -66,10 +77,11 @@ is recorded ``unknown`` and never resent, and an alert not sent within
 ``EXPIRE_SECONDS`` is dropped, since a late give-back alert is wrong advice.
 Right before the send, ``notification_policy.decide`` may hold it (``held``, with
 the reason): the daily cap or a ping for the same position moments earlier.
-Last-day final and give-back alerts are never over the cap.
+Last-day final and give-back alerts are never over the cap; the day-before-expiry
+alert ranks with the 90-minute last-day alert.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 import logging
 import os
 import time
@@ -99,6 +111,8 @@ MAX_QUOTE_AGE = 120  # seconds since Tradier's bid time
 FIRST_MINUTES = 90
 FIRST_GRACE_MINUTES = 15
 FINAL_MINUTES = 30
+EVE_MINUTE = 15 * 60 + 30
+WEEK_TRADING_DAYS = 5
 RUN_SECONDS = 30
 CLAIM_SECONDS = 120
 EXPIRE_SECONDS = 15 * 60
@@ -110,7 +124,7 @@ WRONG_WAY_GRACE = 5
 RECORD_MIN_TRADES = 5  # per side of the record, or the message leaves it out
 QUICK_MINUTES, LONG_MINUTES = 30, 120
 INDEX_UNDERLYING = {"SPXW": "SPY", "SPX": "SPY", "XSP": "SPY", "NDX": "QQQ", "NDXP": "QQQ"}
-KINDS = ("giveback", "expiry_first", "expiry_final", "hold_hour", "wrong_way")
+KINDS = ("giveback", "expiry_first", "expiry_final", "expiry_eve", "hold_hour", "wrong_way")
 
 
 def enabled() -> bool:
@@ -202,6 +216,28 @@ def wrong_way_due(opened_at: datetime, today: date, regular) -> int | None:
         return None
     due = entry + 1 + WRONG_WAY_MINUTES
     return due if due < regular[2] else None
+
+
+def trading_days_after(calendar, day: date, count: int) -> list[date]:
+    """The ``count`` trading days after ``day``, from the market calendar (weekdays when it is unavailable)."""
+    found, probe = [], day
+    while len(found) < count and probe < day + timedelta(days=4 * count + 10):
+        probe += timedelta(days=1)
+        hours = calendar.hours(probe) if calendar is not None else None
+        if any(w[0] == "regular" for w in session_windows(probe, hours)):
+            found.append(probe)
+    return found
+
+
+def eve_due(regular) -> int:
+    """The minute (ET) of the day-before-expiry alert: 15:30, or ``FINAL_MINUTES`` before an earlier close."""
+    return min(EVE_MINUTE, regular[2] - FINAL_MINUTES)
+
+
+def week_at_risk(positions: list[dict], ahead: list[date]) -> dict:
+    """The open long options expiring on one of the ``ahead`` trading days: contracts and their cost basis in dollars."""
+    expiring = [p for p in positions if p["expiration"] in ahead]
+    return {"contracts": sum(p["contracts"] for p in expiring), "premium": round(sum(p["avg_cost"] * p["contracts"] for p in expiring), 2)}
 
 
 def underlying_move(ticker: str, opened_at: datetime) -> float | None:
@@ -330,6 +366,17 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
         return (f"{alert.contract}: wrong way at {WRONG_WAY_MINUTES} min",
                 f"{moved}. Option {now_part}. {_count(alert.contracts)} open.{record} "
                 f"Re-decide: close, trim, or set your exit.", 4)
+    if alert.kind == "expiry_eve":
+        facts = facts or {}
+        when = facts.get("expires") or "tomorrow"
+        if alert.mark is not None:
+            vs = f"Mark {_premium(alert.mark)} vs cost {_premium(alert.avg_cost)}: {_money(alert.gain)} ({_pct(alert.gain_pct)})"
+        else:
+            vs = f"Cost {_premium(alert.avg_cost)}, " + ("no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else ""))
+        week = facts.get("week")
+        risk = (f" Expiring this week: {_count(week['contracts'])}, ${week['premium']:,.0f} premium at risk." if week and week["contracts"]
+                else "")
+        return (f"{alert.contract} expires {when}, still open", f"{vs}. {_count(alert.contracts)} open.{risk}", 4)
     if alert.kind == "hold_hour":
         if alert.mark is None:
             now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
@@ -376,7 +423,7 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
 
 
 ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
-            "expiry_final": "30-minutes-left alert", "wrong_way": "Wrong-way alert"}
+            "expiry_final": "30-minutes-left alert", "expiry_eve": "Day-before-expiry alert", "wrong_way": "Wrong-way alert"}
 
 
 def ask_context(alert: PositionAlert) -> str:
@@ -455,10 +502,15 @@ class PositionAlerts:
             return
         marks = self._marks(positions, now)
         found = []
+        eve = eve_due(regular)
+        tomorrow = (next(iter(trading_days_after(self.calendar, today, 1)), None) if eve <= minute < eve + FIRST_GRACE_MINUTES
+                    else None)
         with Session(self.engine) as db:
             for position in positions:
                 mark = marks.get(position["occ"])
                 found.extend(self._judge(db, position, mark, today, minute, regular, now))
+                if tomorrow is not None and position["expiration"] == tomorrow:
+                    found.append(self._alert(position, "expiry_eve", 0, mark, *self._gain(position, mark), None, now))
             db.commit()
         for alert in found:
             self._record(alert, regular=regular)
@@ -471,13 +523,18 @@ class PositionAlerts:
             return {}
         return {symbol: judged for symbol, quote in quotes.items() if (judged := judged_quote(quote, now))}
 
+    @staticmethod
+    def _gain(position: dict, mark: dict | None) -> tuple[float | None, float | None]:
+        price, held, cost = (mark["mark"] if mark else None), position["contracts"], position["avg_cost"]
+        if price is None:
+            return None, None
+        return round((price - cost) * held, 2), (price - cost) / cost
+
     def _judge(self, db: Session, position: dict, mark: dict | None, today: date, minute: int, regular, now: float) -> list[PositionAlert]:
         found = []
         held, cost = position["contracts"], position["avg_cost"]
         price = mark["mark"] if mark else None
-        gain = gain_pct = None
-        if price is not None:
-            gain, gain_pct = round((price - cost) * held, 2), (price - cost) / cost
+        gain, gain_pct = self._gain(position, mark)
         watch = db.exec(select(PositionWatch).where(PositionWatch.account_id == position["account_id"],
                                                     PositionWatch.source_key == position["source_key"])).first()
         if watch is None:
@@ -592,9 +649,10 @@ class PositionAlerts:
                 alert.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
                 return
+            facts = (wrong_way_facts(db, alert) if alert.kind == "wrong_way" else self._eve_facts(db, alert, now) if alert.kind == "expiry_eve"
+                     else None)
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
-                                            max(1, int((close - now) // 60)) if close else None,
-                                            wrong_way_facts(db, alert) if alert.kind == "wrong_way" else None)
+                                            max(1, int((close - now) // 60)) if close else None, facts)
             path, more = _links(db, alert)
             ticket = notification_policy.decide(
                 db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,
@@ -624,6 +682,20 @@ class PositionAlerts:
             ping_images.record(db, ticket, image_state)
             db.commit()
 
+    def _eve_facts(self, db: Session, alert: PositionAlert, now: float) -> dict:
+        """What a day-before-expiry message says beyond the alert row: the expiry's day and this week's premium at risk."""
+        facts = {"expires": None, "week": None}
+        try:
+            today = datetime.fromtimestamp(now, ET).date()
+            ahead = trading_days_after(self.calendar, today, WEEK_TRADING_DAYS)
+            expiration = db.exec(select(Trade.expiration).where(Trade.id == alert.trade_id)).first()
+            if expiration is not None and (expiration - today).days > 1:
+                facts["expires"] = expiration.strftime("%A")  # after a weekend or holiday: "expires Monday"
+            facts["week"] = week_at_risk(open_positions(db), ahead)
+        except Exception:  # noqa: BLE001 - the alert matters more than its extras
+            log.warning("Day-before-expiry facts skipped", exc_info=True)
+        return facts
+
     def _close(self, now: float) -> float | None:
         """Today's regular close as epoch seconds, or None on a closed day."""
         today = datetime.fromtimestamp(now, ET).date()
@@ -635,6 +707,7 @@ class PositionAlerts:
 
 
 PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today",
+                 "expiry_eve": "expires next session",
                  "wrong_way": "wrong way 30m"}
 
 

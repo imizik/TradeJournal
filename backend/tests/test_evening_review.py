@@ -71,7 +71,7 @@ def test_at_1630_one_ping_says_what_waits_and_opens_close_the_day_once(engine, m
     (row,) = rows(engine)
     assert (row.day, row.delivery, row.review, row.alerts, row.radar, row.fills) == (WED, "sent", 2, 3, 0, 1)
     (sent,) = phone.sent
-    assert sent["title"] == "Close the day" and sent["body"] == "To review: 2 threads, 3 alerts, 1 fill to link."
+    assert sent["title"] == "Close the day" and sent["body"] == "To review: 2 threads · 3 alerts unanswered · 1 fill to link"
     assert sent["path"] == "/copilot-lab?close=1" and sent["direct_click"] is True and sent["image"] is None
     with Session(engine) as db:
         record = db.exec(select(PhonePing).where(PhonePing.sender == "evening_review")).one()
@@ -120,15 +120,28 @@ def test_the_lab_off_is_skipped_with_why(engine, monkeypatch):  # noqa: F811
     assert row.delivery == "skipped" and "Copilot Lab is off" in row.last_error and phone.sent == []
 
 
-def test_the_daily_cap_holds_it_and_it_is_recorded(engine, monkeypatch):  # noqa: F811
+def test_the_daily_cap_never_holds_it_and_it_reports_what_was_held(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("EVENING_REVIEW_PING_ENABLED", "true")
     monkeypatch.setenv("PING_DAILY_CAP", "0")
     phone = Phone(monkeypatch)
+    with Session(engine) as db:
+        for i in range(11):
+            db.add(PhonePing(sender="radar_alerts", source_id=f"r{i}", kind="radar_event" if i % 2 else "radar_digest", rank=9,
+                             decision="over_cap", title="t", body="b", decided_at=datetime(2026, 10, 21, 14, 0 + i)))
+        db.add(PhonePing(sender="thesis_watch", source_id="t1", kind="thesis_watch", rank=11, decision="suppressed", title="t",
+                         body="b", decided_at=datetime(2026, 10, 21, 13, 0)))
+        db.add(PhonePing(sender="research", source_id="old", kind="research", rank=12, decision="over_cap", title="t", body="b",
+                         decided_at=datetime(2026, 10, 20, 15, 0)))  # yesterday in New York
+        db.commit()
     job(engine, Clock(at("16:30"))).run()
     (row,) = rows(engine)
-    assert row.delivery == "held" and "cap" in row.last_error and phone.sent == []
+    assert row.delivery == "sent" and phone.sent[0]["body"] == (
+        "To review: 2 threads · 3 alerts unanswered · 1 fill to link · 12 pings held today (Radar 11, thesis watch 1)")
     with Session(engine) as db:
-        assert db.exec(select(PhonePing.decision).where(PhonePing.sender == "evening_review")).one() == "over_cap"
+        assert db.exec(select(PhonePing.decision).where(PhonePing.sender == "evening_review")).one() == "sent"
+    # Held pings alone are worth the evening ping.
+    assert message({"review": 0, "alerts": 0, "radar": 0, "fills": 0}, "1 ping held today (research 1)") == (
+        "To review: 1 ping held today (research 1)")
 
 
 def test_a_send_that_may_have_arrived_is_unknown_and_never_resent(engine, monkeypatch):  # noqa: F811
@@ -156,7 +169,7 @@ def test_the_time_is_configurable_but_never_before_the_close(monkeypatch):
     for bad in ("15:30", "25:00", "evening", "17"):
         monkeypatch.setenv("EVENING_REVIEW_PING_AT", bad)
         assert at_minute() == 16 * 60 + 30
-    assert message({"review": 1, "alerts": 0, "radar": 2, "fills": 2}) == "To review: 1 thread, 2 Radar hits, 2 fills to link."
+    assert message({"review": 1, "alerts": 0, "radar": 2, "fills": 2}) == "To review: 1 thread · 2 Radar hits unrated · 2 fills to link"
     assert message({"review": 0, "alerts": 0, "radar": 0, "fills": 0}) is None
 
 
