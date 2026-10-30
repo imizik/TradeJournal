@@ -181,7 +181,7 @@ test("?investigation= opens that investigation with its fired alert", async ({ p
       source_kind: "level", source_id: "lvl", label: "Charts level", state: "active", armed_at: 1, event: null },
   ];
   await lab(page, server, { url: `/copilot-lab?investigation=${INV}` });
-  await expect(page.getByText("Make a plan for NBIS")).toBeVisible();
+  await expect(page.getByText("Make a plan for NBIS").first()).toBeVisible(); // the breadcrumb names it too
   const linked = await timeline(page);
   await expect(linked).toContainText("Alert hit");
   await expect(linked).toContainText("at 92.4");

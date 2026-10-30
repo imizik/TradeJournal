@@ -455,7 +455,7 @@ class ThesisWatch:
     def _record(self, db: Session, candidate: Candidate, today: date, now: datetime) -> dict | None:
         """Write the trigger once (its key is unique), decide its delivery, send, and record the outcome.
         Returns the row's view, or None when the key was already written."""
-        from app.engine import ntfy
+        from app.engine import phone
         row = candidate.row
         day = today.isoformat()
         # A delivered (or attempted) trigger keeps its key for good; a skipped one keeps it for the day only, so a
@@ -470,7 +470,7 @@ class ThesisWatch:
             reason = "already told today"
         elif len(attempted) >= daily_cap():
             reason = "daily cap reached"
-        elif not ntfy.configured():
+        elif not phone.configured():
             reason = "ntfy not configured"
         trigger_id = uuid.uuid4()
         trigger = ThesisWatchTrigger(
@@ -509,8 +509,8 @@ class ThesisWatch:
                 image = ping_images.picture(ping_images.thesis(
                     title_for(row.symbol), row.symbol, candidate.detail.get("reference"),
                     "since evidence" if basis.startswith("evidence:") else "since close" if basis else "", now.timestamp()))
-                trigger.message_id, image_state = ping_images.publish(title_for(row.symbol), candidate.text + ticket.append, image,
-                                                                      path=trigger.path, direct_click=True)
+                trigger.message_id, image_state = phone.send(title_for(row.symbol), candidate.text + ticket.append, kind="thesis_watch",
+                                                             image=image, path=trigger.path, direct_click=True)
                 ping_images.record(db, ticket, image_state)
             trigger.delivery = "sent"
         except Exception as exc:  # noqa: BLE001 - recorded, never retried: a failed push may still have been delivered

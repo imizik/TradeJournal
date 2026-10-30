@@ -64,6 +64,7 @@ from sqlmodel import Session, col, select
 
 from app.ai import copilot
 from app.database import get_session
+from app.engine import radar_dip
 from app.engine.chart_math import ET, session_windows
 from app.routers import today
 
@@ -74,7 +75,7 @@ router = APIRouter()
 MAX_INVESTIGATIONS = 20
 DRAFT_KINDS = ("watch", "trade_plan")  # alerts and plans (a plan card carries its time stop); not memories or revisits
 CONDITION = {"touches": "touches", "crosses": "crosses", "closes_beyond": "closes beyond"}  # ProposalCard's words
-RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "group_move": "Group move"}  # RadarFeedView's words
+RADAR_KIND = {"relative_to_spy": "vs SPY", "relative_to_sector": "vs sector", "group_move": "Group move", "dip_turn": "Dip turning up"}  # RadarFeedView's words
 
 
 def _hours(day):
@@ -487,7 +488,7 @@ def _new_rows(radar: dict, thesis: dict, titles: dict[str, str]) -> list[dict]:
         kind = RADAR_KIND.get(event["kind"], (event["kind"] or "event").replace("_", " "))
         # A stock hit opens on the desk, on its decision (watching, passing or planning); a group event stays on Radar.
         path = (f"/copilot-lab?{urlencode({'symbol': event['symbol'], 'radar': event['event_id']})}"
-                if event["symbol"] and event["kind"] in ("relative_to_spy", "relative_to_sector") else event["path"])
+                if event["symbol"] and event["kind"] in ("relative_to_spy", "relative_to_sector", "dip_turn") else event["path"])
         rows.append(_row(f"radar:{event['event_id']}", "new", event["summary"] or kind, _say(f"Radar · {kind}", "info"),
                          symbol=event["symbol"] or None, radar_event_id=event["event_id"], path=path,
                          changed_at=_epoch(event["first_seen_at"])))
@@ -721,7 +722,7 @@ def _hits_to_rate(day) -> dict:
     store, _reason = radar._store(read_only=True)
     if store is None:
         return {"state": "off"}
-    events = sorted(store.events(), key=lambda e: _epoch(e.get("first_seen_at")) or 0, reverse=True)
+    events = sorted((e for e in store.events() if not radar_dip.is_dip(e)), key=lambda e: _epoch(e.get("first_seen_at")) or 0, reverse=True)
     version = events[0]["rule_version"] if events else None
     events = [e for e in events if e["rule_version"] == version]
     rated = store.latest_ratings()

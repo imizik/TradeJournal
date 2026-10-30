@@ -280,7 +280,7 @@ export type PanelLink = { symbol: string; context: string; investigation: string
   /** A Radar hit's event id: the desk opens on its decision. */
   radar?: string | null };
 /** What the page's home (``home``) can do: start a conversation about no symbol with one prompt, or open a saved one. */
-export type HomeActions = { ask(prompt: string): void; open(id: string): void };
+export type HomeActions = { ask(prompt: string): void; open(id: string): void; home(): void };
 /** What a page's strip above the panel's conversation (``strip``) can do: start a new conversation on the panel's
  * symbol with ``context`` as its context line (unsent, like a deep link), or open a saved one; neither while a turn runs.
  * ``chart``: that conversation's first Send also attaches the page's chart (``look``), within the two-image cap. */
@@ -620,6 +620,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     if (!command || busy || status?.enabled !== true) return;
     if (command.kind === "open") void resume(command.id).then(() => { if (command.text) fill(command.text); });
     else if (command.kind === "fill") fill(command.text);
+    else if (command.kind === "home") startNew();
     else { setSymbol(""); void send(command.text, ""); }
   }, [desk?.command]); // eslint-disable-line react-hooks/exhaustive-deps -- each command acts once, when it arrives
 
@@ -1060,6 +1061,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         // Across everything: no symbol, so the saved conversation has none either.
         ask: prompt => { if (!busy) { setSymbol(""); void send(prompt, ""); } },
         open: id => void resume(id),
+        home: startNew,
       })}
 
       <div className={panel ? "space-y-4 py-1" : "space-y-5 py-2"} aria-live="polite">

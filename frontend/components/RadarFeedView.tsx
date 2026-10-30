@@ -17,7 +17,7 @@ const DIRECTION = {
   up: { label: "Up", className: "bg-emerald-500/10 text-emerald-300" },
   down: { label: "Down", className: "bg-rose-500/10 text-rose-300" },
 };
-const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move" };
+const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up" };
 
 function Evidence({ rows }: { rows: RadarDetail["event"]["evidence"] }) {
   return (

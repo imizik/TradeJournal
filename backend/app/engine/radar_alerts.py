@@ -27,7 +27,9 @@ Right before every send, the app's notification policy (``notification_policy.de
 budget of its kind (4 singles and 2 digests a day by default), the daily ceiling, or, for a single
 (anchored to the stock's open position or the stock, or to the group), the quiet window after a ping for
 the same position. A held ping is written ``held`` with the reason and never sent later; a held single
-does not count toward the hourly rule. Rows live in the journal database (``RadarAlert``; the Radar file
+does not count toward the hourly rule, which counts one rule version's singles only. A dip-buy
+candidate (``radar_dip``, kind ``dip_turn``, only with ``RADAR_DIP_RULES=alert``) is always a single ping: the owner
+chose to be told the minute it turns, and the first-hour window would be over by the 10:00 digest. Rows live in the journal database (``RadarAlert``; the Radar file
 stays append-only and alert-free). Delivery is the position alerts' at-most-once outbox: a send that may
 have reached ntfy is ``unknown`` and never resent, and one not sent within ``EXPIRE_SECONDS`` is dropped
 as late. ``sent`` proves ntfy accepted it, not that the phone showed it.
@@ -47,7 +49,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, ping_images
+from app.engine import notification_policy, ntfy, ping_images, radar_dip
 from app.engine.chart_math import ET
 from app.models import RadarAlert
 
@@ -153,7 +155,10 @@ def _minute_label(minute: int) -> str:
 def message(event: dict) -> tuple[str, str]:
     """Title and body: the event's own numbers, then the feed's summary and the time it was first seen."""
     m = event["measures"]
-    if event["kind"] == "group_move":
+    if event["kind"] == "dip_turn":
+        title = (f"Radar dip: {event['symbols'][0]} turning up, {_signed(m['day_change_pct'])} "
+                 f"(low {_signed(m['low_change_pct'])})")
+    elif event["kind"] == "group_move":
         title = (f"Radar: {event['group']} {_signed(m['median_relative_pct'])} vs SPY "
                  f"({m['members_same_direction']} of {m['members_with_data']} {'up' if event['direction'] == 'up' else 'down'})")
     else:
@@ -166,6 +171,8 @@ def digest_line(event: dict) -> str:
     m = event["measures"]
     way = "up" if event["direction"] == "up" else "down"
     when = _clock(_parse(event["first_seen_at"])).removesuffix(" ET")
+    if event["kind"] == radar_dip.KIND:
+        return f"{event['symbols'][0]} dip turning up, {_signed(m['day_change_pct'])} (low {_signed(m['low_change_pct'])}) · {when}"
     if event["kind"] == "group_move":
         return (f"{event['group']} {way} {abs(m['median_relative_pct']):.1f}% vs SPY "
                 f"({m['members_same_direction']} of {m['members_with_data']}) · {when}")
@@ -206,7 +213,7 @@ class RadarAlerts:
                 alert = RadarAlert(event_id=event["event_id"], session_date=event["session_date"], rule_version=event["rule_version"],
                                    kind=event["kind"], subject=subject(event), title=title, body=body,
                                    first_seen_at=_utc(_parse(event["first_seen_at"])), detected_at=_utc(now))
-                if not strong(event):
+                if event["kind"] != radar_dip.KIND and not strong(event):
                     alert.delivery, alert.body = DIGEST, digest_line(event)
                 elif reason := self._hour_reason(db, alert, now):
                     alert.delivery, alert.body, alert.last_error = DIGEST, digest_line(event), reason
@@ -223,7 +230,8 @@ class RadarAlerts:
         return written
 
     def _hour_reason(self, db: Session, alert: RadarAlert, now: float) -> str | None:
-        recent = db.exec(select(RadarAlert.detected_at).where(RadarAlert.subject == alert.subject, SINGLE,
+        mine = RadarAlert.rule_version == alert.rule_version
+        recent = db.exec(select(RadarAlert.detected_at).where(RadarAlert.subject == alert.subject, mine, SINGLE,
                                                               RadarAlert.detected_at > _utc(now - SUBJECT_HOUR_SECONDS))
                          .order_by(RadarAlert.detected_at.desc())).first()
         if recent is not None:

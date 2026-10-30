@@ -12,7 +12,9 @@ here. After an ok or partial pass, ``radar_rules.detect`` appends new events and
 revisions (step 2) under the rule version ``RADAR_RULES_VERSION`` selects (v0 by default), then ``radar_news.enrich`` checks headlines near recent
 events (PR 5), so a new event gets its news the same minute. With
 ``RADAR_ALERTS_ENABLED`` the new events also go to the phone through
-``radar_alerts`` (off by default). None of these failures affects the recorded pass. Outside the regular session an optional
+``radar_alerts`` (off by default). With ``RADAR_DIP_RULES`` set, the separate ``radar_dip`` rule runs on
+the same pass under its own version and receipt (off by default; its events ping only in ``alert`` mode, and
+only with ``RADAR_ALERTS_ENABLED`` too). None of these failures affects the recorded pass. Outside the regular session an optional
 ``radar_premarket`` scanner (off unless ``RADAR_PREMARKET_ENABLED``) records its
 own pre-open lists in a separate file.
 """
@@ -25,7 +27,7 @@ import os
 import time
 from typing import Callable
 
-from app.engine import radar_alerts, radar_news, radar_premarket, radar_rules, tradier
+from app.engine import radar_alerts, radar_dip, radar_news, radar_premarket, radar_rules, tradier
 from app.engine.chart_math import ET, REGULAR_CLOSE, REGULAR_OPEN, session_windows
 from app.engine.radar_store import RadarEvent, RadarEventRevision, RadarPass, RadarQuote, RadarStore, load_universe
 
@@ -53,7 +55,8 @@ class RadarRunner:
                  quotes: Callable[[list[str]], dict] = tradier.get_quotes_once,
                  clock: Callable[[], float] = time.time, news: radar_news.NewsReader = radar_news.fetch,
                  premarket: radar_premarket.PremarketScanner | None = None, alerts: radar_alerts.RadarAlerts | None = None,
-                 rules: radar_rules.Thresholds = radar_rules.V0):
+                 rules: radar_rules.Thresholds = radar_rules.V0, dip: radar_dip.DipThresholds | None = None,
+                 dip_alerts: bool = False, daily: Callable[[list[str], str], dict] = radar_dip.fetch_daily):
         self.store = store
         self.calendar = calendar
         self.universe = universe or load_universe()
@@ -64,6 +67,10 @@ class RadarRunner:
         self.premarket = premarket
         self.alerts = alerts  # phone pings for new events; None keeps Radar silent
         self.rules = rules
+        self.dip = dip  # the dip-buy rule's version; None keeps it off
+        self.dip_alerts = dip_alerts  # its new events also go to ``alerts``
+        self.daily = daily
+        self._daily: tuple[str, dict] | None = None  # (session, radar_dip.daily_context) once read
         self._pruned_for: date | None = None
 
     def _regular(self, today: date, minute: int) -> tuple[bool, str | None]:
@@ -88,6 +95,11 @@ class RadarRunner:
                     self.premarket.run_once()
                 except Exception:  # the pilot is extra; it never stops the recorder
                     log.exception("Radar premarket scan failed")
+            if self.dip is not None and today.weekday() < 5 and REGULAR_OPEN - 30 <= minute < REGULAR_OPEN:
+                try:  # read the 20-day closes before the open, so the first pass does not wait on them
+                    self._session_daily(today.isoformat())
+                except Exception:
+                    log.exception("Radar dip rule: daily closes not read yet; the next minute tries again")
             return None
         record: RadarPass = {"session_date": today.isoformat(), "started_at": _iso(started), "finished_at": "",
                              "universe_version": self.universe["version"], "status": "skipped",
@@ -110,11 +122,24 @@ class RadarRunner:
             except Exception:  # detection is extra; the recorded pass stands either way
                 detection_status = "failed"
                 log.exception("Radar detection failed")
+        dip_events: list[RadarEvent] = []
+        side = None
+        if self.dip is not None:
+            dip_status = "skipped"
+            if inside and record["status"] in radar_rules.USABLE:
+                try:
+                    dip_events = self.detect_dip(record["session_date"], pass_id)
+                    dip_status = "ok"
+                except Exception:  # the dip rule is extra too; the pass and the trial rules' events stand
+                    dip_status = "failed"
+                    log.exception("Radar dip detection failed")
+            side = {"dip": {"rules": asdict(self.dip), "status": dip_status, "event_ids": [e["event_id"] for e in dip_events]}}
         try:
             self.store.append_detection(pass_id, universe=self.universe, rules=asdict(self.rules),
                                         hours=self._session_hours, status=detection_status,
                                         event_ids=[e["event_id"] for e in new_events],
-                                        recorded_at=_iso(datetime.fromtimestamp(self.clock(), UTC)), origin="live")
+                                        recorded_at=_iso(datetime.fromtimestamp(self.clock(), UTC)), origin="live",
+                                        side=side)
         except Exception:
             # Keep collection/alerts running, but the scorer cannot certify this pass.
             log.exception("Radar detection receipt failed")
@@ -122,6 +147,8 @@ class RadarRunner:
             try:
                 if new_events:
                     self.alerts.record(new_events)
+                if self.dip_alerts and dip_events:
+                    self.alerts.record(dip_events)
                 self.alerts.deliver()
             except Exception:  # a phone ping is extra; the recorded pass and its events stand either way
                 log.exception("Radar alerts failed")
@@ -156,6 +183,31 @@ class RadarRunner:
                 self.store.append_revision(revision)
                 written_revisions.append(revision)
         return written_events, written_revisions
+
+    def _session_daily(self, session_date: str) -> dict:
+        """The dip rule's daily context for the session, read once (``radar_dip.fetch_daily``)."""
+        if self._daily is None or self._daily[0] != session_date:
+            stocks = [r["symbol"] for r in self.universe["symbols"] if r["kind"] == "stock" and not r["benchmark"]]
+            self._daily = (session_date, self.daily(stocks, session_date))
+        return self._daily[1]
+
+    def detect_dip(self, session_date: str, pass_id: int) -> list[RadarEvent]:
+        """Append the dip rule's new events for one recorded pass; returns the rows written (``detect``'s pattern)."""
+        passes = radar_rules.session_passes(self.store.passes(session_date), session_date)
+        end = next((i for i, p in enumerate(passes) if p["id"] == pass_id), None)
+        if end is None:
+            return []
+        needed = radar_dip.needed_pass_ids(passes, end, self.dip)
+        if not needed:
+            return []  # after the window: nothing to read
+        daily = self._session_daily(session_date)
+        saved = [e for e in self.store.events(session_date) if e["rule_version"] == self.dip.version]
+        written = []
+        for event in radar_dip.detect(self.universe, passes, end, self.store.pass_quotes(needed), saved, daily, self.dip):
+            if self.store.event(event["event_id"]) is None:
+                self.store.append_event(event)
+                written.append(event)
+        return written
 
     def _collect(self, record: RadarPass) -> list[RadarQuote]:
         batches = [self.symbols[i:i + BATCH_SIZE] for i in range(0, len(self.symbols), BATCH_SIZE)]
@@ -208,7 +260,9 @@ def runner_from_env() -> RadarRunner | None:
         return None
     from app.engine.chart_calendar import chart_calendar
     universe = load_universe()
-    runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe, rules=radar_rules.from_env())
+    dip = radar_dip.mode_from_env()
+    runner = RadarRunner(RadarStore(store), chart_calendar, universe=universe, rules=radar_rules.from_env(),
+                         dip=None if dip == "off" else radar_dip.V0, dip_alerts=dip == "alert")
     if radar_alerts.enabled():
         from app.database import engine
         runner.alerts = radar_alerts.RadarAlerts(engine, store=runner.store)

@@ -48,7 +48,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import captures, chart_render, notification_policy, ntfy, ping_images
+from app.engine import captures, chart_render, notification_policy, phone, ping_images
 from app.engine.chart_math import ET, session_windows
 from app.engine.chart_render import Chart, Level, Mark, Time
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc
@@ -471,7 +471,7 @@ class DayReplays:
                 row.delivery, row.last_error = "expired", "Not sent within 2 hours of its time, so it was not sent late."
                 db.commit()
                 return
-            if not ntfy.configured():
+            if not phone.configured():
                 row.delivery, row.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 row.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
@@ -491,9 +491,9 @@ class DayReplays:
                 except OSError:
                     image = None
             try:
-                _, state = ping_images.publish(title, text + ticket.append, image, priority=3, tags=("clapper",), path=path,
-                                               direct_click=True)
-            except ntfy.NtfyError as exc:
+                _, state = phone.send(title, text + ticket.append, kind="day_replay", image=image, priority=3, tags=("clapper",),
+                                      path=path, direct_click=True)
+            except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
                     notification_policy.delivered(db, ticket, now)

@@ -535,3 +535,32 @@ test("SPY QQQ prep saves two or three scenarios, reopens, and logs a freeze", as
   await page.reload();
   await expect(page.getByTestId("day-journal-entry").filter({ hasText: entries[0].id })).toBeVisible();
 });
+
+test("dashboard morning card shows the copilot's morning brief and opens its thread", async ({ page }) => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  const brief = { id: "4b3c5d1e-0000-4000-8000-000000000001", source: "copilot", has_findings: false, title: `Morning brief ${today}`, symbol: null,
+    status: "open", conclusion: "Hold — SPY is up 0.4% pre-market; the invented NBIS call expires today.", revision: 1, message_count: 2,
+    created_at: `${today}T12:31:00Z`, updated_at: `${today}T12:31:00Z` };
+  await page.route("**/copilot/investigations?**", (route) => route.fulfill({ json: { investigations: [
+    { ...brief, id: "4b3c5d1e-0000-4000-8000-000000000002", title: `Morning brief 2026-01-02`, conclusion: "An older day" }, brief] } }));
+  const base = await (await page.request.get(`/api/backend/jo/morning?day=${today}`)).json();
+  await page.route("**/jo/morning?**", (route) => route.fulfill({ json: { ...base, state: "unavailable", briefing: null, packet: null, late: false, stale: false } }));
+  // Lab off (the fixture backend): the card never asks for conversations and Jo's message stands as it was.
+  const asked: string[] = [];
+  page.on("request", (request) => { if (request.url().includes("/copilot/investigations")) asked.push(request.url()); });
+  await page.goto("/");
+  const card = page.getByTestId("morning-briefing");
+  await expect(card).toContainText("No briefing has been saved for this date.");
+  await expect(card.getByTestId("copilot-morning-brief")).toHaveCount(0);
+  expect(asked).toEqual([]);
+  await page.route("**/copilot/status", (route) => route.fulfill({ json: { enabled: true, backend: "fake", evidence: "fixture", model: "fake-scripted",
+    effort: "medium", fallbacks: false, key_configured: false, plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
+    limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 } } }));
+  await page.reload();
+  const copilot = card.getByTestId("copilot-morning-brief");
+  await expect(copilot).toContainText(brief.conclusion);
+  await expect(copilot).not.toContainText("An older day");
+  await expect(copilot.getByRole("link", { name: "Open the brief" })).toHaveAttribute("href", `/copilot-lab?investigation=${brief.id}`);
+  await expect(card).toContainText("No briefing from Jo has been saved for this date.");
+  await card.screenshot({ path: test.info().outputPath("dashboard-copilot-morning-brief.png") });
+});

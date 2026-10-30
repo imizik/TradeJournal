@@ -88,8 +88,8 @@ test("⌘K opens the palette: type to filter, Enter opens the thread, Escape and
   const box = palette(page);
   await expect(box).toBeVisible();
   const options = box.getByRole("option");
-  // The thread list's rows in list order (pinned rows are the commands), then the commands.
-  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^MU/, /^APLD/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/]);
+  // The thread list's rows in list order, tickers first and Main's Radar hits after (pinned rows are the commands), then the commands.
+  await expect(options).toHaveText([/^NBIS/, /^CRWV/, /^APLD/, /^MU/, /^Plan a trade/, /^Review my week/, /^What matters right now\?/]);
   await expect(options.first()).toContainText("1.0% from invalidation 92.30");
   await expect(options.first()).toContainText("+$180.00");
   await page.keyboard.type("crw");
@@ -145,12 +145,12 @@ test("J and K open the next and previous thread in list order; keys typed in the
   await page.keyboard.press("j");
   await expect(thread.getByText("NBIS answer: hold above 92.30.")).toBeVisible();
   await page.keyboard.press("j");
-  await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible(); // Near a trigger; the MU Radar row leaves the page, so J skips it
+  await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible(); // an armed plan; the MU Radar row leaves the page, so J skips it
   await page.keyboard.press("j");
   await expect(thread.getByText("APLD answer: enter at 31.00.")).toBeVisible();
   await page.keyboard.press("k");
   await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "CRWV short" })).toHaveClass(/ring-1/);
+  await expect(page.getByRole("button", { name: "CRWV, Plan armed" })).toHaveClass(/ring-1/);
 
   const message = page.getByRole("textbox", { name: "Message" });
   await message.click();
@@ -198,7 +198,7 @@ for (const [width, height] of [[1440, 900], [375, 812]] as const) {
   test(`the Briefing opens on today's session at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await lab(page);
-    if (width < 760) await page.getByRole("tab", { name: "Thread" }).click();
+    if (width < 760) await page.getByRole("tab", { name: "Main" }).click();
     const tape = page.getByTestId("session-tape");
     await expect(tape).toBeVisible();
     await expect(tape).toContainText("Market open");
@@ -396,9 +396,9 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   const { chats } = await lab(page, { time: new Date("2026-10-23T21:00:00Z"), threads, // 17:00 New York, a Friday
     session: { ...SESSION, now: epoch("2026-10-23T21:00:00Z"), phase: "post", time_stops: [] } });
   const rail = page.getByRole("navigation", { name: "Thread list" });
-  await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Review: did you follow the plan?");
-  await expect(rail.getByRole("link", { name: /^CRWV/ })).toContainText("Added or not, and why?");
-  await expect(rail.getByRole("link", { name: /^APLD/ })).toContainText("Reviewed · Entered at 31.00 as planned, sized…");
+  await expect(rail.getByRole("button", { name: /^NBIS, / })).toContainText("Review: did you follow the plan?");
+  await expect(rail.getByRole("button", { name: /^CRWV, / })).toContainText("Added or not, and why?");
+  await expect(rail.getByRole("button", { name: /^APLD, / })).toContainText("Reviewed · Entered at 31.00 as planned, sized…");
   await expect(page.getByTestId("briefing-reviewed")).toHaveText("1 of 4 done");
   await page.screenshot({ path: test.info().outputPath("close-the-day-1440.png") });
 
@@ -412,11 +412,11 @@ test("after 16:00 Close the day walks each unreviewed thread: an answer or Skip 
   // TSLA has no conversation and no plan: it opens by its symbol, on "Want a plan for this?".
   await page.waitForURL(/\/copilot-lab\?symbol=TSLA$/);
   await expect(review).toContainText("Want a plan for this?");
-  await expect(rail.getByRole("link", { name: /^NBIS/ })).toContainText("Reviewed · Held above 92.30 all day, as…");
+  await expect(rail.getByRole("button", { name: /^NBIS, / })).toContainText("Reviewed · Held above 92.30 all day, as…");
   await review.getByRole("button", { name: "Not now" }).click();
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible();
   await expect(review).toContainText("Added or not, and why?");
-  await expect(rail.getByRole("link", { name: /^TSLA/ })).toContainText("Reviewed · No plan for now");
+  await expect(rail.getByRole("button", { name: /^TSLA, / })).toContainText("Reviewed · No plan for now");
   await review.getByRole("button", { name: "Skip" }).click();
   await expect(review).toHaveCount(0);
   await expect(conversation(page).getByText("CRWV answer: short under 99.00.")).toBeVisible(); // the last one: the pass ends here

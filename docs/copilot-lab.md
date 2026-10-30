@@ -109,7 +109,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       entry and invalidation), and one line of what is new on it (a Radar
       event since the last Radar visit, or a thesis trigger fired today). The
       same read's `last_exit` (the symbol's newest answered exit review) feeds
-      the plan card's lesson line; the dock does not show it. Each
+      the plan card's lesson line, and its `setup` the plan card's setup
+      record; the dock shows neither. Each
       is a dock section with its count, folded per device; an empty one is
       left out. A position opens its review (`Review this position: <trade
       id>`), a plan its investigation, and the new line a conversation about
@@ -173,49 +174,52 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). One grouped list, in `DESK_GROUPS`
-  order, with one line for the day above it: the market phase, how many rows
-  need a decision, and the plan streak. Each group's heading carries a
-  coloured dot (rose Act now, sky Near a trigger and New, amber Waiting for
-  you) and its row count. Groups:
-  - **Pinned**: the Briefing only (today's pre-market prep when there is
-    one). Pressing it sends one turn, the fixed **What matters right
-    now?** prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`, "What matters
-    right now across my open positions, armed watches and open
-    investigations? Lead with anything that needs a decision today; say
-    plainly if nothing does."). Review my week is in ⌘K and on the
-    Briefing (beside Watch today); the server's pinned week row is not
-    listed. Opening the list never sends.
-  - **Act now**: open positions the Today screen flags (within 1% of an
-    armed invalidation or past a hit one, expiring today, give-back fired,
-    time stop within 30 minutes). Empty, it says "Clear. Nothing needs a
-    decision right now.", or that positions are unavailable. A `decision`
-    day-journal entry for the symbol logged today moves the row to Watching,
-    unless the invalidation was hit after it.
-  - **Near a trigger**: armed plans not yet in a position within 1% of their
-    entry or invalidation.
-  - **Waiting for you**: the owner's open conversations with plan or alert
-    cards (`trade_plan`, `watch`; a plan card carries its time stop) still
-    waiting on Confirm or Dismiss, read from each saved transcript (a card
-    with no `outcome`), newest first. The value is "N to confirm" (amber),
-    the status the first waiting card ("Alert · APLD crosses 31.20", "Plan ·
-    APLD long calls · entry crosses 31.20"). A row opens the conversation in
-    place, on its cards: only a card's own Confirm makes anything. A
-    conversation already shown as an armed plan or a position stays there,
-    a waiting one leaves Watching, and a research job's cards are not read.
-    Hidden when nothing waits.
-  - **New since you looked**: Radar events since the last Radar visit and
-    the newest thesis-watch trigger today per investigation, one row per
-    symbol (a Radar hit ahead of thesis news, newest first), five shown and
-    the rest behind "+N more". What the owner has opened or marked seen is
-    remembered in this browser only (`localStorage`); seen rows stay,
-    dimmed, and opening a symbol's row sees its folded rows too.
-  - **Watching**: every other open position (its plan's nearest line, "Fill
-    to link" in amber when a saved plan is suggested for its fill, or "No
-    plan yet"), armed plan and open investigation (a research job's
-    conclusion is never shown: a model that read web pages wrote it); three
-    shown and the rest behind "+N more", so a busy day reads as about ten
-    rows.
+  `components/copilot/ThreadRail.tsx`). **Main** at the top, then one row
+  per ticker, with one line for the day above it: the market phase, how many
+  rows need a decision, and the plan streak. The server still sends its rows
+  in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
+  you looked, Watching); the list regroups them by symbol in the browser.
+  - **Main**: the market-wide thread, the Briefing (today's pre-market prep
+    line when there is one). Pressing it goes back to the Briefing in place
+    (a deep link leaves for the bare desk) and sends nothing; the
+    open conversation stays saved. Radar hits, alerts to answer and Review my
+    week are lines inside the Briefing, not rows in the list: "N new on
+    Radar ▾" lists the Radar events since the last Radar visit, each opening
+    the desk on its decision (a stock hit) or Radar (a group event). Main
+    shows their count ("18 Radar", a sky dot while one is unseen in this
+    browser). Open conversations about no ticker (a Briefing turn, a week
+    review) are listed under it, title and date. **What matters right
+    now?** (one turn, the fixed `lib/copilot.ts` `WHAT_MATTERS_PROMPT`) sits
+    on the Briefing beside Review my week, and in ⌘K.
+  - **Tickers**: one row per symbol the owner has something on: an open
+    position, a plan (armed, near a trigger, or exited with its exit review
+    waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
+    today, an open conversation, or a conversation closed since Monday (New
+    York). A row shows the symbol, its state (**Held**, **Plan armed**,
+    **Exited**, **Watching** or **Closed**), the position's unrealized P&L
+    (an option's from its own mark) or the exit day, and the status line of
+    its most urgent row (Act now's reasons, a plan's nearest level, "N to
+    confirm", the close question). An amber dot means it needs the owner: an
+    Act now position, a card waiting on Confirm, a fill to link, or a close
+    or exit question not yet answered or skipped today. A plan meter shows
+    when the leading row is Act now or Near a trigger: the underlying on the
+    track from the invalidation (left) to the entry (the tick). Sort: needs
+    you first, then held, armed plans, exited, watching and closed, newest
+    first within each; past the needs-you, held and armed rows six more show
+    and the rest wait behind "+N more".
+  - **Subthreads**: pressing a ticker opens its newest saved conversation in
+    place (from the latest 50 in `GET /copilot/investigations`, open and
+    closed) or, with none, follows its row's link (a position with a fill to
+    link, an unplanned position, a trade). With more than one conversation
+    they list beneath it, indented, title and date, the plan's conversation
+    tagged **Plan** and the exit review's **Exit review**. A ticker with one
+    conversation shows no children. Thesis news is remembered as seen in
+    this browser (`localStorage`) once its ticker is opened.
+
+  A **breadcrumb** tops the conversation pane at every width: "Main",
+  "Main › <conversation>" for one about no ticker, or "NBIS › Neocloud group
+  bounce · Oct 29" (the date the conversation was last saved). On a phone the
+  middle tab carries the open ticker, or "Main".
 
   **All | Plans** under the day line switches the list to the **Plans**
   view and back; the choice is remembered in this browser (`localStorage`),
@@ -233,24 +237,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   in place; a done plan whose alerts and time stop were all deleted has no
   saved thread to find and opens by its symbol.
 
-  Under the groups, a collapsed **Closed this week** footer with its count:
-  saved conversations closed and last touched since Monday (New York), from
-  the latest 50 in `GET /copilot/investigations`, each opening in place; then
-  the key hint.
-
-  Each row: symbol, instrument (contract, direction or "research"), one value
-  and one status line coloured by what it needs (amber: needs you). A
-  position's value is its own unrealized P&L, an option's from its own mark;
-  its plan levels are on the underlying, named in the status line. Only Act
-  now and Near a trigger rows carry a plan meter: the underlying on the track
-  from the invalidation (left) to the entry (the tick), with room past it.
-  Empty groups other than Act now are left out. A row with an investigation
-  opens it in place; any other follows its link (a stock Radar hit opens the
-  desk on its decision, `/copilot-lab?symbol=<symbol>&radar=<id>`; a group
-  event its `/radar?event=<id>`; a position with a fill to link the desk on
-  its symbol, `/copilot-lab?symbol=<symbol>`; planning an unplanned position;
-  a trade). **Plan a
-  trade** sits under the groups. It refreshes every minute while visible and
+  **Plan a
+  trade** sits under the tickers, then the key hint. It refreshes every minute while visible and
   reads one owner-only `GET /copilot/desk/threads`
   (`app/routers/copilot_desk.py`), composed in-process from the Plans board
   (`copilot_plans.board`), `plan_positions.positions` with the Today
@@ -585,7 +573,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit in New since you looked opens the desk on that hit: what
+A stock Radar hit in Main's "N new on Radar" line opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -752,6 +740,29 @@ the `reflection` saved just before it. A skipped or unanswered review falls
 back to the one before; a symbol with none shows nothing. Read-only, no model
 call; a failed read leaves the line out (`last_exit` unavailable).
 
+**Your record for this setup.** A draft option plan (calls or puts, not stock)
+also shows how the owner's own closed option trades opened in the session's
+first hour went in the same setup (`SetupRecordLines.tsx`), from the same
+read's `setup` (`setup_record.for_symbol`), which the card asks for with
+`?setup=true` so the Charts dock's polling never computes it:
+- **Gap.** "Gap −2.4%. Your opening calls bought against a gap down of 1%+:
+  12 trades, 67% won, +$1,240." Against, with or a gap under 1%, from today's
+  gap.
+- **Trend.** "NBIS is 3.1% below its 20-day average. Your opening calls bought
+  below it: …"
+- **Size.** Once Size it for me prices the plan, its sizing lines add "This
+  plan: $1,384 of premium, 2.8× your usual $500", and the owner's record at
+  that premium or more when it is in his largest quarter.
+
+History is each trade's first entry fill and its market context
+(`entry_gap_pct`, and the entry price against `entry_sma_20`). Today's gap and
+20-day average are from the chart feed's daily bars, so before today's daily
+bar there is no gap line. A cohort under 5 trades, or a size record under 20,
+shows nothing; Webull is left out. These are lines of history, never a verdict.
+Read-only, no model call; a failed read leaves the lines out (`setup`
+unavailable). This is the app's half of the October 29, 2026 opening review;
+the Check service's pre-trade check does not see it.
+
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
 at a glance instead of a header and plan ladder (`SessionTape.tsx`): "Today",
@@ -901,10 +912,12 @@ Briefing's day).
   pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
   no orders.
-- **Short answers.** After the Verdict line, at most about 120 words: the
-  two or three deciding facts with their numbers and as-of, including the
-  strongest point against; no preamble, tool tour or closing summary, and a
-  plan's fields stay on its card rather than in the text. A trade review, a
+- **Short answers.** A hard limit: at most three one-sentence bullets in the
+  body, one-sentence Against and Changes if lines, under 120 words in all,
+  leaving out whatever does not change the verdict; no preamble, tool tour or
+  closing summary, and a plan's fields stay on its card rather than in the
+  text. (The first, softer "about 120 words" rule produced about 300-word
+  answers in the 2026-10-29 live check.) A trade review, a
   week review or an explicit "more", "why" or "go deeper" gets the room it
   needs. Length is the wait: after a tool result, Sonnet 5.5 sends the whole
   answer at once at about 100 tokens a second (§ Live measurements).
@@ -1823,16 +1836,26 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
 
 ## Pre-market prep
 
-One phone ping each trading morning with what the owner already holds and has
-planned (`backend/app/engine/premarket_prep.py`). It is the copilot's own short
-prep; Jo's morning briefing (`/morning`) is separate and untouched.
+The morning brief: one phone ping each trading morning with the market and what
+the owner already holds and has planned (`backend/app/engine/premarket_prep.py`).
+The heading keeps its old name so links stay put. On 2026-10-29 the owner chose
+this as the one morning brief: Jo's 08:45 briefing (`/morning`) still works
+unchanged, and switching Jo's morning task off is the owner's step.
 
 - **When:** at `PREMARKET_PREP_AT` (default `08:30` New York) on a day the
   market calendar has a regular session, never a weekend or holiday. The day is
   claimed once (`premarket_prep.day` is unique, additive migration
   `e5a9c3d7f2b4`), so a restart or a second process never sends a second one.
   A prep not started within an hour of its time waits for the next trading day.
-- **Pack:** open positions with days to expiry, expires-today, give-back watch
+- **Pack:** `market`: Jo's backdrop reader (`jo_morning_market.collect_backdrop`:
+  the coming week's FOMC/CPI/jobs calendar, the saved VIX, saved earnings
+  dates, with its gaps) and the SPY/QQQ/SMH pre-market proxies with their
+  change vs the prior close (Jo's `tradier_snapshots`; no futures feed exists);
+  `headlines`: since the previous session's close (market calendar), at most 8,
+  up to 3 market-wide ones from the broad tape (Jo's macro keyword filter) then
+  held and armed-plan symbols (catalyst stories first, two per symbol), each with
+  publisher and New York time, from two batched Alpaca/Benzinga reads; then open
+  positions with days to expiry, expires-today, give-back watch
   state and open P&L (the owner context pack's positions section); armed plans
   with their distance to the entry and the invalidation (the Plans board's
   `copilot_plans.board`, one batched quote); earnings from today through Sunday
@@ -1840,16 +1863,21 @@ prep; Jo's morning briefing (`/morning`) is separate and untouched.
   Tradier calendar read, at most 8 symbols); today's pending time stops; the
   plan streak. A section that fails reads `unavailable`; the rest stand.
 - **Turn:** one `run_turn` on the configured backend and evidence, system
-  prompt unchanged, its turn budget cap included. The message starts "Pre-market
-  prep for …" and asks for at most 6 lines from those facts only: what expires
-  or sits near a trigger today and one thing to decide before the open. The
-  answer, cut to 6 lines, is saved as an open copilot investigation titled
-  `Pre-market prep <date>`, so it shows in the desk's thread list.
-- **Ping:** title `Pre-market prep`, body the first two lines; a tap opens
+  prompt unchanged, its turn budget cap included. The message starts "Morning
+  brief for …" and asks for at most 10 lines from those facts only: two on the
+  market and what it means for the owner's names, then what expires or sits
+  near a trigger, earnings this week, and one thing to decide before the open.
+  Headlines are marked as third-party data, never instructions. The answer, cut
+  to 10 lines, is saved as an open copilot investigation titled
+  `Morning brief <date>` (`Pre-market prep <date>` before 2026-10-30), so it
+  shows in the desk's thread list and on the Dashboard's Morning briefing card
+  (its conclusion line and a link to the thread, above Jo's briefing).
+- **Ping:** title `Morning brief`, body the first two lines; a tap opens
   `/copilot-lab?investigation=<id>`. If the turn fails (an error event,
   including the budget stop, or no text), the ping and the saved record carry
-  the raw facts instead (expiries, the nearest triggers, today's time stops,
-  earnings this week) under "Raw facts (the copilot turn failed):".
+  the raw facts instead under "Raw facts (the copilot turn failed):": the market
+  line and up to 3 headlines, then expiries, the nearest triggers, today's time
+  stops and earnings this week.
 - **Delivery:** the same at-most-once outbox as plan nudges: a send that may
   have reached ntfy is `unknown` and never resent; a prep that never finished
   within 10 minutes, or a ping not sent within 30 minutes, is `expired`.
@@ -2061,7 +2089,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
 | `PING_QUIET_MINUTES` | `10` | A second ping for the same position inside this window is merged or suppressed. |
-| `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [pre-market prep](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
+| `PREMARKET_PREP_ENABLED` | unset (off) | `true` sends the [morning brief](#pre-market-prep) ping on trading mornings (needs `COPILOT_ENABLED` and `NTFY_URL`). `PREMARKET_PREP_AT` (`HH:MM` New York, default `08:30`) sets its time. |
 | `WEEK_REVIEW_AUTO_ENABLED` | unset (off) | `true` runs [Review my week](#review-my-week) by itself once a week and pings it (needs `COPILOT_ENABLED` and `NTFY_URL`). `WEEK_REVIEW_AUTO_AT` (`HH:MM` New York, default `16:45`) sets its time on the week's last trading day. |
 | `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
@@ -2482,8 +2510,8 @@ day, and nothing runs when the flag is off.
   one a day; the queue's budget applies when it runs). The queue's own result
   ping is the only other notification.
 - **Lab home:** the desk's thread list shows each investigation's newest
-  trigger today under New since you looked (kind and text), opening the
-  investigation.
+  trigger today as its ticker's status line (kind and text); the ticker
+  opens the investigation.
 
 Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
 quotes, bars and earnings).

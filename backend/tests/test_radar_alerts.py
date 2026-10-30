@@ -447,3 +447,15 @@ def test_an_interrupted_digest_is_unknown_and_so_are_its_events(engine, monkeypa
     assert sent == [] and digests(engine)[0].delivery == "unknown"
     [event] = rows(engine)
     assert event.delivery == "unknown" and event.last_error.startswith("In the 10:00 AM Radar digest: The send was interrupted")
+
+
+def test_a_dip_candidate_is_always_a_single_and_its_hour_counts_its_own_rule_only(engine, monkeypatch):
+    clock = Clock(at(20))
+    alerts = RadarAlerts(engine, clock=clock)
+    alerts.record([_event("e1", "AAA", 20)])  # a strong trial-rule single for AAA
+    dip = _event("rd0-1", "AAA", 22, kind="dip_turn")
+    dip.update(rule_version="radar-dip-v0", measures={"day_change_pct": -3.1, "low_change_pct": -4.6})
+    clock.now = at(22)
+    [row] = alerts.record([dip])
+    assert row.delivery == "pending" and row.title == "Radar dip: AAA turning up, −3.1% (low −4.6%)"
+    assert radar_alerts.digest_line(dip) == "AAA dip turning up, −3.1% (low −4.6%) · 9:52 AM"
