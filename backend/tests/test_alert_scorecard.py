@@ -167,6 +167,30 @@ def test_the_route_refuses_while_the_lab_is_off_and_reads_the_card_while_it_is_o
         for k in ("holding", "exiting", "none")}, "rows": [], "truncated": False}
 
 
+def test_a_failed_radar_read_leaves_the_alert_card_standing(db, monkeypatch):
+    # On Postgres a failed Radar query aborts the transaction: the alert card is read first and the session rolled back.
+    from types import SimpleNamespace
+    from app.engine import alert_scorecard, radar_scorecard
+    from app.routers import copilot_desk, radar
+    order = []
+    real = alert_scorecard.scorecard
+    monkeypatch.setattr(copilot_desk.copilot, "settings", lambda: SimpleNamespace(enabled=True))
+    monkeypatch.setattr(copilot_desk.today, "_now", lambda: NOW)
+    monkeypatch.setattr(radar, "_store", lambda read_only=False: (object(), None))
+    monkeypatch.setattr(alert_scorecard, "scorecard", lambda *a, **k: order.append("alerts") or real(*a, **k))
+
+    def broken(*args, **kwargs):
+        order.append("radar")
+        raise RuntimeError("operator does not exist: date >= character varying")
+
+    monkeypatch.setattr(radar_scorecard, "scorecard", broken)
+    monkeypatch.setattr(db, "rollback", lambda: order.append("rollback"))
+    card = copilot_desk.desk_scorecard(db)
+    assert order == ["alerts", "radar", "rollback"]
+    assert card["radar"] == {"state": "unavailable", "reason": "The Radar file could not be read right now."}
+    assert card["alerts"] == 0 and card["window_days"] == 30
+
+
 def test_a_decision_only_answers_an_alert_on_its_own_new_york_day(db):
     trade, key = position(db, "NBIS", [(1, 400, ny(27, 9, 41))], [(1, 450, ny(29, 10))], status="closed", closed_at=ny(29, 10))
     alert(db, trade, key, utc(27, 10, 31), contracts=1, bid=300)

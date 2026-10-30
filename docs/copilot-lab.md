@@ -947,12 +947,16 @@ Briefing's day).
   all three parts parse) and `against`; the desk shows the read as one small
   line under the headline and Against set off in amber above Changes if, and
   read aloud they become "Thesis holds, Timing early, …" and "Against that,
-  …". The scripted group reads carry both. Under a finished answer the desk's
-  chips include **More**, one turn asking for the full reasoning behind it
-  (the length rule gives the room back on "more"). A new conversation is
-  named after its first answer's headline (what it concluded), at most 80
-  characters cut at a word, and after its first message's first line only
-  when there is no formatted answer; a saved name is never changed. The scheduled turns' phone pings and
+  …". The scripted group reads carry both. Every finished answer's headline,
+  bullets and Against line carry a small reply button, **Push back on
+  this**: it puts `Push back on "<that line>": ` in the message box, unsent,
+  for the owner to finish (the disagreement rule then re-checks the evidence
+  they dispute). Under a finished answer the desk's chips include **More**,
+  one turn asking for the full reasoning behind it (the length rule gives the
+  room back on "more"). A new conversation is named after its first answer's
+  headline (what it concluded), at most 80 characters cut at a word, and
+  after its first message's first line only when there is no formatted
+  answer; a saved name is never changed. The scheduled turns' phone pings and
   saved conclusions drop the "Verdict: " label (`premarket_prep.unlabelled`,
   `week_review_auto._plain`); their saved answers keep it.
 
