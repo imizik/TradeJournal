@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // The copilot's answer format on the desk (docs/copilot-lab.md § How the copilot reasons): a verdict and a bold headline,
-// the body, a plain Changes if line and the sources folded into one line that still says what was unavailable, stale or
+// the thesis · timing · contract read, the body, the Against line set off, a plain Changes if line and the sources folded into one line that still says what was unavailable, stale or
 // simulated. And the desk's cleaned conversation: one quiet status line, a scope chip in the message box, suggestion
 // chips from the thread's state, a "…" menu for the conclusion and Close, and at 375 px a full-width box with the mic as
 // the main round button. Every lab route is stubbed in the browser and each turn is a fixed SSE stream, so no model runs.
@@ -13,7 +13,9 @@ const ON = {
   limits: { max_rounds: 4, max_tool_calls: 8, tool_timeout_s: 10, turn_timeout_s: 120, turn_budget_usd: 0.25 },
 };
 const ANSWER = "Verdict: Hold — The thesis has not broken.\n\n_(Simulated model — scripted text from the tool results, not Claude.)_\n\n"
-  + "NBIS is 3.1% above the invalidation and the group is up.\n\n- CRWV +1.9% over 15 minutes\n- No new headline\n\nChanges if: NBIS closes below 85.00.";
+  + "Read: Thesis holds · Timing late · Contract n/a\n\n"
+  + "NBIS is 3.1% above the invalidation and the group is up.\n\n- CRWV +1.9% over 15 minutes\n- No new headline\n\n"
+  + "Against: QQQ is down 1.4% today, and NBIS has given back half its morning gain.\n\nChanges if: NBIS closes below 85.00.";
 const simulated = (source: string, state = "ok") => ({ source: `SIMULATED fixture (shaped like ${source})`, kind: "simulated", as_of: "2026-10-28T14:00:00Z", state });
 const sse = (events: object[]) => events.map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
 const TURN = sse([
@@ -98,7 +100,12 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect(answer).toContainText("NBIS is 3.1% above the invalidation and the group is up.");
   await expect(answer.getByRole("listitem")).toHaveText(["CRWV +1.9% over 15 minutes", "No new headline"]);
   await expect(answer.getByText("Changes if NBIS closes below 85.00.", { exact: true })).toBeVisible();
+  // The three questions at a glance, and the case against set off from the body.
+  await expect(answer.getByTestId("copilot-read")).toHaveText("Thesis holds · Timing late · Contract n/a");
+  await expect(answer.getByTestId("copilot-against")).toHaveText("Against QQQ is down 1.4% today, and NBIS has given back half its morning gain.");
   await expect(answer).not.toContainText("Verdict:"); // the structure, not the raw lines
+  await expect(answer).not.toContainText("Read:");
+  await expect(answer).not.toContainText("Against:");
   await expect(answer).toContainText("(Simulated model — scripted text from the tool results, not Claude.)");
   expect(seen.chats[0].symbol).toBe("NBIS");
 

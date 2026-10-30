@@ -19,6 +19,11 @@ test.describe("what is spoken", () => {
       + "Group: C R W V and A P L D confirm. Stop below 98 dollars. Size 1200 shares, risk about 450 dollars to 2.5 R.");
   });
 
+  test("the answer format's Read and Against lines", () => {
+    const content = "Verdict: Wait — Not yet.\n\nRead: Thesis holds · Timing early · Contract mismatch\n\nThe group leads.\n\nAgainst: CRWV is fading.";
+    expect(speechText({ content })).toBe("Wait. Not yet. Thesis holds, Timing early, Contract mismatch. The group leads. Against that, C R W V is fading.");
+  });
+
   test("option contracts, ranges, cents, losses, links and code", () => {
     expect(speechText({ content: "Buy the `NBIS 95C` if it holds $100–$102. Premium $0.85; P&L -$1,234 on $2.5M. See [the news](https://example.com/a). Earnings 2026-10-29." }))
       .toBe("Buy the N B I S 95 call if it holds 100 dollars to 102 dollars. Premium 85 cents; P and L minus 1234 dollars on 2.5 million dollars. See the news. Earnings October 29, 2026.");

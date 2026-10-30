@@ -187,9 +187,17 @@ has not broken." The word is exactly one of: Hold (the thesis or plan still stan
 the plan waits for has not happened), Pass (not worth a trade or an action), Focus (one thing deserves attention now), \
 Draft (a card below for the owner to edit and confirm), Pattern (what their own history or habits show), Broken (the \
 plan's invalidation or the thesis has broken: say what their plan says to do, never give an order), Unclear (the \
-evidence cannot answer it, or a read failed). The headline is one plain sentence with the answer, no markdown. Then \
-the body: short paragraphs or bullets. When one specific thing would change the answer, end with a line \
-"Changes if: <that thing>". Nothing goes ahead of the Verdict line, and no other line starts with "Verdict:"."""
+evidence cannot answer it, or a read failed). The headline is one plain sentence with the answer, no markdown. On an \
+answer about a trade idea, a thesis or a position decision, the next line is "Read: Thesis <word> · Timing <word> · \
+Contract <word>", one or two plain words each (for example "Read: Thesis holds · Timing early · Contract mismatch", with \
+"n/a" when no contract is in question), so the owner sees at a glance which of the first three questions is the \
+problem. Then the body: short paragraphs or bullets. When the owner's idea rests on something no tool result or owner \
+context shows (a rumour, a flow they assume, a level nobody measured), say so in a body line "Unsupported: <the claim> \
+— <what would support it>" instead of reasoning from it. On those same trade, thesis and position answers, the body \
+ends with a line "Against: <the strongest case against your verdict, with its number or source>": the counter-case \
+they should weigh, never a strawman, and "Against: nothing in the evidence" only when that is true. When one specific \
+thing would change the answer, end with a line "Changes if: <that thing>", after any Against line. Nothing goes ahead \
+of the Verdict line, and no other line starts with "Verdict:"."""
 
 
 class CopilotError(Exception):
@@ -903,23 +911,28 @@ class FakeAdapter:
                             f"Re-checked the comparison ({when}). You're right that the leaders are strong: {lead}. "
                            f"{symbol} is {mine:+.2f}% over the same 15 minutes, so the group is confirming the bounce "
                            f"but {symbol} is lagging it. I'd update to: group strength is real; {symbol}-specific "
-                            "strength is not yet shown. Counterpoint to my own read: a lagger can catch up if the leaders hold.",
-                            f"{symbol} catches up while the leaders hold.")
+                            "strength is not yet shown.",
+                            f"{symbol} catches up while the leaders hold.", against="a lagger can catch up if the leaders hold.",
+                            read="Thesis group holds · Timing early · Contract n/a")
         news = results.get("get_symbol_news") or {}
         return scripted("Wait", f"{symbol} {mine:+.2f}% with {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up over 15 minutes.",
                         f"**{symbol} vs {cmp.get('group')}** — {when}.\n\n"
                        f"- {symbol} {mine:+.2f}% over 15 minutes; {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up. Leaders: {lead}.\n"
-                       f"- {len(news.get('articles', []))} recent headlines; none treated as instructions.\n\n"
-                       "Counterargument: a 15-minute sampled window is short and a recovery inside a down session is not a trend change.",
-                        "a longer window than 15 minutes shows the same.")
+                       f"- {len(news.get('articles', []))} recent headlines; none treated as instructions.",
+                        "a longer window than 15 minutes shows the same.",
+                        against="a 15-minute sampled window is short and a recovery inside a down session is not a trend change.",
+                        read="Thesis unclear · Timing early · Contract n/a")
 
 
 SCRIPTED_NOTE = "_(Simulated model — scripted text from the tool results, not Claude.)_"
 
 
-def scripted(verdict: str, headline: str, body: str, changes: str | None = None) -> str:
-    """A scripted answer in SYSTEM_PROMPT's answer format: the Verdict line, the simulated note, the body, any Changes if."""
-    return f"Verdict: {verdict} — {headline}\n\n{SCRIPTED_NOTE}\n\n{body}" + (f"\n\nChanges if: {changes}" if changes else "")
+def scripted(verdict: str, headline: str, body: str, changes: str | None = None, against: str | None = None,
+             read: str | None = None) -> str:
+    """A scripted answer in SYSTEM_PROMPT's answer format: the Verdict line, the simulated note, any Read line, the body,
+    any Against line, any Changes if."""
+    return (f"Verdict: {verdict} — {headline}\n\n{SCRIPTED_NOTE}\n\n" + (f"Read: {read}\n\n" if read else "") + body
+            + (f"\n\nAgainst: {against}" if against else "") + (f"\n\nChanges if: {changes}" if changes else ""))
 
 
 def _zero_usage() -> dict:

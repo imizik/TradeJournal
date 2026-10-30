@@ -73,7 +73,7 @@ def test_representative_conversation_with_simulated_model_and_evidence():
     assert {t["name"] for t in tools} == {"get_group_comparison", "get_symbol_news", "get_symbol_events"}
     assert all(t["provenance"]["kind"] == "simulated" and t["provenance"]["as_of"] for t in tools)
     answer = _text(first)
-    assert "Simulated model" in answer and "Neoclouds and AI hosting" in answer and "Counterargument" in answer
+    assert "Simulated model" in answer and "Neoclouds and AI hosting" in answer and "\n\nAgainst: a 15-minute" in answer
     assert first[-1]["type"] == "done" and first[-1]["metrics"]["cost_usd"] == 0.0
 
     history = [{"role": "user", "content": "NBIS looks like it might recover."}, {"role": "assistant", "content": answer},

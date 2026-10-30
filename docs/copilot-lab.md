@@ -922,7 +922,19 @@ Briefing's day).
   error) renders as plain text. The scripted `fake` backend writes every
   answer this way (`copilot.scripted`), with its simulated-model note (and
   any image note) under the Verdict line. Read aloud, the line becomes
-  "Hold. The thesis has not broken." The scheduled turns' phone pings and
+  "Hold. The thesis has not broken."
+- **The case against.** On an answer about a trade idea, a thesis or a
+  position decision, the line after the Verdict is
+  `Read: Thesis holds · Timing early · Contract n/a` (one or two words per
+  question), and the body ends with `Against: <the strongest case against
+  the verdict, with its number or source>` before any Changes if line;
+  "nothing in the evidence" only when that is true. A claim no tool or owner
+  context shows gets a body line `Unsupported: <claim> — <what would support
+  it>` instead of being reasoned from. `answerParts` returns `read` (only when
+  all three parts parse) and `against`; the desk shows the read as one small
+  line under the headline and Against set off in amber above Changes if, and
+  read aloud they become "Thesis holds, Timing early, …" and "Against that,
+  …". The scripted group reads carry both. The scheduled turns' phone pings and
   saved conclusions drop the "Verdict: " label (`premarket_prep.unlabelled`,
   `week_review_auto._plain`); their saved answers keep it.
 
