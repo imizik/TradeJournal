@@ -133,3 +133,26 @@ def test_daily_schedule_identity_survives_interruption_before_dispatch(tmp_path,
         db.commit()
         assert daily(db, "2026-10-30") == []
         assert len(db.exec(select(JobRun)).all()) == 1
+
+
+def test_daily_marks_coalesced_manual_job_and_preserves_day_rollover(tmp_path, monkeypatch):
+    import json
+    from sqlmodel import select
+    from app.models import JobRun
+    from app.engine import job_runtime
+    engine = create_engine(f"sqlite:///{tmp_path / 'coalesce.db'}")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setenv("COMPANY_RESEARCH_DAILY_ENABLED", "true")
+    monkeypatch.setattr(job_runtime, "submit_job", lambda _: None)
+    with Session(engine) as db:
+        company = store.add(db, "NVDA")
+        manual = store.queue_refresh(db, company)
+        assert daily(db, "2026-10-29") == [str(manual.id)]
+        assert daily(db, "2026-10-30") == [str(manual.id)]
+        db.refresh(manual)
+        assert json.loads(manual.params_json)["scheduled_days"] == ["2026-10-29", "2026-10-30"]
+        manual.status = "succeeded"
+        db.add(manual)
+        db.commit()
+        assert daily(db, "2026-10-29") == daily(db, "2026-10-30") == []
+        assert len(db.exec(select(JobRun)).all()) == 1

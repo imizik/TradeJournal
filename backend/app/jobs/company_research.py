@@ -29,7 +29,8 @@ def daily(db, day):
     for row in db.exec(select(ResearchCompany).where(ResearchCompany.followed.is_(True)).limit(10)).all():
         previous = db.exec(select(JobRun).where(JobRun.job_type == "company_research_refresh",
             JobRun.created_at >= datetime.fromisoformat(day) - timedelta(days=1)).limit(1000)).all()
-        if any(json.loads(j.params_json).get("company_id") == str(row.id) and json.loads(j.params_json).get("scheduled_day") == day for j in previous):
+        if any(json.loads(j.params_json).get("company_id") == str(row.id) and
+               (json.loads(j.params_json).get("scheduled_day") == day or day in json.loads(j.params_json).get("scheduled_days", [])) for j in previous):
             continue
         job = store.queue_refresh(db, row, scheduled_day=day)
         submit_job(job.id)

@@ -166,15 +166,29 @@ def queue_refresh(db, row, scheduled_day=None):
         scheduled = db.exec(select(JobRun).where(JobRun.job_type == "company_research_refresh").order_by(JobRun.created_at.desc()).limit(1000)).all()
         for job in scheduled:
             params = json.loads(job.params_json)
-            if params.get("company_id") == str(row.id) and params.get("scheduled_day") == scheduled_day:
+            days = set(params.get("scheduled_days", [])) | {params.get("scheduled_day")}
+            if params.get("company_id") == str(row.id) and scheduled_day in days:
                 db.commit()
                 return job
     pending = db.exec(select(JobRun).where(JobRun.job_type == "company_research_refresh",
                                          JobRun.status.in_(["queued", "running"]))).all()
     for job in pending:
         if json.loads(job.params_json).get("company_id") == str(row.id):
+            if scheduled_day:
+                params = json.loads(job.params_json)
+                days = set(params.get("scheduled_days", []))
+                if params.get("scheduled_day"):
+                    days.add(params["scheduled_day"])
+                days.add(scheduled_day)
+                # A pending job can cover multiple daily checks; preserve the
+                # initial day and the most recent month without unbounded params.
+                params.setdefault("scheduled_day", scheduled_day)
+                params["scheduled_days"] = sorted(days)[-31:]
+                job.params_json = canonical(params)
+                db.add(job)
+            db.commit()
             return job
-    return create_job(db, "company_research_refresh", {"company_id": str(row.id), **({"scheduled_day": scheduled_day} if scheduled_day else {})}, total=1)
+    return create_job(db, "company_research_refresh", {"company_id": str(row.id), **({"scheduled_day": scheduled_day, "scheduled_days": [scheduled_day]} if scheduled_day else {})}, total=1)
 
 
 def run_refresh(job_id):
