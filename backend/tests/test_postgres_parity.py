@@ -598,3 +598,27 @@ def test_journal_coach_export_requires_and_observes_database_read_only_role(migr
             for role in (reader, writer, member):
                 if role in role_created:
                     connection.exec_driver_sql(f"DROP ROLE {role}")
+
+
+def test_radar_scorecard_reads_journal_decisions_on_postgres(migrated, tmp_path):
+    # SQLite compared the journal's date column with an ISO string; Postgres refuses (date >= character varying),
+    # which once aborted the desk scorecard's transaction (#613). The day filter must be a date.
+    from app.engine import radar_scorecard
+    from app.engine.radar_store import RadarStore
+    from app.models import DayJournalEntry
+    from tests.test_radar_scorecard import DONE, FLAT, NOW, _decide, _event, _pass
+
+    store = RadarStore(tmp_path / "radar.sqlite")
+    start = _pass(store, "10:00", FLAT)
+    _pass(store, "11:00", {**FLAT, "AAA": 104.0})
+    _event(store, "aaa1", "relative_to_spy", "up", ["AAA"], start)
+    with Session(migrated) as db:
+        _decide(db, "AAA", "Watching. Radar: AAA up.", DONE, "10:05")
+        try:
+            card = radar_scorecard.scorecard(store, db, NOW)
+            assert [(r["event_id"], r["decision"]) for r in card["rows"]] == [("aaa1", "watching")]
+        finally:
+            db.rollback()
+            for row in db.exec(select(DayJournalEntry).where(DayJournalEntry.symbol == "AAA")).all():
+                db.delete(row)
+            db.commit()
