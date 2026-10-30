@@ -197,9 +197,9 @@ class Bot:
         return [body for n, body in self.calls if n == name]
 
 
-def tap(data: str, chat=CHAT, update_id=1, keyboard=None) -> dict:
+def tap(data: str, chat=CHAT, update_id=1, keyboard=None, sender=None) -> dict:
     return {"update_id": update_id, "callback_query": {
-        "id": f"q{update_id}", "data": data, "from": {"id": int(chat)},
+        "id": f"q{update_id}", "data": data, "from": {"id": int(sender or chat)},
         "message": {"message_id": 55, "chat": {"id": int(chat)}, "reply_markup": {"inline_keyboard": keyboard or []}}}}
 
 
@@ -228,6 +228,7 @@ def test_taps_from_another_chat_and_other_updates_are_ignored(case):
     bot = Bot()
     replies = telegram_replies.Replies(db_engine, call=bot)
     assert run(replies.handle(tap(f"fb:{alert}:prompted_review", chat="999"))) is None
+    assert run(replies.handle(tap(f"why:{alert}", sender="999"))) is None  # someone else in the owner's chat
     assert run(replies.handle({"update_id": 2, "message": {"chat": {"id": int(CHAT)}, "text": "hi"}})) is None
     assert run(replies.handle(tap("nonsense:1"))) is None
     assert bot.calls == []
@@ -249,13 +250,14 @@ def test_feedback_tap_saves_once_answers_and_marks_the_keyboard(case):
     assert bot.named("answerCallbackQuery")[0] == {"callback_query_id": "q1", "text": "Saved: Prompted review."}
     edit = bot.named("editMessageReplyMarkup")[0]
     assert edit["chat_id"] == CHAT and edit["message_id"] == 55
-    assert edit["reply_markup"]["inline_keyboard"] == [[{"text": "✓ Prompted review", "callback_data": "done"}],
+    assert edit["reply_markup"]["inline_keyboard"] == [[{"text": "✓ Prompted review", "callback_data": "done"},
+                                                        {"text": "Why?", "callback_data": f"why:{alert}"}],
                                                        [{"text": "Open", "url": "https://journal.example/x"}]]
     # The other answer tapped later cannot overwrite it; the keyboard shows what was saved.
     assert run(replies.handle(tap(f"fb:{alert}:already_aware", update_id=3, keyboard=keyboard))) == "fb"
     assert bot.named("answerCallbackQuery")[-1]["text"] == "Already answered: Prompted review."
-    assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"][0] == [
-        {"text": "✓ Prompted review", "callback_data": "done"}]
+    assert bot.named("editMessageReplyMarkup")[-1]["reply_markup"]["inline_keyboard"][0][0] == {
+        "text": "✓ Prompted review", "callback_data": "done"}
     with Session(db_engine) as db:
         assert db.exec(select(PositionAlertFeedback.rating)).all() == ["prompted_review"]
 
@@ -307,10 +309,12 @@ def test_why_runs_one_fake_copilot_turn_and_replies_in_the_chat(case, monkeypatc
 
     async def go():
         await replies.handle(tap(f"why:{alert}", keyboard=keyboard))
+        await replies.handle(tap(f"why:{alert}", update_id=2, keyboard=keyboard))  # a double tap: one turn
         await asyncio.gather(*replies._tasks)
+        await replies.handle(tap(f"why:{alert}", update_id=3, keyboard=keyboard))  # asked once per message
 
     run(go())
-    assert bot.named("answerCallbackQuery")[0]["text"] == "Asking copilot…"
+    assert [a["text"] for a in bot.named("answerCallbackQuery")] == ["Asking copilot…"] + 2 * ["Already asked; the answer comes in the chat."]
     [reply] = bot.named("sendMessage")
     assert reply["chat_id"] == CHAT and reply["reply_parameters"]["message_id"] == 55
     assert reply["text"].startswith("Verdict:") and len(reply["text"]) <= telegram_replies.ANSWER_MAX

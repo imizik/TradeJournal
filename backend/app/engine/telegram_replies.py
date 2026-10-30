@@ -2,7 +2,8 @@
 
 One long-polling task in the API process (started from the app lifespan beside the level alert monitor, only when
 ``telegram.configured()``) asks Telegram for new button taps (``getUpdates`` with an offset, ``callback_query`` only).
-A tap is handled only when it comes from the message in ``TELEGRAM_CHAT_ID``; everything else is ignored. When
+A tap is handled only when it is on a message in ``TELEGRAM_CHAT_ID`` and made by that same id (the owner's private
+chat with the bot, whose id is the owner's user id); everything else is ignored. When
 Telegram cannot be reached the task sleeps and tries again; nothing else waits on it.
 
 A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
@@ -14,7 +15,7 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
   (``POST /radar/events/{event_id}/feedback``, what ``&rate=`` posts), skipped when it is already the latest rating;
 - ``why:<position alert id>``: one bounded copilot turn on the alert (``position_alerts.ask_context``, the configured
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
-  characters; with Copilot Lab off the reply says so.
+  characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
 
 Every handled tap is answered (``answerCallbackQuery``) and the message's keyboard is edited to show the answer
 chosen. Each tap is recorded once in the rows those routes already write; there is no table of its own. Known
@@ -35,7 +36,7 @@ from app.engine import telegram
 
 log = logging.getLogger(__name__)
 
-POLL_SECONDS = 25  # Telegram holds the request open this long when nothing is new
+POLL_SECONDS = 10  # Telegram holds the request open this long when nothing is new; a shutdown waits for it
 RETRY_SECONDS = 30
 ANSWER_MAX = 1500
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
@@ -63,6 +64,7 @@ class Replies:
         self.offset: int | None = None
         self.last_error: str | None = None
         self._tasks: set[asyncio.Task] = set()
+        self._asked: set = set()  # messages whose Why? was asked in this process
 
     async def loop(self) -> None:
         while True:
@@ -94,7 +96,9 @@ class Replies:
         if not query:
             return None
         message = query.get("message") or {}
-        if str((message.get("chat") or {}).get("id")) != telegram.chat_id():
+        owner = telegram.chat_id()
+        # The owner's private chat with the bot: its id is the owner's user id, so a tap by anyone else is ignored.
+        if str((message.get("chat") or {}).get("id")) != owner or str((query.get("from") or {}).get("id")) != owner:
             return None
         verb, _, rest = str(query.get("data") or "").partition(":")
         if verb == "fb":
@@ -102,10 +106,14 @@ class Replies:
         elif verb == "rr":
             reply, chosen = await asyncio.to_thread(self._rating, *rest.partition(":")[::2])
         elif verb == "why":
-            reply, chosen = "Asking copilot…", WHY
-            task = asyncio.create_task(self._why(rest, message))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            if self._tasks or message.get("message_id") in self._asked:  # one turn at a time, once per message
+                reply, chosen = "Already asked; the answer comes in the chat.", None
+            else:
+                self._asked.add(message.get("message_id"))
+                reply, chosen = "Asking copilot…", WHY
+                task = asyncio.create_task(self._why(rest, message))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
         elif verb == DONE:
             reply, chosen = None, None
         else:
@@ -165,10 +173,13 @@ class Replies:
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
             text = "The copilot turn failed unexpectedly."
-        await asyncio.to_thread(self.call, "sendMessage", json={
-            "chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
-                                                                              "allow_sending_without_reply": True},
-            "link_preview_options": {"is_disabled": True}})
+        try:
+            await asyncio.to_thread(self.call, "sendMessage", json={
+                "chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
+                                                                                  "allow_sending_without_reply": True},
+                "link_preview_options": {"is_disabled": True}})
+        except telegram.TelegramError as exc:
+            log.warning("Telegram Why? answer not delivered: %s", exc)
 
     async def why_text(self, alert_id: str) -> str:
         """One bounded copilot turn on the alert, as plain text for the chat."""
@@ -180,12 +191,16 @@ class Replies:
         if not cfg.enabled:
             return "Copilot Lab is off on this server, so there is no answer here."
         alert_uuid = _uuid(alert_id)
-        with Session(self.engine) as db:
-            alert = db.get(PositionAlert, alert_uuid) if alert_uuid else None
-            if alert is None:
-                return "That alert is no longer in the journal."
-            question = position_alerts.ask_context(alert)
-            symbol = (alert.contract or "").split(" ")[0]
+
+        def read() -> tuple[str, str] | None:
+            with Session(self.engine) as db:
+                alert = db.get(PositionAlert, alert_uuid) if alert_uuid else None
+                return (position_alerts.ask_context(alert), (alert.contract or "").split(" ")[0]) if alert else None
+
+        found = await asyncio.to_thread(read)
+        if found is None:
+            return "That alert is no longer in the journal."
+        question, symbol = found
         symbol = symbol if SYMBOL.match(symbol) else None
         if cfg.backend == "anthropic":
             spent = await asyncio.to_thread(copilot_spend.spent_today)
@@ -243,8 +258,9 @@ class Replies:
                 edited.append(row)
             elif chosen == WHY:
                 edited.append([{"text": "✓ Why? (answer below)", "callback_data": DONE} if b is tapped else b for b in row])
-            else:
-                edited.append([{"text": f"✓ {chosen}", "callback_data": DONE}])
+            else:  # the answers give way to the saved one; Why? stays
+                kept = [b for b in row if str(b.get("callback_data", "")).startswith(("why:", DONE)) and b is not tapped]
+                edited.append([{"text": f"✓ {chosen}", "callback_data": DONE}, *kept])
         if edited == rows:
             return
         try:

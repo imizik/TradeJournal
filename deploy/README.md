@@ -587,11 +587,17 @@ Owner steps (nothing here is switched on by the code):
    token it gives you. Do not set a webhook for this bot: the API polls.
 2. Open the new bot and send it any message (for example `hi`).
 3. Read your chat id from that message, before the API is polling (the poll
-   only asks for button taps). On the server, with the token in place of
-   `TOKEN`, run the command below and copy `"chat":{"id":...}` from it:
+   only asks for button taps). On the server, run the two commands below,
+   paste the token at the silent prompt (so it stays out of the shell
+   history), and copy `"chat":{"id":...}` from the output. Use your private
+   chat with the bot: taps are accepted only from that chat's own id.
 
    ```bash
-   curl -s https://api.telegram.org/botTOKEN/getUpdates
+   read -rs TOKEN
+   ```
+
+   ```bash
+   curl -s "https://api.telegram.org/bot$TOKEN/getUpdates"; unset TOKEN
    ```
 
 4. Add both to `/etc/tradejournal/alerts.env` (root owned, mode 0600) and keep
