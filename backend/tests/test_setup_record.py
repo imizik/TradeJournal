@@ -21,7 +21,7 @@ def engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(Account(id=ROTH, name="Roth", type="roth_ira", last4="8267", broker="robinhood"))
+        db.add(Account(id=ROTH, name="Roth", type="roth_ira", last4="1111", broker="robinhood"))
         db.add(Account(id=WEBULL, name="Webull", type="individual", last4="0001", broker="webull"))
         db.commit()
     yield engine

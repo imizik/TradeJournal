@@ -123,13 +123,13 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   useEffect(() => {
     if (!drafting) return;
     const controller = new AbortController();
-    getSymbolLoop(plan.symbol, controller.signal)
+    getSymbolLoop(plan.symbol, controller.signal, { setup: plan.instrument !== "stock" })
       .then(loop => {
         setLastExit(loop.last_exit?.state === "ok" ? loop.last_exit.lesson : null);
         setSetupRecord(loop.setup?.state === "ok" ? loop.setup : null);
       }).catch(() => undefined);
     return () => controller.abort();
-  }, [drafting, plan.symbol]);
+  }, [drafting, plan.symbol, plan.instrument]);
   const stopText = timeStop.trim();
   useEffect(() => {
     if (!stopText || !alertsSupported) return;

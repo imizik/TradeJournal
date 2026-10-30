@@ -632,7 +632,9 @@ export type SymbolLoop = {
   };
   quotes_at: number | null; quote_issue: string | null;
 };
-export const getSymbolLoop = (symbol: string, signal?: AbortSignal) => request<SymbolLoop>(`/copilot/symbol/${encodeURIComponent(symbol)}`, { signal });
+/** ``setup``: also the owner's record for an option plan's setup (the plan card asks; the Charts dock does not). */
+export const getSymbolLoop = (symbol: string, signal?: AbortSignal, { setup = false } = {}) =>
+  request<SymbolLoop>(`/copilot/symbol/${encodeURIComponent(symbol)}${setup ? "?setup=true" : ""}`, { signal });
 /** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
 export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
 

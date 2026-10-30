@@ -35,7 +35,8 @@ export default function SetupRecordLines({ symbol, side, setup }: { symbol: stri
   if (gap?.record && setup.gap_pct !== null)
     lines.push(`Gap ${pct(setup.gap_pct)}. Your opening ${side}s bought ${gapWords(side, gap.relation)}: ${tally(gap.record)}.`);
   if (trend?.record && setup.vs_sma_pct !== null) {
-    const where = setup.vs_sma_pct < 0 ? "below" : "above";
+    // From the relation the cohort was matched on, never the sign: a call against the trend is below it, a put above.
+    const where = (side === "call") === (trend.relation === "against") ? "below" : "above";
     lines.push(`${symbol} is ${Math.abs(setup.vs_sma_pct).toFixed(1)}% ${where} its 20-day average. Your opening ${side}s bought ${where} it: ${tally(trend.record)}.`);
   }
   if (!lines.length) return null;

@@ -145,13 +145,14 @@ def test_the_symbols_last_answered_exit_lesson_for_a_draft_plan_card(lab, engine
     assert body["last_exit"] == {"state": "unavailable"} and body["plans"]["state"] == "ok"
 
 
-def test_the_setup_record_rides_along_on_its_own(lab, monkeypatch):  # noqa: F811
-    body = lab.get("/copilot/symbol/NBIS").json()
+def test_the_setup_record_rides_along_on_its_own_when_asked(lab, monkeypatch):  # noqa: F811
+    assert "setup" not in lab.get("/copilot/symbol/NBIS").json()  # the Charts dock's polling never computes it
+    body = lab.get("/copilot/symbol/NBIS?setup=true").json()
     assert body["setup"] == {"state": "ok", "gap_pct": None, "vs_sma_pct": None, "calls": {"gap": None, "trend": None},
                              "puts": {"gap": None, "trend": None}, "size": None}
 
     def broken(*_args, **_kwargs):
         raise RuntimeError("boom")
     monkeypatch.setattr(setup_record, "opening_trades", broken)
-    body = lab.get("/copilot/symbol/NBIS").json()
+    body = lab.get("/copilot/symbol/NBIS?setup=true").json()
     assert body["setup"] == {"state": "unavailable"} and body["plans"]["state"] == "ok"
