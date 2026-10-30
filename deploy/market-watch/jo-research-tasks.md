@@ -7,12 +7,13 @@ outside market hours, and its output lands in TradeJournal as saved research
 the copilot reads as a source. Jo never pings the phone, never runs inside
 market hours (09:30–16:00 America/New_York) and never advises an order.
 
-**Nothing here is activated by the pull request that adds it.** The owner's
-steps, in order:
+**These task texts do nothing until the owner installs them;** the app side
+starts publishing on merge (step 1). The owner's steps, in order:
 
-1. Approve the audit's scope: its counts and percentages come from the
-   copilot's week review across every non-Webull account (no dollar amounts or
-   account names), wider than the accounts approved for Jo. Then merge; the app
+1. Approve the plan and audit scope: holdings are limited to the accounts
+   approved for Jo, but plans' position states, linked-trade status and return
+   percent, and the audit's counts and percentages (the copilot's week review)
+   cover every non-Webull account, with no dollar amounts or account names. Then merge; the app
    side autodeploys and starts publishing contexts, because research
    publication/import rides the existing Jo switch (`enabled` in the file
    `JO_MORNING_CONFIG` names). To stop

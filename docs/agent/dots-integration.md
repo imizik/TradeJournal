@@ -111,10 +111,12 @@ the existing Jo pass and its switch) publishes the dossier after 18:30 New York
 on trading days, the audit after 17:00 on Fridays and the red-team list when it
 changes, each as an immutable file that expires in 24 hours. Holdings come from
 the accounts approved for Jo (`account_ids` in the Jo configuration); no context
-carries account ids or names, quantities, prices paid or dollar amounts. The
-audit's counts and percentages come from the copilot's week review, which spans
-every non-Webull account (an owner-approved widening is needed before
-activation). The red-team list never carries the copilot's answer text. Each
+carries account ids or names, quantities, prices paid or dollar amounts. Plans
+are not tied to an account: an armed plan's position state and a confirmed
+plan's linked-trade status and return percent come from whichever account it was
+traded in, and the audit's counts and percentages come from the copilot's week
+review across every non-Webull account (an owner-approved widening is needed
+before activation). The red-team list never carries the copilot's answer text. Each
 sealed submission becomes one saved research record with source `jo` (title like
 "Jo dossier · NBIS · Oct 29", Jo's title as its conclusion, sources as
 citations, Jo's text in the findings, never as a transcript answer), which
