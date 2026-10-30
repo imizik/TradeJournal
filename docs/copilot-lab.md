@@ -900,7 +900,14 @@ Briefing's day).
   week); explaining a moment on the chart (Explain this candle); plans, and
   pressure-testing a trade the
   owner wants to take before one plan card (Confirm a plan); SIMULATED;
-  no orders; brevity that leads with what matters for the decision.
+  no orders.
+- **Short answers.** After the Verdict line, at most about 120 words: the
+  two or three deciding facts with their numbers and as-of, including the
+  strongest point against; no preamble, tool tour or closing summary, and a
+  plan's fields stay on its card rather than in the text. A trade review, a
+  week review or an explicit "more", "why" or "go deeper" gets the room it
+  needs. Length is the wait: after a tool result, Sonnet 5.5 sends the whole
+  answer at once at about 100 tokens a second (§ Live measurements).
 - **The answer format.** The first line of every answer is
   `Verdict: <word> — <headline>`, for example
   `Verdict: Hold — The thesis has not broken.`, with the word from a fixed

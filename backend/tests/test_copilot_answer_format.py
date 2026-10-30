@@ -29,6 +29,14 @@ def test_the_prompt_asks_for_the_verdict_line_the_fixed_words_and_changes_if():
     assert "never give an order" in prompt  # Broken says what the plan says, not what to do
 
 
+def test_the_prompt_keeps_answers_short_unless_more_is_asked_for():
+    # After a tool result the whole answer is generated before any of it streams, so length is the wait.
+    prompt = " ".join(copilot.SYSTEM_PROMPT.split())
+    assert "After the Verdict line, use at most about 120 words" in prompt
+    assert "do not repeat them in the text" in prompt
+    assert 'when they ask for more ("more", "why", "go deeper") or for a trade review or a week review' in prompt
+
+
 def test_every_scripted_answer_leads_with_a_verdict_and_keeps_the_simulated_note():
     fake = copilot.FakeAdapter
     answers = [
