@@ -96,7 +96,9 @@ def _match(roll: OptionRollOrder, fills: list[Fill], next_roll_at) -> _Match | N
     for fill in fills:
         first_fill.setdefault(_key(fill), fill)
     # Every sale of something never opened is a candidate, even a part sale that cannot qualify yet: it could be the real leg.
-    new = [k for k, f in first_fill.items() if f.executed_at >= at and f.side == "sell_to_close"]
+    # One first sold after the next order belongs to that order, so resolving together matches resolving one at a time.
+    new = [k for k, f in first_fill.items() if f.executed_at >= at and f.side == "sell_to_close"
+           and (next_roll_at is None or f.executed_at < next_roll_at)]
     pairs = [(o, n) for o in old for n in new if o != n and o[:2] == n[:2]]
     if len(pairs) != 1:
         return None

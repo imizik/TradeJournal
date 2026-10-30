@@ -210,3 +210,16 @@ def test_a_sale_long_after_the_order_is_no_evidence():
     _roll(db)
     _fill(db, account, "sell_to_close", NEW, "2", "270", datetime(2026, 12, 15, 10, 0))
     assert resolve_rolls(db) == 0
+
+
+def test_separate_rolls_resolve_the_same_together_as_one_at_a_time():
+    db = _db()
+    account = _account(db)
+    _setup(db, account)
+    _roll(db, net="50")
+    _fill(db, account, "sell_to_close", NEW, "2", "300", datetime(2026, 10, 29, 12, 0))
+    _fill(db, account, "buy_to_open", Z, "2", "80", datetime(2026, 10, 29, 13, 0))
+    db.add(OptionRollOrder(raw_email_id="roll-2", ticker="CRWV", contracts=Decimal(2), net_per_contract=Decimal(30), executed_at=datetime(2026, 10, 30, 11, 0)))
+    _fill(db, account, "sell_to_close", C, "2", "200", datetime(2026, 10, 30, 12, 0))
+    assert resolve_rolls(db) == 2 and unresolved_rolls(db) == []
+    assert sum(t.realized_pnl for t in _trades(db).trades) == Decimal("480")  # (600 - 200 - 100) + (400 - 160 - 60)

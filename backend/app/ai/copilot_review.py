@@ -98,10 +98,10 @@ def _fills(db, trade) -> list[dict]:
     from sqlmodel import select
     from app.engine.analytics import wall_time
     from app.models import Fill, TradeFill
-    rows = db.exec(select(TradeFill.role, Fill.id, Fill.side, Fill.contracts, Fill.price, Fill.executed_at)
+    rows = db.exec(select(TradeFill.role, Fill.id, Fill.side, Fill.contracts, Fill.price, Fill.executed_at, Fill.raw_email_id)
                    .join(Fill, Fill.id == TradeFill.fill_id).where(TradeFill.trade_id == trade.id)).all()
     return [{"id": r.id, "role": r.role, "side": r.side, "contracts": float(r.contracts), "price": float(r.price),
-             "executed_at": wall_time(r.executed_at)} for r in rows]
+             "executed_at": wall_time(r.executed_at), "derived": (r.raw_email_id or "").startswith("roll:")} for r in rows]
 
 
 def _path(db, trade) -> dict:

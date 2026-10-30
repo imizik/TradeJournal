@@ -295,3 +295,8 @@ def test_journal_readers_are_denied(boundary):  # noqa: F811
     assert signin(boundary, identifier="reader", key=created.json()["key"]).status_code == 200
     assert boundary.public.get("/stats/analytics").status_code == 200  # the journal grant is real
     assert boundary.public.get("/analytics/exit-habits").status_code == 403
+
+
+def test_a_rolled_close_is_not_read_as_a_sale_at_the_alert():
+    out = follow_up(alert(), BUY + [{**f("sell_to_close", 2, 100.0, "2026-10-21T10:40"), "derived": True}], "closed")
+    assert out["response"] == "rolled" and out["vs_alert"] is None and "rolled" in out["note"]

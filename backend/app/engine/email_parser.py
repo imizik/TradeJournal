@@ -126,6 +126,8 @@ def parse_option_email(subject: str, body: str, imap_uid: str) -> ParsedFill | P
 def _parse_roll(body: str, imap_uid: str) -> ParsedRoll | None:
     match = _ROLL_RE.search(body)
     if not match:
+        if "2-Option Strateg" in body:
+            raise EmailParseError(f"Could not parse two-leg order from email uid={imap_uid!r}")
         return None  # this subject on anything else stays ignored, as before
     dt_match = _DATETIME_RE.search(body)
     if not dt_match:
