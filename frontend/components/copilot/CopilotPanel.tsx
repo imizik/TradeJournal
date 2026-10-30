@@ -308,10 +308,20 @@ function scrollParent(node: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+/** A new conversation's name: its first answer's headline (what it concluded), else the first line of its first
+ * message; at most 80 characters, cut at a word. */
+function threadTitle(messages: LabMessage[]): string {
+  const answer = messages.find(m => m.role === "assistant" && m.content.trim());
+  const text = ((answer && answerParts(answer.content)?.headline) || messages[0].content.split("\n")[0]).trim();
+  if (text.length <= 80) return text || "Untitled";
+  const cut = text.slice(0, 79);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 40 ? cut.lastIndexOf(" ") : 79)}…`;
+}
+
 /** What is saved for a conversation: its title, symbol, status, conclusion, text and evidence references. */
 function savedFields(messages: LabMessage[], current: Current | null, symbol: string,
   next: Partial<Pick<Current, "status" | "conclusion">> = {}) {
-  return { title: current?.title ?? (messages[0].content.split("\n")[0].slice(0, 80) || "Untitled"),
+  return { title: current?.title ?? threadTitle(messages),
     symbol: symbol.trim().toUpperCase() || null, status: next.status ?? current?.status ?? "open",
     conclusion: next.conclusion !== undefined ? next.conclusion : current?.conclusion ?? null, ...toSaved(messages) };
 }
@@ -915,11 +925,15 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {voice.button}
     </span>
   );
-  // The desk's next steps from the thread's state, two to four of them; each sends one turn, fills the box or opens the menu.
+  // The desk's next steps from the thread's state, two to five of them; each sends one turn, fills the box or opens the menu.
   const planned = messages.some(m => m.proposals?.some(p => p.kind === "trade_plan"));
+  const lastMessage = messages[messages.length - 1];
+  const moreReady = !busy && lastMessage?.role === "assistant" && !!lastMessage.content.trim();
   const offered: (Suggestion | false | null | undefined | "")[] = !desk || !enabled ? [] : [
     current && messages.length > 0 && { label: "What changed?", title: "One copilot turn: what changed since this investigation was last discussed",
       run: () => void send(whatChangedPrompt(current.id)) },
+    moreReady && { label: "More", title: "One copilot turn: the full reasoning behind the last answer",
+      run: () => void send("More: the full reasoning behind that answer.") },
     current && symbol && { label: "Look at my chart", title: `Send today's ${symbol} chart from the Context pane and ask what the copilot sees`,
       run: () => void lookAtChart(deskChart) },
     planned && { label: "Size it", title: "Put a sizing question in the box, unsent: you add the dollars at risk",
@@ -929,7 +943,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     !current && !messages.length && symbol && { label: `Is ${symbol}'s group confirming?`, run: () => void send(`Is ${symbol}'s group confirming the move?`) },
     !current && !messages.length && symbol && { label: "Plan a trade", run: () => void send(`Plan a trade on ${symbol}.`) },
   ];
-  const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 4);
+  const suggestions = offered.filter((item): item is Suggestion => !!item).slice(0, 5);
   return (
     <div className={panel ? "space-y-2 p-2 text-sm" : "space-y-3"} ref={root} data-testid={panel ? "copilot-panel" : undefined}>
       {panel && (

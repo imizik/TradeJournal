@@ -141,7 +141,9 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
 
   // Saved, the thread's next steps are offered instead.
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-  await expect(chips.getByRole("button")).toHaveText(["What changed?", "Look at my chart", "Close with a lesson"]);
+  await expect(chips.getByRole("button")).toHaveText(["What changed?", "More", "Look at my chart", "Close with a lesson"]);
+  // The new thread is named after what its first answer concluded, not the first words typed.
+  expect(seen.posts[0].title).toBe("The thesis has not broken.");
   await page.screenshot({ path: test.info().outputPath("answer-format-1440.png") });
 
   // × on the scope chip asks across everything.
@@ -168,7 +170,7 @@ test("the thread menu keeps a lesson and closes the thread; a plan card offers S
   await expect(conversation(page).getByTestId("copilot-verdict")).toHaveText("Draft");
   await expect(page.getByRole("region", { name: "Proposed trade plan" })).toBeVisible();
   const chips = page.getByRole("group", { name: "Suggestions" });
-  await expect(chips.getByRole("button")).toHaveText(["What changed?", "Look at my chart", "Size it", "Close with a lesson"]);
+  await expect(chips.getByRole("button")).toHaveText(["What changed?", "More", "Look at my chart", "Size it", "Close with a lesson"]);
   await expect(page.getByLabel("Message")).toHaveValue(/^What changed\?/); // the deep link's question, unsent
 
   await chips.getByRole("button", { name: "Size it" }).click();
