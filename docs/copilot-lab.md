@@ -1745,13 +1745,24 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   Radar alerts and thesis watch are anchored per symbol (the symbol's open
   position when there is one; a Radar group event to its group); a ping they
   hold is recorded `held` and counts toward neither sender's own caps.
-- **Daily cap:** at most `PING_DAILY_CAP` (default 12) pings a New York day across
-  every kind. The priority order keeps the cap from dropping what matters:
-  last-day final > invalidation > give-back > time stop (and the 90-minute
-  last-day alert) > entry trigger > hold-hour > nudge/link > prep (and the
-  automatic week review, Watch your day and the evening review) > Radar >
-  thesis watch > research. The first three are
-  never over the cap; the last five are held once only 3 slots are left.
+- **Budgets:** each kind from nudge down has its own budget a New York day, so
+  one kind spending its pings never takes another's (on October 29, 2026 the old
+  shared pool was spent by 09:50 on prep, thesis watch, research and nudges, and
+  every Radar ping and the evening review were held). Defaults, each overridden
+  by `PING_BUDGET_<KIND>`: `nudge` 2 (link pings share it), `prep` 1 (shared
+  with the automatic week review and Watch your day), `radar_event` 4 (Radar's
+  single pings), `radar_digest` 2, `thesis_watch` 2, `research` 1. Before 09:30
+  New York these kinds together also have `PING_PREOPEN_ALLOWANCE` (default 2)
+  pings, so pre-open headlines cannot spend the day. A held ping's reason names
+  the budget: "Not sent: Radar's 4 single pings for today are spent."
+- **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
+  across every kind. Priority order: last-day final > invalidation > give-back
+  > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
+  trigger > hold-hour > nudge/link > prep > evening review > Radar single >
+  Radar digest > thesis watch > research. The first three are never over the
+  ceiling; time stop, entry, hold-hour and the budgeted kinds are held once it
+  is reached. The evening review is never held, by the ceiling or the quiet
+  window: it is the ping that reports what was held.
 - **Quiet window:** a second ping anchored to the same position within
   `PING_QUIET_MINUTES` (default 10) of one that was sent is not sent on its own:
   a different kind whose predecessor is still being resent (its send failed) is
@@ -1765,10 +1776,12 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   has waiting through `copilot_desk.waiting`, what Close the day walks: the
   symbols still asking their close question, today's position alerts with no
   feedback, today's Radar hits not rated and the fills waiting to link (older
-  alerts and hits stay in the Briefing's lists and never ping). When any is waiting it sends one ping, "Close the day: To
-  review: 2 threads, 3 alerts, 1 fill to link.", that opens
-  `/copilot-lab?close=1` on Close the day (kind `evening_review`, ranked with
-  the prep). Nothing waiting, the lab off, or a desk source (positions, plans,
+  alerts and hits stay in the Briefing's lists and never ping), and the pings
+  the policy held today (`notification_policy.held_text`). When any is waiting
+  it sends one ping, "Close the day: To review: 2 threads · 3 alerts unanswered
+  · 5 Radar hits unrated · 1 fill to link · 12 pings held today (Radar 11,
+  evening 1)", that opens `/copilot-lab?close=1` on Close the day (kind
+  `evening_review`, never held by the policy). Nothing waiting, the lab off, or a desk source (positions, plans,
   alerts, Radar) that cannot be read is recorded `skipped` with why and sends nothing. One `evening_review` row a day (unique day, additive
   migration `d2e7a4c9b1f6`): `skipped`, `held`, `sent`, `unknown` (may have
   reached the phone, never resent) or `expired`. A day not counted by two hours

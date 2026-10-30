@@ -23,15 +23,26 @@ The policy, in the order it is applied:
   (each sender already writes one row per firing, and two plans' invalidations
   in one symbol are two messages): a last-day final after a one-hour alert
   still goes out, and so does an invalidation after a last-day final.
-- **Daily cap.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
-  across every kind. The priority order keeps the cap from dropping what
-  matters: last-day final, invalidation and give-back are never over cap; the
-  last ``RESERVED`` slots under the cap are kept for position and plan pings,
-  so nudges, prep, Radar, thesis watch and research are held first.
+- **Budgets.** Every kind at or below ``nudge`` in the priority order has a
+  budget of its own a New York day (``PING_BUDGET_<KIND>``): ``nudge`` 2 (link
+  pings share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
+  ``radar_event`` 4 (Radar's single pings), ``radar_digest`` 2, ``thesis_watch``
+  2 and ``research`` 1. One kind spending its budget never takes another's: on
+  October 29, 2026 the old shared pool was gone by 09:50 on prep, thesis watch,
+  research and nudges, and every Radar ping and the evening review were held.
+  Before 09:30 New York these kinds together also have ``PING_PREOPEN_ALLOWANCE``
+  (default 2) pings, so pre-open headlines cannot spend the day.
+- **Daily ceiling.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
+  across every kind; ranks 3 and below (time stop, entry, hold-hour and the
+  budgeted kinds) are held once it is reached. Last-day final, invalidation
+  and give-back are never over it, and ``evening_review`` is never held at all,
+  by the window or the ceiling: it is the ping that reports what was held.
 
-  ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (and the
-  90-minute last-day alert) > ``entry`` > ``hold_hour`` > ``nudge`` / ``link`` >
-  ``prep`` (and ``week_review``, ``day_replay`` and ``evening_review``, ranked with it) > ``radar_event`` > ``thesis_watch`` > ``research``.
+  ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
+  90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
+  > ``hold_hour`` > ``nudge`` / ``link`` > ``prep`` (and ``week_review``,
+  ``day_replay``) > ``evening_review`` > ``radar_event`` > ``radar_digest`` >
+  ``thesis_watch`` > ``research``.
 
 Every decision is one ``PhonePing`` row (``sent``, ``merged``, ``suppressed``,
 ``over_cap``), so the owner can see what was held back (the Dashboard Plans
@@ -73,14 +84,19 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "radar_event",
-            "thesis_watch", "research")
-ALIASES = {"expiry_first": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge", "week_review": "prep", "day_replay": "prep",
-           "evening_review": "prep"}
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "evening_review",
+            "radar_event", "radar_digest", "thesis_watch", "research")
+ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
+           "week_review": "prep", "day_replay": "prep"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
-LOW_PRIORITY = 6  # ranks from here (nudge/link, prep, Radar, thesis watch, research) are held first
-RESERVED = 3  # slots under the cap kept for ranks below LOW_PRIORITY
+NEVER_HELD = ("evening_review",)  # neither the quiet window nor the ceiling: it reports what was held
+# Each kind's own daily budget (PING_BUDGET_<KIND>); a kind here is also held by the ceiling and, before the open, the
+# pre-open allowance. The noun names the budget in a held ping's reason.
+BUDGETS = {"nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
+BUDGET_NAMES = {"nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
+                "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
+PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
 RUN_SECONDS = 30
 ENTRY_MINUTES = 30
@@ -91,7 +107,7 @@ ACTED = ("entered", "closed", "trimmed", "linked")
 EPS = 1e-9
 # What answers each kind: an entry fill in the symbol, an exit of the position, or a plan link.
 TRACKED = {"entry": "entry", "invalidation": "exit", "time_stop": "exit", "giveback": "exit", "hold_hour": "exit", "wrong_way": "exit",
-           "expiry_first": "exit", "expiry_final": "exit", "nudge": "link", "link": "link", "no_plan": "link"}
+           "expiry_first": "exit", "expiry_final": "exit", "expiry_eve": "exit", "nudge": "link", "link": "link", "no_plan": "link"}
 WINDOW = {"entry": ENTRY_MINUTES, "exit": EXIT_MINUTES, "link": LINK_MINUTES}
 
 
@@ -114,10 +130,26 @@ def quiet_seconds() -> int:
     return _setting("PING_QUIET_MINUTES", 10) * 60
 
 
+def budget(kind: str) -> int | None:
+    """The canonical kind's own daily budget, or None for a kind only the ceiling holds."""
+    canonical = ALIASES.get(kind, kind)
+    if canonical not in BUDGETS:
+        return None
+    return _setting(f"PING_BUDGET_{canonical.upper()}", BUDGETS[canonical])
+
+
+def preopen_allowance() -> int:
+    return _setting("PING_PREOPEN_ALLOWANCE", 2)
+
+
+def canonical(kind: str) -> str:
+    return ALIASES.get(kind, kind)
+
+
 def rank(kind: str) -> int:
     """The kind's place in the priority order; a kind the policy does not know goes last."""
-    canonical = ALIASES.get(kind, kind)
-    return PRIORITY.index(canonical) if canonical in PRIORITY else len(PRIORITY)
+    found = canonical(kind)
+    return PRIORITY.index(found) if found in PRIORITY else len(PRIORITY)
 
 
 def _utc(stamp: float) -> datetime:
@@ -222,6 +254,8 @@ def _decide(db: Session, *, sender: str, source_id: str, kind: str, title: str, 
 
 
 def _judge(db: Session, row: PhonePing, now: float) -> None:
+    if row.kind in NEVER_HELD:
+        return
     if row.anchor and row.rank >= NEVER_QUIET:
         recent = db.exec(select(PhonePing).where(PhonePing.anchor == row.anchor, PhonePing.decision == "sent",
                                                  PhonePing.decided_at >= _utc(now - quiet_seconds()))
@@ -243,14 +277,38 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
     if row.rank < NEVER_CAPPED:
         return
     start, end = day_bounds(now)
-    sent_today = len(db.exec(select(PhonePing.id).where(PhonePing.decision == "sent", PhonePing.decided_at >= start,
-                                                        PhonePing.decided_at < end)).all())
+    sent = db.exec(select(PhonePing.kind, PhonePing.decided_at).where(PhonePing.decision == "sent", PhonePing.decided_at >= start,
+                                                                       PhonePing.decided_at < end)).all()
+    own = budget(row.kind)
+    if own is not None:
+        spent = sum(canonical(k) == canonical(row.kind) for k, _ in sent)
+        if spent >= own:
+            row.decision, row.reason = "over_cap", budget_reason(row.kind, own)
+            return
+        if _minute_et(now) < PREOPEN:
+            allowance = preopen_allowance()
+            early = sum(budget(k) is not None and _minute_et(_epoch(at)) < PREOPEN for k, at in sent)
+            if early >= allowance:
+                row.decision = "over_cap"
+                row.reason = (f"Not sent: the {allowance} pre-open ping{'' if allowance == 1 else 's'} for nudges, prep, Radar, thesis "
+                              "watch and research before 9:30 AM New York are spent.")
+                return
     cap = daily_cap()
-    limit = cap - RESERVED if row.rank >= LOW_PRIORITY else cap
-    if sent_today >= max(0, limit):
+    if len(sent) >= cap:
         row.decision = "over_cap"
-        kept = (f" The last {RESERVED} of {cap} are kept for position and plan pings." if row.rank >= LOW_PRIORITY and limit > 0 else "")
-        row.reason = f"Not sent: {sent_today} ping{'' if sent_today == 1 else 's'} already went out today (cap {cap}).{kept}"
+        row.reason = f"Not sent: {len(sent)} ping{'' if len(sent) == 1 else 's'} already went out today (cap {cap})."
+
+
+def budget_reason(kind: str, own: int) -> str:
+    """'Not sent: Radar's 4 single pings for today are spent.'"""
+    owner, noun = BUDGET_NAMES[canonical(kind)]
+    text = f"{owner} {own} {noun}{'' if own == 1 else 's'} for today {'is' if own == 1 else 'are'} spent."
+    return f"Not sent: {text[0].upper()}{text[1:]}"
+
+
+def _minute_et(stamp: float) -> int:
+    moment = datetime.fromtimestamp(stamp, ET)
+    return moment.hour * 60 + moment.minute
 
 
 def _appended(db: Session, into: PhonePing) -> str:
@@ -262,7 +320,7 @@ def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way",
             "time_stop": "time stop", "entry": "entry trigger", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
-            "evening_review": "evening review",
+            "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research"}.get(kind, kind)
 
 
@@ -438,7 +496,7 @@ def then_text(then: str | None, minutes: int | None) -> str | None:
             "linked": f"plan linked{soon}", "not_linked": f"no plan linked within {LINK_MINUTES} min"}.get(then)
 
 
-SENDER_OF_KIND = {"giveback": "position_alerts", "expiry_first": "position_alerts", "expiry_final": "position_alerts",
+SENDER_OF_KIND = {"giveback": "position_alerts", "expiry_first": "position_alerts", "expiry_final": "position_alerts", "expiry_eve": "position_alerts",
                   "hold_hour": "position_alerts", "wrong_way": "position_alerts", "plan_nudge": "plan_nudges", "plan_link": "plan_nudges"}
 
 
@@ -471,6 +529,22 @@ def held_back_today(db: Session, now: float) -> dict:
     return {"count": len(rows), "by_kind": dict(Counter(_label(k) for k in rows))}
 
 
+SHORT = {"radar_event": "Radar", "radar_digest": "Radar", "evening_review": "evening", "prep": "prep", "nudge": "nudges",
+         "thesis_watch": "thesis watch", "research": "research"}
+
+
+def held_text(db: Session, now: float) -> str | None:
+    """'12 pings held today (Radar 11, evening 1)' for the evening review, most held first; None when nothing was held."""
+    start, end = day_bounds(now)
+    rows = db.exec(select(PhonePing.kind).where(PhonePing.decision.in_(HELD), PhonePing.decided_at >= start,
+                                                PhonePing.decided_at < end)).all()
+    if not rows:
+        return None
+    by = Counter(SHORT.get(canonical(k), _label(k)) for k in rows)
+    parts = ", ".join(f"{name} {count}" for name, count in sorted(by.items(), key=lambda kv: (-kv[1], kv[0])))
+    return f"{len(rows)} ping{'' if len(rows) == 1 else 's'} held today ({parts})"
+
+
 def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
     """The week's pings by kind: sent, held, judged and acted on, for the copilot's week review."""
     rows = db.exec(select(PhonePing).where(PhonePing.decided_at >= start_utc, PhonePing.decided_at < end_utc)).all()
@@ -493,4 +567,4 @@ def week_summary(db: Session, start_utc: datetime, end_utc: datetime) -> dict:
             "then": (f"acted_on: an entry trigger followed by an entry fill in the symbol within {ENTRY_MINUTES} min; an "
                      f"invalidation, time stop or open-trade alert followed by the position closed or trimmed within {EXIT_MINUTES} "
                      f"min; a nudge or link ping followed by a plan link within {LINK_MINUTES} min. judged counts pings the fills "
-                     "could answer. held: merged, suppressed by the quiet window, or over the daily cap.")}
+                     "could answer. held: merged, suppressed by the quiet window, or over its budget or the daily cap.")}

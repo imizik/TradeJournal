@@ -574,10 +574,27 @@ Off unless `RADAR_ALERTS_ENABLED=true` in the VPS `backend.env`; switching it
 on is Isaac's call (a new phone alert is an activation). It has been on on the
 VPS since October 25, 2026 (undo copy `backend.env.before-four-pings`). With it on, the
 recorder (`backend/app/engine/radar_runner.py`) hands each pass's newly
-written events to `backend/app/engine/radar_alerts.py`, which sends one ntfy
-notification per event the same minute, on the `NTFY_URL` topic and
-`ALERT_APP_URL` position alerts use:
+written events to `backend/app/engine/radar_alerts.py`, on the `NTFY_URL` topic
+and `ALERT_APP_URL` position alerts use. Since October 29, 2026 (the day the
+shared ping cap held all twelve Radar pings) most events reach the phone in two
+digests a session, and only a strong one is pinged on its own:
 
+- **Digests:** at each `RADAR_DIGEST_AT` time (default `10:00,14:00` New York)
+  one ping (policy kind `radar_digest`), `Radar digest: 5 events since the
+  open`, lists every event waiting since the previous digest or the session's
+  start, newest first, one line each (`LAD up 5.2% vs SPY · 10:07 AM`,
+  `Semis down 3.1% vs SPY (5 of 6) · 10:12 AM`), at most 12 lines then
+  `+N more`; the tap opens `/radar`. A digest more than 15 minutes past its time
+  is not written; one with nothing waiting is recorded `skipped`. When the
+  digest is sent, held or dropped its events take the same delivery, so
+  `/radar/proof` counts an event a digest reached as alerted. Events after the
+  last digest stay in the feed only.
+- **Single pings, strong events only** (`radar_alerts.strong`, one pure test
+  the Shadow book can reuse): a stock at least `RADAR_SINGLE_MIN_RELATIVE_PCT`
+  (default 7.0) against SPY (a sector event reads its SPY-relative move), or a
+  group whose every member moved the same way with a median at least
+  `RADAR_SINGLE_MIN_GROUP_PCT` (default 3.0) against SPY. Policy kind
+  `radar_event`. What follows describes a single ping.
 - **Title:** the event's own numbers, `Radar: LAD +5.3% vs SPY +0.1%` for a
   stock (its 30-minute change and the benchmark's), `Radar: Neoclouds and AI
   hosting −2.4% vs SPY (6 of 7 down)` for a group (median member vs SPY).
@@ -597,23 +614,26 @@ notification per event the same minute, on the `NTFY_URL` topic and
 - **Only a new event pings.** Revisions (extended, faded, reversed) never do.
   Regular hours only: the recorder detects only inside the session and sends
   pending pings only on a pass.
-- **Caps:** at most `RADAR_ALERTS_DAILY_CAP` (default 8) a session and one per
-  stock or group an hour. An event past a cap is recorded `skipped` with the
-  reason and never sent later; it still appears in the feed. A held alert
-  (below) does not count toward these caps.
-- **Notification policy:** right before the send, the app's
-  [phone ping policy](copilot-lab.md#phone-ping-policy) (kind `radar_event`,
-  below pre-market prep and above research; anchored to the stock's open
-  position, else the stock, or to the group) may hold it: the shared daily cap,
-  or the quiet window after a ping for the same position. A held alert is
-  recorded `held` with the reason and never sent later.
+- **Caps:** one single ping per stock or group an hour; a strong event inside
+  that hour waits for the digest instead. A held single (below) does not count
+  toward the hour. The old `RADAR_ALERTS_DAILY_CAP` is gone: the policy's
+  budgets (4 singles and 2 digests a day by default) replace it.
+- **Notification policy:** right before every send, the app's
+  [phone ping policy](copilot-lab.md#phone-ping-policy) may hold it: its
+  kind's budget (`PING_BUDGET_RADAR_EVENT`, `PING_BUDGET_RADAR_DIGEST`), the
+  daily ceiling, or, for a single (anchored to the stock's open position, else
+  the stock, or to the group), the quiet window after a ping for the same
+  position. A held ping is recorded `held` with the reason and never sent
+  later.
 - **Outbox:** table `radar_alert` in the journal database (`RadarAlert` in
   `backend/app/models.py`, additive migration
   `backend/alembic/versions/b9e4d2a7c1f3_add_radar_alerts.py`), not the Radar
   file, which stays append-only and alert-free. One row per event (unique
-  event id); delivery `pending`, `sending`, `sent`, `expired` (not sent within
-  15 minutes: a late Radar ping is a stale read), `unknown` (a send that may
-  have reached ntfy is never resent), `skipped` or `held`. `sent` means ntfy accepted
+  event id) and one per digest (kind `digest`, event id
+  `digest-<session>-<HHMM>`); delivery `pending`, `sending`, `digest` (waiting
+  for the next digest), `sent`, `expired` (not sent within 15 minutes: a late
+  Radar ping is a stale read), `unknown` (a send that may have reached ntfy is
+  never resent), `skipped` or `held`. `sent` means ntfy accepted
   it, not that the phone showed it. A failing ping never affects the recorded
   pass or its events.
 - **Proof:** `GET /radar/proof` adds `alerted` (events with a `sent` or
@@ -621,10 +641,11 @@ notification per event the same minute, on the `NTFY_URL` topic and
   from events only seen in the feed; `/proof` shows the line, not part of the
   verdict.
 
-Switching on: add `RADAR_ALERTS_ENABLED=true` (and `RADAR_ALERTS_DAILY_CAP` if
-not 8) to `/etc/tradejournal/backend.env` and restart
-`tradejournal-api.service`; ntfy must already be set up (`alerts.env`). Tests:
-`backend/tests/test_radar_alerts.py` (trigger, caps, delivery states),
+Switching on: add `RADAR_ALERTS_ENABLED=true` (and `RADAR_DIGEST_AT` or the
+`RADAR_SINGLE_MIN_*` thresholds if not the defaults) to
+`/etc/tradejournal/backend.env` and restart `tradejournal-api.service`; ntfy
+must already be set up (`alerts.env`). Tests:
+`backend/tests/test_radar_alerts.py` (trigger, digests, strong events, delivery states),
 `backend/tests/test_radar_proof.py` (alerted counts) and the tap in
 `frontend/e2e/radar.spec.ts`.
 

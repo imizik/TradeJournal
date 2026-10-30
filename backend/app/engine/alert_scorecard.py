@@ -32,7 +32,7 @@ WINDOW_DAYS = 30
 MAX_ROWS = 60
 SENT = ("sent", "unknown")
 KIND = {"giveback": "Give-back", "hold_hour": "Held an hour", "expiry_first": "Expires today", "expiry_final": "30 minutes left",
-        "wrong_way": "Wrong way at 30 min"}
+        "expiry_eve": "Expires next session", "wrong_way": "Wrong way at 30 min"}
 EPSILON = 1e-9
 
 

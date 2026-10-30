@@ -517,8 +517,10 @@ pings, plan time stops, a plan's entry and invalidation alerts, pre-market prep,
 research results) pass one [notification policy](../docs/copilot-lab.md#phone-ping-policy)
 before ntfy: `ALERT_POLICY_ENABLED` (default `true`, since it only reduces
 pings), `PING_DAILY_CAP` (default 12 a New York day; last-day final,
-invalidation and give-back are never over it) and `PING_QUIET_MINUTES` (default
-10, per position). Each sender's own switch below still decides whether it runs
+invalidation, give-back and the evening review are never over it), a budget per
+low-priority kind (`PING_BUDGET_<KIND>`, e.g. `PING_BUDGET_RADAR_EVENT=4`),
+`PING_PREOPEN_ALLOWANCE` (default 2 before 09:30 New York) and
+`PING_QUIET_MINUTES` (default 10, per position). Each sender's own switch below still decides whether it runs
 at all; Jo's senders are not gated. Held pings are recorded, never lost silently.
 
 Level alerts set on the charts (Charts C5.1) go to the same topic: the API
@@ -540,7 +542,7 @@ Clearing this setting restores the dollar floor for future arming; already-armed
 watches retain their normal give-back coverage. Existing position-alert enablement
 and delivery settings must be preserved when applying this optional setting.
 
-Radar phone alerts (one ping per new Radar event, capped) are separate too and
+Radar phone alerts (two digests a session plus single pings for strong events) are separate too and
 remain off unless `RADAR_ALERTS_ENABLED=true` is in `backend.env`; see
 [Radar phone alerts](../docs/radar.md#phone-alerts-off-by-default).
 
