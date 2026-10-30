@@ -82,7 +82,7 @@ async function lab(page: Page, { configured = true, ...fakes }: Fakes & { config
 async function hold(page: Page, ms = 700) {
   const mic = page.getByTestId("copilot-mic");
   // The thread list loads in after the mic appears (beside it, or on its own tab on a phone): let it settle first.
-  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeAttached();
+  await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeAttached();
   await mic.hover();
   const box = (await mic.boundingBox())!;
   await page.mouse.down();
@@ -178,7 +178,7 @@ test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page);
   await page.goto("/copilot-lab");
-  await expect(page.getByText("Clear. Nothing needs a decision right now.")).toBeVisible();
+  await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
   const send = (await page.getByRole("button", { name: "Send", exact: true }).boundingBox())!;

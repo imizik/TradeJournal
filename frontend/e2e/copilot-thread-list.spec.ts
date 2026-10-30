@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The desk's thread list: one grouped list from GET /copilot/desk/threads. Every lab route is stubbed in the browser (the
+// The desk's thread list: Main, then one row per ticker, regrouped from GET /copilot/desk/threads. Every lab route is stubbed in the browser (the
 // e2e backend runs with the lab off), so no model runs and opening the list sends nothing.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
@@ -61,28 +61,32 @@ async function lab(page: Page, desk: unknown = DESK) {
   return { chats, reads: () => reads };
 }
 
+const summary = (id: string, symbol: string, status: string, updated: string) => ({ id, source: "copilot", title: `${symbol} reclaim`, symbol, status,
+  conclusion: status === "closed" ? "Out at the invalidation; followed the plan." : null, revision: 2, message_count: 4, has_findings: false,
+  created_at: updated, updated_at: updated });
 const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" });
+const tickers = (page: Page) => list(page).getByRole("region", { name: "Tickers" });
+const crumb = (page: Page) => page.getByTestId("desk-breadcrumb");
 
-test("the groups read in desk order, meters only on Act now and Near a trigger, and the list refreshes each minute", async ({ page }) => {
+test("Main, then one row per ticker, needs-you first; meters only on Act now and Near a trigger; the list refreshes each minute", async ({ page }) => {
   const { chats, reads } = await lab(page);
   const threads = list(page);
   await expect(threads.getByTestId("desk-day")).toHaveText("Market open · 1 needs you · plan streak 4");
-  const titles = await threads.locator("section h3").allTextContents();
-  expect(titles).toEqual(["Pinned", "Act now", "Near a trigger", "New since you looked", "Watching"]); // no empty Waiting for you
-
-  const act = threads.getByRole("region", { name: "Act now" });
-  const nbis = act.getByRole("link", { name: "NBIS 10/23/26 100C" });
+  const main = threads.getByRole("region", { name: "Main" });
+  await expect(main).toContainText("Prep: NBIS 100C expires Friday.");
+  await expect(main).toContainText("1 Radar"); // Radar lives inside Main, not as a row
+  await expect(tickers(page).getByRole("button")).toHaveText([/^NBIS/, /^CRWV/, /^APLD/]); // MU (Radar only) is no ticker
+  const nbis = tickers(page).getByRole("button", { name: "NBIS, Held, needs you" });
   await expect(nbis).toContainText("+$180.00");
   await expect(nbis).toContainText("1.0% from invalidation 92.30");
   await expect(nbis.getByRole("img")).toHaveAttribute("aria-label", "Underlying 20% of the way from the invalidation; entry at 80%");
-  await expect(threads.getByRole("region", { name: "Near a trigger" }).getByRole("img")).toHaveCount(1);
-  const watching = threads.getByRole("region", { name: "Watching" });
-  await expect(watching).toContainText("Entry 31.00 · 3.3% away");
-  await expect(watching.getByRole("img")).toHaveCount(0); // a watched plan carries no meter
-  await expect(threads.getByRole("region", { name: "Pinned" })).toContainText("Prep: NBIS 100C expires Friday.");
+  await expect(tickers(page).getByRole("button", { name: "CRWV, Plan armed" }).getByRole("img")).toHaveCount(1); // near a trigger
+  const apld = tickers(page).getByRole("button", { name: "APLD, Plan armed" });
+  await expect(apld).toContainText("Entry 31.00 · 3.3% away");
+  await expect(apld.getByRole("img")).toHaveCount(0); // a watched plan carries no meter
   // A number sets in the mono face; a word never does.
   await expect(nbis.getByText("+$180.00")).toHaveClass(/tabular-nums/);
-  await expect(threads.getByRole("region", { name: "Near a trigger" }).getByText("Armed")).not.toHaveClass(/tabular-nums/);
+  await expect(crumb(page)).toHaveText("Main");
   expect(reads()).toBe(1);
   await page.screenshot({ path: test.info().outputPath("thread-list-desktop.png") });
 
@@ -91,60 +95,82 @@ test("the groups read in desk order, meters only on Act now and Near a trigger, 
   expect(chats).toEqual([]);
 });
 
-test("a row with an investigation opens it in place; a Radar row links to its event", async ({ page }) => {
+test("a ticker opens its conversation in place under a breadcrumb, and Main goes back to the Briefing without sending", async ({ page }) => {
   const { chats } = await lab(page);
-  const threads = list(page);
-  await expect(threads.getByRole("link", { name: "MU MU up 4.1% while SMH is up 0.6%" })).toHaveAttribute("href", `/radar?event=${EVENT}`);
-  const nbis = threads.getByRole("link", { name: "NBIS 10/23/26 100C" });
-  await expect(nbis).toHaveAttribute("href", `/copilot-lab?investigation=${NBIS}`);
+  const nbis = tickers(page).getByRole("button", { name: "NBIS, Held, needs you" });
   await nbis.click();
   await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toBeVisible();
-  await expect(threads).toBeVisible(); // the desk keeps the list beside the open conversation
-  await expect(nbis).toHaveClass(/ring-1/); // the open thread is marked
+  await expect(list(page)).toBeVisible(); // the desk keeps the list beside the open conversation
+  await expect(nbis).toHaveClass(/ring-1/); // the open ticker is marked
+  await expect(crumb(page)).toHaveText("NBIS›NBIS plan");
+  await list(page).getByRole("region", { name: "Main" }).getByRole("button").click();
+  await expect(crumb(page)).toHaveText("Main");
+  await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toHaveCount(0);
   expect(chats).toEqual([]);
 });
 
-test("new since you looked is remembered in this browser", async ({ page }) => {
+test("a ticker with several conversations lists them as subthreads with their dates; one with a single conversation shows none", async ({ page }) => {
   await lab(page);
-  const fresh = list(page).getByRole("region", { name: "New since you looked" });
-  await expect(fresh).toContainText("New:");
-  await fresh.getByRole("button", { name: "Mark seen" }).click();
-  await expect(fresh).not.toContainText("New:");
+  const older = { ...saved, id: "33333333-3333-4333-8333-333333333333", title: "Trim into the gap?", updated_at: "2026-10-22T16:00:00Z",
+    transcript: [{ role: "user", content: "Trim into the gap?" }, { role: "assistant", content: "Hold; the gap filled on volume." }] };
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [
+    { ...saved, transcript: undefined }, { ...older, transcript: undefined },
+    summary(CRWV, "CRWV", "open", "2026-10-22T18:00:00Z"),
+  ] } }));
+  await page.route(`**/copilot/investigations/${older.id}`, (route) => route.fulfill({ json: older }));
   await page.reload();
-  await expect(fresh.getByRole("link")).toHaveCount(1); // still listed, no longer marked new
-  await expect(fresh).not.toContainText("New:");
-  await expect(fresh.getByRole("button", { name: "Mark seen" })).toHaveCount(0);
+  await tickers(page).getByRole("button", { name: "NBIS, Held, needs you" }).click();
+  const children = list(page).getByRole("list", { name: "NBIS threads" });
+  await expect(children.getByRole("link")).toHaveText([/NBIS plan\s*Oct 23/, /Trim into the gap\?\s*Oct 22/]);
+  await children.getByRole("link", { name: /Trim into the gap/ }).click();
+  await expect(page.getByText("Hold; the gap filled on volume.")).toBeVisible();
+  await expect(crumb(page)).toHaveText("NBIS›Trim into the gap?· Oct 22");
+
+  await tickers(page).getByRole("button", { name: "CRWV, Plan armed" }).click();
+  await expect(list(page).getByRole("list", { name: "CRWV threads" })).toHaveCount(0);
+  await expect(children).toHaveCount(0); // the ticker left is folded
 });
 
-test("a quiet day: Act now says it is clear, and Plan a trade is one tap away", async ({ page }) => {
+test("Radar hits sit inside Main: one line, each hit opening its event", async ({ page }) => {
+  await lab(page);
+  const radar = page.getByTestId("briefing-radar-new");
+  await expect(radar.locator("summary")).toHaveText("1 new on Radar ▾");
+  await radar.locator("summary").click();
+  await expect(radar.getByRole("link", { name: /MU/ })).toHaveAttribute("href", `/radar?event=${EVENT}`);
+  await expect(tickers(page).getByRole("button", { name: /^MU/ })).toHaveCount(0);
+});
+
+test("a quiet day: nothing open says so, and Plan a trade is one tap away", async ({ page }) => {
   await lab(page, QUIET);
   const threads = list(page);
   await expect(threads.getByTestId("desk-day")).toHaveText("Market closed · Nothing needs you");
-  await expect(threads.getByRole("region", { name: "Act now" })).toHaveText(/Clear\. Nothing needs a decision right now\./);
+  await expect(tickers(page)).toContainText("Nothing open. Plan a trade to start a ticker.");
   await expect(threads.getByRole("link", { name: "Plan a trade" })).toHaveAttribute("href", /\/copilot-lab\?.*context=Plan\+a\+trade/);
 });
 
-test("an unavailable source says so, and Act now never claims clear without positions", async ({ page }) => {
+test("an unavailable source says so, and the list never claims nothing is open without positions", async ({ page }) => {
   await lab(page, { ...QUIET, sections: { ...QUIET.sections, positions: "unavailable", radar: "unavailable" } });
   const threads = list(page);
-  await expect(threads.getByRole("region", { name: "Act now" })).toContainText("Positions unavailable right now.");
+  await expect(tickers(page)).toContainText("Positions unavailable right now.");
   await expect(threads).toContainText("Unavailable right now: positions, Radar.");
 });
 
-test("the list fits a 375 px phone with thumb-sized rows", async ({ page }) => {
+test("the list fits a 375 px phone with thumb-sized rows, and the middle tab names where you are", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const { chats } = await lab(page);
   const threads = list(page);
-  for (const link of await threads.getByRole("link").all()) {
-    const box = (await link.boundingBox())!;
+  await expect(page.getByRole("tab", { name: "Main" })).toBeVisible();
+  for (const item of [...await threads.getByRole("link").all(), ...await threads.getByRole("button").all()]) {
+    const box = (await item.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
     expect(box.x + box.width).toBeLessThanOrEqual(375);
   }
-  const ask = threads.getByRole("button", { name: "What matters right now?" });
-  await expect(ask).toBeInViewport();
-  expect((await ask.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await expect(threads.getByRole("region", { name: "Main" }).getByRole("button")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: test.info().outputPath("thread-list-375.png"), fullPage: true });
+  await threads.getByRole("button", { name: "NBIS, Held, needs you" }).click();
+  await expect(page.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
+  await expect(crumb(page)).toBeInViewport();
   expect(chats).toEqual([]);
 });
 
@@ -160,19 +186,15 @@ const waiting = {
     ] }],
 };
 
-test("Waiting for you lists a conversation with cards to confirm and opens it on them; nothing arms from the list", async ({ page }) => {
+test("a conversation with cards to confirm puts the needs-you dot on its ticker and opens on them; nothing arms from the list", async ({ page }) => {
   const posts: string[] = [];
   page.on("request", (request) => { if (request.method() !== "GET") posts.push(request.url()); });
   const { chats } = await lab(page, { ...DESK, threads: [...DESK.threads.slice(0, 4), DRAFT, ...DESK.threads.slice(4)] });
   await page.route(`**/copilot/investigations/${APLD}`, (route) => route.fulfill({ json: waiting }));
-  const threads = list(page);
-  await expect(threads.locator("section h3")).toHaveText(["Pinned", "Act now", "Near a trigger", "Waiting for you", "New since you looked", "Watching"]);
-  const drafts = threads.getByRole("region", { name: "Waiting for you" });
-  await expect(drafts.getByLabel("1 thread")).toBeVisible();
-  const apld = drafts.getByRole("link", { name: "APLD APLD base" });
-  await expect(apld).toContainText("2 to confirm");
+  // Needs you first: NBIS (Act now) and APLD (a card waiting), then CRWV's armed plan.
+  await expect(tickers(page).getByRole("button")).toHaveText([/^NBIS/, /^APLD/, /^CRWV/]);
+  const apld = tickers(page).getByRole("button", { name: "APLD, Plan armed, needs you" });
   await expect(apld).toContainText("Alert · APLD crosses 31.20");
-  await expect(apld).toHaveAttribute("href", `/copilot-lab?investigation=${APLD}`);
   await page.screenshot({ path: test.info().outputPath("thread-list-drafts.png") });
 
   await apld.click();
@@ -207,11 +229,7 @@ const BUSY = { ...DESK, threads: [
   ...["APLD", "RNXT", "AAPL", "TSLA", "META"].map((symbol) => row({ key: `investigation:${symbol}`, group: "watch", symbol, title: `${symbol} idea`,
     status: { text: "Open investigation", tone: "muted" }, investigation_id: `${symbol}-id`, changed_at: epoch("2026-10-22T14:00:00Z") })),
 ] };
-const summary = (id: string, symbol: string, status: string, updated: string) => ({ id, source: "copilot", title: `${symbol} reclaim`, symbol, status,
-  conclusion: status === "closed" ? "Out at the invalidation; followed the plan." : null, revision: 2, message_count: 4, has_findings: false,
-  created_at: updated, updated_at: updated });
-
-test("a busy day stays calm: one new row per symbol, Radar first, five shown, Watching folded, closed ones in the footer", async ({ page }) => {
+test("a busy day stays calm: one row per ticker, six quiet ones shown, a ticker closed this week kept", async ({ page }) => {
   await lab(page, BUSY);
   // Registered after lab()'s empty list, so it answers first; the reload reads it.
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [
@@ -220,32 +238,18 @@ test("a busy day stays calm: one new row per symbol, Radar first, five shown, Wa
   ] } }));
   await page.reload();
   const threads = list(page);
-  await expect(threads.getByRole("region", { name: "Pinned" }).getByRole("button")).toHaveText([/Briefing/]); // Review my week is in ⌘K and the Briefing
-
-  const fresh = threads.getByRole("region", { name: "New since you looked" });
-  await expect(fresh.getByRole("link")).toHaveCount(5);
-  // Radar hits first (newest first), then one row per symbol by its newest news.
-  await expect(fresh.getByRole("link")).toHaveText([/^New:IREN/, /^New:MU.*Radar/, /^New:NBIS.*headline 45/, /^New:CRWV/, /^New:AMD/]);
-  await expect(fresh.getByLabel("7 threads")).toBeVisible();
-  await fresh.getByRole("button", { name: "+2 more" }).click();
-  await expect(fresh.getByRole("link")).toHaveCount(7);
-  await fresh.getByRole("button", { name: "Show fewer" }).click();
-  await expect(fresh.getByRole("link")).toHaveCount(5);
-
-  const watching = threads.getByRole("region", { name: "Watching" });
-  await expect(watching.getByRole("link")).toHaveCount(3);
-  await expect(watching.getByRole("button", { name: "+2 more" })).toBeVisible();
-  // With the Briefing (a button), Act now, Near a trigger, five new and three watched: eleven rows on a busy day.
-  await expect(threads.locator("section").getByRole("link")).toHaveCount(10);
-
-  const closed = threads.locator("details", { hasText: "Closed this week" });
-  await expect(closed.locator("summary")).toHaveText("Closed this week1");
-  await closed.locator("summary").click();
-  await expect(closed.getByRole("link")).toHaveText([/HOOD.*Out at the invalidation/]);
+  await expect(threads.getByRole("region", { name: "Main" })).toContainText("2 Radar");
+  // NBIS and CRWV, then six of MU, AMD, SMCI, ORCL (news), APLD, RNXT, AAPL, TSLA, META (open) and HOOD (closed Wednesday).
+  await expect(tickers(page).getByLabel("12 tickers")).toBeVisible();
+  await expect(tickers(page).getByRole("button", { name: /^[A-Z]+, / })).toHaveCount(8);
+  await expect(tickers(page).getByRole("button", { name: /^NBIS, / })).toHaveCount(1); // its news folds into its row
+  await tickers(page).getByRole("button", { name: "+4 more" }).click();
+  await expect(tickers(page).getByRole("button", { name: /^[A-Z]+, / })).toHaveCount(12);
+  await expect(tickers(page).getByRole("button", { name: "HOOD, Closed" })).toContainText("Out at the invalidation");
+  await expect(tickers(page).getByRole("button", { name: /^(IREN|PLTR), / })).toHaveCount(0); // Radar only, or closed last week
+  await tickers(page).getByRole("button", { name: "Show fewer" }).click();
+  await expect(tickers(page).getByRole("button", { name: /^[A-Z]+, / })).toHaveCount(8);
   await expect(threads.getByTestId("desk-keys")).toBeVisible();
-
-  await fresh.getByRole("button", { name: "Mark seen" }).click();
-  await expect(fresh).not.toContainText("New:");
   await page.screenshot({ path: test.info().outputPath("thread-list-busy.png") });
 });
 
@@ -286,7 +290,7 @@ test("the Plans view lists every plan by stage, opens its thread, and is remembe
   const sofi = plans.getByRole("link", { name: "SOFI Swing" });
   await expect(sofi).toContainText("Marked done");
   await expect(sofi).toHaveAttribute("href", "/copilot-lab?symbol=SOFI"); // no saved thread: it opens by its symbol
-  await expect(threads.getByRole("region", { name: "Act now" })).toHaveCount(0);
+  await expect(threads.getByRole("region", { name: "Tickers" })).toHaveCount(0);
 
   await nbis.click();
   await expect(page.getByText("Plan: enter above 95.90, out under 92.30.")).toBeVisible();
@@ -296,7 +300,7 @@ test("the Plans view lists every plan by stage, opens its thread, and is remembe
   await page.reload();
   await expect(list(page).getByTestId("desk-plans")).toBeVisible();
   await list(page).getByRole("tab", { name: "All" }).click();
-  await expect(list(page).getByRole("region", { name: "Act now" })).toBeVisible();
+  await expect(list(page).getByRole("region", { name: "Tickers" })).toBeVisible();
 });
 
 test("the Plans view fits a 375 px phone inside the Now tab", async ({ page }) => {
