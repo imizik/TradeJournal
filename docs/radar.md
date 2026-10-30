@@ -38,6 +38,9 @@ involve Jo.
 7. **Phone alerts (built, on on the VPS since October 25, 2026):** `backend/app/engine/radar_alerts.py`, one
    ntfy ping per new event when `RADAR_ALERTS_ENABLED=true`. See
    [Phone alerts](#phone-alerts-off-by-default).
+8. **Dip-buy candidates (built, off):** `backend/app/engine/radar_dip.py`, a
+   separate first-hour rule `radar-dip-v0` with its own version, receipt and
+   scoring. See [Dip-buy candidates](#dip-buy-candidates-radar-dip-v0-off-by-default).
 
 ## Recorder
 
@@ -101,7 +104,8 @@ The screen shows one coverage line, then "New since your last visit" and the
 earlier events as cards that expand into the original evidence, the later
 readings, an Open chart link and the four rating buttons. No detection runs
 here; with no events it shows the empty state with coverage. Events whose
-`rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag.
+`rule_version` is `radar-rules-v0` carry a small "v0 · provisional rules" tag,
+and dip-rule events (`radar-dip-v0`) a "dip · discovery rule" tag.
 
 ## Alert rules (radar-rules-v0, provisional)
 
@@ -385,6 +389,76 @@ Unit=tradejournal-radar-outcomes.service
 [Install]
 WantedBy=timers.target
 ```
+
+## Dip-buy candidates (radar-dip-v0, off by default)
+
+A discovery rule beside the trial rules, built October 29, 2026. In the first
+hour it flags a tracked stock that came into the day weak, dropped further, and
+now shows the first sign of turning up on the recorded passes: a buy-the-dip
+candidate. It is advice only (it flags a name, never an order), deterministic
+and model-free, and it reads nothing after the pass it fires on. Its numbers
+were fixed before any trial, not fitted to trades; changing one is a new
+version.
+
+Every condition holds on **2** consecutive passes (no gap over 150 seconds),
+each read as of that pass, for a tracked stock (not an ETF or benchmark):
+
+| Test | `radar_dip.V0` |
+| --- | --- |
+| Window | the pass started before **10:30 ET**; the session's first usable pass started by **09:33 ET** with a usable quote for the stock |
+| Liquid | last at least **$5**; the day's dollar volume so far (last × cumulative volume) at least **$10M**. The tracked list is curated optionable names; optionability is not re-checked |
+| Weak coming in | the open at least **1.0%** below the previous close (gap down), **or** the latest completed daily close below the mean of the last **20** completed daily closes |
+| Dropped | the lowest recorded last so far at least **1.5%** below the previous close |
+| Turning up | no new or equal low for **5 minutes**; the last at least **0.5%** off that low; the low was under its sampled VWAP and the last is now above it |
+
+The sampled VWAP weights each recorded last by the cumulative volume added
+since the stock's previous usable quote, so it is an estimate from minute
+samples, not the exchange VWAP. Quotes follow the trial rules' freshness test.
+The 20-day test uses Alpaca daily bars (`ALPACA_DATA_FEED`, cached per ticker),
+only closes dated before the session, read once a session from 09:00 ET so the
+first pass does not wait; a symbol with fewer than 20 closes or none in the last
+5 days can only qualify on its gap.
+
+One event per stock a session, at most **10** a session (earliest first, ties
+by symbol), no revisions: kind `dip_turn`, direction `up`, ids
+`rd0-<session>-dip-<symbol>-up-1`. The summary names the low and its time, the
+change now and why the stock counted as weak; measures include the day change,
+the low, the distance off the low and from the sampled VWAP, the gap, the prior
+close against its 20-day average and SPY's day.
+
+**Kept apart from the trial.** The trial rules' events, receipts and frozen
+configuration are unchanged with the dip rule on: its result is a `dip` entry in
+the same pass's detection receipt, with its own frozen configuration, and its
+event ids are never in the trial's `event_ids`. `/radar/proof`, the desk's
+"to rate" list and the trial's session census leave dip events out; the
+outcome scorer gives the dip rule its own census and read-out
+(`radar_evidence.census(..., side="dip")`). Phone caps count one rule version's
+alerts at a time, so dip pings never use up the trial's 8 a day or its
+one-per-stock-an-hour; the app-wide [ping policy](copilot-lab.md#phone-ping-policy)
+still applies to both. Dip events do get news checks (the same 3 a pass),
+appear in the feed, where they can be rated, and reach the shadow book when
+that is on.
+
+**Switching on (Isaac's call).** `RADAR_DIP_RULES` in the VPS `backend.env`:
+`off` (default), `record` (events in the feed and scored; no phone) or `alert`
+(also a ping per event, `Radar dip: XYZ turning up, −1.2% (low −3.1%)`, which
+still needs `RADAR_ALERTS_ENABLED=true`). Read at startup: add the line and
+restart `tradejournal-api.service` before the open (between sessions, never
+mid-session: a session the rule did not see from the first pass is unverified).
+Undo: remove the line and restart; saved events stay.
+
+**How it is judged.** `scripts/radar_outcomes.py` scores each dip event at its
+first-seen pass, signed up, against SPY at +30 min, +60 min and the close,
+beside the Movers leaders and five random tracked stocks at the same pass, and
+reports `radar-dip-v0` separately. Decide after **20** verified sessions of
+this version, never on fewer: it earns its keep when its +60 min return against
+SPY is positive more often than not and its confidence interval against the
+leaders sits above zero, and when Isaac rates its events useful; otherwise drop
+it or keep it as a record-only list. No tuning before that read-out.
+
+Tests: `backend/tests/test_radar_dip.py` (triggers, no-triggers, the window,
+liquidity, the cap, no future pass read, the daily closes before the session,
+the recorder's separate receipt, census and scoring, alert mode).
 
 ## Movers now
 
@@ -704,7 +778,9 @@ screen, under v0 unless `RADAR_RULES_VERSION` names v1
 ([Rules v1 candidate](#rules-v1-candidate-october-26-2026)); switching is Isaac's call. Phone alerts have their own `RADAR_ALERTS_ENABLED`, off by default
 ([Phone alerts](#phone-alerts-off-by-default)), and the premarket pilot its
 own `RADAR_PREMARKET_ENABLED`, also off, and the shadow book its own
-`SHADOW_BOOK_ENABLED`, also off ([Shadow book](#shadow-book-off-by-default));
+`SHADOW_BOOK_ENABLED`, also off ([Shadow book](#shadow-book-off-by-default)),
+and the dip-buy rule its own `RADAR_DIP_RULES`, also off
+([Dip-buy candidates](#dip-buy-candidates-radar-dip-v0-off-by-default));
 turning any of them on is Isaac's call.
 
 

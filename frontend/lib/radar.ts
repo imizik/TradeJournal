@@ -11,7 +11,7 @@ export const RATINGS: { value: RadarRating; label: string }[] = [
 export type RadarEvidence = { symbol: string; pass_id: number; retrieved_at: string; last: number; change_pct: number };
 export type RadarEvent = {
   event_id: string; session_date: string; rule_version: string; universe_version: string;
-  kind: "relative_to_spy" | "relative_to_sector" | "group_move"; direction: "up" | "down";
+  kind: "relative_to_spy" | "relative_to_sector" | "group_move" | "dip_turn"; direction: "up" | "down";
   symbols: string[]; benchmark: string; group: string | null; first_seen_at: string; summary: string;
   measures: Record<string, number>; evidence: RadarEvidence[];
   coverage: { passes_expected: number; passes_recorded: number; symbols_missing: string[] };
@@ -78,11 +78,13 @@ export const MEASURE_LABELS: Record<string, string> = {
   day_change_pct: "Day", window_minutes: "Window (min)", spy_relative_pct: "vs SPY", median_relative_pct: "Median vs SPY",
   members_same_direction: "Members moving", members_with_data: "Members with data", members_total: "Members listed",
   top_member_relative_pct: "Biggest member", top_member_share_pct: "Biggest member's share", spy_change_pct: "SPY",
-  minutes_since_start: "Minutes since start",
+  minutes_since_start: "Minutes since start", low_change_pct: "Morning low", from_low_pct: "Off the low",
+  vwap_distance_pct: "vs sampled VWAP", vwap: "Sampled VWAP", dollar_volume: "Dollar volume", low_minutes_ago: "Low (min ago)",
+  gap_pct: "Opening gap", prior_close_vs_average_pct: "Prior close vs 20-day avg", spy_day_change_pct: "SPY day",
 };
 
 /** A small tag for rules that are still rough, from the event's own rule_version. */
-export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules" };
+export const RULE_TAGS: Record<string, string> = { "radar-rules-v0": "v0 · provisional rules", "radar-dip-v0": "dip · discovery rule" };
 export function measureText(key: string, value: number) {
   if (key === "volume_ratio") return `${value.toFixed(1)}×`;
   if (key.endsWith("_share_pct")) return `${value.toFixed(0)}%`;

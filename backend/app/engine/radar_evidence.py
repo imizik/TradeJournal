@@ -3,10 +3,22 @@ from datetime import date, datetime, timedelta
 
 from app.engine.chart_math import ET
 from app.engine.radar_comparison import epoch
+from app.engine.radar_dip import is_dip
 
 
-def census(store, today: str) -> list[dict]:
+def side_receipt(receipt: dict | None, side: str | None) -> dict | None:
+    """The receipt as one rule saw it: the trial rules' own (``side`` None), else that side rule's result over the
+    pass's shared fields (origin, hours); None when the side rule did not run on the pass."""
+    if receipt is None or side is None:
+        return receipt
+    result = receipt.get(side)
+    return None if result is None else {**receipt, **result}
+
+
+def census(store, today: str, side: str | None = None) -> list[dict]:
+    """One row per session for the trial rules, or with ``side="dip"`` for the dip rule (only sessions it ran on)."""
     receipts, configs = store.detection_evidence()
+    receipts = {pass_id: side_receipt(r, side) for pass_id, r in receipts.items()}
     sessions = sorted(s for s in store.sessions() if s < today)
     if not sessions:
         return []
@@ -19,8 +31,11 @@ def census(store, today: str) -> list[dict]:
         day += timedelta(days=1)
     result = []
     for session in sorted(days):
-        passes, events = store.passes(session), store.events(session)
+        passes = store.passes(session)
+        events = [e for e in store.events(session) if is_dip(e) == (side == 'dip')]
         own = [receipts.get(p['id']) for p in passes]
+        if side is not None and not any(own):
+            continue
         digests = {r['config_digest'] for r in own if r}
         versions = {configs[d]['rules']['version'] for d in digests if d in configs}
         if not versions:
