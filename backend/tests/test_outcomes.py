@@ -392,3 +392,30 @@ def test_the_week_review_reads_the_outcomes_by_kind(db, store):
     assert section["by_kind"]["ping"] == {"count": 2, "complete": 2, "held": 1, "median_d1_pct": -12.0,
                                           "actions": {"closed": 1, "entered": 1}, "alt_usd_total": -40.0}
     assert copilot_review._week_outcomes(db, datetime(2026, 10, 12), datetime(2026, 10, 17))["state"] == "not_applicable"
+
+
+# ------------------------------------------------------------------ the pipeline step
+
+def test_a_failed_outcomes_step_never_fails_the_sync_pipeline(monkeypatch):
+    """The step's own run row records the failure; the pipeline (whose success Gmail health reads) still succeeds."""
+    import types
+    from app.models import JobRun
+    from app.routers import sync
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(sync, "engine", engine)
+    monkeypatch.setattr(sync, "execute_job", lambda job_id, runner: runner())
+    monkeypatch.setattr(sync, "_import_fills_from_gmail", lambda session, start_enrichment: {"saved": 0, "skipped": 0})
+    monkeypatch.setattr(sync, "_run_existing_enrichment", lambda *a: types.SimpleNamespace(total=0, id=None))
+
+    def broken(session, job_id):
+        raise RuntimeError("outcome table missing")
+    monkeypatch.setattr(sync, "_run_outcomes", broken)
+    with Session(engine) as db:
+        pipeline = sync._create_run(db, sync.JOB_FULL_PIPELINE, "test", total=sync.PIPELINE_STEPS)
+    sync._run_pipeline(pipeline.id)
+    with Session(engine) as db:
+        runs = {r.job_type: r for r in db.exec(select(JobRun)).all()}
+    assert (runs["full_pipeline"].status, runs["full_pipeline"].done, runs["full_pipeline"].total) == ("succeeded", 7, 7)
+    assert runs["compute_outcomes"].status == "failed" and "outcome table missing" in runs["compute_outcomes"].error

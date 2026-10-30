@@ -80,7 +80,9 @@ Every output the app makes gets one `outcome` row (`app/engine/outcomes.py`):
 what the underlying did after it, what the owner did in the fills, and the
 dollars against the obvious alternative. Python fills it in once a day at the
 end of the morning sync pipeline (`compute_outcomes`); no model call, and
-prices come only from the minute sessions the charts already store on disk.
+prices come only from the minute sessions the charts already store on disk
+(the only provider read is the market calendar's usual cached one, at most
+once a New York day).
 Rows start at `OUTCOMES_SINCE` (default 2026-10-21, when position alerts went
 live). `GET /analytics/outcomes?kind=&since=&symbol=` (owner only) returns the
 rows and a summary per kind; `/proof` shows the summary, the trade page shows

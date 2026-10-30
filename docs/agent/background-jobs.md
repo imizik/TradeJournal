@@ -50,8 +50,8 @@ timer each morning) runs seven steps: Gmail import, the fill check, the trade
 rebuild (only when the import saved new fills), Polygon enrichment (queued, not
 waited on), Alpaca enrichment, path metrics, then `compute_outcomes`
 (`app/engine/outcomes.py`, [definitions](../analytics.md#outcomes)). The last
-step reads only the journal, the Radar file and stored minute sessions: no
-provider or model call, nothing sent. It computes at most 400 new or incomplete
+step reads only the journal, the Radar file, stored minute sessions and the
+cached market calendar: no price provider or model call, nothing sent. It computes at most 400 new or incomplete
 subjects a run, oldest first, and a failure there is recorded on its own run
 row without failing the pipeline. The Sync Center can also run it alone.
 

@@ -1,7 +1,8 @@
 """Outcome attribution (docs/analytics.md § Outcomes): for every output the app makes, what the underlying did 1 hour,
 1 trading day and 5 trading days later, what the owner did in the fills, and the dollars against the obvious
 alternative. One ``Outcome`` row per output, filled in by the morning sync pipeline (``compute_outcomes``, after
-fills and enrichment). Python only: no model call, and prices come from stored bars, never a provider request.
+fills and enrichment). Python only: no model call, and prices come from stored bars, never a price provider request
+(the market calendar is its usual cached read: at most one Tradier calendar request a New York day per month).
 
 **Subjects**, anchored at the output's moment (naive UTC), since ``OUTCOMES_SINCE`` (default 2026-10-21, the alerts'
 go-live):
@@ -431,15 +432,18 @@ def compute(db: Session, now: float, *, bars: Bars | None = None, hours: Hours |
     done = Counter()
     failed = 0
     for _, kind, build in work[:cap]:
+        # One commit per subject: a failed read rolls back only its own subject (Postgres refuses every later
+        # statement in an aborted transaction).
         try:
             row = build()
+            _save(db, have.get((row["subject_kind"], row["subject_id"])), row, now)
+            db.commit()
         except Exception:  # noqa: BLE001 - one odd source row must not stop the run
+            db.rollback()
             log.warning("Outcomes: a %s could not be computed", kind, exc_info=True)
             failed += 1
             continue
-        _save(db, have.get((row["subject_kind"], row["subject_id"])), row, now)
         done[kind] += 1
-    db.commit()
     return {"computed": sum(done.values()), "by_kind": dict(done), "failed": failed, "waiting": max(0, len(work) - cap),
             "note": radar_note}
 
