@@ -21,7 +21,7 @@ import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/Se
 import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
+import { BRIEFING_TITLE, WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
 import { afterClose, deskSymbolThread, nyDay, saveHorizon, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
@@ -33,8 +33,6 @@ const CLOSING_KEY = "desk.closing.v1";
 /** "Plan a trade" with nothing known: the owner names the ticker. The thread list's own button makes the same link. */
 const PLAN_HREF = copilotLabHref("", planContext(), { kind: "copilot", ref: null });
 const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my positions and watches, and what would change a plan before the open?";
-/** A Briefing conversation keeps its question's first line as its title (CopilotPanel's ``savedFields``). */
-const BRIEFING_TITLE = WHAT_MATTERS_PROMPT.split("\n")[0].slice(0, 80);
 const ARM_PROMPT = "Arm today's plans: for each plan I mean to trade today, check its entry, invalidation and time stop against the pre-market, and propose any alert or time stop still missing for me to confirm.";
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
 
@@ -48,7 +46,7 @@ function Breadcrumb({ thread, link, saved, onMain }: { thread: DeskThreadRef | n
   const at = thread && saved.find(t => t.id === thread.id)?.updated_at;
   const leaf = thread && !briefing ? thread.title : !thread && symbol ? (link?.radar ? "Radar hit" : "Decision") : null;
   return (
-    <nav aria-label="You are here" data-testid="desk-breadcrumb" className="mb-3 flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
+    <nav aria-label="You are here" data-testid="desk-breadcrumb" className="z-10 mb-3 flex min-w-0 items-baseline gap-1.5 bg-background py-1 text-xs text-muted-foreground lg:sticky lg:top-0 lg:shadow-[0_-24px_0_0_hsl(var(--background))]">
       {symbol ? <span className="shrink-0 font-semibold text-foreground">{symbol}</span> : (
         <button type="button" onClick={onMain} disabled={!leaf} className={cn("shrink-0 font-semibold", leaf ? "hover:text-foreground hover:underline" : "text-foreground")}>Main</button>
       )}
@@ -115,8 +113,10 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const [refresh, setRefresh] = useState(0);
   // Mark plan done in the thread menu: only for a plan row (armed and not entered, or exited), never a held position's.
   const [planSymbol, setPlanSymbol] = useState<string | null>(null);
-  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread,
-    planDone: planSymbol ? { symbol: planSymbol, done: () => setRefresh(n => n + 1) } : null }), [command, planSymbol]);
+  // A decision or an alert still asking today: a conversation opens on it, at the top of the thread.
+  const asking = deciding || !!session.data?.to_answer?.alerts?.rows.some(a => a.today && !a.feedback && a.symbol === thread?.symbol);
+  const hooks = useMemo<DeskHooks>(() => ({ command, onThread: setThread, holdTop: asking,
+    planDone: planSymbol ? { symbol: planSymbol, done: () => setRefresh(n => n + 1) } : null }), [command, planSymbol, asking]);
 
   // A row opens the way the thread list opens it: an investigation in place, anything else by its link.
   const pick = useCallback((row: DeskThread) => {
@@ -345,7 +345,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
             <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main}
-              pick={pick} onRows={setRows} onSaved={setSaved} refresh={refresh} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
+              pick={pick} onRows={setRows} onSaved={setSaved} refresh={refresh}
+              toAnswer={(session.data?.to_answer?.alerts?.count ?? 0) + (session.data?.to_answer?.radar?.count ?? 0)} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
               {phaseAction && (
                 <button type="button" onClick={runPhase} title={phaseAction.hint}
                   className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">

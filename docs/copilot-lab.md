@@ -174,8 +174,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). **Main** at the top, then one row
-  per ticker, with one line for the day above it: the market phase, how many
+  `components/copilot/ThreadRail.tsx`). **Main** in its own bordered card, pinned
+  while the list scrolls on a wide screen, then one row per ticker, with one line for the day above it: the market phase, how many
   rows need a decision, and the plan streak. The server still sends its rows
   in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
   you looked, Watching); the list regroups them by symbol in the browser.
@@ -187,8 +187,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     Radar ▾" lists the Radar events since the last Radar visit, each opening
     the desk on its decision (a stock hit) or Radar (a group event). Main
     shows their count ("18 Radar", a sky dot while one is unseen in this
-    browser). Open conversations about no ticker (a Briefing turn, a week
-    review) are listed under it, title and date. **What matters right
+    browser) and, in amber, how many alerts and Radar hits wait for an answer
+    ("3 to answer"). Open conversations about no ticker (a Briefing turn, a week
+    review) are listed under it, title and date: today's, the open one and the
+    latest automatic week review, the rest under **Earlier · N**. **What matters right
     now?** (one turn, the fixed `lib/copilot.ts` `WHAT_MATTERS_PROMPT`) sits
     on the Briefing beside Review my week, and in ⌘K.
   - **Tickers**: one row per symbol the owner has something on: an open
@@ -203,17 +205,21 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     Act now position, a card waiting on Confirm, a fill to link, or a close
     or exit question not yet answered or skipped today. A plan meter shows
     when the leading row is Act now or Near a trigger: the underlying on the
-    track from the invalidation (left) to the entry (the tick). Sort: needs
-    you first, then held, armed plans, exited, watching and closed, newest
-    first within each; past the needs-you, held and armed rows six more show
-    and the rest wait behind "+N more".
+    track from the invalidation (left) to the entry (the tick). Three headed
+    groups: **Needs you**, **Held and armed**, and **Others** (exited,
+    watching, closed), newest first within each state; six of Others show and
+    the rest wait behind "+N more".
   - **Subthreads**: pressing a ticker opens its newest saved conversation in
     place (from the latest 50 in `GET /copilot/investigations`, open and
     closed) or, with none, follows its row's link (a position with a fill to
-    link, an unplanned position, a trade). With more than one conversation
-    they list beneath it, indented, title and date, the plan's conversation
-    tagged **Plan** and the exit review's **Exit review**. A ticker with one
-    conversation shows no children. Thesis news is remembered as seen in
+    link, an unplanned position, a trade) and shows its subthreads. A ticker
+    with more than one conversation carries a count and arrow at the row's
+    end, which show or hide them without changing the open conversation; any
+    number of tickers can stay open. Beneath it, indented, title and date, its
+    three newest open conversations and the open one, the plan's tagged
+    **Plan** and the exit review's **Exit review**, then the other open ones
+    under **Earlier · N** and the closed ones under **Closed · N**. A ticker
+    with one conversation shows no children. Thesis news is remembered as seen in
     this browser (`localStorage`) once its ticker is opened.
 
   A **breadcrumb** tops the conversation pane at every width: "Main",
@@ -458,7 +464,11 @@ The full page is a desk of three panes beside each other
   one quiet line with the time stop or expiry, and the rest (alert conditions,
   1R in dollars, entry premium, size, open P&L) behind Details. For an option
   the levels are the underlying's, said in its title. `compact` draws it as
-  one line (invalidation · bar · 2R), `dimmed` for a plan not armed yet.
+  one line ("3.1% above invalidation", invalidation · bar · 2R, the R multiple,
+  with a time stop on its own line when the plan has one), `dimmed` for a plan
+  not armed yet. The thread opens on that one line so the conversation stays in
+  view; **Full plan** unfolds it and **Fold plan** folds it, remembered in this
+  browser.
   Both read `GET /copilot/plans` (the plan is the row for the open
   investigation) and `GET /copilot/plans/positions` (the open position in its
   symbol, matched by the plan's invalidation; none for an armed plan not yet
@@ -622,10 +632,19 @@ no longer in the journal is counted but not listed. Proof:
 
 **One main element per thread.** The thread's top reads header, then its
 main element, then the conversation: while the decision bar (below) is
-asking, it sits between the header and the plan ladder, and the ladder
-shrinks to one line (invalidation · scale · 2R); once a decision is logged, or
-when nothing needs one, the full ladder leads. The bar reports whether it is
-asking through `onActive`; `DeskThreadTop` places it (`hero`, `compact`).
+asking, it sits between the header and the plan ladder, and the ladder stays
+one line, without Full plan; once a decision is logged, or when nothing needs
+one, the ladder can be unfolded again. The bar reports whether it is asking
+through `onActive`; `DeskThreadTop` places it (`hero`, `compact`).
+
+**A saved conversation opens on its latest question.** When that question
+would sit under the message box, the pane scrolls it to the top, under the
+breadcrumb (pinned on a wide screen), and a short conversation stays where it
+is. A decision still asking, or an alert sent today and not yet answered, keeps
+the thread at its top instead (`DeskHooks.holdTop`). The reader's own scroll or
+send stops this. The idle message box is one line, in a row with its tools; a
+tap in it or any words in it open it to its full size, with the settings and the
+read-only note (on a phone, Send too, and an "Across everything" scope).
 Browser proof: `frontend/e2e/copilot-decision-bar.spec.ts`.
 
 **Decision bar** (`components/copilot/DecisionBar.tsx`, between the thread

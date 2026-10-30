@@ -97,11 +97,12 @@ function Details({ plan, ladder, position }: { plan: PlanBoardRow; ladder: Ladde
 
 /**
  * The plan ladder. Full: what the price is doing against the plan, the R multiple, the scale with its tick labels and
- * one quiet line (time stop, expiry), then Details. ``compact``: one line, invalidation · bar · 2R. ``dimmed`` for a plan
- * that is not armed yet. Renders nothing when the plan lacks an entry or an invalidation.
+ * one quiet line (time stop, expiry), then Details. ``compact``: one line, where the price is against the invalidation,
+ * invalidation · bar · 2R and the R multiple, with a time stop beneath when the plan has one. ``onToggle`` folds or
+ * unfolds it. ``dimmed`` for a plan that is not armed yet. Renders nothing when the plan lacks an entry or an invalidation.
  */
-export default function PlanLadder({ plan, position = null, compact = false, dimmed = false }: {
-  plan: PlanBoardRow; position?: DeskPosition | null; compact?: boolean; dimmed?: boolean;
+export default function PlanLadder({ plan, position = null, compact = false, dimmed = false, onToggle }: {
+  plan: PlanBoardRow; position?: DeskPosition | null; compact?: boolean; dimmed?: boolean; onToggle?(): void;
 }) {
   const ladder = ladderOf(plan);
   if (!ladder) return null;
@@ -120,15 +121,29 @@ export default function PlanLadder({ plan, position = null, compact = false, dim
     </div>
   );
 
+  const state = where(plan, ladder);
+  const toggle = onToggle && (
+    <button type="button" onClick={onToggle} aria-expanded={!compact}
+      className="min-h-11 shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline sm:min-h-0">
+      {compact ? "Full plan" : "Fold plan"}
+    </button>
+  );
   if (compact) return (
-    <div role="img" aria-label={label} className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 text-xs", dimmed && "opacity-45")}>
-      <span className="tabular-nums text-rose-300">{price(ladder.invalidation)}</span>
-      {bar("h-5")}
-      <span className="tabular-nums text-muted-foreground" title="2R past the entry: a measure, not a target">{price(ladder.two)}</span>
+    <div className={cn("space-y-1", dimmed && "opacity-45")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className={cn("shrink-0 font-medium", state.tone)}>{state.text}</span>
+        <div role="img" aria-label={label} className="grid min-w-32 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5">
+          <span className="tabular-nums text-rose-300">{price(ladder.invalidation)}</span>
+          {bar("h-5")}
+          <span className="tabular-nums text-muted-foreground" title="2R past the entry: a measure, not a target">{price(ladder.two)}</span>
+        </div>
+        {ladder.r !== null && <span className={cn("shrink-0 tabular-nums", ladder.r >= 0 ? "text-emerald-300" : "text-rose-300")}>{signed(ladder.r, 2)}R</span>}
+        {toggle}
+      </div>
+      {plan.time_stop && <p className="text-xs text-muted-foreground">{clockLine(plan, position)}</p>}
     </div>
   );
 
-  const state = where(plan, ladder);
   const option = position?.instrument === "option";
   return (
     <section aria-label="Plan ladder" className={cn("space-y-2", dimmed && "opacity-45")}>
@@ -164,7 +179,10 @@ export default function PlanLadder({ plan, position = null, compact = false, dim
         </div>
       </div>
       <p className="text-xs text-muted-foreground">{clockLine(plan, position)}</p>
-      <Details plan={plan} ladder={ladder} position={position} />
+      <div className="flex flex-wrap items-baseline gap-x-4">
+        <Details plan={plan} ladder={ladder} position={position} />
+        {toggle}
+      </div>
     </section>
   );
 }

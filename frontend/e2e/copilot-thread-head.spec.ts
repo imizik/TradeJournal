@@ -75,6 +75,11 @@ async function lab(page: Page, id: string) {
 }
 
 const conversation = (page: Page) => page.getByRole("region", { name: "Conversation" });
+/** The ladder opens folded to one line; this asks for the whole of it. */
+const fullLadder = async (page: Page) => {
+  await conversation(page).getByRole("button", { name: "Full plan" }).click();
+  return conversation(page).getByRole("region", { name: "Plan ladder" });
+};
 
 test("an option: its own mark and P&L, the underlying labelled, and the plan ladder on the underlying", async ({ page }) => {
   const { chats } = await lab(page, NBIS);
@@ -93,7 +98,7 @@ test("an option: its own mark and P&L, the underlying labelled, and the plan lad
   await expect(priceBlock).not.toContainText("610"); // the older NBIS position is not this plan's
   await expect(priceBlock.getByText("NBIS 87.74 · underlying")).toBeVisible();
 
-  const ladder = conversation(page).getByRole("region", { name: "Plan ladder" });
+  const ladder = await fullLadder(page);
   await expect(ladder).toContainText("Plan · NBIS levels (underlying)");
   await expect(ladder).toContainText("3.1% above invalidation");
   await expect(ladder).toContainText("−0.12R on NBIS");
@@ -121,7 +126,7 @@ test("a stock: last price and P&L with the average cost, a time stop under the l
   await expect(priceBlock).toContainText("Avg cost 126.95");
   await expect(priceBlock).not.toContainText("underlying");
   await expect(priceBlock).not.toContainText("option mark");
-  const ladder = conversation(page).getByRole("region", { name: "Plan ladder" });
+  const ladder = await fullLadder(page);
   await expect(ladder).toContainText("Plan9.1% above invalidation");
   await expect(ladder).toContainText("+1.46R");
   await expect(ladder).toContainText("Time stop 14:30");
@@ -133,7 +138,7 @@ test("an armed plan not yet entered shows no position; a thread with no plan sho
   await expect(head).toContainText("Armed");
   await expect(head).toContainText("Long plan · waiting for entry");
   await expect(head.getByTestId("thread-price")).toContainText("last30.62");
-  await expect(conversation(page).getByRole("region", { name: "Plan ladder" })).toContainText("2.7% above invalidation");
+  await expect(await fullLadder(page)).toContainText("2.7% above invalidation");
 
   await page.goto(`/copilot-lab?investigation=${IREN}`);
   const bare = conversation(page).getByRole("group", { name: "Thread header" });
@@ -172,7 +177,7 @@ test("the header and ladder fit a 375 px phone, the underlying still labelled", 
   const head = conversation(page).getByRole("group", { name: "Thread header" });
   await expect(head).toBeInViewport();
   await expect(head.getByTestId("thread-price")).toContainText("NBIS 87.74 · underlying");
-  const ladder = conversation(page).getByRole("region", { name: "Plan ladder" });
+  const ladder = await fullLadder(page);
   await expect(ladder).toContainText("3.1% above invalidation");
   const box = (await ladder.boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(375);

@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
  */
 
 const REFRESH_MS = 60_000;
+/** The plan ladder unfolded, remembered in this browser; a blocked store keeps it folded. */
+const LADDER_KEY = "desk.ladder.v1";
 const price = (value: number) => value.toFixed(2);
 const pct = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}%`;
 const expiryDay = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
@@ -136,7 +138,8 @@ export function ThreadHead({ thread, data, draft = false, horizon = null, onHori
 }
 
 /**
- * The top of the open thread: its header, and the plan ladder when it has a plan with an entry and an invalidation.
+ * The top of the open thread: its header, and the plan ladder when it has a plan with an entry and an invalidation,
+ * folded to one line so the conversation stays in view; Full plan unfolds it, and that is remembered.
  * Reads ``GET /copilot/plans`` and ``GET /copilot/plans/positions`` when the thread opens or its activity changes, then
  * each minute while the page is visible. Nothing for a conversation across everything with no plan.
  */
@@ -145,6 +148,14 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
   onHorizon?(horizon: DeskHorizon): Promise<void>; stage?: string | null; adopted?: boolean;
 }) {
   const [read, setRead] = useState<{ id: string; data: DeskThreadPlan } | null>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    try { setFull(window.localStorage.getItem(LADDER_KEY) === "full"); } catch { /* folded */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
+  }, []);
+  const toggleLadder = () => setFull(was => {
+    try { window.localStorage.setItem(LADDER_KEY, was ? "folded" : "full"); } catch { /* this visit only */ }
+    return !was;
+  });
   const id = thread?.id, symbol = thread?.symbol ?? null, refreshKey = thread?.refreshKey;
   useEffect(() => {
     if (!id) return;
@@ -167,7 +178,7 @@ export default function DeskThreadTop({ thread, draft = false, hero = null, comp
     <div className="mb-4 space-y-4 border-b pb-4">
       <ThreadHead thread={thread} data={data} draft={draft} horizon={horizon} onHorizon={onHorizon} stage={stage} adopted={adopted} />
       {hero}
-      {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact} />}
+      {data?.plan && <PlanLadder plan={data.plan} position={data.position} dimmed={draft} compact={compact || !full} onToggle={compact ? undefined : toggleLadder} />}
     </div>
   );
 }

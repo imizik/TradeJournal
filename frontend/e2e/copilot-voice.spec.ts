@@ -96,6 +96,7 @@ const autoSend = (page: Page) => page.getByLabel("Auto-send what I say");
 test("hold, release: the words go straight out with auto-send on (the default)", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
+  await page.getByLabel("Message").click(); // the idle box opens when used
   await expect(autoSend(page)).toBeChecked();
   const { release } = await hold(page);
   await expect(page.getByTestId("copilot-voice-status")).toContainText(/0:0\d/);
@@ -109,8 +110,10 @@ test("hold, release: the words go straight out with auto-send on (the default)",
 test("with auto-send off the words wait in the box for review, and the setting is remembered", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
+  await page.getByLabel("Message").click(); // the idle box opens when used
   await autoSend(page).uncheck();
   await page.reload();
+  await page.getByLabel("Message").click();
   await expect(autoSend(page)).not.toBeChecked();
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Quick one:");
   const { release } = await hold(page);
@@ -159,6 +162,7 @@ test("a refused microphone says how to allow it", async ({ page }) => {
 test("without a server transcriber the browser listens, and only its tickers are cleaned up", async ({ page }) => {
   const seen = await lab(page, { configured: false, recognition: true });
   await page.goto("/copilot-lab");
+  await page.getByLabel("Message").click(); // the idle box opens when used
   await autoSend(page).uncheck();
   const { release } = await hold(page);
   await release();
@@ -180,6 +184,7 @@ test("at 375 px the mic is a 44 px thumb target beside Send, and nothing scrolls
   await page.goto("/copilot-lab");
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab").nth(1).click(); // a phone shows the conversation on its own tab
+  await page.getByLabel("Message").click(); // the idle box opens when used
   const mic = (await page.getByTestId("copilot-mic").boundingBox())!;
   const send = (await page.getByRole("button", { name: "Send", exact: true }).boundingBox())!;
   expect(mic.width).toBeGreaterThanOrEqual(44);

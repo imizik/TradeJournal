@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
+  BRIEFING_TITLE,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
@@ -362,6 +363,7 @@ const TOOL = "[&>button]:rounded-lg [&>button]:border-transparent [&>button:hove
 const FOLLOW_PX = 80;
 /** Scroll events this soon (ms) after the panel scrolled itself are its own, not the reader's. */
 const AUTO_MS = 150;
+const LAND_ROOM = 96; // px of the latest question that must show above the message box, or the desk scrolls to it
 
 /** The element that scrolls the conversation: a dock or drawer's own scroller, or null for the page itself. */
 function scrollParent(node: HTMLElement | null): HTMLElement | null {
@@ -438,6 +440,12 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // the page opens a thread at its top (header and decision first) and follows once the owner sends.
   const following = useRef(variant === "panel");
   const autoAt = useRef(0); // when the panel last scrolled itself
+  const landing = useRef<number[]>([]); // the desk's pending landings on the latest turn
+  const stopLanding = useCallback(() => { landing.current.forEach(window.clearTimeout); landing.current = []; }, []);
+  useEffect(() => stopLanding, [stopLanding]);
+  const holdTop = useRef(false);
+  const composer = useRef<HTMLDivElement>(null);
+  const [composing, setComposing] = useState(false); // the desk's message box in use: it opens to its full size
   const scroller = useRef<HTMLElement | null>(null); // a dock or drawer's own scroller; null for the page
   const root = useRef<HTMLDivElement | null>(null);
   const [current, setCurrent] = useState<Current | null>(null);
@@ -468,13 +476,27 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const latest = useRef<{ messages: LabMessage[]; current: Current | null; symbol: string }>({ messages: [], current: null, symbol: "" });
   useEffect(() => {
     shown.current = messages.length;
+    holdTop.current = !!desk?.holdTop;
     latest.current = { messages, current, symbol };
   });
 
   const refreshRecent = useCallback(() => { void listInvestigations().then(setRecent).catch(() => { /* the list is a convenience */ }); }, []);
 
+  /** The desk opens a saved conversation on its latest question, or at the top while something there asks for an answer.
+   * Tried again as what sits above the conversation reads in; the reader's own scroll or send stops it. */
+  function landOnLatest() {
+    stopLanding();
+    landing.current = [0, 300, 800, 2000].map(ms => window.setTimeout(() => {
+      const turn = root.current?.querySelector("[data-turn=latest]");
+      if (ms === 0 || holdTop.current) (scroller.current ?? window).scrollTo({ top: 0 });
+      if (holdTop.current || !turn || !composer.current) return;
+      if (turn.getBoundingClientRect().top + LAND_ROOM > composer.current.getBoundingClientRect().top) turn.scrollIntoView({ block: "start" });
+    }, ms));
+  }
+
   function open(saved: Investigation) {
     following.current = panel;
+    if (desk && (saved.symbol || saved.title !== BRIEFING_TITLE)) landOnLatest();
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMenu(false);
     pendingOutcomes.current.clear();
@@ -527,6 +549,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   /** A new conversation on ``target``, with the page's context line ready, unless the owner has typed their own. */
   function fresh(target: string) {
     following.current = panel;
+    stopLanding();
     pendingOutcomes.current.clear();
     pendingRatings.current.clear();
     setMessages([]);
@@ -635,9 +658,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       const el = box ?? document.scrollingElement;
       if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
     };
-    const wheel = (event: WheelEvent) => { if (event.deltaY < 0) following.current = false; };
-    const touch = () => { following.current = false; };
-    const key = (event: KeyboardEvent) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key) && !(event.target as HTMLElement)?.closest?.("textarea, input")) following.current = false; };
+    const wheel = (event: WheelEvent) => { stopLanding(); if (event.deltaY < 0) following.current = false; };
+    const touch = () => { stopLanding(); following.current = false; };
+    const key = (event: KeyboardEvent) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key) && !(event.target as HTMLElement)?.closest?.("textarea, input")) { stopLanding(); following.current = false; } };
     target.addEventListener("scroll", read, { passive: true });
     target.addEventListener("wheel", wheel as EventListener, { passive: true });
     target.addEventListener("touchmove", touch, { passive: true });
@@ -648,7 +671,16 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       target.removeEventListener("touchmove", touch);
       window.removeEventListener("keydown", key);
     };
-  }, [status?.enabled]); // the conversation renders once the status read says the lab is on
+  }, [stopLanding, status?.enabled]); // the conversation renders once the status read says the lab is on
+  // On the desk the idle message box is one line, in the same row as its tools; a word in it, or a tap, opens it.
+  const small = !!desk && !composing && !draft.trim() && !attached.length && !attaching && !tray;
+  useEffect(() => {
+    if (!composing) return;
+    // After the click, not on the press: the page shifts as the box shrinks, and a click must land where it was aimed.
+    const outside = (event: MouseEvent) => { if (!composer.current?.contains(event.target as Node)) setComposing(false); };
+    document.addEventListener("click", outside);
+    return () => document.removeEventListener("click", outside);
+  }, [composing]);
   // The message box grows with what is typed, up to a cap (a dock's share of its height, 40% of the page), then scrolls.
   useLayoutEffect(() => {
     const el = box.current;
@@ -657,7 +689,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     const cap = panel ? 224 : Math.round(window.innerHeight * 0.4);
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
     el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
-  }, [draft, panel, status?.enabled]);
+  }, [draft, panel, small, status?.enabled]);
   // To the very end, so the newest line sits above the pinned message box instead of under it.
   const pin = useCallback(() => {
     if (!following.current) return;
@@ -749,6 +781,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   async function send(text: string, about = symbol, shots = attached) {
     const content = text.trim() || (shots.length ? IMAGE_PREFILL : "");
     if (!content || busy || running.current || !status?.enabled) return;
+    stopLanding();
     following.current = true; // the owner's own message: show it and follow the answer
     if (lookOnSend.current && look && shots.length < MAX_IMAGES) {
       lookOnSend.current = false;
@@ -962,14 +995,14 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     </span>
   );
   const messageBox = (
-    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={3} disabled={!enabled}
+    <textarea ref={box} value={draft} onChange={e => { typed.current = true; if (!e.target.value.trim()) setSpoken(false); setDraft(e.target.value.slice(0, 4000)); }} rows={small ? 1 : 3} wrap={small ? "off" : undefined} disabled={!enabled}
       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }}
       placeholder={enabled ? "Ask, challenge, or ask for a plan…" : "Copilot Lab is off"} aria-label="Message"
-      className="block min-h-[4.75rem] w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm" />
+      className={cn("block w-full resize-none bg-transparent px-3 text-base", small ? "min-h-[2.625rem] min-w-0 flex-1 py-2" : "min-h-[4.75rem] pb-1 pt-2.5", " leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:text-sm")} />
   );
   const sendButton = busy
     ? <button type="button" onClick={() => abort.current?.abort()} className="min-h-11 rounded-lg border px-4 text-sm md:min-h-9">Stop</button>
-    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className="min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40 md:min-h-9">Send</button>;
+    : <button type="submit" disabled={!enabled || (!draft.trim() && !attached.length)} className={cn("min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-40 md:min-h-9", small && "max-md:hidden")}>Send</button>;
   const attachButton = (
     <button type="button" aria-label="Attach a screenshot" title="Attach a screenshot (up to 2)" data-testid="copilot-attach"
       onClick={() => picker.current?.click()} disabled={!enabled || busy || attaching?.state === "busy" || attached.length >= MAX_IMAGES}
@@ -1149,7 +1182,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
           </p>
         )}
         {messages.map((message, i) => message.role === "user" ? (
-          <div key={i} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground">
+          <div key={i} data-turn={i === messages.map(m => m.role).lastIndexOf("user") ? "latest" : undefined} className="ml-auto scroll-mt-10 w-fit max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-foreground">
             {message.images?.length ? (
               <span className="mb-1.5 flex flex-wrap justify-end gap-1.5">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
@@ -1185,7 +1218,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       </div>
 
       {/* On the desk the box stays in reach while the conversation scrolls; a phone keeps it above the tab bar. */}
-      <div className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1",
+      <div ref={composer} onFocus={e => { if ((e.target as HTMLElement) === box.current) setComposing(true); }}
+        onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setComposing(false); }}
+        className={cn("space-y-1", panel && "sticky bottom-0 bg-[#121924] py-1",
         desk && "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 bg-background py-2 md:bottom-0")}>
       {voice.banner}
       {(attached.length > 0 || attaching) && (
@@ -1225,9 +1260,9 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {/* One box: (on the desk, what the conversation is about,) the text, then a toolbar inside it. The text area gets the
           full width at every size, even in a narrow dock; a phone desk keeps attach and read-aloud behind "+". */}
       <form onSubmit={e => { e.preventDefault(); void send(draft); }}
-        className="rounded-xl border bg-background transition-colors focus-within:border-primary/50">
+        className={cn("rounded-xl border bg-background transition-colors focus-within:border-primary/50", small && "flex items-center")}>
         {desk && (
-            <div className="flex min-h-7 items-center px-2 pt-1.5 text-xs">
+            <div className={cn("flex min-h-7 items-center px-2 text-xs", small ? cn("shrink-0", !symbol && !scoping && "max-md:hidden") : "pt-1.5")}>
               {symbol ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-muted py-0.5 pl-2 pr-0.5 text-foreground" data-testid="copilot-scope">
                   About {symbol}
@@ -1250,7 +1285,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             </div>
         )}
         {messageBox}
-        <div className="flex items-center gap-1 px-1.5 pb-1.5">
+        <div className={cn("flex items-center gap-1 px-1.5", small ? "shrink-0" : "pb-1.5")}>
           {desk && (
             <button type="button" onClick={() => setTray(open => !open)} aria-expanded={tray} aria-label="More: attach, read aloud"
               className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden">
@@ -1266,8 +1301,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
         </div>
         {pickerInput}
       </form>
-      {desk && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
-      {(voice.available || speak.available) && (
+      {desk && !small && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
+      {(voice.available || speak.available) && !small && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}
           <span className={cn("flex flex-wrap items-center gap-x-3", desk && !tray && "max-md:hidden")}>{voice.setting}{speak.setting}</span>

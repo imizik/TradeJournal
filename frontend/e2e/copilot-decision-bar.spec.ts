@@ -107,7 +107,7 @@ test("while the bar asks, the plan ladder shrinks to one line under it; once log
 
   await bar.getByRole("button", { name: "Holding" }).click();
   await expect(page.getByTestId("desk-decision-logged")).toBeVisible({ timeout: 8_000 });
-  await expect(page.getByRole("region", { name: "Plan ladder" })).toBeVisible(); // decided: the full ladder (its scale inside) leads again
+  await expect(page.getByRole("button", { name: "Full plan" })).toBeVisible(); // decided: the ladder can be unfolded again
 });
 
 test("a long put's plan holds below a level above the price, and a later alert brings the bar back", async ({ page }) => {

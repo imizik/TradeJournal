@@ -691,6 +691,8 @@ export const getSymbolLoop = (symbol: string, signal?: AbortSignal, { setup = fa
   request<SymbolLoop>(`/copilot/symbol/${encodeURIComponent(symbol)}${setup ? "?setup=true" : ""}`, { signal });
 /** The home's one button: a new conversation with no symbol and exactly this prompt. Never sent on open (a turn costs money). */
 export const WHAT_MATTERS_PROMPT = "What matters right now across my open positions, armed watches and open investigations? Lead with anything that needs a decision today; say plainly if nothing does.";
+/** A Briefing conversation keeps its question's first line as its title (CopilotPanel's ``savedFields``). */
+export const BRIEFING_TITLE = WHAT_MATTERS_PROMPT.split("\n")[0].slice(0, 80);
 
 // --------------------------------------------------------------------------- confirming a proposal
 
