@@ -2,7 +2,7 @@
 
 Every copilot-side sender (open-trade alerts, plan nudges and link pings, plan
 time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-the automatic week review, Watch your day, the evening review, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
+the automatic week review, Watch your day, the evening review, fill-time pattern interrupts, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
 own expiry. Right before it hands a message to ``ntfy`` it asks this module one
 question, ``decide``: **send now, merge, or hold**. ``ntfy.py`` stays a
 transport. Jo's senders (Codex) are not gated here.
@@ -23,8 +23,9 @@ The policy, in the order it is applied:
   (each sender already writes one row per firing, and two plans' invalidations
   in one symbol are two messages): a last-day final after a one-hour alert
   still goes out, and so does an invalidation after a last-day final.
-- **Budgets.** Every kind at or below ``nudge`` in the priority order has a
-  budget of its own a New York day (``PING_BUDGET_<KIND>``): ``nudge`` 2 (link
+- **Budgets.** Every kind at or below ``interrupt`` in the priority order has a
+  budget of its own a New York day (``PING_BUDGET_<KIND>``): ``interrupt`` 4
+  (fill-time pattern interrupts), ``nudge`` 2 (link
   pings share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
   ``radar_event`` 4 (Radar's single pings), ``radar_digest`` 2, ``thesis_watch``
   2 and ``research`` 1. One kind spending its budget never takes another's: on
@@ -40,7 +41,7 @@ The policy, in the order it is applied:
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
-  > ``hold_hour`` > ``nudge`` / ``link`` > ``prep`` (and ``week_review``,
+  > ``hold_hour`` > ``interrupt`` > ``nudge`` / ``link`` > ``prep`` (and ``week_review``,
   ``day_replay``) > ``evening_review`` > ``radar_event`` > ``radar_digest`` >
   ``thesis_watch`` > ``research``.
 
@@ -84,7 +85,7 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "nudge", "prep", "evening_review",
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "nudge", "prep", "evening_review",
             "radar_event", "radar_digest", "thesis_watch", "research")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
            "week_review": "prep", "day_replay": "prep"}
@@ -93,8 +94,8 @@ NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by th
 NEVER_HELD = ("evening_review",)  # neither the quiet window nor the ceiling: it reports what was held
 # Each kind's own daily budget (PING_BUDGET_<KIND>); a kind here is also held by the ceiling and, before the open, the
 # pre-open allowance. The noun names the budget in a held ping's reason.
-BUDGETS = {"nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
-BUDGET_NAMES = {"nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
+BUDGETS = {"interrupt": 4, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
+BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
@@ -318,7 +319,7 @@ def _appended(db: Session, into: PhonePing) -> str:
 
 def _label(kind: str) -> str:
     return {"expiry_final": "last-day final", "expiry_first": "expires-today", "giveback": "give-back", "hold_hour": "one-hour", "wrong_way": "wrong-way",
-            "time_stop": "time stop", "entry": "entry trigger", "invalidation": "invalidation", "nudge": "plan nudge",
+            "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
             "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research"}.get(kind, kind)
