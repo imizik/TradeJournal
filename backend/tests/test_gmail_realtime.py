@@ -540,3 +540,30 @@ def test_data_version_changes_when_a_push_finishes(job_rows):
         session.add(JobRun(job_type="gmail_push", status="succeeded", finished_at=datetime.utcnow() + timedelta(seconds=1)))
         session.commit()
     assert _health()["data_version"] != before
+
+
+def test_a_roll_email_is_saved_once_and_the_rebuild_turns_it_into_fills(monkeypatch):
+    """Through the real import and rebuild: the roll, the later sale, and a second import of the same mail."""
+    from app.engine.email_parser import ParsedRoll
+    from app.models import Account, Fill, OptionRollOrder, Trade
+    from app.routers import fills as fills_router
+
+    roll = ParsedRoll("RLLT", Decimal("2"), Decimal("132"), False, datetime(2026, 10, 29, 11, 16, tzinfo=ET), "gmail-roll")
+    monkeypatch.setattr(gmail_poller, "poll_fills_by_ids", lambda ids, known_ids=None: [r for r in [roll] if r.raw_email_id not in known_ids])
+    with Session(engine) as session:
+        account = Account(name="roll", type="roth_ira", last4="9911")
+        session.add(account)
+        session.flush()
+        common = {"account_id": account.id, "ticker": "RLLT", "instrument_type": "option", "contracts": Decimal(2), "option_type": "call"}
+        session.add(Fill(**common, side="buy_to_open", price=Decimal(138), executed_at=datetime(2026, 10, 28, 10), raw_email_id="rllt-open",
+                         strike=Decimal("63.5"), expiration=datetime(2026, 11, 20).date()))
+        session.add(Fill(**common, side="sell_to_close", price=Decimal(270), executed_at=datetime(2026, 10, 29, 12, 17), raw_email_id="rllt-stop",
+                         strike=Decimal(65), expiration=datetime(2026, 11, 27).date()))
+        session.commit()
+        assert fills_router._import_fills_from_gmail(session, start_enrichment=False, message_ids=["gmail-roll"])["saved"] == 1
+        assert fills_router._import_fills_from_gmail(session, start_enrichment=False, message_ids=["gmail-roll"])["saved"] == 0
+        assert len(session.exec(select(OptionRollOrder).where(OptionRollOrder.raw_email_id == "gmail-roll")).all()) == 1
+        fills_router._rebuild_trades(session, anomalies_label="test")
+        session.commit()
+        trades = session.exec(select(Trade).where(Trade.ticker == "RLLT")).all()
+        assert {t.status for t in trades} == {"closed"} and sum(t.realized_pnl for t in trades) == Decimal(0)

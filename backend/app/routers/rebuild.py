@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, delete, select
 
 from app.database import get_session
+from app.engine.option_rolls import resolve_rolls
 from app.engine.reconstructor import FillInput, reconstruct
 from app.models import FILL_LIGHT, Fill, Trade, TradeFill, TradeTag
 
@@ -17,6 +18,7 @@ def post_rebuild(session: Session = Depends(get_session)):
     session.commit()
 
     # 2. Load all fills ordered by executed_at ASC
+    resolve_rolls(session)
     fills = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at)).all()
     if not fills:
         return {"status": "ok", "trades_rebuilt": 0}

@@ -106,6 +106,10 @@ def follow_up(alert: dict, fills: list[dict] | None, status: str | None) -> dict
     for f in after:
         if f["side"] in OPEN_SIDES or left <= EPS:
             continue
+        if f.get("derived"):  # a roll's close is at cost, not a sale price: the value moved to the new contract
+            out["response"] = "rolled"
+            out["note"] = "You rolled these contracts, so there is no sale price to compare with the alert."
+            return out
         used = min(left, f["contracts"])
         left -= used
         proceeds += used * f["price"]
@@ -286,7 +290,8 @@ def build(db: Session, go_live: date = GO_LIVE) -> dict:
     trade_of_source: dict = {}
     for row in links:
         fills_of[row.trade_id].append({"id": row.id, "role": row.role, "side": row.side, "contracts": float(row.contracts),
-                                       "price": float(row.price), "executed_at": wall_time(row.executed_at)})
+                                       "price": float(row.price), "executed_at": wall_time(row.executed_at),
+                                       "derived": (row.raw_email_id or "").startswith("roll:")})
         trade_of_source[(row.account_id, row.raw_email_id)] = row.trade_id
         trade_of_source[(row.account_id, str(row.id))] = row.trade_id
 

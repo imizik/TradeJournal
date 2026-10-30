@@ -21,10 +21,12 @@ from app.engine.jobs import (
     latest_job,
     running_job,
 )
+from app.engine.email_parser import ParsedRoll
+from app.engine.option_rolls import resolve_rolls
 from app.engine.reconstructor import FillInput, reconstruct
 from app.engine.job_runtime import submit_job
 from app.environment import require_destructive_confirmation
-from app.models import Account, DailyReviewRecord, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
+from app.models import Account, DailyReviewRecord, FILL_LIGHT, Fill, FillOut, OptionRollOrder, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
 
@@ -180,6 +182,7 @@ def _import_fills_from_gmail(
     log.info("BEGIN /fills/import")
 
     known_ids: set[str] = {raw_id for raw_id in session.exec(select(Fill.raw_email_id)).all() if raw_id}
+    known_ids |= set(session.exec(select(OptionRollOrder.raw_email_id)).all())
     log.info("Loaded %d known email IDs", len(known_ids))
 
     try:
@@ -206,6 +209,15 @@ def _import_fills_from_gmail(
 
     for parsed_fill in parsed_fills:
         if parsed_fill.raw_email_id in known_ids:
+            continue
+
+        if isinstance(parsed_fill, ParsedRoll):
+            session.add(OptionRollOrder(raw_email_id=parsed_fill.raw_email_id, ticker=parsed_fill.ticker,
+                                        contracts=parsed_fill.contracts, net_per_contract=parsed_fill.net_per_contract,
+                                        credit_mentioned=parsed_fill.credit_mentioned,
+                                        executed_at=_normalize_executed_at(parsed_fill.executed_at)))
+            known_ids.add(parsed_fill.raw_email_id)
+            saved += 1  # the push path rebuilds only when something was saved
             continue
 
         if parsed_fill.account_last4 not in account_cache:
@@ -260,6 +272,7 @@ def _import_fills_from_gmail(
 
 
 def _persist_rebuild(session: Session, anomalies_label: str) -> tuple[int, list[str]]:
+    resolve_rolls(session)
     fills = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at)).all()
     if not fills:
         return 0, []
