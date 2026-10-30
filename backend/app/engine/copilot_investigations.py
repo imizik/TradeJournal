@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.models import CopilotInvestigation
@@ -354,9 +355,14 @@ def get(investigation_id: str | uuid.UUID, session: Session | None = None) -> di
 
 
 def list_investigations(symbol: str | None = None, source: Source | None = None, limit: int = 20,
-                        before: datetime | None = None, session: Session | None = None) -> list[dict]:
-    """Newest first, summaries only. ``before`` (naive UTC) keeps records created at or before that moment."""
+                        before: datetime | None = None, search: str | None = None, session: Session | None = None) -> list[dict]:
+    """Newest first, summaries only. ``before`` (naive UTC) keeps records created at or before that moment. ``search``
+    keeps records whose title, symbol or conclusion holds every word, ignoring case."""
     query = select(CopilotInvestigation)
+    for word in (search or "").split():
+        pattern = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.where(or_(*(column.ilike(pattern, escape="\\") for column in (
+            CopilotInvestigation.title, CopilotInvestigation.symbol, CopilotInvestigation.conclusion))))
     if symbol:
         query = query.where(CopilotInvestigation.symbol == symbol.upper())
     if source:

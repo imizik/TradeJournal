@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePracticeLine } from "@/components/copilot/ReviewMyWeek";
-import { getDeskSession, type DeskSession, type DeskSessionEvent, type DeskThread } from "@/lib/desk";
+import { getDeskSession, needingCount, nyDay, type DeskSession, type DeskSessionEvent, type DeskThread } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
@@ -79,7 +79,7 @@ export function DeskStatus({ data }: { data: DeskSession | null }) {
 /** The Briefing's numbers: open positions, what needs a decision, the nearest armed trigger and pings against the cap. */
 function Numbers({ data, rows }: { data: DeskSession; rows: DeskThread[] }) {
   const positions = new Set(rows.filter(r => r.tradeId).map(r => r.tradeId)).size;
-  const needYou = rows.filter(r => r.group === "act").length;
+  const needYou = needingCount(rows, nyDay());
   const near = rows.find(r => r.group === "near");
   const cells: [string, ReactNode, string?][] = [
     ["Positions", num(positions)],
@@ -144,7 +144,7 @@ export default function SessionTape({ data, error, rows, tally }: {
         <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Today</h2>
         <span className="text-sm text-foreground">{data.phase ? PHASE[data.phase] : "Market hours unknown"}</span>
         {data.indices.length > 0 && (
-          <span className="ml-auto flex gap-3 text-xs" data-testid="session-indices">
+          <span className="ml-auto flex gap-3 text-xs md:hidden" data-testid="session-indices">
             {data.indices.map(row => (
               <span key={row.symbol}>
                 <span className="text-muted-foreground">{row.symbol}</span>{" "}

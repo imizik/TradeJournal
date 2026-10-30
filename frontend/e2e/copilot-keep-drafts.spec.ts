@@ -94,11 +94,18 @@ async function lab(page: Page, server: Server) {
 const planCard = (page: Page) => page.getByRole("region", { name: "Proposed trade plan" });
 const watchCard = (page: Page) => page.getByRole("region", { name: "Proposed watch" });
 
+async function aboutNbis(page: Page) { // the desk starts across everything
+  await page.getByTestId("copilot-scope").click();
+  await page.getByLabel("Investigation symbol").fill("NBIS");
+  await page.getByLabel("Investigation symbol").press("Enter");
+}
+
 test("drafted cards come back after a reload and a thread switch, a confirmed one as done", async ({ page }) => {
   const server: Server = { records: new Map(), posts: [], outcomes: [] };
   server.records.set(OTHER, { ...meta(OTHER, "CRWV capacity"), symbol: "CRWV",
     transcript: [{ role: "user", content: "CRWV capacity?" }, { role: "assistant", content: "CRWV is still adding capacity." }] } as Record_);
   await lab(page, server);
+  await aboutNbis(page);
   await page.getByLabel("Message").fill("Plan NBIS and watch the gap");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();

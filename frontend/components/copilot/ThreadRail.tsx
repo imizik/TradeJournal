@@ -9,7 +9,7 @@ import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
 import { AUTO_WEEK_REVIEW_TITLE, type InvestigationSummary } from "@/lib/copilot";
 import {
-  getDeskThreads, getSavedConversations, nyDay, reviewSkipped, type DeskDay, type DeskGroup, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
+  getDeskThreads, getSavedConversations, needsYou, nyDay, reviewSkipped, type DeskGroup, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +23,6 @@ export const TONE: Record<DeskTone, string> = {
 const BAR: Record<DeskTone, string> = {
   attention: "bg-primary", loss: "bg-rose-400", gain: "bg-emerald-400", info: "bg-foreground", muted: "bg-muted-foreground",
 };
-const PHASE: Record<NonNullable<DeskDay["phase"]>, string> = { pre: "Pre-market", regular: "Market open", post: "After hours", closed: "Market closed" };
 const SOURCE: Record<string, string> = { positions: "positions", plans: "plans", investigations: "investigations", drafts: "waiting cards", radar: "Radar", thesis: "thesis watch" };
 /** A ticker's state, in sort order after "needs you". */
 type TickerState = "held" | "armed" | "exited" | "watching" | "closed";
@@ -143,6 +142,13 @@ function Fold({ label, opened = false, children, count }: { label: string; opene
   );
 }
 
+/** A ticker's open conversations in view (the newest, and always the open one), the other open ones, and the closed. */
+function foldTalks(ticker: Ticker, active: string | null) {
+  const open = ticker.conversations.filter(t => t.status !== "closed");
+  const shown = open.filter((t, i) => i < CHILDREN_SHOWN || t.id === active);
+  return { shown, earlier: open.filter(t => !shown.includes(t)), closed: ticker.conversations.filter(t => t.status === "closed") };
+}
+
 /** A ticker's subthreads: its newest open conversations (title and date; the plan's and the exit review's named), the
  * other open ones under Earlier and the closed ones under Closed. The open conversation always shows. */
 function Children({ ticker, active, actions }: { ticker: Ticker; active: string | null; actions: HomeActions }) {
@@ -150,10 +156,7 @@ function Children({ ticker, active, actions }: { ticker: Ticker; active: string 
   const exitOf = new Set(ticker.rows.filter(r => r.close?.kind === "exit").map(r => r.investigationId));
   const row = (talk: InvestigationSummary) => <Talk key={talk.id} id={talk.id} title={talk.title} at={talk.updated_at} active={active} actions={actions}
     tag={exitOf.has(talk.id) ? "Exit review" : planOf.has(talk.id) ? "Plan" : null} />;
-  const open = ticker.conversations.filter(t => t.status !== "closed");
-  const closed = ticker.conversations.filter(t => t.status === "closed");
-  const shown = open.filter((t, i) => i < CHILDREN_SHOWN || t.id === active);
-  const earlier = open.filter(t => !shown.includes(t));
+  const { shown, earlier, closed } = foldTalks(ticker, active);
   return (
     <ul aria-label={`${ticker.symbol} threads`} className="ml-3.5 space-y-0.5 border-l pl-1.5">
       {shown.map(row)}
@@ -210,11 +213,10 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
   );
 }
 
-function DayLine({ data }: { data: DeskThreads }) {
-  const { phase, needYou, streak } = data.day;
+function DayLine({ data, needYou }: { data: DeskThreads; needYou: number }) {
+  const { streak } = data.day;
   return (
     <p data-testid="desk-day" className="px-2.5 text-xs text-muted-foreground">
-      {phase && <>{PHASE[phase]} · </>}
       {needYou ? <span className="text-primary"><span className="tabular-nums">{needYou}</span> need{needYou === 1 ? "s" : ""} you</span> : "Nothing needs you"}
       {streak && <> · plan streak <span className="tabular-nums">{streak.current}</span></>}
     </p>
@@ -230,11 +232,12 @@ function DayLine({ data }: { data: DeskThreads }) {
  * follows its row's link when it has none) and shows its subthreads; with more than one, its count and arrow show or hide
  * them without changing the open conversation, and any number can stay open. Radar hits, alerts to answer and Review my
  * week live inside Main; ``toAnswer`` is how many are waiting.
- * ``onRows`` gets the desk rows in the order shown, for J / K and the palette; ``onSaved`` the saved conversations, for
+ * ``onRows`` gets the desk rows in the order shown, for the palette; ``onWalk`` the conversations J / K walk, as the list
+ * shows them (under Main, then each ticker: its subthreads when shown, else its newest); ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
-  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void;
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onWalk, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
+  actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void; onWalk?(ids: string[]): void;
   onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; toAnswer?: number; pick(row: DeskThread): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
@@ -287,8 +290,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
 
   const rows = useMemo(() => data?.threads ?? [], [data]);
   const day = data ? nyDay(new Date(data.asOf)) : null;
-  const needs = useCallback((row: DeskThread) => row.group === "act" || row.group === "draft" || !!row.fillToLink
-    || (!!row.close && !row.close.reviewed && !(day && row.symbol && reviewSkipped(day, row.symbol))), [day]);
+  const needs = useCallback((row: DeskThread) => needsYou(row, day), [day]);
   const tickers = useMemo(() => tickersOf(rows, data?.plans ?? [], saved, needs), [rows, data, saved, needs]);
   const briefing = rows.find(r => r.key === "briefing");
   const radar = rows.filter(isRadar);
@@ -316,6 +318,14 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   const live = tickers.filter(t => !t.needs && (t.state === "held" || t.state === "armed"));
   const quiet = tickers.filter(t => !t.needs && !live.includes(t));
   const shownQuiet = more ? quiet : quiet.slice(0, Math.max(QUIET_SHOWN, quiet.findIndex(t => t.symbol === openSymbol) + 1));
+  const walk = [...looseShown.map(t => t.id), ...[...needing, ...live, ...shownQuiet].flatMap(ticker => {
+    if (!ticker.conversations.length) return ticker.rows.flatMap(r => r.investigationId ? [r.investigationId] : []);
+    const shown = expanded.has(ticker.symbol) ? foldTalks(ticker, active).shown : [];
+    const walked = ticker.conversations.filter(t => shown.includes(t) || t.id === active || (!shown.length && t === ticker.conversations[0]));
+    return walked.map(t => t.id);
+  })];
+  const walkKey = [...new Set(walk)].join();
+  useEffect(() => { onWalk?.(walkKey ? walkKey.split(",") : []); }, [walkKey, onWalk]);
 
   const press = (ticker: Ticker) => {
     setOpened(ticker.symbol);
@@ -328,7 +338,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
 
   return (
     <nav aria-label="Thread list" className="space-y-3 text-sm">
-      {data ? <DayLine data={data} /> : !error && <p className="px-2.5 text-xs text-muted-foreground">Reading what is live…</p>}
+      {data ? <DayLine data={data} needYou={needing.length} /> : !error && <p className="px-2.5 text-xs text-muted-foreground">Reading what is live…</p>}
       {error && <p className="px-2.5 text-xs text-muted-foreground">{data ? "Not refreshed" : "Threads unavailable"}: {error}</p>}
       {phase && <div className="px-2.5">{phase}</div>}
       <div role="tablist" aria-label="Thread list view" className="mx-2.5 grid grid-cols-2 gap-1 rounded-md border p-0.5 text-xs">

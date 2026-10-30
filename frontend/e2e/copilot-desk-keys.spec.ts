@@ -494,3 +494,23 @@ test("after the close questions, Close the day asks today's alerts, Radar hits a
   expect(writes).toEqual([`alert ${GIVEBACK.id} prompted_review`]);
   expect(chats).toEqual([]);
 });
+
+test("the palette finds a saved conversation that is not on the list, by what it was about", async ({ page }) => {
+  await lab(page);
+  const old = "00000000-0000-4000-8000-000000000009";
+  await page.route("**/copilot/investigations?*", (route) => {
+    const q = new URL(route.request().url()).searchParams.get("q");
+    route.fulfill({ json: { investigations: q === "roll" ? [{ id: old, source: "copilot", title: "OKLO roll to March", symbol: "OKLO", status: "closed", conclusion: null,
+      revision: 1, message_count: 2, has_findings: false, created_at: "2026-02-03T15:00:00Z", updated_at: "2026-02-03T15:00:00Z" }] : [] } });
+  });
+  await page.route(`**/copilot/investigations/${old}`, (route) => route.fulfill({ json: saved(old, "OKLO", "OKLO answer: rolled.") }));
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("roll");
+  const hit = palette(page).getByRole("option", { name: /OKLO roll to March/ });
+  await expect(hit).toContainText("Closed");
+  await hit.click();
+  await expect(conversation(page).getByText("OKLO answer: rolled.")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("zzzz");
+  await expect(palette(page).getByText("Nothing matches.")).toBeVisible();
+});
