@@ -68,10 +68,10 @@ class Quotes:
         return {s: TradierQuote(symbol=s, bid=self.bid, ask=self.ask, bid_date=bid_at, ask_date=ask_at) for s in symbols}
 
 
-def fill(db, side, qty, price, when, expiration=FRI, account_id=ROTH):
+def fill(db, side, qty, price, when, expiration=FRI, account_id=ROTH, option_type="call"):
     i = next(n)
     db.add(Fill(id=UUID(int=i), account_id=account_id, ticker="SNDK", instrument_type="option", side=side, contracts=qty, price=price,
-                executed_at=datetime.fromisoformat(when), raw_email_id=f"gmail:{i}", option_type="call", strike=230,
+                executed_at=datetime.fromisoformat(when), raw_email_id=f"gmail:{i}", option_type=option_type, strike=230,
                 expiration=expiration))
     db.commit()
     _rebuild_trades(db, "test")
@@ -736,3 +736,158 @@ def test_hold_alert_delivery_is_at_most_once(engine, world, hold_on, monkeypatch
         db.commit()
     watcher.deliver()
     assert len(sent) == 1 and alerts(engine)[0].delivery == "unknown"
+
+
+# ---------------------------------------------------------------- wrong way at 30 minutes
+
+
+@pytest.fixture
+def wrong_way_on(monkeypatch):
+    monkeypatch.setenv("POSITION_ALERTS_ENABLED", "true")
+    monkeypatch.setenv("POSITION_WRONG_WAY_ALERTS", "true")
+
+
+def underlying(monkeypatch, path, symbol="SNDK"):
+    """Today's minute bars for ``symbol`` from 09:30: ``path(minutes since 09:30)`` is each bar's open; it closes at the next
+    bar's open."""
+    first = at(WED, "09:30")
+    bars = [{"time": first + 60 * i, "open": path(i), "high": max(path(i), path(i + 1)), "low": min(path(i), path(i + 1)),
+             "close": path(i + 1)} for i in range(150)]
+    seen = []
+
+    def today_bars(sym):
+        seen.append(sym)
+        return bars if sym == symbol else []
+    monkeypatch.setattr(position_alerts.ping_images, "today_bars", today_bars)
+    return seen
+
+
+def falling(i):
+    return 100.0 - 0.02 * i  # 10:01 (i=31) 99.38 -> 10:31 (i=61) 98.78: -0.60%
+
+
+def test_a_call_whose_underlying_fell_30_minutes_in_gets_one_wrong_way_alert(engine, world, wrong_way_on, monkeypatch):
+    clock, quotes, watcher = world
+    underlying(monkeypatch, falling)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(3.74)  # mid $3.76: -6%
+    run_at(clock, watcher, WED, "10:20", "10:30")
+    assert alerts(engine) == []
+    run_at(clock, watcher, WED, "10:31", "10:32", "10:35")
+    found = alerts(engine)
+    assert [(a.kind, a.generation) for a in found] == [("wrong_way", 0)]
+    with Session(engine) as db:
+        facts = position_alerts.wrong_way_facts(db, found[0])
+    assert facts == {"move": pytest.approx(98.78 / 99.38 - 1), "record": None}
+    title, body, _ = position_alerts.message(found[0], facts=facts)
+    assert title == "SNDK 10/23/26 230C: wrong way at 30 min"
+    assert body == ("SNDK down 0.60% in the 30 min after your entry, against your call. "
+                    "Option now -$24 (-6%) at a $3.76 mid, bid $3.74. 1 contract open. "
+                    "Re-decide: close, trim, or set your exit.") + OFF_CONTEXT
+
+
+def test_the_right_way_sends_nothing_and_a_put_is_judged_the_other_way(engine, world, wrong_way_on, monkeypatch):
+    clock, quotes, watcher = world
+    underlying(monkeypatch, falling)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00", option_type="put")
+    quotes.set(4.40)
+    run_at(clock, watcher, WED, "10:31", "10:33")
+    assert alerts(engine) == []
+    underlying(monkeypatch, lambda i: 100.0 + 0.02 * i)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:05", option_type="put", expiration=date(2026, 10, 30))
+    run_at(clock, watcher, WED, "10:36")
+    found = alerts(engine)
+    assert [(a.kind, a.contract) for a in found] == [("wrong_way", "SNDK 10/30/26 230P")]
+    assert position_alerts.message(found[0], facts={"move": 0.0061, "record": None})[1].startswith(
+        "SNDK up 0.61% in the 30 min after your entry, against your put. ")
+
+
+def test_only_opening_entries_on_time_are_checked_and_index_options_read_spy(engine, world, wrong_way_on, monkeypatch):
+    clock, quotes, watcher = world
+    seen = underlying(monkeypatch, falling)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:30")  # after the first hour
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T09:40", expiration=date(2026, 10, 30))  # due 10:11
+    quotes.set(3.74)
+    run_at(clock, watcher, WED, "10:16", "11:01", "11:05")  # the 09:40 entry is checked 5 minutes late: skipped
+    assert alerts(engine) == [] and seen == []
+    regular = ("regular", 570, 960)
+
+    def due(when, day=WED, close=960):
+        return position_alerts.wrong_way_due(datetime.fromisoformat(when), day, ("regular", 570, close))
+    assert (due("2026-10-21T09:30"), due("2026-10-21T10:29"), due("2026-10-21T10:30"), due("2026-10-21T09:15")) == (601, 660, None, None)
+    assert due("2026-10-20T09:45") is None and due("2026-10-21T09:45", close=600) is None
+    assert position_alerts.hold_due(datetime(2026, 10, 21, 10), WED, regular, False) == 660  # unchanged
+    seen = underlying(monkeypatch, falling, symbol="SPY")
+    assert position_alerts.underlying_move("SPXW", datetime(2026, 10, 21, 10, 0)) == pytest.approx(98.78 / 99.38 - 1)
+    assert seen == ["SPY"]
+
+
+def test_no_bars_means_no_alert(engine, world, wrong_way_on, monkeypatch):
+    clock, quotes, watcher = world
+    underlying(monkeypatch, falling, symbol="OTHER")
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(3.74)
+    run_at(clock, watcher, WED, "10:31")
+
+    def broken(symbol):
+        raise RuntimeError("feed down")
+    monkeypatch.setattr(position_alerts.ping_images, "today_bars", broken)
+    run_at(clock, watcher, WED, "10:32")
+    assert alerts(engine) == []
+
+
+@pytest.mark.parametrize("flags", [{"POSITION_ALERTS_ENABLED": "true"}, {"POSITION_WRONG_WAY_ALERTS": "true"}])
+def test_the_wrong_way_alert_is_off_without_both_switches(engine, world, monkeypatch, flags):
+    clock, quotes, watcher = world
+    seen = underlying(monkeypatch, falling)
+    monkeypatch.delenv("POSITION_ALERTS_ENABLED", raising=False)
+    monkeypatch.delenv("POSITION_WRONG_WAY_ALERTS", raising=False)
+    for name, value in flags.items():
+        monkeypatch.setenv(name, value)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")
+    quotes.set(3.74)
+    run_at(clock, watcher, WED, "10:31")
+    assert alerts(engine) == [] and seen == []
+
+
+def closed(db, opened, minutes, pnl, instrument="option"):
+    db.add(Trade(account_id=ROTH, ticker="NBIS", instrument_type=instrument, contracts=1, avg_entry_premium=1,
+                 total_premium_paid=100, realized_pnl=pnl, hold_duration_mins=minutes, opened_at=datetime.fromisoformat(opened),
+                 status="closed"))
+
+
+def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, world, wrong_way_on, monkeypatch):
+    clock, quotes, watcher = world
+    underlying(monkeypatch, falling)
+    with Session(engine) as db:
+        fill(db, "buy_to_open", 1, 400, "2026-10-21T10:00")  # first: a trade rebuild replaces the hand-made rows below
+        for i in range(5):
+            closed(db, f"2026-09-0{i + 1}T09:45", 12, 100.0 if i < 3 else -50.0)   # quick: 3 of 5 won, +$200
+            closed(db, f"2026-09-0{i + 1}T10:15", 300, -400.0 if i else 150.0)      # held 5 h: 1 of 5 won, -$1,450
+        closed(db, "2026-09-01T10:45", 300, -9999.0)                                  # opened after the first hour
+        closed(db, "2026-09-01T09:45", 300, -9999.0, instrument="stock")
+        db.commit()
+        assert position_alerts.opening_record(db) == ("Your past opening option trades: closed within 30 min, 5 won 60% (+$200); "
+                                                      "held 2 h or more, 5 won 20% (-$1,450).")
+    quotes.set(3.74)
+    run_at(clock, watcher, WED, "10:31")
+    alert = alerts(engine)[0]
+    sent = []
+
+    def publish(title, body, priority=4, tags=(), path="", direct_click=False, more=()):
+        sent.append((title, body, path))
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(ntfy, "publish", publish)
+    watcher.deliver()
+    watcher.deliver()
+    assert [(t, p) for t, _, p in sent] == [("SNDK 10/23/26 230C: wrong way at 30 min", f"/trades/{alert.trade_id}?alert={alert.id}")]
+    assert sent[0][1].startswith("SNDK down 0.60% in the 30 min after your entry, against your call. Option now -$24 (-6%)")
+    assert ("1 contract open. Your past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
+            "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in sent[0][1]
+    assert position_alerts.ask_context(alert).endswith("Wrong-way alert at 10:31 AM: now -$24.")

@@ -41,6 +41,19 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   when it fired, and adding to the position (a new generation) neither restarts
   the clock nor sends another. A quote that cannot be judged still sends, saying so;
   the peak shown is what this loop saw.
+- **Wrong way at 30 minutes.** Also off unless ``POSITION_WRONG_WAY_ALERTS=true``.
+  In a read-only review of 2026's opening option trades, those whose underlying
+  had moved against them 30 minutes in and were then held past two hours were
+  where most of the money went. A position whose first entry fill was in the
+  first ``OPENING_MINUTES`` of the regular session is checked once,
+  ``WRONG_WAY_MINUTES`` after the minute following the entry: the underlying's
+  move between those two minutes (the bar's open, else the previous close, from
+  today's chart bars; index options read SPY or QQQ). If it moved against the
+  call or put, one alert says so, with the option's mark and the owner's own
+  record from the journal: closed opening option trades held under 30 minutes
+  against those held two hours or more. It never says what to do, and no bars
+  means no alert. Once per position (generation 0); due at or after the close
+  or more than ``WRONG_WAY_GRACE`` minutes late, it is skipped.
 
 An already-qualified alert also freezes optional same-session Radar entry context.
 This does not participate in judging or delivery eligibility. Missing/stale context
@@ -91,7 +104,13 @@ CLAIM_SECONDS = 120
 EXPIRE_SECONDS = 15 * 60
 BACKOFF = (30, 60, 120, 300)
 HOLD_MINUTES = 60
-KINDS = ("giveback", "expiry_first", "expiry_final", "hold_hour")
+OPENING_MINUTES = 60  # entries in the session's first hour are checked for the wrong way
+WRONG_WAY_MINUTES = 30
+WRONG_WAY_GRACE = 5
+RECORD_MIN_TRADES = 5  # per side of the record, or the message leaves it out
+QUICK_MINUTES, LONG_MINUTES = 30, 120
+INDEX_UNDERLYING = {"SPXW": "SPY", "SPX": "SPY", "XSP": "SPY", "NDX": "QQQ", "NDXP": "QQQ"}
+KINDS = ("giveback", "expiry_first", "expiry_final", "hold_hour", "wrong_way")
 
 
 def enabled() -> bool:
@@ -120,6 +139,10 @@ def floorless_giveback(position: dict) -> bool:
 
 def hold_enabled() -> bool:
     return enabled() and os.environ.get("POSITION_HOLD_ALERTS", "").lower() == "true"
+
+
+def wrong_way_enabled() -> bool:
+    return enabled() and os.environ.get("POSITION_WRONG_WAY_ALERTS", "").lower() == "true"
 
 
 def _utc(stamp: float) -> datetime:
@@ -170,6 +193,69 @@ def hold_due(opened_at: datetime, today: date, regular, expires_today: bool) -> 
     return due
 
 
+def wrong_way_due(opened_at: datetime, today: date, regular) -> int | None:
+    """The minute (ET) a position opened today in the session's first hour is checked for the wrong way, or None."""
+    if opened_at.date() != today:
+        return None
+    entry = opened_at.hour * 60 + opened_at.minute
+    if not regular[1] <= entry < regular[1] + OPENING_MINUTES:
+        return None
+    due = entry + 1 + WRONG_WAY_MINUTES
+    return due if due < regular[2] else None
+
+
+def underlying_move(ticker: str, opened_at: datetime) -> float | None:
+    """The underlying's move over the ``WRONG_WAY_MINUTES`` from the minute after the entry, from today's chart bars
+    (a bar's open, else the previous bar's close), or None when a price is missing."""
+    try:
+        bars = ping_images.today_bars(INDEX_UNDERLYING.get(ticker, ticker))
+    except Exception:  # noqa: BLE001 - no bars means no judgment, never a failed pass
+        log.info("Wrong-way check: no bars for %s", ticker, exc_info=True)
+        return None
+    by_time = {int(b["time"]): b for b in bars}
+
+    def price(at: int) -> float | None:
+        if at in by_time:
+            return by_time[at]["open"]
+        return by_time[at - 60]["close"] if at - 60 in by_time else None
+
+    start = int(opened_at.replace(second=0, microsecond=0, tzinfo=ET).timestamp()) + 60
+    first, last = price(start), price(start + WRONG_WAY_MINUTES * 60)
+    return None if not first or last is None else last / first - 1
+
+
+def opening_record(db: Session) -> str | None:
+    """The owner's closed option trades opened in the session's first hour, held under 30 minutes against two hours or
+    more, from the journal; None when either side has fewer than ``RECORD_MIN_TRADES``."""
+    rows = db.exec(select(Trade.opened_at, Trade.hold_duration_mins, Trade.realized_pnl)
+                   .where(Trade.instrument_type == "option", Trade.status != "open", Trade.realized_pnl.is_not(None),
+                          Trade.hold_duration_mins.is_not(None))).all()
+    opening = [r for r in rows if 570 <= r.opened_at.hour * 60 + r.opened_at.minute < 570 + OPENING_MINUTES]
+    quick = [float(r.realized_pnl) for r in opening if r.hold_duration_mins < QUICK_MINUTES]
+    held = [float(r.realized_pnl) for r in opening if r.hold_duration_mins >= LONG_MINUTES]
+    if min(len(quick), len(held)) < RECORD_MIN_TRADES:
+        return None
+
+    def side(pnls: list[float]) -> str:
+        return f"{len(pnls)} won {sum(p > 0 for p in pnls) / len(pnls):.0%} ({_money(sum(pnls))})"
+    return (f"Your past opening option trades: closed within {QUICK_MINUTES} min, {side(quick)}; "
+            f"held {LONG_MINUTES // 60} h or more, {side(held)}.")
+
+
+def wrong_way_facts(db: Session, alert: PositionAlert) -> dict:
+    """What a wrong-way message says beyond the alert row: the underlying's move and the owner's record. Either may be
+    None; neither holds the alert back."""
+    facts = {"move": None, "record": None}
+    try:
+        trade = db.get(Trade, alert.trade_id)
+        if trade is not None:
+            facts["move"] = underlying_move(trade.ticker, trade.opened_at)
+        facts["record"] = opening_record(db)
+    except Exception:  # noqa: BLE001 - the alert matters more than its extras
+        log.warning("Wrong-way facts skipped", exc_info=True)
+    return facts
+
+
 def open_positions(db: Session) -> list[dict]:
     """Every open long option with what is still held, anchored in its first entry fill."""
     trades = db.exec(select(Trade).where(Trade.status == "open", Trade.instrument_type == "option",
@@ -218,7 +304,8 @@ def _count(contracts: float) -> str:
     return f"{n} contract{'' if contracts == 1 else 's'}"
 
 
-def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None) -> tuple[str, str, int]:
+def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
+                  facts: dict | None = None) -> tuple[str, str, int]:
     """Title, body and ntfy priority for one alert."""
     if alert.mark is not None:
         now_part = f"now {_money(alert.gain)} ({_pct(alert.gain_pct)}) at a {_premium(alert.mark)} mid, bid {_premium(alert.bid)}"
@@ -226,6 +313,20 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
         now_part = f"bid {_premium(alert.bid)}, too thin to price at a midpoint"
     else:
         now_part = "no live quote right now"
+    if alert.kind == "wrong_way":
+        facts = facts or {}
+        side = "put" if (alert.contract or "").endswith("P") else "call"
+        symbol = (alert.contract or "").split(" ")[0]
+        move = facts.get("move")
+        moved = (f"{symbol} {'down' if move < 0 else 'up'} {abs(move) * 100:.2f}% in the {WRONG_WAY_MINUTES} min after "
+                 f"your entry, against your {side}" if move is not None
+                 else f"{symbol} moved against your {side} in the {WRONG_WAY_MINUTES} min after your entry")
+        if alert.mark is None:
+            now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
+        record = f" {facts['record']}" if facts.get("record") else ""
+        return (f"{alert.contract}: wrong way at {WRONG_WAY_MINUTES} min",
+                f"{moved}. Option {now_part}. {_count(alert.contracts)} open.{record} "
+                f"Re-decide: close, trim, or set your exit.", 4)
     if alert.kind == "hold_hour":
         if alert.mark is None:
             now_part = "no reliable quote" + (f", bid {_premium(alert.bid)}" if alert.bid is not None else "")
@@ -246,8 +347,9 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
             f"Still open: {_count(alert.contracts)}, {now_part}.{when}", 5)
 
 
-def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None) -> tuple[str, str, int]:
-    title, body, priority = _base_message(alert, close_label, minutes_left)
+def message(alert: PositionAlert, close_label: str | None = None, minutes_left: int | None = None,
+            facts: dict | None = None) -> tuple[str, str, int]:
+    title, body, priority = _base_message(alert, close_label, minutes_left, facts)
     context = position_alert_context.phone_text(alert.context_snapshot_json)
     return title, body + ("\n\n" + context if context else ""), priority
 
@@ -271,7 +373,7 @@ def desk_path(db: Session, alert: PositionAlert) -> str:
 
 
 ASK_KIND = {"giveback": "Give-back alert", "hold_hour": "One-hour alert", "expiry_first": "Expires-today alert",
-            "expiry_final": "30-minutes-left alert"}
+            "expiry_final": "30-minutes-left alert", "wrong_way": "Wrong-way alert"}
 
 
 def ask_context(alert: PositionAlert) -> str:
@@ -402,6 +504,15 @@ class PositionAlerts:
             due = hold_due(position["opened_at"], today, regular, position["expiration"] == today)
             if due is not None and due <= minute < due + FIRST_GRACE_MINUTES:
                 found.append(self._alert(position, "hold_hour", watch.generation, mark, gain, gain_pct, watch, now))
+        if wrong_way_enabled():
+            due = wrong_way_due(position["opened_at"], today, regular)
+            if due is not None and due <= minute < due + WRONG_WAY_GRACE and db.exec(select(PositionAlert.id).where(
+                    PositionAlert.account_id == position["account_id"], PositionAlert.source_key == position["source_key"],
+                    PositionAlert.kind == "wrong_way")).first() is None:
+                trade = position["trade"]
+                move = underlying_move(trade.ticker, position["opened_at"])
+                if move is not None and move * (1 if trade.option_type == "call" else -1) < 0:
+                    found.append(self._alert(position, "wrong_way", 0, mark, gain, gain_pct, watch, now))
         return found
 
     def _alert(self, position: dict, kind: str, generation: int, mark: dict | None, gain, gain_pct, watch, now: float) -> PositionAlert:
@@ -479,7 +590,8 @@ class PositionAlerts:
                 db.commit()
                 return
             title, body, priority = message(alert, _clock_label(_minute_of(close)) if close else None,
-                                            max(1, int((close - now) // 60)) if close else None)
+                                            max(1, int((close - now) // 60)) if close else None,
+                                            wrong_way_facts(db, alert) if alert.kind == "wrong_way" else None)
             path, more = _links(db, alert)
             ticket = notification_policy.decide(
                 db, sender="position_alerts", source_id=str(alert.id), kind=alert.kind, title=title, body=body, now=now,
@@ -519,7 +631,8 @@ class PositionAlerts:
         return datetime(today.year, today.month, today.day, regular[2] // 60, regular[2] % 60, tzinfo=ET).timestamp()
 
 
-PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today"}
+PICTURE_TITLE = {"giveback": "gave back", "hold_hour": "held 1h", "expiry_first": "expires today", "expiry_final": "expires today",
+                 "wrong_way": "wrong way 30m"}
 
 
 def _picture(db: Session, alert: PositionAlert, now: float):

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 const CHOICE = "inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium hover:bg-secondary disabled:opacity-50 sm:min-h-8";
 const LINK = "min-h-11 text-xs font-medium text-primary underline-offset-2 hover:underline sm:min-h-0";
 const ALERT_KIND: Record<string, string> = { giveback: "Give-back", hold_hour: "Open an hour", expiry_first: "Expires today",
-  expiry_final: "30 minutes to the close" };
+  expiry_final: "30 minutes to the close", wrong_way: "Wrong way at 30 min" };
 const when = (at: number | null, today: boolean) => at == null ? "" : new Date(at * 1000).toLocaleString("en-US", {
   timeZone: "America/New_York", ...(today ? {} : { month: "short", day: "numeric" }), hour: "numeric", minute: "2-digit" });
 
