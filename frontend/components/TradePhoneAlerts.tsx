@@ -16,7 +16,9 @@ type Sent = { id?: string; contract?: string; quoted_at?: number | null; feedbac
   gain: number | null; gain_pct: number | null; peak_gain: number | null; peak_gain_pct: number | null;
   delivery: "pending" | "sending" | "sent" | "expired" | "unknown" | "skipped" | "held"; error: string | null; delivered_at: number | null;
   /** What the fills or a plan link show happened after the ping, e.g. "closed in 6 min" (backend notification_policy.then_text). */
-  then?: string | null };
+  then?: string | null;
+  /** What the underlying did after the ping, e.g. "+1h −4% · +1d −12%" (backend outcomes.after_text). */
+  after?: string | null };
 type Watch = { peak_gain: number | null; peak_gain_pct: number | null; armed: boolean; fired: boolean; peak_at: number | null };
 // The optional field keeps older API responses on the original +$50 rule.
 type Body = { enabled: boolean; giveback_dollar_floor_applies?: boolean; alerts: Sent[]; watch: Watch | null };
@@ -87,7 +89,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
   const selectedAsk = askHref && selected?.ask_context ? copilotLabHref(symbol, selected.ask_context) : askHref;
   const rows = <ul className="mt-1 divide-y">{history.map(a => <li key={a.id ?? `${a.kind}-${a.detected_at}`} className="py-2">
     <span className="font-medium">{KIND[a.kind]}</span>
-    <span className="text-muted-foreground"> · {time(a.detected_at)} · {((a.kind === "plan_link" && a.delivery === "skipped") || a.delivery === "held") && a.error ? a.error : DELIVERY[a.delivery]}{a.then && <> · then: {a.then}</>}</span>
+    <span className="text-muted-foreground"> · {time(a.detected_at)} · {((a.kind === "plan_link" && a.delivery === "skipped") || a.delivery === "held") && a.error ? a.error : DELIVERY[a.delivery]}{a.then && <> · then: {a.then}</>}{a.after && <> · {a.after}</>}</span>
     <div className="text-muted-foreground">
       {a.kind === "giveback" && <>Was up {money(a.peak_gain)} ({pct(a.peak_gain_pct)}), </>}
       {a.kind === "plan_nudge" ? <>Opened {a.entry ?? a.contracts} with no plan linked or suggested</>
@@ -126,7 +128,7 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
         <Link href={chartLink({ symbol, from: selected.detected_at, trade: tradeId })}
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">View underlying chart at alert</Link>
       </div>
-      <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}</p>
+      <p className="text-xs text-muted-foreground">Delivery: {selected.delivery === "held" && selected.error ? selected.error : DELIVERY[selected.delivery]}{selected.then && <> Then: {selected.then}.</>}{selected.after && <> After: {selected.after}.</>}</p>
       {owner && selected.id && selected.feedback !== undefined && ["giveback", "hold_hour", "wrong_way", "expiry_first", "expiry_final", "expiry_eve"].includes(selected.kind)
         && ["sent", "unknown"].includes(selected.delivery) && <PositionAlertFeedback key={`${tradeId}:${selected.id}`}
           tradeId={tradeId} alertId={selected.id} initial={selected.feedback}

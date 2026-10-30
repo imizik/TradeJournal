@@ -73,3 +73,55 @@ Accounting and temporal edge cases are covered in
 covered in `frontend/e2e/analytics.spec.ts`, using isolated seeded SQLite data.
 These checks do not establish live broker completeness or historical data
 freshness.
+
+## Outcomes
+
+Every output the app makes gets one `outcome` row (`app/engine/outcomes.py`):
+what the underlying did after it, what the owner did in the fills, and the
+dollars against the obvious alternative. Python fills it in at the end of the
+sync pipeline the timer runs at 08:00 and 17:00 New York (`compute_outcomes`); no model call, and
+prices come only from the minute sessions the charts already store on disk
+(the only provider read is the market calendar's usual cached one, at most
+once a New York day).
+Rows start at `OUTCOMES_SINCE` (default 2026-10-21, when position alerts went
+live). `GET /analytics/outcomes?kind=&since=&symbol=` (owner only) returns the
+rows and a summary per kind; `/proof` shows the summary, the trade page shows
+each ping's "+1h −4% · +1d −12%", and the week review reads it per kind.
+
+| Subject (`subject_kind`) | Anchored at | Action window | Alternative (`alt_usd`) |
+|---|---|---|---|
+| `ping`: every phone ping; those the policy held are rows too, `held` true, as a control | delivered (else decided) | 15 min on the position's own fills for an exit-kind ping; 30 min on the symbol's fills otherwise | open-trade alerts sent or possibly sent (as `exit_habits` counts them): proceeds minus closing the alert's contracts at its midpoint mark (`follow_up`'s `vs_alert`) |
+| `plan`: every pre-trade plan, the copilot's plan card included | saved | the trade's life: `entered` once linked, else `none` (final 14 days on with no link) | none |
+| `radar_event`: stock events on the stock, group events on their top member (Radar's first listed) | first sighting | 30 min on the symbol's fills | one share at first sight in Radar's direction: the scorecard's move against SPY to the session's last pass times the price then |
+| `research`: each Jo research record, on its symbol; d1 and d5 only | saved | to the next session's close | none |
+| `shadow_decision`: each Shadow book plan or skip; d1 and d5 only | decided | its own paper book (`entered`, `closed`, `none`) | none: its paper fills are its result |
+
+`companion_update` is reserved for the position companion's updates.
+
+**Windows.** `h1` ends 60 minutes after the anchor; `d1` and `d5` at the
+regular close of the 1st and 5th trading day after the anchor's New York date
+(the market calendar, else weekdays). Each holds the last minute's close
+before the end, its change from the reference price in percent, the highest
+and lowest minute inside, and `complete`. The reference price is the source's
+own recorded price of the underlying (Radar's evidence at first sight), else
+the last stored minute at or before the anchor (up to five days back, for a
+weekend or an anchor before 04:00). Stored minutes include extended hours.
+
+**Action.** With a position in the symbol open at the anchor: `closed` (all of
+it), `trimmed`, `added` or `held`; with none, `entered` or `none`. `unknown`
+when it cannot be told (no symbol, or the position's trade is gone). Fills
+carry the broker's minute, so a fill in the anchor's own minute counts as after.
+
+**Incomplete rows.** A window still open, a session not stored yet, an open
+position behind an alert or a plan, or a Radar session still trading leaves
+the row incomplete; the next run recomputes it. New subjects are computed
+before rows waiting on a window, at most 400 a run. A window still missing a
+session ten days after it ended is closed with what there is, and says which
+sessions were missing. Symbols the charts never stored have no prices.
+
+**What it does not claim.** Counts and price paths, not causation. A price
+move after a ping is not the ping's effect, the alternative is a reference
+mark rather than an executable price, held pings are a convenience control
+rather than a randomized one, and a symbol nobody charted has no stored
+sessions to measure.
+

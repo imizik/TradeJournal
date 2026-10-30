@@ -5,6 +5,7 @@ const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 test.beforeEach(async ({ request }) => {
   expect((await request.post(`${API}/__test/exit-habits-seed`)).ok()).toBe(true);
   expect((await request.post(`${API}/__test/radar-seed`)).ok()).toBe(true);
+  expect((await request.post(`${API}/__test/outcomes-seed`)).ok()).toBe(true);
 });
 
 for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
@@ -69,11 +70,31 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     await expect(page.getByTestId("proof-planning-caveat")).toContainText("not that planning causes it");
     await expect(planningCard.getByTestId("plan-group-planned")).toContainText("0 trades");
     await expect(planningCard.getByTestId("plan-group-late")).toContainText("shown, not counted");
+    // Outcomes: counts and price paths per kind, no verdict.
+    const outcomesCard = page.getByRole("region", { name: "Outcomes" });
+    await expect(page.getByTestId("proof-outcomes-caveat")).toHaveText("Counts and price paths, not causation.");
+    const pings = outcomesCard.getByTestId("outcome-kind-ping");
+    await expect(pings).toContainText("Phone pings");
+    await expect(pings).toContainText("2 · 1 held");
+    await expect(pings).toContainText("-10.0% of 2"); // the median of -12% and -8%
+    await expect(pings).toContainText("closed 1 · entered 1");
+    await expect(pings).toContainText("-$40");
+    await expect(outcomesCard.getByTestId("outcome-kind-radar_event")).toContainText("+$4");
+    await expect(outcomesCard.getByTestId("outcome-kind-plan")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: test.info().outputPath(`proof-${size}.png`), fullPage: true });
     expect(errors).toEqual([]);
   });
 }
+
+test("the trade page lists what the underlying did after each ping", async ({ page }) => {
+  const habits = await (await page.request.get("/api/backend/analytics/exit-habits")).json();
+  const nvda = habits.alerts.find((a: { contract: string }) => a.contract.startsWith("NVDA"));
+  await page.goto(`/trades/${nvda.trade_id}`);
+  const alerts = page.getByTestId("trade-phone-alerts");
+  await expect(alerts).toContainText("+1h −4% · +1d −12%");
+  await alerts.screenshot({ path: test.info().outputPath("trade-phone-alerts-outcome.png") });
+});
 
 for (const [size, width, height, symbol] of [["desktop", 1440, 1000, "AAPL"], ["phone", 390, 844, "TSLA"]] as const) {
   test(`alert feedback survives a lost save response, reload and stale edit on ${size}`, async ({ page }) => {
