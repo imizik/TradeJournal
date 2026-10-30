@@ -1,5 +1,5 @@
 {
-  "commit": "9cff89c23e00a7284cf4a27efa509e65cdec8293",
-  "date": "2026-10-29",
-  "note": "Reconciled e40b122c..9cff89c2 (39 code commits, #543-#585: Copilot desk decision bar, keys, Radar and alert decisions and scorecards, thread list, Plans view, horizons, exit reviews, fill links, desk as home, graphite surfaces; alert feedback on Proof; Radar evidence receipts; Deploys page; autodeploy state move; opening lab). Most PRs updated their own docs. Fixed in feature-map: added the Deploys page row, the Radar evidence receipts/census module and test, and alert feedback on the Proof card. Not checked: every prose claim in the per-PR sections of copilot-lab and radar; deploy/README; research notes; live host states."
+  "commit": "d418a7d8b9615505d92e36bb0001c6849d0ae623",
+  "date": "2026-10-30",
+  "note": "Reconciled 9cff89c2..d418a7d8 (40 code commits, #586-#625: copilot desk checklists, short answers, compare, Telegram pings and replies, position companion, fill interrupts, evening review, outcomes, Radar dip rule, Jo research role, option rolls, Company Research). Fixed: feature-map Company Research screen, option rolls and seven new test modules; Company Research refresh in the sync lane; Jo research role no longer 'this PR'/'once merged'; level alerts send through phone.py (Telegram or ntfy). Not checked: per-PR prose in copilot-lab, radar and company-research docs; deploy/README; live host states."
 }
