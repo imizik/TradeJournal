@@ -1,6 +1,7 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /company-research/researchers",
     "GET /company-research/companies/{identifier}/comparisons",
     "GET /company-research/companies/{identifier}/numbers",
     "PATCH /company-research/findings/{identifier}",

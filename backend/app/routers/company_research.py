@@ -78,6 +78,7 @@ class AssignmentBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     company_id: uuid.UUID
     question: str = Field(min_length=1, max_length=2000)
+    actor: str = Field(default="manual", max_length=50)
 
 
 class ImportBody(BaseModel):
@@ -88,7 +89,22 @@ class ImportBody(BaseModel):
 
 @router.post("/assignments")
 def create_assignment(body: AssignmentBody, db: Session = Depends(get_session)):
-    return assignments.create(db, body.company_id, body.question)
+    from fastapi import HTTPException
+    from app.engine.company_research_bridge import researchers, configuration
+    if body.actor != "manual" and body.actor not in {r["id"] for r in researchers()}:
+        raise HTTPException(422, "Researcher is not configured and approved")
+    packet = assignments.create(db, body.company_id, body.question, body.actor)
+    if body.actor != "manual":
+        from app.jobs.company_research import publish
+        publish(db, uuid.UUID(packet["id"]), body.actor, configuration())
+    return packet
+
+
+@router.get("/researchers")
+def researchers():
+    from app.engine.company_research_bridge import researchers
+    return researchers()
+
 
 @router.get("/assignments/{identifier}")
 def assignment(identifier: uuid.UUID, db: Session = Depends(get_session)):

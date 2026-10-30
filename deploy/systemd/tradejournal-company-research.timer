@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh followed company fundamentals daily (opt-in)
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 America/New_York
+Persistent=true
+Unit=tradejournal-company-research.service
+
+[Install]
+WantedBy=timers.target
