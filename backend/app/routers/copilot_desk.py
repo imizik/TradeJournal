@@ -14,6 +14,8 @@ that already exist:
   there; a waiting one leaves Watching;
 - ``new``: Radar events since the last Radar visit (``today._radar``) and thesis-watch triggers fired today
   (``today._thesis``), newest first;
+- a position the position companion adopted (``engine/position_companion.py``) opens its adopted thread and reads
+  "Adopted · draft plan" (or its armed invalidation) with ``adopted`` set, until it closes or is ignored;
 - ``watch``: every other open position, armed plan and open investigation, and each plan whose position closed in the
   last ``EXIT_DAYS`` days (``copilot_plans.exits``): Exited, asking its one exit review at any hour.
 
@@ -108,7 +110,7 @@ def _row(key: str, group: str, title: str, status: dict, *, symbol: str | None =
     return {"key": key, "group": group, "symbol": symbol, "title": title, "instrument": instrument, "value": value,
             "status": status, "meter": meter, "investigation_id": investigation_id, "trade_id": trade_id,
             "radar_event_id": radar_event_id, "path": path, "changed_at": changed_at, "horizon": None, "close": None,
-            "fill_to_link": fill_to_link}
+            "fill_to_link": fill_to_link, "adopted": False}
 
 
 def meter(entry: float | None, invalidation: float | None, last: float | None, tone: str) -> dict | None:
@@ -157,6 +159,13 @@ def _position_investigations(db: Session, book: dict) -> dict[str, str]:
         if found:
             out[row["trade_id"]] = found
     return out
+
+
+def _adopted(db: Session) -> dict[str, dict]:
+    """Each adopted, still open position's thread, by trade id: its investigation and plan state."""
+    from app.engine import position_companion
+    return {trade_id: {"investigation_id": str(row.investigation_id), "state": row.state}
+            for trade_id, row in position_companion.adopted_trades(db).items() if row.investigation_id}
 
 
 def _investigations(db: Session) -> dict:
@@ -342,13 +351,25 @@ def _decided(row: dict, decided: dict) -> datetime | None:
     return at
 
 
-def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dict) -> tuple[list[dict], list[dict], set[str]]:
-    """(act rows, watch rows, investigation ids the rows cover). ``links``: each planned position's investigation."""
+def _adopted_status(row: dict, adopted: dict, plan: dict | None) -> dict:
+    """An adopted position not flagged for Act now: its draft, or its armed invalidation."""
+    level = (plan or {}).get("invalidation")
+    if adopted["state"] == "armed" and level:
+        away = f" · {abs(level['distance_pct']):.1f}% away" if level.get("state") == "armed" and "distance_pct" in level else ""
+        return _say(f"Adopted · invalidation {level['price']:.2f} ({row['symbol']}){away}", "muted")
+    return _say("Adopted · draft plan to confirm", "info")
+
+
+def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dict,
+                   adopted: dict[str, dict] | None = None) -> tuple[list[dict], list[dict], set[str]]:
+    """(act rows, watch rows, investigation ids the rows cover). ``links``: each planned position's investigation;
+    ``adopted``: each adopted position's thread (``_adopted``)."""
     plans = {p["investigation_id"]: p for p in board.get("plans", [])}
     act, watch, covered = [], [], set()
     for row in found["positions"]:
         trade_id, symbol = row["trade_id"], row["symbol"]
-        investigation = links.get(trade_id)
+        companion = (adopted or {}).get(trade_id) if row["plan"] is None else None
+        investigation = links.get(trade_id) or (companion["investigation_id"] if companion else None)
         if investigation:
             covered.add(investigation)
         plan = plans.get(investigation) if investigation else None
@@ -364,7 +385,7 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
         if flagged and at is None:
             hit = any(r["kind"] == "invalidation_hit" for r in flagged["reasons"])
             tone = "loss" if hit else "attention"
-            level = (row["plan"] or {}).get("invalidation")
+            level = (row["plan"] or {}).get("invalidation") or (plan or {}).get("invalidation")
             track = meter(plan["entry"]["price"] if plan and plan["entry"] else None, level["price"] if level else None,
                           plan["last"] if plan else None, tone)
             act.append(_row(f"trade:{trade_id}", "act", row["contract"], _say(reasons, tone), meter=track, **common))
@@ -372,7 +393,10 @@ def _position_rows(found: dict, links: dict[str, str], board: dict, decided: dic
             clock = at.replace(tzinfo=UTC).astimezone(ET).strftime("%H:%M")
             watch.append(_row(f"trade:{trade_id}", "watch", row["contract"], _say(f"Decided {clock} · {reasons}", "muted"), **common))
         else:
-            watch.append(_row(f"trade:{trade_id}", "watch", row["contract"], _position_status(row), **common))
+            status = _adopted_status(row, companion, plan) if companion else _position_status(row)
+            watch.append(_row(f"trade:{trade_id}", "watch", row["contract"], status, **common))
+        if companion:
+            (act if flagged and at is None else watch)[-1]["adopted"] = True
     return act, watch, covered
 
 
@@ -558,8 +582,9 @@ def threads(db: Session, now: float) -> dict:
     if found["state"] == "ok":
         # Which investigation each planned position opens; on its own, so a failure here still lists the positions.
         links = today._section(db, "desk position plans", lambda: {"state": "ok", "map": _position_investigations(db, found)})
+        adopted = today._section(db, "desk adopted", lambda: {"state": "ok", "map": _adopted(db)})
         act, watch, covered = _position_rows(found, links.get("map", {}), board if board["state"] == "ok" else {},
-                                             decisions.get("symbols", {}))
+                                             decisions.get("symbols", {}), adopted.get("map", {}))
     near = []
     if board["state"] == "ok":
         waiting = {}

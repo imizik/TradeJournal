@@ -13,6 +13,13 @@ the fill linked to its capture is an open position. Once its alerts have fired
 or been deleted and nothing is open it drops off, and still shows in its
 investigation (``LinkedActivity``). Read-only; the only id out is the
 investigation's. Last prices come from one batched quote read.
+
+A position the companion adopted (``engine/position_companion.py``) has no plan
+capture: once Confirm arms its invalidation, its plan is read from the adopted
+row instead: the position (open or closed) from the trade at its anchor, the
+direction from the option (a call is long), the thesis from the draft, and an
+``entry`` level already hit at the underlying's price when it was adopted, so
+the plan ladder has both ends.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -22,6 +29,7 @@ from sqlmodel import Session, select
 
 from app.engine import capture_links
 from app.engine.chart_journal import contract_label
+from app.engine.chart_math import ET
 from app.engine.position_alerts import _epoch
 from app.models import CopilotInvestigation, LevelAlert, PlanTimeStop, TradeCapture
 
@@ -130,9 +138,26 @@ def _plans(db: Session) -> tuple[list[dict], dict]:
         plan["capture"] = capture
     captures = [p["capture"] for p in plans if p["capture"] is not None]
     links = capture_links.link_rows(db, captures)
+    from app.engine import position_companion
+    adopted = position_companion.for_investigations(db, [p["investigation_id"] for p in plans if p["capture"] is None])
     for plan in plans:
         plan["position"] = _position(plan["capture"], links, {})
+        if (row := adopted.get(plan["investigation_id"])) is not None:
+            trade = position_companion.trade_of(db, row)
+            plan["adopted"], plan["trade"] = row, trade
+            if trade is not None:
+                plan["position"] = "in_position" if trade.status == "open" else "closed"
     return plans, links
+
+
+def _adopted_entry(row) -> dict | None:
+    """An adopted position's entry on the underlying: its price when adopted, already hit at the first fill."""
+    from app.engine import position_companion
+    price = position_companion.plan_of(row).get("entry_underlying")
+    if not price:
+        return None
+    return {"price": price, "condition": "touches", "interval": None, "state": "hit",
+            "hit_at": int(row.opened_at.replace(tzinfo=ET).timestamp())}
 
 
 def board(db: Session, quotes=None) -> dict:
@@ -148,7 +173,8 @@ def board(db: Session, quotes=None) -> dict:
     waiting = [p["capture"] for p in live if p["capture"] is not None and p["position"] == "waiting"]
     suggested = capture_links.suggestions(db, waiting)
     for plan in live:
-        plan["position"] = _position(plan["capture"], links, suggested)
+        if plan.get("adopted") is None:  # an adopted plan's position is its trade's
+            plan["position"] = _position(plan["capture"], links, suggested)
 
     last, fetched_at, issue = (quotes or _quotes)(sorted({p["symbol"] for p in live}))
     titles = {str(i.id): i.title for i in db.exec(select(CopilotInvestigation).where(
@@ -156,6 +182,18 @@ def board(db: Session, quotes=None) -> dict:
     rows = []
     for plan in live:
         price, capture, stop = last.get(plan["symbol"]), plan["capture"], plan["stop"]
+        adopted = plan.get("adopted")
+        if adopted is not None:
+            from app.engine import position_companion
+            draft = position_companion.plan_of(adopted)
+            rows.append({
+                "investigation_id": plan["investigation_id"], "symbol": plan["symbol"], "direction": draft.get("direction"),
+                "instrument": adopted.contract.removeprefix(adopted.ticker).strip(),
+                "thesis": draft.get("thesis") or titles.get(plan["investigation_id"]), "last": price,
+                "entry": _adopted_entry(adopted), "invalidation": _level(plan["invalidation"], price), "time_stop": None,
+                "position": plan["position"], "confirmed_at": int(_epoch(plan["newest"])),
+            })
+            continue
         if capture is not None:
             direction = "long" if capture.side in LONG_SIDES else "short"
         elif plan["entry"] and plan["invalidation"]:
@@ -202,7 +240,9 @@ def exits(db: Session, since: datetime) -> list[dict]:
     out = []
     for plan in plans:
         link = links.get(plan["capture"].id, {}).get("link") if plan["capture"] is not None else None
-        if link and link.get("trade_id"):
+        if plan.get("adopted") is not None:
+            trades = [plan["trade"]] if plan["trade"] is not None else []
+        elif link and link.get("trade_id"):
             trades = [t for t in [db.get(Trade, uuid.UUID(link["trade_id"]))] if t is not None]
         elif plan["position"] == "waiting":
             trades = db.exec(select(Trade).join(Account, Account.id == Trade.account_id)

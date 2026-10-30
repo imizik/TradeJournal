@@ -2,7 +2,8 @@
 
 Every copilot-side sender (open-trade alerts, plan nudges and link pings, plan
 time stops, a confirmed plan's entry and invalidation alerts, pre-market prep,
-the automatic week review, Watch your day, the evening review, fill-time pattern interrupts, Radar alerts, thesis watch, research results) keeps its own outbox, its own at-most-once delivery and its
+the automatic week review, Watch your day, the evening review, fill-time pattern interrupts, Radar alerts, thesis watch, research results, the
+position companion) keeps its own outbox, its own at-most-once delivery and its
 own expiry. Right before it hands a message to ``ntfy`` it asks this module one
 question, ``decide``: **send now, merge, or hold**. ``ntfy.py`` stays a
 transport. Jo's senders (Codex) are not gated here.
@@ -25,8 +26,9 @@ The policy, in the order it is applied:
   still goes out, and so does an invalidation after a last-day final.
 - **Budgets.** Every kind at or below ``interrupt`` in the priority order has a
   budget of its own a New York day (``PING_BUDGET_<KIND>``): ``interrupt`` 4
-  (fill-time pattern interrupts), ``nudge`` 2 (link
-  pings share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
+  (fill-time pattern interrupts), ``companion_update`` 12 (the position companion's
+  updates and close notes), ``nudge`` 2 (link pings and the companion's adopt pings
+  share it), ``prep`` 1 (shared with ``week_review`` and ``day_replay``),
   ``radar_event`` 4 (Radar's single pings), ``radar_digest`` 2, ``thesis_watch``
   2 and ``research`` 1. One kind spending its budget never takes another's: on
   October 29, 2026 the old shared pool was gone by 09:50 on prep, thesis watch,
@@ -35,13 +37,15 @@ The policy, in the order it is applied:
   (default 2) pings, so pre-open headlines cannot spend the day.
 - **Daily ceiling.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
   across every kind; ranks 3 and below (time stop, entry, hold-hour and the
-  budgeted kinds) are held once it is reached. Last-day final, invalidation
+  budgeted kinds) are held once it is reached; the position companion's updates
+  count toward it only for themselves, so they never hold another kind.
+  Last-day final, invalidation
   and give-back are never over it, and ``evening_review`` is never held at all,
   by the window or the ceiling: it is the ping that reports what was held.
 
   ``expiry_final`` > ``invalidation`` > ``giveback`` > ``time_stop`` (the
   90-minute last-day and the day-before-expiry alerts ranked with it) > ``entry``
-  > ``hold_hour`` > ``interrupt`` > ``nudge`` / ``link`` > ``prep`` (and ``week_review``,
+  > ``hold_hour`` > ``interrupt`` > ``companion_update`` > ``nudge`` / ``link`` / ``companion_adopt`` > ``prep`` (and ``week_review``,
   ``day_replay``) > ``evening_review`` > ``radar_event`` > ``radar_digest`` >
   ``thesis_watch`` > ``research``.
 
@@ -85,18 +89,20 @@ from app.models import CaptureLink, Fill, PhonePing, Trade, TradeFill
 
 log = logging.getLogger(__name__)
 
-PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "nudge", "prep", "evening_review",
+PRIORITY = ("expiry_final", "invalidation", "giveback", "time_stop", "entry", "hold_hour", "interrupt", "companion_update", "nudge", "prep", "evening_review",
             "radar_event", "radar_digest", "thesis_watch", "research")
 ALIASES = {"expiry_first": "time_stop", "expiry_eve": "time_stop", "wrong_way": "hold_hour", "link": "nudge", "no_plan": "nudge",
+           "companion_adopt": "nudge",
            "week_review": "prep", "day_replay": "prep"}
 NEVER_CAPPED = 3  # ranks 0-2 (last-day final, invalidation, give-back) are never over cap
 NEVER_QUIET = 2  # ranks 0-1 (last-day final, invalidation) are never held by the quiet window
 NEVER_HELD = ("evening_review",)  # neither the quiet window nor the ceiling: it reports what was held
 # Each kind's own daily budget (PING_BUDGET_<KIND>); a kind here is also held by the ceiling and, before the open, the
 # pre-open allowance. The noun names the budget in a held ping's reason.
-BUDGETS = {"interrupt": 4, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
-BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
+BUDGETS = {"interrupt": 4, "companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
+BUDGET_NAMES = {"interrupt": ("pattern interrupts'", "message"), "companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
+COMPANION = "companion_update"  # counted toward the ceiling only for itself
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
 RUN_SECONDS = 30
@@ -295,6 +301,10 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
                               "watch and research before 9:30 AM New York are spent.")
                 return
     cap = daily_cap()
+    # The companion's updates have their own budget and never crowd out another kind: they count toward the ceiling only
+    # for themselves (October 29's Radar starvation must not come back this way).
+    if row.kind != COMPANION:
+        sent = [(k, at) for k, at in sent if canonical(k) != COMPANION]
     if len(sent) >= cap:
         row.decision = "over_cap"
         row.reason = f"Not sent: {len(sent)} ping{'' if len(sent) == 1 else 's'} already went out today (cap {cap})."
@@ -322,7 +332,8 @@ def _label(kind: str) -> str:
             "time_stop": "time stop", "entry": "entry trigger", "interrupt": "pattern", "invalidation": "invalidation", "nudge": "plan nudge",
             "no_plan": "plan nudge", "link": "plan link", "prep": "pre-market prep", "week_review": "week review", "day_replay": "Watch your day",
             "evening_review": "evening review", "expiry_eve": "day-before-expiry", "radar_digest": "Radar digest",
-            "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research"}.get(kind, kind)
+            "radar_event": "Radar", "thesis_watch": "thesis watch", "research": "research", "companion_adopt": "adopted position",
+            "companion_update": "companion update"}.get(kind, kind)
 
 
 def delivered(db: Session, ticket: Ticket, now: float) -> None:
@@ -531,6 +542,7 @@ def held_back_today(db: Session, now: float) -> dict:
 
 
 SHORT = {"radar_event": "Radar", "radar_digest": "Radar", "evening_review": "evening", "prep": "prep", "nudge": "nudges",
+         "companion_update": "companion",
          "thesis_watch": "thesis watch", "research": "research"}
 
 

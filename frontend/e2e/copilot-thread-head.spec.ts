@@ -143,6 +143,29 @@ test("an armed plan not yet entered shows no position; a thread with no plan sho
   await expect(conversation(page).getByRole("region", { name: "Plan ladder" })).toHaveCount(0);
 });
 
+test("a position the copilot adopted: its row and header say Adopted while the plan is a draft", async ({ page }) => {
+  const SOUN = "55555555-5555-4555-8555-555555555555";
+  await lab(page, SOUN);
+  await page.route(`**/copilot/investigations/${SOUN}`, (route) => route.fulfill({ json: { ...saved(SOUN, "SOUN"), title: "Adopted: SOUN 12C" } }));
+  await page.route("**/copilot/plans/positions", (route) => route.fulfill({ json: { ...POSITIONS, count: 4, positions: [...POSITIONS.positions,
+    { trade_id: "t-soun", symbol: "SOUN", contract: "SOUN 10/24/26 12C", instrument: "option", direction: "long", quantity: 3,
+      option: { side: "call", strike: 12, expiry: "2026-10-24" }, mark: 95, avg_entry: 80, days_held: 0, unrealized_usd: 45,
+      unrealized_pct: 18.8, giveback: null, latest_alert: null, plan: null, link_path: null, plan_path: null }] } }));
+  await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: {
+    as_of: "2026-10-23T15:00:00Z", quotes_at: null, quote_issue: null, sections: {}, day: { phase: "regular", need_you: 0, streak: null },
+    plans: [], threads: [{ key: "trade:t-soun", group: "watch", symbol: "SOUN", title: "SOUN 10/24/26 12C", instrument: "10/24/26 12C",
+      value: null, status: { text: "Adopted · draft plan to confirm", tone: "info" }, meter: null, investigation_id: SOUN, trade_id: "t-soun",
+      radar_event_id: null, path: null, changed_at: null, horizon: "day", close: null, fill_to_link: null, adopted: true }] } }));
+  await page.reload();
+  await expect(page.getByText("Adopted · draft plan to confirm").first()).toBeVisible();
+  const head = conversation(page).getByRole("group", { name: "Thread header" });
+  await expect(head).toContainText("Adopted");
+  await expect(head).not.toContainText("In position");
+  await expect(head).toContainText("12C · Oct 24 · 1 day left");
+  await expect(head.getByTestId("thread-price")).toContainText("option mark0.95+18.8%");
+  await page.screenshot({ path: test.info().outputPath("thread-head-adopted.png") });
+});
+
 test("the header and ladder fit a 375 px phone, the underlying still labelled", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page, NBIS);

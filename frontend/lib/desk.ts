@@ -67,6 +67,8 @@ export type DeskThread = {
   /** The open trade whose fill waits to be linked to a plan (a position the link ping offers plans for, or the plan the
    * linker suggests it for); its thread top links it inline (``FillLinkBar``). */
   fillToLink: string | null;
+  /** A position the copilot adopted after an unplanned entry (its draft or confirmed plan is the thread's). */
+  adopted?: boolean;
 };
 
 /** How often the desk checks in after the close: a day trade every trading day, a swing on a day something happened to

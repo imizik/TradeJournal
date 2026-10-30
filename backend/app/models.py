@@ -709,6 +709,43 @@ class FillInterrupt(SQLModel, table=True):
     noted_at: Optional[datetime] = None  # the owner tapped Noted
 
 
+class PositionCompanion(SQLModel, table=True):
+    """One unplanned long option the copilot adopted (``engine/position_companion.py``): its saved investigation, the
+    provisional plan (``plan_json``), the Telegram thread's root message and each update (``updates_json``). Written once
+    per position: the unique position anchor keeps a trade rebuild, a restart or a second process from adopting it twice."""
+
+    __tablename__ = "position_companion"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source_key", name="uq_position_companion_position"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)  # the first entry fill's source identity
+    trade_id: uuid.UUID  # the trade when it was adopted (trades are rebuilt; read by source_key)
+    ticker: str
+    contract: str  # e.g. "NBIS 11/21/26 160C"
+    option_type: str  # call | put
+    expiration: date
+    opened_at: datetime  # the first entry fill, a New York wall clock
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    # adopting (the turn is running) | draft | armed (Confirm armed the invalidation) | ignored | closed | failed
+    state: str = Field(default="adopting", index=True)
+    watched: bool = True  # False: adopt-only, past COMPANION_MAX_POSITIONS (the newest win)
+    investigation_id: Optional[uuid.UUID] = None
+    plan_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    alert_id: Optional[uuid.UUID] = None  # the invalidation level alert Confirm armed
+    message_id: Optional[str] = None  # the adopt message's Telegram id: every later message replies to it
+    delivery: str = Field(default="pending")  # the adopt ping: pending | sent | held | unknown | failed | off
+    updates_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    last_update_at: Optional[datetime] = None  # the adopt or the last update (UTC): triggers count after it
+    last_underlying: Optional[float] = None  # the underlying then, for the move trigger
+    decided_at: Optional[datetime] = None  # the Confirm or Ignore tap
+    closed_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+
 class PlanTimeStop(SQLModel, table=True):
     """A confirmed copilot plan's time stop (``engine/plan_time_stops.py``): one
     phone ping at ``due_at`` if a position in ``symbol`` opened after the plan is
