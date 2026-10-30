@@ -43,7 +43,7 @@ from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import capture_links, notification_policy, ntfy, ping_images
+from app.engine import capture_links, notification_policy, phone, ping_images
 from app.engine.captures import epoch
 from app.engine.chart_journal import contract_label, stamp
 from app.engine.chart_math import ET, session_windows
@@ -240,7 +240,7 @@ class PlanNudges:
                 nudge.delivery, nudge.last_error = "expired", "Not sent within 15 minutes or before the close, so it was not sent late."
                 db.commit()
                 return
-            if not ntfy.configured():
+            if not phone.configured():
                 nudge.delivery, nudge.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 nudge.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
@@ -257,8 +257,9 @@ class PlanNudges:
                 title, body, path = link_message(label, plans, trade.id)
             else:
                 title, body, path = message(nudge, label)
+            ticket_kind = "link" if nudge.kind == "link" else "nudge"
             ticket = notification_policy.decide(
-                db, sender="plan_nudges", source_id=str(nudge.id), kind="link" if nudge.kind == "link" else "nudge", title=title, body=body,
+                db, sender="plan_nudges", source_id=str(nudge.id), kind=ticket_kind, title=title, body=body,
                 now=now, anchor=notification_policy.anchor(nudge.account_id, nudge.source_key), symbol=nudge.ticker, trade_id=nudge.trade_id)
             if ticket.held:
                 nudge.delivery, nudge.last_error = "held", ticket.reason
@@ -267,9 +268,9 @@ class PlanNudges:
             image = ping_images.picture(ping_images.prepare(db, _picture, nudge, label, now)) if nudge.attempts == 0 else None  # a retry goes as text
             nudge.attempts += 1
             try:
-                _, image_state = ping_images.publish(title, body + ticket.append, image, priority=4,
-                                                     tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
-            except ntfy.NtfyError as exc:
+                _, image_state = phone.send(title, body + ticket.append, kind=ticket_kind, image=image, priority=4,
+                                            tags=("link" if nudge.kind == "link" else "memo",), path=path, direct_click=True)
+            except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     nudge.delivery, nudge.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
                     notification_policy.delivered(db, ticket, now)

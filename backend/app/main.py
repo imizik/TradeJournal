@@ -364,6 +364,19 @@ async def _maybe_start_shadow_book(app_: FastAPI):
     return None if book is None else asyncio.create_task(book.loop())
 
 
+async def _maybe_start_telegram_replies(app_: FastAPI):
+    """Reply buttons on Telegram pings (app/engine/telegram_replies.py): an outbound long poll, never an inbound
+    webhook; off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set."""
+    app_.state.telegram_replies = None
+    from app.engine import telegram
+    if not telegram.configured() or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
+        return None
+    from app.engine.telegram_replies import Replies
+    replies = Replies(engine)
+    app_.state.telegram_replies = replies
+    return asyncio.create_task(replies.loop())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -386,6 +399,7 @@ async def lifespan(_app: FastAPI):
     chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
     _app.state.chart_market_stream = chart_market_stream
     level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
+    telegram_replies = await _maybe_start_telegram_replies(_app)
     market_watch = await _maybe_start_market_watch(_app)
     radar = await _maybe_start_radar(_app)
     jo_morning = await _maybe_start_jo_morning(_app)
@@ -408,6 +422,8 @@ async def lifespan(_app: FastAPI):
             market_watch.cancel()
         if radar is not None:
             radar.cancel()
+        if telegram_replies is not None:
+            telegram_replies.cancel()
         if level_alerts is not None:
             await level_alerts.stop()
         await chart_market_stream.stop()
