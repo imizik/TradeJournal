@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import type { InvestigationSummary } from "@/lib/copilot";
+import { copilotStatus, type InvestigationSummary } from "@/lib/copilot";
 import { getMorning, saveBriefFeedback, type BriefEvidence, type BriefItem, type BriefOpportunity, type BriefMemory, type MorningDelivery, type MorningView } from "@/lib/joMorning";
 import { DashboardCard, dashboardLink } from "./DashboardCard";
 import DayJournal from "@/components/DayJournal";
@@ -76,8 +76,10 @@ function DeliveryStatus({ delivery, pending, day }: { delivery: MorningDelivery;
 }
 
 /** The copilot's 08:30 morning brief for ``day`` (backend/app/engine/premarket_prep.py), found by its saved title among the
- * latest saved conversations; null when there is none or the lab is off. Earlier days were titled "Pre-market prep". */
+ * latest saved conversations; null when there is none or the lab is off (the shared status read, so a lab-off backend is
+ * never asked for its conversations). Earlier days were titled "Pre-market prep". */
 async function getCopilotBrief(day: string, signal: AbortSignal): Promise<InvestigationSummary | null> {
+  if (!(await copilotStatus()).enabled) return null;
   const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
   if (!response.ok) return null;
   const { investigations } = await response.json() as { investigations: InvestigationSummary[] };
