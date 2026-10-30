@@ -12,7 +12,11 @@ exits and in a few repeated entry habits. Four pure rules judge each new **entry
 - ``late_short_dated``: a ``buy_to_open`` of an option with 0 to 2 trading days to expiry (weekdays; a market
   holiday counts as one) at or after 14:00 New York.
 
-A stock entry can fire only ``opened_green``; a short (``sell_to_open``) only ``opened_green``. Each rule's line
+A stock entry can fire only ``opened_green``; a short (``sell_to_open``) only ``opened_green``. The put, green-day
+and late-buy rules describe the position, so each fires once per position (``ONCE_PER_POSITION``); adding to a
+loser fires on every such add. A fill whose email arrives after a later entry's keeps the position's recorded
+anchor. Known limit, as for position alerts: a message sent before an earlier entry fill arrived links the trade
+id of that moment, which the rebuild replaces, so its link no longer opens. Each rule's line
 carries the owner's record for that habit from closed trades in every account but Webull, never counting the
 trade being judged (matched by its first entry fill's source identity, so a rebuild cannot slip it in):
 
@@ -69,6 +73,7 @@ LATE_AT = clock_time(14, 0)
 SHORT_DATED_DAYS = 2
 EPS = 1e-9
 KINDS = ("add_to_loser", "put_entry", "opened_green", "late_short_dated")
+ONCE_PER_POSITION = ("put_entry", "opened_green", "late_short_dated")
 FOOTER = "Your record, not advice."
 
 
@@ -200,7 +205,9 @@ def line(kind: str, rec: dict, day_pnl: float | None = None) -> str:
     if kind == "put_entry":
         if n < MIN_SAMPLE:
             return f"Put entry: {_plural(n, 'past put')}, too few to read"
-        return f"Put entry: puts {money(rec['pnl'])} over {_plural(n, 'trade')}; calls {money(rec['calls_pnl'])} over {rec['calls']:,}"
+        calls = (f"calls {rec['calls']:,}, too few to read" if rec["calls"] < MIN_SAMPLE
+                 else f"calls {money(rec['calls_pnl'])} over {rec['calls']:,}")
+        return f"Put entry: puts {money(rec['pnl'])} over {_plural(n, 'trade')}; {calls}"
     if kind == "opened_green":
         head = f"Day already green ({money(day_pnl or 0)} today): {_plural(n, 'past trade')} opened green"
         return f"{head}, too few to read" if n < MIN_SAMPLE else f"{head}, {money(rec['pnl'])}"
@@ -296,16 +303,24 @@ class FillInterrupts:
                         .join(Fill, Fill.id == TradeFill.fill_id).where(TradeFill.trade_id == trade.id)).all()
         fills = sorted(({"id": f.id, "key": f.raw_email_id or str(f.id), "role": f.role, "side": f.side, "contracts": float(f.contracts),
                          "price": float(f.price), "executed_at": wall_time(f.executed_at)} for f in links), key=_order)
-        position = anchor([f for f in links if f.role == "entry"])
+        entries = [f for f in links if f.role == "entry"]
+        # A fill whose email came before an earlier entry's keeps the anchor already recorded for the position, so the
+        # quiet window still sees one position and its first message stays on the trade page.
+        position = db.exec(select(FillInterrupt.position_key).where(
+            FillInterrupt.account_id == fill["account_id"], FillInterrupt.fill_key.in_([f.raw_email_id or str(f.id) for f in entries]))
+            .order_by(FillInterrupt.detected_at)).first() or anchor(entries)
         prior = [f for f in fills if _order(f) < _order(fill)]
         start = datetime.combine(fill["executed_at"].date(), clock_time())
         closes = db.exec(select(Trade.closed_at, Trade.realized_pnl).where(
             Trade.account_id == fill["account_id"], Trade.id != trade.id, Trade.status.in_(("closed", "expired")),
             Trade.closed_at >= start, Trade.closed_at < fill["executed_at"])).all()
         day = day_pnl_before([(wall_time(c), _num(p) or 0.0) for c, p in closes], fill["executed_at"])
-        kinds = fired(fill, prior, day)
+        # The put, green-day and late-buy rules describe the position: once each, so scaling in does not repeat them.
+        said = {k for kinds in db.exec(select(FillInterrupt.kinds).where(
+            FillInterrupt.account_id == fill["account_id"], FillInterrupt.position_key == position)) for k in kinds.split(",")}
+        kinds = [k for k in fired(fill, prior, day) if k not in said or k not in ONCE_PER_POSITION]
         label = short_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike)
-        title, body = message(label, [line(k, record(rows, k, position), day) for k in kinds])
+        title, body = message(label, [line(k, record(rows, k, anchor(entries)), day) for k in kinds])
         return FillInterrupt(
             account_id=fill["account_id"], fill_key=fill["key"], position_key=position, trade_id=trade.id, ticker=trade.ticker,
             contract=contract_label(trade.ticker, trade.instrument_type, trade.option_type, trade.strike, trade.expiration),
@@ -424,7 +439,8 @@ def for_trade(db: Session, trade: Trade) -> list[dict]:
                       .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
     if not entries:
         return []
-    rows = db.exec(select(FillInterrupt).where(FillInterrupt.account_id == trade.account_id, FillInterrupt.position_key == anchor(entries),
+    keys = [f.raw_email_id or str(f.id) for f in entries]
+    rows = db.exec(select(FillInterrupt).where(FillInterrupt.account_id == trade.account_id, FillInterrupt.fill_key.in_(keys),
                                                FillInterrupt.delivery != "none").order_by(FillInterrupt.detected_at)).all()
     return [shape(r) for r in rows]
 

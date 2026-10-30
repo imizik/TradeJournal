@@ -16,7 +16,7 @@ from app.engine import fill_interrupts, ntfy, reconstructor
 from app.engine.chart_math import ET
 from app.engine.fill_interrupts import FillInterrupts
 from app.engine.level_alert_monitor import LevelAlertMonitor
-from app.models import Account, Fill, FillInterrupt, PhonePing
+from app.models import Account, Fill, FillInterrupt, PhonePing, Trade
 from app.routers import position_alerts as position_alerts_router
 from app.routers.fills import _rebuild_trades
 
@@ -207,7 +207,7 @@ def test_records_lines_and_the_too_few_rule():
     assert fill_interrupts.line("add_to_loser", loser) == "Adding to a loser: 6 past adds, 2 ended green, −$1,100"
     assert fill_interrupts.record(rows, "add_to_loser", exclude="k3")["n"] == 5  # the judged position is never counted
     puts = fill_interrupts.record(rows, "put_entry")
-    assert fill_interrupts.line("put_entry", puts) == "Put entry: puts −$1,100 over 6 trades; calls +$900 over 1"
+    assert fill_interrupts.line("put_entry", puts) == "Put entry: puts −$1,100 over 6 trades; calls 1, too few to read"
     late = fill_interrupts.record(rows, "late_short_dated")
     assert fill_interrupts.line("late_short_dated", late) == (
         "Late short-dated buy: 6 past buys after 2 PM with 0–2 days left, 50% expired worthless, −$1,100")
@@ -238,7 +238,7 @@ def test_the_seeded_day_one_message_per_fill(engine, world, sent):
         ("SNDK 10/30/26 500C", "", "none"),  # a call, first of the day: nothing fires
         ("CRWV stock", "opened_green", "sent"),  # a stock fires only the green day
         ("NBIS 10/23/26 160P", "put_entry,opened_green,late_short_dated", "sent"),
-        ("NBIS 10/23/26 160P", "add_to_loser,put_entry,opened_green,late_short_dated", "sent"),
+        ("NBIS 10/23/26 160P", "add_to_loser", "sent"),  # the position's other lines were already said
     ]
     assert [(t, b) for t, b, _ in sent] == [
         ("Pattern: CRWV", "Day already green (+$200 today): 1 past trade opened green, too few to read\nYour record, not advice."),
@@ -246,11 +246,7 @@ def test_the_seeded_day_one_message_per_fill(engine, world, sent):
                                "Day already green (+$200 today): 1 past trade opened green, too few to read\n"
                                "Late short-dated buy: 1 past buy after 2 PM with 0–2 days left, too few to read\n"
                                "Your record, not advice."),
-        ("Pattern: NBIS 160P", "Adding to a loser: 1 past add, too few to read\n"
-                               "Put entry: puts −$350 over 6 trades; calls +$150 over 5\n"
-                               "Day already green (+$200 today): 1 past trade opened green, too few to read\n"
-                               "Late short-dated buy: 1 past buy after 2 PM with 0–2 days left, too few to read\n"
-                               "Your record, not advice."),
+        ("Pattern: NBIS 160P", "Adding to a loser: 1 past add, too few to read\nYour record, not advice."),
     ]
     add = found[3]
     kw = sent[2][2]
@@ -266,13 +262,39 @@ def test_each_fill_is_judged_once_across_a_rebuild_and_a_second_process(engine, 
     clock, interrupts = world
     fill(engine, ny("14:05"), qty=2, price=310)
     tick(clock, interrupts, "14:06")
-    rebuild(engine)  # new trade ids; the fill's source identity is the same
+    rebuild(engine)  # the trades rebuilt; the fill's source identity is the same
     tick(clock, interrupts, "14:07")
     other = FillInterrupts(engine, Calendar(), clock=Clock(at("09:30")))
     other.clock.now = at("14:08")
     other.run()
     other.deliver()
     assert len(rows(engine)) == 1 and len(sent) == 1
+
+
+def test_an_earlier_fill_whose_email_comes_late_stays_on_the_same_position(engine, world, sent):
+    clock, interrupts = world
+    fill(engine, ny("14:02"), qty=1, price=310)  # its email came first
+    tick(clock, interrupts, "14:03")
+    fill(engine, ny("14:00"), qty=1, price=310)  # the earlier fill, a minute late: now the position's first entry
+    tick(clock, interrupts, "14:04")
+    later, earlier = sorted(rows(engine), key=lambda r: r.detected_at)
+    assert later.position_key == earlier.position_key == later.fill_key
+    assert (later.delivery, earlier.delivery) == ("sent", "none") and len(sent) == 1  # nothing new to say about the position
+    with Session(engine) as db:
+        trade = db.get(Trade, earlier.trade_id)
+        assert [r["id"] for r in fill_interrupts.for_trade(db, trade)] == [str(later.id)]  # still listed on the rebuilt trade
+
+
+def test_scaling_in_repeats_only_adding_to_a_loser(engine, world, sent):
+    clock, interrupts = world
+    fill(engine, ny("14:05"), qty=1, price=310)
+    tick(clock, interrupts, "14:06")
+    fill(engine, ny("14:20"), qty=1, price=320)  # above cost: the put and late-buy lines were already said
+    tick(clock, interrupts, "14:21")
+    fill(engine, ny("14:40"), qty=1, price=250)  # below cost
+    tick(clock, interrupts, "14:41")
+    assert [(r.kinds, r.delivery) for r in rows(engine)] == [("put_entry,late_short_dated", "sent"), ("", "none"), ("add_to_loser", "sent")]
+    assert sent[1][1] == "Adding to a loser: 1 past add, too few to read\nYour record, not advice."
 
 
 def test_only_fills_since_start_in_the_regular_session_and_never_webull(engine, world, sent):

@@ -28,16 +28,17 @@ export default function FillInterruptCard({ tradeId, interruptId, noted }: { tra
 
   useEffect(() => {
     let active = true;
-    fetch(apiUrl(`/trades/${encodeURIComponent(tradeId)}/fill-interrupts`), { cache: "no-store" })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((b: { interrupts: Interrupt[] }) => { if (active) setRow(b.interrupts.find(i => i.id === interruptId) ?? null); })
-      .catch(() => { if (active) setRow(null); });
+    let saving: Promise<void> = Promise.resolve();
     if (noted && !tapped.current) {
       tapped.current = true;
       const url = new URL(window.location.href); url.searchParams.delete("noted");
       window.history.replaceState(window.history.state, "", url);
-      void note();
+      saving = note();  // saved before the read, so the read shows it
     }
+    saving.then(() => fetch(apiUrl(`/trades/${encodeURIComponent(tradeId)}/fill-interrupts`), { cache: "no-store" }))
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((b: { interrupts: Interrupt[] }) => { if (active) setRow(b.interrupts.find(i => i.id === interruptId) ?? null); })
+      .catch(() => { if (active) setRow(null); });
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the address the page opened with
   }, [tradeId, interruptId]);

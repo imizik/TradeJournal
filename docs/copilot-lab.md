@@ -1878,9 +1878,10 @@ Four rules judge each new entry fill:
 - **Late short-dated buy:** a `buy_to_open` of an option with 0 to 2 trading
   days to expiry (weekdays) at or after 14:00 New York.
 
-A stock (or a short) can fire only the green-day rule. A fill that fires
-several sends one message, one line per rule in that order, ending "Your
-record, not advice.":
+A stock (or a short) can fire only the green-day rule. The put, green-day and
+late-buy rules describe the position, so each fires once per position; adding
+to a loser fires on every such add. A fill that fires several sends one
+message, one line per rule in that order, ending "Your record, not advice.":
 
 ```
 Pattern: NBIS 160P
@@ -1907,7 +1908,13 @@ rebuild never re-sends; a fill that fired nothing is kept as `none`. Delivery is
 at most once, and a message not sent within 3 minutes or before the close is
 dropped. The policy kind is `interrupt`, below hold-hour, with its own budget
 (`PING_BUDGET_INTERRUPT`, default 4 a day); the quiet window is per position,
-so a plan nudge right after an interrupt for the same position yields to it.
+so a plan nudge right after an interrupt for the same position yields to it,
+and so does a second interrupt (an add below cost) within 10 minutes. Up to 4
+interrupts a day count toward the shared ceiling of 12, so on a busy day they
+can leave fewer pings for Radar. A fill whose email arrives after a later
+entry's stays on the same position; known limit, as for position alerts: a
+message sent before that earlier fill arrived links the trade id of that
+moment, which the rebuild replaces, so that link no longer opens.
 
 **Switch on (the owner's switch):** `FILL_INTERRUPTS_ENABLED=true` in the API's
 environment (needs `NTFY_URL` or Telegram), restart the API. Off by default.
