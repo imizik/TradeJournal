@@ -51,8 +51,8 @@ monitor's loop (``level_alert_monitor.py``), at most every ``RUN_SECONDS``:
   today's chart bars; index options read SPY or QQQ). If it moved against the
   call or put, one alert says so, with the option's mark and the owner's own
   record from the journal: closed opening option trades held under 30 minutes
-  against those held two hours or more. It never says what to do, and no bars
-  means no alert. Once per position (generation 0); due at or after the close
+  against those held two hours or more. Like the one-hour alert it asks for a
+  re-decision and suggests no order; no bars means no alert. Once per position (generation 0); due at or after the close
   or more than ``WRONG_WAY_GRACE`` minutes late, it is skipped.
 
 An already-qualified alert also freezes optional same-session Radar entry context.
@@ -208,20 +208,19 @@ def underlying_move(ticker: str, opened_at: datetime) -> float | None:
     """The underlying's move over the ``WRONG_WAY_MINUTES`` from the minute after the entry, from today's chart bars
     (a bar's open, else the previous bar's close), or None when a price is missing."""
     try:
-        bars = ping_images.today_bars(INDEX_UNDERLYING.get(ticker, ticker))
-    except Exception:  # noqa: BLE001 - no bars means no judgment, never a failed pass
-        log.info("Wrong-way check: no bars for %s", ticker, exc_info=True)
+        by_time = {int(b["time"]): b for b in ping_images.today_bars(INDEX_UNDERLYING.get(ticker, ticker))}
+
+        def price(at: int) -> float | None:
+            if at in by_time:
+                return by_time[at]["open"]
+            return by_time[at - 60]["close"] if at - 60 in by_time else None
+
+        start = int(opened_at.replace(second=0, microsecond=0, tzinfo=ET).timestamp()) + 60
+        first, last = price(start), price(start + WRONG_WAY_MINUTES * 60)
+        return None if not first or last is None else last / first - 1
+    except Exception:  # noqa: BLE001 - no usable bars means no judgment, never a failed pass
+        log.info("Wrong-way check: no usable bars for %s", ticker, exc_info=True)
         return None
-    by_time = {int(b["time"]): b for b in bars}
-
-    def price(at: int) -> float | None:
-        if at in by_time:
-            return by_time[at]["open"]
-        return by_time[at - 60]["close"] if at - 60 in by_time else None
-
-    start = int(opened_at.replace(second=0, microsecond=0, tzinfo=ET).timestamp()) + 60
-    first, last = price(start), price(start + WRONG_WAY_MINUTES * 60)
-    return None if not first or last is None else last / first - 1
 
 
 def opening_record(db: Session) -> str | None:
@@ -247,9 +246,12 @@ def wrong_way_facts(db: Session, alert: PositionAlert) -> dict:
     None; neither holds the alert back."""
     facts = {"move": None, "record": None}
     try:
-        trade = db.get(Trade, alert.trade_id)
-        if trade is not None:
-            facts["move"] = underlying_move(trade.ticker, trade.opened_at)
+        # The first entry fill by the position's anchor: a trade rebuild since the alert leaves its trade id stale.
+        first = db.exec(select(Fill.ticker, Fill.executed_at).where(
+            Fill.account_id == alert.account_id, Fill.raw_email_id == alert.source_key)).first() \
+            or db.exec(select(Trade.ticker, Trade.opened_at).where(Trade.id == alert.trade_id)).first()
+        if first is not None:
+            facts["move"] = underlying_move(first[0], first[1])
         facts["record"] = opening_record(db)
     except Exception:  # noqa: BLE001 - the alert matters more than its extras
         log.warning("Wrong-way facts skipped", exc_info=True)
@@ -316,7 +318,8 @@ def _base_message(alert: PositionAlert, close_label: str | None = None, minutes_
     if alert.kind == "wrong_way":
         facts = facts or {}
         side = "put" if (alert.contract or "").endswith("P") else "call"
-        symbol = (alert.contract or "").split(" ")[0]
+        ticker = (alert.contract or "").split(" ")[0]
+        symbol = f"{INDEX_UNDERLYING[ticker]} (for {ticker})" if ticker in INDEX_UNDERLYING else ticker
         move = facts.get("move")
         moved = (f"{symbol} {'down' if move < 0 else 'up'} {abs(move) * 100:.2f}% in the {WRONG_WAY_MINUTES} min after "
                  f"your entry, against your {side}" if move is not None

@@ -824,6 +824,9 @@ def test_only_opening_entries_on_time_are_checked_and_index_options_read_spy(eng
     seen = underlying(monkeypatch, falling, symbol="SPY")
     assert position_alerts.underlying_move("SPXW", datetime(2026, 10, 21, 10, 0)) == pytest.approx(98.78 / 99.38 - 1)
     assert seen == ["SPY"]
+    spx = PositionAlert(kind="wrong_way", contract="SPXW 10/21/26 6800P", contracts=1, mark=None, bid=None)
+    assert position_alerts.message(spx, facts={"move": 0.0018, "record": None})[1].startswith(
+        "SPY (for SPXW) up 0.18% in the 30 min after your entry, against your put. Option no reliable quote. ")
 
 
 def test_no_bars_means_no_alert(engine, world, wrong_way_on, monkeypatch):
@@ -838,6 +841,8 @@ def test_no_bars_means_no_alert(engine, world, wrong_way_on, monkeypatch):
         raise RuntimeError("feed down")
     monkeypatch.setattr(position_alerts.ping_images, "today_bars", broken)
     run_at(clock, watcher, WED, "10:32")
+    monkeypatch.setattr(position_alerts.ping_images, "today_bars", lambda symbol: [{"t": 1}])  # malformed
+    run_at(clock, watcher, WED, "10:33")
     assert alerts(engine) == []
 
 
@@ -878,6 +883,9 @@ def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, 
     quotes.set(3.74)
     run_at(clock, watcher, WED, "10:31")
     alert = alerts(engine)[0]
+    with Session(engine) as db:
+        db.get(PositionAlert, alert.id).trade_id = UUID(int=9)  # a trade id gone stale: the anchor still finds the entry
+        db.commit()
     sent = []
 
     def publish(title, body, priority=4, tags=(), path="", direct_click=False, more=()):
@@ -886,7 +894,7 @@ def test_the_message_carries_the_owners_opening_record_and_is_sent_once(engine, 
     monkeypatch.setattr(ntfy, "publish", publish)
     watcher.deliver()
     watcher.deliver()
-    assert [(t, p) for t, _, p in sent] == [("SNDK 10/23/26 230C: wrong way at 30 min", f"/trades/{alert.trade_id}?alert={alert.id}")]
+    assert [(t, p) for t, _, p in sent] == [("SNDK 10/23/26 230C: wrong way at 30 min", f"/trades/{UUID(int=9)}?alert={alert.id}")]
     assert sent[0][1].startswith("SNDK down 0.60% in the 30 min after your entry, against your call. Option now -$24 (-6%)")
     assert ("1 contract open. Your past opening option trades: closed within 30 min, 5 won 60% (+$200); held 2 h or more, "
             "5 won 20% (-$1,450). Re-decide: close, trim, or set your exit.") in sent[0][1]
