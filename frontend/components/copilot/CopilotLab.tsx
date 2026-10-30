@@ -21,7 +21,7 @@ import SessionTape, { DeskStatus, useDeskSession } from "@/components/copilot/Se
 import ThreadRail from "@/components/copilot/ThreadRail";
 import DeskThreadTop, { HorizonPick } from "@/components/copilot/ThreadHead";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
-import { WHAT_MATTERS_PROMPT, copilotLabHref } from "@/lib/copilot";
+import { WHAT_MATTERS_PROMPT, copilotLabHref, type InvestigationSummary } from "@/lib/copilot";
 import { afterClose, deskSymbolThread, nyDay, saveHorizon, toReview, type DeskCommand, type DeskHorizon, type DeskHooks, type DeskTab, type DeskThread, type DeskThreadRef } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 import styles from "./CopilotLab.module.css";
@@ -37,6 +37,26 @@ const PREP_PROMPT = "Prep the day: what is armed, what news or earnings touch my
 const BRIEFING_TITLE = WHAT_MATTERS_PROMPT.split("\n")[0].slice(0, 80);
 const ARM_PROMPT = "Arm today's plans: for each plan I mean to trade today, check its entry, invalidation and time stop against the pre-market, and propose any alert or time stop still missing for me to confirm.";
 const CLOSE_PROMPT = "Close the day: for each position and plan today, did I follow the plan, and what is the one thing to repeat or change tomorrow?";
+
+const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
+
+/** You are here: "Main", "Main › a conversation about no ticker", or "NBIS › its conversation · Oct 29". Main goes back to
+ * the Briefing. */
+function Breadcrumb({ thread, link, saved, onMain }: { thread: DeskThreadRef | null; link: PanelLink | null; saved: InvestigationSummary[]; onMain(): void }) {
+  const symbol = thread ? thread.symbol : link?.symbol || null;
+  const briefing = thread && !thread.symbol && thread.title === BRIEFING_TITLE;
+  const at = thread && saved.find(t => t.id === thread.id)?.updated_at;
+  const leaf = thread && !briefing ? thread.title : !thread && symbol ? (link?.radar ? "Radar hit" : "Decision") : null;
+  return (
+    <nav aria-label="You are here" data-testid="desk-breadcrumb" className="mb-3 flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
+      {symbol ? <span className="shrink-0 font-semibold text-foreground">{symbol}</span> : (
+        <button type="button" onClick={onMain} disabled={!leaf} className={cn("shrink-0 font-semibold", leaf ? "hover:text-foreground hover:underline" : "text-foreground")}>Main</button>
+      )}
+      {leaf && <><span aria-hidden>›</span><span className="min-w-0 truncate text-foreground" title={leaf}>{leaf}</span></>}
+      {at && <span className="shrink-0 tabular-nums">· {shortDay(at)}</span>}
+    </nav>
+  );
+}
 
 /** Typing somewhere: a desk key never fires there. */
 function typing(target: EventTarget | null) {
@@ -60,6 +80,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const [command, setCommand] = useState<DeskCommand | null>(null);
   const [thread, setThread] = useState<DeskThreadRef | null>(null);
   const [rows, setRows] = useState<DeskThread[]>([]);
+  const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [palette, setPalette] = useState(false);
   // Hidden or shown is remembered in this browser; a blocked store keeps the pane shown.
   const [contextShown, setContextShown] = useState(true);
@@ -77,7 +98,13 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const actions = useMemo<HomeActions>(() => ({
     open: id => { setCommand({ kind: "open", id, n: ++sent.current }); setTab("thread"); },
     ask: text => { setCommand({ kind: "ask", text, n: ++sent.current }); setTab("thread"); },
-  }), []);
+    // Main: a deep link leaves for the bare desk (a new link remounts the lab); otherwise the open conversation stays saved.
+    home: () => {
+      setTab("thread");
+      if (window.location.search) router.push("/copilot-lab");
+      else setCommand({ kind: "home", n: ++sent.current });
+    },
+  }), [router]);
   const fill = useCallback((text: string) => { setCommand({ kind: "fill", text, n: ++sent.current }); setTab("thread"); }, []);
   // The thread list's Plan a trade link: a new conversation with "Plan a trade: " in the box, unsent. Already there,
   // the same link would not remount the lab, so the page reloads it.
@@ -270,6 +297,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   // The Context pane shows the day while no symbol is open: the Briefing, a thread about no symbol, or no thread at all
   // (a deep link naming a symbol waits for its thread instead).
   const day = thread ? !thread.symbol : !link?.symbol;
+  const main = day && !arming && !closeStep;
   // A deep link naming a symbol shows its Context by the symbol until a conversation is saved, then by that conversation.
   const linkSymbol = link?.symbol;
   const context = useMemo(() => thread ?? (linkSymbol ? deskSymbolThread(linkSymbol) : null), [thread, linkSymbol]);
@@ -308,7 +336,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
         <div role="tablist" aria-label="Desk" className={styles.tabs}>
           {TABS.map(item => (
             <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)}>
-              {item.id === "thread" ? thread?.symbol || item.label : item.label}
+              {item.id === "thread" ? thread?.symbol || link?.symbol || (main ? "Main" : item.label) : item.label}
             </button>
           ))}
         </div>
@@ -316,7 +344,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
       <div className={styles.panes}>
         {on && (
           <aside aria-label="Threads" className={styles.rail}>
-            <ThreadRail actions={actions} active={thread?.id ?? null} onRows={setRows} refresh={refresh} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
+            <ThreadRail actions={actions} active={thread?.id ?? null} activeSymbol={thread ? thread.symbol : link?.symbol ?? null} main={main}
+              pick={pick} onRows={setRows} onSaved={setSaved} refresh={refresh} phase={(phaseAction || fills.waiting.length > 0) && <div className="space-y-1.5">
               {phaseAction && (
                 <button type="button" onClick={runPhase} title={phaseAction.hint}
                   className="min-h-11 w-full rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8">
@@ -328,6 +357,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
           </aside>
         )}
         <section aria-label="Conversation" className={styles.thread}>
+          {on && <Breadcrumb thread={thread} link={link} saved={saved} onMain={actions.home} />}
           {/* The Briefing (or no thread) opens on the day at a glance. Any other thread has one main element: the header,
               then the decision when one is asked (the ladder shrinks to a line), else the full plan ladder; the conversation follows. */}
           {/* A position ping's link names only the symbol when no plan conversation exists: it opens on the decision.
@@ -359,7 +389,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               <DecisionBar key={link.symbol} symbol={link.symbol} {...barFor(link.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
               <ThreadAlertAnswers symbol={link.symbol} rows={alertRows} />
             </div>
-          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} tally={tally} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} toAnswer={session.data?.to_answer} /><AlertScorecard /></> : (
+          ) : !thread || (!thread.symbol && thread.title === BRIEFING_TITLE) ? <>{fills.waiting.length > 0 && <div className="mb-4"><FillsToLink count={fills.waiting.length} onStart={fills.start} /></div>}<SessionTape data={session.data} error={session.error} rows={rows} tally={tally} /><BriefingExtras onReviewWeek={() => actions.ask(WEEK_REVIEW_CONTEXT)} onWhatMatters={() => actions.ask(WHAT_MATTERS_PROMPT)} toAnswer={session.data?.to_answer} radar={rows.filter(r => r.key.startsWith("radar:"))} /><AlertScorecard /></> : (
             <DeskThreadTop key={fills.linked} thread={thread} compact={deciding} horizon={threadRow?.horizon ?? null} stage={threadRow?.close?.kind === "exit" ? "Exited" : null} onHorizon={horizon => changeHorizon(thread.symbol, horizon)} hero={
               <>{fills.bar(thread.symbol)}<DecisionBar key={thread.symbol ?? ""} symbol={thread.symbol ?? null} {...barFor(thread.symbol)} onActive={setDeciding} fill={fill} onReviewed={onReviewed} />
                 <ThreadAlertAnswers symbol={thread.symbol ?? null} rows={alertRows} /></>} />

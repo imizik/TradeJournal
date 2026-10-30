@@ -14,8 +14,9 @@ import type { RadarRating } from "@/lib/radar";
 export type DeskTab = "now" | "thread" | "context";
 
 /** What the desk asks the conversation to do: open a saved investigation (with ``text`` in the box, unsent), send one
- * prompt across everything, or put a question in the message box unsent (the decision bar's Ask why). */
-export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number };
+ * prompt across everything, put a question in the message box unsent (the decision bar's Ask why), or leave the open
+ * conversation saved and go back to Main (``home``). */
+export type DeskCommand = { kind: "open"; id: string; n: number; text?: string } | { kind: "ask"; text: string; n: number } | { kind: "fill"; text: string; n: number } | { kind: "home"; n: number };
 
 /** The conversation's open investigation, reported up so the inspector can show its context. */
 export type DeskThreadRef = { id: string; symbol: string | null; title: string; refreshKey: number };
@@ -128,15 +129,11 @@ type Wire = {
 
 const nyDate = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
 
-/** Saved conversations closed and last touched since Monday (New York), newest first, from the latest 50 saved. */
-export async function getClosedThisWeek(signal?: AbortSignal): Promise<InvestigationSummary[]> {
+/** The latest 50 saved conversations, open and closed, newest first: the thread list's subthreads and the breadcrumb. */
+export async function getSavedConversations(signal?: AbortSignal): Promise<InvestigationSummary[]> {
   const response = await fetch(apiUrl("/copilot/investigations?limit=50"), { cache: "no-store", signal });
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-  const today = nyDate(new Date());
-  const noon = Date.parse(`${today}T12:00:00Z`);
-  const monday = new Date(noon - ((new Date(noon).getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
-  const { investigations } = await response.json() as { investigations: InvestigationSummary[] };
-  return investigations.filter(row => row.status === "closed" && nyDate(new Date(row.updated_at)) >= monday);
+  return ((await response.json()) as { investigations: InvestigationSummary[] }).investigations;
 }
 
 export async function getDeskThreads(signal?: AbortSignal): Promise<DeskThreads> {

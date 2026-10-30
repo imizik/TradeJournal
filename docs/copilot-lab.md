@@ -174,49 +174,52 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     phone check), `frontend/e2e/copilot-panel.spec.ts` and
     `frontend/e2e/copilot-review.spec.ts`.
 - **Thread list**, the desk's left pane (page only, lab on;
-  `components/copilot/ThreadRail.tsx`). One grouped list, in `DESK_GROUPS`
-  order, with one line for the day above it: the market phase, how many rows
-  need a decision, and the plan streak. Each group's heading carries a
-  coloured dot (rose Act now, sky Near a trigger and New, amber Waiting for
-  you) and its row count. Groups:
-  - **Pinned**: the Briefing only (today's pre-market prep when there is
-    one). Pressing it sends one turn, the fixed **What matters right
-    now?** prompt (`lib/copilot.ts` `WHAT_MATTERS_PROMPT`, "What matters
-    right now across my open positions, armed watches and open
-    investigations? Lead with anything that needs a decision today; say
-    plainly if nothing does."). Review my week is in ⌘K and on the
-    Briefing (beside Watch today); the server's pinned week row is not
-    listed. Opening the list never sends.
-  - **Act now**: open positions the Today screen flags (within 1% of an
-    armed invalidation or past a hit one, expiring today, give-back fired,
-    time stop within 30 minutes). Empty, it says "Clear. Nothing needs a
-    decision right now.", or that positions are unavailable. A `decision`
-    day-journal entry for the symbol logged today moves the row to Watching,
-    unless the invalidation was hit after it.
-  - **Near a trigger**: armed plans not yet in a position within 1% of their
-    entry or invalidation.
-  - **Waiting for you**: the owner's open conversations with plan or alert
-    cards (`trade_plan`, `watch`; a plan card carries its time stop) still
-    waiting on Confirm or Dismiss, read from each saved transcript (a card
-    with no `outcome`), newest first. The value is "N to confirm" (amber),
-    the status the first waiting card ("Alert · APLD crosses 31.20", "Plan ·
-    APLD long calls · entry crosses 31.20"). A row opens the conversation in
-    place, on its cards: only a card's own Confirm makes anything. A
-    conversation already shown as an armed plan or a position stays there,
-    a waiting one leaves Watching, and a research job's cards are not read.
-    Hidden when nothing waits.
-  - **New since you looked**: Radar events since the last Radar visit and
-    the newest thesis-watch trigger today per investigation, one row per
-    symbol (a Radar hit ahead of thesis news, newest first), five shown and
-    the rest behind "+N more". What the owner has opened or marked seen is
-    remembered in this browser only (`localStorage`); seen rows stay,
-    dimmed, and opening a symbol's row sees its folded rows too.
-  - **Watching**: every other open position (its plan's nearest line, "Fill
-    to link" in amber when a saved plan is suggested for its fill, or "No
-    plan yet"), armed plan and open investigation (a research job's
-    conclusion is never shown: a model that read web pages wrote it); three
-    shown and the rest behind "+N more", so a busy day reads as about ten
-    rows.
+  `components/copilot/ThreadRail.tsx`). **Main** at the top, then one row
+  per ticker, with one line for the day above it: the market phase, how many
+  rows need a decision, and the plan streak. The server still sends its rows
+  in `DESK_GROUPS` order (Act now, Near a trigger, Waiting for you, New since
+  you looked, Watching); the list regroups them by symbol in the browser.
+  - **Main**: the market-wide thread, the Briefing (today's pre-market prep
+    line when there is one). Pressing it goes back to the Briefing in place
+    (a deep link leaves for the bare desk) and sends nothing; the
+    open conversation stays saved. Radar hits, alerts to answer and Review my
+    week are lines inside the Briefing, not rows in the list: "N new on
+    Radar ▾" lists the Radar events since the last Radar visit, each opening
+    the desk on its decision (a stock hit) or Radar (a group event). Main
+    shows their count ("18 Radar", a sky dot while one is unseen in this
+    browser). Open conversations about no ticker (a Briefing turn, a week
+    review) are listed under it, title and date. **What matters right
+    now?** (one turn, the fixed `lib/copilot.ts` `WHAT_MATTERS_PROMPT`) sits
+    on the Briefing beside Review my week, and in ⌘K.
+  - **Tickers**: one row per symbol the owner has something on: an open
+    position, a plan (armed, near a trigger, or exited with its exit review
+    waiting), a plan or alert card waiting on Confirm, a thesis-watch trigger
+    today, an open conversation, or a conversation closed since Monday (New
+    York). A row shows the symbol, its state (**Held**, **Plan armed**,
+    **Exited**, **Watching** or **Closed**), the position's unrealized P&L
+    (an option's from its own mark) or the exit day, and the status line of
+    its most urgent row (Act now's reasons, a plan's nearest level, "N to
+    confirm", the close question). An amber dot means it needs the owner: an
+    Act now position, a card waiting on Confirm, a fill to link, or a close
+    or exit question not yet answered or skipped today. A plan meter shows
+    when the leading row is Act now or Near a trigger: the underlying on the
+    track from the invalidation (left) to the entry (the tick). Sort: needs
+    you first, then held, armed plans, exited, watching and closed, newest
+    first within each; past the needs-you, held and armed rows six more show
+    and the rest wait behind "+N more".
+  - **Subthreads**: pressing a ticker opens its newest saved conversation in
+    place (from the latest 50 in `GET /copilot/investigations`, open and
+    closed) or, with none, follows its row's link (a position with a fill to
+    link, an unplanned position, a trade). With more than one conversation
+    they list beneath it, indented, title and date, the plan's conversation
+    tagged **Plan** and the exit review's **Exit review**. A ticker with one
+    conversation shows no children. Thesis news is remembered as seen in
+    this browser (`localStorage`) once its ticker is opened.
+
+  A **breadcrumb** tops the conversation pane at every width: "Main",
+  "Main › <conversation>" for one about no ticker, or "NBIS › Neocloud group
+  bounce · Oct 29" (the date the conversation was last saved). On a phone the
+  middle tab carries the open ticker, or "Main".
 
   **All | Plans** under the day line switches the list to the **Plans**
   view and back; the choice is remembered in this browser (`localStorage`),
@@ -234,24 +237,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   in place; a done plan whose alerts and time stop were all deleted has no
   saved thread to find and opens by its symbol.
 
-  Under the groups, a collapsed **Closed this week** footer with its count:
-  saved conversations closed and last touched since Monday (New York), from
-  the latest 50 in `GET /copilot/investigations`, each opening in place; then
-  the key hint.
-
-  Each row: symbol, instrument (contract, direction or "research"), one value
-  and one status line coloured by what it needs (amber: needs you). A
-  position's value is its own unrealized P&L, an option's from its own mark;
-  its plan levels are on the underlying, named in the status line. Only Act
-  now and Near a trigger rows carry a plan meter: the underlying on the track
-  from the invalidation (left) to the entry (the tick), with room past it.
-  Empty groups other than Act now are left out. A row with an investigation
-  opens it in place; any other follows its link (a stock Radar hit opens the
-  desk on its decision, `/copilot-lab?symbol=<symbol>&radar=<id>`; a group
-  event its `/radar?event=<id>`; a position with a fill to link the desk on
-  its symbol, `/copilot-lab?symbol=<symbol>`; planning an unplanned position;
-  a trade). **Plan a
-  trade** sits under the groups. It refreshes every minute while visible and
+  **Plan a
+  trade** sits under the tickers, then the key hint. It refreshes every minute while visible and
   reads one owner-only `GET /copilot/desk/threads`
   (`app/routers/copilot_desk.py`), composed in-process from the Plans board
   (`copilot_plans.board`), `plan_positions.positions` with the Today
@@ -586,7 +573,7 @@ threshold. Proof: `tests/test_alert_scorecard.py`,
 `frontend/e2e/copilot-scorecard.spec.ts`.
 
 **Radar hits open on a decision** (`components/copilot/RadarDecision.tsx`).
-A stock Radar hit in New since you looked opens the desk on that hit: what
+A stock Radar hit in Main's "N new on Radar" line opens the desk on that hit: what
 Radar saw (its kind, direction, first-seen time and summary, with Open in
 Radar) and one choice. **Watching** or **Pass** logs a `decision` day-journal
 entry for the symbol ("Watching. Radar vs SPY: …", "Passing. …") after the
@@ -2495,8 +2482,8 @@ day, and nothing runs when the flag is off.
   one a day; the queue's budget applies when it runs). The queue's own result
   ping is the only other notification.
 - **Lab home:** the desk's thread list shows each investigation's newest
-  trigger today under New since you looked (kind and text), opening the
-  investigation.
+  trigger today as its ticker's status line (kind and text); the ticker
+  opens the investigation.
 
 Tests: `backend/tests/test_thesis_watch.py` (seeded journal; stubbed news,
 quotes, bars and earnings).

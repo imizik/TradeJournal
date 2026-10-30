@@ -55,7 +55,6 @@ test("Friday's saved review shows in the thread list and opens with its practice
   const home = page.getByRole("navigation", { name: "Thread list" });
   const thread = home.getByRole("link", { name: TITLE });
   await expect(thread).toHaveAttribute("href", `/copilot-lab?investigation=${INVESTIGATION}`);
-  await expect(home).toContainText(SAVED.conclusion);
   await page.screenshot({ path: test.info().outputPath("week-review-auto-threads.png") });
 
   await thread.click();

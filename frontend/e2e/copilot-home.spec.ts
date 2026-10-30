@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // The lab's home: the desk's thread list beside the conversation. Every lab route is stubbed in the browser and the one
 // turn is a fixed SSE stream, so no model runs. Opening the lab reads /copilot/desk/threads and sends nothing; only a
-// pinned row sends, and only when pressed. The grouped list itself: copilot-thread-list.spec.ts.
+// Briefing button sends, and only when pressed. The list itself: copilot-thread-list.spec.ts.
 const ON = {
   enabled: true, backend: "fake", evidence: "live", model: "fake-scripted", effort: "medium", fallbacks: false, key_configured: false,
   plan_configured: false, tools: [], capabilities: { copilot_alerts: true },
@@ -60,17 +60,17 @@ async function lab(page: Page) {
 }
 
 const list = (page: Page) => page.getByRole("navigation", { name: "Thread list" });
+const briefing = (page: Page) => page.getByRole("region", { name: "Conversation" });
 
 test("the list sends nothing on open, and What matters right now? asks across everything beside it", async ({ page }) => {
   const { chats, saves, reads } = await lab(page);
   const threads = list(page);
-  await expect(threads.getByRole("link", { name: "NBIS Is the NBIS recovery real?" })).toHaveAttribute("href", `/copilot-lab?investigation=${INV}`);
-  await expect(threads).toContainText("Group is confirming; the symbol lags.");
+  await expect(threads.getByRole("button", { name: "NBIS, Watching" })).toContainText("Group is confirming; the symbol lags.");
   await page.waitForTimeout(300);
   expect(chats).toEqual([]); // opening costs nothing
   expect(reads()).toBe(1);
 
-  await threads.getByRole("button", { name: "What matters right now?" }).click();
+  await briefing(page).getByRole("button", { name: "What matters right now?" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
   expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null }]);
   await expect(threads).toBeVisible(); // the desk keeps the thread list beside the open conversation
@@ -82,7 +82,7 @@ test("the list sends nothing on open, and What matters right now? asks across ev
 test("an open investigation opens in place without sending", async ({ page }) => {
   const { chats } = await lab(page);
   const threads = list(page);
-  await threads.getByRole("link", { name: "NBIS Is the NBIS recovery real?" }).click();
+  await threads.getByRole("button", { name: "NBIS, Watching" }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   await expect(threads).toBeVisible(); // still beside the conversation on a wide screen
   await expect(page.getByLabel("Message")).toHaveValue(""); // not even a prefilled question
@@ -96,7 +96,7 @@ test("on a phone the desk shows one pane at a time, and opening a thread moves t
   const tabs = page.getByRole("tablist", { name: "Desk" });
   await expect(tabs.getByRole("tab", { name: "Now" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Message")).toBeHidden();
-  await threads.getByRole("link", { name: "NBIS Is the NBIS recovery real?" }).click();
+  await threads.getByRole("button", { name: "NBIS, Watching" }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   await expect(threads).toBeHidden();
   await expect(tabs.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
@@ -113,7 +113,7 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await page.goto("/copilot-lab");
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
-  await expect(threads.getByRole("button", { name: "What matters right now?" })).toBeEnabled();
+  await expect(briefing(page).getByRole("button", { name: "What matters right now?" })).toBeEnabled();
   await expect(threads.getByRole("button", { name: "Review my week" })).toHaveCount(0); // in ⌘K and the Briefing now
   await expect(page.getByRole("region", { name: "Conversation" }).getByRole("button", { name: "Review my week" })).toBeEnabled();
 });
