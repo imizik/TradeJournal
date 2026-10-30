@@ -206,6 +206,11 @@ def tap(data: str, chat=CHAT, update_id=1, keyboard=None, sender=None) -> dict:
         "message": {"message_id": 55, "chat": {"id": int(chat)}, "reply_markup": {"inline_keyboard": keyboard or []}}}}
 
 
+def said(text: str, chat=CHAT, update_id=1, sender=None, replied=None) -> dict:
+    return {"update_id": update_id, "message": {"message_id": 60 + update_id, "chat": {"id": int(chat)}, "from": {"id": int(sender or chat)},
+                                                "text": text, **({"reply_to_message": replied} if replied else {})}}
+
+
 @pytest.fixture
 def case(engine, monkeypatch):  # noqa: F811
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
@@ -232,7 +237,9 @@ def test_taps_from_another_chat_and_other_updates_are_ignored(case):
     replies = telegram_replies.Replies(db_engine, call=bot)
     assert run(replies.handle(tap(f"fb:{alert}:prompted_review", chat="999"))) is None
     assert run(replies.handle(tap(f"why:{alert}", sender="999"))) is None  # someone else in the owner's chat
-    assert run(replies.handle({"update_id": 2, "message": {"chat": {"id": int(CHAT)}, "text": "hi"}})) is None
+    assert run(replies.handle({"update_id": 2, "message": {"chat": {"id": int(CHAT)}, "text": "hi"}})) is None  # no sender
+    assert run(replies.handle(said("hi", sender="999"))) is None
+    assert run(replies.handle(said("hi", chat="999"))) is None
     assert run(replies.handle(tap("nonsense:1"))) is None
     assert bot.calls == []
     with Session(db_engine) as db:
@@ -331,14 +338,14 @@ def test_why_with_the_lab_off_says_so(case):
     assert run(replies.why_text(str(alert))) == "Copilot Lab is off on this server, so there is no answer here."
 
 
-def test_the_poll_advances_its_offset_and_asks_only_for_taps(case):
+def test_the_poll_advances_its_offset_and_asks_for_taps_and_messages(case):
     db_engine, alert = case
     bot = Bot([tap(f"fb:{alert}:prompted_review", update_id=40), tap("done", update_id=41)])
     replies = telegram_replies.Replies(db_engine, call=bot)
     run(replies.poll_once())
     run(replies.poll_once())
     first, second = bot.named("getUpdates")
-    assert first == {"timeout": telegram_replies.POLL_SECONDS, "allowed_updates": ["callback_query"]}
+    assert first == {"timeout": telegram_replies.POLL_SECONDS, "allowed_updates": ["callback_query", "message"]}
     assert second["offset"] == 42
 
 
@@ -367,3 +374,64 @@ def test_startup_polls_only_when_telegram_is_set_up(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
     monkeypatch.setenv("TELEGRAM_CHAT_ID", CHAT)
     assert run(go()) is not None and started == [1]
+
+
+def lab_on(monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    monkeypatch.setenv("COPILOT_BACKEND", "fake")
+    monkeypatch.setenv("COPILOT_EVIDENCE", "fixture")
+    from app.ai import copilot_spend
+    monkeypatch.setattr(copilot_spend, "record", lambda *a, **k: None)
+
+
+def test_a_typed_message_is_a_copilot_question_answered_as_a_reply(case, monkeypatch):
+    db_engine, _ = case
+    lab_on(monkeypatch)
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+
+    async def go():
+        assert await replies.handle(said("Should I trim NBIS here?")) == "ask"
+        assert await replies.handle(said("And SPY?", update_id=2)) == "busy"  # one turn at a time
+        await asyncio.gather(*replies._tasks)
+
+    run(go())
+    busy, answer = bot.named("sendMessage")
+    assert busy["text"] == telegram_replies.BUSY and busy["reply_parameters"]["message_id"] == 62
+    assert answer["chat_id"] == CHAT and answer["reply_parameters"]["message_id"] == 61
+    assert answer["text"].startswith("Verdict:") and len(answer["text"]) <= telegram_replies.ANSWER_MAX
+
+
+def test_a_reply_to_a_ping_carries_that_ping_as_context(case, monkeypatch):
+    db_engine, alert = case
+    lab_on(monkeypatch)
+    asked = []
+
+    async def turn(question, symbol):
+        asked.append((question, symbol))
+        return "ok"
+
+    replies = telegram_replies.Replies(db_engine, call=Bot())
+    monkeypatch.setattr(replies, "turn", turn)
+    keyboard = [[{"text": label, "callback_data": data} for label, data in telegram_replies.feedback_buttons(alert)]]
+    alert_ping = {"message_id": 55, "text": "SNDK give-back", "reply_markup": {"inline_keyboard": keyboard}}
+    radar_ping = {"message_id": 56, "caption": "Radar: AAA +7.3% vs SPY",
+                  "reply_markup": {"inline_keyboard": [[{"text": "Useful", "callback_data": "rr:x:useful"}]]}}
+    run(replies.question_text("why now?", alert_ping))
+    run(replies.question_text("is this real?", radar_ping))
+    run(replies.question_text("hello", None))
+    with Session(db_engine) as db:
+        from app.engine import position_alerts
+        context = position_alerts.ask_context(db.get(PositionAlert, alert))
+    assert asked[0] == (f"{context}\n\nMy question about this: why now?", "SNDK")
+    assert asked[1] == ("Radar: AAA +7.3% vs SPY\n\nMy question about this: is this real?", None)
+    assert asked[2] == ("hello", None)
+
+
+def test_commands_get_the_help_note_and_the_lab_off_says_so(case):
+    db_engine, _ = case
+    bot = Bot()
+    replies = telegram_replies.Replies(db_engine, call=bot)
+    assert run(replies.handle(said("/start"))) == "help"
+    assert bot.named("sendMessage")[0]["text"] == telegram_replies.HELP
+    assert run(replies.question_text("hi", None)) == "Copilot Lab is off on this server, so there is no answer here."

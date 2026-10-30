@@ -578,12 +578,14 @@ the week review, Watch your day, research results) can go to a Telegram bot
 instead of ntfy, with reply buttons whose answers are saved in the app
 (position alerts: Prompted review, Already aware and Why?; Radar singles:
 Useful and Not useful; `backend/app/engine/telegram.py`, `phone.py`,
-`telegram_replies.py`). The
+`telegram_replies.py`). A message typed to the bot is a question for copilot,
+answered in the chat; typed as a reply to a ping, that ping is its context. The
 health, deploy and watchdog alerts in this section stay on ntfy. Telegram is
 used only when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; nothing
 changes until then. The API only calls out to `api.telegram.org`: it reads the
-button taps by long polling, so no webhook or inbound port is opened and the
-private API stays private. Only taps from that one chat are acted on.
+button taps and messages by long polling, so no webhook or inbound port is
+opened and the private API stays private. Only taps and messages from that one
+chat are acted on.
 
 Owner steps (nothing here is switched on by the code):
 

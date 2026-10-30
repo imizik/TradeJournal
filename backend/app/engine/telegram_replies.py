@@ -1,9 +1,9 @@
-"""Reply buttons on Telegram pings, written back into the app, with no inbound port.
+"""Reply buttons and typed questions on Telegram pings, written back into the app, with no inbound port.
 
 One long-polling task in the API process (started from the app lifespan beside the level alert monitor, only when
-``telegram.configured()``) asks Telegram for new button taps (``getUpdates`` with an offset, ``callback_query`` only).
-A tap is handled only when it is on a message in ``TELEGRAM_CHAT_ID`` and made by that same id (the owner's private
-chat with the bot, whose id is the owner's user id); everything else is ignored. When
+``telegram.configured()``) asks Telegram for new button taps and messages (``getUpdates`` with an offset,
+``callback_query`` and ``message`` only). A tap or message is handled only when it is in ``TELEGRAM_CHAT_ID`` and from
+that same id (the owner's private chat with the bot, whose id is the owner's user id); everything else is ignored. When
 Telegram cannot be reached the task sleeps and tries again; nothing else waits on it.
 
 A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
@@ -17,10 +17,16 @@ A button's callback data is ``<verb>:<id>[:<answer>]``, at most 64 bytes:
   backend and its turn and daily budgets), answered in the chat with the Verdict line and body cut to 1,500
   characters; with Copilot Lab off the reply says so. One turn runs at a time, and a message's Why? is asked once.
 
+A typed message is a question for copilot: one bounded turn, as Why? runs, answered as a reply to it. Sent as a
+reply to a ping, the ping is its context: a position alert's (found from the ping's ``fb:``/``why:`` button) is
+``ask_context`` on that alert, any other ping's is its text. ``/start`` and ``/help`` (or any command) get a short
+note on what the bot does. One turn runs at a time, shared with Why?; a question while one runs is not asked, and the
+reply says so. A question is cut to ``QUESTION_MAX`` characters.
+
 Every handled tap is answered (``answerCallbackQuery``) and the message's keyboard is edited to show the answer
 chosen. Each tap is recorded once in the rows those routes already write; there is no table of its own. Known
 limit: the offset lives in memory, so a tap handled just before a restart may be read again after it; the feedback
-and rating writes are idempotent, a repeated ``why`` asks once more.
+and rating writes are idempotent, a repeated ``why`` or question asks once more.
 """
 
 import asyncio
@@ -39,6 +45,10 @@ log = logging.getLogger(__name__)
 POLL_SECONDS = 10  # Telegram holds the request open this long when nothing is new; a shutdown waits for it
 RETRY_SECONDS = 30
 ANSWER_MAX = 1500
+QUESTION_MAX = 1000
+HELP = ("I send TradeJournal's phone pings. Tap a ping's buttons to answer it, or type a question for copilot. "
+        "Reply to a ping to ask about that alert.")
+BUSY = "Copilot is still answering the last question; ask again in a moment."
 FEEDBACK_LABELS = {"prompted_review": "Prompted review", "already_aware": "Already aware", "too_late": "Too late",
                    "not_useful": "Not useful"}
 RADAR_LABELS = {"useful": "Useful", "already_knew": "Already knew", "too_late": "Too late", "irrelevant": "Not useful"}
@@ -79,7 +89,7 @@ class Replies:
                 await asyncio.sleep(RETRY_SECONDS)
 
     async def poll_once(self) -> None:
-        payload = {"timeout": POLL_SECONDS, "allowed_updates": ["callback_query"]}
+        payload = {"timeout": POLL_SECONDS, "allowed_updates": ["callback_query", "message"]}
         if self.offset is not None:
             payload["offset"] = self.offset
         updates = await asyncio.to_thread(self.call, "getUpdates", json=payload, timeout=POLL_SECONDS + 10)
@@ -94,7 +104,7 @@ class Replies:
         """Handle one update; returns what was done (for tests), or None when it was ignored."""
         query = update.get("callback_query")
         if not query:
-            return None
+            return await self.handle_message(update.get("message"))
         message = query.get("message") or {}
         owner = telegram.chat_id()
         # The owner's private chat with the bot: its id is the owner's user id, so a tap by anyone else is ignored.
@@ -122,6 +132,25 @@ class Replies:
         if chosen is not None:
             await asyncio.to_thread(self._mark, message, query.get("data"), chosen)
         return verb
+
+    async def handle_message(self, message: dict | None) -> str | None:
+        """A typed message from the owner: a copilot question (``ask``), or the help note for a command."""
+        owner = telegram.chat_id()
+        if not message or str((message.get("chat") or {}).get("id")) != owner or str((message.get("from") or {}).get("id")) != owner:
+            return None
+        text = str(message.get("text") or "").strip()
+        if not text:
+            return None
+        if text.startswith("/"):
+            await asyncio.to_thread(self._reply, message, HELP)
+            return "help"
+        if self._tasks:
+            await asyncio.to_thread(self._reply, message, BUSY)
+            return "busy"
+        task = asyncio.create_task(self._ask(text[:QUESTION_MAX], message))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return "ask"
 
     # -------------------------------------------------------------- the writes
 
@@ -173,35 +202,60 @@ class Replies:
         except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
             log.exception("Telegram Why? turn failed")
             text = "The copilot turn failed unexpectedly."
+        await asyncio.to_thread(self._reply, message, text)
+
+    async def _ask(self, text: str, message: dict) -> None:
         try:
-            await asyncio.to_thread(self.call, "sendMessage", json={
-                "chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
-                                                                                  "allow_sending_without_reply": True},
-                "link_preview_options": {"is_disabled": True}})
-        except telegram.TelegramError as exc:
-            log.warning("Telegram Why? answer not delivered: %s", exc)
+            answer = await self.question_text(text, message.get("reply_to_message"))
+        except Exception:  # noqa: BLE001 - the owner hears that it failed, never silence
+            log.exception("Telegram question turn failed")
+            answer = "The copilot turn failed unexpectedly."
+        await asyncio.to_thread(self._reply, message, answer)
+
+    def _alert_context(self, alert_id: str) -> tuple[str, str | None] | None:
+        """``ask_context`` on a position alert and its symbol, or None when the alert is not in the journal."""
+        from app.engine import position_alerts
+        from app.models import PositionAlert
+        alert_uuid = _uuid(alert_id)
+        with Session(self.engine) as db:
+            alert = db.get(PositionAlert, alert_uuid) if alert_uuid else None
+            if alert is None:
+                return None
+            symbol = (alert.contract or "").split(" ")[0]
+            return position_alerts.ask_context(alert), symbol if SYMBOL.match(symbol) else None
 
     async def why_text(self, alert_id: str) -> str:
         """One bounded copilot turn on the alert, as plain text for the chat."""
-        from app.ai import copilot, copilot_spend
-        from app.engine import position_alerts
-        from app.engine.chart_math import ET
-        from app.models import PositionAlert
-        cfg = copilot.settings()
-        if not cfg.enabled:
+        from app.ai import copilot
+        if not copilot.settings().enabled:
             return "Copilot Lab is off on this server, so there is no answer here."
-        alert_uuid = _uuid(alert_id)
-
-        def read() -> tuple[str, str] | None:
-            with Session(self.engine) as db:
-                alert = db.get(PositionAlert, alert_uuid) if alert_uuid else None
-                return (position_alerts.ask_context(alert), (alert.contract or "").split(" ")[0]) if alert else None
-
-        found = await asyncio.to_thread(read)
+        found = await asyncio.to_thread(self._alert_context, alert_id)
         if found is None:
             return "That alert is no longer in the journal."
-        question, symbol = found
-        symbol = symbol if SYMBOL.match(symbol) else None
+        return await self.turn(*found)
+
+    async def question_text(self, text: str, replied: dict | None) -> str:
+        """One bounded copilot turn on a typed question; a reply to a ping carries that ping as its context."""
+        from app.ai import copilot
+        if not copilot.settings().enabled:
+            return "Copilot Lab is off on this server, so there is no answer here."
+        context, symbol = None, None
+        if replied:
+            alert_id = next((data.split(":")[1] for row in ((replied.get("reply_markup") or {}).get("inline_keyboard") or [])
+                             for data in (str(b.get("callback_data") or "") for b in row) if data.startswith(("fb:", "why:"))), None)
+            found = await asyncio.to_thread(self._alert_context, alert_id) if alert_id else None
+            if found is not None:
+                context, symbol = found
+            else:
+                context = str(replied.get("text") or replied.get("caption") or "").strip()[:QUESTION_MAX] or None
+        question = f"{context}\n\nMy question about this: {text}" if context else text
+        return await self.turn(question, symbol)
+
+    async def turn(self, question: str, symbol: str | None) -> str:
+        """One bounded copilot turn (the configured backend, its turn and daily budgets), as plain text for the chat."""
+        from app.ai import copilot, copilot_spend
+        from app.engine.chart_math import ET
+        cfg = copilot.settings()
         if cfg.backend == "anthropic":
             spent = await asyncio.to_thread(copilot_spend.spent_today)
             if spent >= cfg.daily_budget_usd:
@@ -238,6 +292,15 @@ class Replies:
         return answer if len(answer) <= ANSWER_MAX else answer[: ANSWER_MAX - 1].rstrip() + "…"
 
     # -------------------------------------------------------------- the chat
+
+    def _reply(self, message: dict, text: str) -> None:
+        try:
+            self.call("sendMessage", json={
+                "chat_id": telegram.chat_id(), "text": text, "reply_parameters": {"message_id": message.get("message_id"),
+                                                                                  "allow_sending_without_reply": True},
+                "link_preview_options": {"is_disabled": True}})
+        except telegram.TelegramError as exc:
+            log.warning("Telegram answer not delivered: %s", exc)
 
     def _answer(self, query: dict, text: str | None) -> None:
         payload = {"callback_query_id": query.get("id")}
