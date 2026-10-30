@@ -33,7 +33,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import level_alerts, notification_policy, phone, ping_images
+from app.engine import fill_interrupts, level_alerts, notification_policy, phone, ping_images
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
@@ -67,13 +67,16 @@ class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
                  clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None, scanner=None,
                  positions=None, nudges=None, time_stops=None, prep=None, week_review=None, day_replay=None, evening_review=None,
-                 follow_ups=None):
+                 follow_ups=None, interrupts=None):
         self.engine = engine
         self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.scanner = scanner  # Paper S1 and/or stock-only awareness; each retains its own enable flag.
         self.positions = positions  # Open-trade give-back and expiry alerts, when POSITION_ALERTS_ENABLED
         self.nudges = nudges  # Unplanned-entry plan nudges, when PLAN_NUDGE_ENABLED
         self.time_stops = time_stops  # Copilot plans' time stops, when PLAN_TIME_STOPS_ENABLED
+        if interrupts is None and fill_interrupts.enabled():
+            interrupts = fill_interrupts.FillInterrupts(engine, calendar, clock=clock)
+        self.interrupts = interrupts  # Fill-time pattern interrupts, when FILL_INTERRUPTS_ENABLED
         self.follow_ups = follow_ups  # notification_policy.FollowUps: what the owner did after each ping
         self.prep = prep  # The copilot's pre-market prep ping, when PREMARKET_PREP_ENABLED
         self.week_review = week_review  # The automatic week review ping, when WEEK_REVIEW_AUTO_ENABLED
@@ -193,8 +196,15 @@ class LevelAlertMonitor:
                                                     finally:
                                                         await asyncio.to_thread(self.evening_review.deliver)
                                             finally:
-                                                if self.follow_ups is not None:
-                                                    await asyncio.to_thread(self.follow_ups.run)
+                                                try:
+                                                    if self.interrupts is not None:
+                                                        try:
+                                                            await asyncio.to_thread(self.interrupts.run)
+                                                        finally:
+                                                            await asyncio.to_thread(self.interrupts.deliver)
+                                                finally:
+                                                    if self.follow_ups is not None:
+                                                        await asyncio.to_thread(self.follow_ups.run)
 
     async def _run_alerts(self) -> None:
         await self._record_found()
