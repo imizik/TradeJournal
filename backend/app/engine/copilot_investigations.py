@@ -1,7 +1,8 @@
 """Saved Copilot Lab investigations and research results (docs/copilot-lab.md).
 
-One record for two writers: the interactive copilot (``source="copilot"``, saved by the lab page) and background
-research jobs (``source="research_job"``, saved in-process with ``save_research_result``). A record holds text and
+One record for three writers: the interactive copilot (``source="copilot"``, saved by the lab page), background
+research jobs (``source="research_job"``, saved in-process with ``save_research_result``) and Jo's imported research
+(``source="jo"``, ``save_jo_result``; docs/agent/dots-integration.md § Jo research role). A record holds text and
 references only: a transcript, evidence references (tool + as-of, never the data) and optional cited findings.
 An answer's proposal cards ride in its message with what the owner did with each (``outcome``), so a card comes back
 after a reload as it was left. Nothing here creates or links follow-ups, plans, decisions, memories or watches: a
@@ -29,7 +30,7 @@ MAX_TRANSCRIPT_CHARS = 400_000  # message text and stored cards together
 MAX_PROPOSALS = 4  # per answer: it may make two, and a week review's practice card can join them
 PROPOSAL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")  # what the capture, time-stop and memory saves replay on
-Source = Literal["copilot", "research_job"]
+Source = Literal["copilot", "research_job", "jo"]
 
 
 class InvestigationError(ValueError):
@@ -167,6 +168,8 @@ class Findings(_Strict):
     counterpoints: list[str] = Field(default_factory=list, max_length=12)
     what_would_change: list[str] = Field(default_factory=list, max_length=8)
     citations: list[Citation] = Field(default_factory=list, max_length=30)
+    # Jo's full research text (source "jo"): kept here, a tool result, never as a transcript answer.
+    report: str | None = Field(None, max_length=12_000)
     # The market moment the evidence describes, when it is not "now" (a replay job): ISO 8601 with an offset.
     evidence_at: str | None = Field(None, max_length=40)
 
@@ -378,3 +381,21 @@ def save_research_result(*, title: str, symbol: str | None, findings: Findings |
     fields = InvestigationFields(title=title, symbol=symbol, conclusion=conclusion, findings=findings,
                                  evidence=list(evidence), transcript=list(transcript))
     return create(fields, source="research_job", session=session)
+
+
+def save_jo_result(*, investigation_id: uuid.UUID, title: str, symbol: str | None, findings: Findings | dict,
+                   transcript: list[SavedMessage | dict], conclusion: str | None = None, also: list = (),
+                   session: Session) -> dict:
+    """Save one imported Jo research submission as a closed record (source ``jo``), committed together with ``also``
+    (its import row and, for a red team, the answered request). Closed, because open records are what the thesis
+    watch pings about, the research queue reassesses and the desk lists as the owner's threads; Jo's research is read
+    through ``get_saved_research`` and the plan card instead. Raises pydantic.ValidationError on bad input."""
+    fields = InvestigationFields(title=title, symbol=symbol, status="closed", conclusion=conclusion, findings=findings,
+                                 transcript=list(transcript))
+    row = CopilotInvestigation(id=investigation_id, source="jo", title=fields.title, transcript_json="[]", evidence_json="[]")
+    _fill(row, fields)
+    session.add(row)
+    session.add_all(list(also))
+    session.commit()
+    session.refresh(row)
+    return full(row)

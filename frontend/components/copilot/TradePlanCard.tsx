@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type SetupRecord, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
+import JoCaseAgainst from "@/components/copilot/JoCaseAgainst";
 import LastExitLine from "@/components/copilot/LastExitLine";
 import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
@@ -438,6 +439,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         </div>
       )}
       {finished && <p role="status" className="text-xs text-emerald-300">Plan confirmed.</p>}
+      {investigationId && (finished || saved) && <JoCaseAgainst investigationId={investigationId} proposalId={plan.id} />}
     </section>
   );
 }

@@ -84,6 +84,17 @@ PAYLOADS = {
             "limitations": ["Option marks missing.", "Prices are 15 minutes stale."], "supersedes_id": ids()}},
     ],
     "jo_receipt": [{"operation_id": "morning-roth-2026-10-20"}, {"operation_id": "jo-memory:2026-10-20:apld"}],
+    "jo_research_context": [{"kind": k} for k in ("dossier", "audit", "red_team")],
+    "jo_research_submit": [
+        {"operation_id": "jo-dossier:2026-10-29:nbis", "kind": "dossier", "symbols": ["NBIS", "BRK.B"], "title": "NBIS: capacity story",
+            "body": "## What changed\n" + PROSE, "sources": [{"url": "https://www.reuters.com/markets/nbis", "publisher": "Reuters",
+            "published_at": "2026-10-29T18:05:00-04:00"}, {"url": "http://example.com/a", "publisher": "Example", "published_at": "2026-10-28"}],
+            "as_of": "2026-10-29T19:20:00-04:00"},
+        {"operation_id": "jo-audit:2026-10-30", "kind": "audit", "symbols": [], "title": "Copilot week", "body": PROSE,
+            "sources": [], "as_of": "2026-10-30T21:40:00Z", "request_id": None},
+        {"operation_id": ids(), "kind": "red_team", "symbols": ["APLD"], "title": "The case against", "body": PROSE,
+            "sources": [], "as_of": "2026-10-29T23:00:00Z", "request_id": ids()},
+    ],
     "pre_trade_check": [
         {"ticker": "spy", "side": "long", "instrument": "stock", "horizon": "intraday"},
         {"ticker": "BRK.B", "side": "short", "instrument": "stock", "horizon": "swing", "entry": 471.25,

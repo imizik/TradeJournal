@@ -648,7 +648,7 @@ def saved_research(symbol: str, limit: int = 3, before: datetime | None = None) 
             **({"evidence_at": findings["evidence_at"]} if findings.get("evidence_at") else {}),
         })
     return {"symbol": symbol, "state": "ok", "as_of": _now(), "items": items,
-            "note": "Saved earlier by the owner's copilot or a research job; text, not market data."}
+            "note": "Saved earlier by the owner's copilot, a research job or Jo (source jo: research by an external OpenAI model, unverified); text, not market data."}
 
 
 def _iso(value) -> str | None:

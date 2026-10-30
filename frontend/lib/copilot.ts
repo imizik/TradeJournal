@@ -368,9 +368,11 @@ export type EvidenceRef = { tool: string; as_of?: string | number | null; kind?:
 export type Findings = {
   summary: string; key_findings: string[]; counterpoints: string[]; what_would_change: string[];
   citations: { url: string; publisher?: string | null; published_at?: string | null; title?: string | null }[];
+  /** Jo's full research text (source "jo"). */
+  report?: string | null;
 };
 export type InvestigationSummary = {
-  id: string; source: "copilot" | "research_job"; has_findings: boolean; title: string; symbol: string | null; status: "open" | "closed"; conclusion: string | null;
+  id: string; source: "copilot" | "research_job" | "jo"; has_findings: boolean; title: string; symbol: string | null; status: "open" | "closed"; conclusion: string | null;
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
@@ -411,6 +413,18 @@ export function savedMetrics(m: LabMessage): SavedMetrics | undefined {
     backend: t.backend.slice(0, 40), tools: t.tool_calls.map(c => c.name).slice(0, 50) } : {};
   if (m.error) out.error = m.error.code.slice(0, 80);
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as SavedMetrics;
+}
+/** Asking Jo to argue against a confirmed plan (docs/agent/dots-integration.md § Jo research role): a pending request
+ * Jo answers in its next research run, then its answer (a saved research record, source "jo"). No model call, no ping. */
+export type RedTeamCitation = { url: string; publisher?: string | null; published_at?: string | null };
+export type RedTeam = { request_id: string; proposal_id: string; symbol: string; status: "pending" | "answered"; requested_at: string;
+  answered_at: string | null; answer: { investigation_id: string; title: string; body: string; citations: RedTeamCitation[] } | null };
+export async function getRedTeam(investigationId: string, signal?: AbortSignal): Promise<RedTeam[]> {
+  return (await request<{ requests: RedTeam[] }>(`/copilot/plans/${encodeURIComponent(investigationId)}/red-team`, { signal })).requests;
+}
+export async function askRedTeam(investigationId: string, proposalId: string): Promise<RedTeam> {
+  return request<RedTeam>(`/copilot/plans/${encodeURIComponent(investigationId)}/red-team`,
+    { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) });
 }
 /** The card's confirmed outcome as saved now (another window may have confirmed it), else null; a failed read is null. */
 export async function confirmedElsewhere(id: string, proposalId: string): Promise<ProposalOutcome | null> {
@@ -591,7 +605,7 @@ export type ThreadPosition = {
 /** One thesis-watch trigger for an open investigation: a new headline, a move since its evidence or the prior close, or
  * earnings within two trading days; ``delivery`` says whether the phone was told (sent), or why not. */
 export type ThreadWatchTrigger = { kind: "news" | "move" | "earnings"; text: string; fired_at: string; delivery: "sending" | "sent" | "failed" | "skipped" | "held"; reason?: string | null; path: string };
-export type ThreadInvestigation = { id: string; source: "copilot" | "research_job"; symbol?: string; title: string; status: string; conclusion?: string; updated_at: string; watch?: ThreadWatchTrigger[] };
+export type ThreadInvestigation = { id: string; source: "copilot" | "research_job" | "jo"; symbol?: string; title: string; status: string; conclusion?: string; updated_at: string; watch?: ThreadWatchTrigger[] };
 /** An armed level alert ("level alert") or a waiting research job ("research job (<kind>)"). */
 export type ThreadWatch = {
   watch: string; symbol?: string; price?: number; condition?: string; interval?: string; label?: string; armed_at?: string;

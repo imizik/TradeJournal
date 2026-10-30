@@ -290,7 +290,9 @@ async def _maybe_start_jo_morning(app_: FastAPI):
     if not os.environ.get("JO_MORNING_CONFIG") or os.environ.get("TJ_DOT_TRIAL_ENABLED") == "true":
         return None
     from app.engine.jo_morning import MorningRunner
+    from app.engine.jo_research import ResearchRunner
     runner = MorningRunner(engine)
+    research = ResearchRunner(engine)  # Jo's research role rides the same switch (docs/agent/dots-integration.md)
     app_.state.jo_morning = runner
 
     async def loop():
@@ -301,6 +303,11 @@ async def _maybe_start_jo_morning(app_: FastAPI):
                 # Never log record contents or configuration paths.
                 runner.last_error = f"Morning briefing pass unavailable ({type(error).__name__})"
                 logging.getLogger(__name__).warning("%s", runner.last_error)
+            try:
+                await asyncio.to_thread(research.run_once)
+            except Exception as error:
+                research.last_error = f"Jo research pass unavailable ({type(error).__name__})"
+                logging.getLogger(__name__).warning("%s", research.last_error)
             await asyncio.sleep(30)
     return asyncio.create_task(loop())
 
