@@ -475,6 +475,9 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
         price = plan.get("invalidation")
         if not price:
             return "This draft has no invalidation to arm; edit it on the desk.", None
+        trade = trade_of(db, row)
+        if trade is not None and trade.status != "open":
+            return "Not confirmed: this position has closed.", None
         last = (quote or (lambda s: read_underlying([s]).get(s)))(row.ticker)
         if not last:
             return f"The latest {row.ticker} quote is missing, so nothing was armed. Try again.", None
@@ -775,9 +778,14 @@ class Companion:
     def _live(self, row: PositionCompanion, trade: Trade, now: float) -> dict:
         from app.engine.occ import occ_symbol
         from app.engine.position_alerts import _money, _premium
-        out: dict = {"underlying": self.underlying([row.ticker]).get(row.ticker)}
-        occ = occ_symbol(row.ticker, row.expiration, row.option_type, float(trade.strike))
-        mark = self.marks([occ], now).get(occ) or {}
+        out: dict = {}
+        try:  # optional context: the prompt says "unavailable" without it
+            out["underlying"] = self.underlying([row.ticker]).get(row.ticker)
+            occ = occ_symbol(row.ticker, row.expiration, row.option_type, float(trade.strike))
+            mark = self.marks([occ], now).get(occ) or {}
+        except Exception:  # noqa: BLE001
+            log.warning("Companion live read failed for %s", row.ticker, exc_info=True)
+            return out
         if mark.get("mark") is not None:
             cost = float(trade.avg_entry_premium)
             gain = (mark["mark"] - cost) * float(trade.contracts) if trade.status == "open" else None
@@ -857,14 +865,18 @@ class Companion:
     # ------------------------------------------------------------ close
 
     def _closed(self, now: float) -> list[uuid.UUID]:
-        """Adopted positions whose exits brought them to zero, once no ping for them is inside the quiet window (so the
-        exit note is not held by it)."""
+        """Adopted positions whose exits brought them to zero: any armed invalidation is removed now, and each is returned
+        once no ping for it is inside the quiet window (so the exit note is not held by it)."""
         with Session(self.engine) as db:
             rows = db.exec(select(PositionCompanion).where(PositionCompanion.state.in_(("draft", "armed")))).all()
             out = []
             for row in rows:
                 trade = trade_of(db, row)
-                if trade is not None and trade.status != "open" and (not row.watched or not self._quiet(db, row, now)):
+                if trade is None or trade.status == "open":
+                    continue
+                _disarm(db, row)  # at once: only the note waits, so a closed position never pings "your plan says out"
+                db.commit()
+                if not row.watched or not self._quiet(db, row, now):
                     out.append(row.id)
             return out
 
@@ -895,7 +907,11 @@ class Companion:
         if found is None:
             return
         row, question = found
-        answer, error = await self.turn(question, row.ticker, now)
+        try:
+            answer, error = await self.turn(question, row.ticker, now)
+        except Exception as exc:  # noqa: BLE001 - the row is already closed, so the thread must still be closed here
+            log.warning("Companion close turn failed: %s", type(exc).__name__)
+            answer, error = "", "The copilot turn failed unexpectedly."
         await asyncio.to_thread(self._finished, row_id, question, answer, error)
 
     def _finished(self, row_id, question: str, answer: str, error: str | None) -> None:

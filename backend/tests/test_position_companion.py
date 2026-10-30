@@ -685,3 +685,40 @@ def test_one_failing_adopt_never_stops_the_others(world, engine, phone):
     world.tick("10:03")
     states = {r.ticker: r.state for r in companions(engine)}
     assert states == {"NBIS": "draft", "AMD": "adopting"}
+
+
+def test_the_alert_goes_at_once_while_the_exit_note_waits(world, engine, phone):
+    row = adopted(world, engine)
+    position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0)
+    ping(engine, "giveback", "10:38")
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    world.tick("10:41")
+    [row] = companions(engine)
+    assert row.state == "armed" and len(world.turns.questions) == 1  # the note waits for the quiet window
+    with Session(engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+
+
+def test_confirm_refuses_a_position_already_closed(world, engine, phone):
+    row = adopted(world, engine)
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0)
+    assert chosen is None and "has closed" in reply
+    with Session(engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+
+
+def test_a_failed_read_or_turn_at_the_close_still_closes_the_thread(world, engine, phone):
+    row = adopted(world, engine)
+
+    def down(symbols):
+        raise RuntimeError("feed down")
+
+    async def failing(question, symbol, now):
+        raise RuntimeError("model down")
+    world.companion.underlying, world.companion.turn = down, failing
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    world.tick("10:41")
+    [row] = companions(engine)
+    saved = investigation(engine, row)
+    assert row.state == "closed" and saved["status"] == "closed" and saved["conclusion"].startswith("Unclear")

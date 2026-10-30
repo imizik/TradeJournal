@@ -1798,7 +1798,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   pings, so pre-open headlines cannot spend the day. A held ping's reason names
   the budget: "Not sent: Radar's 4 single pings for today are spent."
 - **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
-  across every kind (the companion's updates count toward it only for kinds ranked at or below them). Priority order: last-day final > invalidation > give-back
+  across every kind (the companion's updates count toward it only for themselves). Priority order: last-day final > invalidation > give-back
   > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
   trigger > hold-hour > companion update > nudge/link/companion adopt > prep > evening review > Radar single >
   Radar digest > thesis watch > research. The first three are never over the
@@ -1905,13 +1905,15 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
   adopted investigation, so the desk shows them in the thread (and its Timeline lists each ping), and sent as a
   Telegram reply to the adopt message, so one thread holds the position, with **Closed it** / **Holding** (recorded
   on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12; it counts
-  toward the daily ceiling only for kinds ranked at or below it, so it never holds a more important alert.
+  toward the daily ceiling only for itself, so it never holds another kind (a busy day can therefore send more than
+  the ceiling: its pings plus up to 12 updates).
 - **Close.** When the exits bring the position to zero: one last turn writes the exit note (what the plan said,
   what he did, where the underlying and the option mark went), saved as the investigation's conclusion with status
   `closed`, and sent as the thread's last reply. It waits out the quiet window (so a give-back just before the sale
   does not hold it) and runs only from the open to 30 minutes after the close; a position closed later (or expired
   overnight) gets its note in the next session. The row is marked closed before the turn, so it never runs twice. A
-  confirmed invalidation that never fired is removed, so a closed position never pings "your plan says out".
+  confirmed invalidation that never fired is removed as soon as the close is seen (within a minute), before the note
+  waits, and Confirm refuses a closed position, so it never pings "your plan says out" after that.
   An adopt-only position closes quietly: its thread is closed with no note.
 - **Desk.** An adopted position's row opens its adopted thread and reads "Adopted · draft plan to confirm" (or its
   armed invalidation); the thread header's chip says Adopted (Adopted · armed once confirmed).
