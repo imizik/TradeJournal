@@ -18,7 +18,7 @@ from sqlmodel import Session
 
 from app.ai import copilot
 from app.database import get_session
-from app.engine import copilot_plans, desk_context, plan_positions
+from app.engine import copilot_plans, desk_context, plan_positions, setup_record
 from app.engine.chart_math import ET
 from app.routers import today
 
@@ -42,10 +42,12 @@ def plan_positions_view(db: Session = Depends(get_session)):
 
 
 @router.get("/symbol/{symbol}")
-def symbol_loop(symbol: str, db: Session = Depends(get_session)):
+def symbol_loop(symbol: str, setup: bool = False, db: Session = Depends(get_session)):
     """The Charts dock's Copilot tab for one symbol: its open positions with their plans, its armed plans not yet in a
     position, what is new on it (Radar events since the last Radar visit, thesis triggers fired today) and its newest
-    answered exit review (``last_exit``, ``copilot_plans.last_exit_lessons``; ``lesson`` null without one). Composed
+    answered exit review (``last_exit``, ``copilot_plans.last_exit_lessons``; ``lesson`` null without one), and the
+    owner's record for an option plan's setup today (``setup``, ``setup_record.for_symbol``, only with ``?setup=true``:
+    the plan card asks for it, the Charts dock's polling does not). Composed
     in-process from the Plans board, the Plans card and the Today screen's readers, each section on its own so one
     failing source reads ``{"state": "unavailable"}``. Quotes are read for this symbol only. Read-only."""
     if not copilot.settings().enabled:
@@ -75,6 +77,8 @@ def symbol_loop(symbol: str, db: Session = Depends(get_session)):
         "positions": today._section(db, "symbol positions", positions), "plans": armed,
         "last_exit": today._section(db, "symbol last exit", lambda: {
             "state": "ok", "lesson": copilot_plans.last_exit_lessons(db, {symbol}).get(symbol)}),
+        **({"setup": today._section(db, "symbol setup", lambda: {"state": "ok", **setup_record.for_symbol(db, symbol, now)})}
+           if setup else {}),
         "new": {"radar": today._section(db, "symbol radar", lambda: today._radar(now, symbol)),
                 "thesis": today._section(db, "symbol thesis", lambda: today._thesis(db, day, symbol))},
         "quotes_at": shared.at, "quote_issue": shared.issue,
