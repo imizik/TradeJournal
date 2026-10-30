@@ -603,6 +603,18 @@ export const getPlansBoard = (signal?: AbortSignal) => request<PlansBoard>("/cop
 /** A symbol's newest answered exit review (``copilot_plans.last_exit_lessons``): ``exited``, the New York date of the
  * plan's last exit; ``followed``, what the answer opens with; ``lesson``, the owner's own words. */
 export type ExitLesson = { exited: string; followed: "yes" | "partly" | "no" | null; lesson: string };
+/** The owner's closed opening option trades in one cohort (``setup_record.record``). */
+export type SetupTally = { trades: number; won: number; pnl: number };
+/** Today's relation of one side to the gap or the 20-day trend, with the matching cohort (``record`` null when thin);
+ * null when today's context is unknown. */
+export type SetupCohort = { relation: "against" | "with" | "small"; record: SetupTally | null } | null;
+/** A draft option plan's setup today (``setup_record.for_symbol``): today's gap and distance from the 20-day average
+ * (percent), each side's matching record, and the size record (``usual``: median premium). */
+export type SetupRecord = {
+  gap_pct: number | null; vs_sma_pct: number | null;
+  calls: { gap: SetupCohort; trend: SetupCohort }; puts: { gap: SetupCohort; trend: SetupCohort };
+  size: { usual: number; top_quarter_from: number; top_quarter: SetupTally | null } | null;
+};
 /** The Charts dock's Copilot tab for one symbol (``GET /copilot/symbol/{symbol}``): its open positions with their plans
  * (the Dashboard Plans card's rows), its armed plans not yet in a position (the board's rows), and what is new on it.
  * A section whose source failed reads ``unavailable``; Radar reads ``off`` while it is not running. */
@@ -612,6 +624,8 @@ export type SymbolLoop = {
   positions: LoopSection<PlanPosition>; plans: LoopSection<PlanBoardRow>;
   /** The symbol's newest answered exit review (null without one), for the plan card. */
   last_exit?: { state: "ok"; lesson: ExitLesson | null } | { state: "unavailable" };
+  /** The owner's record for an option plan's setup today, for the plan card. */
+  setup?: ({ state: "ok" } & SetupRecord) | { state: "unavailable" };
   new: {
     radar: { state: "ok"; count: number; rows: { event_id: string; summary: string | null; first_seen_at: string }[] } | { state: "off" | "unavailable" };
     thesis: { state: "ok"; count: number; rows: { kind: string; text: string; fired_at: string | null }[] } | { state: "unavailable" };

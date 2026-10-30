@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
+import { confirmedElsewhere, createPlanAlert, freshQuote, getSymbolLoop, PLAN_CONFIRMED, previewTimeStop, rememberRisk, savedRisk, savePlanCapture, saveTimeStop, type DrawnPlan, type ExitLesson, type FreshQuote, type LevelHistory, type OptionCandidates, type OptionPick, type PlanConfirmed, type PlanLevel, type ProposalOutcome, type SetupRecord, type TimeStopPreview, type TradePlan } from "@/lib/copilot";
 import { fetchSetup, newClientId, SIDE_LABEL, type CaptureOrigin, type CaptureSetup, type CaptureSide } from "@/lib/captures";
 import LastExitLine from "@/components/copilot/LastExitLine";
+import SetupRecordLines, { premiumLine } from "@/components/copilot/SetupRecordLines";
 import { conditionText, levelText } from "@/components/copilot/ProposalCard";
 import { HORIZONS, horizonFor, saveHorizon, type DeskHorizon } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -114,14 +115,19 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
   // One plan per card, its id kept with it: a save retried here, after a reload or from another window returns the first one.
   const clientId = useRef(plan.client_id ?? newClientId());
   useEffect(() => { fetchSetup().then(setSetup).catch(() => setSetupError(true)); }, []);
-  // A draft shows the symbol's last exit lesson; a confirmed or dismissed card never reads it.
+  // A draft shows the symbol's last exit lesson and, for an option plan, the owner's record for its setup; a confirmed
+  // or dismissed card never reads them.
   const [lastExit, setLastExit] = useState<ExitLesson | null>(null);
+  const [setupRecord, setSetupRecord] = useState<SetupRecord | null>(null);
   const drafting = !saved && !dismissed;
   useEffect(() => {
     if (!drafting) return;
     const controller = new AbortController();
     getSymbolLoop(plan.symbol, controller.signal)
-      .then(loop => setLastExit(loop.last_exit?.state === "ok" ? loop.last_exit.lesson : null)).catch(() => undefined);
+      .then(loop => {
+        setLastExit(loop.last_exit?.state === "ok" ? loop.last_exit.lesson : null);
+        setSetupRecord(loop.setup?.state === "ok" ? loop.setup : null);
+      }).catch(() => undefined);
     return () => controller.abort();
   }, [drafting, plan.symbol]);
   const stopText = timeStop.trim();
@@ -172,7 +178,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
     timeStop.trim() && `Time stop: ${timeStop.trim()}.`, sizeText && `Size: ${sizeText}.`].filter(Boolean).join(" ").slice(0, 400);
 
   /** What the typed risk buys, in plain lines, and the line Confirm puts in front of the size note (none for zero). */
-  function sizeIt(): { lines: string[]; note: string | null } | null {
+  function sizeIt(): { lines: string[]; note: string | null; premium?: number } | null {
     if (!(riskUsd > 0)) return null;
     const losing = long ? entryLevel.price - stopLevel.price : stopLevel.price - entryLevel.price;
     const distance = Number.isFinite(losing) && losing > 0 ? losing : null;
@@ -206,7 +212,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
         : `At invalidation: about ${n(c.atInvalidation.contracts)}, each losing about ${usd(c.atInvalidation.perContract)} if ${plan.symbol} reaches ${stopAt} (delta ${pick.delta}); the premium is still all at risk past it.`,
       `Priced at the ${pick.ask.toFixed(2)} ask (${usd(pick.ask_contract)} a contract)${read}${candidates?.simulated ? " (simulated)" : ""}.`,
     ];
-    return { lines, note: c.maxLoss === 0 ? null : `${n(c.maxLoss)} of ${pick.label} at ${pick.ask.toFixed(2)}, ${usd(c.premium)} max loss, risk ${usd(riskUsd)}` };
+    return { lines, note: c.maxLoss === 0 ? null : `${n(c.maxLoss)} of ${pick.label} at ${pick.ask.toFixed(2)}, ${usd(c.premium)} max loss, risk ${usd(riskUsd)}`,
+      premium: c.maxLoss === 0 ? undefined : c.premium };
   }
   const note = [`Thesis: ${thesis.trim()}`, contract && `Contract: ${contract}.`, "From a Copilot Lab plan card."]
     .filter(Boolean).join(" ").slice(0, 500);
@@ -312,6 +319,8 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       )}
       {plan.last !== undefined && <p className="text-xs text-muted-foreground">{plan.symbol} was {plan.last} when this was drafted.</p>}
       {drafting && <LastExitLine symbol={plan.symbol} lesson={lastExit} />}
+      {drafting && plan.instrument !== "stock" && <SetupRecordLines symbol={plan.symbol} side={plan.instrument === "calls" ? "call" : "put"}
+        setup={setupRecord} />}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">Thesis</span>
         <textarea value={thesis} onChange={e => setThesis(e.target.value.slice(0, 300))} rows={3} disabled={locked} className={field} />
@@ -384,6 +393,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
       {sizing && (
         <div aria-label="Size it for me" className="space-y-0.5 text-xs text-muted-foreground">
           {sizing.lines.map(line => <p key={line}>{line}</p>)}
+          {drafting && premiumLine(setupRecord, sizing.premium) && <p>{premiumLine(setupRecord, sizing.premium)}</p>}
           {sizing.note && !locked && <p>{sizeEdited ? "Your size note is kept as you wrote it." : `Confirm puts this size in front of the size note${sizeText.endsWith("…") ? `, which is cut to fit ${SIZE_MAX} characters` : ""}.`}</p>}
         </div>
       )}

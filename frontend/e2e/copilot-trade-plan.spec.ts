@@ -32,7 +32,7 @@ const TURN = sse([
 ]);
 
 type Server = { alerts: object[]; posts: { path: string; body: Record<string, unknown> }[]; failAlert?: (body: Record<string, unknown>) => boolean;
-  failCapture?: boolean; last?: number; stops?: object[]; reads?: Record<string, object>; lastExit?: object | null; loopReads?: string[] };
+  failCapture?: boolean; last?: number; stops?: object[]; reads?: Record<string, object>; lastExit?: object | null; loopReads?: string[]; setup?: object };
 // The server's reading of a time stop; anything not listed stays a note.
 const DUE = Date.UTC(2026, 9, 24, 19, 30) / 1000;
 const READ = (server: Server, text: string) => server.reads?.[text] ?? { due_at: null, reason: "No time or length in it, so it stays a note.", enabled: true };
@@ -63,7 +63,7 @@ async function lab(page: Page, server: Server, { alertsSupported = true, default
   await page.route("**/copilot/symbol/*", (route) => {
     server.loopReads?.push(new URL(route.request().url()).pathname);
     return route.fulfill({ json: { symbol: "NBIS", as_of: "2026-10-24T14:00:00Z", positions: { state: "ok", rows: [] }, plans: { state: "ok", rows: [] },
-      last_exit: { state: "ok", lesson: server.lastExit ?? null }, new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } });
+      last_exit: { state: "ok", lesson: server.lastExit ?? null }, ...(server.setup ? { setup: { state: "ok", ...server.setup } } : {}), new: { radar: { state: "off" }, thesis: { state: "ok", count: 0, rows: [] } }, quotes_at: null, quote_issue: null } });
   });
   await page.route("**/copilot/time-stops/preview?*", (route) =>
     route.fulfill({ json: READ(server, new URL(route.request().url()).searchParams.get("text") ?? "") }));
@@ -487,4 +487,45 @@ test("size it for me on a stock plan: shares from the invalidation distance, cos
   await expect(card.getByRole("list", { name: "Plan results" })).toContainText("Pre-trade plan: done");
   const [capture] = posts(server, "captures");
   expect(capture.wording).toContain("Size: half size, earnings week.");
+});
+
+// The owner's record for an option plan's setup today (GET /copilot/symbol/{symbol}'s setup; tests/test_setup_record.py).
+const SETUP = { gap_pct: -2.4, vs_sma_pct: -3.1,
+  calls: { gap: { relation: "against", record: { trades: 12, won: 8, pnl: 1240 } }, trend: { relation: "against", record: { trades: 20, won: 11, pnl: 860 } } },
+  puts: { gap: { relation: "with", record: { trades: 9, won: 3, pnl: -700 } }, trend: { relation: "with", record: null } },
+  size: { usual: 500, top_quarter_from: 1000, top_quarter: { trades: 15, won: 9, pnl: -310 } } };
+
+test("a draft option plan shows the owner's record for its setup, and its premium against the usual once sized", async ({ page }) => {
+  const server: Server = { alerts: [], posts: [], setup: SETUP };
+  await lab(page, server);
+  await page.route("**/copilot/chat", (route) => route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: turnWith(PLAN, SIZED) }));
+  const card = await askForPlan(page);
+  const record = card.getByLabel("Your record for this NBIS setup");
+  await expect(record.locator("p")).toHaveText([
+    "Gap −2.4%. Your opening calls bought against a gap down of 1%+: 12 trades, 67% won, +$1,240.",
+    "NBIS is 3.1% below its 20-day average. Your opening calls bought below it: 20 trades, 55% won, +$860.",
+  ]);
+  await card.getByLabel("Contract").selectOption("Nov 13 '26 95C");
+  await card.getByLabel("Risk $").fill("1400");
+  // The size line sits with the sizing lines, where the risk is typed.
+  await expect(card.getByLabel("Size it for me")).toContainText(
+    "This plan: $1,384 of premium, 2.8× your usual $500. Your opening option trades of $1,000+: 15 trades, 60% won, −$310.");
+  await card.getByLabel("Contract").selectOption("Nov 6 '26 95C");
+  await card.getByLabel("Risk $").fill("600");
+  await expect(card.getByLabel("Size it for me")).toContainText("This plan: $565 of premium, 1.1× your usual $500.");
+  await expect(card.getByLabel("Size it for me")).not.toContainText("Your opening option trades of");
+  await record.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("plan-card-setup-record-1440.png") });
+  await card.getByRole("button", { name: "Confirm" }).click();
+  await expect(card.getByText("Set: NBIS crosses 92.3.")).toBeVisible();
+  await expect(record).toBeHidden(); // a confirmed card no longer shows it
+});
+
+test("a thin or unknown setup shows no record lines", async ({ page }) => {
+  const thin = { ...SETUP, calls: { gap: { relation: "small", record: null }, trend: null }, size: null };
+  const server: Server = { alerts: [], posts: [], setup: thin };
+  await lab(page, server);
+  const card = await askForPlan(page);
+  await expect(card.getByLabel("Invalidation (crosses)")).toHaveValue("92.3");
+  await expect(card.getByLabel("Your record for this NBIS setup")).toHaveCount(0);
 });

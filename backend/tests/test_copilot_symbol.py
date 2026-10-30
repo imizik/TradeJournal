@@ -11,7 +11,7 @@ import pytest
 from sqlmodel import Session
 
 from app.database import get_session
-from app.engine import copilot_plans, plan_positions
+from app.engine import copilot_plans, plan_positions, setup_record
 from app.engine.chart_feed import chart_feed
 from app.engine.radar_store import RadarStore
 from app.models import Account, ThesisWatchTrigger
@@ -28,6 +28,7 @@ from tests.test_today import RADAR_EVENT, clock, marks  # noqa: F401  (fixtures)
 def lab(engine, quotes, marks, clock, monkeypatch):  # noqa: F811
     monkeypatch.delenv("RADAR_ENABLED", raising=False)
     monkeypatch.setattr(plan_routes.copilot, "settings", lambda: SimpleNamespace(enabled=True))
+    monkeypatch.setattr(setup_record, "_daily_bars", lambda symbol: [])  # no network: no gap or trend today
     app = FastAPI()
     app.include_router(plan_routes.router, prefix="/copilot")
 
@@ -142,3 +143,15 @@ def test_the_symbols_last_answered_exit_lesson_for_a_draft_plan_card(lab, engine
     monkeypatch.setattr(copilot_plans, "last_exit_lessons", broken)
     body = lab.get("/copilot/symbol/CRWV").json()
     assert body["last_exit"] == {"state": "unavailable"} and body["plans"]["state"] == "ok"
+
+
+def test_the_setup_record_rides_along_on_its_own(lab, monkeypatch):  # noqa: F811
+    body = lab.get("/copilot/symbol/NBIS").json()
+    assert body["setup"] == {"state": "ok", "gap_pct": None, "vs_sma_pct": None, "calls": {"gap": None, "trend": None},
+                             "puts": {"gap": None, "trend": None}, "size": None}
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(setup_record, "opening_trades", broken)
+    body = lab.get("/copilot/symbol/NBIS").json()
+    assert body["setup"] == {"state": "unavailable"} and body["plans"]["state"] == "ok"
