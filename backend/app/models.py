@@ -81,6 +81,17 @@ class Account(SQLModel, table=True):
     trades: list["Trade"] = Relationship(back_populates="account")
 
 
+class OptionRollOrder(SQLModel, table=True):
+    """A two-leg order's email: quantity and net price only. ``option_rolls`` derives its two fills."""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    raw_email_id: str = Field(index=True, unique=True)
+    ticker: str
+    contracts: float = Field(sa_column=Column(DECIMAL_18_6, nullable=False))
+    net_per_contract: float = Field(sa_column=Column(DECIMAL_18_6, nullable=False))  # dollars, premium x 100
+    credit_mentioned: bool = False  # never seen yet; such an order stays unresolved rather than be read as a debit
+    executed_at: datetime  # naive America/New_York wall clock
+
+
 class Fill(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(foreign_key="account.id", index=True)

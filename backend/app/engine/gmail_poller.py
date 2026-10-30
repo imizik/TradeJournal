@@ -21,6 +21,8 @@ from app.engine.email_parser import (
     OPTION_PARTIAL_SUBJECT,
     OPTION_SUBJECT,
     ParsedFill,
+    ParsedRoll,
+    ROLL_SUBJECT,
     STOCK_SUBJECT,
     parse_option_email,
 )
@@ -38,7 +40,7 @@ GMAIL_SKIPPED_MESSAGE_IDS_FILE = _BACKEND_DIR / "data" / "gmail_skipped_message_
 GMAIL_HISTORY_CURSOR_FILE = _BACKEND_DIR / "data" / "gmail_history_cursor.json"
 GMAIL_AUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_auth_state.json"
 ROBINHOOD_SENDER = "noreply@robinhood.com"
-FILL_SUBJECTS = frozenset({OPTION_SUBJECT, OPTION_PARTIAL_SUBJECT, STOCK_SUBJECT})
+FILL_SUBJECTS = frozenset({OPTION_SUBJECT, OPTION_PARTIAL_SUBJECT, ROLL_SUBJECT, STOCK_SUBJECT})
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
 DEFAULT_GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"

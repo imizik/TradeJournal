@@ -1,8 +1,13 @@
 from decimal import Decimal
 
+import pytest
+
 from app.engine.email_parser import (
+    EmailParseError,
     OPTION_PARTIAL_SUBJECT,
     OPTION_SUBJECT,
+    ParsedRoll,
+    ROLL_SUBJECT,
     parse_option_email,
 )
 
@@ -114,3 +119,19 @@ def test_option_email_after_price_format_switch_is_scaled_to_per_contract() -> N
     assert parsed is not None
     assert parsed.price == Decimal("330.00")
     assert parsed.contracts == Decimal("1")
+
+
+ROLL_BODY = ("Hi Isaac, Your limit order for 2 CRWV 2-Option Strategies executed at an average price of $1.32 "
+             "for a total of $264.00 on October 29, 2026 at 11:16 AM ET.")
+
+
+def test_two_leg_email_becomes_a_roll_and_other_mail_with_that_subject_stays_ignored() -> None:
+    roll = parse_option_email(ROLL_SUBJECT, ROLL_BODY, "uid-roll")
+    assert isinstance(roll, ParsedRoll)
+    assert (roll.ticker, roll.contracts, roll.net_per_contract, roll.credit_mentioned) == ("CRWV", Decimal("2"), Decimal("132"), False)
+    assert parse_option_email(ROLL_SUBJECT, "Your limit order to sell 2 contracts of X", "uid-other") is None
+
+
+def test_two_leg_email_with_a_total_that_disagrees_refuses_to_parse() -> None:
+    with pytest.raises(EmailParseError):
+        parse_option_email(ROLL_SUBJECT, ROLL_BODY.replace("$264.00", "$26.40"), "uid-bad")

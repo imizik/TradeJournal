@@ -117,7 +117,12 @@ def _positions(db, symbol: str | None, now_et: datetime) -> dict:
                 "setup": _trim(plan.setup_label, 60), "wording": _trim(plan.wording), "note": _trim(plan.note),
                 "captured_at": copilot_book._iso(plan.received_at)}.items() if v}
         rows.append(out)
+    from app.engine.option_rolls import unresolved_rolls
+    rolls = [{"symbol": r.ticker, "contracts": float(r.contracts), "net_per_contract_usd": float(r.net_per_contract),
+              "at": copilot_book._iso(r.executed_at)} for r in unresolved_rolls(db)]
     return {"state": "ok", "count": total, "shown": len(rows), "positions": rows,
+            **({"unresolved_rolls": rolls, "unresolved_rolls_note": "The broker's email names no contracts, so these positions "
+                "may be stale: the rolled-out contract can still show as held until the new one is sold."} if rolls else {}),
             "units": "Options: avg_entry, mark and peak are dollars per contract (premium x 100). Stocks: per share."}
 
 

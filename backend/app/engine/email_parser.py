@@ -5,6 +5,8 @@ Handles two email types:
   - "Option order executed" -> ParsedFill with instrument_type="option"
   - "Your order has been executed" -> ParsedFill with instrument_type="stock"
 
+  - "Option Order Executed" naming a 2-Option Strategy -> ParsedRoll (no legs or leg prices in it)
+
 All other subjects are silently ignored.
 """
 
@@ -53,6 +55,12 @@ _DATETIME_RE = re.compile(
     re.IGNORECASE,
 )
 
+_ROLL_RE = re.compile(
+    r"order for (\d+) ([A-Z]+) 2-Option Strateg(?:y|ies) executed at an average price of \$([\d,]+\.?\d*) "
+    r"for a total of \$([\d,]+\.?\d*)",
+    re.IGNORECASE,
+)
+
 _ACCOUNT_LAST4_RE = re.compile(r"\([^0-9]*(\d{4})\)")
 _ACCOUNT_TYPE_RE = re.compile(r"(Roth IRA|Individual|Traditional IRA|Brokerage)", re.IGNORECASE)
 
@@ -66,6 +74,7 @@ _ACCOUNT_TYPE_MAP = {
 OPTION_SUBJECT = "Option order executed"
 OPTION_PARTIAL_SUBJECT = "Option order partially executed"
 STOCK_SUBJECT = "Your order has been executed"
+ROLL_SUBJECT = "Option Order Executed"
 OPTION_SUBJECTS = (OPTION_SUBJECT,)  # Skip partial-fill emails — they report cumulative
 # counts that duplicate the complete-fill email. See scripts/find_phantoms.py.
 
@@ -85,6 +94,16 @@ class ParsedFill:
     expiration: date | None = None
 
 
+@dataclass
+class ParsedRoll:
+    ticker: str
+    contracts: Decimal
+    net_per_contract: Decimal  # the email's total / quantity: dollars per contract, unaffected by the price-format switch
+    credit_mentioned: bool
+    executed_at: datetime
+    raw_email_id: str
+
+
 class EmailParseError(Exception):
     pass
 
@@ -93,13 +112,30 @@ def _to_decimal(value: str) -> Decimal:
     return Decimal(value.replace(",", ""))
 
 
-def parse_option_email(subject: str, body: str, imap_uid: str) -> ParsedFill | None:
+def parse_option_email(subject: str, body: str, imap_uid: str) -> ParsedFill | ParsedRoll | None:
     s = subject.strip()
+    if s == ROLL_SUBJECT:
+        return _parse_roll(body, imap_uid)
     if s in OPTION_SUBJECTS:
         return _parse_option(body, imap_uid)
     if s == STOCK_SUBJECT:
         return _parse_stock(body, imap_uid)
     return None
+
+
+def _parse_roll(body: str, imap_uid: str) -> ParsedRoll | None:
+    match = _ROLL_RE.search(body)
+    if not match:
+        return None  # this subject on anything else stays ignored, as before
+    dt_match = _DATETIME_RE.search(body)
+    if not dt_match:
+        raise EmailParseError(f"Could not parse datetime from email uid={imap_uid!r}")
+    contracts, price, total = (_to_decimal(match.group(i)) for i in (1, 3, 4))
+    if not contracts or contracts * price * 100 != total:
+        raise EmailParseError(f"Two-leg total does not match its price in email uid={imap_uid!r}")
+    return ParsedRoll(ticker=match.group(2).upper(), contracts=contracts, net_per_contract=total / contracts,
+                      credit_mentioned="credit" in body[max(0, match.start() - 80):match.end() + 80].lower(),
+                      executed_at=_parse_dt(dt_match), raw_email_id=imap_uid)
 
 
 def _parse_option(body: str, imap_uid: str) -> ParsedFill:
