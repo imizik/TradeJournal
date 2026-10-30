@@ -189,8 +189,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     shows their count ("18 Radar", a sky dot while one is unseen in this
     browser) and, in amber, how many alerts and Radar hits wait for an answer
     ("3 to answer"). Open conversations about no ticker (a Briefing turn, a week
-    review) are listed under it, title and date: today's and the open one,
-    the rest under **Earlier · N**. **What matters right
+    review) are listed under it, title and date: today's, the open one and the
+    latest automatic week review, the rest under **Earlier · N**. **What matters right
     now?** (one turn, the fixed `lib/copilot.ts` `WHAT_MATTERS_PROMPT`) sits
     on the Briefing beside Review my week, and in ⌘K.
   - **Tickers**: one row per symbol the owner has something on: an open

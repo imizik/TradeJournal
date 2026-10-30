@@ -7,7 +7,7 @@ import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanList from "@/components/copilot/PlanList";
 import type { HomeActions } from "@/components/copilot/CopilotPanel";
-import type { InvestigationSummary } from "@/lib/copilot";
+import { AUTO_WEEK_REVIEW_TITLE, type InvestigationSummary } from "@/lib/copilot";
 import {
   getDeskThreads, getSavedConversations, nyDay, reviewSkipped, type DeskDay, type DeskGroup, type DeskPlan, type DeskThread, type DeskThreads, type DeskTone,
 } from "@/lib/desk";
@@ -304,8 +304,9 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
   const livePlans = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
-  // Under Main: today's conversations and the open one; the rest wait under Earlier.
-  const looseShown = loose.filter(t => t.id === active || (day && t.at && nyDay(new Date(t.at)) === day));
+  // Under Main: today's conversations, the open one and the latest automatic week review; the rest wait under Earlier.
+  const weekReview = loose.find(t => t.title.startsWith(AUTO_WEEK_REVIEW_TITLE));
+  const looseShown = loose.filter(t => t === weekReview || t.id === active || (day && t.at && nyDay(new Date(t.at)) === day));
   const looseEarlier = loose.filter(t => !looseShown.includes(t));
   const missing = Object.entries(data?.sections ?? {}).filter(([name, state]) => state === "unavailable" && SOURCE[name]).map(([name]) => SOURCE[name]);
   // The open ticker: the one just pressed, until the open conversation changes; then the conversation's.
