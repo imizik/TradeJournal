@@ -2101,3 +2101,32 @@ class ThesisWatchTrigger(SQLModel, table=True):
     reason: Optional[str] = None  # why skipped or failed
     message_id: Optional[str] = None  # ntfy's receipt: accepted, not shown
     reassess_job_id: Optional[uuid.UUID] = None  # the research_job queued for it, when the queue is on
+
+
+class Outcome(SQLModel, table=True):
+    """What followed one output of the app (``engine/outcomes.py``, docs/analytics.md § Outcomes): the underlying's
+    price 1 hour, 1 trading day and 5 trading days after it, what the owner did in the fills, and the dollars against
+    the obvious alternative. Filled in by the sync pipeline (08:00 and 17:00 New York) from stored bars and the journal, no
+    model or price provider call; a row with a window still open stays ``complete`` false and is recomputed next run. Additive: one
+    row per (``subject_kind``, ``subject_id``), nothing else reads or writes the sources through it."""
+
+    __tablename__ = "outcome"
+    __table_args__ = (UniqueConstraint("subject_kind", "subject_id", name="uq_outcome_subject"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    subject_kind: str = Field(index=True)  # ping | plan | radar_event | research | shadow_decision | companion_update (reserved)
+    subject_id: str  # the source row's id (research: "<investigation id>:<symbol>")
+    source_kind: Optional[str] = None  # the source's own kind: the ping's kind, the Radar rule, the plan's setup, …
+    held: bool = Field(default=False)  # a ping the notification policy held (merged, suppressed, over cap): a control
+    symbol: Optional[str] = Field(default=None, index=True)
+    trade_id: Optional[uuid.UUID] = None  # the trade when computed (trades are rebuilt)
+    anchored_at: datetime = Field(index=True)  # UTC: the output's moment
+    reference_price: Optional[float] = None  # the underlying at that moment: the source's own price, else the nearest stored bar
+    h1: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # JSON {price, pct, high, low, complete}
+    d1: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    d5: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    action: Optional[str] = None  # closed | trimmed | added | held | entered | none | unknown; None while its window is open
+    alt_usd: Optional[float] = None  # $ against the obvious alternative (pings: closing at the mark; Radar: one share)
+    complete: bool = Field(default=False, index=True)  # every window and the action are final
+    computed_at: datetime = Field(default_factory=utc_now_naive)
+    version: int = 1

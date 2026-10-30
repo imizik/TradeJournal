@@ -658,6 +658,12 @@ def _week_pings(db, start: datetime, end: datetime) -> dict:
     return out
 
 
+def _week_outcomes(db, start: datetime, end: datetime) -> dict:
+    """The week's outcome rows by kind (``outcomes.week``): the week is New York wall clock, the rows UTC."""
+    from app.engine import capture_links, outcomes
+    return outcomes.week(db, capture_links.entry_utc(start), capture_links.entry_utc(end))
+
+
 def _week_habits(db, rows: list[dict]) -> dict:
     from app.engine import exit_habits
     longs = [{"flags": r["flags"], "realized_pnl": r["pnl"]} for r in rows if r["flags"]]
@@ -727,6 +733,8 @@ def week_review(week_start: str | None = None, session=None) -> dict:
             "follow_through": _section(lambda: _follow_through(db, rows, start, end)),
             "alerts": _section(lambda: _week_alerts(rows)),
             "pings": _section(lambda: _week_pings(db, start, end)),
+            # What followed the week's outputs, per kind (engine/outcomes.py): count, median d1, action mix, alt_usd.
+            "outcomes": _section(lambda: _week_outcomes(db, start, end)),
             "habits": _section(lambda: _week_habits(db, rows)),
             "exits": _section(lambda: _exits(rows)),
             "units": "P&L in $; pnl_on_premium_pct is P&L over premium paid, in percent; win rates in percent. Times are "

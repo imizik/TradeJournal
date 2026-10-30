@@ -1,13 +1,13 @@
 """Two-leg Robinhood orders (additive): the email's facts, kept until the contracts are known.
 
 Revision ID: a7c4e1d9b3f2
-Revises: c6e2a8f4d1b7
+Revises: 924f38989575
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "a7c4e1d9b3f2"
-down_revision = "c6e2a8f4d1b7"
+down_revision = "924f38989575"
 branch_labels = None
 depends_on = None
 
