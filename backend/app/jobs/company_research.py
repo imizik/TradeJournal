@@ -119,6 +119,19 @@ def main():
     parser.add_argument("--actor")
     parser.add_argument("--check-config", default=os.getenv("COMPANY_RESEARCH_CHECK_CONFIG"))
     args = parser.parse_args()
+    if args.daily and os.getenv("COMPANY_RESEARCH_DAILY_ENABLED") != "true":
+        print(json.dumps({"completed": True, "count": 0, "enabled": False}))
+        return
+    from app.engine.job_runtime import _lock, lock_directory
+    # One host owns the database and exchange; serialize explicit operation passes.
+    with _lock(lock_directory(), "company-research-operations") as acquired:
+        if not acquired:
+            print(json.dumps({"completed": False, "busy": True}))
+            return
+        execute(args, parser)
+
+
+def execute(args, parser):
     with Session(engine) as db:
         if args.daily:
             from app.engine.chart_math import ET

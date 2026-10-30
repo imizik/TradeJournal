@@ -24,13 +24,27 @@ def context(root, actor, identifier, now):
 
 def submit(root, outbox, actor, identifier, body, now):
     body = FindingBody.model_validate(body)
-    packet = context(root, actor, identifier, now)
-    if body.context_hash != packet["context_hash"] or (body.kind != "question" and not body.sources):
-        raise ValueError("Context or source evidence missing")
     payload = body.model_dump(mode="json")
     if len(files.canonical(payload).encode()) > 65536:
         raise ValueError("Research exceeds 64 KiB")
     key = files.operation_key(actor, body.operation_id)
+    name = f"company-request-{key}.json"
+    try:
+        prior = files.read(outbox, name)
+    except FileNotFoundError:
+        prior = None
+    if prior is not None:
+        if prior["actor"] != actor or prior["assignment_id"] != str(identifier) or prior["payload"] != payload:
+            raise ValueError("Operation ID already used")
+        return receipt(root, actor, body.operation_id)
+    packet = context(root, actor, identifier, now)
+    if body.context_hash != packet["context_hash"] or (body.kind != "question" and not body.sources):
+        raise ValueError("Context or source evidence missing")
+    # One sealed result per finite assignment bounds repeated operations. A retry
+    # can finish publication after a crash between this binding and the request.
+    binding = {"actor": actor, "assignment_id": str(identifier), "operation_id": body.operation_id,
+               "digest": files.digest(payload)}
+    files.write(outbox, f"company-assignment-{files.profile(actor)}-{UUID(str(identifier))}.json", binding)
     name = f"company-request-{key}.json"
     value = {"actor": actor, "assignment_id": str(identifier), "payload": payload,
              "digest": files.digest(payload), "received_at": now.isoformat()}

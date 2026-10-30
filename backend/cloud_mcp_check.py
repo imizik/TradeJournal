@@ -57,6 +57,7 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "company_research_assignments": (set(), set()),
     "company_research_context": ({"assignment_id"}, set()),
     "company_research_submit": ({"assignment_id", "result"}, set()),
     "company_research_receipt": ({"operation_id"}, set()),

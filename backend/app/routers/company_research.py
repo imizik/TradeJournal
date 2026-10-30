@@ -49,7 +49,11 @@ def detail(identifier: uuid.UUID, db: Session = Depends(get_session)):
 
 @router.patch("/companies/{identifier}")
 def edit(identifier: uuid.UUID, body: EditCompany, db: Session = Depends(get_session)):
-    return service.view(db, service.patch(db, identifier, **body.model_dump()))
+    row = service.patch(db, identifier, **body.model_dump())
+    if not row.followed:
+        from app.engine.company_research_bridge import revoke_company
+        revoke_company(db, identifier)
+    return service.view(db, row)
 
 
 @router.get("/companies/{identifier}/history")

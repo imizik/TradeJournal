@@ -46,6 +46,8 @@ def test_scoped_roundtrip_and_owner_acceptance(harness, tmp_path, monkeypatch): 
             receipt = call(client, "company_research_receipt", {"operation_id": "research-1"}, token)
             assert receipt["structuredContent"]["app_saved"]
             assert exchange_pass(db, config) == {"saved": 0, "rejected": 0}
+            retry = call(client, "company_research_submit", {"assignment_id": assignment["id"], "result": body}, token)
+            assert retry["structuredContent"]["app_saved"]
         from app.company_research_models import ResearchFinding
         from sqlmodel import select
         finding = db.exec(select(ResearchFinding).where(ResearchFinding.company_id == company.id)).one()

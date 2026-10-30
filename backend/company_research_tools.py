@@ -1,5 +1,6 @@
 """Opt-in research tools using the existing authenticated Check transport."""
 import asyncio
+from pathlib import Path
 from uuid import UUID
 from typing import Any
 
@@ -15,6 +16,24 @@ def register(server, config, authenticated, scopes, clock):
 
     def metadata(name):
         return {"securitySchemes": [{"type": "oauth2", "scopes": scopes(name)}]}
+
+    @server.tool(meta=metadata("company_research_assignments"), annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    async def company_research_assignments() -> dict[str, Any]:
+        """List this actor's current finite questions; other actors' work is excluded."""
+        actor = (await authenticated("company_research_assignments")).claims["profile_id"]
+        def listing():
+            items = []
+            for path in sorted(Path(root).glob(f"company-context-{actor}-*.json"), reverse=True):
+                try:
+                    identifier = path.stem.removeprefix(f"company-context-{actor}-")
+                    packet = exchange.context(root, actor, identifier, clock())
+                    items.append({key: packet[key] for key in ("id", "question", "expires_at")})
+                except (ValueError, OSError, KeyError):
+                    continue
+                if len(items) == 30:
+                    break
+            return {"assignments": items}
+        return await asyncio.to_thread(listing)
 
     @server.tool(meta=metadata("company_research_context"), annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def company_research_context(assignment_id: UUID) -> dict[str, Any]:
