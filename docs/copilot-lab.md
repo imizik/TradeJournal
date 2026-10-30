@@ -109,7 +109,8 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
       entry and invalidation), and one line of what is new on it (a Radar
       event since the last Radar visit, or a thesis trigger fired today). The
       same read's `last_exit` (the symbol's newest answered exit review) feeds
-      the plan card's lesson line; the dock does not show it. Each
+      the plan card's lesson line, and its `setup` the plan card's setup
+      record; the dock shows neither. Each
       is a dock section with its count, folded per device; an empty one is
       left out. A position opens its review (`Review this position: <trade
       id>`), a plan its investigation, and the new line a conversation about
@@ -751,6 +752,29 @@ plans, newest exit first, the first whose `plan_done` says Exit reviewed, with
 the `reflection` saved just before it. A skipped or unanswered review falls
 back to the one before; a symbol with none shows nothing. Read-only, no model
 call; a failed read leaves the line out (`last_exit` unavailable).
+
+**Your record for this setup.** A draft option plan (calls or puts, not stock)
+also shows how the owner's own closed option trades opened in the session's
+first hour went in the same setup (`SetupRecordLines.tsx`), from the same
+read's `setup` (`setup_record.for_symbol`), which the card asks for with
+`?setup=true` so the Charts dock's polling never computes it:
+- **Gap.** "Gap −2.4%. Your opening calls bought against a gap down of 1%+:
+  12 trades, 67% won, +$1,240." Against, with or a gap under 1%, from today's
+  gap.
+- **Trend.** "NBIS is 3.1% below its 20-day average. Your opening calls bought
+  below it: …"
+- **Size.** Once Size it for me prices the plan, its sizing lines add "This
+  plan: $1,384 of premium, 2.8× your usual $500", and the owner's record at
+  that premium or more when it is in his largest quarter.
+
+History is each trade's first entry fill and its market context
+(`entry_gap_pct`, and the entry price against `entry_sma_20`). Today's gap and
+20-day average are from the chart feed's daily bars, so before today's daily
+bar there is no gap line. A cohort under 5 trades, or a size record under 20,
+shows nothing; Webull is left out. These are lines of history, never a verdict.
+Read-only, no model call; a failed read leaves the lines out (`setup`
+unavailable). This is the app's half of the October 29, 2026 opening review;
+the Check service's pre-trade check does not see it.
 
 **Today's session (the Briefing's top).** While the Briefing (or no thread) is
 open, the top of the conversation shows the day
