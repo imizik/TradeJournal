@@ -13,6 +13,7 @@ import { fetchTradePlans, type Capture } from "@/lib/captures";
 import PlanSummary from "@/components/charts/PlanSummary";
 import TradeAdvice from "@/components/TradeAdvice";
 import TradePhoneAlerts from "@/components/TradePhoneAlerts";
+import FillInterruptCard from "@/components/FillInterruptCard";
 import WatchDayLink from "@/components/replay/WatchDayLink";
 import { useCopilotOn } from "@/components/copilot/useCopilotOn";
 import { copilotLabHref } from "@/lib/copilot";
@@ -55,10 +56,10 @@ function tradeTitle(trade: Trade) {
 /** Trade times in New York time, labelled, whatever the viewing device's zone. */
 const etTime = (value: string) => `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} ET`;
 
-export default function TradeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string; alert?: string; answer?: string }> }) {
+export default function TradeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string; alert?: string; answer?: string; interrupt?: string; noted?: string }> }) {
   const { id } = use(params);
   // Back returns to the page that opened the trade (e.g. a Daily Review day); only same-site paths are followed.
-  const { returnTo: from, alert, answer } = use(searchParams);
+  const { returnTo: from, alert, answer, interrupt, noted } = use(searchParams);
   const back = from && from.startsWith("/") && !from.startsWith("//") ? { href: from, label: from.startsWith("/daily") ? "Back to Daily Review" : "Back" } : { href: "/trades", label: "Back to Trades" };
   const [tradeError, setTradeError] = useState(false);
   const [trade, setTrade] = useState<Trade | null>(null);
@@ -156,6 +157,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Ask copilot about this position</Link>}
       </div>
 
+      {interrupt && <FillInterruptCard key={`${id}:${interrupt}`} tradeId={id} interruptId={interrupt} noted={noted === "1"} />}
       {alert && <TradePhoneAlerts key={id} tradeId={id} alertId={alert} answer={answer} symbol={trade.ticker} status={trade.status} askHref={askHref} />}
       {/* An alert asks you to review your exit plan, so the plan follows it rather than the summary. */}
       {alert && planSection}
