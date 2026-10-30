@@ -1,7 +1,7 @@
 # Company Research activation
 
-This package is prepared for owner review. Nothing is installed or enabled by
-merging these files. See [the feature](../../docs/company-research.md) and
+This package is prepared for owner review. The normal release process installs bundled unit files, but never enables the
+Company Research timer automatically. See [the feature](../../docs/company-research.md) and
 [the plan](../../docs/company-research-plan.md). No purchase or paid model/API
 usage is authorized by this runbook.
 
@@ -25,7 +25,8 @@ python -m app.jobs.company_research --daily
 
 After owner approval, set `COMPANY_RESEARCH_DAILY_ENABLED=true` in the service
 environment, verify JOB_EXECUTION_MODE/JOB_LOCK_DIR and the existing sync worker,
-then install the supplied service/timer using the normal deployment process.
+then verify the supplied units were installed by the normal release and explicitly
+enable the timer.
 The timer runs daily at 07:00 New York, including weekends; it queues bounded
 per-company jobs, never research/model calls. It is not a real-time earnings
 feed. Check the last attempt/success on each company and the durable jobs.
@@ -70,10 +71,11 @@ python -m app.jobs.company_research --exchange --check-config /approved/check-co
 ```
 
 This is an explicit finite pass, not an automatic app-start task. Run it after
-the agent submits, or prepare an owner-approved schedule separately. Published
-snapshots remain readable until expiry or the next revocation pass; do not
-claim instantaneous archive revocation. If immediate removal is required, run
-the exchange pass at archive time before considering the handoff closed.
+the agent submits, or prepare an owner-approved schedule separately. Normal app publication holds the company row lock until the handoff is written;
+archiving then revokes its published handoffs when the approved Check config is
+available to the app. For operator-only publication without that app setting,
+run the explicit revocation pass before treating archive as externally revoked.
+Expiry remains enforced by the connector in either mode.
 
 Agent instruction:
 

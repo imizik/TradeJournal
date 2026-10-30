@@ -156,18 +156,25 @@ def sourced_numbers(db, identifier):
     return out
 
 
-def queue_refresh(db, row):
+def queue_refresh(db, row, scheduled_day=None):
     from app.models import JobRun
     from app.engine.jobs import create_job
     if not row.followed:
         raise HTTPException(409, "Restore this company before refreshing")
     db.execute(update(ResearchCompany).where(ResearchCompany.id == row.id).values(updated_at=ResearchCompany.updated_at))
+    if scheduled_day:
+        scheduled = db.exec(select(JobRun).where(JobRun.job_type == "company_research_refresh").order_by(JobRun.created_at.desc()).limit(1000)).all()
+        for job in scheduled:
+            params = json.loads(job.params_json)
+            if params.get("company_id") == str(row.id) and params.get("scheduled_day") == scheduled_day:
+                db.commit()
+                return job
     pending = db.exec(select(JobRun).where(JobRun.job_type == "company_research_refresh",
                                          JobRun.status.in_(["queued", "running"]))).all()
     for job in pending:
         if json.loads(job.params_json).get("company_id") == str(row.id):
             return job
-    return create_job(db, "company_research_refresh", {"company_id": str(row.id)}, total=1)
+    return create_job(db, "company_research_refresh", {"company_id": str(row.id), **({"scheduled_day": scheduled_day} if scheduled_day else {})}, total=1)
 
 
 def run_refresh(job_id):

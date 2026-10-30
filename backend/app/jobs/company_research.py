@@ -31,12 +31,7 @@ def daily(db, day):
             JobRun.created_at >= datetime.fromisoformat(day) - timedelta(days=1)).limit(1000)).all()
         if any(json.loads(j.params_json).get("company_id") == str(row.id) and json.loads(j.params_json).get("scheduled_day") == day for j in previous):
             continue
-        job = store.queue_refresh(db, row)
-        params = json.loads(job.params_json)
-        params["scheduled_day"] = day
-        job.params_json = json.dumps(params)
-        db.add(job)
-        db.commit()
+        job = store.queue_refresh(db, row, scheduled_day=day)
         submit_job(job.id)
         queued.append(str(job.id))
     return queued
@@ -48,13 +43,24 @@ def publish(db, identifier, actor, config):
     if not config.company_research_enabled or not any(p.id == actor and p.enabled for p in config.profiles):
         raise ValueError("Research must be explicitly enabled for a configured actor")
     row = tasks.get(db, identifier)
-    if row.actor not in {"manual", actor} or row.status != "queued" or row.expires_at <= store.utc_now_naive() or not store.company(db, row.company_id).followed:
+    from sqlalchemy import update
+    if db.bind.dialect.name == "sqlite":
+        db.execute(update(ResearchCompany).where(ResearchCompany.id == row.company_id).values(updated_at=ResearchCompany.updated_at))
+    company = db.exec(select(ResearchCompany).where(ResearchCompany.id == row.company_id).with_for_update().execution_options(populate_existing=True)).one()
+    if row.actor not in {"manual", actor} or row.status != "queued" or row.expires_at <= store.utc_now_naive() or not company.followed:
         raise ValueError("Assignment unavailable for publication")
     row.actor = actor
     db.add(row)
-    db.commit()
+    db.flush()
     packet = tasks.packet(row)
-    files.write(config.market_watch_snapshots_dir, exchange.context_name(actor, identifier), packet)
+    name = exchange.context_name(actor, identifier)
+    try:
+        files.write(config.market_watch_snapshots_dir, name, packet)
+        db.commit()
+    except Exception:
+        db.rollback()
+        (Path(config.market_watch_snapshots_dir) / name).unlink(missing_ok=True)
+        raise
     return packet
 
 
@@ -87,14 +93,18 @@ def exchange_pass(db, config):
         try:
             identifier = uuid.UUID(data["assignment_id"])
             row = tasks.get(db, identifier)
-            if actor not in allowed or row.actor != actor:
+            if row.actor != actor:
                 raise ValueError("Wrong assignment actor")
-            _, payload, hashed = tasks.validate(db, identifier, body)
+            payload = body.model_dump(mode="json")
+            hashed = store.digest(payload)
             prior = db.exec(select(ResearchFinding).where(ResearchFinding.assignment_id == identifier,
                                                         ResearchFinding.operation_id == body.operation_id)).first()
-            if prior and prior.digest != hashed:
+            if prior and (prior.digest != hashed or prior.actor != actor):
                 raise ValueError("Operation conflict")
             if not prior:
+                if actor not in allowed:
+                    raise ValueError("Actor is no longer enabled")
+                _, payload, hashed = tasks.validate(db, identifier, body)
                 db.add(ResearchFinding(company_id=row.company_id, assignment_id=identifier, operation_id=body.operation_id,
                     actor=actor, payload_json=store.canonical(payload), digest=hashed))
                 row.status = "imported"
