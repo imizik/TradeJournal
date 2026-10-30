@@ -101,7 +101,10 @@ export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; pr
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
 /** ``images``: an owner message's screenshot thumbnails (this browser only; the saved text carries SHARED_MARKER). */
-export type LabMessage = { role: "user" | "assistant"; content: string; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics;
+export type Rating = "helped" | "didnt";
+/** How one saved answer went (a small subset of its turn's metrics); what comes back on a reopened conversation. */
+export type SavedMetrics = { first_text_ms?: number; total_ms?: number; rounds?: number; model?: string; backend?: string; tools?: string[]; error?: string };
+export type LabMessage = { role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics;
   /** The server's id for the evidence this answer read, sent with the next message; never saved. */
   carry?: string };
 
@@ -371,7 +374,7 @@ export type InvestigationSummary = {
   revision: number; message_count: number; created_at: string; updated_at: string;
 };
 export type Investigation = InvestigationSummary & {
-  transcript: { role: "user" | "assistant"; content: string; proposals?: Proposal[] }[]; evidence: EvidenceRef[]; findings: Findings | null;
+  transcript: { role: "user" | "assistant"; content: string; proposals?: Proposal[]; rating?: Rating; metrics?: SavedMetrics }[]; evidence: EvidenceRef[]; findings: Findings | null;
 };
 export type InvestigationFields = Pick<Investigation, "title" | "symbol" | "status" | "conclusion" | "transcript" | "evidence">;
 
@@ -397,6 +400,18 @@ export const updateInvestigation = (id: string, revision: number, fields: Invest
 export const saveOutcome = (id: string, proposalId: string, outcome: ProposalOutcome) =>
   investigationRequest<Investigation>(`/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/outcome`,
     { method: "PUT", body: JSON.stringify(outcome) });
+/** Records (or, with null, clears) the owner's rating of one saved answer. It needs no revision: an open window's next save keeps it. */
+export const saveRating = (id: string, index: number, rating: Rating | null) =>
+  investigationRequest<Investigation>(`/${encodeURIComponent(id)}/messages/${index}/rating`, { method: "PUT", body: JSON.stringify({ rating }) });
+/** The small part of an answer's turn that is saved: its speed, model, tool names and error code. */
+export function savedMetrics(m: LabMessage): SavedMetrics | undefined {
+  const t = m.metrics;
+  if (!t && !m.error) return m.savedMetrics;
+  const out: SavedMetrics = t ? { first_text_ms: t.first_text_ms ?? undefined, total_ms: t.total_ms, rounds: t.rounds, model: t.model.slice(0, 80),
+    backend: t.backend.slice(0, 40), tools: t.tool_calls.map(c => c.name).slice(0, 50) } : {};
+  if (m.error) out.error = m.error.code.slice(0, 80);
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as SavedMetrics;
+}
 /** The card's confirmed outcome as saved now (another window may have confirmed it), else null; a failed read is null. */
 export async function confirmedElsewhere(id: string, proposalId: string): Promise<ProposalOutcome | null> {
   try {
@@ -437,6 +452,8 @@ export async function uploadImage(file: Blob): Promise<SharedImage> {
 export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "transcript" | "evidence"> {
   return {
     transcript: messages.map(m => ({ role: m.role, content: spokenText(m),
+      ...(m.role === "assistant" && m.rating ? { rating: m.rating } : {}),
+      ...(m.role === "assistant" && savedMetrics(m) ? { metrics: savedMetrics(m) } : {}),
       // A card from the stream still carries its event type, which is not part of the proposal.
       ...(m.proposals?.length ? { proposals: m.proposals.slice(0, MAX_SAVED_PROPOSALS).map(card => Object.fromEntries(Object.entries(card).filter(([key]) => key !== "type")) as Proposal) } : {}) })),
     evidence: messages.flatMap((m, i) => (m.tools ?? []).filter(t => t.status === "ok" && t.provenance && t.name !== "propose_plan")
@@ -446,7 +463,7 @@ export function toSaved(messages: LabMessage[]): Pick<InvestigationFields, "tran
 
 /** A saved conversation as messages; its cards come back as cards, with any outcome they were left with. */
 export function fromSaved(saved: Investigation): LabMessage[] {
-  return saved.transcript.map((m, i) => ({ ...m, tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
+  return saved.transcript.map(({ metrics, ...m }, i) => ({ ...m, ...(metrics ? { savedMetrics: metrics } : {}), tools: saved.evidence.filter(e => e.message === i).map((e, j) => ({
     type: "tool" as const, id: `saved-${i}-${j}`, name: e.tool, status: "ok" as const,
     provenance: { source: "saved reference (re-read to see the data)", kind: e.kind ?? "cached", as_of: e.as_of ?? null },
   })) }));

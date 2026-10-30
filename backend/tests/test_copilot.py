@@ -1217,3 +1217,37 @@ def test_the_prompt_frames_the_owner_the_four_questions_and_memory_without_rules
                    "you cannot create alerts or research jobs yourself", "never turn a measured count into a judgement"):
         assert phrase in prompt, phrase
     assert "always exit" not in prompt.lower() and "you must sell" not in prompt.lower()
+
+
+def test_investigations_keep_an_answers_rating_and_metrics(monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    metrics = {"first_text_ms": 900, "total_ms": 4200, "rounds": 2, "model": "fake", "backend": "fake", "tools": ["get_quote"]}
+    turns = [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A", "rating": "helped", "metrics": metrics}]
+    with TestClient(app) as client:
+        made = client.post("/copilot/investigations", json={"title": "Rated", "transcript": turns})
+        assert made.status_code == 201
+        saved = made.json()
+        assert saved["transcript"][1]["rating"] == "helped" and saved["transcript"][1]["metrics"] == metrics
+        url = f"/copilot/investigations/{saved['id']}"
+        # Switched, then cleared, without a revision.
+        assert client.put(f"{url}/messages/1/rating", json={"rating": "didnt"}).json()["transcript"][1]["rating"] == "didnt"
+        assert "rating" not in client.put(f"{url}/messages/1/rating", json={"rating": None}).json()["transcript"][1]
+        assert client.put(f"{url}/messages/1/rating", json={"rating": "helped"}).status_code == 200
+        # A window that had not seen the rating saves its copy: the rating stays.
+        stale = [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]
+        again = client.put(url, json={"title": "Rated", "revision": 1, "transcript": stale}).json()
+        assert again["transcript"][1]["rating"] == "helped"
+        # Not an answer, out of range, or a bad value.
+        assert client.put(f"{url}/messages/0/rating", json={"rating": "helped"}).status_code == 404
+        assert client.put(f"{url}/messages/9/rating", json={"rating": "helped"}).status_code == 404
+        assert client.put(f"{url}/messages/1/rating", json={"rating": "great"}).status_code == 422
+
+
+def test_investigations_without_a_rating_or_metrics_still_load_and_bad_ones_are_refused(monkeypatch):
+    monkeypatch.setenv("COPILOT_ENABLED", "true")
+    with TestClient(app) as client:
+        plain = client.post("/copilot/investigations", json={"title": "Old", "transcript": [{"role": "assistant", "content": "A"}]})
+        assert plain.status_code == 201 and "rating" not in plain.json()["transcript"][0] and "metrics" not in plain.json()["transcript"][0]
+        for bad in ({"rating": "meh"}, {"metrics": {"total_ms": -1}}, {"metrics": {"model": "x" * 200}}, {"metrics": {"extra": 1}}):
+            r = client.post("/copilot/investigations", json={"title": "Bad", "transcript": [{"role": "assistant", "content": "A", **bad}]})
+            assert r.status_code == 422, bad

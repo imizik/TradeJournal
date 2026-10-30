@@ -2003,6 +2003,16 @@ stale save from another window is refused (409). The browser remembers only
 which investigation was open. No follow-up, plan, decision, memory or
 monitoring is created or linked: a saved card is only a card.
 
+Under each finished answer the desk shows two quiet buttons, Helped and Didn't.
+A tap chooses, the other switches, the chosen one clears. The saved message
+carries the optional `rating` (`helped` or `didnt`) and `metrics`: that turn's
+`first_text_ms`, `total_ms`, `rounds`, `model`, `backend`, tool names and error
+code, so real use shows which answers helped and how slow they were. A rating
+is saved at once by `PUT /copilot/investigations/{id}/messages/{index}/rating`
+(no revision, like a card outcome; queued until the conversation's first save
+lands), and a later save from a window that had not seen it keeps it. Older
+records have neither field and read as before.
+
 The same record holds background research results. `source` is `copilot` (the
 lab page, through the HTTP routes) or `research_job` (saved in-process by
 `save_research_result` in `backend/app/engine/copilot_investigations.py`, with

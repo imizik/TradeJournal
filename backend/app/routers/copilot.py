@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.ai import copilot, copilot_images, copilot_spend
@@ -305,6 +305,21 @@ def set_proposal_outcome(investigation_id: str, proposal_id: str, body: investig
     _enabled()
     try:
         return investigations.set_outcome(investigation_id, proposal_id, body, session=session)
+    except investigations.InvestigationError as exc:
+        raise _http(exc)
+
+
+class RatingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rating: Literal["helped", "didnt"] | None = None
+
+
+@router.put("/investigations/{investigation_id}/messages/{index}/rating")
+def set_message_rating(investigation_id: str, index: int, body: RatingBody, session: Session = Depends(get_session)):
+    """The owner's Helped / Didn't on one saved answer (null clears it)."""
+    _enabled()
+    try:
+        return investigations.set_rating(investigation_id, index, body.rating, session=session)
     except investigations.InvestigationError as exc:
         raise _http(exc)
 
