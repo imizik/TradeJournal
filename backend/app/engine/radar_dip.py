@@ -8,7 +8,7 @@ session.
 
 All of these hold on ``persist_passes`` consecutive passes (no gap over 150 seconds), each read as of that pass:
 
-- **Window:** the pass started before 10:30 ET, and the session's first usable pass started by 09:33 ET with a
+- **Window:** the pass started before 10:30 ET, and the session's first usable pass started before 09:33 ET with a
   usable quote for the stock (otherwise the morning low and the sampled VWAP are not seen).
 - **Liquid:** last at least ``min_price`` and the day's dollar volume so far (last × cumulative volume) at least
   ``min_dollar_volume``. The tracked list is a curated list of optionable names; optionability is not re-checked.
@@ -109,13 +109,25 @@ def daily_context(bars: dict[str, list[dict]], session_date: str, days: int = V0
 
 
 def fetch_daily(symbols: list[str], session_date: str) -> dict[str, dict]:
-    """``daily_context`` from Alpaca daily bars (cached per ticker on disk); raises when Alpaca is not configured."""
+    """``daily_context`` from Alpaca daily bars, through the no-retry fast read (2.5 s a request, no sleep), so a rate
+    limit or outage raises at once instead of holding up the recorder's pass; raises when Alpaca is not configured."""
     from app.engine import alpaca
     if not alpaca.alpaca_configured():
         raise RuntimeError("the dip rule's 20-day test needs Alpaca daily bars (ALPACA_API_KEY)")
     session = date.fromisoformat(session_date)
-    return daily_context(alpaca.fetch_daily_bars(symbols, session - timedelta(days=45), session - timedelta(days=1)),
-                         session_date)
+    bars: dict[str, list] = {}
+    for i in range(0, len(symbols), 100):
+        params = {"symbols": ",".join(symbols[i:i + 100]), "timeframe": "1Day", "adjustment": "all", "limit": 10000,
+                  "start": (session - timedelta(days=45)).isoformat(), "end": (session - timedelta(days=1)).isoformat(),
+                  "feed": alpaca.ALPACA_DATA_FEED}
+        while True:
+            page = alpaca._alpaca_get_fast("/v2/stocks/bars", params)
+            for symbol, rows in (page.get("bars") or {}).items():
+                bars.setdefault(symbol, []).extend(rows)
+            if not page.get("next_page_token"):
+                break
+            params = {**params, "page_token": page["next_page_token"]}
+    return daily_context(bars, session_date)
 
 
 # ------------------------------------------------------------------ the rule

@@ -405,7 +405,7 @@ each read as of that pass, for a tracked stock (not an ETF or benchmark):
 
 | Test | `radar_dip.V0` |
 | --- | --- |
-| Window | the pass started before **10:30 ET**; the session's first usable pass started by **09:33 ET** with a usable quote for the stock |
+| Window | the pass started before **10:30 ET**; the session's first usable pass started before **09:33 ET** with a usable quote for the stock |
 | Liquid | last at least **$5**; the day's dollar volume so far (last × cumulative volume) at least **$10M**. The tracked list is curated optionable names; optionability is not re-checked |
 | Weak coming in | the open at least **1.0%** below the previous close (gap down), **or** the latest completed daily close below the mean of the last **20** completed daily closes |
 | Dropped | the lowest recorded last so far at least **1.5%** below the previous close |
@@ -414,9 +414,11 @@ each read as of that pass, for a tracked stock (not an ETF or benchmark):
 The sampled VWAP weights each recorded last by the cumulative volume added
 since the stock's previous usable quote, so it is an estimate from minute
 samples, not the exchange VWAP. Quotes follow the trial rules' freshness test.
-The 20-day test uses Alpaca daily bars (`ALPACA_DATA_FEED`, cached per ticker),
-only closes dated before the session, read once a session from 09:00 ET so the
-first pass does not wait; a symbol with fewer than 20 closes or none in the last
+The 20-day test uses Alpaca daily bars (`ALPACA_DATA_FEED`), only closes dated
+before the session, read once a session from 09:00 ET so the first pass does not
+wait, through the no-retry fast read (2.5 s a request): a rate limit or outage
+fails that pass's dip result at once (receipt `failed`, retried the next
+minute) and never holds up the recorder or the trial rules. A symbol with fewer than 20 closes or none in the last
 5 days can only qualify on its gap.
 
 One event per stock a session, at most **10** a session (earliest first, ties

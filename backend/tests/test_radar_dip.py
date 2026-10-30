@@ -280,3 +280,28 @@ def test_alert_mode_hands_dip_events_to_the_phone(tmp_path):
 def test_mode_from_env(monkeypatch, value, mode):
     monkeypatch.setenv("RADAR_DIP_RULES", value)
     assert radar_dip.mode_from_env() == mode
+
+
+def test_daily_fetch_uses_the_no_retry_read_and_fails_fast(monkeypatch):
+    from app.engine import alpaca
+    weekdays = [d for d in ((datetime(2029, 12, 10) + timedelta(days=n)).date() for n in range(40))
+                if d.weekday() < 5 and d.isoformat() < DAY][-20:]
+    rows = [{"t": f"{d.isoformat()}T05:00:00Z", "c": 100.0} for d in weekdays]
+    calls = []
+
+    def fast(path, params):
+        calls.append(params.get("page_token"))
+        if params.get("page_token") is None:
+            return {"bars": {"AAA": rows[:10]}, "next_page_token": "p2"}
+        return {"bars": {"AAA": rows[10:]}, "next_page_token": None}
+
+    monkeypatch.setattr(alpaca, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(alpaca, "_alpaca_get_fast", fast)
+    monkeypatch.setattr(alpaca, "_alpaca_get", lambda *a: pytest.fail("the retrying read sleeps on a 429"))
+    assert radar_dip.fetch_daily(["AAA"], DAY)["AAA"]["sma"] == 100.0 and calls == [None, "p2"]
+
+    def limited(path, params):
+        raise alpaca.AlpacaFastFailure("Alpaca rate limited.")
+    monkeypatch.setattr(alpaca, "_alpaca_get_fast", limited)
+    with pytest.raises(alpaca.AlpacaFastFailure):
+        radar_dip.fetch_daily(["AAA"], DAY)
