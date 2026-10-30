@@ -6,8 +6,8 @@ def configuration():
     path = os.getenv("COMPANY_RESEARCH_CHECK_CONFIG", "")
     if not path:
         return None
-    from cloud_mcp_check_common import read_config
-    config = read_config(path)
+    from company_research_owner import read_binding
+    config = read_binding(path)
     return config if config.company_research_enabled else None
 
 

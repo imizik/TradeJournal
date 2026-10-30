@@ -150,8 +150,8 @@ def execute(args, parser):
         else:
             if not args.check_config:
                 parser.error("--check-config is required")
-            from cloud_mcp_check_common import read_config
-            config = read_config(args.check_config)
+            from company_research_owner import read_binding
+            config = read_binding(args.check_config)
             result = publish(db, args.publish, args.actor, config) if args.publish else exchange_pass(db, config)
         # Print counts only; frozen company/thesis contexts belong in the protected exchange.
         print(json.dumps({"completed": True, "count": len(result)}))
