@@ -30,7 +30,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.engine import notification_policy, ntfy, ping_images
+from app.engine import notification_policy, phone, ping_images
 from app.engine.chart_math import ET
 from app.engine.position_alerts import BACKOFF, CLAIM_SECONDS, _epoch, _surely_unsent, _utc
 from app.engine.premarket_prep import _trading_day
@@ -159,7 +159,7 @@ class EveningReviews:
                 row.delivery, row.last_error = "expired", "Not sent within 2 hours of its time, so it was not sent late."
                 db.commit()
                 return
-            if not ntfy.configured():
+            if not phone.configured():
                 row.delivery, row.next_attempt_at = "pending", _utc(now + BACKOFF[-1])
                 row.last_error = "Phone alerts are not set up on this server (NTFY_URL is not set)."
                 db.commit()
@@ -173,9 +173,9 @@ class EveningReviews:
                 return
             row.attempts += 1
             try:
-                _, state = ping_images.publish(TITLE, body + ticket.append, None, priority=3, tags=("memo",), path=PATH,
-                                               direct_click=True)
-            except ntfy.NtfyError as exc:
+                _, state = phone.send(TITLE, body + ticket.append, kind="evening_review", priority=3, tags=("memo",), path=PATH,
+                                      direct_click=True)
+            except phone.SendError as exc:
                 if not _surely_unsent(exc):
                     row.delivery, row.last_error = "unknown", f"{exc} It may have reached the phone, so it was not resent."
                     notification_policy.delivered(db, ticket, now)
