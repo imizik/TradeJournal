@@ -39,23 +39,29 @@ const DESK = {
   sections: { positions: "ok", plans: "ok", investigations: "ok", radar: "off" }, threads: [],
 };
 
-type Lab = { chats: { messages: { role: string; content: string }[]; symbol: string | null }[]; puts: Record<string, unknown>[] };
+type Lab = { chats: { messages: { role: string; content: string }[]; symbol: string | null }[]; puts: Record<string, unknown>[]; posts: Record<string, unknown>[] };
 
 async function lab(page: Page, url: string, saved = record()) {
-  const seen: Lab = { chats: [], puts: [] };
+  const seen: Lab = { chats: [], puts: [], posts: [] };
   let current = saved;
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/desk/threads", (route) => route.fulfill({ json: DESK }));
   await page.route("**/copilot/desk/*/timeline", (route) => route.fulfill({ json: { events: [], sources: {} } }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
-  await page.route("**/copilot/investigations", (route) =>
-    route.fulfill({ status: 201, json: { ...record({ id: NEW, transcript: [] }), ...route.request().postDataJSON(), id: NEW } }));
+  await page.route("**/copilot/investigations", (route) => {
+    seen.posts.push(route.request().postDataJSON());
+    return route.fulfill({ status: 201, json: { ...record({ id: NEW, transcript: [] }), ...route.request().postDataJSON(), id: NEW } });
+  });
   await page.route("**/copilot/investigations/*", (route) => {
     if (route.request().method() === "PUT") {
       const { revision, ...fields } = route.request().postDataJSON();
       seen.puts.push(fields);
       current = { ...current, ...fields, revision: revision + 1 };
     }
+    return route.fulfill({ json: current });
+  });
+  await page.route("**/copilot/investigations/*/messages/*/rating", (route) => {
+    seen.puts.push({ rating: route.request().postDataJSON().rating });
     return route.fulfill({ json: current });
   });
   await page.route("**/copilot/chat", (route) => {
@@ -111,6 +117,20 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await expect(sources.getByText("News · unavailable")).toBeVisible();
   await expect(sources).toContainText("fake-scripted"); // the turn's model, timings and cost, one click away
   await expect(sources).toContainText("(no API call)");
+
+  // One tap rates the answer, another switches, the chosen one clears; the saved turn carries its own speed.
+  const helped = here.getByRole("button", { name: "Helped", exact: true });
+  const didnt = here.getByRole("button", { name: "Didn't", exact: true });
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await helped.click();
+  await expect(helped).toHaveAttribute("aria-pressed", "true");
+  await didnt.click();
+  await expect(helped).toHaveAttribute("aria-pressed", "false");
+  await expect(didnt).toHaveAttribute("aria-pressed", "true");
+  await didnt.click();
+  await expect(didnt).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => seen.puts.filter((p) => "rating" in p)).toEqual([{ rating: "helped" }, { rating: "didnt" }, { rating: null }]);
+  expect(seen.posts[0]).toMatchObject({ transcript: [{}, { metrics: { total_ms: 2, rounds: 2, model: "fake-scripted" } }] });
 
   // Saved, the thread's next steps are offered instead.
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();

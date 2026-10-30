@@ -105,9 +105,29 @@ def _saved_proposal(card: dict) -> dict:
     return out
 
 
+class AnswerMetrics(_Strict):
+    """How one answer went: the speed, model and tool names of its turn, and the error code if it ended in one."""
+    first_text_ms: int | None = Field(None, ge=0, le=3_600_000)
+    total_ms: int | None = Field(None, ge=0, le=3_600_000)
+    rounds: int | None = Field(None, ge=0, le=1000)
+    model: str | None = Field(None, max_length=80)
+    backend: str | None = Field(None, max_length=40)
+    tools: list[str] | None = Field(None, max_length=50)
+    error: str | None = Field(None, max_length=80)
+
+    @field_validator("tools")
+    @classmethod
+    def short_names(cls, names: list[str] | None) -> list[str] | None:
+        if names and any(len(n) > 64 for n in names):
+            raise ValueError("a tool name is at most 64 characters")
+        return names
+
+
 class SavedMessage(_Strict):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=20_000)
+    rating: Literal["helped", "didnt"] | None = None  # the owner's one-tap verdict on an answer; absent on older records
+    metrics: AnswerMetrics | None = None
     proposals: list[dict] | None = Field(None, max_length=MAX_PROPOSALS)  # an answer's cards; absent on older records
 
     @field_validator("proposals")
@@ -223,8 +243,13 @@ def _kept(outcome: dict | None, stored: dict | None) -> dict | None:
     return stored
 
 
-def _fill(row: CopilotInvestigation, fields: InvestigationFields, stored: dict[str, dict] | None = None) -> None:
+def _fill(row: CopilotInvestigation, fields: InvestigationFields, stored: dict[str, dict] | None = None,
+          stored_ratings: dict[int, tuple[str, str]] | None = None) -> None:
     transcript = [m.model_dump(exclude_none=True) for m in fields.transcript]
+    for i, m in enumerate(transcript):  # a rating tapped in another window is not lost to a save that had not seen it
+        kept = (stored_ratings or {}).get(i)
+        if kept and "rating" not in m and m["role"] == "assistant" and m["content"] == kept[1]:
+            m["rating"] = kept[0]
     for card in (p for m in transcript for p in m.get("proposals") or ()):
         if (outcome := _kept(card.get("outcome"), (stored or {}).get(card["id"]))) is not None:
             card["outcome"] = outcome
@@ -267,7 +292,8 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         row = _row(db, investigation_id)
         if revision != row.revision:
             raise InvestigationError("stale", "This investigation changed in another window. Reload it before saving.")
-        _fill(row, fields, _outcomes(json.loads(row.transcript_json)))
+        stored = json.loads(row.transcript_json)
+        _fill(row, fields, _outcomes(stored), {i: (m["rating"], m["content"]) for i, m in enumerate(stored) if m.get("rating")})
         row.revision += 1
         row.updated_at = datetime.utcnow()
         db.add(row)
@@ -290,6 +316,27 @@ def set_outcome(investigation_id: str | uuid.UUID, proposal_id: str, outcome: Pr
         kept = _kept(outcome.model_dump(exclude_none=True), card.get("outcome"))
         if kept != card.get("outcome"):
             card["outcome"] = kept
+            row.transcript_json = json.dumps(transcript)
+            row.updated_at = datetime.utcnow()
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+        return full(row)
+
+
+def set_rating(investigation_id: str | uuid.UUID, index: int, rating: str | None, session: Session | None = None) -> dict:
+    """Record (or clear, with None) the owner's rating of the saved answer at ``index``. Like ``set_outcome`` it needs
+    no revision and does not bump it; the next save from an open window keeps it."""
+    with _session(session) as db:
+        row = _row(db, investigation_id)
+        transcript = json.loads(row.transcript_json)
+        if not 0 <= index < len(transcript) or transcript[index]["role"] != "assistant":
+            raise InvestigationError("not_found", "That answer is not saved with this investigation.")
+        if transcript[index].get("rating") != rating:
+            if rating is None:
+                transcript[index].pop("rating", None)
+            else:
+                transcript[index]["rating"] = rating
             row.transcript_json = json.dumps(transcript)
             row.updated_at = datetime.utcnow()
             db.add(row)

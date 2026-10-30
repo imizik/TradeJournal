@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
-  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
+  AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
+  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
@@ -108,6 +108,15 @@ function Answer({ text }: { text: string }) {
 
 /** What the answer read, folded into one line. The line still says what was unavailable, stale, partial, simulated or a
  * replay; opening it lists each source and the turn's model, timings and cost. */
+/** One-tap verdict under a finished answer: tap to choose, tap the other to switch, tap the chosen one to clear. */
+function RateAnswer({ rating, onRate }: { rating?: Rating; onRate: (next: Rating | null) => void }) {
+  const button = (value: Rating, label: string) => (
+    <button type="button" aria-pressed={rating === value} onClick={() => onRate(rating === value ? null : value)}
+      className={`min-h-11 rounded border px-2 py-0.5 text-xs sm:min-h-0 ${rating === value ? "border-foreground/40 bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+  );
+  return <div role="group" aria-label="Rate this answer" className="mt-1 flex gap-1.5">{button("helped", "Helped")}{button("didnt", "Didn't")}</div>;
+}
+
 function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics }) {
   const read = tools.filter(tool => tool.name !== "propose_plan"); // a proposal is its card, not a source
   if (!read.length && !metrics) return null;
@@ -361,6 +370,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   // Card outcomes recorded while their card may not be saved yet (a turn running, or its save in flight): sent once
   // the save lands. Keyed by card id; a switch to another conversation drops them (its messages carried them).
   const pendingOutcomes = useRef(new Map<string, ProposalOutcome>());
+  // Ratings tapped (by answer index) while the conversation may not be saved yet; sent once the save lands.
+  const pendingRatings = useRef(new Map<number, Rating | null>());
   // What an awaited follow re-checks when it resolves, since the owner may have typed or sent meanwhile.
   const turns = useRef(0); // sends so far
   const running = useRef(false);
@@ -381,6 +392,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
     lookOnSend.current = false; // a saved conversation is not the strip's: its Send attaches nothing unasked
     setMenu(false);
     pendingOutcomes.current.clear();
+    pendingRatings.current.clear();
     setMessages(fromSaved(saved));
     setSymbol(saved.symbol ?? "");
     setCurrent(saved);
@@ -430,6 +442,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   function fresh(target: string) {
     following.current = panel;
     pendingOutcomes.current.clear();
+    pendingRatings.current.clear();
     setMessages([]);
     setCurrent(null);
     setConclusion("");
@@ -494,7 +507,11 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       void refreshRecent();
       const pending = [...pendingOutcomes.current];
       pendingOutcomes.current.clear();
+    pendingRatings.current.clear();
       for (const [id, outcome] of pending) sendOutcome(saved.id, id, outcome);
+      const ratings = [...pendingRatings.current];
+      pendingRatings.current.clear();
+      for (const [index, rating] of ratings) sendRating(saved.id, index, rating);
     } catch (error) {
       setSaveState({ state: "error", message: error instanceof Error ? error.message : "Saving failed." });
     } finally {
@@ -631,6 +648,15 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const sendOutcome = (investigation: string, id: string, outcome: ProposalOutcome) =>
     void saveOutcome(investigation, id, outcome).catch(() => setSaveState({ state: "error",
       message: "What you did with that card was not saved, so after a reload it may offer Confirm again (a retried Confirm does not save a plan or memory twice)." }));
+
+  /** Helped / Didn't on answer ``index``: kept in the conversation, and saved at once when the conversation is saved. */
+  function rateAnswer(index: number, rating: Rating | null) {
+    setMessages(list => list.map((m, i) => i === index ? { ...m, rating: rating ?? undefined } : m));
+    if (!current || running.current || unsaved.current || persisting.current) pendingRatings.current.set(index, rating);
+    else sendRating(current.id, index, rating);
+  }
+  const sendRating = (investigation: string, index: number, rating: Rating | null) =>
+    void saveRating(investigation, index, rating).catch(() => setSaveState({ state: "error", message: "That rating was not saved." }));
 
   /** One turn about ``about`` (the symbol box unless given; empty means no symbol). */
   async function send(text: string, about = symbol, shots = attached) {
@@ -1057,6 +1083,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
                 onOutcome={outcome => recordOutcome(proposal.id, outcome)} />
             ))}
             <Sources tools={message.tools ?? []} metrics={message.metrics} />
+            {message.content && !(busy && i === messages.length - 1) && <RateAnswer rating={message.rating} onRate={next => rateAnswer(i, next)} />}
           </div>
         ))}
         <div ref={end} />
