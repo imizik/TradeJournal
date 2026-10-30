@@ -5,7 +5,9 @@ During the regular session each new Radar event of today, read only from the Rad
 one unattended copilot turn on the owner's Claude plan (``app.ai.shadow_turn``, never an API key), at most
 ``SHADOW_BOOK_MAX_TURNS`` a session (default 12). An event the book reaches more than ``FRESH_SECONDS`` after Radar
 first saw it, one in the session's last half hour, and one past the cap is recorded ``not_decided`` with no turn.
-Between sessions it is quiet.
+Before any of that, ``eligible`` keeps the turns for events worth one: Radar's strong-event bar for a single ping
+(``radar_alerts.strong``) or a dip-buy candidate; any other event is recorded ``filtered`` with no turn, so the cap
+counts eligible events only. Between sessions it is quiet.
 
 The answer is SKIP or one plan in the copilot's ``trade_plan`` shape plus a target and a New York clock time stop.
 One unit per position: one option contract for calls or puts, or whole shares worth ``STOCK_UNIT_USD`` for stock.
@@ -32,6 +34,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
+from app.engine import radar_alerts, radar_dip
 from app.engine import scanner_rules as rules
 from app.engine import tradier
 from app.engine.chart_math import ET, normalize_bars
@@ -188,6 +191,22 @@ def exit_condition(plan: dict, minutes: list[dict], entry_at: float, close_at: i
     return None if found is None else {**found, "reason": EXIT_REASONS[found["reason"]]}
 
 
+def eligible(event: dict) -> tuple[bool, str]:
+    """Whether a Radar event is worth a turn: one strong enough for its own Radar ping (``radar_alerts.strong``) or a
+    dip-buy candidate; otherwise False with the short reason the record keeps."""
+    if event.get("kind") == radar_dip.KIND or radar_alerts.strong(event):
+        return True, ""
+    m = event.get("measures") or {}
+    if event.get("kind") == "group_move":
+        median = m.get("median_relative_pct")
+        move = "no median vs SPY" if median is None else f"{median:+.1f}% vs SPY"
+        return False, (f"Below the strong-event bar: {event.get('group')} {move} "
+                       f"({m.get('members_same_direction')} of {m.get('members_with_data')} the same way)")
+    vs_spy = m.get("relative_pct") if event.get("kind") == "relative_to_spy" else m.get("spy_relative_pct")
+    symbol = (event.get("symbols") or ["?"])[0]
+    return False, f"Below the strong-event bar: {symbol} {'no move vs SPY' if vs_spy is None else f'{vs_spy:+.1f}% vs SPY'}"
+
+
 def event_brief(event: dict) -> dict:
     """What the turn and the record keep of a Radar event."""
     return {k: event.get(k) for k in ("event_id", "kind", "direction", "symbols", "benchmark", "group", "first_seen_at",
@@ -231,7 +250,7 @@ class ShadowBook:
 
     def claim_next(self) -> ShadowBookDecision | None:
         """The next of today's undecided Radar events, claimed for a turn; earlier ones that cannot be decided are
-        recorded ``not_decided`` on the way. None outside the regular session or with nothing new."""
+        recorded ``filtered`` or ``not_decided`` on the way. None outside the regular session or with nothing new."""
         from app.engine.radar_store import RadarStore
         now = self.clock()
         session = self.session(now)
@@ -247,6 +266,7 @@ class ShadowBook:
                 if event["event_id"] in known:
                     continue
                 age = now - datetime.fromisoformat(event["first_seen_at"].replace("Z", "+00:00")).timestamp()
+                worth, filtered = eligible(event)  # a filtered event costs no turn, so the cap counts eligible ones only
                 reason = None
                 if age > FRESH_SECONDS:
                     reason = f"Radar saw it {age / 60:.0f} minutes before the shadow book reached it; too late to decide."
@@ -254,16 +274,17 @@ class ShadowBook:
                     reason = "In the session's last half hour: no new positions."
                 elif used >= self.turns:
                     reason = f"This session's {self.turns} turns were used."
+                status = "deciding" if worth and reason is None else "not_decided" if worth else "filtered"
                 row = ShadowBookDecision(radar_event_id=event["event_id"], session_date=today,
                                          symbol=(event.get("symbols") or [None])[0], event_json=json.dumps(event_brief(event)),
-                                         status="not_decided" if reason else "deciding", reason=reason, claimed_at=_utc(now))
+                                         status=status, reason=reason if worth else filtered, claimed_at=_utc(now))
                 db.add(row)
                 try:
                     db.commit()
                 except IntegrityError:
                     db.rollback()  # another process claimed it first
                     continue
-                if reason is None:
+                if status == "deciding":
                     db.refresh(row)
                     return row
         return None
@@ -515,6 +536,7 @@ def week_view(db: Session, week_start: date | None = None, today: date | None = 
     decisions = [decision_view(r, fold(ShadowBook._events(db, r.id))) for r in rows]
     closed = [d["result"]["pnl"] for d in decisions if d["result"]]
     shadow = {"decisions": len(decisions), "turns": sum(d["decision"] in TURNS for d in decisions),
+              "filtered": sum(d["decision"] == "filtered" for d in decisions),
               "plans": sum(d["decision"] == "plan" for d in decisions), "closed": len(closed),
               "pnl_usd": round(sum(closed), 2)}
     try:
