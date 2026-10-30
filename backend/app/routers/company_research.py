@@ -90,7 +90,6 @@ class ImportBody(BaseModel):
 def create_assignment(body: AssignmentBody, db: Session = Depends(get_session)):
     return assignments.create(db, body.company_id, body.question)
 
-
 @router.get("/assignments/{identifier}")
 def assignment(identifier: uuid.UUID, db: Session = Depends(get_session)):
     return assignments.packet(assignments.get(db, identifier))
@@ -139,7 +138,9 @@ def comparisons(identifier: uuid.UUID, db: Session = Depends(get_session)):
     numbers = service.sourced_numbers(db, identifier)
     out = []
     for actual in [n for n in numbers if n["role"] == "actual"]:
-        for reference in [n for n in numbers if n["role"] in {"estimate", "guidance"}
-                          and n["metric"] == actual["metric"] and n["period_end"] == actual["period_end"]][:2]:
-            out.append({"actual": actual, "reference": reference, "comparison": earnings_comparison(actual, reference)})
+        candidates = [{"actual": actual, "reference": reference, "comparison": earnings_comparison(actual, reference)}
+                      for reference in numbers if reference["role"] in {"estimate", "guidance"}
+                      and reference["metric"] == actual["metric"] and reference["period_end"] == actual["period_end"]]
+        eligible = [item for item in candidates if item["comparison"]["state"] == "ready"]
+        out.extend((eligible or candidates)[:2])
     return out[:100]

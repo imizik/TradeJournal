@@ -31,15 +31,15 @@ def add(db, symbol):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", symbol):
         raise HTTPException(422, "Enter a US company ticker")
-    if db.bind.dialect.name == "sqlite":
-        db.execute(update(ResearchCompany).where(ResearchCompany.symbol == symbol).values(updated_at=ResearchCompany.updated_at))
-    existing = db.exec(select(ResearchCompany).where(ResearchCompany.symbol == symbol)).first()
-    if existing and existing.followed:
-        return existing
     # Serialize limit checking on Postgres, including an initially empty list.
     if db.bind.dialect.name == "postgresql":
         from sqlalchemy import text
         db.execute(text("SELECT pg_advisory_xact_lock(741963852)"))
+    if db.bind.dialect.name == "sqlite":
+        db.execute(update(ResearchCompany).where(ResearchCompany.symbol == symbol).values(updated_at=ResearchCompany.updated_at))
+    existing = db.exec(select(ResearchCompany).where(ResearchCompany.symbol == symbol).execution_options(populate_existing=True)).first()
+    if existing and existing.followed:
+        return existing
     rows = db.exec(select(ResearchCompany).where(ResearchCompany.followed.is_(True))).all()
     if len(rows) >= 10:
         raise HTTPException(409, "Follow at most 10 companies")

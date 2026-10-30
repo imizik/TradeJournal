@@ -61,6 +61,33 @@ from tests.postgres_support import (  # noqa: E402
 pytestmark = requires_postgres
 
 
+def test_company_research_stale_restore_and_refresh_coalescing(migrated):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from app.company_research_models import ResearchCompany
+    from app.engine import company_research as research
+    with Session(migrated) as first, Session(migrated) as stale:
+        row = research.add(first, "RESEARCHTEST")
+        identifier = row.id
+        row = research.patch(first, identifier, row.revision, "Original", [], False)
+        cached = stale.get(ResearchCompany, identifier)  # retain the stale identity-map object
+        assert cached.revision == row.revision
+        restored = research.add(first, "RESEARCHTEST")
+        edited = research.patch(first, identifier, restored.revision, "New thesis", [], True)
+        version = edited.revision
+        assert research.add(stale, "RESEARCHTEST").revision == version
+        assert research.company(stale, identifier).thesis == "New thesis"
+    barrier = Barrier(2)
+    def queue(_):
+        with Session(migrated) as db:
+            row = research.company(db, identifier)
+            barrier.wait(timeout=10)
+            return research.queue_refresh(db, row).id
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        queued = list(pool.map(queue, range(2)))
+    assert queued[0] == queued[1]
+
+
 def test_position_alert_feedback_concurrent_save_and_stale_update(migrated):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

@@ -14,10 +14,12 @@ def number(value):
 
 
 def compare(actual, reference):
-    keys = ("issuer", "metric", "period_end", "currency", "unit", "basis", "share_basis")
+    keys = ("issuer", "metric", "period_start", "period_end", "fiscal_year", "fiscal_period", "scope", "currency", "unit", "basis", "share_basis")
     for key in keys:
         if key not in actual or key not in reference or actual[key] in (None, "unknown", "unresolved") or actual[key] != reference[key]:
             return {"state": "incompatible", "reason": f"Incompatible or unknown {key}"}
+    if actual["scope"] == "segment" and (not actual.get("segment") or actual.get("segment") != reference.get("segment")):
+        return {"state": "incompatible", "reason": "Incompatible segment"}
     a, b = number(actual.get("value")), number(reference.get("value"))
     midpoint = False
     if b is None:
@@ -27,11 +29,15 @@ def compare(actual, reference):
     if a is None or b is None:
         return {"state": "unavailable", "reason": "Missing or invalid number"}
     delta = a - b
+    if actual["metric"] in {"gross_margin", "operating_margin"}:
+        return {"state": "ready", "difference": str(delta * 100), "percent": None,
+                "difference_unit": "percentage points", "reference": "calculated range midpoint" if midpoint else "point value",
+                "result": "above" if delta > 0 else "below" if delta < 0 else "equal"}
     minimum = Decimal("0.01") if actual["metric"] == "eps" else Decimal(0)
     pct = delta / abs(b) if b != 0 and abs(b) >= minimum else None
     return {"state": "ready", "difference": str(delta), "percent": str(pct) if pct is not None else None,
             "result": "above" if delta > 0 else "below" if delta < 0 else "equal",
-            "reference": "calculated range midpoint" if midpoint else "point value"}
+            "reference": "calculated range midpoint" if midpoint else "point value", "difference_unit": actual["unit"]}
 
 
 def earnings_comparison(actual, reference):

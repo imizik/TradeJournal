@@ -29,6 +29,11 @@ class NumericEvidence(BaseModel):
     role: Literal["actual", "estimate", "guidance"]
     metric: Literal["revenue", "eps", "gross_margin", "operating_margin", "cash", "debt", "operating_cash_flow", "capital_expenditure", "shares"]
     period_end: date
+    period_start: date
+    fiscal_year: int = Field(ge=1900, le=2200)
+    fiscal_period: Literal["Q1", "Q2", "Q3", "Q4", "FY", "H1", "H2"]
+    scope: Literal["consolidated", "segment"]
+    segment: str | None = Field(default=None, max_length=120)
     basis: Literal["gaap", "adjusted", "ifrs", "unknown"]
     currency: str = Field(min_length=3, max_length=3)
     unit: str = Field(min_length=1, max_length=30)
@@ -53,6 +58,10 @@ class NumericEvidence(BaseModel):
 
     @model_validator(mode="after")
     def point_or_range(self):
+        if self.period_end < self.period_start:
+            raise ValueError("Period end precedes its start")
+        if self.scope == "segment" and not self.segment:
+            raise ValueError("Segment observations require a segment identity")
         if self.value is not None and self.low is None and self.high is None:
             return self
         if self.value is None and self.low is not None and self.high is not None and Decimal(self.low) <= Decimal(self.high):
