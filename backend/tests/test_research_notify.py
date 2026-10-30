@@ -34,6 +34,14 @@ def _run(assessment=None, checks=None):
     return run
 
 
+@pytest.fixture(autouse=True)
+def wide_policy_budget(monkeypatch):
+    """The research sender's own caps are under test here, on the real clock; the policy's research budget and pre-open
+    allowance are tested in test_notification_policy."""
+    monkeypatch.setenv("PING_BUDGET_RESEARCH", "20")
+    monkeypatch.setenv("PING_PREOPEN_ALLOWANCE", "20")
+
+
 @pytest.fixture
 def pushes(monkeypatch):
     sent = []
