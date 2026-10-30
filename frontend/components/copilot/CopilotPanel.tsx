@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
-  type Backend, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
+  type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
@@ -104,6 +104,52 @@ function Prose({ text, onPushBack }: { text: string; onPushBack?: (line: string)
   );
 }
 
+/** Two choices side by side: the scenario names as headers, the row labels on the left. Where the answer is narrower
+ * than 28rem (a phone, the chart's side panel) it stacks as two labelled cards, A then B, so nothing scrolls sideways.
+ * With ``onPushBack``, each cell gets a Push back button. */
+function CompareBlock({ compare, onPushBack }: { compare: Compare; onPushBack?: (line: string) => void }) {
+  const sides = [{ key: "A", name: compare.a, cell: (row: Compare["rows"][number]) => row.a },
+    { key: "B", name: compare.b, cell: (row: Compare["rows"][number]) => row.b }];
+  const push = (side: (typeof sides)[number], row: Compare["rows"][number]) =>
+    <PushBack line={`${row.label} (${side.name}): ${side.cell(row)}`} onPushBack={onPushBack} />;
+  return (
+    <div data-testid="copilot-compare" className="[container-type:inline-size]">
+      <div role="table" aria-label={`Compare ${compare.a} and ${compare.b}`} data-testid="copilot-compare-grid"
+        className="hidden grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] overflow-hidden rounded border text-sm [@container(min-width:28rem)]:grid">
+        <div role="row" className="contents">
+          <span role="columnheader" className="border-b bg-muted/40 px-2 py-1" />
+          {sides.map(side => (
+            <span key={side.key} role="columnheader" className="break-words border-b border-l bg-muted/40 px-2 py-1 font-semibold text-foreground">{side.name}</span>
+          ))}
+        </div>
+        {compare.rows.map((row, i) => (
+          <div key={row.label} role="row" className="contents">
+            <span role="rowheader" className={cn("px-2 py-1 text-xs font-medium text-muted-foreground", i > 0 && "border-t")}>{row.label}</span>
+            {sides.map(side => (
+              <span key={side.key} role="cell" className={cn("break-words border-l px-2 py-1 text-foreground/90", i > 0 && "border-t")}>{side.cell(row)}{push(side, row)}</span>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div data-testid="copilot-compare-cards" className="space-y-2 [@container(min-width:28rem)]:hidden">
+        {sides.map(side => (
+          <section key={side.key} aria-label={`${side.key}: ${side.name}`} className="rounded border px-2 py-1.5 text-sm">
+            <h4 className="break-words font-semibold text-foreground"><span className="text-muted-foreground">{side.key}</span> {side.name}</h4>
+            <dl className="mt-1 space-y-0.5">
+              {compare.rows.map(row => (
+                <div key={row.label} className="flex gap-2">
+                  <dt className="w-16 shrink-0 text-xs font-medium leading-5 text-muted-foreground">{row.label}</dt>
+                  <dd className="min-w-0 break-words text-foreground/90">{side.cell(row)}{push(side, row)}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** An answer in the copilot's format (docs/copilot-lab.md § How the copilot reasons): the verdict and the headline, the
  * thesis · timing · contract read, the body, the case against set off, and a plain Changes if line. An answer without the format reads as plain text, as before. */
 function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string) => void }) {
@@ -125,6 +171,7 @@ function Answer({ text, onPushBack }: { text: string; onPushBack?: (line: string
         </p>
       )}
       {parts.body && <Prose text={parts.body} onPushBack={onPushBack} />}
+      {parts.compare && <CompareBlock compare={parts.compare} onPushBack={onPushBack} />}
       {parts.against && (
         <p data-testid="copilot-against" className="border-l-2 border-amber-300/60 pl-2 text-sm">
           <span className="font-medium text-amber-300">Against</span> {parts.against}<PushBack line={`Against: ${parts.against}`} onPushBack={onPushBack} />

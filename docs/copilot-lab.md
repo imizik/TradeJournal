@@ -959,6 +959,24 @@ Briefing's day).
   answer; a saved name is never changed. The scheduled turns' phone pings and
   saved conclusions drop the "Verdict: " label (`premarket_prep.unlabelled`,
   `week_review_auto._plain`); their saved answers keep it.
+- **Comparing two choices.** When the owner weighs two options ("10/30 vs
+  11/6 calls?", "enter now or wait for 95.9?", "add or replace?"), the body is
+  a compare block instead of the bullets, under the same length limit:
+  `Compare: <A> | <B>`, then the rows `Needs: … | …`, `Risks: … | …`,
+  `Breaks if: … | …` and, when a contract is involved, `Costs: … | …`
+  (premium, break-even move or time value from `get_option_candidates`),
+  then Against and Changes if as usual. The headline says which side the
+  evidence favours, or that it is a coin flip; it never recommends a
+  contract. `answerParts` returns `compare` only when the Compare line and at
+  least two rows parse (otherwise the lines stay in the body); the desk shows
+  a two-column grid with the scenario names as headers and the row labels on
+  the left, and where the answer is narrower than 28rem (a phone, the chart's
+  side panel) two labelled cards, A then B, with nothing scrolling sideways.
+  Each cell carries Push back on this (`Push back on "Needs (<side>): …": `).
+  Read aloud a row is "Needs: A, …; B, …". The `fake` backend answers a
+  message with " vs " or " or " plus "which" or "compare" with a scripted
+  coin-flip compare (`FakeAdapter._compare`), so the sandbox and the browser
+  tests show it without a model call.
 
 Tests pin the sentences other guards depend on (`tests/test_copilot_answer_format.py`
 on the answer format and the scripted answers, `tests/test_copilot_book.py`
