@@ -21,17 +21,20 @@ red, held an hour and lost, left to expire). So instead of a nudge to plan, the 
   phone ping went out for it (give-back, hold-hour, expiry, time stop, invalidation), thesis watch fired on its symbol,
   Radar recorded an event on the symbol or its group (store read-only), the underlying moved ``COMPANION_MOVE_PCT``
   (default 3) from the last update, or a cadence floor passed: 60 minutes after the entry, and 15:30 New York while it
-  is open. At most ``COMPANION_MAX_UPDATES`` (default 4) a position a day, besides the adopt and close turns. An update
-  waits while a ping for the position is inside the notification policy's quiet window, so no turn is spent on a
-  message the policy would hold.
+  is open. At most ``COMPANION_MAX_UPDATES`` (default 4) a position a day, besides the adopt and close turns, and one
+  per quiet window. An update waits while a ping for the position is inside the notification policy's quiet window,
+  and is recorded before its turn, so a failure after the turn never repeats it. A held adopt ping leaves the position
+  adopt-only (no thread to reply in, no Ignore on the phone).
 - **Update.** One ``run_turn``: what changed since the last update and whether it changes the plan, Verdict line
   first, at most 80 words, with the plan's invalidation and the live option mark in the question. Saved as messages on
   the adopted investigation and sent as a Telegram reply to the adopt message, with Closed it / Holding (recorded
   on the row, nothing else). Kind ``companion_update``, ranked just below ``hold_hour``, budget 12.
 - **Close.** When the position's exits bring it to zero (the trade at its anchor is no longer open): one last turn
   writes the exit note (what the plan said, what he did, where the underlying and the option mark went), saved as
-  the investigation's conclusion with status ``closed`` and sent as the thread's last reply. A confirmed invalidation
-  that never fired is removed then, so a closed position never pings "your plan says out". A multi-day hold gets
+  the investigation's conclusion with status ``closed`` and sent as the thread's last reply. The row is claimed closed
+  before the turn (a Confirm racing it arms nothing), the note waits out the quiet window, and closes run from the open
+  to ``CLOSE_GRACE_MINUTES`` after the close. A confirmed invalidation that never fired is removed then (and on
+  Ignore), so a closed position never pings "your plan says out". A multi-day hold gets
   no overnight update; it resumes in the next regular session.
 
 Off unless ``POSITION_COMPANION_ENABLED=true``, and nothing runs while the lab is off (``COPILOT_ENABLED``). Turns use
@@ -54,7 +57,7 @@ import time
 from typing import Awaitable, Callable
 import uuid
 
-from sqlalchemy import or_
+from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -71,6 +74,7 @@ ADOPT_SECONDS = 10 * 60  # an adopt still "adopting" this long after its claim d
 FLOOR_MINUTES = 60  # the cadence floor after the entry: the audit's best holds were 15 to 60 minutes
 LATE_MINUTE = 15 * 60 + 30  # the second floor, New York
 UPDATE_WORDS = 80
+CLOSE_GRACE_MINUTES = 30  # a position closed near the bell still gets its exit note this long after the close
 DAY_HORIZON_DAYS = 7  # a contract expiring within this many days is drafted as a day trade
 # The position's own pings that call for an update (the policy's kinds).
 POSITION_KINDS = ("giveback", "hold_hour", "wrong_way", "expiry_eve", "expiry_first", "expiry_final", "time_stop", "invalidation")
@@ -82,6 +86,11 @@ PRICE = re.compile(r"\$?(\d+(?:\.\d+)?)")
 
 def enabled() -> bool:
     return os.environ.get("POSITION_COMPANION_ENABLED", "").strip().lower() == "true"
+
+
+def active() -> bool:
+    """Switched on and able to run: what plan nudges hand long options over on (with the lab off they keep nudging)."""
+    return enabled() and _lab_on() and os.environ.get("TJ_DOT_TRIAL_ENABLED") != "true"
 
 
 def _setting(name: str, default: float) -> float:
@@ -262,7 +271,7 @@ def update_prompt(row: PositionCompanion, trade: Trade, reasons: list[str], live
         f"Verdict line first, at most {UPDATE_WORDS} words in all. {NO_ORDER}")
 
 
-def close_prompt(row: PositionCompanion, trade: Trade, live: dict) -> str:
+def close_prompt(row: PositionCompanion, trade: Trade, live: dict, confirmed: bool = False) -> str:
     plan = plan_of(row)
     stop = plan.get("invalidation")
     closed = trade.closed_at.strftime("%H:%M") if trade.closed_at else "?"
@@ -272,7 +281,7 @@ def close_prompt(row: PositionCompanion, trade: Trade, live: dict) -> str:
         f"Review this position: {trade.id}. The adopted {row.contract} is closed. Write its exit note: the Verdict line, "
         "then one paragraph under 90 words: what the provisional plan said (invalidation "
         f"{f'{stop:,.2f}' if stop else 'none'}, time stop {plan.get('time_stop') or 'none'}, thesis guess "
-        f"{plan.get('thesis') or 'unstated'}; {'confirmed' if row.state == 'armed' else 'never confirmed'}), what he did "
+        f"{plan.get('thesis') or 'unstated'}; {'confirmed' if confirmed else 'never confirmed'}), what he did "
         f"(entered {_clock(row.opened_at)} at ${float(trade.avg_entry_premium) / 100:,.2f}, out {closed} at {exit_premium}, "
         f"P&L {pnl}), and where {row.ticker} and the option mark went after the exit (now {row.ticker} "
         f"{live.get('underlying') or 'unavailable'}, mark {live.get('mark_text', 'unavailable')}). {NO_ORDER}")
@@ -479,9 +488,14 @@ def confirm(engine, companion_id: str, *, quote: Callable[[str], float | None] |
                                  label=f"{ticker} invalidation: {condition} {price:,.2f}"[:60], now=now, plan_role="invalidation")
         except ValueError as exc:
             return f"Not armed: {exc}", None
-        row.state, row.alert_id, row.decided_at = "armed", alert.id, _utc(now)
-        db.add(row)
+        # Only a draft becomes armed: a close or an Ignore that landed meanwhile wins, and the alert just made goes.
+        armed = db.exec(update(PositionCompanion).where(PositionCompanion.id == row.id, PositionCompanion.state == "draft")
+                        .values(state="armed", alert_id=alert.id, decided_at=_utc(now)))
         db.commit()
+        if armed.rowcount != 1:
+            _remove_alert(db, alert.id)
+            db.commit()
+            return "Not confirmed: this position closed or was ignored meanwhile.", None
     log.info("Companion plan confirmed for %s: invalidation %.2f armed", contract, price)
     return f"Confirmed: invalidation {price:,.2f} on {ticker} is armed.", "Confirmed"
 
@@ -496,9 +510,15 @@ def ignore(engine, companion_id: str, *, now: float | None = None) -> tuple[str,
             return "Already ignored.", "Ignored"
         if row.state not in ("draft", "armed"):
             return f"This position is {row.state}.", None
-        row.state, row.decided_at = "ignored", _utc(time.time() if now is None else now)
-        db.add(row)
+        ignored = db.exec(update(PositionCompanion).where(PositionCompanion.id == row.id, PositionCompanion.state.in_(("draft", "armed")))
+                          .values(state="ignored", decided_at=_utc(time.time() if now is None else now)))
         db.commit()
+        if ignored.rowcount != 1:
+            return "This position changed meanwhile; nothing was ignored.", None
+        db.refresh(row)
+        _disarm(db, row)  # an Ignore after Confirm takes its invalidation alert with it
+        db.commit()
+        _close_thread(db, row, "Ignored: the companion sent nothing more for this position.")
     return "Ignored: no more updates for this position.", "Ignored"
 
 
@@ -552,21 +572,33 @@ class Companion:
             await asyncio.sleep(RUN_SECONDS)
 
     async def run_once(self) -> None:
-        if not enabled() or not _lab_on():
+        if not active():
             return
         now = self.clock()
         moment = datetime.fromtimestamp(now, ET)
         regular = _regular(self.calendar, moment.date())
         minute = moment.hour * 60 + moment.minute
         await asyncio.to_thread(self._give_up, now)
-        for row_id in await asyncio.to_thread(self._closed):
-            await self.close(row_id)
-        if regular is None or not regular[1] <= minute < regular[2]:
-            return  # no overnight updates: the companion resumes in the next regular session
+        if regular is None or not regular[1] <= minute < regular[2] + CLOSE_GRACE_MINUTES:
+            return  # nothing overnight: the companion resumes in the next regular session
+        for row_id in await asyncio.to_thread(self._closed, now):
+            await self._each("close", self.close, row_id)
+        if not regular[1] <= minute < regular[2]:
+            return
         for draft in await asyncio.to_thread(self._claim, now, regular):
-            await self.adopt(draft, regular)
+            await self._each("adopt", self.adopt, draft, regular)
         for row_id, reasons in await asyncio.to_thread(self._due, now):
-            await self.update(row_id, reasons)
+            await self._each("update", self.update, row_id, reasons)
+
+    @staticmethod
+    async def _each(what: str, step, *args) -> None:
+        """One position's step; its failure is logged and never stops the others in the pass."""
+        try:
+            await step(*args)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Position companion %s failed", what)
 
     def _give_up(self, now: float) -> None:
         with Session(self.engine) as db:
@@ -668,6 +700,8 @@ class Companion:
                 db, row, source_id=str(row.id), kind="companion_adopt", title=f"Adopted: {name}", body="\n".join(lines),
                 buttons=adopt_buttons(row, plan), reply_to=None, open_label="Edit", priority=4, now=now)
             row.last_error = failure or row.last_error
+            if row.delivery not in ("sent", "unknown"):
+                row.watched = False  # no thread to reply in and no Ignore on the phone: adopt-only, no updates
             contract, delivery = row.contract, row.delivery
             db.add(row)
             db.commit()
@@ -694,6 +728,8 @@ class Companion:
                 if len(done_today) >= max_updates():
                     continue
                 since = row.last_update_at or row.detected_at
+                if now - _epoch(since) < notification_policy.quiet_seconds():
+                    continue  # at most one turn per quiet window, whatever keeps triggering
                 reasons = self._reasons(db, row, trades[row.id], since, now, last.get(row.ticker))
                 if not reasons:
                     continue
@@ -759,52 +795,76 @@ class Companion:
                 live = self._live(row, trade, now)
                 return row, update_prompt(row, trade, reasons, live), live
 
-        row, question, live = await asyncio.to_thread(read)
+        found = await asyncio.to_thread(read)
+        row, question, live = found
+        index = await asyncio.to_thread(self._attempt, row_id, reasons, live, now)
+        if index is None:
+            return
         answer, error = await self.turn(question, row.ticker, now)
-        await asyncio.to_thread(self._updated, row_id, reasons, question, answer, error, live)
+        await asyncio.to_thread(self._updated, row_id, index, question, answer, error)
 
-    def _updated(self, row_id, reasons, question, answer, error, live) -> None:
-        now = self.clock()
-        today = datetime.fromtimestamp(now, ET).date().isoformat()
+    def _attempt(self, row_id, reasons: list[str], live: dict, now: float) -> int | None:
+        """Record the update before its turn, so it counts toward the ceiling and the pacing whatever happens next."""
         with Session(self.engine) as db:
             row = db.get(PositionCompanion, row_id)
             if row is None or row.state not in ("draft", "armed"):
-                return  # ignored meanwhile
+                return None  # ignored or closed meanwhile
             updates = updates_of(row)
-            entry = {"at": int(now), "day": today, "reasons": reasons[:8], "delivery": "skipped", "answer": None}
-            row.last_update_at = _utc(now)
+            updates.append({"at": int(now), "day": datetime.fromtimestamp(now, ET).date().isoformat(), "reasons": reasons[:8],
+                            "delivery": "pending", "answer": None})
+            row.updates_json, row.last_update_at = json.dumps(updates), _utc(now)
             if isinstance(live.get("underlying"), (int, float)):
                 row.last_underlying = live["underlying"]
+            db.add(row)
+            db.commit()
+            return len(updates) - 1
+
+    def _updated(self, row_id, index: int, question: str, answer: str, error: str | None) -> None:
+        now = self.clock()
+        result: dict = {"delivery": "failed"}
+        with Session(self.engine) as db:
+            row = db.get(PositionCompanion, row_id)
+            if row is None:
+                return
             if error is not None:
-                entry["delivery"], entry["error"] = "failed", f"Copilot turn failed: {error}"[:300]
-                updates.append(entry)
+                result["error"] = f"Copilot turn failed: {error}"[:300]
+            elif row.state not in ("draft", "armed"):
+                result["delivery"] = "skipped"  # ignored or closed while the turn ran
+            else:
+                try:
+                    save_messages(row.investigation_id, [{"role": "user", "content": question},
+                                                         {"role": "assistant", "content": answer}], session=db)
+                except Exception as exc:  # noqa: BLE001 - the ping still goes; the desk thread misses this update
+                    db.rollback()
+                    log.warning("Companion update not saved on its investigation: %s", type(exc).__name__)
+                    result["error"] = f"Not saved on the desk thread ({type(exc).__name__})."
+                name = label(row.ticker, row.option_type, _strike(row))
+                result["delivery"], result["message_id"], failure = self._send(
+                    db, row, source_id=f"{row.id}:u{index}", kind="companion_update", title=f"{name} · update",
+                    body=words(answer, UPDATE_WORDS), buttons=update_buttons(row, index), reply_to=row.message_id,
+                    open_label="Open", priority=3, now=now)
+                if failure:
+                    result["error"] = failure[:300]
+            db.commit()
+            db.refresh(row)  # an answer tapped meanwhile is kept: only this update's entry changes
+            updates = updates_of(row)
+            if index < len(updates):
+                updates[index].update(result)
                 row.updates_json = json.dumps(updates)
                 db.add(row)
                 db.commit()
-                return
-            save_messages(row.investigation_id, [{"role": "user", "content": question}, {"role": "assistant", "content": answer}], session=db)
-            updates.append(entry)
-            index = len(updates) - 1
-            name = label(row.ticker, row.option_type, _strike(row))
-            entry["delivery"], entry["message_id"], failure = self._send(
-                db, row, source_id=f"{row.id}:u{index}", kind="companion_update", title=f"{name} · update",
-                body=words(answer, UPDATE_WORDS), buttons=update_buttons(row, index), reply_to=row.message_id,
-                open_label="Open", priority=3, now=now)
-            if failure:
-                entry["error"] = failure[:300]
-            row.updates_json = json.dumps(updates)
-            db.add(row)
-            db.commit()
 
     # ------------------------------------------------------------ close
 
-    def _closed(self) -> list[uuid.UUID]:
+    def _closed(self, now: float) -> list[uuid.UUID]:
+        """Adopted positions whose exits brought them to zero, once no ping for them is inside the quiet window (so the
+        exit note is not held by it)."""
         with Session(self.engine) as db:
             rows = db.exec(select(PositionCompanion).where(PositionCompanion.state.in_(("draft", "armed")))).all()
             out = []
             for row in rows:
                 trade = trade_of(db, row)
-                if trade is not None and trade.status != "open":
+                if trade is not None and trade.status != "open" and (not row.watched or not self._quiet(db, row, now)):
                     out.append(row.id)
             return out
 
@@ -813,16 +873,23 @@ class Companion:
 
         def read():
             with Session(self.engine) as db:
+                # Claimed closed before the turn: a failure after it never repeats the turn, and a Confirm racing it loses.
+                claimed = db.exec(update(PositionCompanion).where(PositionCompanion.id == row_id,
+                                                                  PositionCompanion.state.in_(("draft", "armed")))
+                                  .values(state="closed", closed_at=_utc(now)))
+                db.commit()
+                if claimed.rowcount != 1:
+                    return None
                 row = db.get(PositionCompanion, row_id)
+                _disarm(db, row)
+                db.commit()
                 if not row.watched:  # adopt-only: closed quietly, no turn
-                    row.state, row.closed_at = "closed", _utc(now)
-                    _disarm(db, row)
-                    db.add(row)
-                    db.commit()
+                    _close_thread(db, row, "Closed: adopt-only, so no exit note was written.")
                     return None
                 trade = trade_of(db, row)
+                prior = "armed" if row.alert_id else "draft"
                 live = self._live(row, trade, now)
-                return row, close_prompt(row, trade, live)
+                return row, close_prompt(row, trade, live, confirmed=prior == "armed")
 
         found = await asyncio.to_thread(read)
         if found is None:
@@ -835,16 +902,19 @@ class Companion:
         now = self.clock()
         with Session(self.engine) as db:
             row = db.get(PositionCompanion, row_id)
-            if row is None or row.state not in ("draft", "armed"):
+            if row is None:
                 return
             note = answer if error is None else f"Verdict: Unclear — The exit note could not be written: {error}"
             first = next((line for line in note.splitlines() if line.strip()), "")
-            save_messages(row.investigation_id, [{"role": "user", "content": question}, {"role": "assistant", "content": note}],
-                          status="closed", conclusion=unlabelled(first)[:280] or None, session=db)
-            row.state, row.closed_at = "closed", _utc(now)
-            _disarm(db, row)
-            db.add(row)
-            db.commit()
+            try:
+                save_messages(row.investigation_id, [{"role": "user", "content": question}, {"role": "assistant", "content": note}],
+                              status="closed", conclusion=unlabelled(first)[:280] or None, session=db)
+            except Exception as exc:  # noqa: BLE001 - the note still goes to the phone
+                db.rollback()
+                log.warning("Companion exit note not saved on its investigation: %s", type(exc).__name__)
+                row.last_error = f"Exit note not saved on the desk thread ({type(exc).__name__})."
+                db.add(row)
+                db.commit()
             if error is None:
                 name = label(row.ticker, row.option_type, _strike(row))
                 _, _, failure = self._send(db, row, source_id=f"{row.id}:close", kind="companion_update", title=f"{name} · closed",
@@ -882,12 +952,28 @@ class Companion:
 def _disarm(db: Session, row: PositionCompanion) -> None:
     """Remove the confirmed invalidation alert if it is still armed (the level alert route's delete); a fired one stays
     as the record of the hit. The monitor drops it on its next reload."""
-    from sqlmodel import delete
-    from app.models import LevelAlert, LevelAlertEvent
+    from app.models import LevelAlert
     alert = db.get(LevelAlert, row.alert_id) if row.alert_id else None
     if alert is not None and alert.state == "active":
-        db.exec(delete(LevelAlertEvent).where(LevelAlertEvent.alert_id == alert.id))
-        db.exec(delete(LevelAlert).where(LevelAlert.id == alert.id))
+        _remove_alert(db, alert.id)
+
+
+def _remove_alert(db: Session, alert_id: uuid.UUID) -> None:
+    from sqlmodel import delete
+    from app.models import LevelAlert, LevelAlertEvent
+    db.exec(delete(LevelAlertEvent).where(LevelAlertEvent.alert_id == alert_id))
+    db.exec(delete(LevelAlert).where(LevelAlert.id == alert_id))
+
+
+def _close_thread(db: Session, row: PositionCompanion, conclusion: str) -> None:
+    """Close the adopted investigation with no new message, so it leaves the desk's open threads."""
+    if row.investigation_id is None:
+        return
+    try:
+        save_messages(row.investigation_id, [], status="closed", conclusion=conclusion, session=db)
+    except Exception:  # noqa: BLE001 - the owner can still close it on the desk
+        db.rollback()
+        log.warning("Companion thread not closed", exc_info=True)
 
 
 def _strike(row: PositionCompanion):

@@ -186,6 +186,17 @@ def test_the_position_companion_adopts_on_the_nudge_budget_and_updates_on_its_ow
         assert decide(db, "companion_update", "u14", anchor="p-q").reason.startswith("Merged into the give-back ping")
 
 
+def test_companion_updates_never_fill_the_ceiling_for_more_important_kinds(engine):
+    with Session(engine) as db:
+        for i in range(12):
+            assert decide(db, "companion_update", f"u{i}", anchor=f"p-u{i}").action == "send"
+        for kind in ("time_stop", "entry", "hold_hour", "expiry_eve"):  # ranked above the companion: not crowded out
+            assert decide(db, kind, f"x-{kind}", anchor=f"p-{kind}").action == "send"
+        # Kinds ranked below it still count it: 16 sent, cap 12.
+        assert decide(db, "radar_event", "r1", anchor="s-1").reason == "Not sent: 16 pings already went out today (cap 12)."
+        assert decide(db, "companion_update", "u12", anchor="p-u12").action == "hold"
+
+
 def test_before_the_open_the_budgeted_kinds_share_the_pre_open_allowance(engine, monkeypatch):
     with Session(engine) as db:
         assert decide(db, "prep", "prep1", anchor=None, now=at("08:30")).action == "send"

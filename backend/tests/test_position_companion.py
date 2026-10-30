@@ -558,3 +558,130 @@ def test_a_real_fake_backend_turn_adopts(engine, phone, monkeypatch):
     reply = investigation(engine, row)["transcript"][1]["content"]
     assert reply and "Simulated" in reply
     assert len(phone.sent) == 1
+
+
+# ------------------------------------------------------------------ review regressions
+
+
+def test_a_failure_after_the_update_turn_never_repeats_it(world, engine, phone, monkeypatch):
+    adopted(world, engine)
+
+    def broken(*args, **kwargs):
+        raise ValueError("the transcript is full")
+    monkeypatch.setattr(position_companion, "save_messages", broken)
+    world.prices["NBIS"] = 170.0
+    for minute in ("10:20", "10:21", "10:22", "10:25"):
+        world.tick(minute)
+    assert len(world.turns.questions) == 2  # one update turn; the failure did not bring it back every pass
+    [entry] = json.loads(companions(engine)[0].updates_json)
+    assert entry["delivery"] == "sent" and "Not saved on the desk thread" in entry["error"]
+    assert len(phone.sent) == 2  # the ping still went
+
+
+def test_a_failure_after_the_close_turn_never_repeats_it(world, engine, phone, monkeypatch):
+    adopted(world, engine)
+
+    def broken(*args, **kwargs):
+        raise ValueError("the transcript is full")
+    monkeypatch.setattr(position_companion, "save_messages", broken)
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    for minute in ("10:41", "10:42", "10:50"):
+        world.tick(minute)
+    assert companions(engine)[0].state == "closed" and len(world.turns.questions) == 2
+
+
+def test_updates_are_paced_by_the_quiet_window(world, engine, phone):
+    adopted(world, engine)
+    world.radar_events.append((utc("10:14"), "first"))
+    world.tick("10:15")
+    world.radar_events.append((utc("10:16"), "second"))
+    world.tick("10:17")
+    assert len(world.turns.questions) == 2  # the second waits for the window after the first
+    world.tick("10:26")
+    assert len(world.turns.questions) == 3
+
+
+def test_the_exit_note_waits_out_the_quiet_window(world, engine, phone):
+    adopted(world, engine)
+    ping(engine, "giveback", "10:35")
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    world.tick("10:41")
+    assert companions(engine)[0].state == "draft"  # a give-back went out 6 minutes ago: the note would be held
+    world.tick("10:46")
+    assert companions(engine)[0].state == "closed"
+    assert phone.sent[-1]["text"].startswith("<b>NBIS 160C · closed</b>")
+    with Session(engine) as db:
+        close = db.exec(select(PhonePing).where(PhonePing.source_id.like("%:close"))).one()
+    assert close.decision == "sent"
+
+
+def test_no_exit_note_after_hours_until_the_next_session(world, engine, phone):
+    adopted(world, engine)
+    fill(engine, "16:45", side="sell_to_close", price=420)
+    world.tick("16:46")
+    world.tick("20:00")
+    assert companions(engine)[0].state == "draft" and len(world.turns.questions) == 1
+    world.tick("09:31", date(2026, 10, 22))
+    assert companions(engine)[0].state == "closed" and len(world.turns.questions) == 2
+
+
+def test_a_confirm_racing_the_close_arms_nothing(world, engine, phone):
+    row = adopted(world, engine)
+
+    def quote_while_closing(symbol):  # the close loop claims the row while Confirm reads its quote
+        with Session(engine) as db:
+            found = db.get(PositionCompanion, row.id)
+            found.state = "closed"
+            db.add(found)
+            db.commit()
+        return 165.0
+    reply, chosen = position_companion.confirm(engine, str(row.id), quote=quote_while_closing)
+    assert chosen is None and "closed or was ignored meanwhile" in reply
+    with Session(engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+    assert companions(engine)[0].state == "closed"
+
+
+def test_ignore_after_confirm_disarms_and_closes_the_thread(world, engine, phone):
+    row = adopted(world, engine)
+    position_companion.confirm(engine, str(row.id), quote=lambda symbol: 165.0)
+    reply, chosen = position_companion.ignore(engine, str(row.id))
+    assert chosen == "Ignored"
+    with Session(engine) as db:
+        assert db.exec(select(LevelAlert)).all() == []
+    saved = investigation(engine, companions(engine)[0])
+    assert saved["status"] == "closed" and saved["conclusion"].startswith("Ignored")
+
+
+def test_an_adopt_only_close_closes_its_thread(world, engine, phone, monkeypatch):
+    monkeypatch.setenv("COMPANION_MAX_POSITIONS", "0")
+    row = adopted(world, engine)
+    fill(engine, "10:40", side="sell_to_close", price=420)
+    world.tick("10:41")
+    assert investigation(engine, companions(engine)[0])["status"] == "closed"
+    assert row.watched is False
+
+
+def test_a_held_adopt_is_adopt_only(world, engine, phone, monkeypatch):
+    monkeypatch.setenv("PING_BUDGET_NUDGE", "0")
+    adopted(world, engine)
+    [row] = companions(engine)
+    assert row.delivery == "held" and row.watched is False
+    world.prices["NBIS"] = 175.0
+    world.tick("11:05")
+    assert len(world.turns.questions) == 1 and phone.sent == []
+
+
+def test_one_failing_adopt_never_stops_the_others(world, engine, phone):
+    fill(engine, "10:00")
+    fill(engine, "10:00", ticker="AMD", strike=250)
+    real = world.companion.chart
+
+    def chart(symbol):
+        if symbol == "AMD":
+            raise RuntimeError("feed down")
+        return real(symbol)
+    world.companion.chart = chart
+    world.tick("10:03")
+    states = {r.ticker: r.state for r in companions(engine)}
+    assert states == {"NBIS": "draft", "AMD": "adopting"}

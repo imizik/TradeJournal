@@ -14,7 +14,7 @@ notification goes out:
 
 Nothing here places, changes or suggests an order.
 
-With the position companion on (``POSITION_COMPANION_ENABLED=true``) a new long option is left to it: the companion
+With the position companion running (``POSITION_COMPANION_ENABLED=true`` and the lab on) a new long option is left to it: the companion
 adopts it with a drafted plan instead (``engine/position_companion.py``), so it gets no nudge or link ping here.
 Stock entries (and sold-to-open options, which the companion does not adopt) are nudged as before.
 
@@ -160,7 +160,7 @@ class PlanNudges:
         if regular is None or not regular[1] <= moment.hour * 60 + moment.minute < regular[2]:
             return
         with Session(self.engine) as db:
-            companion = position_companion.enabled()
+            companion = position_companion.active()
             for nudge in self._due(db, now, moment.date()):
                 if capture_links.for_trade(db, nudge.trade_id):
                     continue

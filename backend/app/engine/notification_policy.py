@@ -36,7 +36,9 @@ The policy, in the order it is applied:
   (default 2) pings, so pre-open headlines cannot spend the day.
 - **Daily ceiling.** At most ``PING_DAILY_CAP`` (default 12) pings a New York day
   across every kind; ranks 3 and below (time stop, entry, hold-hour and the
-  budgeted kinds) are held once it is reached. Last-day final, invalidation
+  budgeted kinds) are held once it is reached; the position companion's updates
+  count toward it only for kinds ranked at or below them, so they never hold a
+  more important alert. Last-day final, invalidation
   and give-back are never over it, and ``evening_review`` is never held at all,
   by the window or the ceiling: it is the ping that reports what was held.
 
@@ -99,6 +101,7 @@ NEVER_HELD = ("evening_review",)  # neither the quiet window nor the ceiling: it
 BUDGETS = {"companion_update": 12, "nudge": 2, "prep": 1, "radar_event": 4, "radar_digest": 2, "thesis_watch": 2, "research": 1}
 BUDGET_NAMES = {"companion_update": ("the position companion's", "update"), "nudge": ("plan nudges'", "ping"), "prep": ("the prep and review pings'", "ping"), "radar_event": ("Radar's", "single ping"),
                 "radar_digest": ("Radar's", "digest"), "thesis_watch": ("thesis watch's", "ping"), "research": ("research's", "ping")}
+COMPANION = "companion_update"  # counted toward the ceiling only for kinds ranked at or below it
 PREOPEN = 9 * 60 + 30  # New York; budgeted pings decided before it also count against PING_PREOPEN_ALLOWANCE
 HELD = ("merged", "suppressed", "over_cap")
 RUN_SECONDS = 30
@@ -297,6 +300,10 @@ def _judge(db: Session, row: PhonePing, now: float) -> None:
                               "watch and research before 9:30 AM New York are spent.")
                 return
     cap = daily_cap()
+    # The companion's updates never crowd out a more important kind: they count toward the ceiling only for kinds ranked
+    # at or below them.
+    if row.rank < rank(COMPANION):
+        sent = [(k, at) for k, at in sent if canonical(k) != COMPANION]
     if len(sent) >= cap:
         row.decision = "over_cap"
         row.reason = f"Not sent: {len(sent)} ping{'' if len(sent) == 1 else 's'} already went out today (cap {cap})."

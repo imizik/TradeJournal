@@ -1798,7 +1798,7 @@ all hit one position within minutes. Jo's senders (Codex) are not gated.
   pings, so pre-open headlines cannot spend the day. A held ping's reason names
   the budget: "Not sent: Radar's 4 single pings for today are spent."
 - **Daily ceiling:** at most `PING_DAILY_CAP` (default 12) pings a New York day
-  across every kind. Priority order: last-day final > invalidation > give-back
+  across every kind (the companion's updates count toward it only for kinds ranked at or below them). Priority order: last-day final > invalidation > give-back
   > time stop (and the 90-minute last-day and day-before-expiry alerts) > entry
   trigger > hold-hour > companion update > nudge/link/companion adopt > prep > evening review > Radar single >
   Radar digest > thesis watch > research. The first three are never over the
@@ -1881,28 +1881,38 @@ long theses, reviewed weekly. Nothing here places, changes or suggests an order,
   three-line read. Saved as the investigation "Adopted: NBIS 160C" and a `position_companion` row in `draft`
   anchored to the position (a rebuild never re-adopts it). Telegram: the headline, the read, the draft plan, and
   **Confirm**, **Ignore** and **Edit** (the desk thread). Kind `companion_adopt`, ranked and budgeted with `nudge`.
-  With the companion on, plan nudges leave long options to it; stocks and sold-to-open options are nudged as before.
+  An adopt ping the policy holds (the nudge budget) leaves the position adopt-only: saved on the desk, no updates.
+  With the companion running (the flag and the lab both on), plan nudges leave long options to it; stocks and
+  sold-to-open options are nudged as before, and with the lab off long options are nudged too.
 - **Confirm** arms the draft's invalidation as a confirmed plan card's invalidation alert (a `copilot` level alert
   with `plan_role: invalidation` on the investigation), state `armed`: the desk's plan ladder and the Plans board
   read it, with the entry at the underlying's price when it was adopted. An invalidation already crossed, or a stale
-  quote, arms nothing and says so. **Ignore** stops every later message for the position (state `ignored`).
+  quote, arms nothing and says so; so does a Confirm that lands after the position closed or was ignored. **Ignore**
+  stops every later message for the position (state `ignored`), removes an invalidation it had armed, and closes the
+  thread.
 - **Watch.** Every minute in the regular session, each adopted position still open, not ignored, and among the
   newest `COMPANION_MAX_POSITIONS` (default 6; older ones are adopt-only, closed quietly) gets an update when, since
   its last one: a phone ping went out for it (give-back, one-hour, wrong way, expiry, time stop, invalidation), thesis
   watch fired on its symbol, Radar recorded an event on the symbol or its group (store read-only), the underlying
   moved `COMPANION_MOVE_PCT` (default 3) percent, or a cadence floor passed: 60 minutes after the entry, and 15:30
   New York while it is open. At most `COMPANION_MAX_UPDATES` (default 4) a position a day besides the adopt and
-  close turns. An update waits while a ping for the position is inside the [quiet window](#phone-ping-policy), so
-  no turn is spent on a message the policy would hold. No overnight updates: a multi-day hold resumes in the next
-  regular session (the 08:30 brief already lists expiries).
+  close turns, and at most one per [quiet window](#phone-ping-policy) (10 minutes) whatever keeps triggering. An
+  update waits while a ping for the position is inside that window, so no turn is spent on a message the window would
+  hold. Each update is recorded before its turn runs, so a failure after the turn never repeats it. No overnight
+  updates: a multi-day hold resumes in the next regular session (the 08:30 brief already lists expiries).
 - **Update.** One turn: what changed since the last update and whether it changes the plan, Verdict line first, at
   most 80 words, with the plan's invalidation and the live option mark in the question. Saved as messages on the
   adopted investigation, so the desk shows them in the thread (and its Timeline lists each ping), and sent as a
   Telegram reply to the adopt message, so one thread holds the position, with **Closed it** / **Holding** (recorded
-  on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12.
+  on the row, nothing else). Kind `companion_update`, ranked just below the one-hour alert, budget 12; it counts
+  toward the daily ceiling only for kinds ranked at or below it, so it never holds a more important alert.
 - **Close.** When the exits bring the position to zero: one last turn writes the exit note (what the plan said,
   what he did, where the underlying and the option mark went), saved as the investigation's conclusion with status
-  `closed`, and sent as the thread's last reply.
+  `closed`, and sent as the thread's last reply. It waits out the quiet window (so a give-back just before the sale
+  does not hold it) and runs only from the open to 30 minutes after the close; a position closed later (or expired
+  overnight) gets its note in the next session. The row is marked closed before the turn, so it never runs twice. A
+  confirmed invalidation that never fired is removed, so a closed position never pings "your plan says out".
+  An adopt-only position closes quietly: its thread is closed with no note.
 - **Desk.** An adopted position's row opens its adopted thread and reads "Adopted · draft plan to confirm" (or its
   armed invalidation); the thread header's chip says Adopted (Adopted · armed once confirmed).
 - **Cost.** Turns use the copilot's configured backend, its per-turn budget and, on the API backend, its daily
