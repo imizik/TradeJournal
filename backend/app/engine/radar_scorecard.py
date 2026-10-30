@@ -89,14 +89,15 @@ def _mean(values: list[float]) -> float | None:
 
 def scorecard(store: RadarStore, db: Session, now: float, days: int = WINDOW_DAYS) -> dict:
     today = datetime.fromtimestamp(now, ET).date()
-    since = (today - timedelta(days=days)).isoformat()
+    start = today - timedelta(days=days)
+    since = start.isoformat()  # Radar's session names are ISO dates; the journal's day column is a date
     hits = []
     for session in sorted(s for s in store.sessions() if s >= since):
         hits += [e for e in store.events(session) if e.get("kind") in STOCK_KINDS and e.get("symbols")]
     hits.sort(key=lambda e: (e["first_seen_at"], e["event_id"]))
     symbols = {e["symbols"][0] for e in hits}
     decisions = list(db.exec(select(DayJournalEntry).where(DayJournalEntry.kind == "decision", DayJournalEntry.symbol.in_(symbols),
-                                                           DayJournalEntry.day >= since)
+                                                           DayJournalEntry.day >= start)
                              .order_by(DayJournalEntry.created_at)).all()) if symbols else []
     plans = radar_proof.planned_events(db, [e["event_id"] for e in hits])
     passes: dict[str, list[dict]] = {}
