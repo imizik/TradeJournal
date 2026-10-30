@@ -144,6 +144,7 @@ test("the speaker is remembered; each answer is spoken once, after it finishes, 
   await page.reload();
   await expect(speaker(page)).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => localStorage.getItem("copilot.speak"))).toBe("on");
+  await page.getByLabel("Message").click(); // the idle box keeps its settings out of the way
   await page.getByLabel("Voice speed").selectOption("1.2");
 
   await ask(page, "Is NBIS holding?");

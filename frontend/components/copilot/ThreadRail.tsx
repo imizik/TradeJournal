@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { ChevronDown, ChevronRight, Home } from "lucide-react";
 import { KBD, useJumpKey } from "@/components/copilot/CommandPalette";
 import PlanATrade from "@/components/copilot/PlanATrade";
 import PlanList from "@/components/copilot/PlanList";
@@ -38,6 +39,8 @@ const RANK: Record<TickerState, number> = { held: 0, armed: 1, exited: 2, watchi
 const URGENCY: Record<DeskGroup, number> = { act: 0, near: 1, draft: 2, new: 3, watch: 4, pinned: 5 };
 /** Tickers past the ones that need the owner, are held or have an armed plan: this many shown, the rest behind "+N more". */
 const QUIET_SHOWN = 6;
+/** A ticker's open conversations shown before "Earlier · N". */
+const CHILDREN_SHOWN = 3;
 /** A real number sets in the desk's mono face; a word never does. */
 export const numeric = (text: string) => /^[+−-]?\$?\d/.test(text);
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
@@ -108,33 +111,60 @@ function closedThisWeek(talk: InvestigationSummary) {
 
 const box = (active: boolean) => cn("block min-h-11 w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-secondary", active && "bg-secondary ring-1 ring-border");
 
-/** A ticker's subthreads: its conversations (title and date), the plan's and the exit review's named. */
+/** One conversation under Main or a ticker: its title and date. */
+function Talk({ id, title, at, tag, active, actions }: { id: string; title: string; at: string | null; tag?: string | null; active: string | null; actions: HomeActions }) {
+  return (
+    <li>
+      <Link href={`/copilot-lab?investigation=${id}`} title={title} aria-current={active === id ? "page" : undefined}
+        onClick={event => { if (plain(event)) { event.preventDefault(); actions.open(id); } }}
+        className={cn("flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary sm:min-h-8",
+          active === id ? "bg-secondary text-foreground" : "text-muted-foreground")}>
+        {tag && <span className="shrink-0 rounded border px-1 text-[10px] leading-4">{tag}</span>}
+        <span className="min-w-0 truncate">{title}</span>
+        {at && <span className="ml-auto shrink-0 tabular-nums">{shortDay(at)}</span>}
+      </Link>
+    </li>
+  );
+}
+
+/** "Earlier · 4" or "Closed · 3": conversations kept out of the way, opened in place. Nothing when none. */
+function Fold({ label, opened = false, children, count }: { label: string; opened?: boolean; children: ReactNode; count: number }) {
+  const [open, setOpen] = useState(false);
+  if (!count) return null;
+  const shown = open || opened;
+  return (
+    <li>
+      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)}
+        className="flex min-h-11 w-full items-center gap-1 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-7">
+        {shown ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}{label} · <span className="tabular-nums">{count}</span>
+      </button>
+      {shown && <ul aria-label={label} className="space-y-0.5">{children}</ul>}
+    </li>
+  );
+}
+
+/** A ticker's subthreads: its newest open conversations (title and date; the plan's and the exit review's named), the
+ * other open ones under Earlier and the closed ones under Closed. The open conversation always shows. */
 function Children({ ticker, active, actions }: { ticker: Ticker; active: string | null; actions: HomeActions }) {
   const planOf = new Set(ticker.rows.filter(r => r.key.startsWith("plan:") && r.close?.kind !== "exit").map(r => r.investigationId));
   const exitOf = new Set(ticker.rows.filter(r => r.close?.kind === "exit").map(r => r.investigationId));
+  const row = (talk: InvestigationSummary) => <Talk key={talk.id} id={talk.id} title={talk.title} at={talk.updated_at} active={active} actions={actions}
+    tag={exitOf.has(talk.id) ? "Exit review" : planOf.has(talk.id) ? "Plan" : null} />;
+  const open = ticker.conversations.filter(t => t.status !== "closed");
+  const closed = ticker.conversations.filter(t => t.status === "closed");
+  const shown = open.filter((t, i) => i < CHILDREN_SHOWN || t.id === active);
+  const earlier = open.filter(t => !shown.includes(t));
   return (
     <ul aria-label={`${ticker.symbol} threads`} className="ml-3.5 space-y-0.5 border-l pl-1.5">
-      {ticker.conversations.map(talk => {
-        const tag = exitOf.has(talk.id) ? "Exit review" : planOf.has(talk.id) ? "Plan" : null;
-        return (
-          <li key={talk.id}>
-            <Link href={`/copilot-lab?investigation=${talk.id}`} title={talk.title} aria-current={active === talk.id ? "page" : undefined}
-              onClick={event => { if (plain(event)) { event.preventDefault(); actions.open(talk.id); } }}
-              className={cn("flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary sm:min-h-8",
-                active === talk.id ? "bg-secondary text-foreground" : "text-muted-foreground")}>
-              {tag && <span className="shrink-0 rounded border px-1 text-[10px] leading-4">{tag}</span>}
-              <span className="min-w-0 truncate">{talk.title}</span>
-              <span className="ml-auto shrink-0 tabular-nums">{shortDay(talk.updated_at)}</span>
-            </Link>
-          </li>
-        );
-      })}
+      {shown.map(row)}
+      <Fold label="Earlier" count={earlier.length}>{earlier.map(row)}</Fold>
+      <Fold label="Closed" count={closed.length} opened={closed.some(t => t.id === active)}>{closed.map(row)}</Fold>
     </ul>
   );
 }
 
-function TickerRow({ ticker, open, active, actions, pick, skipped, unread }: {
-  ticker: Ticker; open: boolean; active: string | null; actions: HomeActions; pick(ticker: Ticker): void; skipped: boolean; unread: boolean;
+function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, skipped, unread }: {
+  ticker: Ticker; open: boolean; expanded: boolean; onExpand(): void; active: string | null; actions: HomeActions; pick(ticker: Ticker): void; skipped: boolean; unread: boolean;
 }) {
   const lead = ticker.lead;
   // After the close a row still asking its review says so in a muted amber; one skipped today says that instead.
@@ -143,11 +173,13 @@ function TickerRow({ ticker, open, active, actions, pick, skipped, unread }: {
   const state = STATE[ticker.state];
   const here = open && (!active || ticker.conversations.every(t => t.id !== active) || ticker.conversations.length < 2);
   const meter = lead?.meter && (lead.group === "act" || lead.group === "near") ? lead.meter : null;
+  const many = ticker.conversations.length > 1;
   return (
     <li>
-      <button type="button" onClick={() => pick(ticker)} aria-expanded={ticker.conversations.length > 1 ? open : undefined}
+      <div className="flex items-stretch gap-0.5">
+      <button type="button" onClick={() => pick(ticker)}
         aria-label={[ticker.symbol, state.text, ticker.needs ? "needs you" : null].filter(Boolean).join(", ")} title={lead?.title}
-        className={cn(box(here), open && !here && "bg-secondary/50")}>
+        className={cn(box(here), "min-w-0 flex-1", open && !here && "bg-secondary/50")}>
         <span className="flex min-w-0 items-center gap-1.5">
           {ticker.needs
             ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
@@ -164,7 +196,16 @@ function TickerRow({ ticker, open, active, actions, pick, skipped, unread }: {
         {status.text && <span className={cn("block truncate pl-3 text-xs", TONE[status.tone], asking && !skipped && "text-primary/75")} title={status.text}>{status.text}</span>}
         {meter && <div className="pl-3"><Meter meter={meter} /></div>}
       </button>
-      {open && ticker.conversations.length > 1 && <Children ticker={ticker} active={active} actions={actions} />}
+      {/* A ticker with one conversation keeps the column, so the P&L figures line up. */}
+      {!many ? <span aria-hidden className="w-9 shrink-0" /> : (
+        <button type="button" onClick={onExpand} aria-expanded={expanded} aria-label={`${expanded ? "Hide" : "Show"} ${ticker.symbol} threads`}
+          title={`${ticker.conversations.length} conversations. This keeps the one you have open.`}
+          className="flex w-9 shrink-0 items-center justify-center gap-0.5 rounded-md text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground">
+          <span className="tabular-nums">{ticker.conversations.length}</span>{expanded ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+        </button>
+      )}
+      </div>
+      {many && expanded && <Children ticker={ticker} active={active} actions={actions} />}
     </li>
   );
 }
@@ -181,24 +222,32 @@ function DayLine({ data }: { data: DeskThreads }) {
 }
 
 /**
- * The desk's thread list (docs/copilot-lab.md § The desk): **Main** (the Briefing, the market-wide thread) at the top, then
- * one row per ticker the owner has something on (a position, a plan, a waiting card, a conversation), from
- * ``GET /copilot/desk/threads`` and the latest saved conversations, refreshed each minute while the page is visible.
- * A ticker row shows its state, P&L and a "needs you" dot; tickers sort needs-you first, then held, armed plans and the
- * rest. Pressing a ticker opens its newest conversation (or follows its row's link when it has none) and, with more than
- * one, lists its conversations beneath as subthreads. Radar hits, alerts to answer and Review my week live inside Main.
+ * The desk's thread list (docs/copilot-lab.md § The desk): **Main** (the Briefing, the market-wide thread), pinned at the
+ * top on a wide screen with today's conversations under it and the rest under Earlier, then one row per ticker the owner
+ * has something on (a position, a plan, a waiting card, a conversation), from ``GET /copilot/desk/threads`` and the latest
+ * saved conversations, refreshed each minute while the page is visible. A ticker row shows its state, P&L and a "needs
+ * you" dot; tickers sort under Needs you, Held and armed, and Others. Pressing a ticker opens its newest conversation (or
+ * follows its row's link when it has none) and shows its subthreads; with more than one, its count and arrow show or hide
+ * them without changing the open conversation, and any number can stay open. Radar hits, alerts to answer and Review my
+ * week live inside Main; ``toAnswer`` is how many are waiting.
  * ``onRows`` gets the desk rows in the order shown, for J / K and the palette; ``onSaved`` the saved conversations, for
  * the breadcrumb. All | Plans switches to the Plans view (``PlanList``) from the same read, remembered in this browser.
  */
-export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onSaved, phase = null, refresh = 0, pick }: {
+export default function ThreadRail({ actions, active = null, activeSymbol = null, main = false, onRows, onSaved, phase = null, refresh = 0, toAnswer = 0, pick }: {
   actions: HomeActions; active?: string | null; activeSymbol?: string | null; main?: boolean; onRows?(rows: DeskThread[]): void;
-  onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; pick(row: DeskThread): void;
+  onSaved?(saved: InvestigationSummary[]): void; phase?: ReactNode; refresh?: number; toAnswer?: number; pick(row: DeskThread): void;
 }) {
   const [data, setData] = useState<DeskThreads | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<InvestigationSummary[]>([]);
   const [more, setMore] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const expand = useCallback((symbol: string, show = true) => setExpanded(was => {
+    const next = new Set(was);
+    if (show) next.add(symbol); else next.delete(symbol);
+    return next;
+  }), []);
   const [view, setView] = useState<"threads" | "plans">("threads");
   useEffect(() => {
     try { if (window.localStorage.getItem(VIEW_KEY) === "plans") setView("plans"); } catch { /* threads */ } // eslint-disable-line react-hooks/set-state-in-effect -- the store is read after hydration
@@ -254,17 +303,22 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
   const ordered = useMemo(() => [...rows.filter(r => r.group === "pinned"), ...tickers.flatMap(t => t.rows), ...rows.filter(isRadar)], [rows, tickers]);
   useEffect(() => { if (data) onRows?.(ordered); }, [data, ordered, onRows]); // once read: the placeholder is not the list
   const jumpKey = useJumpKey();
-  const live = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
+  const livePlans = data?.plans.filter(p => p.stage === "armed" || p.stage === "in_position").length ?? 0;
+  // Under Main: today's conversations and the open one; the rest wait under Earlier.
+  const looseShown = loose.filter(t => t.id === active || (day && t.at && nyDay(new Date(t.at)) === day));
+  const looseEarlier = loose.filter(t => !looseShown.includes(t));
   const missing = Object.entries(data?.sections ?? {}).filter(([name, state]) => state === "unavailable" && SOURCE[name]).map(([name]) => SOURCE[name]);
   // The open ticker: the one just pressed, until the open conversation changes; then the conversation's.
-  useEffect(() => { setOpened(null); }, [activeSymbol]); // eslint-disable-line react-hooks/set-state-in-effect -- a new conversation takes over
+  useEffect(() => { setOpened(null); if (activeSymbol) expand(activeSymbol); }, [activeSymbol, expand]); // eslint-disable-line react-hooks/set-state-in-effect -- a new conversation takes over
   const openSymbol = opened ?? activeSymbol;
-  const urgent = tickers.filter(t => t.needs || t.state === "held" || t.state === "armed");
-  const quiet = tickers.filter(t => !urgent.includes(t));
+  const needing = tickers.filter(t => t.needs);
+  const live = tickers.filter(t => !t.needs && (t.state === "held" || t.state === "armed"));
+  const quiet = tickers.filter(t => !t.needs && !live.includes(t));
   const shownQuiet = more ? quiet : quiet.slice(0, Math.max(QUIET_SHOWN, quiet.findIndex(t => t.symbol === openSymbol) + 1));
 
   const press = (ticker: Ticker) => {
     setOpened(ticker.symbol);
+    expand(ticker.symbol);
     mark(ticker.rows.filter(r => r.group === "new"));
     const newest = ticker.conversations[0];
     if (newest && !ticker.conversations.some(t => t.id === active)) actions.open(newest.id);
@@ -280,52 +334,53 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
         {(["threads", "plans"] as const).map(id => (
           <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => pickView(id)}
             className={cn("min-h-11 rounded px-2 sm:min-h-7", view === id ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            {id === "threads" ? "All" : <>Plans{live > 0 && <span className="ml-1 tabular-nums text-muted-foreground" aria-label={`, ${live} live`}>{live}</span>}</>}
+            {id === "threads" ? "All" : <>Plans{livePlans > 0 && <span className="ml-1 tabular-nums text-muted-foreground" aria-label={`, ${livePlans} live`}>{livePlans}</span>}</>}
           </button>
         ))}
       </div>
       {view === "plans" ? data && <PlanList plans={data.plans} actions={actions} active={active} /> : (
         <>
-          <section aria-label="Main" className="space-y-0.5">
+          {/* Pinned where the list scrolls on its own: the conversations under it scroll away, Main does not. */}
+          <section aria-label="Main" className="z-10 bg-background lg:sticky lg:top-0 lg:shadow-[0_-12px_0_0_hsl(var(--background)),0_6px_0_0_hsl(var(--background))]">
             <button type="button" onClick={() => { setOpened(null); mark(radar); actions.home(); }} aria-current={main ? "page" : undefined}
-              title="The market-wide thread: the day, Radar hits to rate, alerts to answer and Review my week" className={box(main)}>
+              title="The market-wide thread: the day, Radar hits to rate, alerts to answer and Review my week" className={cn(box(main), "border", !main && "bg-card")}>
               <span className="flex items-center gap-1.5">
-                {radarNew > 0 ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" /> : <span aria-hidden className="w-1.5 shrink-0" />}
+                <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
                 <span className="font-semibold text-foreground">Main</span>
-                <span className="text-xs text-muted-foreground">Briefing</span>
-                {radar.length > 0 && <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground" title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}
+                {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" />}
+                <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
+                  {toAnswer > 0 && <span className="text-primary" title="Alerts to answer and Radar hits to rate, in Main">{toAnswer} to answer</span>}
+                  {radar.length > 0 && <span title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}
+                </span>
               </span>
-              <span className={cn("block truncate pl-3 text-xs", TONE[briefing?.status.tone ?? "muted"])}>{briefing?.status.text ?? "What matters right now? One turn across everything"}</span>
+              <span className={cn("block truncate pl-5 text-xs", TONE[briefing?.status.tone ?? "muted"])}>{briefing?.status.text ?? "What matters right now? One turn across everything"}</span>
             </button>
-            {loose.length > 0 && (
-              <ul aria-label="Main threads" className="ml-3.5 space-y-0.5 border-l pl-1.5">
-                {loose.map(talk => (
-                  <li key={talk.id}>
-                    <Link href={`/copilot-lab?investigation=${talk.id}`} title={talk.title} aria-current={active === talk.id ? "page" : undefined}
-                      onClick={event => { if (plain(event)) { event.preventDefault(); actions.open(talk.id); } }}
-                      className={cn("flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary sm:min-h-8",
-                        active === talk.id ? "bg-secondary text-foreground" : "text-muted-foreground")}>
-                      <span className="min-w-0 truncate">{talk.title}</span>{talk.at && <span className="ml-auto shrink-0 tabular-nums">{shortDay(talk.at)}</span>}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
+          {loose.length > 0 && (
+            <ul aria-label="Main threads" className="ml-3.5 space-y-0.5 border-l pl-1.5">
+              {looseShown.map(talk => <Talk key={talk.id} id={talk.id} title={talk.title} at={talk.at} active={active} actions={actions} />)}
+              <Fold label="Earlier" count={looseEarlier.length}>
+                {looseEarlier.map(talk => <Talk key={talk.id} id={talk.id} title={talk.title} at={talk.at} active={active} actions={actions} />)}
+              </Fold>
+            </ul>
+          )}
           {data && (
             <section aria-label="Tickers" className="space-y-0.5">
-              <h3 className="flex items-center px-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Tickers<span className="ml-auto tabular-nums" aria-label={`${tickers.length} tickers`}>{tickers.length}</span>
-              </h3>
               {!tickers.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">
                 {data.sections.positions === "unavailable" ? "Positions unavailable right now." : "Nothing open. Plan a trade to start a ticker."}
               </p>}
-              <ul className="space-y-0.5">
-                {[...urgent, ...shownQuiet].map(ticker => (
-                  <TickerRow key={ticker.symbol} ticker={ticker} open={openSymbol === ticker.symbol} active={active} actions={actions} pick={press}
-                    skipped={!!(day && ticker.lead?.close && reviewSkipped(day, ticker.symbol))} unread={ticker.rows.some(unread)} />
-                ))}
-              </ul>
+              {([["Needs you", needing], ["Held and armed", live], ["Others", shownQuiet]] as const).map(([title, group]) => group.length > 0 && (
+                <div key={title} className="space-y-0.5">
+                  <h3 className="px-2.5 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
+                  <ul className="space-y-0.5">
+                    {group.map(ticker => (
+                      <TickerRow key={ticker.symbol} ticker={ticker} open={openSymbol === ticker.symbol} expanded={expanded.has(ticker.symbol)}
+                        onExpand={() => expand(ticker.symbol, !expanded.has(ticker.symbol))} active={active} actions={actions} pick={press}
+                        skipped={!!(day && ticker.lead?.close && reviewSkipped(day, ticker.symbol))} unread={ticker.rows.some(unread)} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
               {quiet.length > shownQuiet.length || more ? (
                 <button type="button" aria-expanded={more} onClick={() => setMore(open => !open)}
                   className="min-h-11 w-full rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:min-h-8">

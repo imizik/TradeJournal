@@ -23,7 +23,9 @@ export type DeskThreadRef = { id: string; symbol: string | null; title: string; 
 
 /** How the conversation and the desk talk: commands down, the open thread up. ``planDone`` is there while the open
  * thread has a plan that can be marked done (the thread menu's Mark plan done): its symbol, and ``done`` hears it was. */
-export type DeskHooks = { command: DeskCommand | null; onThread(thread: DeskThreadRef | null): void; planDone?: { symbol: string; done(): void } | null };
+export type DeskHooks = { command: DeskCommand | null; onThread(thread: DeskThreadRef | null): void; planDone?: { symbol: string; done(): void } | null;
+  /** Something at the top of the thread still asks for an answer: a conversation opens there, not on its latest turn. */
+  holdTop?: boolean };
 
 /** The thread list's groups, in order: what needs a decision first, what is only being watched last. */
 export type DeskGroup = "pinned" | "act" | "near" | "draft" | "new" | "watch";
