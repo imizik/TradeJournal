@@ -166,6 +166,9 @@ def recover_interrupted(*, lane: str | None = None, unowned: bool = False, db_en
 
 
 def _dispatch(job: JobRun) -> int:
+    if job.job_type == "company_research_refresh":
+        from app.engine.company_research import run_refresh
+        return run_refresh(job.id)
     if job.job_type == "webull_listener":
         from app.engine.webull_listener import _run_listener
         return _run_listener(job.id)

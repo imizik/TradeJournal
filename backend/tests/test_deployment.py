@@ -915,6 +915,7 @@ def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_toke
     assert "tradejournal-plan-reviews.timer" in control.OPT_IN_TIMERS
     service = (systemd / "tradejournal-plan-reviews.service").read_text()
     assert "-m app.jobs.plan_reviews" in service
+
     assert "EnvironmentFile=/etc/tradejournal/claude-plan.env" in service  # required: no token, no run
     assert "TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude" in service
     assert "ReadWritePaths=/var/lib/tradejournal" in service and "ProtectHome=true" in service
@@ -930,6 +931,33 @@ def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_toke
     assert "claude-code-linux-{arch}/claude" in (root / "deploy/build.py").read_text()
     example = (root / "deploy/claude-plan.env.example").read_text()
     assert "CLAUDE_CODE_OAUTH_TOKEN=\n" in example and "ANTHROPIC_API_KEY" not in example
+
+
+def test_company_research_units_quiesce_and_are_removed_on_rollback(control, tmp_path, monkeypatch):
+    timer = "tradejournal-company-research.timer"
+    service = "tradejournal-company-research.service"
+    assert timer in control.OPT_IN_TIMERS and timer not in control.TIMERS
+    assert {timer, service} <= set(control.OPTIONAL_UNITS)
+    calls = []
+    monkeypatch.setattr(control, "run", lambda *args: calls.append(args))
+    monkeypatch.setattr(control.subprocess, "run", lambda args, **kwargs: SimpleNamespace(
+        stdout="loaded\n", returncode=1 if "is-enabled" in args else 0, check_returncode=lambda: None))
+    control.stop_services()
+    assert ("systemctl", "stop", timer) in calls
+    assert ("systemctl", "stop", service) in calls
+    units = tmp_path / "units"
+    units.mkdir()
+    for name in (timer, service):
+        (units / name).write_text("new unit")
+    old = tmp_path / "old-release"
+    (old / "deploy/systemd").mkdir(parents=True)
+    monkeypatch.setattr(control, "UNITS", units)
+    removed = []
+    monkeypatch.setattr(control.subprocess, "run", lambda args, **kwargs: removed.append(args))
+    control.install_units(old)
+    assert not (units / timer).exists() and not (units / service).exists()
+    assert ["systemctl", "disable", "--now", timer] in removed
+    assert ["systemctl", "disable", "--now", service] in removed
 
 
 def test_moomoo_provisioning_preserves_existing_state_and_cleans_partial_creation(tmp_path, monkeypatch):

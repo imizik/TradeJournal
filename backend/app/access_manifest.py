@@ -1,6 +1,24 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /company-research/researchers",
+    "GET /company-research/companies/{identifier}/comparisons",
+    "GET /company-research/companies/{identifier}/numbers",
+    "PATCH /company-research/findings/{identifier}",
+    'POST /company-research/assignments',
+    'GET /company-research/assignments/{identifier}',
+    'POST /company-research/assignments/{identifier}/import',
+    'GET /company-research/companies/{identifier}/assignments',
+    'GET /company-research/companies/{identifier}/findings',
+
+    "GET /company-research/jobs/{identifier}",
+    'GET /company-research/companies',
+    'POST /company-research/companies',
+    'GET /company-research/companies/{identifier}',
+    'PATCH /company-research/companies/{identifier}',
+    'GET /company-research/companies/{identifier}/history',
+    'POST /company-research/companies/{identifier}/refresh',
+
     "GET /jo/check-links/for-trade/{trade_id}",
     "GET /jo/check-links/{check_id}/activity",
     "POST /jo/check-links/{check_id}/link",

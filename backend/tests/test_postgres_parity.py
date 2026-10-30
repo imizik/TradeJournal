@@ -61,6 +61,135 @@ from tests.postgres_support import (  # noqa: E402
 pytestmark = requires_postgres
 
 
+def test_company_research_stale_restore_and_refresh_coalescing(migrated):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from app.company_research_models import ResearchCompany
+    from app.engine import company_research as research
+    with Session(migrated) as first, Session(migrated) as stale:
+        row = research.add(first, "RESEARCHTEST")
+        identifier = row.id
+        row = research.patch(first, identifier, row.revision, "Original", [], False)
+        cached = stale.get(ResearchCompany, identifier)  # retain the stale identity-map object
+        assert cached.revision == row.revision
+        restored = research.add(first, "RESEARCHTEST")
+        edited = research.patch(first, identifier, restored.revision, "New thesis", [], True)
+        version = edited.revision
+        assert research.add(stale, "RESEARCHTEST").revision == version
+        assert research.company(stale, identifier).thesis == "New thesis"
+    barrier = Barrier(2)
+    def queue(_):
+        with Session(migrated) as db:
+            row = research.company(db, identifier)
+            barrier.wait(timeout=10)
+            return research.queue_refresh(db, row).id
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        queued = list(pool.map(queue, range(2)))
+    assert queued[0] == queued[1]
+
+
+def test_company_restore_serializes_against_thesis_patch(migrated):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlalchemy import event
+    from fastapi import HTTPException
+    from app.engine import company_research as research
+    with Session(migrated) as db:
+        company = research.add(db, "RESTORETEST")
+        company = research.patch(db, company.id, company.revision, "Original", [], False)
+        identifier, revision = company.id, company.revision
+    locked, patch_attempt, release = Event(), Event(), Event()
+    def after(_conn, _cursor, statement, _params, _context, _many):
+        if "company_research_company" in statement and "FOR UPDATE" in statement:
+            locked.set()
+            assert release.wait(10)
+    def before(_conn, _cursor, statement, _params, _context, _many):
+        if statement.startswith("UPDATE company_research_company SET") and "thesis=" in statement:
+            patch_attempt.set()
+    def restore():
+        with Session(migrated) as db:
+            return research.add(db, "RESTORETEST").revision
+    def edit():
+        with Session(migrated) as db:
+            try:
+                research.patch(db, identifier, revision, "Stale edit", [], False)
+                return 200
+            except HTTPException as exc:
+                return exc.status_code
+    event.listen(migrated, "after_cursor_execute", after)
+    event.listen(migrated, "before_cursor_execute", before)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            restoring = pool.submit(restore)
+            assert locked.wait(10)
+            editing = pool.submit(edit)
+            assert patch_attempt.wait(10)
+            release.set()
+            assert restoring.result(timeout=10) == revision + 1
+            assert editing.result(timeout=10) == 409
+    finally:
+        release.set()
+        event.remove(migrated, "after_cursor_execute", after)
+        event.remove(migrated, "before_cursor_execute", before)
+
+
+def test_company_context_publication_cannot_reappear_after_archive(migrated, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from sqlalchemy import event
+    from app.engine import company_research as research, company_research_assignments as tasks
+    from app.engine import company_research_bridge as bridge
+    from app.jobs.company_research import publish
+    import jo_briefing_exchange as files
+    from company_research_exchange import context_name
+    root, outbox = tmp_path / "snapshots", tmp_path / "outbox"
+    root.mkdir()
+    outbox.mkdir()
+    actor = "check_" + str(uuid4())
+    config = SimpleNamespace(company_research_enabled=True, profiles=[SimpleNamespace(id=actor, enabled=True)],
+        market_watch_snapshots_dir=str(root), market_watch_outbox_dir=str(outbox))
+    with Session(migrated) as db:
+        company = research.add(db, "PUBRACETEST")
+        identifier, revision = company.id, company.revision
+        assignment = tasks.create(db, identifier, "Review the report")
+        assignment_id = __import__("uuid").UUID(assignment["id"])
+    publishing, archive_attempt, release = Event(), Event(), Event()
+    original = files.write
+    def paused(directory, name, value):
+        if name.startswith("company-context-"):
+            publishing.set()
+            assert release.wait(10)
+        return original(directory, name, value)
+    def before(_conn, _cursor, statement, _params, _context, _many):
+        if statement.startswith("UPDATE company_research_company SET") and "thesis=" in statement:
+            archive_attempt.set()
+    def publish_now():
+        with Session(migrated) as db:
+            publish(db, assignment_id, actor, config)
+    def archive():
+        with Session(migrated) as db:
+            research.patch(db, identifier, revision, "", [], False)
+            bridge.revoke_company(db, identifier)
+    monkeypatch.setattr(files, "write", paused)
+    monkeypatch.setattr(bridge, "configuration", lambda: config)
+    event.listen(migrated, "before_cursor_execute", before)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(publish_now)
+            assert publishing.wait(10)
+            second = pool.submit(archive)
+            assert archive_attempt.wait(10)
+            release.set()
+            first.result(timeout=10)
+            second.result(timeout=10)
+        assert not (root / context_name(actor, assignment_id)).exists()
+    finally:
+        release.set()
+        event.remove(migrated, "before_cursor_execute", before)
+
+
 def test_position_alert_feedback_concurrent_save_and_stale_update(migrated):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

@@ -57,6 +57,10 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "company_research_assignments": (set(), set()),
+    "company_research_context": ({"assignment_id"}, set()),
+    "company_research_submit": ({"assignment_id", "result"}, set()),
+    "company_research_receipt": ({"operation_id"}, set()),
     "jo_context": ({"packet_id"}, set()),
     "jo_morning_context": (set(), set()),
     "jo_memory_propose": ({"packet_id", "memory"}, set()),
@@ -100,6 +104,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name.startswith("company_research_"):
+        return [READ_SCOPE, "company-research:read"] + (["company-research:submit"] if name == "company_research_submit" else [])
     if name.startswith("followup_"):
         return [READ_SCOPE, MARKET_READ_SCOPE] + ([MARKET_SUBMIT_SCOPE] if name in ("followup_create", "followup_review", "followup_cancel") else [])
     if name.startswith("jo_"):
@@ -388,7 +394,8 @@ class CheckMCP(FastMCP):
             # five-minute access token renews without a reconnect. The tools never require it.
             authorization_servers=[self.settings.auth.issuer_url],
             scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"] + ([MARKET_READ_SCOPE, MARKET_SUBMIT_SCOPE] if getattr(self, "market_watch_enabled", False) else [])
-            + ([JO_READ_SCOPE, JO_SUBMIT_SCOPE] if getattr(self, "jo_briefing_enabled", False) else []))
+            + ([JO_READ_SCOPE, JO_SUBMIT_SCOPE] if getattr(self, "jo_briefing_enabled", False) else [])
+            + (["company-research:read", "company-research:submit"] if getattr(self, "company_research_enabled", False) else []))
         paths = {route.path for route in metadata}
         app.routes[:] = [route for route in app.routes if route.path not in paths] + metadata
         return RequestLimits(app)
@@ -493,6 +500,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None, tradier_sourc
         return checked
 
     server.audit_call = lambda name: authenticated(name, log=True)
+    server.company_research_enabled = config.company_research_enabled
+    if config.company_research_enabled:
+        from company_research_tools import register as register_company_research
+        register_company_research(server, config, authenticated, scopes, clock)
     server.jo_briefing_enabled = config.jo_briefing_enabled
     if config.jo_briefing_enabled:
         from jo_briefing_tools import register as register_jo
