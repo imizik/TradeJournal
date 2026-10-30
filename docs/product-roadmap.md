@@ -137,7 +137,10 @@ slice; the detailed contracts continue to own implementation and acceptance.
    Alerts only, off until he enables `POSITION_ALERTS_ENABLED`. This does not
    reopen other non-Dots work.
    The one-hour re-decide alert followed (#411), behind its own
-   `POSITION_HOLD_ALERTS` flag as well.
+   `POSITION_HOLD_ALERTS` flag as well. On October 29, 2026 a read-only review
+   of 2026's opening option trades found most of the losses in trades already
+   moving the wrong way 30 minutes in and then held for hours, so a wrong-way
+   alert at 30 minutes followed, behind its own `POSITION_WRONG_WAY_ALERTS` flag.
    **Selected October 21, 2026:** Isaac selected [Radar](radar.md), a feed of
    meaningful intraday market changes outside his watchlist, ahead of other new
    feature work. In-flight Dots acceptance work continues. Radar sends no alerts
