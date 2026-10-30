@@ -25,7 +25,7 @@ Six execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync, the after-close options snapshot and the morning relative-volume history |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, outcomes, requested daily review, confirmed resync, the after-close options snapshot and the morning relative-volume history |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
@@ -44,6 +44,16 @@ committed, and the next run fetches only the rest. The relative-volume
 history (06:00 and 08:40 New York) holds the lane for about a minute each
 morning; its first run, 20 sessions for each watchlist name at 30 requests a
 minute, stops after ten minutes and the next run continues.
+
+The full sync pipeline (Sync Everything, and the `tradejournal-sync-pipeline`
+timer at 08:00 and 17:00 New York) runs seven steps: Gmail import, the fill check, the trade
+rebuild (only when the import saved new fills), Polygon enrichment (queued, not
+waited on), Alpaca enrichment, path metrics, then `compute_outcomes`
+(`app/engine/outcomes.py`, [definitions](../analytics.md#outcomes)). The last
+step reads only the journal, the Radar file, stored minute sessions and the
+cached market calendar: no price provider or model call, nothing sent. It computes at most 400 new or incomplete
+subjects a run, new ones first, and a failure there is recorded on its own run
+row without failing the pipeline. The Sync Center can also run it alone.
 
 On worker startup and each idle poll:
 
