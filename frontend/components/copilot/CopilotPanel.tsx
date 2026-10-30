@@ -674,6 +674,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       history.unshift(...pair);
       total += size;
     }
+    // The evidence the latest answer read, kept on the server: the copilot reuses it for a follow-up instead of reading again.
+    const carry = [...messages].reverse().find(m => m.role === "assistant" && m.carry)?.carry ?? null;
     turns.current += 1;
     running.current = true;
     typed.current = false;
@@ -706,8 +708,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             tools: at < 0 ? [...tools, event] : tools.map((t, i) => i === at ? { ...t, ...event } : t) };
         });
         else if (event.type === "error") update(last => ({ ...last, error: { code: event.code, message: event.message } }));
-        else if (event.type === "done") { update(last => ({ ...last, progress: undefined, metrics: event.metrics })); setAnswered(n => n + 1); }
-      }, controller.signal, model, shots.map(s => s.id), backend);
+        else if (event.type === "done") { update(last => ({ ...last, progress: undefined, metrics: event.metrics, carry: event.carry_id ?? undefined })); setAnswered(n => n + 1); }
+      }, controller.signal, model, shots.map(s => s.id), backend, carry);
     } catch (error) {
       update(last => ({ ...last, error: controller.signal.aborted ? { code: "stopped", message: "Stopped." }
         : { code: "network", message: error instanceof Error && error.message ? "Copilot Lab could not be reached." : "Copilot Lab failed." } }));

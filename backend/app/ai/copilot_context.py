@@ -329,8 +329,9 @@ def block(pack: dict) -> str:
     """The text that precedes the owner's message: framed so the model never mistakes it for their words."""
     head = ("[Owner context, assembled by TradeJournal for this turn; not the owner's message. Labels: \"owner said\" = their own "
             "words (memories, today's notes, a captured plan); \"measured\" = journal facts (positions, trades, habit counts); "
-            "\"saved\" = earlier copilot conclusions and armed watches, possibly stale. Use it before answering. Re-check market "
-            "evidence with the tools; do not re-read positions, trades or memories it already shows.]\n")
+            "\"saved\" = earlier copilot conclusions and armed watches, possibly stale. Use it before answering. Read market "
+            "evidence with the tools (or the earlier evidence, when it covers the question); do not re-read positions, "
+            "trades or memories it already shows.]\n")
     return head + json.dumps(pack, default=str, separators=(",", ":")) + "\n" + BLOCK_END + "\n\n"
 
 

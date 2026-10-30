@@ -43,6 +43,7 @@ class ChatBody(BaseModel):
     # Screenshots from POST /images, sent with the last message and deleted when the turn ends.
     image_ids: list[str] = Field(default_factory=list, max_length=copilot_images.MAX_PER_TURN)
     backend: Literal["anthropic", "plan"] | None = None  # one of GET /status's ``backends``
+    carry_id: str | None = Field(None, pattern=copilot.CARRY_ID)  # the previous turn's ``done`` event: its evidence, kept here
 
 
 @router.get("/status")
@@ -176,8 +177,9 @@ async def chat(body: ChatBody):
         try:
             now = datetime.now(ET)
             # The plan backend's SDK runs its own tool loop, so it supplies the whole turn.
-            turn = (adapter.run_turn(history, body.symbol, cfg, evidence, now, images=images) if hasattr(adapter, "run_turn")
-                    else copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now, images=images))
+            turn = (adapter.run_turn(history, body.symbol, cfg, evidence, now, images=images, carry_id=body.carry_id)
+                    if hasattr(adapter, "run_turn")
+                    else copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now, images=images, carry_id=body.carry_id))
             async for event in turn:
                 if event.get("type") == "done":
                     done = event.get("metrics")

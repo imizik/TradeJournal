@@ -76,7 +76,7 @@ export type CopilotEvent =
   | ToolEvent
   | ({ type: "proposal" } & Proposal)
   | { type: "error"; code: string; message: string }
-  | { type: "done"; metrics: TurnMetrics };
+  | { type: "done"; metrics: TurnMetrics; carry_id?: string | null };
 
 /** A step the model proposed (propose_plan). It is only a card: nothing exists until the owner confirms it. Saved
  * with its answer: ``client_id`` is the card's one id for its replayable saves (minted when it arrives, so a Confirm
@@ -101,7 +101,9 @@ export type PlanLevel = { condition: "touches" | "crosses" | "closes_beyond"; pr
 export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 
 /** ``images``: an owner message's screenshot thumbnails (this browser only; the saved text carries SHARED_MARKER). */
-export type LabMessage = { role: "user" | "assistant"; content: string; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics };
+export type LabMessage = { role: "user" | "assistant"; content: string; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics;
+  /** The server's id for the evidence this answer read, sent with the next message; never saved. */
+  carry?: string };
 
 /** One status read per page load, shared by the nav, the panels and every Ask copilot button. Only an answer is
  * kept: a failed read is tried again by the next caller. */
@@ -253,11 +255,11 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
 
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
   onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, imageIds: string[] = [],
-  backend: Backend | null = null) {
+  backend: Backend | null = null, carryId: string | null = null) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}), ...(imageIds.length ? { image_ids: imageIds } : {}),
-      ...(backend ? { backend } : {}) }),
+      ...(backend ? { backend } : {}), ...(carryId ? { carry_id: carryId } : {}) }),
     signal, cache: "no-store",
   });
   if (!response.ok || !response.body) {

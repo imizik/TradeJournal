@@ -91,13 +91,15 @@ def preflight(env: dict[str, str]) -> str:
     return binary
 
 
-def prompt_for(history: list[dict], symbol: str | None, now: datetime, replay: bool = False, owner_block: str = "") -> str:
-    """One prompt: Claude Code takes a single user message, so earlier text-only turns are quoted into it. The owner
-    context block (``copilot.owner_context``) follows the context line, before the quoted conversation."""
+def prompt_for(history: list[dict], symbol: str | None, now: datetime, replay: bool = False, owner_block: str = "",
+               carried: str = "") -> str:
+    """One prompt: Claude Code takes a single user message, so earlier text-only turns are quoted into it. The earlier
+    evidence (``copilot.carry_block``) and the owner context block (``copilot.owner_context``) follow the context line,
+    before the quoted conversation."""
     *earlier, last = history
-    text = copilot.context_line(symbol, now, replay) + owner_block
+    text = copilot.context_line(symbol, now, replay) + carried + owner_block
     if earlier:
-        text += ("Conversation so far (text only; re-check evidence with the tools rather than trusting earlier numbers):\n\n"
+        text += ("Conversation so far (text only; its numbers are the earlier evidence above, or read them again):\n\n"
                  + "\n\n".join(f"{'Trader' if m['role'] == 'user' else 'Copilot'}: {m['content']}" for m in earlier)
                  + "\n\nThe trader's new message:\n\n")
     return text + last["content"]
@@ -199,6 +201,7 @@ class PlanAdapter:
                 block = {"id": f"plan_{state['calls']}", "name": name, "input": args}
                 await queue.put(("event", {"type": "tool", "id": block["id"], "name": name, "status": "running"}))
                 result, event = await copilot._run_tool(evidence, block, cfg, state)
+                state["ran"].append((result, event))
                 await queue.put(("event", event))
                 if (proposal := copilot.proposal_event(event)) is not None:
                     await queue.put(("event", proposal))
@@ -210,13 +213,13 @@ class PlanAdapter:
         return sdk.create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=[make(t) for t in copilot_tools.TOOLS])
 
     async def run_turn(self, history: list[dict], symbol: str | None, cfg: copilot.Settings, evidence,
-                       now: datetime, images: list[dict] | None = None) -> AsyncIterator[dict]:
-        """Stream one turn as UI events: text, tool, error, done (always last, with metrics). ``images``: the owner's
-        shared screenshots as image blocks, as for ``copilot.run_turn``."""
+                       now: datetime, images: list[dict] | None = None, carry_id: str | None = None) -> AsyncIterator[dict]:
+        """Stream one turn as UI events: text, tool, error, done (always last, with metrics and the next ``carry_id``).
+        ``images`` and ``carry_id`` as for ``copilot.run_turn``."""
         sdk = self.sdk
         started = time.monotonic()
         queue: asyncio.Queue = asyncio.Queue()
-        state = {"calls": 0, "images": len(images or [])}
+        state = {"calls": 0, "images": len(images or []), "ran": []}
         metrics: dict[str, Any] = {"backend": "plan", "evidence": cfg.evidence, "model": cfg.model,
                                    "first_text_ms": None, "rounds": 0, "tool_calls": []}
         usage = _usage(None)
@@ -224,6 +227,8 @@ class PlanAdapter:
         replay = getattr(evidence, "label", "") == "replay"
         if replay:
             now = evidence.at
+        mode = getattr(evidence, "label", "")
+        earlier = copilot.carried(carry_id, mode) if len(history) > 1 else []
 
         def elapsed() -> int:
             return round((time.monotonic() - started) * 1000)
@@ -237,7 +242,7 @@ class PlanAdapter:
                 import anyio
                 # An anyio deadline, so the SDK's shielded close still stops Claude Code on timeout.
                 with anyio.fail_after(cfg.turn_timeout_s):
-                    prompt = prompt_for(history, symbol, now, replay, owner_block)
+                    prompt = prompt_for(history, symbol, now, replay, owner_block, copilot.carry_block(earlier))
                     async for message in sdk.query(prompt=prompt_stream(prompt, images) if images else prompt,
                                                    options=self.options(self.server(evidence, queue, state))):
                         await queue.put(("message", message))
@@ -315,4 +320,4 @@ class PlanAdapter:
                  metrics["model"], metrics["first_text_ms"], metrics["total_ms"], metrics["rounds"],
                  ",".join(t["name"] for t in metrics["tool_calls"]), usage["input_tokens"], usage["output_tokens"],
                  usage["cache_read_input_tokens"], cost)
-        yield {"type": "done", "metrics": metrics}
+        yield {"type": "done", "metrics": metrics, "carry_id": copilot.keep_carry(copilot.carry_items(state["ran"], earlier, now), mode)}
