@@ -71,7 +71,7 @@ const crumb = (page: Page) => page.getByTestId("desk-breadcrumb");
 test("Main, then one row per ticker, needs-you first; meters only on Act now and Near a trigger; the list refreshes each minute", async ({ page }) => {
   const { chats, reads } = await lab(page);
   const threads = list(page);
-  await expect(threads.getByTestId("desk-day")).toHaveText("Market open · 1 needs you · plan streak 4");
+  await expect(threads.getByTestId("desk-day")).toHaveText("1 needs you · plan streak 4");
   const main = threads.getByRole("region", { name: "Main" });
   await expect(main).toContainText("Prep: NBIS 100C expires Friday.");
   await expect(main).toContainText("1 Radar"); // Radar lives inside Main, not as a row
@@ -208,7 +208,7 @@ test("Radar hits sit inside Main: one line, each hit opening its event", async (
 test("a quiet day: nothing open says so, and Plan a trade is one tap away", async ({ page }) => {
   await lab(page, QUIET);
   const threads = list(page);
-  await expect(threads.getByTestId("desk-day")).toHaveText("Market closed · Nothing needs you");
+  await expect(threads.getByTestId("desk-day")).toHaveText("Nothing needs you");
   await expect(tickers(page)).toContainText("Nothing open. Plan a trade to start a ticker.");
   await expect(threads.getByRole("link", { name: "Plan a trade" })).toHaveAttribute("href", /\/copilot-lab\?.*context=Plan\+a\+trade/);
 });
@@ -381,4 +381,39 @@ test("the Plans view fits a 375 px phone inside the Now tab", async ({ page }) =
     expect(box.x + box.width).toBeLessThanOrEqual(375);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test("the open thread is in the address: Back returns to the one before, a reload stays, and J / K walk the subthreads", async ({ page }) => {
+  const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+  const saved = [1, 2].map(n => summary(ID(n), "NBIS", "open", `2026-10-2${n}T15:00:00Z`));
+  await lab(page);
+  await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: saved } }));
+  for (const n of [1, 2]) await page.route(`**/copilot/investigations/${ID(n)}`, (route) => route.fulfill({ json: { ...saved[n - 1], title: `Talk ${n}`,
+    findings: null, evidence: [], transcript: [{ role: "user", content: `Question ${n}` }, { role: "assistant", content: `Answer ${n}` }] } }));
+  await page.clock.runFor(60_000);
+  await expect(tickers(page).getByRole("button", { name: "Show NBIS threads" })).toBeVisible();
+  const here = page.getByRole("region", { name: "Conversation" });
+  await page.keyboard.press("j"); // NBIS's newest
+  await expect(here.getByText("Answer 2")).toBeVisible();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${ID(2)}`);
+  await page.keyboard.press("j"); // its subthreads are now shown, so the older one is next
+  await expect(here.getByText("Answer 1")).toBeVisible();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${ID(1)}`);
+  await page.goBack();
+  await expect(here.getByText("Answer 2")).toBeVisible();
+  await expect(page).toHaveURL(`/copilot-lab?thread=${ID(2)}`);
+  await page.goBack();
+  await expect(page).toHaveURL("/copilot-lab");
+  await expect(here.getByText("Answer 2")).toBeHidden();
+  await page.goForward();
+  await expect(here.getByText("Answer 2")).toBeVisible();
+  await page.reload();
+  await expect(here.getByText("Answer 2")).toBeVisible();
+  await expect(page.getByLabel("Message")).toHaveValue(""); // no prefilled question, unlike an alert's link
+  // The next day the bare address starts on Main.
+  await page.evaluate(() => window.localStorage.setItem("tradejournal.copilot-lab.current-day.v1", "2020-01-01"));
+  await page.goto("/copilot-lab");
+  await expect(list(page).getByRole("button", { name: /^NBIS/ }).first()).toBeVisible();
+  await expect(here.getByText("Answer 2")).toBeHidden();
+  await expect(page.getByTestId("copilot-scope")).toHaveText("Across everything · add a symbol");
 });

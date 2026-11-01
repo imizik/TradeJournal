@@ -108,6 +108,12 @@ async function timeline(page: Page) {
   return pane.getByRole("list", { name: "Timeline" });
 }
 
+async function aboutNbis(page: Page) { // the desk starts across everything
+  await page.getByTestId("copilot-scope").click();
+  await page.getByLabel("Investigation symbol").fill("NBIS");
+  await page.getByLabel("Investigation symbol").press("Enter");
+}
+
 async function askForPlan(page: Page) {
   await page.getByLabel("Message").fill("Plan a trade: yolo NBIS calls");
   await page.getByRole("button", { name: "Send" }).click();
@@ -122,6 +128,7 @@ const posts = (server: Server, path: string) => server.posts.filter((p) => p.pat
 test("the plan card is edited, then Confirm saves the pre-trade plan and arms both alerts", async ({ page }) => {
   const server: Server = { alerts: [], posts: [] };
   await lab(page, server);
+  await aboutNbis(page);
   const card = await askForPlan(page);
   await expect(card).toContainText("Proposed trade plan · NBIS · Buy calls · Nov 21 100C");
   await expect(card.getByLabel("Thesis")).toHaveValue(PLAN.thesis);
@@ -293,6 +300,7 @@ test("a time stop read as a time is previewed before Confirm and set as a timed 
     "2 days": { due_at: DUE + 2 * 86400, when: "Mon Oct 26, 15:30 ET", enabled: false } } };
   await page.clock.install({ time: new Date("2026-10-24T14:00:00Z") }); // the plan's day, so "today 15:30" is today
   await lab(page, server);
+  await aboutNbis(page);
   const card = await askForPlan(page);
   const reading = card.getByLabel("When it pings");
   const horizon = card.getByRole("combobox", { name: "Horizon" });

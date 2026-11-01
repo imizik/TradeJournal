@@ -563,7 +563,7 @@ export const planOrigin = (origin: LinkOrigin | null | undefined, context?: stri
   origin ? { ...origin, text: context?.trim() || null } : { kind: "copilot", ref: null, text: null };
 
 /** The deep link's values, or null when there is none; an invalid symbol is dropped. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The deep link's values, or null when there is none. `investigation` opens that saved investigation; a `context`
  * with it is the owner's question, ready in the message box (a plan alert's tap). */
