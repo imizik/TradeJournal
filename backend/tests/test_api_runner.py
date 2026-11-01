@@ -77,7 +77,7 @@ def test_ask_counts_cached_input_tokens():
 def test_ask_expands_the_short_model_names_claude_code_took(name):
     client = FakeAnthropic([json_message({"verdict": "ok"})])
     api_runner.ask("s", "m", SCHEMA, model=name, client=client)
-    assert client.last["model"] == api_runner._ALIASES[name] and client.last["model"].startswith("claude-")
+    assert client.last["model"] == f"claude-{name}-5-5"
 
 
 def test_ask_takes_the_model_from_the_environment_and_leaves_a_full_id_alone(monkeypatch):
