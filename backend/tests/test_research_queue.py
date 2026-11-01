@@ -156,7 +156,7 @@ def test_runner_runs_one_job_and_records_the_result():
 def test_runner_retries_failures_and_records_missing_saves():
     job, _ = q.enqueue_question("Why?", [])
     out = asyncio.run(_runner(_done(error={"code": "api", "message": "boom"})).run_once())
-    assert out["status"] == "queued" and out["error"] == "sdk: boom"
+    assert out["status"] == "queued" and out["error"] == "api: boom"
     other, _ = q.enqueue_question("Other", [])
     out = asyncio.run(_runner(_done(saved=None)).run_once())
     assert out["id"] == other["id"] and out["status"] == "failed" and out["error"].startswith("save_failed")
