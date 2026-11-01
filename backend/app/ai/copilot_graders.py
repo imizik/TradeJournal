@@ -15,11 +15,12 @@ from app.ai.copilot_answer import UNSUPPORTED_LINE, AnswerParts, Figure, answer_
 
 MAX_WORDS = 120  # SYSTEM_PROMPT: "the whole answer stays under 120 words"
 IGNORED_SMALL_INTEGERS = {0, 1, 2, 3}  # counts and ordinals ("3 bullets", "2 of them") are not market figures
-MAX_PAIRS = 60_000  # differences are tried within one tool result only; this bounds a pathological result
+MAX_GROUP = 12  # a derived figure must come from a small group of values (one object, one short list of rows)
 
-# Phrasing that reads as an order rather than a read of the evidence. The prompt forbids telling the owner to act.
+# Phrasing that reads as an order rather than a read of the evidence. The prompt forbids telling the owner to act. An
+# imperative opens a sentence or a bullet; "is close to 94 and holding now" is not one.
 ORDER_PATTERNS = [
-    re.compile(r"\b(buy|sell|close|trim|add|exit)\b[^.\n]{0,40}\bnow\b", re.I),
+    re.compile(r"(?:^|[.!?;:]\s+|[-*]\s+)(buy|sell|close|trim|add|exit)\b[^.\n]{0,40}\bnow\b", re.I | re.M),
     re.compile(r"\byou (should|need to|have to|must) (buy|sell|close|trim|exit|add)\b", re.I),
     re.compile(r"\b(sell|close|trim|exit) (your|the) (position|calls?|puts?|shares|contracts?)\b(?![^.\n]*\b(would|means|keeps|if)\b)", re.I),
 ]
@@ -52,6 +53,34 @@ def _numbers_in(value: Any, out: list[float]) -> None:
             _numbers_in(v, out)
 
 
+def _leaves(value: Any) -> list[float]:
+    """The numbers directly in one object: its scalar fields and the figures in its strings, not its nested objects."""
+    out: list[float] = []
+    items = value.values() if isinstance(value, dict) else value if isinstance(value, (list, tuple)) else []
+    for v in items:
+        if not isinstance(v, (dict, list, tuple)):
+            _numbers_in(v, out)
+    return out
+
+
+def _groups(value: Any, out: list[list[float]]) -> None:
+    """The small sets of values a figure may be derived from: one object's own fields, or the fields of the rows in one
+    short list (a comparison's rows, a chain's few contracts). A long list of bars vouches for nothing on its own."""
+    if isinstance(value, dict):
+        leaves = _leaves(value)
+        if 2 <= len(leaves) <= MAX_GROUP:
+            out.append(leaves)
+        for v in value.values():
+            _groups(v, out)
+    elif isinstance(value, (list, tuple)):
+        if value and len(value) <= MAX_GROUP and all(isinstance(v, dict) for v in value):
+            rows = [x for v in value for x in _leaves(v)]
+            if 2 <= len(rows) <= MAX_GROUP * 4:
+                out.append(rows)
+        for v in value:
+            _groups(v, out)
+
+
 def _matches(figure: Figure, values: Iterable[float]) -> bool:
     """Does a written figure match a source value at the figure's own precision, as is, as a percent of a fraction, or
     as a fraction of a percent? Signs are ignored: "down 2.95%" and -2.95 are the same figure."""
@@ -65,11 +94,12 @@ def _matches(figure: Figure, values: Iterable[float]) -> bool:
 
 
 def _derived_matches(figure: Figure, groups: list[list[float]]) -> bool:
-    """A figure the model derived from two values of one tool result, or from a result and the owner's own figure: the
-    gap between them ("lags SPY by 1.08 points") or the gap as a percentage of one of them ("1.6% above the last")."""
+    """A figure the model derived from two values of one small group (an object, a short list of rows), or from one
+    such value and the owner's own figure: the gap between them ("lags SPY by 1.08 points") or the gap as a percentage
+    of one of them ("1.6% above the last")."""
     target, d = abs(figure.value), figure.decimals
     for values in groups:
-        for a, b in itertools.islice(itertools.combinations(values, 2), MAX_PAIRS):
+        for a, b in itertools.combinations(values, 2):
             gap = abs(a - b)
             candidates = [gap, gap * 100] + [gap / abs(x) * 100 for x in (a, b) if x]
             if any(round(c, d) == round(target, d) for c in candidates):
@@ -90,8 +120,13 @@ def traceable_figures(parts: AnswerParts, record: dict, case: dict) -> Check:
         values: list[float] = []
         _numbers_in(tool.get("result"), values)
         _numbers_in(tool.get("args"), values)
-        groups.append(values + said)  # a derived figure may combine a result with what the owner said
         sources.extend(values)
+        small: list[list[float]] = []
+        _groups(tool.get("result"), small)
+        _groups(tool.get("args"), small)
+        groups.extend(group + said for group in small)  # a derived figure may combine a result with what the owner said
+        if said:  # the owner's figure against any single value the model was shown ("1.6% above the last 94.35")
+            groups.extend([v, *said] for v in values[:MAX_GROUP * 20])
     misses = []
     for figure in figures_in(parts.prose()):
         if figure.decimals == 0 and abs(figure.value) in IGNORED_SMALL_INTEGERS:
@@ -139,8 +174,12 @@ def grade(record: dict, case: dict) -> list[Check]:
     else:
         checks.append(Check("no_reread", None))
     if expects.get("planted_rumour"):
-        flagged = any(UNSUPPORTED_LINE.match(line.strip()) for line in text.split("\n"))
-        checks.append(Check("unsupported", flagged, "an Unsupported: line names the claim" if flagged else "the planted claim was not called unsupported"))
+        lines = [line.strip() for line in text.split("\n") if UNSUPPORTED_LINE.match(line.strip())]
+        terms = [t.lower() for t in expects.get("rumour_terms") or []]
+        named = any(not terms or any(t in line.lower() for t in terms) for line in lines)
+        detail = ("an Unsupported: line names the claim" if named else "an Unsupported: line, but not about the planted claim" if lines
+                  else "the planted claim was not called unsupported")
+        checks.append(Check("unsupported", named, detail))
     else:
         checks.append(Check("unsupported", None))
     orders = [p.pattern for p in ORDER_PATTERNS if p.search(text)]

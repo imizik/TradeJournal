@@ -61,3 +61,9 @@ def test_figures_skip_times_dates_expiries_and_ids_and_keep_precision():
     assert [(f.value, f.decimals) for f in figures] == [(94.35, 2), (2.95, 2), (1528.0, 0), (4.1, 1)]
     assert figures_in("5m bars, 1D chart, Q3 2026") == [] or [f.value for f in figures_in("5m bars, 1D chart, Q3 2026")] == [2026.0]
     assert word_count("one two  three\nfour") == 4
+
+
+def test_figures_glued_to_units_are_skipped_and_ranges_give_both_ends():
+    assert figures_in("a 12.5x multiple, 10.5K shares, 94.35x") == []
+    assert [f.value for f in figures_in("a 5-10 point gap over 5-minute bars")] == [5.0, 10.0, 5.0]
+    assert [f.value for f in figures_in("from 95.6–95.9, then -2.95 and +3.2%")] == [95.6, 95.9, -2.95, 3.2]

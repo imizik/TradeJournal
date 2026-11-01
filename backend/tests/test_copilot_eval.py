@@ -184,3 +184,52 @@ def test_export_strips_ids_skips_briefs_and_refuses_the_fixtures_folder(tmp_path
     assert not any(copilot_eval.UUID.search(json.dumps(c)) for c in cases)
     with pytest.raises(ValueError):
         copilot_eval.export_cases(now, Path(__file__).parent / "fixtures" / "copilot_eval" / "owner.jsonl")
+
+
+def test_a_long_list_of_bars_does_not_vouch_for_an_arbitrary_figure():
+    bars = [{"name": "get_chart_context", "args": {"symbol": "NBIS", "timeframe": "5m"},
+             "result": {"bars": [{"close": 92.4 + i * 0.12, "volume": 41_000 + 900 * i} for i in range(40)]}}]
+    invented = _record("Verdict: Hold — H.\n\n- Support sits at 3.37 and resistance at 7.41.", tools=bars)
+    check = next(c for c in copilot_graders.grade(invented, {"expects": {}}) if c.name == "traceable_figures")
+    assert check.state == "fail" and "3.37" in check.detail and "7.41" in check.detail
+    read_off = _record("Verdict: Hold — H.\n\n- The last bar closed at 97.08 on 76,100 shares.", tools=bars)
+    assert _state(copilot_graders.grade(read_off, {"expects": {}}), "traceable_figures") == "pass"
+
+
+def test_order_and_unsupported_checks_read_the_sentence_not_the_word():
+    prose = _record("Verdict: Hold — H.\n\n- The price is close to 94 and holding now, with 5 of 7 peers up.\n\nAgainst: thin.")
+    assert _state(copilot_graders.grade(prose, {"expects": {}}), "no_orders") == "pass"
+    bullet = _record("Verdict: Broken — H.\n\n- Close the position now; the level went.")
+    assert _state(copilot_graders.grade(bullet, {"expects": {}}), "no_orders") == "fail"
+    case = {"expects": {"planted_rumour": True, "rumour_terms": ["contract", "2pm"]}}
+    other = _record("Verdict: Pass — H.\n\n- Unsupported: a flow you assume — nothing shows it.")
+    check = next(c for c in copilot_graders.grade(other, case) if c.name == "unsupported")
+    assert check.state == "fail" and "not about the planted claim" in check.detail
+    named = _record("Verdict: Pass — H.\n\n- Unsupported: a 2pm contract announcement — no headline or filing shows it.")
+    assert _state(copilot_graders.grade(named, case), "unsupported") == "pass"
+
+
+def test_side_reads_are_not_recorded_as_tool_reads(harness):
+    out = harness / "run"
+    copilot_eval.main(["run", "--cases", str(CASES), "--model", "fake", "--out", str(out)])
+    names = {t["name"] for r in _records(out) for t in r["tools"]}
+    assert names <= copilot_eval.RECORDED and "review_images" not in names and "week_exit_reviews" not in names
+    week = next(r for r in _records(out) if r["id"] == "week-review")
+    assert "get_week_review" in {t["name"] for t in week["tools"]}
+
+
+def test_a_failed_turn_is_not_cached(harness, monkeypatch):
+    calls = {"n": 0}
+
+    async def failing(case, history, cfg, adapter, evidence, now, carry_id):
+        calls["n"] += 1
+        return {"id": case["id"], "question": case["question"], "history": [], "text": "", "tools": [], "proposals": [],
+                "error": "api_rate_limit", "metrics": {"total_ms": 5}, "cost_usd": 0.0, "cached": False, "carry_id": None}
+
+    monkeypatch.setattr(copilot_eval, "run_case", failing)
+    one = harness / "one.jsonl"
+    one.write_text(json.dumps({"id": "x", "question": "q"}) + "\n")
+    for out in ("a", "b"):
+        assert copilot_eval.main(["run", "--cases", str(one), "--model", "fake", "--out", str(harness / out)]) == 0
+    assert calls["n"] == 2 and not list((harness / "data" / "cache").glob("*.json"))
+    assert _records(harness / "b")[0]["error"] == "api_rate_limit" and not _records(harness / "b")[0]["cached"]

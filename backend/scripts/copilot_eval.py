@@ -85,9 +85,13 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row, default=str) + "\n" for row in rows))
 
 
+RECORDED = frozenset(copilot_tools.TOOL_NAMES) | {"owner_context"}
+
+
 class RecordingEvidence:
-    """Wraps an evidence object and keeps every read the turn makes (name, arguments, result), including the owner
-    context, so the graders can check the answer's figures against what the model was actually shown."""
+    """Wraps an evidence object and keeps every tool read the turn makes (name, arguments, result), including the owner
+    context, so the graders can check the answer's figures against what the model was actually shown. The turn's side
+    reads (a review's images, a week's exit lessons) pass through unrecorded: the model is not shown them as results."""
 
     def __init__(self, inner):
         self._inner = inner
@@ -99,7 +103,7 @@ class RecordingEvidence:
 
     def __getattr__(self, name: str):
         value = getattr(self._inner, name)
-        if not callable(value):
+        if not callable(value) or name not in RECORDED:
             return value
 
         def wrapped(*args, **kwargs):
@@ -179,7 +183,8 @@ async def run_all(cases: list[dict], args, cfg_for, adapter, evidence_for, repla
             carry_state = "ok" if carry_id else "unavailable"
         if key.is_file() and not args.no_cache:
             record = json.loads(key.read_text())
-            record.update(cached=True, carry_id=None, carry=carry_state if carry_state else record.get("carry"))
+            # A cached answer carried nothing from this process, whatever its parent did this time.
+            record.update(cached=True, carry_id=None, carry="unavailable" if case.get("carry_from") else None)
             records[case["id"]] = record
             continue
         if backend == "anthropic" and cap is not None and spent >= cap:
@@ -191,7 +196,7 @@ async def run_all(cases: list[dict], args, cfg_for, adapter, evidence_for, repla
         record = await run_case(case, history, cfg, adapter, evidence_for(case), case_moment(case), carry_id)
         record["carry"] = carry_state
         spent += record["cost_usd"]
-        if backend == "anthropic" or not args.no_cache:
+        if record["error"] is None:  # a stopped, refused or failed turn is asked again next time, never replayed
             key.write_text(json.dumps(record, default=str))
         records[case["id"]] = record
         print(f"{case['id']}: {record['error'] or 'ok'} · {len(record['tools'])} reads · {record['metrics'].get('total_ms')} ms · ${record['cost_usd']:.4f}")

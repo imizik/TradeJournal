@@ -109,8 +109,9 @@ def word_count(text: str) -> int:
 # --------------------------------------------------------------------------- numbers in prose
 
 # A number the owner would read as a figure: 94.35, 1,528, -2.95, 4.5%, $610. Skipped: clock times (10:40), ISO dates
-# and M/D expiries (2026-10-23, 10/30), hex and other id-like runs, and a number glued to letters (5m, 1D, Q3).
-_NUMBER = re.compile(r"(?<![\w/:.\-])[-+]?\$?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?%?(?![\w/:])")
+# and M/D expiries (2026-10-23, 10/30), hex and other id-like runs, and a number glued to letters (5m, 1D, Q3, 12.5x).
+# A sign counts only when no digit precedes it, so "5-10" is two figures and "-2.95" one.
+_NUMBER = re.compile(r"(?<![\w/:.])(?:(?<!\d)[-+])?\$?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?%?(?![\w/:]|\.\d)")
 _TIME_OR_DATE = re.compile(r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|[0-9a-f]{8}(?:-[0-9a-f]{4}){1,3}(?:-[0-9a-f]{12})?", re.I)
 
 
