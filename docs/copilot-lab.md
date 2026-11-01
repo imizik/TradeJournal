@@ -2244,12 +2244,12 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EVIDENCE` | `fixture` | `fixture` returns SIMULATED neocloud data; the model is told so in its context line, in a `"simulated": true` marker on every tool result and in the system prompt, and says so in its answer. `live` reads this installation's Radar, news, Tradier and quote services. `replay` reads a recorded session at a frozen moment (below). |
 | `COPILOT_REPLAY_STORE` | none | `replay` only: path to a read-only copy of a Radar store. |
 | `COPILOT_REPLAY_AT` | none | `replay` only: New York time inside a recorded session, e.g. `2026-10-23T11:12`. |
-| `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic` and `plan`: the default for a turn. |
+| `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic`: the default for a turn. |
 | `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line in each answer's Sources shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
-| `COPILOT_DAILY_BUDGET_USD` | `2` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow; plan turns are unaffected. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
-| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). Not applied to `plan`, which bills nothing per token: a plan turn is bounded by its rounds and tool calls, and a failed plan turn's error carries Claude Code's own reason (for example an HTTP 400's message). |
+| `COPILOT_DAILY_BUDGET_USD` | `2` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
+| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
@@ -2259,7 +2259,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `EVENING_REVIEW_PING_ENABLED` | unset (off) | `true` sends the [evening review ping](#phone-ping-policy) on a trading day when something waits for review (needs `COPILOT_ENABLED` and `NTFY_URL`). `EVENING_REVIEW_PING_AT` (`HH:MM` New York, default `16:30`, not before 16:00) sets its time. |
 | `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
-| `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
+| `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser. |
 
 A model id the price table doesn't know (a dated id, or a fallback model the API reports) is priced at its
 known base model, otherwise at the dearest known price, so the per-turn cap always applies.
@@ -2280,9 +2280,9 @@ Every Claude call in the app now uses `ANTHROPIC_API_KEY` through the Messages
 API: chat, research jobs, the shadow book and the reviews. The earlier plan
 backend and the Claude Agent SDK are gone. `copilot_turn` rows and saved answers
 from before the move still say `plan` / `claude_plan`, and their costs are API-price
-equivalents, not bills. Desk turns count toward `COPILOT_DAILY_BUDGET_USD`, as do
-the prep, companion and Telegram turns that share the backend; shadow-book turns
-are recorded as `api_background`, under `SHADOW_BOOK_MAX_TURNS` instead.
+equivalents, not bills. Desk, companion, Telegram, prep and week-review turns are recorded and count toward
+`COPILOT_DAILY_BUDGET_USD` (prep and week review do not check it, so they always run);
+shadow-book turns are recorded as `api_background`, under `SHADOW_BOOK_MAX_TURNS` instead.
 
 ## Replay
 

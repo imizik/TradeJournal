@@ -329,7 +329,7 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
     import anthropic
 
     model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(base_url="https://api.anthropic.com")
     try:
         # Streaming, because adaptive thinking on a long brief can outlast a plain request.
         with client.beta.messages.stream(

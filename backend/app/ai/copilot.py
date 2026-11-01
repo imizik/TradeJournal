@@ -251,11 +251,16 @@ class Settings:
                 "tools": sorted(copilot_tools.TOOL_NAMES)}
 
 
+def model_id(name: str) -> str:
+    """A full API model id; the short names Claude Code took may still be in an environment."""
+    return {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5"}.get(name, name)
+
+
 def settings() -> Settings:
     backend = os.environ.get("COPILOT_BACKEND", "fake").strip().lower()
     evidence = os.environ.get("COPILOT_EVIDENCE", "fixture").strip().lower()
     effort = os.environ.get("COPILOT_EFFORT", "medium").strip().lower()
-    model = os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    model = model_id(os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL)
     # An environment still saying COPILOT_BACKEND=plan means the API now: never a silent fall to the scripted model.
     backend = "anthropic" if backend == "plan" else backend
     backend = backend if backend in ("fake", "anthropic") else "fake"

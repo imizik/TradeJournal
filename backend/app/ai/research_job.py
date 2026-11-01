@@ -182,7 +182,7 @@ def lab_tools(names: tuple[str, ...]) -> list[dict]:
 
 def web_tools(lim: JobLimits) -> tuple[dict, ...]:
     return ({"type": "web_search_20260209", "name": "web_search", "max_uses": lim.max_searches},
-            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": lim.max_fetches})
+            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": lim.max_fetches, "max_content_tokens": 20000})
 
 
 class _Recorder:
@@ -293,7 +293,7 @@ async def run_job(question: str, symbols: list[str], evidence, *, now: datetime,
     lim = lim or limits()
     if client is None and not api_runner.configured():
         raise ResearchError("api_not_configured", "Research jobs need ANTHROPIC_API_KEY on the private backend.")
-    model = model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL
+    model = copilot.model_id(model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL)
     cfg = copilot.Settings(enabled=True, backend="anthropic", evidence=getattr(evidence, "label", "live"), model=model,
                            effort="medium", fallbacks=False, key_configured=True)
     rec = _Recorder(lim, evidence, cfg)
@@ -318,7 +318,9 @@ async def run_job(question: str, symbols: list[str], evidence, *, now: datetime,
         run.error = {"code": "api", "message": f"The job failed ({type(exc).__name__})."}
     record["model"] = run.model
     record["metrics"] = {"turns": run.rounds, "duration_ms": round((time.monotonic() - started) * 1000),
-                         "cost_usd": run.cost_usd, "usage": run.usage, "cost_basis": "api"}
+                         # A cut-off round's cost is unknown: None keeps the queue's estimate for the attempt.
+                         "cost_usd": None if run.error and run.error["code"] in ("timeout", "api") else run.cost_usd,
+                         "usage": run.usage, "cost_basis": "api"}
     if run.error is None and isinstance(run.answer, dict):
         record.update(status="ok", assessment=run.answer, checks=_checks(run.answer, rec, evidence))
     else:

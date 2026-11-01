@@ -8,8 +8,7 @@ it has no review, when trades were added after its review (one written
 mid-session), or when its review is marked stale. Older days are never
 backfilled: a past day gets a review only from its own Daily Review button.
 
-A sign-in other than the plan stops the run before any question. It never falls
-back to API credits.
+A missing API key stops the run before any question.
 
 The status file is ``TJ_PLAN_REVIEW_DIR/status.json`` (production:
 ``/var/lib/tradejournal/plan-reviews``). ``GET /daily-review/runner`` serves it.
@@ -178,7 +177,7 @@ def run(session: Session, dry_run: bool = False, today: date | None = None) -> d
             break
         except LookupError:
             continue
-        except Exception as exc:  # e.g. the plan's usage limit: recorded, and the next run tries again
+        except Exception as exc:  # e.g. the API's rate limit: recorded, and the next run tries again
             session.rollback()
             status["failed"].append({"day": _label(key), "reason": reason, "error": str(exc)[:300]})
             continue

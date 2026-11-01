@@ -37,7 +37,7 @@ test("the calendar says whether nightly plan reviews are set up, and a plan revi
     await route.fulfill({ json: { day: body.day, review, generated_at: "2026-10-01T00:05:00Z", trade_count: 3 } });
   });
   const run = page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ });
-  await expect(page.getByText("on your Claude plan")).toBeVisible();
+  await expect(page.getByText("Full-day Claude review for", { exact: false })).toBeVisible();
   await run.click();
   await expect(page.getByText("The Market That Day")).toBeVisible();
   const plans = page.getByLabel("Plan versus execution");

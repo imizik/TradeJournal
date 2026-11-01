@@ -160,10 +160,10 @@ test("Daily Review refresh receives another tab's thoughts and invalidates its s
 
 test("Daily Review explains a review that is not set up instead of asking for a retry", async ({ page }) => {
   await page.route("**/api/backend/daily-review", (route) => route.request().method() === "POST"
-    ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Daily review is not set up on the Claude plan: no plan token" }) })
+    ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Daily review is not set up: no plan token" }) })
     : route.continue());
   await page.goto(`/daily/${tradedDay}`);
   await page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ }).click();
-  await expect(page.locator("#ai-review")).toContainText("Daily review is not set up on the Claude plan: no plan token");
+  await expect(page.locator("#ai-review")).toContainText("Daily review is not set up: no plan token");
   await expect(page.locator("#ai-review")).not.toContainText("Please retry");
 });

@@ -88,7 +88,7 @@ async def decide(event: dict, book: dict, now: datetime, *, client=None, evidenc
     if evidence is None:
         from app.ai.copilot_tools import LiveEvidence
         evidence = LiveEvidence()
-    model = model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL
+    model = copilot.model_id(model or os.environ.get("RESEARCH_MODEL") or copilot.DEFAULT_MODEL)
     label = getattr(evidence, "label", "live")
     cfg = copilot.Settings(enabled=True, backend="anthropic", evidence=label, model=model, effort="medium",
                            fallbacks=False, key_configured=True)

@@ -17,11 +17,11 @@ def install(app):
     if os.environ.get("DATABASE_URL") != f"sqlite:///{expected}":
         raise RuntimeError("Day journal review fixture requires the disposable e2e database")
 
-    from app.ai import plan_runner, review_context
+    from app.ai import api_runner, review_context
 
     names = ("daily_moves", "intraday_shape", "gauges", "company_facts", "_headlines", "open_interest_walls")
     originals = {name: getattr(review_context, name) for name in names}
-    original_ask = plan_runner.ask
+    original_ask = api_runner.ask
     state = {"mode": "off"}
 
     def stamp(day):
@@ -78,7 +78,7 @@ def install(app):
             "plan_vs_execution": actions, "expectation_checks": checks,
         }
         return SimpleNamespace(data=data, author="Synthetic browser fixture (no model call)", input_tokens=0,
-                               output_tokens=0, api_equivalent_usd=0, seconds=0)
+                               output_tokens=0, usage={"input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})
 
     @app.post("/__test/day-journal-review", include_in_schema=False)
     def configure(mode: str):
@@ -88,7 +88,7 @@ def install(app):
         if mode == "off":
             for name, value in originals.items():
                 setattr(review_context, name, value)
-            plan_runner.ask = original_ask
+            api_runner.ask = original_ask
         else:
             review_context.daily_moves = daily_moves
             review_context.intraday_shape = intraday_shape
@@ -96,5 +96,5 @@ def install(app):
             review_context.company_facts = lambda symbols, day: {symbol: {"sector_state": "none", "earnings": {"state": "none"}} for symbol in symbols}
             review_context._headlines = lambda day, symbols, gaps: {}
             review_context.open_interest_walls = lambda *args, **kwargs: None
-            plan_runner.ask = ask
+            api_runner.ask = ask
         return {"mode": mode, "provenance": "synthetic-browser-fixture"}

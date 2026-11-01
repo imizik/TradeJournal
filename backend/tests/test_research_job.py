@@ -91,7 +91,7 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(saved):
     assert not set(kept_out) & set(offered) and "get_chart_context" in offered
     server = [t for t in req["tools"] if t.get("type", "").startswith("web_")]
     assert server == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8},
-                      {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10}]
+                      {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10, "max_content_tokens": 20000}]
     assert not [t for t in req["tools"] if t["name"] in ("Bash", "Read", "Write", "Task")]
     answer_tool = req["tools"][-1]
     assert answer_tool["strict"] is True and answer_tool["input_schema"] == api_runner.api_schema(research_job.ASSESSMENT_SCHEMA)
@@ -313,10 +313,11 @@ def test_a_search_costs_a_cent_against_the_budget(saved):
     assert record["error"]["code"] == "error_max_budget_usd" and record["metrics"]["cost_usd"] == 0.01
 
 
-def test_timeout_is_recorded_and_keeps_the_spend_so_far(saved):
+def test_timeout_is_recorded_and_leaves_the_cost_to_the_queues_estimate(saved):
     record = _run(client_for(lab("get_quotes", {"symbols": ["NBIS"]}), Sleep(5), submit()), lim=research_job.JobLimits(timeout_s=0.1))
     assert record["error"]["code"] == "timeout" and record["status"] == "error"
-    assert record["metrics"]["turns"] == 1 and record["metrics"]["cost_usd"] > 0 and len(record["lab_tool_calls"]) == 1
+    assert record["metrics"]["turns"] == 1 and len(record["lab_tool_calls"]) == 1
+    assert record["metrics"]["cost_usd"] is None  # the cut-off round's cost is unknown: the queue keeps its estimate
 
 
 def test_a_cancelled_job_propagates_the_cancellation_and_is_not_swallowed(saved):

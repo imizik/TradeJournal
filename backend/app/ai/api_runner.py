@@ -28,8 +28,6 @@ MAX_TOKENS = 16000
 WEB_SEARCH_USD = 0.01  # per search, on top of tokens
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _UNSUPPORTED = {"minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "multipleOf"}
-# The short names Claude Code took, which an existing TJ_PLAN_REVIEW_MODEL may still hold.
-_ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5"}
 
 
 class ApiUnavailable(RuntimeError):
@@ -95,6 +93,8 @@ def _api_error(exc: Exception) -> tuple[str, str]:
         return "api_auth", "The Anthropic API key was rejected."
     if isinstance(exc, anthropic.PermissionDeniedError):
         return "api_permission", "This Anthropic account is not permitted to use the configured model."
+    if isinstance(exc, anthropic.NotFoundError):
+        return "api_request", "The Anthropic API does not know the configured model (404)."
     if isinstance(exc, anthropic.RateLimitError):
         return "api_rate_limit", "The Anthropic API rate limit was reached."
     if isinstance(exc, anthropic.BadRequestError):
@@ -112,8 +112,7 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
     """One question, one structured answer. Raises ApiUnavailable or ApiCallFailed."""
     if client is None and not configured():
         raise ApiUnavailable(f"No {KEY_ENV} on the private backend.")
-    model = model or os.environ.get("TJ_PLAN_REVIEW_MODEL") or DEFAULT_MODEL
-    model = _ALIASES.get(model, model)
+    model = copilot.model_id(model or os.environ.get("TJ_PLAN_REVIEW_MODEL") or DEFAULT_MODEL)
     limit = timeout or float(os.environ.get("TJ_PLAN_REVIEW_TIMEOUT") or DEFAULT_TIMEOUT)
     client = client or anthropic.Anthropic(api_key=os.environ[KEY_ENV], base_url=BASE_URL, max_retries=1, timeout=limit)
     started = time.monotonic()

@@ -420,7 +420,7 @@ def fallback_lines(pack: dict) -> list[str]:
 def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str | None]:
     """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used. ``events``, when
     given, collects every turn event (the week review reads its tool and proposal events)."""
-    from app.ai import copilot
+    from app.ai import copilot, copilot_spend
     cfg = copilot.settings()
     now_et = datetime.fromtimestamp(now, ET)
     history = [{"role": "user", "content": text}]
@@ -436,6 +436,8 @@ def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str |
                     events.append(event)
                 if event["type"] == "text":
                     parts.append(event["delta"])
+                elif event["type"] == "done":
+                    await asyncio.to_thread(copilot_spend.record, event.get("metrics") or {})
                 elif event["type"] == "error" and error is None:
                     error = event.get("message") or event.get("code") or "error"
         finally:
