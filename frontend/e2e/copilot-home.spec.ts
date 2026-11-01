@@ -94,13 +94,13 @@ test("on a phone the desk shows one pane at a time, and opening a thread moves t
   const { chats } = await lab(page);
   const threads = list(page);
   const tabs = page.getByRole("tablist", { name: "Desk" });
-  await expect(tabs.getByRole("tab", { name: "Now" })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.getByRole("tab", { name: "Threads" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Message")).toBeHidden();
   await threads.getByRole("button", { name: "NBIS, Watching" }).click();
   await expect(page.getByText("Not yet: it lags CRWV.")).toBeVisible();
   await expect(threads).toBeHidden();
   await expect(tabs.getByRole("tab", { name: "NBIS" })).toHaveAttribute("aria-selected", "true");
-  await tabs.getByRole("tab", { name: "Now" }).click();
+  await tabs.getByRole("tab", { name: "Threads" }).click();
   await expect(threads).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   expect(chats).toEqual([]);

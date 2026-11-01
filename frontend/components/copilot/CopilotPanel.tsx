@@ -19,15 +19,22 @@ import TradePlanCard from "@/components/copilot/TradePlanCard";
 import { useSpeakAnswer } from "@/components/copilot/SpeakAnswer";
 import { useVoiceInput } from "@/components/copilot/VoiceInput";
 import { newClientId, type CaptureOrigin } from "@/lib/captures";
-import { getDeskPicture, type DeskHooks } from "@/lib/desk";
+import { getDeskPicture, nyDay, threadInUrl, type DeskHooks } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 /** This browser only: which saved investigation to reopen. The server copy is the source of truth. */
 const CURRENT_KEY = "tradejournal.copilot-lab.current.v2";
+/** The New York day it was last open: the desk reopens it that day only; the next day starts on Main. */
+const CURRENT_DAY_KEY = "tradejournal.copilot-lab.current-day.v1";
 type Current = Pick<Investigation, "id" | "revision" | "title" | "status" | "conclusion" | "source" | "findings" | "created_at">;
-const remember = (id: string | null) => {
-  try { if (id) window.localStorage.setItem(CURRENT_KEY, id); else window.localStorage.removeItem(CURRENT_KEY); } catch { /* convenience only */ }
+export const remember = (id: string | null) => {
+  try {
+    if (id) { window.localStorage.setItem(CURRENT_KEY, id); window.localStorage.setItem(CURRENT_DAY_KEY, nyDay()); }
+    else { window.localStorage.removeItem(CURRENT_KEY); window.localStorage.removeItem(CURRENT_DAY_KEY); }
+  } catch { /* convenience only */ }
 };
+export const rememberedThread = () => { try { return window.localStorage.getItem(CURRENT_KEY); } catch { return null; } };
+const fromAnotherDay = () => { try { const day = window.localStorage.getItem(CURRENT_DAY_KEY); return !!day && day !== nyDay(); } catch { return false; } };
 const shortTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const MAX_CHARS = 4000, MAX_MESSAGES = 23, MAX_TOTAL = 38_000;
 const clip = (text: string) => text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 12)} [clipped]`;
@@ -414,7 +421,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   const opening = link?.context && !link.investigation ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
   const [status, setStatus] = useState<CopilotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || "NBIS");
+  const [symbol, setSymbol] = useState(link?.symbol || pageSymbol || (desk ? "" : "NBIS"));
   // The conversation's origin, from its link; a new or another investigation is the lab's own.
   const [origin, setOrigin] = useState<CaptureOrigin>(() => planOrigin(link?.origin, link?.context));
   // The levels the owner drew for this conversation's plan (Charts' "Plan this"), shown beside the plan card's prices.
@@ -587,6 +594,10 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       let id: string | null = null;
       try { id = window.localStorage.getItem(CURRENT_KEY); } catch { /* start fresh */ }
       if (link?.investigation) id = link.investigation; // ?investigation=<id> opens that one
+      else if (desk && !link) { // the desk's address names its thread; else the last one, if it was open today
+        id = threadInUrl() ?? (fromAnotherDay() ? null : id);
+        if (!id) remember(null);
+      }
       else if (link) id = null; // a symbol or context link starts fresh rather than reopening the last investigation
       if (link && !link.investigation) remember(null);
       else if (id) getInvestigation(id).then(saved => {

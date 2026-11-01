@@ -83,6 +83,12 @@ async function timeline(page: Page) {
   return pane.getByRole("list", { name: "Timeline" });
 }
 
+async function aboutNbis(page: Page) { // the desk starts across everything
+  await page.getByTestId("copilot-scope").click();
+  await page.getByLabel("Investigation symbol").fill("NBIS");
+  await page.getByLabel("Investigation symbol").press("Enter");
+}
+
 async function askForPlan(page: Page) {
   await page.getByLabel("Message").fill("Make a plan for NBIS");
   await page.getByRole("button", { name: "Send" }).click();
@@ -98,6 +104,7 @@ const fresh = (): Server => ({ alerts: [], jobs: [], posts: [], quote: { fresh: 
 test("a proposed watch is confirmed against a fresh quote and shows as a linked alert", async ({ page }) => {
   const server = fresh();
   await lab(page, server);
+  await aboutNbis(page);
   await askForPlan(page);
   // The saved investigation carries the quote as evidence and leaves the proposal out: a proposal is not evidence.
   const saved = server.posts.find((p) => p.path === "investigations")!.body as { evidence: { tool: string; kind: string; message: number }[] };
@@ -133,6 +140,7 @@ test("a stale quote refuses the watch and sends nothing", async ({ page }) => {
 test("without alert support a watch waits, while a revisit still confirms; Dismiss removes a card", async ({ page }) => {
   const server = { ...fresh(), queueOff: true };
   await lab(page, server, { alertsSupported: false });
+  await aboutNbis(page);
   await askForPlan(page);
   const watch = page.getByRole("region", { name: "Proposed watch" });
   await expect(watch).toContainText("Awaiting alert support");

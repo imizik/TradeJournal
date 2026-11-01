@@ -704,6 +704,10 @@ def test_research_jobs_save_cited_findings_in_process_and_the_copilot_keeps_them
     assert inv.list_investigations(symbol=symbol, source="research_job")[0]["id"] == saved["id"]
     assert inv.list_investigations(symbol=symbol, source="copilot") == []
     assert inv.list_investigations(symbol=symbol, before=datetime(2026, 1, 1)) == []
+    # Search: every word, any case, in the title, symbol or conclusion; a wildcard is only a character.
+    assert [r["id"] for r in inv.list_investigations(search=f"neocloud {symbol.lower()}")] == [saved["id"]]
+    assert inv.list_investigations(search=f"neocloud {symbol} nothing") == []
+    assert inv.list_investigations(search=f"{symbol} %") == []
 
     # A copilot-style save without findings keeps them, and the source never changes.
     kept = inv.update(saved["id"], inv.InvestigationFields(title="Neocloud financing", symbol=symbol, status="closed"), 1)

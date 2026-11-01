@@ -273,9 +273,9 @@ def _http(exc: investigations.InvestigationError) -> HTTPException:
 
 
 @router.get("/investigations")
-def list_investigations(limit: int = 20, symbol: str | None = None, session: Session = Depends(get_session)):
+def list_investigations(limit: int = 20, symbol: str | None = None, q: str | None = None, session: Session = Depends(get_session)):
     _enabled()
-    return {"investigations": investigations.list_investigations(symbol=symbol, limit=limit, session=session)}
+    return {"investigations": investigations.list_investigations(symbol=symbol, limit=limit, search=q, session=session)}
 
 
 @router.post("/investigations", status_code=201)
