@@ -6,7 +6,11 @@ import type { MarketReadSlot, MarketReadsView, MarketReadText } from "../lib/mar
 // Jo's day on the Daily Review joins four existing records; each is stubbed here so the
 // timeline can be judged with realistic content. Trades and thoughts come from the seeded backend.
 const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-const iso = (day: string, et: string) => new Date(`${day}T${et}:00-04:00`).toISOString();
+// New York's offset on that day (-04:00 in daylight time, -05:00 in standard time), so the stubbed clock reads the same
+// all year: a fixed -04:00 put every time an hour early once daylight time ended on 2026-11-01.
+const nyOffset = (day: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" })
+  .formatToParts(new Date(`${day}T12:00:00Z`)).find((p) => p.type === "timeZoneName")!.value.replace("GMT", "") || "+00:00";
+const iso = (day: string, et: string) => new Date(`${day}T${et}:00${nyOffset(day)}`).toISOString();
 
 const text = (main: string, extra: Partial<MarketReadText> = {}): MarketReadText => ({ view: "mixed", main_text: main,
   alternative_text: "This could stay a choppy range under the opening high.", invalidation_text: "Weakens if SPY loses 769.73 again.",
