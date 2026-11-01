@@ -239,7 +239,7 @@ class Settings:
     turn_budget_usd: float = 0.25
     models: tuple[str, ...] = (DEFAULT_MODEL,)  # what a turn may pick; self.model is always first
     backends: tuple[str, ...] = ("fake",)  # what a turn may pick; self.backend is always first
-    daily_budget_usd: float = 2.0  # COPILOT_DAILY_BUDGET_USD: API turns stop for the day past this estimate
+    daily_budget_usd: float = 4.0  # COPILOT_DAILY_BUDGET_USD: API turns stop for the day past this estimate
 
     def public(self) -> dict:
         return {"enabled": self.enabled, "backend": self.backend, "evidence": self.evidence, "model": self.model,
@@ -269,7 +269,7 @@ def settings() -> Settings:
         enabled=os.environ.get("COPILOT_ENABLED") == "true",
         backend=backend,
         backends=offered_backends(backend, requested_backends(), key_configured),
-        daily_budget_usd=_float_env("COPILOT_DAILY_BUDGET_USD", 2.0),
+        daily_budget_usd=_float_env("COPILOT_DAILY_BUDGET_USD", 4.0),
         evidence=evidence if evidence in ("fixture", "live", "replay") else "fixture",
         model=model,
         models=offered_models(model),

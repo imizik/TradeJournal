@@ -38,7 +38,7 @@ def test_settings_offer_the_api_with_its_key_and_know_nothing_of_the_plan(monkey
     cfg = copilot.settings()
     assert cfg.backend == "fake" and cfg.backends == ("fake", "anthropic")
     public = cfg.public()
-    assert public["backends"] == ["fake", "anthropic"] and public["daily_budget_usd"] == 2.0
+    assert public["backends"] == ["fake", "anthropic"] and public["daily_budget_usd"] == 4.0
     assert "plan_configured" not in public and not hasattr(cfg, "plan_remote_ok") and not hasattr(cfg, "plan_configured")
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     assert copilot.settings().backends == ("fake",)
@@ -81,7 +81,7 @@ def test_a_turn_runs_on_the_api_and_is_recorded_with_its_model_and_cost(monkeypa
         db.commit()
     with TestClient(app) as client:
         status = client.get("/copilot/status").json()
-        assert status["backends"] == ["anthropic"] and status["spend_today_usd"] == 0.0 and status["daily_budget_usd"] == 2.0
+        assert status["backends"] == ["anthropic"] and status["spend_today_usd"] == 0.0 and status["daily_budget_usd"] == 4.0
         assert client.post("/copilot/chat", json={**_turn(), "backend": "anthropic", "symbol": "NBIS"}).status_code == 200 and seen[-1] == "anthropic"
         assert client.post("/copilot/chat", json=_turn()).status_code == 200 and seen[-1] == "anthropic"
         assert client.post("/copilot/chat", json={**_turn(), "backend": "fake"}).status_code == 422  # not a pickable backend
