@@ -2305,6 +2305,65 @@ A replay store is a read-only snapshot of the VPS Radar file, taken with
 SQLite's backup API from a `mode=ro` connection and copied off the server.
 Keep it outside the repository. It holds market quotes only, no account data.
 
+## Measuring the copilot
+
+The [October 31 review](../research/notes/ai-intelligence-review-2026-10-31.md)
+found that nothing scored an answer: every test is a fixture, and the
+Helped / Didn't ratings have no reader. The offline eval is the first measure.
+It runs the same `run_turn` the desk runs, on the scripted model for free or
+on the API for a few cents a case, and grades each answer against what the
+model was actually shown. It never writes `copilot_turn`, never touches a
+provider, and a paid run needs `--max-cost-usd`.
+
+```bash
+cd backend
+python -m scripts.copilot_eval run --model fake                                  # free: scripted model, fixture evidence
+python -m scripts.copilot_eval run --model claude-sonnet-5-5 --effort medium --max-cost-usd 1 --out data/copilot_eval/runs/sonnet
+python -m scripts.copilot_eval grade --run data/copilot_eval/runs/sonnet         # deterministic checks
+python -m scripts.copilot_eval grade --run data/copilot_eval/runs/sonnet --judge --max-cost-usd 1   # plus the Opus rubric judge
+python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run data/copilot_eval/runs/opus
+python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
+```
+
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 14
+  fixture-answerable cases across the desk's workflows: a briefing, a group
+  read, a planted rumour, a follow-up that should reuse carried evidence, "go
+  deeper", a candle, a plan, a compare, an open-position review, an
+  invalidation question, a closed-trade review, the week review, a theme and an
+  order-bait prompt. A case is the owner's words plus `expects`: `read`,
+  `against`, `long_ok`, `planted_rumour`, `carried_tools`, `verdict_in`,
+  `tools_any`, `tools_none`, `known_figures`. A case with `carry_from` runs
+  after its parent with the parent's answer in the history and its `carry_id`;
+  when the parent came from the cache the carry is unavailable and the no-reread
+  check is not applicable.
+- **Run** (`backend/scripts/copilot_eval.py`). Fixture evidence by default;
+  replay (`--evidence replay --replay-store … --replay-at …`) only against a
+  local database, as the lab's replay mode. Every tool read, including the owner
+  context, is recorded with its result. Answers are cached by case, model,
+  effort, evidence, the system prompt and the tool schemas, so a prompt change
+  never reuses a stale answer and a re-run costs nothing. Records go under
+  `backend/data/copilot_eval/` (gitignored).
+- **Grade.** The deterministic checks (`backend/app/ai/copilot_graders.py`, over
+  the Python reading of the answer format in `backend/app/ai/copilot_answer.py`,
+  kept in step with `answerParts` in `frontend/lib/copilot.ts`): `completed`,
+  `format_verdict`, `format_read`, `format_against`, `length` (120 words unless
+  `long_ok`), `traceable_figures` (every figure in the prose appears in a tool
+  result, the owner context or the owner's own words at the precision written,
+  as a percent of a fraction, or as the gap between two values of one result,
+  also as a percentage; clock times, dates, expiries, ids and counts up to 3 are
+  skipped), `no_reread`, `unsupported`, `no_orders`, `verdict_in`, `tools_any`,
+  `tools_none`. The optional judge scores six rubric items 1–5 with Opus 5.5
+  through the structured-answer runner (`backend/scripts/copilot_eval_rubric.md`,
+  its hash recorded); it needs the API runner from the API migration and its own
+  `--max-cost-usd`.
+- **Report.** Pass rate per check, judge means, p50/p90 first-text and total
+  latency, cost per case; with two runs, B minus A per check over the shared
+  cases with a 95% case-bootstrap interval, so a prompt, model or effort change
+  is a number before it ships.
+- **What it is not.** It scores explanations against evidence, not trading
+  outcomes; the Proof pages own those. Tests:
+  `backend/tests/test_copilot_eval.py`, `backend/tests/test_copilot_answer.py`.
+
 ## Live measurements (2026-10-24)
 
 Sonnet 5.5 on the Messages API, effort `medium` unless noted, replay of Fri
