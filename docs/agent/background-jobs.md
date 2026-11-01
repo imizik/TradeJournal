@@ -25,7 +25,7 @@ Six execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, outcomes, requested daily review, confirmed resync, the after-close options snapshot and the morning relative-volume history |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, outcomes, requested daily review, confirmed resync, the after-close options snapshot, the morning relative-volume history and Company Research refreshes (`company_research_refresh`) |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |

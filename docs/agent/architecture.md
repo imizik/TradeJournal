@@ -276,8 +276,9 @@ the fallback when streaming is unavailable. Level alerts (`level_alert`,
 `level_alert_event`) are judged in the same API process by
 `level_alert_monitor.py`, with or without a tab open. It adds alerted symbols
 to that one stream, reads 1-minute bars through the chart feed's budget for
-closed candles and stream gaps, and sends phone messages through the ntfy
-topic in `/etc/tradejournal/alerts.env`. Every stock/ETF chart is on one
+closed candles and stream gaps, and sends phone messages through `phone.py`:
+the Telegram bot when it is configured, otherwise the ntfy topic in
+`/etc/tradejournal/alerts.env`. Every stock/ETF chart is on one
 split-adjusted price basis: Alpaca corporate actions (one small cached file per
 symbol, refetched once per New York date) say which splits happened, and
 `chart_adjust.py` adjusts copies of bars at display time, so the raw history
