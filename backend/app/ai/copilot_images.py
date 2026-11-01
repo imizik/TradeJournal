@@ -101,11 +101,6 @@ def block(jpeg: bytes) -> dict:
                                         "data": base64.b64encode(jpeg).decode("ascii")}}
 
 
-def mcp_block(image_block: dict) -> dict:
-    """The same image as an MCP tool-result block (the Agent SDK's plan backend)."""
-    return {"type": "image", "data": image_block["source"]["data"], "mimeType": image_block["source"]["media_type"]}
-
-
 def size_of(image_block: dict) -> int:
     """The JPEG's size in bytes, from its base64."""
     data = image_block["source"]["data"]

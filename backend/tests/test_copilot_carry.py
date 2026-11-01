@@ -6,7 +6,7 @@ import time
 import pydantic
 import pytest
 
-from app.ai import copilot, copilot_context, copilot_plan
+from app.ai import copilot, copilot_context
 from app.routers.copilot import ChatBody
 from app.ai.copilot_fixture import FixtureEvidence
 from tests.test_copilot import NOW, _cfg
@@ -119,13 +119,6 @@ def test_the_prompt_says_when_to_reuse_and_when_to_read_again():
     prompt = " ".join(copilot.SYSTEM_PROMPT.split())
     assert 'Follow-ups reuse what was read. When the owner\'s message comes after an "Earlier evidence" block' in prompt
     assert "more than 15 minutes old while the market is open" in prompt and "dispute a specific number" in prompt
-
-
-def test_the_plan_prompt_puts_the_earlier_evidence_before_the_owner_block():
-    text = copilot_plan.prompt_for([{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"},
-                                    {"role": "user", "content": "and?"}], "NBIS", NOW, owner_block="[Owner context]\n",
-                                   carried="[Earlier evidence: x]\n")
-    assert text.index("[Earlier evidence:") < text.index("[Owner context]") < text.index("Conversation so far")
 
 
 def test_the_chat_body_takes_only_an_opaque_id():

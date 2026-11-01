@@ -225,7 +225,7 @@ def test_the_tool_is_validated_routed_labelled_and_never_a_job_tool(monkeypatch)
     copilot_tools.call(copilot_tools.LiveEvidence(), "get_option_candidates",
                        v("get_option_candidates", {"symbol": "NBIS", "horizon_days": 21, "direction": "long", "budget_usd": 900}))
     assert seen == [("NBIS", 21, "long", 900.0)]
-    assert "get_option_candidates" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_option_candidates" not in research_job.LAB_TOOLS
+    assert "get_option_candidates" not in research_job.JOB_TOOLS and "get_option_candidates" not in {t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS)}
     assert "get_option_candidates" not in copilot_tools.BOOK_CONTEXT_TOOLS  # market data, so "what changed" keeps it
 
 

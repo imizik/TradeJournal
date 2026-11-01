@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.ai import copilot, copilot_images, copilot_plan, copilot_review, copilot_tools, research_job
+from app.ai import copilot, copilot_images, copilot_review, copilot_tools, research_job
 from app.ai.copilot_fixture import FixtureEvidence
 from app.engine import captures
 from app.main import app
@@ -22,8 +22,6 @@ from app.models import TradeCapture
 from tests.test_browser_access import boundary, signin  # noqa: F401  (the shared access fixture)
 from tests.test_copilot import NOW, _cfg, _text, _turn
 from tests.test_copilot_adversarial import JOB_SAFE, NEVER_IN_JOBS
-from tests.test_copilot_plan import FakeSDK, ResultMessage, plan_env  # noqa: F401  (the shared plan-auth fixture)
-from tests.test_copilot_plan import _cfg as _plan_cfg
 from tests.test_copilot_review import REVIEWED, _seed_world, db  # noqa: F401  (a seeded journal)
 
 TRADE_ID = "0b0e6a3c-7c5d-4f69-9a51-0d6ab8a0b1c2"
@@ -114,7 +112,6 @@ def test_the_block_shapes():
     assert block == {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                  "data": base64.b64encode(image.jpeg).decode()}}
     assert copilot_images.size_of(block) == len(image.jpeg)
-    assert copilot_images.mcp_block(block) == {"type": "image", "data": block["source"]["data"], "mimeType": "image/jpeg"}
     assert copilot_images.MAX_PER_TURN == 2 and copilot_images.LONGEST == 1568
 
 
@@ -205,25 +202,6 @@ def _turn_images(history, images, evidence=None):
         return [e async for e in copilot.run_turn(history, "NBIS", _cfg(), copilot.FakeAdapter(0), evidence or FixtureEvidence(),
                                                   NOW, images=images)]
     return asyncio.run(collect())
-
-
-def test_the_plan_backend_streams_images_in_the_prompt_and_reviews_attach_mcp_images(plan_env):  # noqa: F811
-    images = _blocks(1)
-    sdk = FakeSDK([("message", ResultMessage())])
-    adapter = copilot_plan.PlanAdapter(_plan_cfg(), sdk=sdk)
-
-    async def collect():
-        events = [e async for e in adapter.run_turn([{"role": "user", "content": "What do you see?"}], "NBIS", _plan_cfg(),
-                                                    FixtureEvidence(), NOW, images=images)]
-        return events, [m async for m in sdk.prompt]
-    events, prompt = asyncio.run(collect())
-    [message] = prompt
-    content = message["message"]["content"]
-    assert message["type"] == "user" and content[0] == images[0] and content[1]["text"].endswith("What do you see?")
-    assert events[-1]["type"] == "done"
-    assert copilot_plan.mcp_content("text") == [{"type": "text", "text": "text"}]
-    assert copilot_plan.mcp_content([{"type": "text", "text": "t"}, images[0]]) == [
-        {"type": "text", "text": "t"}, copilot_images.mcp_block(images[0])]
 
 
 # --------------------------------------------------------------------------- the review's plan chart

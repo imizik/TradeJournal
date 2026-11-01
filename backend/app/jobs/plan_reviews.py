@@ -1,8 +1,8 @@
-"""The nightly daily reviews on the Claude plan (``tradejournal-plan-reviews.timer``).
+"""The nightly daily reviews through the Anthropic API (``tradejournal-plan-reviews.timer``).
 
 Finite: one run reviews the latest trading day only (and, on its first run in
 a new month, last month as a whole: app.ai.monthly_reviewer), asking Claude through
-Claude Code on the owner's plan (``app.ai.plan_runner``), saves it as the Daily
+the API (``app.ai.api_runner``), saves it as the Daily
 Review button would, and writes a status file. The latest day is reviewed when
 it has no review, when trades were added after its review (one written
 mid-session), or when its review is marked stale. Older days are never
@@ -145,7 +145,7 @@ def plan_month(session: Session, today: date) -> str | None:
 
 
 def run(session: Session, dry_run: bool = False, today: date | None = None) -> dict:
-    from app.ai import daily_review_service, monthly_reviewer, plan_runner
+    from app.ai import api_runner, daily_review_service, monthly_reviewer
 
     started = time.time()
     picked: list[tuple[date | str, str]] = list(plan(session))
@@ -168,14 +168,13 @@ def run(session: Session, dry_run: bool = False, today: date | None = None) -> d
     _write_status(status)
     for key, reason in picked:
         try:
-            # Always the plan, whatever AI_REVIEW_BACKEND says: the nightly run never bills API credits.
             if isinstance(key, str):
-                _, review = monthly_reviewer.generate(session, key, backend="plan")
+                _, review = monthly_reviewer.generate(session, key)
             else:
-                _, review = daily_review_service.generate(session, key, backend="plan")
-        except plan_runner.PlanUnavailable as exc:
+                _, review = daily_review_service.generate(session, key)
+        except api_runner.ApiUnavailable as exc:
             status["failed"].append({"day": _label(key), "reason": reason, "error": str(exc)})
-            status.update(state="failed", message=f"The Claude plan is not available: {exc}")
+            status.update(state="failed", message=f"The Anthropic API is not available: {exc}")
             break
         except LookupError:
             continue
@@ -198,7 +197,7 @@ def run(session: Session, dry_run: bool = False, today: date | None = None) -> d
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Write the nightly daily reviews on the Claude plan.")
+    parser = argparse.ArgumentParser(description="Write the nightly daily reviews.")
     parser.add_argument("--dry-run", action="store_true", help="say whether it would review the latest day and stop")
     args = parser.parse_args(argv)
     from app.database import engine

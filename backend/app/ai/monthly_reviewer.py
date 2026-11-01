@@ -6,8 +6,7 @@ York calendar, the dashboard's rule), broken down by ticker, time of day, hold
 time, side, days to expiry, entry flags, size, weekday, with or without a
 captured plan, and SPY's day; the month's daily reviews (grades, rules kept and
 broken, patterns); last month's numbers and its commitment. Like the daily
-review it asks Claude on the owner's plan (app.ai.plan_runner), never API
-credits unless ``AI_REVIEW_BACKEND=api`` is set for the button.
+review it asks Claude through the Anthropic API (app.ai.api_runner).
 """
 
 from __future__ import annotations
@@ -233,30 +232,17 @@ def build_context(session: Session, month: str) -> dict:
             "daily_reviews": daily, "gaps": gaps}
 
 
-def review_month(session: Session, month: str, backend: str | None = None) -> tuple[dict, int]:
+def review_month(session: Session, month: str) -> tuple[dict, int]:
     """The month's review and how many closed trades it covered. Raises LookupError when there are none."""
-    import os
 
     context = build_context(session, month)
     message = f"Review this trading month:\n\n{json.dumps(context, indent=2, default=str)}"
-    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
-    if chosen == "api":
-        from app.ai.daily_reviewer import _parse_json_response
-        from anthropic import Anthropic
+    from app.ai import api_runner
 
-        response = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY")).messages.create(
-            model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"), max_tokens=4000, system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(SCHEMA)}"}])
-        review = _parse_json_response(response.content[0].text)
-        review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
-    else:
-        from app.ai import plan_runner
-
-        answer = plan_runner.ask(SYSTEM_PROMPT, message, SCHEMA)
-        review = answer.data
-        review["generated_by"] = answer.author
-        review["usage"] = {"input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
-                           "api_equivalent_usd": answer.api_equivalent_usd, "seconds": answer.seconds}
+    answer = api_runner.ask(SYSTEM_PROMPT, message, SCHEMA)
+    review = answer.data
+    review["generated_by"] = answer.author
+    review["usage"] = answer.usage
     missing = [field for field in FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
@@ -264,8 +250,8 @@ def review_month(session: Session, month: str, backend: str | None = None) -> tu
     return review, context["this_month"]["overall"]["trades"]
 
 
-def generate(session: Session, month: str, backend: str | None = None) -> tuple[MonthlyReviewRecord, dict]:
-    review, count = review_month(session, month, backend)
+def generate(session: Session, month: str) -> tuple[MonthlyReviewRecord, dict]:
+    review, count = review_month(session, month)
     record = session.exec(select(MonthlyReviewRecord).where(MonthlyReviewRecord.month == month)).first()
     now = datetime.utcnow()
     if record:

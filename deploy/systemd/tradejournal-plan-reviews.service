@@ -1,5 +1,5 @@
 [Unit]
-Description=Opt-in nightly TradeJournal daily reviews on the Claude plan
+Description=Opt-in nightly TradeJournal daily reviews through the Anthropic API
 Wants=network-online.target
 After=network-online.target
 
@@ -9,12 +9,8 @@ User=tradejournal
 Group=tradejournal
 WorkingDirectory=/opt/tradejournal/current/backend
 EnvironmentFile=/etc/tradejournal/backend.env
-# The plan token from `claude setup-token` (deploy/README.md, "Nightly reviews on the Claude plan").
-EnvironmentFile=/etc/tradejournal/claude-plan.env
-Environment=TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude
-Environment=TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude
 Environment=TJ_PLAN_REVIEW_DIR=/var/lib/tradejournal/plan-reviews
-Environment=HOME=/var/lib/tradejournal/claude
+Environment=HOME=/var/lib/tradejournal
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m app.jobs.plan_reviews
 TimeoutStartSec=90min

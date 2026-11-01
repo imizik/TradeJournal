@@ -2,7 +2,7 @@
 
 Off unless ``SHADOW_BOOK_ENABLED=true`` and Radar's ``RADAR_STORE`` is an absolute path; it runs in the API process.
 During the regular session each new Radar event of today, read only from the Radar store, gets at most one decision:
-one unattended copilot turn on the owner's Claude plan (``app.ai.shadow_turn``, never an API key), at most
+one unattended copilot turn on API credits (``app.ai.shadow_turn``), at most
 ``SHADOW_BOOK_MAX_TURNS`` a session (default 12). An event the book reaches more than ``FRESH_SECONDS`` after Radar
 first saw it, one in the session's last half hour, and one past the cap is recorded ``not_decided`` with no turn.
 Before any of that, ``eligible`` keeps the turns for events worth one: Radar's strong-event bar for a single ping
@@ -222,7 +222,7 @@ def _quote(symbol: str):
 
 class ShadowBook:
     """Claims Radar events, runs one decision at a time and manages the paper positions. ``decide`` is
-    ``shadow_turn.decide`` (injectable, so tests never start Claude Code)."""
+    ``shadow_turn.decide`` (injectable, so tests never call the API)."""
 
     def __init__(self, engine, store_path: str, feed, calendar, *, clock=time.time, quote=_quote, decide=None,
                  turns: int | None = None):

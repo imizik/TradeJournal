@@ -87,7 +87,7 @@ def test_retry_with_backoff_then_failed_and_non_retryable_fails_at_once():
     other, _ = q.enqueue_question("q2", [])
     _claim()
     assert q.record_outcome(other["id"], cost_usd=None, investigation_id=None,
-                            error={"code": "plan_local_only", "message": "x"})["status"] == "failed"
+                            error={"code": "api_auth", "message": "x"})["status"] == "failed"
 
 
 def test_cancelled_while_running_stays_cancelled_and_restart_requeues():

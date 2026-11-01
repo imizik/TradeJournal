@@ -906,7 +906,7 @@ def test_practice_timer_is_packaged_but_never_enabled_by_install():
     assert "EnvironmentFile=/etc/tradejournal/backend.env" in service
 
 
-def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_token_file():
+def test_plan_reviews_are_packaged_opt_in_and_use_the_backends_api_key_not_a_plan_token_file():
     root = Path(__file__).resolve().parents[2]
     systemd = root / "deploy/systemd"
     control = load("control")
@@ -915,22 +915,21 @@ def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_toke
     assert "tradejournal-plan-reviews.timer" in control.OPT_IN_TIMERS
     service = (systemd / "tradejournal-plan-reviews.service").read_text()
     assert "-m app.jobs.plan_reviews" in service
-
-    assert "EnvironmentFile=/etc/tradejournal/claude-plan.env" in service  # required: no token, no run
-    assert "TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude" in service
+    # The nightly run reads ANTHROPIC_API_KEY from the backend's own env file: no plan token file, no Claude Code.
+    assert "EnvironmentFile=/etc/tradejournal/backend.env" in service
+    assert "claude-plan.env" not in service and "CLAUDE_CODE_OAUTH_TOKEN" not in service
+    assert "TJ_CLAUDE_BIN" not in service and "TJ_CLAUDE_CONFIG_DIR" not in service
     assert "ReadWritePaths=/var/lib/tradejournal" in service and "ProtectHome=true" in service
     timer = (systemd / "tradejournal-plan-reviews.timer").read_text()
     assert "20:10:00 America/New_York" in timer and "Persistent=true" in timer
     api = (systemd / "tradejournal-api.service").read_text()
     assert "ReadWritePaths=-/var/lib/tradejournal-shadow" in api
-    assert "EnvironmentFile=-/etc/tradejournal/claude-plan.env" in api  # optional for the API
+    assert "claude-plan.env" not in api and "TJ_CLAUDE_BIN" not in api and "TJ_CLAUDE_CONFIG_DIR" not in api
     pinned = json.loads((root / "deploy/claude-code/package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
     assert re.fullmatch(r"\d+\.\d+\.\d+", pinned)
     lock = json.loads((root / "deploy/claude-code/package-lock.json").read_text())
     assert lock["packages"]["node_modules/@anthropic-ai/claude-code"]["version"] == pinned
     assert "claude-code-linux-{arch}/claude" in (root / "deploy/build.py").read_text()
-    example = (root / "deploy/claude-plan.env.example").read_text()
-    assert "CLAUDE_CODE_OAUTH_TOKEN=\n" in example and "ANTHROPIC_API_KEY" not in example
 
 
 def test_company_research_units_quiesce_and_are_removed_on_rollback(control, tmp_path, monkeypatch):
@@ -1301,20 +1300,20 @@ def test_market_read_flag_reaches_the_config_from_systemd(alerts, monkeypatch, t
     assert config["JO_MARKET_READ_ALERTS"] == "true" and config["JO_MORNING_ALERTS"] == "true"
 
 
-def test_research_jobs_ship_a_pure_agent_sdk_that_runs_the_release_claude_code():
-    """Research jobs (docs/copilot-lab.md § Research queue) use claude-agent-sdk from the copilot-plan extra. The
-    release builds it from its sdist, so the ~126 MB PyPI wheel's bundled Claude Code never rides along, and installs
-    the extra."""
+def test_research_jobs_ship_with_the_plain_api_client_and_no_agent_sdk_extra():
+    """Research jobs and shadow turns call the Messages API through the ``anthropic`` package the backend already
+    depends on: no copilot-plan extra, no Agent SDK wheel built from its sdist, and no Claude Code env for the API."""
     root = Path(__file__).resolve().parents[2]
-    build = (root / "deploy/build.py").read_text()
-    assert "[copilot-plan]" in build and '"--no-binary", "claude-agent-sdk"' in build and "py3-none-any.whl" in build
-    assert '"trade-journal-backend[copilot-plan]==0.1.0"' in (root / "deploy/control.py").read_text()
     pyproject = (root / "backend/pyproject.toml").read_text()
-    assert re.search(r'copilot-plan = \[\s*"claude-agent-sdk==\d+\.\d+\.\d+",\s*\]', pyproject)
-    # The pinned SDK needs Claude Code 2.1.257 or later (its README); verbatim prompts need 2.1.248.
-    pinned = json.loads((root / "deploy/claude-code/package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
-    assert tuple(int(part) for part in pinned.split(".")) >= (2, 1, 257)
+    assert "copilot-plan" not in pyproject and "claude-agent-sdk" not in pyproject
+    assert re.search(r'"anthropic[>=~]', pyproject)  # the client the runner needs is a plain dependency
+    build = (root / "deploy/build.py").read_text()
+    control_source = (root / "deploy/control.py").read_text()
+    assert "copilot-plan" not in build and "claude-agent-sdk" not in build and "claude_agent_sdk" not in build
+    assert "copilot-plan" not in control_source and "claude-agent-sdk" not in control_source
+    assert '"trade-journal-backend==0.1.0"' in control_source
     api = (root / "deploy/systemd/tradejournal-api.service").read_text()
-    assert "TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude" in api
-    assert "TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude" in api and "ReadWritePaths=/var/lib/tradejournal" in api
-    assert "assert_research_job_ready(release)" in (root / "deploy/smoke.py").read_text()
+    assert "claude-plan.env" not in api and "TJ_CLAUDE_BIN" not in api and "CLAUDE_CODE_OAUTH_TOKEN" not in api
+    smoke = (root / "deploy/smoke.py").read_text()
+    assert "assert_research_job_ready(release)" in smoke and "claude_agent_sdk" not in smoke and "research_job.prepare" not in smoke
+    assert "api_runner" in smoke

@@ -5,8 +5,7 @@ A turn streams Claude's answer and lets it call only the allowlisted tools in
 browser sends text-only history, so it can never forge a tool result; evidence
 is re-read when the model needs it. Nothing is saved: no plan, watch, alert or
 order. ``COPILOT_BACKEND=fake`` (the default) is a scripted stand-in that makes
-no API call; only ``anthropic`` spends API credits. ``plan`` runs the same turn on
-the owner's Claude plan through the Agent SDK (``copilot_plan``).
+no API call; ``anthropic`` spends API credits.
 """
 from __future__ import annotations
 
@@ -48,7 +47,7 @@ MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,60}$")
 # "Explain this candle: NBIS 5m at 10:40 ET" (the Charts menu's line), with "on 2026-10-23" for an earlier session.
 MOMENT = re.compile(r"(?:(?P<symbol>[A-Z][A-Z0-9.\-]{0,9}) (?P<timeframe>1m|3m|5m|15m|30m|1h|4h|1D) )?at (?P<hour>\d{1,2}):(?P<minute>\d{2}) ET"
                     r"(?: on (?P<date>\d{4}-\d{2}-\d{2}))?")
-BACKENDS = ("anthropic", "plan")  # what a turn may pick; `fake` is only ever the default
+BACKENDS = ("anthropic",)  # what a turn may pick; `fake` is only ever the default
 # Short progress notes between tool calls come back as thinking text; reasoning itself stays hidden.
 PROGRESS_BETA = "thinking-display-updates-2026-08-18"
 # USD per million tokens: input, output, cache read, 5-minute cache write.
@@ -238,17 +237,14 @@ class Settings:
     turn_timeout_s: float = 120.0
     max_tokens: int = 4000
     turn_budget_usd: float = 0.25
-    plan_configured: bool = False
     models: tuple[str, ...] = (DEFAULT_MODEL,)  # what a turn may pick; self.model is always first
     backends: tuple[str, ...] = ("fake",)  # what a turn may pick; self.backend is always first
-    plan_remote_ok: bool = False  # COPILOT_PLAN_REMOTE_OK: the plan backend on a hosted database (owner-accepted)
     daily_budget_usd: float = 2.0  # COPILOT_DAILY_BUDGET_USD: API turns stop for the day past this estimate
 
     def public(self) -> dict:
         return {"enabled": self.enabled, "backend": self.backend, "evidence": self.evidence, "model": self.model,
                 "models": list(self.models), "backends": list(self.backends), "daily_budget_usd": self.daily_budget_usd,
                 "effort": self.effort, "fallbacks": self.fallbacks, "key_configured": self.key_configured,
-                "plan_configured": self.plan_configured,
                 "limits": {"max_rounds": self.max_rounds, "max_tool_calls": self.max_tool_calls,
                            "turn_budget_usd": self.turn_budget_usd,
                            "tool_timeout_s": self.tool_timeout_s, "turn_timeout_s": self.turn_timeout_s},
@@ -260,17 +256,15 @@ def settings() -> Settings:
     evidence = os.environ.get("COPILOT_EVIDENCE", "fixture").strip().lower()
     effort = os.environ.get("COPILOT_EFFORT", "medium").strip().lower()
     model = os.environ.get("COPILOT_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    backend = backend if backend in ("fake", "anthropic", "plan") else "fake"
+    # An environment still saying COPILOT_BACKEND=plan means the API now: never a silent fall to the scripted model.
+    backend = "anthropic" if backend == "plan" else backend
+    backend = backend if backend in ("fake", "anthropic") else "fake"
     key_configured = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    plan_remote_ok = os.environ.get("COPILOT_PLAN_REMOTE_OK") == "true"
-    wanted = requested_backends()
-    plan_ready = (backend == "plan" or "plan" in wanted) and _plan_configured()
-    plan_usable = plan_ready and (plan_remote_ok or _is_local())
     return Settings(
         enabled=os.environ.get("COPILOT_ENABLED") == "true",
         backend=backend,
-        backends=offered_backends(backend, wanted, key_configured, plan_usable),
-        plan_remote_ok=plan_remote_ok, daily_budget_usd=_float_env("COPILOT_DAILY_BUDGET_USD", 2.0),
+        backends=offered_backends(backend, requested_backends(), key_configured),
+        daily_budget_usd=_float_env("COPILOT_DAILY_BUDGET_USD", 2.0),
         evidence=evidence if evidence in ("fixture", "live", "replay") else "fixture",
         model=model,
         models=offered_models(model),
@@ -278,7 +272,6 @@ def settings() -> Settings:
         fallbacks=os.environ.get("COPILOT_FALLBACKS", "default") != "off",
         key_configured=key_configured,
         turn_budget_usd=_float_env("COPILOT_TURN_BUDGET_USD", 0.25),
-        plan_configured=plan_ready,
         replay_store=os.environ.get("COPILOT_REPLAY_STORE", ""),
         replay_at=os.environ.get("COPILOT_REPLAY_AT", ""),
     )
@@ -303,20 +296,14 @@ def requested_backends() -> tuple[str, ...]:
     return tuple(dict.fromkeys(b for b in names if b in BACKENDS))
 
 
-def offered_backends(default: str, wanted: tuple[str, ...], key_configured: bool, plan_usable: bool) -> tuple[str, ...]:
+def offered_backends(default: str, wanted: tuple[str, ...], key_configured: bool) -> tuple[str, ...]:
     """The backends a turn may pick: the default first, then each requested one that is actually usable here
-    (anthropic needs the API key; plan needs the token, the SDK and, off a local database, COPILOT_PLAN_REMOTE_OK)."""
+    (anthropic needs the API key)."""
     out = [default]
     for name in wanted:
-        usable = key_configured if name == "anthropic" else plan_usable
-        if usable and name not in out:
+        if key_configured and name not in out:
             out.append(name)
     return tuple(out)
-
-
-def _is_local() -> bool:
-    from app.environment import describe
-    return describe().is_local
 
 
 def with_backend(cfg: Settings, backend: str | None) -> Settings:
@@ -336,11 +323,6 @@ def with_model(cfg: Settings, model: str | None) -> Settings:
     if model not in cfg.models:
         raise CopilotError("model_not_offered", f"{model} is not one of the models this server offers.")
     return dataclasses.replace(cfg, model=model)
-
-
-def _plan_configured() -> bool:
-    from app.ai import copilot_plan
-    return copilot_plan.configured()
 
 
 def evidence_for(cfg: Settings):
@@ -1009,9 +991,6 @@ def adapter_for(cfg: Settings):
         if not cfg.key_configured:
             raise CopilotError("api_not_configured", "ANTHROPIC_API_KEY is not set on the private backend.")
         return AnthropicAdapter(cfg)
-    if cfg.backend == "plan":
-        from app.ai import copilot_plan
-        return copilot_plan.PlanAdapter(cfg)
     return FakeAdapter()
 
 

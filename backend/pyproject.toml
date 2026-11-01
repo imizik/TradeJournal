@@ -53,15 +53,6 @@ dev = [
     # CI resolve the same rule set. Bump deliberately, in its own commit.
     "ruff==0.16.7",
 ]
-# The Claude Agent SDK for Copilot Lab's research jobs (on the VPS) and its
-# local plan backend (docs/copilot-lab.md). An extra, because its ~126 MB PyPI
-# wheel bundles a ~270 MB Claude Code binary that CI does not need (its tests
-# stub the SDK). The release builds it from its sdist into a pure wheel that runs
-# the release's own bin/claude (deploy/build.py) and installs the extra.
-copilot-plan = [
-    "claude-agent-sdk==0.2.174",
-]
-
 [tool.pytest.ini_options]
 # Scope collection to tests/. Without this pytest walks scripts/, where some
 # ad hoc analysis utilities do real work (open databases, hit APIs) at import

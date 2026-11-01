@@ -11,9 +11,9 @@ exam on the locked holdout) and appends the result to `research/ledger.jsonl`.
 a brief (`app/engine/factory_brief.py`), they are judged, and the week's
 report goes to `research/reports/`; `notify` sends its summary to the phone.
 The idea model answers the brief `--dry-run` wrote, and `--answer` judges that
-answer: `scripts/factory_week.sh` has `claude -p` on the Claude plan write it
-every week, or a Claude Code session does by hand (`/factory-week`). Only
-`--use-api` asks Claude through the Anthropic API instead, on API credits.
+answer. `--use-api`, which `scripts/factory_week.sh` passes every week, asks Claude
+through the Anthropic API on API credits instead; a Claude Code session can answer
+by hand (`/factory-week`).
 See docs/strategy-factory.md.
 
 The live ledger is on branch factory/ledger, in the factory checkout
@@ -325,7 +325,7 @@ Proposer = Callable[[str, str], tuple[dict[str, Any], str]]
 
 def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
     """Ask the idea model for this week's candidates through the Anthropic API,
-    on API credits (`week --use-api` only); returns its answer and a usage note."""
+    on API credits (`week --use-api`); returns its answer and a usage note."""
     import anthropic
 
     model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
@@ -363,9 +363,8 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
 
 
 def answer_file(path: Path, author: str) -> Proposer:
-    """The idea model's answer from a file written after reading the brief, by
-    `claude -p` on the Claude plan (scripts/factory_week.sh) or a Claude Code
-    session (`/factory-week`), instead of one asked for through the API."""
+    """The idea model's answer from a file written after reading the brief, by a
+    Claude Code session (`/factory-week`), instead of one asked for through the API."""
 
     def propose(system: str, text: str) -> tuple[dict[str, Any], str]:
         try:
@@ -642,7 +641,7 @@ def main(
     week.add_argument("--brief-out", type=Path, help="with --dry-run, write the brief to this file instead")
     week.add_argument("--schema-out", type=Path, help="with --brief-out, also write the answer's JSON schema here")
     week.add_argument("--answer", type=Path, help="the idea model's answer to the brief as JSON, written by "
-                                                  "claude -p or a Claude Code session; no API call")
+                                                  "a Claude Code session; no API call")
     week.add_argument("--answer-by", default="Claude in a Claude Code session",
                       help="who wrote --answer, for the report")
     week.add_argument("--use-api", action="store_true", help="ask Claude through the Anthropic API instead, "

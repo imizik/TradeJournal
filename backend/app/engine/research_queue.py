@@ -54,7 +54,7 @@ ACTIVE = ("queued", "running")
 MAX_ATTEMPTS = 3
 BACKOFF_S = (60, 300)  # before the 2nd and 3rd attempt
 # Failures worth another attempt; anything else (auth, budget, bad input) fails at once.
-RETRYABLE = {"timeout", "sdk", "no_result", "no_assessment"}
+RETRYABLE = {"timeout", "api", "api_rate_limit", "api_unavailable", "api_unreachable", "no_answer", "no_assessment"}
 MIN_JOB_BUDGET_USD = 0.05  # below what is left of the day, nothing starts
 
 
@@ -261,7 +261,7 @@ def _day_start() -> datetime:
 
 
 def spent_today(session: Session | None = None) -> float:
-    """Spend charged for attempts started since midnight UTC, estimates included (API-equivalent on the plan)."""
+    """Spend charged for attempts started since midnight UTC, estimates included."""
     start = _day_start()
     with _session(session) as db:
         jobs = db.exec(select(ResearchJob).where(col(ResearchJob.started_at) >= start))

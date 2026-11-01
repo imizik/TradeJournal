@@ -306,8 +306,7 @@ leaders (or laggards) and five random tracked stocks at the same pass. It append
 scored event, so results outlive the 20-session quote pruning; run it at least every 20 sessions. The
 read-out is per rule version and decides only after 20 sessions of one version. No provider or model
 call. Question, comparisons and decision: [spec](../research/radar-outcomes/spec.md).
-`backend/scripts/radar_outcomes_review.py` optionally asks one Copilot Lab research job, on the Claude
-plan only (never an API key), what set the furthest continuations apart from the furthest reversals;
+`backend/scripts/radar_outcomes_review.py` optionally asks one Copilot Lab research job, on API credits, what set the furthest continuations apart from the furthest reversals;
 it is hindsight input for a later rule version.
 
 On the VPS, either step can be run by hand as the API's user with its settings:
@@ -319,8 +318,7 @@ sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradej
   /var/lib/tradejournal/radar/radar.sqlite --out /var/lib/tradejournal/radar/outcomes.jsonl
 sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradejournal \
   -p WorkingDirectory=/opt/tradejournal/current/backend -p EnvironmentFile=/etc/tradejournal/backend.env \
-  -p EnvironmentFile=/etc/tradejournal/claude-plan.env -E TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude \
-  -E TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude /opt/tradejournal/current/backend/.venv/bin/python \
+  /opt/tradejournal/current/backend/.venv/bin/python \
   scripts/radar_outcomes_review.py /var/lib/tradejournal/radar/outcomes.jsonl --since <first session> \
   --out /var/lib/tradejournal/radar/review-<date>.json
 ```
@@ -328,7 +326,7 @@ sudo systemd-run --wait --pipe --collect --quiet --uid=tradejournal --gid=tradej
 The review calls the research job directly, so `RESEARCH_BUDGET_USD` caps it but the queue's
 `RESEARCH_DAILY_BUDGET_USD` does not count it; run it at most once a week. First run, October 24:
 the scorer opened the live store read-only and scored 0 (no rule-written events yet); the review,
-on that day's replayed in-sample events, ran on the plan in 56 s ($0.14 API-equivalent, 13 citations,
+on that day's replayed in-sample events, ran in 56 s ($0.14 at API prices, 13 citations,
 server checks clean).
 
 **Weekly timer (owner-approved October 24, 2026).** `tradejournal-radar-outcomes.timer` runs both every
@@ -347,7 +345,7 @@ The installed units, verbatim:
 
 ```ini
 [Unit]
-Description=Weekly Radar outcome scoring, then the plan-only research review (docs/radar.md, Outcome scoring)
+Description=Weekly Radar outcome scoring, then the research review (docs/radar.md, Outcome scoring)
 Wants=network-online.target
 After=network-online.target
 
@@ -357,14 +355,11 @@ User=tradejournal
 Group=tradejournal
 WorkingDirectory=/opt/tradejournal/current/backend
 EnvironmentFile=/etc/tradejournal/backend.env
-EnvironmentFile=/etc/tradejournal/claude-plan.env
-Environment=TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude
-Environment=TJ_CLAUDE_CONFIG_DIR=/var/lib/tradejournal/claude
-Environment=HOME=/var/lib/tradejournal/claude
+Environment=HOME=/var/lib/tradejournal
 Environment=PYTHONUNBUFFERED=1
 # Read-only on the Radar store; appends newly scored events. No model call.
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m scripts.radar_outcomes /var/lib/tradejournal/radar/radar.sqlite --out /var/lib/tradejournal/radar/outcomes.jsonl
-# The week's sessions (Saturday on), reviewed on the Claude plan only; skipped when nothing was scored.
+# The week's sessions (Saturday on), reviewed on API credits; skipped when nothing was scored.
 ExecStart=/bin/sh -c 'f=/var/lib/tradejournal/radar/outcomes.jsonl; since=$$(date -d "6 days ago" +%%F); out=/var/lib/tradejournal/radar/review-$$(date +%%F).json; py=/opt/tradejournal/current/backend/.venv/bin/python; if "$$py" scripts/radar_outcomes_review.py "$$f" --since "$$since" --dry-run >/dev/null 2>&1; then "$$py" scripts/radar_outcomes_review.py "$$f" --since "$$since" --out "$$out" >/dev/null && echo "Review written to $$out"; else echo "No scored events since $$since: no review this week."; fi'
 TimeoutStartSec=20min
 UMask=0077
@@ -757,19 +752,16 @@ Isaac's call, because it runs unattended plan turns in a new worker.
   the cap counts eligible events only. The week summary's `filtered` is that
   count, and the screen folds those rows into one line ("9 events below the
   bar, no turn spent") that opens to the list.
-- **Decision:** one turn through `backend/app/ai/shadow_turn.py` on Isaac's
-  Claude plan only, never an API key (`research_job.prepare("plan")`, whatever
-  `RESEARCH_AUTH` says). It refuses on a hosted database unless
-  `COPILOT_PLAN_REMOTE_OK=true`, as the plan chat does. Tools are an allowlist:
-  the research job's read-only lab tools plus `get_option_candidates`, no
-  built-in tools and no web; a PreToolUse hook denies everything else. The
+- **Decision:** one turn through `backend/app/ai/shadow_turn.py` on API credits.
+  Tools are an allowlist: the research job's read-only lab tools plus
+  `get_option_candidates`, and no web; a call to anything else is denied. The
   prompt carries the event, the 5-minute chart context and the shadow book's own
   open positions and last ten results, never Isaac's book. The answer is SKIP
   with a one-line reason, or one plan in the `trade_plan` shape `propose_plan`
   uses (checked by the same validator) plus a target and an `HH:MM` New York time
   stop; the thesis states the copilot's own rules. A plan that fails the checks
   is recorded `error`, never traded. Each turn is a `copilot_turn` row with
-  `billing=claude_plan`.
+  `backend=shadow`, `billing=api_background`, apart from the desk budget (older rows say `claude_plan`).
 - **Unit:** one position is one unit: one option contract for calls or puts, or
   whole shares worth $1,000 for stock (at least one). No scaling, adding or
   spreads.
@@ -797,7 +789,7 @@ Isaac's call, because it runs unattended plan turns in a new worker.
 
 Switching on: add `SHADOW_BOOK_ENABLED=true` (and `SHADOW_BOOK_MAX_TURNS` if not
 12) to `/etc/tradejournal/backend.env` and restart `tradejournal-api.service`;
-the plan token and `COPILOT_PLAN_REMOTE_OK=true` are already there. Undo: remove
+the API key is already there. Undo: remove
 the line (or set it to false) and restart; the stored decisions stay and the
 section keeps showing them. Tests: `backend/tests/test_shadow_book.py`.
 

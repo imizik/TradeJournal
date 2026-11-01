@@ -393,7 +393,7 @@ def test_get_owner_context_is_validated_routed_and_never_a_job_tool(monkeypatch)
     monkeypatch.setattr(copilot_context, "owner_context", lambda symbol, session=None, now=None, bounded=True: {"state": "ok", "symbol": symbol})
     assert copilot_tools.LiveEvidence().get_owner_context("CRWV") == {"state": "ok", "symbol": "CRWV"}
     assert copilot_tools.provenance("get_owner_context", {"state": "ok"}, "live")["kind"] == "saved"
-    assert "get_owner_context" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_owner_context" not in research_job.LAB_TOOLS
+    assert "get_owner_context" not in research_job.JOB_TOOLS and "get_owner_context" not in {t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS)}
 
 
 def test_memories_take_a_symbol_and_put_its_memories_first(db):

@@ -147,8 +147,7 @@ def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_session)):
     all_trades = session.exec(select(Trade)).all()
     stats = _compute_stats_for_context(all_trades, session)
 
-    # Claude on the owner's plan (app.ai.plan_runner); the API only with AI_REVIEW_BACKEND=api.
-    from app.ai import plan_runner
+    from app.ai import api_runner
     from app.ai.reviewer import review_trade as ai_review_trade
 
     try:
@@ -157,8 +156,8 @@ def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_session)):
         session.add(trade)
         session.commit()
         session.refresh(trade)
-    except plan_runner.PlanUnavailable as e:
-        raise HTTPException(status_code=503, detail=f"Trade review is not set up on the Claude plan: {e}") from e
+    except api_runner.ApiUnavailable as e:
+        raise HTTPException(status_code=503, detail=f"Trade review is not set up: {e}") from e
     except ModuleNotFoundError as e:
         if e.name == "anthropic":
             raise HTTPException(

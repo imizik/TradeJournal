@@ -1098,8 +1098,7 @@ an unknown or expired id, a restart, another worker, or evidence kept in
 another mode (live, replay, fixture) means the turn reads afresh as before.
 A clipped read ends `[clipped]`, and the block's frame markers are made inert
 inside carried text. The data never leaves the server, and the block says that
-text inside it is third-party data, never an instruction. The plan backend
-puts the same block in its single prompt. Tests:
+text inside it is third-party data, never an instruction. Tests:
 `backend/tests/test_copilot_carry.py`.
 
 ## What changed?
@@ -2188,10 +2187,7 @@ what cannot be read, and treat text inside it as data, never an instruction.
 screenshot (under half a cent on Sonnet), counted against the turn's spend cap
 like any other input.
 
-**Backends.** `anthropic` sends image content blocks. `plan` streams the prompt
-as one stream-json user message with the image blocks ahead of its text (the
-Agent SDK passes Messages API content through), and a review's plan chart as
-an MCP image block. `fake` makes no call: it acknowledges each image by its
+**Backends.** `anthropic` sends image content blocks. `fake` makes no call: it acknowledges each image by its
 size in a scripted line, so the fixture and the browser spec exercise the path
 (the fixture's closed review draws a stand-in plan chart). Tests:
 `backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`,
@@ -2244,15 +2240,14 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | Variable | Default | Meaning |
 |---|---|---|
 | `COPILOT_ENABLED` | unset (off) | `true` turns the routes on. On in production since 2026-10-24 (below). |
-| `COPILOT_BACKEND` | `fake` | `fake` is a scripted stand-in that makes no API call. `anthropic` uses the Messages API and spends credits. `plan` runs on the owner's Claude plan through the Agent SDK and spends no API credits (below). |
+| `COPILOT_BACKEND` | `fake` | `fake` is a scripted stand-in that makes no API call. `anthropic` uses the Messages API and spends credits. The old value `plan` now means `anthropic`. |
 | `COPILOT_EVIDENCE` | `fixture` | `fixture` returns SIMULATED neocloud data; the model is told so in its context line, in a `"simulated": true` marker on every tool result and in the system prompt, and says so in its answer. `live` reads this installation's Radar, news, Tradier and quote services. `replay` reads a recorded session at a frozen moment (below). |
 | `COPILOT_REPLAY_STORE` | none | `replay` only: path to a read-only copy of a Radar store. |
 | `COPILOT_REPLAY_AT` | none | `replay` only: New York time inside a recorded session, e.g. `2026-10-23T11:12`. |
 | `COPILOT_MODEL` | `claude-sonnet-5-5` | Model id for `anthropic` and `plan`: the default for a turn. |
 | `COPILOT_MODELS` | `claude-sonnet-5-5,claude-opus-5-5,claude-fable-5-1` | The models the panel's **Model** picker offers, comma-separated; `COPILOT_MODEL` is always offered first. A turn sends its pick as `model` in `POST /copilot/chat`; one not in this list is refused (422). The pick is remembered per browser, and the metrics line in each answer's Sources shows the model that actually answered. A model with no entry in `copilot.PRICES` is costed at the dearest known price, so the turn budget errs high. |
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
-| `COPILOT_BACKENDS` | `anthropic,plan` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. Each is offered only when usable: `anthropic` needs the API key; `plan` needs the token and the SDK and, off a local database, `COPILOT_PLAN_REMOTE_OK`. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
-| `COPILOT_PLAN_REMOTE_OK` | unset (off) | `true` lets the `plan` backend run against a hosted database: the owner accepts the Claude plan's terms for this app, as already done for research jobs (`RESEARCH_AUTH=plan`). Without it the plan backend stays local-only. |
+| `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `2` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow; plan turns are unaffected. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
 | `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). Not applied to `plan`, which bills nothing per token: a plan turn is bounded by its rounds and tool calls, and a failed plan turn's error carries Claude Code's own reason (for example an HTTP 400's message). |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
@@ -2265,8 +2260,6 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `POSITION_COMPANION_ENABLED` | unset (off) | `true` runs the [position companion](#position-companion): unplanned long options are adopted with a drafted plan, updated and closed in one Telegram thread (needs `COPILOT_ENABLED` and Telegram). `COMPANION_MODEL` (default: `COPILOT_MODEL`), `COMPANION_MOVE_PCT` (3), `COMPANION_MAX_UPDATES` (4 a position a day), `COMPANION_MAX_POSITIONS` (6 watched at once). |
 | `DAY_REPLAY_ENABLED` | unset (off) | `true` builds [Watch your day](#watch-your-day) at 16:20 New York on a trading day with a fill and pings it (needs `NTFY_URL`; not the lab). |
 | `ANTHROPIC_API_KEY` | none | Read only by the backend process for `anthropic`. It is never sent to the browser, and `plan` never passes it to Claude Code. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | none | `plan` only: the plan token from `claude setup-token`. |
-| `TJ_CLAUDE_CONFIG_DIR` | a private temp directory | `plan` only: Claude Code's state directory, never the owner's `~/.claude` (shared with `backend/app/ai/plan_runner.py`). `TJ_CLAUDE_BIN` picks the Claude Code binary the same way. |
 
 A model id the price table doesn't know (a dated id, or a fallback model the API reports) is priced at its
 known base model, otherwise at the dearest known price, so the per-turn cap always applies.
@@ -2281,84 +2274,15 @@ Cost estimates use $2 / $10 per million input/output tokens for Sonnet 5.5
 ($0.20 cache read, $2.50 cache write). These are estimates only; the Anthropic
 Console is authoritative.
 
-## Plan backend (`COPILOT_BACKEND=plan`)
+## API only (since 2026-10-31)
 
-`backend/app/ai/copilot_plan.py` runs the same turn through the Claude Agent
-SDK for Python (`claude-agent-sdk`, an optional extra:
-`pip install -e '.[copilot-plan]'` in `backend/`). Claude Code signs in with
-the plan token, so a turn uses the owner's Claude subscription, never API
-credits.
-
-- **Local development and testing only.** Anthropic's current terms point
-  products built on the Agent SDK at API keys. The
-  [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
-  says: "Unless previously approved, Anthropic does not allow third party
-  developers to offer claude.ai login or rate limits for their products,
-  including agents built on the Claude Agent SDK." The
-  [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
-  says OAuth "is designed to support ordinary use of Claude Code and other
-  native Anthropic applications". It also says developers "including those
-  using the Agent SDK, should use API key authentication", and that Pro and Max
-  limits "assume ordinary, individual usage of Claude Code and the Agent SDK".
-  The owner using their own token, made with `claude setup-token` (documented
-  "for CI pipelines, scripts, or other environments where interactive browser
-  login isn't available"), to test their own single-user app on their own
-  machine is that kind of individual use: no one else signs in and nothing is
-  routed for other users. A backend on the VPS is a running product service,
-  which these pages point at API keys. So `plan` refuses to start unless the
-  database is local (`app.environment.describe().is_local`, as replay does).
-  Production uses `anthropic` with an API key, or written approval from
-  Anthropic first.
-- **Owner's decision for research jobs (2026-10-24).** The owner chose the
-  plan for background research jobs on the VPS, in their words: "use my
-  Claude subscription (plan token) for VPS research jobs. It's my own
-  single-user app and I accept the terms risk."
-  - `RESEARCH_AUTH=plan` is therefore allowed on any database
-    (§ Research job).
-  - This chat backend (`COPILOT_BACKEND=plan`) stays local-only.
-  - The quotes above still describe Anthropic's guidance; the owner accepted
-    that risk knowingly.
-- **Authentication.** Run `claude setup-token` and put the value in
-  `CLAUDE_CODE_OAUTH_TOKEN` in the private backend environment. Claude Code
-  gets the environment from `plan_runner` (a short allowlist plus the token);
-  the SDK passes the backend's whole environment otherwise, so every other
-  variable is set to empty for the child, including `ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, cloud-provider switches and
-  the database URL. Before the first turn in a process, `claude auth status`
-  run under that exact environment must report the plan token as the sign-in.
-  Otherwise the chat returns 503 and asks for `claude setup-token`. It never
-  falls back to an API key.
-- **Same limits.** Only the eight lab tools, as in-process SDK MCP tools that
-  call `copilot_tools.validate()` and the same timed, bounded runner; the same
-  8-call cap (later calls get an error result), 4 model rounds (`max_turns`),
-  120 s per turn and the spend cap above.
-- **What it cannot do.** No built-in tools (`--tools ""`, `--restricted`):
-  no shell, file, edit, web, search or subagent. No slash commands, no
-  `@path` expansion of prompt text (`verbatim_prompts`), no settings files, no
-  other MCP servers, no session persistence and no resume.
-- **Differences from `anthropic`.** Claude Code takes one prompt per turn, so
-  earlier text-only turns are quoted into it. There is no server-side
-  fallback setting. Claude Code adds its own small overhead per call, so token
-  counts are not directly comparable with the Messages API backend. The
-  metrics' `cost_usd` is Claude Code's API-price estimate for the same tokens,
-  shown as "API-equivalent · Claude plan (no API credits)". It is not a bill;
-  the plan's usage limits apply instead (a limit hit is reported as
-  `plan_limit`).
-- **Verified live on 2026-10-24** (local backend, `fixture` evidence, Agent SDK
-  0.2.174, Claude Code 2.1.278): the three-step NBIS demo ran on the plan with
-  2–3 tools per turn, 11–14 s per turn and about $0.03 API-equivalent per
-  turn, with no API key present. Live evidence and plan usage-limit responses
-  have not been tried. A replay of Fri 2026-10-23 11:12 ET (the recorded Radar
-  snapshot) also ran three turns on the plan: 3 tools per turn, 10–14 s per
-  turn and $0.025–0.040 API-equivalent. The answers stayed at the frozen moment
-  and named no later price or headline.
-- **Streaming caveat.** A short opening line written before the tool calls
-  streams live. The final answer, written after the tool rounds, reaches the
-  page in one burst at the end, so first-text latency is close to the total
-  when the model writes no opening line. The `anthropic` backend shows the
-  same burst: on Sonnet 5.5 the API holds the whole post-tool answer
-  server-side (see Live measurements), so it is not a plan-path problem. The
-  status line keeps the wait visible; it does not shorten it.
+Every Claude call in the app now uses `ANTHROPIC_API_KEY` through the Messages
+API: chat, research jobs, the shadow book and the reviews. The earlier plan
+backend and the Claude Agent SDK are gone. `copilot_turn` rows and saved answers
+from before the move still say `plan` / `claude_plan`, and their costs are API-price
+equivalents, not bills. Desk turns count toward `COPILOT_DAILY_BUDGET_USD`, as do
+the prep, companion and Telegram turns that share the backend; shadow-book turns
+are recorded as `api_background`, under `SHADOW_BOOK_MAX_TURNS` instead.
 
 ## Replay
 
@@ -2417,7 +2341,7 @@ changed here.
 ## Research job
 
 `backend/app/ai/research_job.py` runs one autonomous, cited investigation
-through the Agent SDK. The interactive copilot stays on the Messages API.
+through the Messages API (`app.ai.api_runner.run_agent`).
 Trigger it by hand only, with `backend/scripts/run_research_job.py "question"
 --symbols NBIS,CRWV --evidence fixture|live|replay [--out job.json] [--no-save]`.
 It has no scheduler, Radar wake-up or notification yet.
@@ -2426,32 +2350,22 @@ It has no scheduler, Radar wake-up or notification yet.
   never reaches a job by default.
   - Allowed: the market reads (group comparison, peer moves, symbol news,
     earnings dates, quotes), `get_saved_research` and `get_chart_context`,
-    plus the built-in `WebSearch` and `WebFetch`, and nothing else.
+    plus Anthropic's server-side web search and web fetch, and nothing else.
   - Not allowed: `propose_plan`, `get_investigation_changes` and the book
-    tools. These aren't registered for a job at all.
+    tools. They are never offered to a job's model.
   - Lab tools run in-process with the same validation, timeout and size
-    bound. A
-  PreToolUse hook denies any other tool and caps a job at 8 searches, 10
-  fetches and 12 lab-tool calls. Other limits: 24 turns, 600 s, and
-  `max_budget_usd` from `RESEARCH_BUDGET_USD` (default $0.50). Built-in tools,
-  settings, other MCP servers and sessions are off, as for the plan backend.
+    bound. A call to any other tool is denied. Each request allows 8 searches
+    and 10 fetches (`max_uses`, per request, so the budget is what bounds them
+    across a job's rounds) and a job gets 12 lab-tool calls. Other limits: 24
+    rounds, 600 s, and `RESEARCH_BUDGET_USD` (default $0.50), counting tokens
+    and $0.01 per search and checked before each round, so one round can overshoot.
   Pages are untrusted data, and the job has no tool that could act on an
   injected instruction.
-- **Auth (`RESEARCH_AUTH`).**
-  - `plan` (default) passes only `CLAUDE_CODE_OAUTH_TOKEN`. It runs on the VPS
-    too, by the owner's 2026-10-24 decision (§ Plan backend).
-  - `api_key` passes only `ANTHROPIC_API_KEY`.
-  - Either way, every other credential variable (API key, auth token, base
-    URL, cloud providers) is set empty for Claude Code.
-  - Claude Code must report the one credential as its sign-in before a job
-    runs. In plan mode that is `oauth_token` with no API key source; a leaked
-    key would show up as one and is refused.
-- **Output.** A structured assessment (`output_format` JSON schema): summary,
+- **Output.** A structured assessment (a strict `submit_answer` tool): summary,
   key findings with citation and evidence indexes, counterpoints, what would
   change the view, citations (URL, publisher, publish time, title) and
   evidence references (tool and `as_of`). The record also has the lab tool
-  calls the server actually ran, with provenance, plus web counts, cost (an
-  API-price equivalent on the plan) and server-side checks:
+  calls the server actually ran, with provenance, plus web counts, cost and server-side checks:
   - citations whose URL the job never got from a search result's `url`
     field, a successful fetch (a failed fetch was never read), or the lab news
     tool's structured article `url`. A URL that only appears inside some text,
@@ -2497,9 +2411,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `RESEARCH_QUEUE_ENABLED` | unset (off) | `true` starts the runner in the API process. Jobs can be queued while it is off; they wait. |
-| `RESEARCH_AUTH` | `plan` | `plan`: the owner's Claude plan token, on any database (the VPS included). `api_key`: `ANTHROPIC_API_KEY` (API credits). |
 | `RESEARCH_BUDGET_USD` | `0.50` | Budget for each job. |
-| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC (API-equivalent on the plan). It is checked before every attempt. At the cap, queued jobs wait for the next day. |
+| `RESEARCH_DAILY_BUDGET_USD` | `2` | Total spend for attempts started since midnight UTC. It is checked before every attempt. At the cap, queued jobs wait for the next day. |
 | `RESEARCH_RADAR_TRIGGER` | unset (off) | `true`: every 5 minutes, each new event in today's Radar session (read only from `RADAR_STORE`) gets one `radar_event` job. |
 | `RESEARCH_NOTIFY_ENABLED` | unset (off) | `true`: a job with a material result about an open investigation sends one phone ping (below). |
 | `RESEARCH_NOTIFY_DAILY_MAX` | `3` | Phone pings per New York day, all jobs together. |
@@ -2596,41 +2509,17 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
 
 ### In production (VPS)
 
-The release carries the SDK: `deploy/build.py` builds the `copilot-plan` extra
-from its sdist, a 164 KB pure-Python wheel instead of the ~126 MB PyPI wheel
-with a second (~270 MB unpacked) Claude Code inside. `deploy/control.py` installs that extra.
-Jobs run the release's own `bin/claude`, the version
-`deploy/claude-code/package.json` pins, which needs to be 2.1.257 or later
-for this SDK. They find it through `TJ_CLAUDE_BIN`, which the API unit sets.
+Jobs use `ANTHROPIC_API_KEY` from `backend.env`.
 
-- **Auth.** Both modes work on the VPS; `plan` is the default.
-  - **`plan`** uses the token in `/etc/tradejournal/claude-plan.env`, and the
-    job passes only that token. The valid `ANTHROPIC_API_KEY` in the same
-    service env is set empty for Claude Code, which must report `oauth_token`
-    with no API key source. State goes in
-    `/var/lib/tradejournal/claude/research-plan`.
-  - **`api_key`** uses `ANTHROPIC_API_KEY` from `backend.env`, and the job
-    passes only that key. Claude Code must report `authMethod=api_key` and
-    `apiKeySource=ANTHROPIC_API_KEY`. State goes in
-    `/var/lib/tradejournal/claude/research-api`.
-  - Both state directories are kept apart from the nightly plan reviews'.
 - **Turning it on, conservatively.** Add `RESEARCH_QUEUE_ENABLED=true`, a
   small `RESEARCH_BUDGET_USD` and `RESEARCH_DAILY_BUDGET_USD`, and leave the
-  two trigger settings unset. `RESEARCH_AUTH` can stay unset (plan); set
-  `api_key` to bill API credits instead. The budgets are an API-price
-  equivalent on the plan. Then
+  two trigger settings unset. Then
   run `sudo systemctl restart tradejournal-api`. Queue one question with
   `POST /copilot/research-jobs` and watch it with `GET /copilot/research-jobs`.
   Turning the queue off again (unset, then restart) leaves queued jobs
   waiting.
-- **CI.** The "Ubuntu package and MCP smokes" job checks the installed release
-  without a model call:
-  - `bin/claude --version` matches the pin;
-  - `claude_agent_sdk` imports from the release venv without a bundled CLI;
-  - the API-key preflight passes as the `tradejournal` user with a dummy key;
-  - the plan preflight passes on Postgres with a dummy token, while a dummy
-    API key is also in the env, which proves the key never reaches Claude
-    Code.
+- **CI.** The "Ubuntu package and MCP smokes" job checks, without a model call,
+  that the installed release imports the API runner as the `tradejournal` user.
 
 ## Thesis watch
 

@@ -104,7 +104,7 @@ def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(
         seen["day_context"] = {"owner_timeline": [{"id": "entry-id", "retrospective": False}]}
         return seen["day_context"]
 
-    from app.ai import review_context, plan_runner
+    from app.ai import review_context, api_runner
     monkeypatch.setattr(review_context, "build", context)
     answer = {"summary": "Saved outlook reviewed.", "day_grade": "B: documented the plan", "key_takeaways": [],
               "best_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
@@ -115,9 +115,9 @@ def test_calendar_lists_thought_days_and_no_trade_review_accepts_owner_thoughts(
                                       "assessment": "unresolved", "evidence": "entry-id; market evidence unavailable"}]}
     answer["expectation_checks"].append({"entry_id": "not-in-context", "expected": "invented", "observed": "invented",
                                          "assessment": "supported", "evidence": "unverified"})
-    monkeypatch.setattr(plan_runner, "ask", lambda *_args, **_kwargs: type("Answer", (), {
-        "data": dict(answer), "author": "test", "input_tokens": 0, "output_tokens": 0,
-        "api_equivalent_usd": 0, "seconds": 0})())
+    monkeypatch.setattr(api_runner, "ask", lambda *_args, **_kwargs: type("Answer", (), {
+        "data": dict(answer), "author": "test", "usage": {
+            "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0}})())
     calendar = client.get("/daily-review").json()
     assert calendar[0]["day"] == DAY.isoformat() and calendar[0]["trade_count"] == 0
     generated = client.post("/daily-review", json={"day": DAY.isoformat(), "trade_ids": []})
@@ -153,7 +153,7 @@ def test_daily_review_rejects_a_foreign_day_trade_selection(journal):
 
 def test_review_generation_fails_if_it_omits_a_saved_outlook_check(journal, monkeypatch):
     _, engine = journal
-    from app.ai import daily_reviewer, plan_runner, review_context
+    from app.ai import daily_reviewer, api_runner, review_context
 
     monkeypatch.setattr(review_context, "build", lambda *_, **__: {"owner_timeline": [{"id": "outlook-1", "kind": "outlook"}]})
     incomplete = {"summary": "A summary", "day_grade": "B: clear plan", "key_takeaways": [],
@@ -161,9 +161,9 @@ def test_review_generation_fails_if_it_omits_a_saved_outlook_check(journal, monk
                   "worst_trade": {"trade_id": None, "ticker": None, "reason": "No trade"}, "patterns": [],
                   "next_session_rules": [], "rules_check": [], "vs_baseline": [], "data_gaps": [],
                   "market_read": "Unclear", "plan_vs_execution": []}
-    monkeypatch.setattr(plan_runner, "ask", lambda *_args, **_kwargs: type("Answer", (), {
-        "data": dict(incomplete), "author": "test", "input_tokens": 0, "output_tokens": 0,
-        "api_equivalent_usd": 0, "seconds": 0})())
+    monkeypatch.setattr(api_runner, "ask", lambda *_args, **_kwargs: type("Answer", (), {
+        "data": dict(incomplete), "author": "test", "usage": {
+            "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0}})())
     with Session(engine) as session, pytest.raises(ValueError, match="expectation_checks"):
         daily_reviewer.review_trading_day(DAY.isoformat(), [], {}, session)
 

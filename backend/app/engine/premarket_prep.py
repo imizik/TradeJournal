@@ -430,9 +430,7 @@ def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str |
         evidence = copilot.evidence_for(cfg)
         parts, error = [], None
         try:
-            # The plan backend's SDK runs its own tool loop, so it supplies the whole turn (as the chat route does).
-            turn = (adapter.run_turn(history, None, cfg, evidence, now_et) if hasattr(adapter, "run_turn")
-                    else copilot.run_turn(history, None, cfg, adapter, evidence, now_et))
+            turn = copilot.run_turn(history, None, cfg, adapter, evidence, now_et)
             async for event in turn:
                 if events is not None:
                     events.append(event)

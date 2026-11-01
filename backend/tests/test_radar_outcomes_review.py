@@ -1,4 +1,4 @@
-"""The Radar outcomes review: the question it builds, and that it runs only on the Claude plan."""
+"""The Radar outcomes review: the question it builds, and that it runs one unsaved research job on API credits."""
 import json
 
 import pytest
@@ -46,34 +46,25 @@ def no_env_files(monkeypatch):
     monkeypatch.setattr(rv, "load_env_files", lambda: None)
 
 
-def test_an_api_key_setting_is_refused_before_any_job(tmp_path, monkeypatch, no_env_files, capsys):
-    monkeypatch.setenv("RESEARCH_AUTH", "api_key")
-    monkeypatch.setattr(research_job, "run", lambda *a, **k: pytest.fail("no job may run on an API key"))
-    assert rv.main([str(_outcomes(tmp_path)), "--since", "2026-10-27"]) == 2
-    assert "never an API key" in capsys.readouterr().err
-
-
-def test_the_job_runs_on_the_plan_without_saving_and_writes_the_review(tmp_path, monkeypatch, no_env_files):
-    monkeypatch.delenv("RESEARCH_AUTH", raising=False)
+def test_the_job_runs_unsaved_and_writes_the_review(tmp_path, monkeypatch, no_env_files):
     calls = {}
 
     def fake_run(question, symbols, evidence, now, **kwargs):
         calls.update(question=question, symbols=symbols, **kwargs)
-        return {"auth": kwargs["mode"], "status": "ok", "assessment": {"summary": "s"}}
+        return {"auth": "api_key", "status": "ok", "assessment": {"summary": "s"}}
 
     monkeypatch.setattr(research_job, "run", fake_run)
     out = tmp_path / "review.json"
     assert rv.main([str(_outcomes(tmp_path)), "--since", "2026-10-27", "--out", str(out)]) == 0
-    assert calls["mode"] == "plan" and calls["save"] is False and calls["symbols"] == ["AAA", "CCC", "BBB"]
-    assert json.loads(out.read_text())["auth"] == "plan"
+    assert "mode" not in calls and calls["save"] is False and calls["symbols"] == ["AAA", "CCC", "BBB"]
+    assert json.loads(out.read_text())["status"] == "ok"
 
 
-def test_a_result_that_did_not_run_on_the_plan_is_refused(tmp_path, monkeypatch, no_env_files):
-    monkeypatch.delenv("RESEARCH_AUTH", raising=False)
-    monkeypatch.setattr(research_job, "run", lambda *a, **k: {"auth": "api_key", "status": "ok"})
+def test_a_missing_key_stops_the_review_with_the_reason_and_writes_nothing(tmp_path, monkeypatch, no_env_files, capsys):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     out = tmp_path / "review.json"
     assert rv.main([str(_outcomes(tmp_path)), "--since", "2026-10-27", "--out", str(out)]) == 2
-    assert not out.exists()
+    assert "api_not_configured" in capsys.readouterr().err and not out.exists()
 
 
 def test_a_dry_run_prints_the_question_and_runs_nothing(tmp_path, monkeypatch, capsys):

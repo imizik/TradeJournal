@@ -84,7 +84,7 @@ def save_review(session: Session, day: date, review: dict, trade_count: int) -> 
     return record
 
 
-def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = None, backend: str | None = None) -> tuple[DailyReviewRecord, dict]:
+def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = None) -> tuple[DailyReviewRecord, dict]:
     """Review the day (its own trades unless ids are given) and save it."""
     from app.ai.daily_reviewer import review_trading_day
 
@@ -96,7 +96,7 @@ def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = No
     if not trades and not has_day_inputs(session, day):
         raise LookupError(f"No trades or saved thoughts/captures on {day.isoformat()}")
     owner_thought_count = len(session.exec(select(DayJournalEntry.id).where(DayJournalEntry.day == day)).all())
-    review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session, backend=backend)
+    review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session)
     review["owner_input_count"] = owner_thought_count
     # Thoughts are append-only, so a count change means generation used a
     # snapshot that did not include all owner inputs available at save time.

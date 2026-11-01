@@ -85,11 +85,11 @@ async def list_daily_reviews(request: Request, session: Session = Depends(get_se
 
 @router.get("/runner")
 def plan_runner_status():
-    """The nightly plan review run (app.jobs.plan_reviews): its last status, or null before the first run."""
-    from app.ai import plan_runner
+    """The nightly review run (app.jobs.plan_reviews): its last status, or null before the first run."""
+    from app.ai import api_runner
     from app.jobs.plan_reviews import read_status
 
-    return {"configured": plan_runner.plan_configured(), "status": read_status()}
+    return {"configured": api_runner.configured(), "status": read_status()}
 
 
 @router.get("/{review_day}", response_model=DailyReviewResponse | None)
@@ -116,7 +116,7 @@ async def get_daily_review(review_day: date, request: Request, session: Session 
 def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get_session)):
     review_day = _parse_day(body.day)
 
-    from app.ai import daily_review_service, plan_runner
+    from app.ai import api_runner, daily_review_service
 
     try:
         record, review = daily_review_service.generate(session, review_day, body.trade_ids)
@@ -124,8 +124,8 @@ def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get
         detail = str(exc)
         raise HTTPException(status_code=400 if "belong to the review day" in detail else 404,
                             detail=detail) from exc
-    except plan_runner.PlanUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Daily review is not set up on the Claude plan: {exc}") from exc
+    except api_runner.ApiUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Daily review is not set up: {exc}") from exc
     except ModuleNotFoundError as exc:
         if exc.name == "anthropic":
             raise HTTPException(

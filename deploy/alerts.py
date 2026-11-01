@@ -68,7 +68,7 @@ SERVICES = {
         "Earnings and VIX for Jo", "The earnings and VIX refresh couldn't be started; Jo's checks show the older values with their age."
     ),
     "tradejournal-plan-reviews.service": (
-        "Nightly AI reviews", "Tonight's daily reviews on the Claude plan didn't run; the Daily page says why."
+        "Nightly AI reviews", "Tonight's daily reviews didn't run; the Daily page says why."
     ),
     "tradejournal-depth-recorder.service": (
         "Depth recorder", "The Level 2 depth recorder stopped, so the watchlist isn't being recorded."

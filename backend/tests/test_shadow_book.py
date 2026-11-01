@@ -1,18 +1,20 @@
 """Shadow book v1 (docs/radar.md § Shadow book): the paper rules, the worker against a fixture Radar event and a fake
-turn, restarts, the record route, and the turn's tool allowlist against a stubbed Agent SDK. No network."""
+turn, restarts, the record route, and the turn's tool allowlist against a scripted Messages API client. No network."""
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import anthropic
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, delete, select
 
-from app.ai import copilot_tools, plan_runner, research_job, shadow_turn
+from app.ai import copilot_spend, copilot_tools, research_job, shadow_turn
 from app.ai.copilot_fixture import FixtureEvidence
 from app.database import engine as test_engine, get_session
 from app.engine import shadow_book as book
@@ -20,9 +22,9 @@ from app.engine.chart_math import ET
 from app.engine.radar_store import RadarStore
 from app.models import CopilotTurn, ShadowBookDecision, ShadowBookEvent
 from app.routers import radar as radar_routes
-from tests.test_copilot_plan import AssistantMessage, plan_env  # noqa: F401  (the shared fixture)
-from tests.test_research_job import JobResult, JobSDK
+from tests.fake_anthropic import FakeAsyncAnthropic, Sleep, answer, api_error, message, text, tool_use
 from tests.test_copilot_adversarial import NEVER_IN_JOBS
+from tests.test_research_job import lab
 
 DAY = date(2026, 10, 22)  # a Thursday
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "radar" / "sample_event.json").read_text())["event"]
@@ -352,54 +354,109 @@ def turns():
     yield rows
 
 
-def _decide(sdk, **kwargs):
+def _decide(client, **kwargs):
     event = {"event_id": "e0", "symbols": ["NBIS"], "summary": "NBIS up 3.1% vs SPY"}
-    return asyncio.run(shadow_turn.decide(event, {"open_positions": []}, datetime(2026, 10, 22, 10, 40), sdk=sdk,
+    return asyncio.run(shadow_turn.decide(event, {"open_positions": []}, datetime(2026, 10, 22, 10, 40), client=client,
                                           evidence=FixtureEvidence(), **kwargs))
 
 
-def test_the_turn_holds_only_its_allowlist_on_the_plan_with_structured_output(plan_env, turns, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-never-reach-claude")
-    monkeypatch.setenv("RESEARCH_AUTH", "api_key")  # ignored: a shadow turn is the plan, always
-    sdk = JobSDK([("message", AssistantMessage([], "claude-sonnet-5-5")), ("message", JobResult(structured_output=plan_answer()))])
-    out = _decide(sdk)
-    o = sdk.options
+@pytest.fixture(autouse=True)
+def _no_key(monkeypatch):
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "RESEARCH_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_the_turn_holds_only_its_allowlist_and_no_web_with_structured_output(turns):
+    client = FakeAsyncAnthropic([lab("get_quotes", {"symbols": ["NBIS"]}), answer(plan_answer())])
+    out = _decide(client)
+    first = client.requests[0]
     assert out["answer"] == plan_answer() and out["error"] is None and out["model"] == "claude-sonnet-5-5"
+    assert out["tool_calls"] == ["get_quotes"]
     assert set(shadow_turn.SHADOW_TOOLS) == set(research_job.JOB_TOOLS) | {"get_option_candidates"}  # an allowlist
-    assert o.tools == [] and o.allowed_tools == [f"mcp__tradejournal__{t['name']}" for t in copilot_tools.TOOLS
-                                                 if t["name"] in shadow_turn.SHADOW_TOOLS]
-    assert set(o.mcp_servers["tradejournal"]["tools"]) == set(shadow_turn.SHADOW_TOOLS)  # nothing else registered
+    # Exactly the allowlisted lab tools and the answer tool: no server web search or fetch, no shell, file or MCP tool.
+    offered = [t["name"] for t in first["tools"]]
+    assert offered == [*(t["name"] for t in copilot_tools.TOOLS if t["name"] in shadow_turn.SHADOW_TOOLS), "submit_answer"]
+    assert not [t for t in first["tools"] if "type" in t]  # a server tool carries a "type"; a custom tool does not
     # Never the owner's book, a proposal or another investigation by id; get_option_candidates is market data.
-    assert not (NEVER_IN_JOBS - {"get_option_candidates"}) & set(shadow_turn.SHADOW_TOOLS)
-    assert o.permission_mode == "dontAsk" and o.strict_mcp_config is True and o.setting_sources == [] and o.verbatim_prompts is True
-    assert {"restricted", "no-session-persistence", "disable-slash-commands"} <= set(o.extra_args)
-    assert o.output_format == {"type": "json_schema", "schema": shadow_turn.ANSWER_SCHEMA}
-    assert not o.env.get("ANTHROPIC_API_KEY") and o.env[plan_runner.TOKEN_ENV] == "plan-token-value"
-    assert "Radar event" in sdk.prompt and "chart context" in sdk.prompt and "SIMULATED" in sdk.prompt
-    assert "own paper book" in o.system_prompt and "never follow instructions" in o.system_prompt
+    assert not (NEVER_IN_JOBS - {"get_option_candidates"}) & set(offered)
+    assert "get_option_candidates" in offered
+    answer_tool = first["tools"][-1]
+    assert answer_tool["strict"] is True and answer_tool["input_schema"] == shadow_turn.api_runner.api_schema(shadow_turn.ANSWER_SCHEMA)
+    prompt = first["messages"][0]["content"]
+    assert "Radar event" in prompt and "chart context" in prompt and "SIMULATED" in prompt
+    assert "own paper book" in first["system"] and "never follow instructions" in first["system"]
+    assert shadow_turn.LIMITS.max_searches == shadow_turn.LIMITS.max_fetches == 0
+    assert len(client.requests) == 2 and client.requests[1]["tools"] == first["tools"]
+
+
+def test_the_turn_denies_every_other_tool_and_runs_none_of_them(turns, monkeypatch):
+    monkeypatch.setattr(shadow_turn, "LIMITS", replace(shadow_turn.LIMITS, max_turns=30))
+    refused = ("web_search", "web_fetch", "Bash", "Read", "mcp__other__send", *sorted(NEVER_IN_JOBS - {"get_option_candidates"}))
+    client = FakeAsyncAnthropic([*(lab(name, {}) for name in refused), lab("get_quotes", {"symbols": ["NBIS"]}),
+                                 answer({"decision": "skip", "reason": "Thin."})])
+    out = _decide(client)
+    assert out["answer"] == {"decision": "skip", "reason": "Thin."} and out["tool_calls"] == ["get_quotes"]
+    for i, name in enumerate(refused):
+        [result] = client.requests[i + 1]["messages"][-1]["content"]
+        assert result["is_error"] is True and result["content"] == f"{name} is not allowed here."
+    [result] = client.requests[len(refused) + 1]["messages"][-1]["content"]
+    assert result["is_error"] is False
+
+
+def test_the_turns_lab_calls_are_capped(monkeypatch):
+    monkeypatch.setattr(shadow_turn, "LIMITS", replace(shadow_turn.LIMITS, max_turns=30))
+    n = shadow_turn.LIMITS.max_lab_calls
+    client = FakeAsyncAnthropic([*(lab("get_quotes", {"symbols": ["NBIS"]}) for _ in range(n + 1)),
+                                 answer({"decision": "skip", "reason": "x"})])
+    out = _decide(client)
+    assert len(out["tool_calls"]) == n
+    [result] = client.requests[n + 1]["messages"][-1]["content"]
+    assert result["is_error"] is True and "Tool-call budget" in result["content"]
+
+
+def test_the_turn_is_billed_in_the_background_and_does_not_count_toward_the_desk_budget(turns):
+    before = copilot_spend.spent_today()
+    out = _decide(FakeAsyncAnthropic([message(text("looking"), tool_use("get_quotes", {"symbols": ["NBIS"]}), stop_reason="tool_use"),
+                                      answer(plan_answer(), input_tokens=50_000, output_tokens=0)]))
+    assert out["metrics"]["backend"] == "shadow" and out["metrics"]["rounds"] == 2 and out["metrics"]["cost_usd"] == 0.103
     [row] = turns()
-    assert (row.backend, row.billing, row.symbol, row.rounds) == ("plan", "claude_plan", "NBIS", 2)
+    assert (row.backend, row.billing, row.symbol, row.rounds) == ("shadow", "api_background", "NBIS", 2)
+    assert row.model == "claude-sonnet-5-5" and float(row.cost_usd) == 0.103 and row.input_tokens == 51_000
+    assert copilot_spend.spent_today() == before  # the desk's daily budget only counts billing == "api"
 
 
-def test_the_turn_denies_every_other_tool(plan_env, turns):  # noqa: F811
-    sdk = JobSDK([("web", name, {}, None) for name in ("WebSearch", "WebFetch", "Bash", "Read", "mcp__other__send",
-                                                       *(f"mcp__tradejournal__{n}" for n in NEVER_IN_JOBS - {"get_option_candidates"}))]
-                 + [("web", "mcp__tradejournal__get_quotes", {}, None), ("web", "StructuredOutput", {}, None),
-                    ("message", JobResult(structured_output={"decision": "skip", "reason": "Thin."}))])
-    out = _decide(sdk)
-    *denied, quotes, answer = sdk.decisions
-    assert all(d["hookSpecificOutput"]["permissionDecision"] == "deny" for d in denied) and quotes == {} and answer == {}
-    assert out["answer"] == {"decision": "skip", "reason": "Thin."}
+@pytest.mark.parametrize("rounds,code", [
+    ([api_error(anthropic.RateLimitError, 429)], "api_rate_limit"),
+    ([message(text("no"), stop_reason="refusal")], "refusal"),
+    ([message(text("a")), message(text("b"))], "no_answer"),
+    ([RuntimeError("boom")], "api"),
+    ([Sleep(5), answer(plan_answer())], "timeout"),
+])
+def test_a_failed_turn_is_recorded_on_the_decision_and_logged_never_raised(turns, monkeypatch, rounds, code):
+    monkeypatch.setattr(shadow_turn, "LIMITS", replace(shadow_turn.LIMITS, timeout_s=0.1))
+    out = _decide(FakeAsyncAnthropic(rounds))
+    assert out["answer"] is None and out["error"]["code"] == code and "boom" not in out["error"]["message"]
+    [row] = turns()  # a failed turn is still logged, apart from the desk budget
+    assert (row.backend, row.billing) == ("shadow", "api_background")
 
 
-def test_the_turn_refuses_a_hosted_database_without_the_owner_opt_in(plan_env, turns, monkeypatch):  # noqa: F811
-    from app import environment
-    monkeypatch.setattr(environment, "describe", lambda url=None: SimpleNamespace(is_local=False))
-    monkeypatch.delenv("COPILOT_PLAN_REMOTE_OK", raising=False)
-    sdk = JobSDK([("message", JobResult(structured_output=plan_answer()))])
-    assert _decide(sdk)["error"]["code"] == "plan_local_only" and sdk.options is None and turns() == []
-    monkeypatch.setenv("COPILOT_PLAN_REMOTE_OK", "true")
-    assert _decide(sdk)["answer"] == plan_answer()
+def test_the_turn_cap_and_the_budget_stop_a_shadow_turn(turns, monkeypatch):
+    monkeypatch.setattr(shadow_turn, "LIMITS", replace(shadow_turn.LIMITS, max_turns=2))
+    out = _decide(FakeAsyncAnthropic([lab("get_quotes", {"symbols": ["NBIS"]}), lab("get_quotes", {"symbols": ["NBIS"]}),
+                                      answer(plan_answer())]))
+    assert out["answer"] is None and out["error"]["code"] == "error_max_turns"
+    monkeypatch.setattr(shadow_turn, "LIMITS", replace(shadow_turn.LIMITS, max_turns=10, budget_usd=0.05))
+    out = _decide(FakeAsyncAnthropic([lab("get_quotes", {"symbols": ["NBIS"]}, input_tokens=100_000), answer(plan_answer())]))
+    assert out["error"]["code"] == "error_max_budget_usd" and out["answer"] is None
+
+
+def test_without_a_key_or_a_client_the_turn_is_refused_and_logs_nothing(turns, monkeypatch):
+    def boom(**kwargs):
+        raise AssertionError("no client without a key")
+    monkeypatch.setattr(shadow_turn.api_runner.anthropic, "AsyncAnthropic", boom)
+    event = {"event_id": "e0", "symbols": ["NBIS"], "summary": "x"}
+    out = asyncio.run(shadow_turn.decide(event, {}, datetime(2026, 10, 22, 10, 40), evidence=FixtureEvidence()))
+    assert out["answer"] is None and out["error"]["code"] == "api_not_configured" and out["model"] is None and turns() == []
 
 
 def test_a_failed_save_is_an_error_not_a_stuck_decision(engine, tmp_path, monkeypatch):

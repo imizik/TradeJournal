@@ -279,7 +279,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         {trade.ai_review ? (
           <AiReview raw={trade.ai_review} />
         ) : reviewLoading ? (
-          <p className="text-sm text-muted-foreground">Generating review on your Claude plan (usually under a minute)...</p>
+          <p className="text-sm text-muted-foreground">Generating review (usually under a minute)...</p>
         ) : (
           <button
             onClick={handleReviewClick}
