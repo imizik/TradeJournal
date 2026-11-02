@@ -2,6 +2,7 @@
 records), and the saved conversation linking itself to its turns. Offline: the scripted model and a stubbed client."""
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime
 
@@ -29,6 +30,14 @@ def clean():
 def _rows() -> list[CopilotTurn]:
     with Session(engine) as db:
         return db.exec(select(CopilotTurn).order_by(CopilotTurn.started_at)).all()
+
+
+def _rows_once_written(count: int, timeout: float = 5.0) -> list[CopilotTurn]:
+    """A turn served by the live app writes its row on the default executor after the stream ends; wait for it."""
+    deadline = time.monotonic() + timeout
+    while len(rows := _rows()) < count and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return rows
 
 
 def _collect(gen):
@@ -123,7 +132,7 @@ def test_the_chat_route_records_source_and_investigation_and_refuses_past_the_ca
         body = {"messages": [{"role": "user", "content": "Is NBIS lagging?"}], "symbol": "NBIS", "source": "radar", "investigation_id": investigation}
         frames = _frames(client.post("/copilot/chat", json=body).text)
         done = next(f for f in frames if f["type"] == "done")
-        [row] = _rows()
+        [row] = _rows_once_written(1)
         assert str(row.id) == done["turn_id"] and row.source == "radar" and str(row.investigation_id) == investigation
         assert client.post("/copilot/chat", json={**body, "source": "phone"}).status_code == 422
         assert client.post("/copilot/chat", json={**body, "investigation_id": "not-a-uuid"}).status_code == 422
