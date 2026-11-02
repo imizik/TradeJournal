@@ -54,7 +54,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         </div>
       </form>
       {result.status === "fulfilled" ? (
-        <AnalyticsExplorer key={query.toString()} data={result.value} accounts={accountOptions} />
+        <AnalyticsExplorer key={query.toString()} data={result.value} accounts={accountOptions} scope={query.toString()} />
       ) : (
         <p role="alert" className="rounded-lg border bg-card p-4 text-sm">
           {invalidFilters

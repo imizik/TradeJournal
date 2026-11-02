@@ -46,6 +46,33 @@ async function visibility(page: Page, hidden: boolean) {
 test.beforeEach(() => fixture("reset"));
 test.afterEach(() => fixture("reset"));
 
+test("summary counts filter the history and the compact phone rows expose verdicts and detail", async ({ page }) => {
+  fixture("pending");
+  await page.goto("/signals");
+  await page.getByRole("button", { name: /Awaiting analysis/ }).click();
+  await expect(page.getByRole("heading", { name: "Awaiting analysis · 1" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "e2e_break" })).toBeVisible();
+  await page.getByRole("button", { name: /Show all alerts/ }).click();
+  fixture("error");
+  await page.goto("/signals?filter=error");
+  await expect(page.locator("table:visible").getByText("analysis failed", { exact: true })).toBeVisible();
+  fixture("skipped");
+  await page.goto("/signals?filter=skipped");
+  await expect(page.locator("table:visible").getByText("alpaca not configured", { exact: true })).toBeVisible();
+  fixture("pending");
+  await page.goto("/signals?filter=pending");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: /Awaiting analysis/ }).click();
+  await expect(page.locator("ul:visible").getByText("SPY", { exact: true })).toBeVisible();
+  await expect(page.locator("ul:visible").getByText("— · pending", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole("link", { name: "Detail", exact: true }).click();
+  await expect(page).toHaveURL(/\/signals\//);
+  await page.getByRole("link", { name: /Back to pending alerts/ }).click();
+  await expect(page).toHaveURL(/\/signals\?filter=pending$/);
+  await expect(page.getByRole("heading", { name: "Awaiting analysis · 1" })).toBeVisible();
+});
+
 test("signals receive new alerts and verdicts without reloading the document", async ({ page }) => {
   let documents = 0;
   page.on("request", (request) => {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The desk's keyboard: the ⌘K palette, J / K through the threads, N for a plan, ] for the Context pane, and the
 // Briefing's session timeline. Every lab route is stubbed in the browser (the e2e backend runs with the lab off), so no
@@ -60,7 +61,7 @@ const ANSWER: Record<string, [string, string]> = {
   [NBIS]: ["NBIS", "NBIS answer: hold above 92.30."], [CRWV]: ["CRWV", "CRWV answer: short under 99.00."], [APLD]: ["APLD", "APLD answer: enter at 31.00."],
 };
 
-async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab" }: { time?: Date; session?: unknown; threads?(): unknown; path?: string } = {}) {
+async function lab(page: Page, { time = NOW, session = SESSION, threads = () => DESK as unknown, path = "/copilot-lab", showThreads = true }: { time?: Date; session?: unknown; threads?(): unknown; path?: string; showThreads?: boolean } = {}) {
   const chats: unknown[] = [];
   await page.clock.install({ time });
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -75,6 +76,7 @@ async function lab(page: Page, { time = NOW, session = SESSION, threads = () => 
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.goto(path);
+  if (showThreads) await openDeskThreads(page);
   await expect(page.getByRole("navigation", { name: "Thread list" }).getByTestId("desk-day")).toBeVisible();
   return { chats };
 }
@@ -139,6 +141,28 @@ test("Plan a trade from the palette opens a new plan, unsent; after 16:00 Close 
   expect(chats).toEqual([]);
 });
 
+test("Threads stay out of the first view, open on request, and preserve a saved thread and unsent words", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { chats } = await lab(page, { showThreads: false });
+  const rail = page.getByRole("navigation", { name: "Thread list" });
+  const toggle = page.getByRole("button", { name: "Threads, 1 need you" });
+  await expect(rail).toBeHidden();
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await page.keyboard.press("j");
+  await expect(conversation(page).getByText("NBIS answer: hold above 92.30.")).toBeVisible();
+  const message = page.getByRole("textbox", { name: "Message" });
+  await message.fill("Keep this thought unsent");
+  await toggle.click();
+  await expect(rail).toBeHidden();
+  await expect(message).toHaveValue("Keep this thought unsent");
+  await page.screenshot({ path: test.info().outputPath("desk-conversation-rail-closed-1440.png") });
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await expect(message).toHaveValue("Keep this thought unsent");
+  expect(chats).toEqual([]);
+});
+
 test("J and K open the next and previous thread in list order; keys typed in the message box are ignored", async ({ page }) => {
   const { chats } = await lab(page);
   const thread = conversation(page);
@@ -151,6 +175,7 @@ test("J and K open the next and previous thread in list order; keys typed in the
   await page.keyboard.press("k");
   await expect(thread.getByText("CRWV answer: short under 99.00.")).toBeVisible();
   await expect(page.getByRole("button", { name: "CRWV, Plan armed" })).toHaveClass(/ring-1/);
+  await page.getByRole("button", { name: "Context pane" }).click();
 
   const message = page.getByRole("textbox", { name: "Message" });
   await message.click();
@@ -162,25 +187,25 @@ test("J and K open the next and previous thread in list order; keys typed in the
   expect(chats).toEqual([]);
 });
 
-test("] hides the Context pane on a wide desk and the choice is remembered; the toggle does the same", async ({ page }) => {
+test("Context stays out of the first view, opens on request, and remembers the choice", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await lab(page);
   const context = page.getByRole("complementary", { name: "Context" });
   const toggle = page.getByRole("button", { name: "Context pane" });
-  await expect(context).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("]");
   await expect(context).toBeHidden();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await page.screenshot({ path: test.info().outputPath("desk-context-hidden-1440.png") });
+  await page.keyboard.press("]");
+  await expect(context).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: test.info().outputPath("desk-context-open-1440.png") });
+  await page.reload();
+  await expect(page.getByTestId("session-tape")).toBeVisible();
+  await expect(context).toBeVisible();
+  await toggle.click();
+  await expect(context).toBeHidden();
   await page.reload();
   await expect(page.getByTestId("session-tape")).toBeVisible();
   await expect(context).toBeHidden();
-  await toggle.click();
-  await expect(context).toBeVisible();
-  await page.reload();
-  await expect(page.getByTestId("session-tape")).toBeVisible();
-  await expect(context).toBeVisible();
 });
 
 test("the phone keeps its tabs: no pane toggle, and the Jump to button still opens the palette", async ({ page }) => {

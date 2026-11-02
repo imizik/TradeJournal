@@ -11,6 +11,6 @@ export default function JoTodayLine({ today }: { today: string }) {
     <span className="text-muted-foreground">Jo: </span>
     {headline ? headline.parts.map((part, i) => <span key={i}>{i ? " · " : ""}<span className={part.tone === "trouble" ? "text-amber-200" : part.tone === "news" ? "font-medium text-foreground" : "text-foreground"}>{part.text}</span></span>)
       : <span className="text-muted-foreground">loading…</span>}
-    <span className="ml-1 text-primary">→</span>
+    <span className="ml-1 text-muted-foreground">→</span>
   </Link>;
 }

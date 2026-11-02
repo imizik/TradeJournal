@@ -23,9 +23,12 @@ def _lines(text: str) -> list[str]:
 def test_the_prompt_asks_for_the_verdict_line_the_fixed_words_and_changes_if():
     prompt = copilot.SYSTEM_PROMPT
     assert '"Verdict: <word> — <headline>"' in prompt and '"Verdict: Hold — The thesis has not broken."' in prompt
+    assert "for market reads, trade ideas, position reviews, plans" in prompt
+    assert "answer directly in natural prose without a Verdict line" in prompt
+    assert "Do not force an action word such as Pass onto an informational answer" in prompt
     for word in VERDICTS:
         assert f"{word} (" in prompt, word
-    assert '"Changes if: <that thing>"' in prompt and "Nothing goes ahead of the Verdict line" in prompt
+    assert '"Changes if: <that thing>"' in prompt and "When using the Verdict format, nothing goes ahead of that line" in prompt
     assert "never give an order" in prompt  # Broken says what the plan says, not what to do
 
 

@@ -34,7 +34,7 @@ const fired = (id: string, minutesAgo: number, over: Partial<LevelAlert> = {}): 
     event_at: (NOW - minutesAgo * 60000) / 1000, detected_at: 0, delivery: "sent", attempts: 1, delivered_at: null, error: null }, ...over } as LevelAlert);
 const health = (status: GmailHealth["status"]): GmailHealth => ({ status, message: `Gmail ${status}`, action: null, listener_enabled: true,
   last_notification_at: null, last_import_at: null, watch_expires_at: null, data_version: "x" });
-const base = (over: Partial<AttentionInputs> = {}): AttentionInputs => ({ rows: [], quotes: {}, quoteError: false, today: TODAY, now: NOW,
+const base = (over: Partial<AttentionInputs> = {}): AttentionInputs => ({ rows: [], accountNames: {}, quotes: {}, quoteError: false, today: TODAY, now: NOW,
   decisions: [], alerts: [], jobs: [], gmail: health("live"), earnings: {}, ...over });
 
 test("attention rules: each trigger, its non-trigger twin, priority order and stable ties", () => {
@@ -74,7 +74,8 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
   expect(byId["earnings:far"].title).toBe("MU earnings 10/14, before expiry");
   expect(byId["earnings:far"].href).toBe("/charts?symbol=MU");
   expect(byId["job:trade_rebuild"].detail).toBe("boom");
-  expect(byId["job:trade_rebuild"].href).toBe("/?sync=open");
+  expect(byId["job:trade_rebuild"].href).toBe("/?sync=open&job=trade_rebuild");
+  expect(byId["no-basis:basis"].href).toBe("/trades/basis#fills");
   expect(byId["alert:recent"].title).toBe("SPY crossed 700.00");
   expect(byId["alert:recent"].when).toBe("30m ago");
   expect(byId["wait:open"].href).toBe("/practice?decision=open#saved-decisions");
@@ -84,6 +85,15 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
   // Same inputs, same order.
   expect(buildAttention(base({ rows: [...rows].reverse(), quotes, gmail: health("down") })).items.map((i) => i.id))
     .toEqual(buildAttention(base({ rows, quotes, gmail: health("down") })).items.map((i) => i.id));
+});
+
+test("positions in the same contract identify the account and remaining size", () => {
+  const roth = option("first", "AAPL", "2026-12-18");
+  roth.trade.account_id = "roth";
+  const individual = option("second", "AAPL", "2026-12-18", { qtyLeft: 1 });
+  individual.trade.account_id = "individual";
+  const { items } = buildAttention(base({ rows: [roth, individual], accountNames: { roth: "Roth IRA", individual: "Individual" } }));
+  expect(items.map(item => item.position)).toEqual(["Roth IRA · 2 contracts open", "Individual · 1 contract open"]);
 });
 
 const phoneAlert = (id: string, minutesAgo: number, over: Partial<TradePhoneAlert> = {}): TradePhoneAlert => ({ id, kind: "giveback",
@@ -203,7 +213,10 @@ with Session(engine) as db:
     await expect(panel).not.toContainText("Position checks cover");
     await page.goto("/?account=roth_ira&type=option");
     await expect(panel).toContainText("Position checks cover Roth IRA · options only");
-    await page.goto("/?type=option&sync=open");
+    await page.goto("/?type=option&sync=open&job=trade_rebuild");
+    const jobRow = page.locator("#sync-job-trade_rebuild");
+    await expect(jobRow).toBeFocused();
+    await expect(jobRow).toBeInViewport();
     await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
     await expect.poll(() => new URL(page.url()).search).toBe("?type=option"); // the sync flag is cleared just after the dialog opens
     expect(errors).toEqual([]);

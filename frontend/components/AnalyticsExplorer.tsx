@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Account, Analytics, AnalyticsDimension, AnalyticsSummary } from "@/lib/api";
 
@@ -63,13 +64,37 @@ function ClosedPnlCurve({ curve }: { curve: Analytics["curve"] }) {
   </div>;
 }
 
-export default function AnalyticsExplorer({ data, accounts }: { data: Analytics; accounts: Account[] }) {
-  const [dimension, setDimension] = useState<AnalyticsDimension>("ticker");
-  const [sort, setSort] = useState<"total_pnl" | "expectancy" | "median_pnl" | "count">("total_pnl");
-  const [minimum, setMinimum] = useState(1);
-  const [selection, setSelection] = useState<{ label: string; ids: string[] } | null>(null);
-  const [page, setPage] = useState(0);
+type SortKey = "total_pnl" | "expectancy" | "median_pnl" | "count";
+
+export default function AnalyticsExplorer({ data, accounts, scope }: { data: Analytics; accounts: Account[]; scope: string }) {
+  const searchParams = useSearchParams();
+  const requestedDimension = searchParams.get("dimension");
+  const dimension = DIMENSIONS.some((item) => item.value === requestedDimension) ? requestedDimension as AnalyticsDimension : "ticker";
+  const requestedSort = searchParams.get("sort");
+  const sort: SortKey = requestedSort && ["total_pnl", "expectancy", "median_pnl", "count"].includes(requestedSort) ? requestedSort as SortKey : "total_pnl";
+  const requestedMinimum = Number(searchParams.get("minimum"));
+  const minimum = [1, 10, 20, 50].includes(requestedMinimum) ? requestedMinimum : 1;
+  const groupLabel = searchParams.get("group")?.slice(0, 512) ?? null;
+  const requestedWinners = Number(searchParams.get("winnerLimit"));
+  const winnerLimit = [1, 3, 5].includes(requestedWinners) ? requestedWinners : null;
+  const requestedPage = Number(searchParams.get("page"));
+  const page = Number.isInteger(requestedPage) && requestedPage >= 0 ? Math.min(10000, requestedPage) : 0;
+  const selectedTradeId = searchParams.get("trade");
   const tradesSection = useRef<HTMLElement>(null);
+  const selectedGroup = groupLabel ? data.breakdowns[dimension].find((item) => item.label === groupLabel) : null;
+  const selectedWinners = winnerLimit ? data.concentration.find((item) => item.limit === winnerLimit) : null;
+  const selection = selectedGroup ? { label: `${DIMENSIONS.find((item) => item.value === dimension)?.label}: ${selectedGroup.label}`, ids: selectedGroup.trade_ids }
+    : selectedWinners ? { label: `Best ${selectedWinners.removed_count} winning trades`, ids: selectedWinners.trade_ids } : null;
+  function updateUrl(values: Record<string, string | null>, push = false, hash = window.location.hash) {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(values)) {
+      if (value == null || value === "") params.delete(key);
+      else params.set(key, value);
+    }
+    const query = params.toString();
+    const url = `${window.location.pathname}${query ? `?${query}` : ""}${hash}`;
+    window.history[push ? "pushState" : "replaceState"]({}, "", url);
+  }
   const summary = data.summary;
   const info = DIMENSIONS.find((item) => item.value === dimension)!;
   const groups = [...data.breakdowns[dimension]].filter((group) => group.count >= minimum).sort((a, b) => {
@@ -83,10 +108,27 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
   const trades = selectedIds ? data.trades.filter((trade) => selectedIds.has(trade.id)) : data.trades;
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const pageSize = 25;
-  function drill(label: string, ids: string[]) {
-    setSelection({ label, ids });
-    setPage(0);
+  function drillGroup(label: string) {
+    updateUrl({ group: label, winnerLimit: null, page: null, trade: null }, true, "#trades");
     tradesSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function drillWinners(limit: number) {
+    updateUrl({ group: null, winnerLimit: String(limit), page: null, trade: null }, true, "#trades");
+    tradesSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  useEffect(() => {
+    if (!selectedTradeId) return;
+    document.getElementById(`analytics-trade-${selectedTradeId}`)?.scrollIntoView({ block: "center" });
+  }, [selectedTradeId]);
+  function inspectHref(tradeId: string, label: string) {
+    const params = new URLSearchParams(scope);
+    params.set("dimension", dimension); params.set("sort", sort); params.set("minimum", String(minimum));
+    if (groupLabel) params.set("group", groupLabel); else params.delete("group");
+    if (winnerLimit) params.set("winnerLimit", String(winnerLimit)); else params.delete("winnerLimit");
+    if (page) params.set("page", String(page)); else params.delete("page");
+    params.set("trade", tradeId); params.set("returnLabel", label.slice(0, 80));
+    const returnTo = `/analytics?${params.toString()}#trades`;
+    return `/trades/${tradeId}?returnTo=${encodeURIComponent(returnTo)}`;
   }
 
   return <div className="min-w-0 space-y-4">
@@ -124,7 +166,7 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
           <p className="text-xs text-muted-foreground">Without your best {item.limit === 1 ? "winner" : `${item.limit} winners`}</p>
           <p className={`mt-1 text-2xl font-medium tabular-nums ${color(item.remaining_pnl)}`}>{money(item.remaining_pnl)}</p>
           <p className="mt-2 text-xs tabular-nums text-muted-foreground">{item.removed_count} winners removed · {percent(item.gross_profit_share)} of gross profits · {money(item.winner_pnl)}</p>
-          {item.removed_count > 0 && <button type="button" onClick={() => drill(`Best ${item.removed_count} winning trades`, item.trade_ids)} className="mt-3 inline-flex min-h-11 items-center text-sm text-primary hover:underline sm:min-h-0">Inspect winners</button>}
+          {item.removed_count > 0 && <button type="button" onClick={() => drillWinners(item.limit)} className="mt-3 inline-flex min-h-11 items-center text-sm text-primary hover:underline sm:min-h-0">Inspect winners</button>}
         </div>)}
       </div>
       </div>
@@ -136,13 +178,13 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="text-xs text-muted-foreground">Compare groups, then inspect their trades below.</p>
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <label>Group by<select aria-label="Group by" value={dimension} onChange={(event) => { setDimension(event.target.value as AnalyticsDimension); setSelection(null); setPage(0); }} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
+          <label>Group by<select aria-label="Group by" value={dimension} onChange={(event) => { const value = event.target.value as AnalyticsDimension; updateUrl({ dimension: value, group: null, winnerLimit: null, page: null, trade: null }); }} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             {DIMENSIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select></label>
-          <label>Sort by<select aria-label="Sort by" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
+          <label>Sort by<select aria-label="Sort by" value={sort} onChange={(event) => { const value = event.target.value as typeof sort; updateUrl({ sort: value, trade: null }); }} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             <option value="total_pnl">Total P&amp;L</option><option value="expectancy">Expectancy</option><option value="median_pnl">Median P&amp;L</option><option value="count">Trade count</option>
           </select></label>
-          <label>Minimum trades<select aria-label="Minimum trades" value={minimum} onChange={(event) => setMinimum(Number(event.target.value))} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
+          <label>Minimum trades<select aria-label="Minimum trades" value={minimum} onChange={(event) => { const value = Number(event.target.value); updateUrl({ minimum: String(value), trade: null }); }} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             {[1, 10, 20, 50].map((number) => <option key={number} value={number}>{number === 1 ? "All samples" : `${number}+`}</option>)}
           </select></label>
         </div>
@@ -157,7 +199,7 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
           </tr></thead>
           <tbody className="divide-y divide-border">
             {groups.map((group) => <tr key={group.label} className={selection?.label === `${info.label}: ${group.label}` ? "bg-muted/60" : "hover:bg-muted/40"}>
-              <td className="px-4 py-3"><button type="button" aria-pressed={selection?.label === `${info.label}: ${group.label}`} onClick={() => drill(`${info.label}: ${group.label}`, group.trade_ids)} className="font-semibold text-foreground underline decoration-muted-foreground/50 underline-offset-4">{group.label}</button>
+              <td className="px-4 py-3"><button type="button" aria-pressed={selection?.label === `${info.label}: ${group.label}`} onClick={() => drillGroup(group.label)} className="font-semibold text-foreground underline decoration-muted-foreground/50 underline-offset-4">{group.label}</button>
                 {group.pnl_count < 20 && <span className="ml-2 inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-secondary px-2 text-[11.5px] font-medium text-muted-foreground">Small sample</span>}</td>
               <td className="px-4 py-3 tabular-nums"><span>{group.count} / {group.entry_days}</span>{group.pnl_count !== group.count && <p className="text-xs text-muted-foreground">{group.pnl_count} with P&amp;L</p>}</td>
               <td className={`px-4 py-3 tabular-nums ${color(group.total_pnl)}`}>{money(group.total_pnl)}</td>
@@ -177,13 +219,13 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
     <section ref={tradesSection} aria-labelledby="analytics-trades" className="min-w-0 scroll-mt-4 rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
         <div><h2 id="analytics-trades" className="text-[13.5px] font-semibold tracking-tight">{selection?.label ?? "Trades in this selection"}</h2><p className="mt-1 text-xs text-muted-foreground">{trades.length} trades · most recent close first · timestamps in New York time</p></div>
-        {selection && <button type="button" onClick={() => { setSelection(null); setPage(0); }} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground sm:min-h-0">Show all selected trades</button>}
+        {selection && <button type="button" onClick={() => updateUrl({ group: null, winnerLimit: null, page: null, trade: null }, false, "")} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground sm:min-h-0">Show all selected trades</button>}
       </div>
       <div className="max-w-full overflow-x-auto">
         <table className="w-full whitespace-nowrap text-sm" aria-label="Analytics trades">
           <thead className="border-b text-xs font-medium text-muted-foreground"><tr>{["Trade", "Account", "Entered", "Closed", "P&L", "Return"].map((label) => <th key={label} className="px-4 py-2 text-left font-medium">{label}</th>)}</tr></thead>
-          <tbody className="divide-y divide-border">{trades.slice(page * pageSize, (page + 1) * pageSize).map((trade) => <tr key={trade.id} className="hover:bg-muted/40">
-            <td className="px-4 py-3"><Link href={`/trades/${trade.id}`} className="font-semibold hover:underline">{trade.ticker}</Link><p className="text-xs text-muted-foreground">{trade.instrument_type === "option" ? `${trade.expiration ?? ""} · ${trade.strike ?? "—"} ${trade.option_type ?? "option"}` : "Stock"} · {trade.status}</p></td>
+          <tbody className="divide-y divide-border">{trades.slice(page * pageSize, (page + 1) * pageSize).map((trade) => <tr id={`analytics-trade-${trade.id}`} key={trade.id} className={selectedTradeId === trade.id ? "bg-primary/10" : "hover:bg-muted/40"}>
+            <td className="px-4 py-3"><Link href={inspectHref(trade.id, selection ? `Back to ${selection.label}` : "Back to Analytics")} className="font-semibold hover:underline">{trade.ticker}</Link><p className="text-xs text-muted-foreground">{trade.instrument_type === "option" ? `${trade.expiration ?? ""} · ${trade.strike ?? "—"} ${trade.option_type ?? "option"}` : "Stock"} · {trade.status}</p></td>
             <td className="px-4 py-3">{accountNames.get(trade.account_id) ?? "Unknown account"}</td>
             <td className="px-4 py-3 text-xs tabular-nums">{trade.opened_at.replace("T", " ").slice(0, 16)}</td>
             <td className="px-4 py-3 text-xs tabular-nums">{trade.closed_at.replace("T", " ").slice(0, 16)}</td>
@@ -193,9 +235,9 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
         </table>
       </div>
       {trades.length > pageSize && <div className="flex items-center justify-end gap-3 border-t px-3.5 py-2.5 text-xs">
-        <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Previous</button>
+        <button type="button" disabled={page === 0} onClick={() => updateUrl({ page: page > 1 ? String(page - 1) : null, trade: null })} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Previous</button>
         <span className="tabular-nums">Page {page + 1} of {Math.ceil(trades.length / pageSize)}</span>
-        <button type="button" disabled={(page + 1) * pageSize >= trades.length} onClick={() => setPage(page + 1)} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Next</button>
+        <button type="button" disabled={(page + 1) * pageSize >= trades.length} onClick={() => updateUrl({ page: String(page + 1), trade: null })} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Next</button>
       </div>}
     </section>
   </div>;

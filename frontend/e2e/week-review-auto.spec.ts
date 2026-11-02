@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The automatic week review (docs/copilot-lab.md § Review my week): Friday's review is saved as an open copilot
 // investigation, so it shows in the desk's thread list; opening it shows the answer and the practice card it proposed, kept on
@@ -52,6 +53,7 @@ async function labOn(page: Page) {
 test("Friday's saved review shows in the thread list and opens with its practice card", async ({ page }) => {
   const posts = await labOn(page);
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   const thread = home.getByRole("link", { name: TITLE });
   await expect(thread).toHaveAttribute("href", `/copilot-lab?investigation=${INVESTIGATION}`);

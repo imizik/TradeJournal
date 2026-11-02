@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The desk's thread list: Main, then one row per ticker, regrouped from GET /copilot/desk/threads. Every lab route is stubbed in the browser (the
 // e2e backend runs with the lab off), so no model runs and opening the list sends nothing.
@@ -58,6 +59,7 @@ async function lab(page: Page, desk: unknown = DESK) {
   await page.route("**/copilot/time-stops?*", (route) => route.fulfill({ json: { time_stops: [], enabled: true } }));
   await page.route("**/copilot/research-jobs?*", (route) => route.fulfill({ json: { jobs: [], queue_enabled: false, daily_budget_usd: 2, spent_today_usd: 0 } }));
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   return { chats, reads: () => reads };
 }
 

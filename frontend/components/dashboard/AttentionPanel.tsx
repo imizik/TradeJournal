@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { DecisionRecord, PositionQuote } from "@/lib/api";
+import type { Account, DecisionRecord, PositionQuote } from "@/lib/api";
 import { api } from "@/lib/serverApi";
 import type { OpenPositionRow } from "@/lib/dashboard";
 import type { Earnings } from "@/lib/symbolInfo";
@@ -18,9 +18,9 @@ const CUE: Record<AttentionPriority, string> = {
 
 /** Streams in after the rest of the Dashboard: its extra sources (alerts,
  * sync jobs, import health, earnings dates) must never delay the journal. */
-export default async function AttentionPanel({ rows, quotes, quoteError, today, decisions, scope }: {
+export default async function AttentionPanel({ accounts, rows, quotes, quoteError, today, decisions, scope }: {
   /** Set when Dashboard filters narrow the positions; import, sync, alerts and WAITs are never filtered. */
-  scope: string | null;
+  accounts: Account[]; scope: string | null;
   rows: OpenPositionRow[]; quotes: Record<string, PositionQuote>; quoteError: boolean; today: string; decisions: DecisionRecord[];
 }) {
   const optionTickers = [...new Set(rows.filter(({ trade }) => trade.instrument_type === "option"
@@ -34,6 +34,7 @@ export default async function AttentionPanel({ rows, quotes, quoteError, today, 
     Promise.all(optionIds.map((id) => api.tradePhoneAlerts(id).then((value) => value.alerts, () => null))),
   ]);
   const { items, unavailable } = buildAttention({
+    accountNames: Object.fromEntries(accounts.map(account => [account.id, account.name])),
     rows, quotes, quoteError, today, now: requestTime(), decisions, alerts, jobs, gmail,
     earnings: Object.fromEntries(optionTickers.map((ticker, index) => [ticker, events[index]])),
     phoneAlerts: Object.fromEntries(optionIds.map((id, index) => [id, phone[index]])),
@@ -48,7 +49,7 @@ function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
       <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[item.priority]}`} />
       <span className="min-w-0 flex-1">
         <span className="block text-xs font-medium text-foreground">{item.title}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">{item.detail}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{item.position && <>{item.position}. </>}{item.detail}</span>
       </span>
       <span className={`shrink-0 text-[11px] tabular-nums ${CUE[item.priority]}`}>{item.when}</span>
       <span aria-hidden className="shrink-0 text-xs text-muted-foreground">›</span>

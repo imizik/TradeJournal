@@ -26,7 +26,7 @@ const memoryKind = (m: BriefMemory) => ({ statement: "Statement", thesis: "Thesi
 const kindLabel = (kind: BriefEvidence["kind"]) => kind === "belief" ? "Belief / interpretation" : kind === "estimate" ? "Estimate" : "Recorded fact";
 
 const button = "inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm hover:bg-secondary disabled:opacity-50";
-const textButton = "inline-flex min-h-11 items-center text-xs text-primary hover:underline sm:min-h-0";
+const textButton = "inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground hover:underline sm:min-h-0";
 const messages = {
   closed: "No morning briefing is scheduled for this closed exchange session.",
   waiting: "The evidence packet is ready. Jo’s briefing has not arrived yet.",
@@ -214,7 +214,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
   };
 
   const dateControls = <details className="open:basis-full">
-    <summary className="inline-flex min-h-11 cursor-pointer items-center text-primary hover:underline sm:min-h-0">Dates &amp; versions</summary>
+    <summary className="inline-flex min-h-11 cursor-pointer items-center text-muted-foreground hover:text-foreground hover:underline sm:min-h-0">Dates &amp; versions</summary>
     <div className="mt-1 flex flex-wrap items-end gap-3 rounded-md border bg-card p-3 text-muted-foreground shadow-lg">
       <label>Briefing date (ET)<input aria-label="Briefing date" type="date" value={day} onChange={(e) => selectDate(e.target.value)} className="mt-1 block min-h-11 rounded-md border bg-background px-3 text-sm text-foreground" /></label>
       {!!data?.versions.length && <label className="min-w-0">Saved version<select aria-label="Saved version" value={id ?? ""} onChange={(e) => selectDate(day, e.target.value || null)} className="mt-1 block min-h-11 max-w-full rounded-md border bg-background px-3 text-sm text-foreground">
@@ -263,7 +263,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       <p className="mb-3 text-xs text-muted-foreground">Exact saved evidence behind this summary; it has not been refreshed.</p>
       {savedEvidence(body.summary_evidence_ids)}
     </details>}
-    {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <Link href="/morning/memories" className="text-primary hover:underline">Add a belief →</Link></p>}
+    {!compact && packet && !packet.redacted_at && !memories.length && !opportunityFirst && <p className="text-xs text-muted-foreground">No saved beliefs or preferences were in this packet, so “why you” rests on positions, watchlist and market evidence. <Link href="/morning/memories" className="text-muted-foreground hover:text-foreground hover:underline">Add a belief →</Link></p>}
   </section>;
 
   if (compact) return <DashboardCard title="Morning briefing" action={<Link href={`/morning?day=${day}`} className={dashboardLink}>Open briefing →</Link>}>
@@ -395,7 +395,7 @@ export default function MorningBriefing({ initialDay, initialId = null, compact 
       </details>}
       {!!memories.length && <details id="brief-memories" className="rounded-md border px-3">
         <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Your saved memories in this packet ({memories.length})</summary>
-        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief. <Link href="/morning/memories" className="text-primary hover:underline">Review or correct saved memories →</Link></p>
+        <p className="mb-3 text-xs text-muted-foreground">The exact revisions Jo was given. Later corrections or retirements do not change this brief. <Link href="/morning/memories" className="text-muted-foreground hover:text-foreground hover:underline">Review or correct saved memories →</Link></p>
         <ol className="space-y-4 pb-3">{memories.map((m) => <li id={`memory-${m.id}`} key={m.id} className="scroll-mt-20 border-t pt-3 text-sm">
           {m.redacted_at ? <p className="text-muted-foreground">Removed memory · revision {m.revision}</p> : <>
             <p className="font-medium">{memoryMeta(m)}</p>

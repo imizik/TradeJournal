@@ -59,7 +59,7 @@ export default function RadarPreview() {
       </ul> : feed && feed.state !== "off" && <p className="text-sm text-muted-foreground">No saved discoveries in this session. This does not mean nothing moved.</p>}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>{feed?.generated_at ? <>Snapshot <time dateTime={feed.generated_at}>{nyTime(feed.generated_at)} ET</time> · refresh for updates</> : "Saved Radar feed · no live scan runs here"}</span>
-        <button type="button" onClick={() => setRefresh((value) => value + 1)} className="inline-flex min-h-11 items-center text-primary hover:underline sm:min-h-8">Refresh Radar</button>
+        <button type="button" onClick={() => setRefresh((value) => value + 1)} className="inline-flex min-h-11 items-center text-muted-foreground hover:text-foreground hover:underline sm:min-h-8">Refresh Radar</button>
       </div>
     </div>
   </DashboardCard>;

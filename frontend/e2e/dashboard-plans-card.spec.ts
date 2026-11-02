@@ -46,12 +46,20 @@ async function dashboard(page: Page, book: unknown = BOOK, on = true) {
 }
 
 const card = (page: Page) => page.getByRole("region", { name: "Plans" });
+async function showPositions(page: Page) {
+  const summary = card(page).locator("summary");
+  if (await card(page).locator("details").getAttribute("open") === null) await summary.click();
+}
 const fits = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
 
 test("one row per position: P&L, invalidation distance, time stop countdown, give-back and the unplanned actions", async ({ page }) => {
   const { reads } = await dashboard(page);
   const rows = card(page).getByTestId("plans-card-row");
   await expect(rows).toHaveCount(3);
+  await expect(rows.first()).toBeHidden();
+  await expect(card(page).locator("summary")).toContainText("1 give-back fired");
+  await expect(card(page).locator("summary")).toContainText("Time stop 15:30");
+  await showPositions(page);
   await expect(card(page).getByTestId("plans-card-held-back")).toHaveText("Held back today: 2 pings (1 plan nudge, 1 one-hour)");
   await expect(rows.nth(0)).toContainText("2× NBIS 10/24/26 100C");
   await expect(rows.nth(0)).toContainText("+$180 · +29%");
@@ -76,13 +84,16 @@ test("one row per position: P&L, invalidation distance, time stop countdown, giv
 test("a row opens the position review; Plan it and Link plan open their pages", async ({ page }) => {
   await dashboard(page);
   const rows = card(page).getByTestId("plans-card-row");
+  await showPositions(page);
   await rows.nth(0).getByRole("link", { name: "Review NBIS 10/24/26 100C" }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/copilot-lab" && url.searchParams.get("symbol") === "NBIS"
     && url.searchParams.get("context") === `Review this position: ${PLANNED}`);
   await page.goBack();
+  await showPositions(page);
   await rows.nth(2).getByRole("link", { name: "Plan it" }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/copilot-lab" && (url.searchParams.get("context") ?? "").startsWith("Plan this position:"));
   await page.goBack();
+  await showPositions(page);
   await page.route(`**/trades/${SUGGESTED}/plan-link`, (route) => route.fulfill({ status: 404, json: { detail: "Not found" } }));
   await rows.nth(1).getByRole("link", { name: "Link plan" }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/plans/link" && url.searchParams.get("trade") === SUGGESTED);
@@ -106,10 +117,46 @@ test("at 375 px every row is thumb-sized and nothing scrolls sideways", async ({
   await dashboard(page);
   const rows = card(page).getByTestId("plans-card-row");
   await expect(rows).toHaveCount(3);
+  await expect(rows.first()).toBeHidden();
+  await showPositions(page);
   for (const link of await card(page).getByRole("link").all()) {
     const box = await link.boundingBox();
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
   await fits(page);
   await card(page).screenshot({ path: test.info().outputPath("dashboard-plans-card-375.png") });
+});
+
+test("a busy portfolio leaves attention visible until the owner asks for positions", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const positions = Array.from({ length: 13 }, (_, i) => ({
+    ...BOOK.positions[2], trade_id: `fixture-${i}`, symbol: `TEST${i}`, contract: `TEST${i} stock`,
+  }));
+  await dashboard(page, { ...BOOK, positions, count: positions.length });
+  const summary = card(page).locator("summary");
+  await expect(summary).toContainText("0 of 13 planned");
+  await expect(card(page).getByRole("link", { name: /^Review / })).toHaveCount(0);
+  const attention = page.getByRole("region", { name: "Attention" });
+  await expect(attention).toContainText("New fills are not arriving");
+  await expect(attention.getByRole("heading")).toBeInViewport();
+  await expect(page.getByRole("region", { name: "Active Options" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("portfolio-dashboard-desktop.png") });
+  await summary.click();
+  await expect(card(page).getByRole("link", { name: /^Review / })).toHaveCount(13);
+  await summary.click();
+  await expect(card(page).getByRole("link", { name: /^Review / })).toHaveCount(0);
+});
+
+test("the full journal P&L fits its summary cell at a tablet width", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 820 });
+  await page.goto("/");
+  await page.getByTestId("journal-details").locator("summary").first().click();
+  const figure = page.getByLabel("Journal summary").getByText("+$1,019.00", { exact: true });
+  await expect(figure).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  expect(await figure.evaluate(el => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().right <= el.parentElement!.getBoundingClientRect().right;
+  })).toBe(true);
 });

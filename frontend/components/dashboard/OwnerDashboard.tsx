@@ -39,12 +39,12 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
     </header>
     <JoTodayLine today={today} />
     <PlansCard />
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-      <div className="min-w-0 space-y-4" aria-label="Market and discovery"><MorningBriefing initialDay={today} compact /><RadarPreview /></div>
-      <aside className="min-w-0 space-y-4" aria-label="Attention and data status">
+    <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      <aside className="min-w-0 xl:col-start-2 xl:row-start-1" aria-label="Attention and data status">
         <Suspense fallback={<AttentionLoading />}>{attention}</Suspense>
-        <ExitHabits /><DataFreshness />
       </aside>
+      <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1 xl:row-span-2" aria-label="Market and discovery"><MorningBriefing initialDay={today} compact /><RadarPreview /></div>
+      <div className="min-w-0 space-y-4 xl:col-start-2"><ExitHabits /><DataFreshness /></div>
     </div>
     {journal}
   </div>;
@@ -54,7 +54,7 @@ export function OwnerDashboardShell({ today, journal, attention }: { today: stri
 export type AttentionProps = Omit<OwnerProps, "stats">;
 
 export function OwnerAttention({ accounts, rows, quotes, quoteError, today, decisions, params }: AttentionProps) {
-  return <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
+  return <AttentionPanel accounts={accounts} rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
     scope={[params.account && params.account !== "all" ? accounts.find((a) => a.type === params.account)?.name ?? params.account : null,
       params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />;
 }
@@ -111,7 +111,7 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
           <span className="text-xs font-normal text-muted-foreground">P&amp;L, stocks &amp; trade history · <span className="group-open/journal:hidden">Expand</span><span className="hidden group-open/journal:inline">Collapse</span></span>
         </summary>
         <div className="min-w-0 space-y-4 border-t p-3 sm:p-4">
-          <div aria-label="Journal summary" className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-lg border bg-card md:grid-cols-5">
+          <div aria-label="Journal summary" className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-px overflow-hidden rounded-lg border bg-border">
             <SummaryFigure label="Today's Closed P&L" value={money(todayClosed.pnl, { signed: true })} tone={pnlTone(todayClosed.pnl)} detail={`${todayClosed.count} closed trades · ET`} />
             <SummaryFigure label="This Week's Closed P&L" value={money(weekClosed.pnl, { signed: true })} tone={pnlTone(weekClosed.pnl)} detail={`${weekClosed.count} closed · Mon–today ET`} />
             <SummaryFigure label="Unrealized P&L" value={money(unrealized, { signed: true })} tone={pnlTone(unrealized)} detail={`${quotedCount} of ${rows.length} positions quoted`} />

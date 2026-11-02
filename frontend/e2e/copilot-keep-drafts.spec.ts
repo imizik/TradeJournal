@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // Proposal cards are kept with their investigation: a reload or a switch to another thread brings each card back as it
 // was left, and a confirmed card never offers Confirm again. Every lab route is stubbed in the browser and the
@@ -89,6 +90,7 @@ async function lab(page: Page, server: Server) {
     return route.fulfill({ json: { alerts: [], phone: true } });
   });
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
 }
 
 const planCard = (page: Page) => page.getByRole("region", { name: "Proposed trade plan" });

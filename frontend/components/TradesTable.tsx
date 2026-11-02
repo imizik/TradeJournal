@@ -101,16 +101,18 @@ function Th({
 }) {
   return (
     <th
+      aria-sort={currentSort === sortKey ? (dir === "asc" ? "ascending" : "descending") : "none"}
       className={cn(
         "px-2 py-2 text-left font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground/80 sm:px-3",
         // A phone fits about four columns; the rest return from sm up, and
         // the ticker still opens the trade for everything they hold.
         wide && "hidden sm:table-cell"
       )}
-      onClick={() => onSort(sortKey)}
     >
-      {children}
-      <SortIcon active={currentSort === sortKey} dir={dir} />
+      <button type="button" onClick={() => onSort(sortKey)} className="inline-flex min-h-11 items-center gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9">
+        {children}
+        <SortIcon active={currentSort === sortKey} dir={dir} />
+      </button>
     </th>
   );
 }

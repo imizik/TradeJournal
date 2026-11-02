@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The practice goal: Review my week proposes one thing to practice as a card; the owner edits the text, Confirm posts it
 // to /copilot/practice (and a lesson memory only when "Remember this too" is ticked), and the goal's line appears in the
@@ -69,6 +70,7 @@ async function labOn(page: Page) {
 
 async function reviewToCard(page: Page) {
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   const home = page.getByRole("navigation", { name: "Thread list" });
   await expect(home.getByTestId("desk-day")).toBeVisible();
   await expect(home).not.toContainText("Practicing:");

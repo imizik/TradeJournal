@@ -44,7 +44,7 @@ const RADAR_PROOF = { state: "ok", reason: null, rule_version: "rv1", sessions: 
 
 type Desk = { picture?: "ok" | string; timeline?: object; history?: object };
 
-async function lab(page: Page, desk: Desk = {}) {
+async function lab(page: Page, desk: Desk = {}, showContext = true) {
   const reads: string[] = [];
   const timeframes: (string | null)[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
@@ -64,8 +64,19 @@ async function lab(page: Page, desk: Desk = {}) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
+  if (showContext) await page.getByRole("button", { name: "Context pane" }).click();
   return { reads, timeframes, pane: page.getByRole("complementary", { name: "Context" }) };
 }
+
+test("the conversation opens first and Context is available on demand", async ({ page }) => {
+  const { pane } = await lab(page, {}, false);
+  await expect(page.getByRole("region", { name: "Conversation" }).getByText("It held the open; the group leads.")).toBeVisible();
+  await expect(pane).toBeHidden();
+  const toggle = page.getByRole("button", { name: "Context pane" });
+  await expect(toggle).toContainText("Context");
+  await toggle.click();
+  await expect(pane).toBeVisible();
+});
 
 test("the Context pane opens on today's chart, and Timeline and Your history read only when asked", async ({ page }) => {
   const { reads, pane } = await lab(page);

@@ -34,8 +34,8 @@ refresh. It never posts visits/feedback, starts detection or activates recording
 Off, no-data, stale and load-failure states stay visible. Opening the full Radar
 screen retains its existing visit behavior.
 
-Attention and import freshness sit beside the market area on desktop and before
-journal detail on phones. Quote errors remain above both. Active options precede
+Position plans start as a single expandable row showing coverage and plan alerts. Opening it reveals the holdings and their planning actions.
+Attention sits beside the market area on desktop and precedes market discovery in the single-column layout. Each position issue identifies its account and remaining quantity. Missing basis and expired-open items open the fill timeline. Failed jobs open their details in Sync Center. Quote errors remain above both. Active options precede
 a collapsed **Journal & performance** disclosure containing the journal summary,
 today's session, stocks, exposure, performance and trade history. Account/type controls live with the
 journal and explicitly do not rescope the saved briefing or Radar. Stock,

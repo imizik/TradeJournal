@@ -61,7 +61,8 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
   const { id } = use(params);
   // Back returns to the page that opened the trade (e.g. a Daily Review day); only same-site paths are followed.
   const { returnTo: from, alert, answer, interrupt, noted } = use(searchParams);
-  const back = from && from.startsWith("/") && !from.startsWith("//") ? { href: from, label: from.startsWith("/daily") ? "Back to Daily Review" : "Back" } : { href: "/trades", label: "Back to Trades" };
+  const requestedLabel = from?.startsWith("/analytics") ? new URL(from, "http://localhost").searchParams.get("returnLabel")?.slice(0, 80) : null;
+  const back = from && from.startsWith("/") && !from.startsWith("//") ? { href: from, label: requestedLabel || (from.startsWith("/daily") ? "Back to Daily Review" : "Back") } : { href: "/trades", label: "Back to Trades" };
   const [tradeError, setTradeError] = useState(false);
   const [trade, setTrade] = useState<Trade | null>(null);
   const [fills, setFills] = useState<Fill[] | null>(null);
@@ -98,6 +99,10 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
         setTradeError(true);
       });
   }, [id]);
+
+  useEffect(() => {
+    if (trade && fills && window.location.hash === "#fills") document.getElementById("fills")?.scrollIntoView();
+  }, [trade, fills]);
 
   if (tradeError) return <div role="alert" className="space-y-3"><p>This position could not be loaded. It may no longer be in the journal.</p><Link href="/trades" className="underline">Back to Trades</Link><p>Reload the page to try again.</p></div>;
 
@@ -184,7 +189,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
 
       <TradeAdvice tradeId={id} />
 
-      <DashboardCard title="Fill Timeline" action={<p className="text-xs text-muted-foreground">
+      <DashboardCard id="fills" title="Fill Timeline" action={<p className="text-xs text-muted-foreground">
             Edit a fill to correct the position history. Saving rebuilds trades and returns you to the ticker view.
           </p>}>
         <div className="space-y-2">
