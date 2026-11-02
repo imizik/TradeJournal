@@ -72,7 +72,7 @@ test("the list sends nothing on open, and What matters right now? asks across ev
 
   await briefing(page).getByRole("button", { name: "What matters right now?" }).click();
   await expect(page.getByText(ANSWER)).toBeVisible();
-  expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null }]);
+  expect(chats).toEqual([{ messages: [{ role: "user", content: PROMPT }], symbol: null, source: "desk" }]);
   await expect(threads).toBeVisible(); // the desk keeps the thread list beside the open conversation
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0].symbol).toBeNull(); // saved about no symbol
