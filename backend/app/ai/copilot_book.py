@@ -155,16 +155,20 @@ def _not_webull():
     return or_(Account.broker.is_(None), Account.broker != "webull")  # Dormant by the owner's choice.
 
 
-def _mark(trade, quotes: dict) -> tuple[float | None, str | None]:
-    """The current mark in the same units as the journal's avg_cost: dollars a share, or a contract (premium x 100)."""
+def _mark(trade, quotes: dict) -> tuple[float | None, str | None, dict]:
+    """The current mark in the same units as the journal's avg_cost: dollars a share, or a contract (premium x 100); for
+    an option also the provider's implied volatility and delta with their hourly stamp (``{}`` when it gave none)."""
     if trade.instrument_type == "option":
         from app.engine.quotes import OptionQuoteRequest, option_mark
         result, quoted_at = option_mark(OptionQuoteRequest(ticker=trade.ticker, expiration=trade.expiration.isoformat(),
                                                            strike=float(trade.strike), option_type=trade.option_type or ""))
         premium = result.mid if result.mid is not None else result.last_price
-        return (None if premium is None else round(premium * 100, 2)), _iso(quoted_at)
+        greeks = {k: v for k, v in {"iv_pct": None if result.iv is None else round(result.iv * 100, 1),
+                                    "delta": None if result.delta is None else round(result.delta, 3),
+                                    "greeks_as_of": result.iv_updated_at}.items() if v is not None}
+        return (None if premium is None else round(premium * 100, 2)), _iso(quoted_at), greeks
     price = quotes.get(trade.ticker)
-    return (None if price is None else float(price)), None
+    return (None if price is None else float(price)), None, {}
 
 
 def _warm_option_quotes(trades: list) -> None:
@@ -205,7 +209,7 @@ def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only
     pairs = []
     for p in held[:limit]:
         trade = trades[p["trade_id"]]
-        mark, quoted_at = _mark(trade, quotes)
+        mark, quoted_at, greeks = _mark(trade, quotes)
         cost, quantity = p.get("avg_cost"), p.get("open") or 0
         sign = -1 if p.get("direction") == "short" else 1
         gain = None if mark is None or cost is None else round(sign * (mark - cost) * quantity, 2)
@@ -215,7 +219,7 @@ def position_rows(db, limit: int = MAX_POSITIONS, first: str | None = None, only
             **({"option": {"side": trade.option_type, "strike": _round(float(trade.strike)), "expiry": trade.expiration.isoformat()}}
                if trade.instrument_type == "option" else {}),
             "direction": p.get("direction"), "quantity": quantity, "avg_entry": _round(cost),
-            "mark": _round(mark), **({"mark_as_of": quoted_at} if quoted_at else {}), "unrealized_usd": gain,
+            "mark": _round(mark), **({"mark_as_of": quoted_at} if quoted_at else {}), **greeks, "unrealized_usd": gain,
             "unrealized_pct": None if gain is None or not cost else round(100 * sign * (mark - cost) / cost, 1),
             "opened_at": _journal_time(trade.opened_at), "days_held": (now - opened).days,
         }))

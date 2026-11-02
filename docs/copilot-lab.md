@@ -926,8 +926,9 @@ Briefing's day).
   the position in front of it resembles it, never to recite them.
 - **Four separate questions** for any trade idea: thesis, setup now,
   instrument fit (expiry, strike and premium against the horizon, from real
-  contracts through `get_option_candidates`; no implied volatility or Greeks,
-  so it says so rather than estimates), and
+  contracts through `get_option_candidates`, with the provider's implied
+  volatility, Greeks and each expiry's expected move; a figure the provider
+  did not give stays null, never estimated), and
   the decision now (what changed for the thesis versus only for the
   position). "Nothing here changes the plan" and "not worth a trade" are
   complete answers.
@@ -1531,10 +1532,18 @@ instrument question needs real contracts, not just marks of the ones held.
   contract (× the contract's multiplier; `unavailable` when the chain does not
   give one), spread % of mid, open interest and volume when listed, distance to
   strike %, the break-even move % by expiry paying the ask, and with a budget
-  how many contracts it buys at the ask. Delta and implied volatility are
-  `unavailable`: the chain carries the provider's greeks, but nothing passes
-  them on and the copilot never estimates them. The answer drops rows rather
-  than cut its JSON past 6,000 characters.
+  how many contracts it buys at the ask; the provider's (ORATS) implied
+  volatility in percent, delta and theta (per share per day, and per
+  contract), with one `greeks_as_of`, the provider's own hourly stamp as
+  given; and `last`. Each expiry carries its `expected_move`,
+  the at-the-money straddle's mid in dollars and as a percent of the price
+  (`options_implied.straddle`, labelled by its quote time), and each candidate
+  `move_needed_vs_expected`, its break-even move over that expected move
+  (above 1 needs more than the market prices in). A Greek or volatility the
+  provider did not give is null; the copilot never estimates one. Open
+  positions in the owner context carry the same `iv_pct`, `delta` and
+  `greeks_as_of` from their marks. The answer drops rows rather than cut its
+  JSON past 6,000 characters.
 - No price or no readable chain says so in `state` and `reason` (for example
   "Set TRADIER_API_KEY …"); a chain missing from a pass is `partial`. Fixture
   mode runs a simulated NBIS chain through the same selection; replay is
