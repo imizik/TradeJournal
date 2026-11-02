@@ -297,7 +297,8 @@ class Replies:
         parts: list[str] = []
         errors: list[str] = []
         try:
-            turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram")
+            turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram",
+                                               web=True)
             async with contextlib.aclosing(turn) as events:
                 async for event in events:
                     if event.get("type") == "text":
