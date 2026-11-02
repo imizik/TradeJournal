@@ -105,10 +105,10 @@ def kind_of(question: str, tool_names: Iterable[str], proposal_kinds: Iterable[s
         return "moment"
     if "trade_plan" in cards:
         return "plan"
+    if WHAT_MATTERS in (question or "")[:600]:  # the panel may put a "Context: …" line ahead of it
+        return "briefing"
     if COMPARE_LINE.search(answer or ""):
         return "compare"
-    if (question or "").strip().startswith(WHAT_MATTERS):
-        return "briefing"
     return "ask"
 
 
@@ -145,21 +145,20 @@ async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, e
     finally:
         names = _names(live)
         chosen = kind or kind_of(question, names, proposals, "".join(text))
-        if finished:
-            await asyncio.to_thread(record, live, symbol, turn_id=turn_id, kind=chosen, source=source, investigation_id=investigation_id,
-                                    tool_names=names, error=error, effort=cfg.effort, evidence=cfg.evidence)
-        else:
-            # Stopped by the consumer (GeneratorExit or a cancelled task): awaiting here would raise again, so the row
-            # goes to the loop's default executor and the turn's cost so far is kept.
+        # Never awaited here: a consumer that stopped (GeneratorExit) or a request being cancelled would re-raise through an
+        # await and lose the row. The default executor writes it; a stopped turn keeps the cost it had reached.
+        if not finished:
             live.setdefault("total_ms", None)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, lambda: record(live, symbol, turn_id=turn_id, kind=chosen, source=source,
-                                                          investigation_id=investigation_id, tool_names=names, error="stopped",
-                                                          effort=cfg.effort, evidence=cfg.evidence))
-            except RuntimeError:  # no loop: record inline
-                record(live, symbol, turn_id=turn_id, kind=chosen, source=source, investigation_id=investigation_id,
-                       tool_names=names, error="stopped", effort=cfg.effort, evidence=cfg.evidence)
+            error = "stopped"
+
+        def write() -> None:
+            record(live, symbol, turn_id=turn_id, kind=chosen, source=source, investigation_id=investigation_id,
+                   tool_names=names, error=error, effort=cfg.effort, evidence=cfg.evidence)
+
+        try:
+            asyncio.get_running_loop().run_in_executor(None, write)
+        except RuntimeError:  # no loop: record inline
+            write()
 
 
 def link(db, investigation_id: uuid.UUID | str, turn_ids: Iterable[str]) -> int:

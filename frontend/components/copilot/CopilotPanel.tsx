@@ -417,7 +417,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
 }) {
   const panel = variant === "panel";
   // Where this question is asked from, recorded with its turn: the desk page, the Charts dock, a Radar drawer, or another panel.
-  const source: TurnSource = !panel ? "desk" : pageSymbol ? "charts" : link?.origin?.kind === "radar_event" ? "radar" : "panel";
+  const source: TurnSource = !panel ? "desk" : link?.origin?.kind === "radar_event" ? "radar" : pageSymbol ? "charts" : "panel";
   const { owner } = useAppAccess();
   const opening = link?.context && !link.investigation ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
   const [status, setStatus] = useState<CopilotStatus | null>(null);

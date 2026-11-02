@@ -47,6 +47,7 @@ Nothing here places, changes or suggests an order, and every prompt says so.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 from datetime import UTC, date, datetime, timedelta
 import json
@@ -365,11 +366,12 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
     try:
         turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, datetime.fromtimestamp(now, ET),
                                            kind="companion", source="companion")
-        async for event in turn:
-            if event.get("type") == "text":
-                parts.append(event.get("delta") or "")
-            elif event.get("type") == "error" and error is None:
-                error = event.get("message") or event.get("code") or "error"
+        async with contextlib.aclosing(turn) as events:
+            async for event in events:
+                if event.get("type") == "text":
+                    parts.append(event.get("delta") or "")
+                elif event.get("type") == "error" and error is None:
+                    error = event.get("message") or event.get("code") or "error"
     except Exception as exc:  # noqa: BLE001 - a failed turn is recorded on the row, never raised into the loop
         log.warning("Companion turn failed: %s", type(exc).__name__)
         error = "The copilot turn failed unexpectedly."

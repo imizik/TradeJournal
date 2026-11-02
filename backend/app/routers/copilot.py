@@ -9,6 +9,7 @@ as soon as it is transcribed and never logged. A shared screenshot is kept, proc
 that turn ends, or after 24 hours if it is never sent.
 """
 import asyncio
+import contextlib
 from datetime import datetime
 import json
 import logging
@@ -179,8 +180,9 @@ async def chat(body: ChatBody):
             now = datetime.now(ET)
             turn = copilot_spend.recorded_turn(history, body.symbol, cfg, adapter, evidence, now, kind=None, source=body.source or "desk",
                                                images=images, carry_id=body.carry_id, investigation_id=body.investigation_id)
-            async for event in turn:
-                yield f"event: {event['type']}\ndata: {json.dumps(event, default=str)}\n\n"
+            async with contextlib.aclosing(turn) as events_:
+                async for event in events_:
+                    yield f"event: {event['type']}\ndata: {json.dumps(event, default=str)}\n\n"
         finally:
             for image_id in body.image_ids:
                 copilot_images.delete(image_id)

@@ -33,6 +33,7 @@ and rating writes are idempotent, a repeated ``why`` or question asks once more.
 """
 
 import asyncio
+import contextlib
 import logging
 import re
 import uuid
@@ -297,11 +298,12 @@ class Replies:
         errors: list[str] = []
         try:
             turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram")
-            async for event in turn:
-                if event.get("type") == "text":
-                    parts.append(event.get("delta") or "")
-                elif event.get("type") == "error":
-                    errors.append(event.get("message") or "")
+            async with contextlib.aclosing(turn) as events:
+                async for event in events:
+                    if event.get("type") == "text":
+                        parts.append(event.get("delta") or "")
+                    elif event.get("type") == "error":
+                        errors.append(event.get("message") or "")
         finally:
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
