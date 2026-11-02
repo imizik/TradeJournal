@@ -10,6 +10,7 @@ import {
   type ContextTab, type DeskHistory, type DeskTimeframe, type DeskSession, type DeskSessionEvent, type DeskThreadRef, type DeskTimeline, type DeskTimelineRow,
 } from "@/lib/desk";
 import { cn } from "@/lib/utils";
+import { unavailable, type AnswerScorecard } from "@/lib/copilot";
 
 const NY = "America/New_York";
 const nyDay = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { timeZone: NY });
@@ -262,8 +263,35 @@ function WeekProof() {
   );
 }
 
+/** This week's copilot, as ``GET /copilot/answer-scorecard`` counts it: Helped of rated, answers, the median wait for the
+ * first text, what it cost; then pushbacks, follow-ups and failed turns. A read that fails says so. */
+function WeekCopilot() {
+  const card = useJson<AnswerScorecard>("/copilot/answer-scorecard?days=7");
+  const seconds = (ms: number | null | undefined) => ms == null ? null : `${(ms / 1000).toFixed(1)} s`;
+  let line: ReactNode = card.error ? "could not load" : "reading…";
+  let detail: ReactNode = null;
+  if (card.body) {
+    const a = card.body.answers, c = card.body.cost, l = card.body.latency;
+    if (unavailable(a)) line = "could not count the answers";
+    else {
+      const ask = !unavailable(l) ? l.ask ?? Object.values(l)[0] : undefined;
+      const wait = seconds(ask?.first_text_ms.p50);
+      line = <>Helped <span className="tabular-nums">{a.helped}</span> of <span className="tabular-nums">{a.rated}</span> rated · <span className="tabular-nums">{a.total}</span> answer{a.total === 1 ? "" : "s"}
+        {wait && <> · first text <span className="tabular-nums">{wait}</span> median</>}
+        {!unavailable(c) && <> · <span className="tabular-nums">${c.total_usd.toFixed(2)}</span></>}</>;
+      detail = <>Pushed back on <span className="tabular-nums">{a.pushback}</span> · <span className="tabular-nums">{a.follow_ups}</span> follow-up{a.follow_ups === 1 ? "" : "s"} · <span className="tabular-nums">{a.failed}</span> failed</>;
+    }
+  }
+  return (
+    <section aria-label="Copilot this week" data-testid="week-copilot" className="space-y-1 border-b pb-3 text-sm">
+      <p data-testid="week-copilot-line" className="min-w-0 break-words"><span className="text-muted-foreground">Copilot: </span><span className="font-medium text-foreground">{line}</span></p>
+      {detail && <p data-testid="week-copilot-detail" className="text-xs text-muted-foreground">{detail}</p>}
+    </section>
+  );
+}
+
 function WeekTab() {
-  return <div className="space-y-3"><WeekProof /><WeekRecord /></div>;
+  return <div className="space-y-3"><WeekCopilot /><WeekProof /><WeekRecord /></div>;
 }
 
 function WeekRecord() {

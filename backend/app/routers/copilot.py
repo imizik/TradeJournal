@@ -265,6 +265,16 @@ def _enabled():
         raise HTTPException(503, "Copilot Lab is off.")
 
 
+@router.get("/answer-scorecard")
+def answer_scorecard(days: int = Query(7, ge=1, le=90), session: Session = Depends(get_session)):
+    """How the copilot's answers went over the last ``days`` (docs/copilot-lab.md § The answer scorecard): Helped / Didn't
+    by kind, source, model and tools, pushback and follow-up rates, latency, failures, spend by day and cost per thread.
+    Counts only; owner-only, refused while the lab is off."""
+    _enabled()
+    from app.engine import copilot_scorecard
+    return copilot_scorecard.answer_scorecard(session, datetime.utcnow(), days)
+
+
 def _http(exc: investigations.InvestigationError) -> HTTPException:
     return HTTPException({"not_found": 404, "stale": 409, "too_long": 413}[exc.code], str(exc))
 

@@ -197,6 +197,12 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
   } }));
   await page.route("**/analytics/exit-habits", (route) => route.fulfill({ json: EXIT_HABITS }));
   await page.route("**/radar/proof", (route) => route.fulfill({ json: RADAR_PROOF }));
+  await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ json: {
+    state: "ok", window: { days: 7, since: "2026-10-19T00:00", until: "2026-10-26T15:00" },
+    turns: { total: 23, by_kind: { ask: 20, plan: 3 }, by_source: { desk: 23 } },
+    answers: { total: 23, rated: 9, helped: 7, didnt: 2, helped_rate: 0.778, pushback: 2, pushback_rate: 0.087, follow_ups: 5, follow_up_rate: 0.217, failed: 1 },
+    by_kind: {}, latency: { ask: { turns: 19, first_text_ms: { p50: 4100, p90: 9800 }, total_ms: { p50: 6000, p90: 12000 }, max_silence_ms_p50: 3900 } },
+    failed: { timeout: 1 }, cost: { total_usd: 0.38, per_turn_usd: 0.0165, top_threads: [], cache: { read_tokens: 0, input_tokens: 0, read_share: null } } } }));
   await page.goto("/copilot-lab");
   const pane = page.getByRole("complementary", { name: "Context" });
   await expect(pane.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
@@ -213,6 +219,8 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
   await tabs.getByRole("tab", { name: "This week" }).click();
   // The two proofs first, as /proof reads them, each with what it rests on.
   const proof = pane.getByRole("region", { name: "Proof this week" });
+  await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: Helped 7 of 9 rated · 23 answers · first text 4.1 s median · $0.38");
+  await expect(pane.getByTestId("week-copilot-detail")).toHaveText("Pushed back on 2 · 5 follow-ups · 1 failed");
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: No consistent decrease · based on 9 of 14 alerts answered");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · 6 hits rated");
   await expect(proof.getByRole("link", { name: "Open Proof →" })).toHaveAttribute("href", "/proof");
@@ -234,11 +242,13 @@ test("this week's proof lines say when a proof read is missing or fails", async 
   await page.route("**/charts/captures/streak", (route) => route.fulfill({ json: { show: false } }));
   await page.route("**/analytics/exit-habits", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.route("**/radar/proof", (route) => route.fulfill({ json: { state: "off", reason: "Radar is not recording." } }));
+  await page.route("**/copilot/answer-scorecard*", (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
   await page.goto("/copilot-lab");
   await page.getByRole("tablist", { name: "Desk" }).getByRole("tab", { name: "Context" }).click();
   const pane = page.getByRole("complementary", { name: "Context" });
   await pane.getByRole("tablist", { name: "Context" }).getByRole("tab", { name: "This week" }).click();
   const proof = pane.getByRole("region", { name: "Proof this week" });
+  await expect(pane.getByTestId("week-copilot-line")).toHaveText("Copilot: could not load");
   await expect(proof.getByTestId("week-proof-alerts")).toHaveText("Alerts: could not load");
   await expect(proof.getByTestId("week-proof-radar")).toHaveText("Radar: Not enough data · Radar is not recording.");
   await expect(pane).toContainText("No entries are tracked yet."); // the week's record still shows below
