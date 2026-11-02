@@ -121,8 +121,12 @@ narrate unchanged waits. No new approval is needed for authorized routine repair
 ## Automatic repair and merge
 
 These rules apply equally to Codex and Claude Code for PRs they own. They govern
-the active agent session; repository instructions do not start a background bot
-after the session ends or authorize new paid API automation.
+the active agent session. The only automation they authorize beyond it is
+GitHub auto-merge on a PR the session armed, and the
+[Land workflow](../../.github/workflows/land.yml), which brings armed branches
+up to date with `main` on the owner's Claude plan token (the
+`CLAUDE_CODE_OAUTH_TOKEN` repository secret); repository instructions start no
+other bot and no paid API automation.
 
 1. Classify the complete diff by behavior using the table above and record the
    tier, whether it is user-gated, and why in the PR description. Mixed
@@ -143,26 +147,33 @@ after the session ends or authorize new paid API automation.
    Do not weaken tests or safeguards to obtain a pass.
 3. Allow at most three automatic repair/review rounds per PR, shared across
    agents and sessions; record rounds in the PR description. Repeated attempts
-   do not reset the budget. If exhausted, blocked, or interrupted, leave the PR
-   unmerged with auto-merge disabled and report the specific remaining work.
+   do not reset the budget. If exhausted, blocked, or interrupted, disarm
+   auto-merge (`gh pr merge <number> --disable-auto`), leave the PR unmerged
+   and report the specific remaining work.
    An unavailable check or unresolved finding is not a pass.
-4. Before merging a PR that is not user-gated, disable any queued GitHub
-   auto-merge, then inspect the final diff, actionable review findings, and all
-   applicable CI jobs/steps on the exact final head. For tiers 1/2, the required
-   reviews must be clean for that head, rechecked under the owner sequence after
-   any substantive change. Check squash merging is enabled and `main` still
-   enforces the required Backend, Frontend,
-   Browser, Postgres parity, and Ubuntu package and systemd build checks. Do not
-   remove protection, bypass reviews, use `--admin`, or merge with pending proof.
-   After those gates pass, use
-   `gh pr merge <number> --squash --match-head-commit <verified-head-sha>`.
-   If the head changes, reassess risk and verify that head before trying again.
-   Do not use `--auto` or leave a merge queued: a queued GitHub auto-merge can
-   survive later pushes by a writer and is not pinned to the verified head.
-   If merge requirements are still pending, continue monitoring and reverify
-   before the next attempt. Confirm the PR actually merged before reporting done.
-5. Leave user-gated PRs with auto-merge disabled for the user's approval and
-   merge, after applicable reviews and verification. A previous PR's approval does not
+4. Arm the merge instead of waiting for it. Once the complete candidate is
+   pushed, the PR is not user-gated, and its tier's required reviews are clean
+   on that head, check that squash merging is enabled and `main` still
+   enforces the required Backend, Frontend, Browser, Postgres parity, and
+   Ubuntu package and systemd build checks, then run
+   `gh pr merge <number> --auto --squash` (the desktop app's `set_auto_merge`
+   is the same thing). GitHub squash-merges the moment those checks pass on
+   the head, whether or not the session is still alive; if they have already
+   passed, gh merges on the spot. Do not remove protection, bypass reviews,
+   or use `--admin`. Auto-merge survives later pushes, so review every repair
+   before pushing it; a repair that changes behavior beyond the fix, or raises
+   the tier, is pushed only after `--disable-auto`, the review the new tier
+   needs, and re-arming. When `main` moves and the branch conflicts, the Land
+   workflow merges `main` into the branch, starts the required checks on the
+   new head and says so on the PR; when it cannot resolve the conflict it
+   says that instead, and the owning session (the app's Auto-fix wakes it on
+   failures, conflicts and comments) or the next session merges `main` by
+   hand. A session still watching when the checks go green may merge directly
+   with `gh pr merge <number> --squash --match-head-commit <verified-head-sha>`.
+   Report a PR as armed, not merged, until it shows as merged.
+5. Leave user-gated PRs unarmed for the user's approval and merge, after
+   applicable reviews and verification; the user may arm auto-merge themselves
+   once they approve, which is their merge. A previous PR's approval does not
    approve a new diff. Do not split or relabel changes to avoid this gate. This
    includes changes to these rules or their enforcement.
 

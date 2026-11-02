@@ -78,16 +78,18 @@ feature-specific safety and acceptance gates; fixture proof is not live proof.
 Develop on a branch, never directly on `main`. Pushes, PR updates and bounded
 repairs are authorized for both Codex and Claude Code. PRs are authorized for
 automatic repair and squash merge under the
-[PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge) once
-CI and the review their tier requires pass.
+[PR completion rules](docs/agent/pr-review.md#automatic-repair-and-merge): once
+the review a PR's tier requires is clean, arm GitHub auto-merge and the
+required checks land it; the Land workflow keeps armed branches current with
+`main`.
 [User-gated changes](docs/agent/pr-review.md#user-gated-changes) (agent rules,
 CI and verification tooling, deployment and activation, destructive data
 changes, and auth/security) still require the user's approval and merge; never
-merge or enable auto-merge for them. Changes to this policy are user-gated.
-CI remains enabled for every PR; only call work merge-ready after required checks
-pass on its final head and any required review is complete. Keep owning PRs you
-will merge while CI is pending; if interrupted or blocked, report that state
-honestly.
+merge or arm auto-merge for them. Changes to this policy are user-gated.
+CI remains enabled for every PR; call work armed until the PR shows as merged,
+and merge-ready only after required checks pass on its final head and any
+required review is complete. If interrupted or blocked, disarm auto-merge and
+report that state honestly.
 Do not rerun a failure until it passes without diagnosing it, weaken tests, or
 conceal missing proof.
 
