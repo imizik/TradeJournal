@@ -419,7 +419,11 @@ def _proposal(args: dict) -> dict:
         days = args.get("horizon_days", 1)
         if not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 30:
             raise ToolInputError("horizon_days must be 0-30")
-        return {"kind": "revisit", "question": _text(args, "question", 500), "horizon_days": days}
+        question = _text(args, "question", 500)
+        if re.search(r"://|\bwww\.", question, re.IGNORECASE):
+            # The question becomes a research job's prompt, and that job can fetch pages: no link may ride in on it.
+            raise ToolInputError("a revisit question carries no links")
+        return {"kind": "revisit", "question": question, "horizon_days": days}
     if kind == "trade_plan":
         return _trade_plan(args)
     if kind == "practice":

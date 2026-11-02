@@ -1503,9 +1503,9 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
     return copilot_context.block(pack), event
 
 
-# A live API turn may search the web: Anthropic's server-side search, at most WEB_SEARCHES a turn, a cent each on top
-# of tokens. No web fetch: a page cannot steer a request to a URL, and the search query is the only thing that leaves.
-# Replay (the web is hindsight) and the fixture never search.
+# A live API turn may search the web: Anthropic's server-side search, about WEB_SEARCHES a turn, a cent each on top of
+# tokens. No web fetch: the query is the only thing that leaves, and a page cannot steer a request to a URL. Replay (the
+# web is hindsight) and the fixture never search.
 WEB_SEARCHES = 3
 WEB_SEARCH_TOOL = "web_search_20260209"
 WEB_LINKS = 8
@@ -1514,32 +1514,49 @@ WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its 
 
 
 def web_tool(left: int) -> list[dict]:
-    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": left}] if left > 0 else []
+    """The search tool for one request. Once offered in a turn it stays in every later round: a search's result (and
+    its code-execution filtering) can arrive in the next round, and the API refuses a history whose server tool is gone.
+    So a spent budget still offers one use a round; the turn's rounds and spend cap bound the rest."""
+    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": max(1, left)}]
 
 
-def web_events(content: list[dict], now: datetime) -> list[dict]:
-    """The UI's evidence rows for one round's web searches: the query, what came back and its links."""
-    results = {b.get("tool_use_id"): b.get("content") for b in content if b.get("type") == "web_search_tool_result"}
-    events = []
+def _host(url: str) -> str:
+    try:
+        return re.sub(r"^www\.", "", urlsplit(url).hostname or "")
+    except ValueError:  # e.g. an unmatched bracket
+        return ""
+
+
+def web_row(search_id: str | None, query: str | None, found: Any, now: datetime) -> dict:
+    """The UI's evidence row for one web search: the query, what came back and its links."""
+    event: dict[str, Any] = {"type": "tool", "id": search_id, "name": "web_search", "input": {"query": query or ""}}
+    if isinstance(found, list):
+        pages = [r for r in found if isinstance(r, dict) and r.get("type") == "web_search_result"
+                 and str(r.get("url") or "").startswith(("https://", "http://"))]
+        links = [{"title": str(r.get("title") or r["url"])[:160], "url": str(r["url"])[:500],
+                  **({"page_age": str(r["page_age"])[:40]} if r.get("page_age") else {})} for r in pages[:WEB_LINKS]]
+        links = list({link["url"]: link for link in links}.values())
+        hosts = [h for h in dict.fromkeys(_host(link["url"]) for link in links) if h]
+        event.update(status="ok", links=links, summary=f"{len(pages)} results" + (f": {', '.join(hosts[:4])}" if hosts else ""))
+    else:
+        code = found.get("error_code", "no result") if isinstance(found, dict) else "no result"
+        event.update(status="error", summary=f"search failed ({code})")
+    event["provenance"] = copilot_tools.provenance("web_search", {"as_of": now.isoformat(timespec="minutes")}, "live")
+    return event
+
+
+def web_events(content: list[dict], now: datetime, pending: dict[str, str]) -> tuple[int, list[dict]]:
+    """One round's web searches: ``(searches started, rows for results that arrived)``. A result can arrive a round after
+    its search, so ``pending`` keeps the queries (by search id) still waiting across the turn's rounds."""
+    started = 0
     for block in content:
-        if block.get("type") != "server_tool_use" or block.get("name") != "web_search":
-            continue
-        found = results.get(block.get("id"))
-        event: dict[str, Any] = {"type": "tool", "id": block.get("id"), "name": "web_search",
-                                 "input": {"query": str((block.get("input") or {}).get("query") or "")[:200]}}
-        if isinstance(found, list):
-            pages = [r for r in found if isinstance(r, dict) and r.get("type") == "web_search_result"
-                     and str(r.get("url") or "").startswith(("https://", "http://"))]
-            links = [{"title": str(r.get("title") or r["url"])[:160], "url": str(r["url"])[:500],
-                      **({"page_age": str(r["page_age"])[:40]} if r.get("page_age") else {})} for r in pages[:WEB_LINKS]]
-            hosts = list(dict.fromkeys(re.sub(r"^www\.", "", urlsplit(link["url"]).hostname or "") for link in links))
-            event.update(status="ok", links=links, summary=f"{len(pages)} results" + (f": {', '.join(hosts[:4])}" if hosts else ""))
-        else:
-            code = (found or {}).get("error_code", "no result") if isinstance(found, dict) else "no result"
-            event.update(status="error", summary=f"search failed ({code})")
-        event["provenance"] = copilot_tools.provenance("web_search", {"as_of": now.isoformat(timespec="minutes")}, "live")
-        events.append(event)
-    return events
+        if block.get("type") == "server_tool_use" and block.get("name") == "web_search":
+            pending[str(block.get("id"))] = query = str((block.get("input") or {}).get("query") or "")[:500]
+            started += 1
+            log.info("copilot web search: %s", query)  # what left the server, in the journal for any turn (Telegram too)
+    rows = [web_row(b.get("tool_use_id"), pending.pop(str(b.get("tool_use_id")), None), b.get("content"), now)
+            for b in content if b.get("type") == "web_search_tool_result"]
+    return started, rows
 
 
 async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapter, evidence,
@@ -1573,6 +1590,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     calls = searched = 0
     web = web and cfg.backend == "anthropic" and mode == "live"
     cap = cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)
+    web_offered = False
+    waiting: dict[str, str] = {}  # web searches whose result has not arrived yet: id -> query
     turn: dict = {"images": len(images or [])}  # per-turn state for _run_tool (one practice proposal, two images)
     last_seen = 0
 
@@ -1597,7 +1616,8 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
             for round_no in range(cfg.max_rounds):
                 final: Round | None = None
                 allow = round_no < cfg.max_rounds - 1 and calls < cfg.max_tool_calls
-                tools = copilot_tools.TOOLS + (web_tool(WEB_SEARCHES - searched) if web and allow else [])
+                web_offered = web_offered or (web and allow and searched < WEB_SEARCHES)
+                tools = copilot_tools.TOOLS + (web_tool(WEB_SEARCHES - searched) if web_offered else [])
                 async for kind, value in adapter.stream_round(SYSTEM_PROMPT, messages, tools, allow):
                     if kind == "text":
                         seen("first_text_ms")
@@ -1613,11 +1633,13 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 for key in usage:
                     usage[key] += final.usage.get(key, 0)
                 spent_usd += cost_usd(final.model or metrics["model"], {key: final.usage.get(key, 0) for key in usage})
-                for event in web_events(final.content, now):
-                    searched += 1
-                    spent_usd += WEB_SEARCH_USD
+                started, rows = web_events(final.content, now, waiting)
+                searched += started
+                spent_usd += started * WEB_SEARCH_USD
+                for event in rows:
                     seen()
-                    metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")})
+                    # The query is kept with the turn's record: what left the server is visible after the fact.
+                    metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")} | {"query": event["input"]["query"]})
                     yield event
                 metrics.update(usage=dict(usage), cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
                 if final.model:
@@ -1668,6 +1690,10 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     except Exception as exc:  # the stream has started: end it with an honest error, never silently
         log.warning("copilot turn failed: %s", type(exc).__name__)
         yield {"type": "error", "code": "internal", "message": "The copilot turn failed unexpectedly."}
+    for search_id, query in waiting.items():  # searched, but the turn ended before a result came back
+        event = web_row(search_id, query, None, now)
+        metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")} | {"query": query})
+        yield event
     seen()  # the turn's end: a long wait before the answer finished counts as silence too
     metrics.update(total_ms=elapsed(), usage=usage, cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
     log.info("copilot turn backend=%s model=%s first_feedback_ms=%s first_text_ms=%s max_silence_ms=%s total_ms=%s "

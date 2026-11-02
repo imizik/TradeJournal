@@ -2287,8 +2287,16 @@ Telegram reply) may search the web on the `anthropic` backend with live
 evidence. Background turns (pre-market prep, the week review, the position
 companion) never do, and neither do replay (the web is hindsight) or the
 fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
-`web_search` tool to each round that may still call tools, with `max_uses`
-counting down from `copilot.WEB_SEARCHES` (3) across the turn's rounds.
+`web_search` tool (`web_search_20260209`) once a round may call tools, with
+`max_uses` counting down from `copilot.WEB_SEARCHES` (3) across the turn's
+rounds. Once offered it stays in every later round, the last included: a
+search's result (and its code-execution filtering) can arrive a round later,
+and the API refuses a history whose server tool is gone (checked live on
+2026-11-02). A spent budget therefore still offers one use a round; the
+turn's rounds and spend cap bound the rest. A result is matched to its query
+by search id whichever round it arrives in; one still missing when the turn
+ends reads "search failed (no result)". Each query is logged at INFO
+(`copilot web search: …`), so Telegram turns' searches are visible too.
 
 - **No web fetch.** Search results only: a page cannot steer a request to a
   URL, and the query is the only thing that leaves. The prompt says to use the
@@ -2310,7 +2318,13 @@ counting down from `copilot.WEB_SEARCHES` (3) across the turn's rounds.
   card. Confirm queues the owner's reassess job due now (`POST
   /copilot/research-jobs/reassess`, `after_days 0`), the [research
   job](#research-job) with web search and fetch, and its result reaches the
-  thread like any revisit. It runs only while the research queue is on.
+  thread like any revisit. It runs only while the research queue is on. An
+  owner revisit dedupes by thread, day, due date and question, so a second
+  question from the same thread is its own job and a failed or cancelled one
+  can be asked again. A revisit question carrying a link (`://` or `www.`) is
+  refused, since it becomes the prompt of a job that can fetch pages. On
+  Telegram only the answer's text is sent, so a proposed card is not shown
+  there.
 
 Tests: `backend/tests/test_copilot_web.py`.
 
@@ -2670,7 +2684,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   - `POST /copilot/research-jobs/reassess` with `{investigation_id, question,
     after_days}` queues the owner's "revisit this question": one reassess job
     for that investigation, due `after_days` (0-30) from now, at most once a
-    day per investigation and due date. Its assignment adds the owner's
+    day per investigation, due date and question (a failed or cancelled one
+    can be asked again). Its assignment adds the owner's
     question to the usual reassessment. It records `from_investigation` too,
     so `?from_investigation=` lists it with that investigation's jobs. While it waits, it counts as that
     investigation's waiting reassessment, so the automatic reassessment
