@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { analyticsTradePage } from "../components/AnalyticsExplorer";
+
+test("a retained trade opens on its new page when another close changes its position", () => {
+  const trades = Array.from({ length: 25 }, (_, i) => ({ id: String(i) }));
+  expect(analyticsTradePage(trades, "24", 0, 25)).toBe(0);
+  expect(analyticsTradePage([{ id: "new" }, ...trades], "24", 0, 25)).toBe(1);
+  expect(analyticsTradePage(trades, "gone", 1, 25)).toBe(0);
+});
+
 const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 
 test("analytics drills into groups and winning outliers", async ({ page }, testInfo) => {

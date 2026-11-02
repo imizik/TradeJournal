@@ -64,6 +64,13 @@ function ClosedPnlCurve({ curve }: { curve: Analytics["curve"] }) {
   </div>;
 }
 
+export function analyticsTradePage(trades: { id: string }[], selectedId: string | null, requestedPage: number, size: number) {
+  const retained = selectedId ? trades.findIndex(trade => trade.id === selectedId) : -1;
+  if (retained >= 0) return Math.floor(retained / size);
+  const lastPage = Math.max(0, Math.ceil(trades.length / size) - 1);
+  return Number.isInteger(requestedPage) ? Math.max(0, Math.min(lastPage, requestedPage)) : 0;
+}
+
 type SortKey = "total_pnl" | "expectancy" | "median_pnl" | "count";
 
 export default function AnalyticsExplorer({ data, accounts, scope }: { data: Analytics; accounts: Account[]; scope: string }) {
@@ -107,10 +114,7 @@ export default function AnalyticsExplorer({ data, accounts, scope }: { data: Ana
   const trades = selectedIds ? data.trades.filter((trade) => selectedIds.has(trade.id)) : data.trades;
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const pageSize = 25;
-  const lastPage = Math.max(0, Math.ceil(trades.length / pageSize) - 1);
-  const savedIndex = selectedTradeId ? trades.findIndex(trade => trade.id === selectedTradeId) : -1;
-  const page = savedIndex >= 0 ? Math.floor(savedIndex / pageSize)
-    : Number.isInteger(requestedPage) ? Math.max(0, Math.min(lastPage, requestedPage)) : 0;
+  const page = analyticsTradePage(trades, selectedTradeId, requestedPage, pageSize);
   function drillGroup(label: string) {
     updateUrl({ group: label, winnerLimit: null, page: null, trade: null }, true, "#trades");
     tradesSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });

@@ -253,8 +253,8 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
   const closeStep = answering ? steps[0] : undefined;
   useEffect(() => { if (answering && !steps.length) setAnswering(false); }, [answering, steps.length]); // eslint-disable-line react-hooks/set-state-in-effect -- the last answer ends the pass
 
-  // The thread list's phase button: before the open on a weekday, Arm today's plans (a checklist of the armed plans in
-  // the conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
+  // The desk bar's phase action: before the open on a weekday, Arm today's plans (a checklist of the armed plans in the
+  // conversation pane; nothing is armed, sized or sent from it); after 16:00, Close the day.
   const [arming, setArming] = useState(false);
   useEffect(() => { setArming(false); setAnswering(false); }, [thread?.id]); // eslint-disable-line react-hooks/set-state-in-effect -- opening a thread leaves the checklist or the pass
   const phaseAction = dayPhase === "pre" ? { label: "Arm today's plans", hint: "Each armed plan: still good, change or drop. Nothing is sent." }

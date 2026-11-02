@@ -230,6 +230,12 @@
 
 /* Desktop side panes are opt-in, leaving the active conversation the full width at first. */
 @container (min-width: 760px) {
+  .desk[data-on="true"][data-threads="hidden"][data-context="hidden"] .thread {
+    width: 100%;
+    max-width: 58rem;
+    margin-inline: auto;
+  }
+
   .desk[data-threads="hidden"] .rail {
     display: none;
   }

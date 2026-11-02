@@ -264,6 +264,43 @@ test("before the open the strip waits and the prep line leads; a closed day says
   await expect(tape).toContainText("No regular session today.");
 });
 
+test("phase actions follow the clock while the owner stays on the desk", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await lab(page, { time: new Date("2026-10-23T13:29:00Z"), showThreads: false });
+  const arm = page.getByRole("button", { name: "Arm today's plans" });
+  await expect(arm).toBeVisible();
+  await page.clock.fastForward(61_000);
+  await expect(arm).toBeHidden();
+  await page.clock.fastForward((6 * 60 + 30) * 60_000);
+  await expect(page.getByRole("button", { name: /Close the day/ })).toBeVisible();
+});
+
+test("the conversation remains reachable with either, both, or neither side pane", async ({ page }) => {
+  await lab(page, { showThreads: false });
+  for (const width of [900, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const threads = page.getByRole("button", { name: /^Threads(?:,|$)/ });
+    const context = page.getByRole("button", { name: "Context pane" });
+    for (const [showThreads, showContext] of [[false, false], [true, false], [true, true], [false, true], [false, false]]) {
+      if ((await threads.getAttribute("aria-pressed") === "true") !== showThreads) await threads.click();
+      if ((await context.getAttribute("aria-pressed") === "true") !== showContext) await context.click();
+      const rail = page.getByRole("complementary", { name: "Threads" });
+      const inspector = page.getByRole("complementary", { name: "Context" });
+      await expect(rail).toBeVisible({ visible: showThreads });
+      await expect(inspector).toBeVisible({ visible: showContext });
+      const composer = page.getByRole("textbox", { name: "Message" });
+      await composer.scrollIntoViewIfNeeded();
+      await expect(composer).toBeInViewport();
+      const rect = (await composer.boundingBox())!;
+      for (const side of [rail, inspector]) {
+        const panel = await side.boundingBox();
+        if (panel) expect(rect.x + rect.width <= panel.x + 1 || panel.x + panel.width <= rect.x + 1).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
+  }
+});
+
 test("pre-open action stays available below 760 px and on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await lab(page, { time: new Date("2026-10-23T12:00:00Z") }); // 08:00 New York
