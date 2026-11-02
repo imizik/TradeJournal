@@ -266,8 +266,7 @@ def test_journal_times_are_new_york_with_their_offset_across_dst(db, marks):
     assert (winter["entry_time"], winter["exit_time"]) == ("2026-11-30T09:30:15-05:00", "2026-11-30T10:30:15-05:00")
     nbis = next(r for r in copilot_book.positions(session=db)["positions"] if r["symbol"] == "NBIS")
     assert nbis["opened_at"] == "2026-10-20T09:42:00-04:00"
-    # Elapsed time, as the book counts it: subtracting two New York times would use the wall clock and miss the DST hour.
-    assert nbis["days_held"] == (datetime.now(UTC) - datetime(2026, 10, 20, 9, 42, tzinfo=ET)).days
+    assert nbis["days_held"] == (datetime.now(UTC) - datetime(2026, 10, 20, 9, 42, tzinfo=ET)).days  # elapsed, across DST
 
 
 def _worst_book():
