@@ -417,27 +417,30 @@ def fallback_lines(pack: dict) -> list[str]:
     return out[:MAX_LINES]
 
 
-def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str | None]:
+def _turn(text: str, now: float, events: list | None = None, kind: str = "prep") -> tuple[str, str | None]:
     """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used. ``events``, when
-    given, collects every turn event (the week review reads its tool and proposal events)."""
+    given, collects every turn event (the week review reads its tool and proposal events, and the ``done`` event's
+    ``turn_id``). The morning brief (``kind="prep"``) is refused once the day's API budget is spent, so an automatic
+    turn never spends past the cap; the week review is left to the owner's call and runs regardless."""
     from app.ai import copilot, copilot_spend
     cfg = copilot.settings()
     now_et = datetime.fromtimestamp(now, ET)
     history = [{"role": "user", "content": text}]
+    if kind == "prep" and cfg.backend == "anthropic" and copilot_spend.spent_today() >= cfg.daily_budget_usd:
+        copilot_spend.record_refused(kind=kind, source=kind, backend=cfg.backend, code="daily_budget")
+        return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
 
     async def go() -> tuple[str, str | None]:
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
         evidence = copilot.evidence_for(cfg)
         parts, error = [], None
         try:
-            turn = copilot.run_turn(history, None, cfg, adapter, evidence, now_et)
+            turn = copilot_spend.recorded_turn(history, None, cfg, adapter, evidence, now_et, kind=kind, source=kind)
             async for event in turn:
                 if events is not None:
                     events.append(event)
                 if event["type"] == "text":
                     parts.append(event["delta"])
-                elif event["type"] == "done":
-                    await asyncio.to_thread(copilot_spend.record, event.get("metrics") or {})
                 elif event["type"] == "error" and error is None:
                     error = event.get("message") or event.get("code") or "error"
         finally:

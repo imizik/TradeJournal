@@ -251,7 +251,7 @@ def test_a_failed_turn_pings_the_weeks_facts_labelled_as_such(engine, phone):
 
 def test_a_turn_through_the_labs_backend_respects_its_budget(engine, phone, monkeypatch):
     """The real ``run_turn`` path: a budget stop mid-turn is a failed turn, so the facts go out."""
-    async def over_budget(history, symbol, cfg, adapter, evidence, now):
+    async def over_budget(history, symbol, cfg, adapter, evidence, now, **kwargs):
         assert symbol is None and history == [{"role": "user", "content": "Context: Review my week of 2026-10-19"}]
         yield {"type": "text", "delta": "Your week "}
         yield {"type": "error", "code": "budget", "message": f"Stopped: this turn reached its ${cfg.turn_budget_usd:.2f} API spend cap."}

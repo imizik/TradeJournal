@@ -44,6 +44,8 @@ class ChatBody(BaseModel):
     image_ids: list[str] = Field(default_factory=list, max_length=copilot_images.MAX_PER_TURN)
     backend: Literal["anthropic"] | None = None  # one of GET /status's ``backends``
     carry_id: str | None = Field(None, pattern=copilot.CARRY_ID)  # the previous turn's ``done`` event: its evidence, kept here
+    source: Literal["desk", "charts", "radar", "panel"] | None = None  # where the question was asked; recorded with the turn
+    investigation_id: str | None = Field(None, pattern=r"^[0-9a-f-]{36}$")  # the saved conversation, when the page has one
 
 
 @router.get("/status")
@@ -158,6 +160,7 @@ async def chat(body: ChatBody):
     if cfg.backend == "anthropic":
         spent = copilot_spend.spent_today()
         if spent >= cfg.daily_budget_usd:
+            copilot_spend.record_refused(kind="ask", source=body.source or "desk", backend=cfg.backend, code="daily_budget", symbol=body.symbol)
             raise HTTPException(429, f"Today's API budget (${cfg.daily_budget_usd:.2f}) is spent: ${spent:.2f} so far. "
                                      "Raise COPILOT_DAILY_BUDGET_USD to keep going today.")
     try:
@@ -172,21 +175,17 @@ async def chat(body: ChatBody):
         raise HTTPException(422, str(exc)) from None
 
     async def events():
-        done: dict | None = None
         try:
             now = datetime.now(ET)
-            turn = copilot.run_turn(history, body.symbol, cfg, adapter, evidence, now, images=images, carry_id=body.carry_id)
+            turn = copilot_spend.recorded_turn(history, body.symbol, cfg, adapter, evidence, now, kind=None, source=body.source or "desk",
+                                               images=images, carry_id=body.carry_id, investigation_id=body.investigation_id)
             async for event in turn:
-                if event.get("type") == "done":
-                    done = event.get("metrics")
                 yield f"event: {event['type']}\ndata: {json.dumps(event, default=str)}\n\n"
         finally:
             for image_id in body.image_ids:
                 copilot_images.delete(image_id)
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
-            if done:
-                await asyncio.to_thread(copilot_spend.record, done, body.symbol)
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

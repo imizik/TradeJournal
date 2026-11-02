@@ -117,5 +117,6 @@ async def decide(event: dict, book: dict, now: datetime, *, client=None, evidenc
            "error": run.error if run.error or isinstance(run.answer, dict)
            else {"code": "no_answer", "message": "The turn ended without a structured answer."},
            "tool_calls": [b["name"] for b in rec.lab]}
-    await asyncio.to_thread(copilot_spend.record, metrics, symbol)
+    await asyncio.to_thread(copilot_spend.record, metrics, symbol, kind="shadow", source="shadow", tool_names=out["tool_calls"],
+                            error=(out["error"] or {}).get("code") if out["error"] else None, evidence=label)
     return out

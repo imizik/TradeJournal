@@ -1340,10 +1340,12 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
 
 
 async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapter, evidence,
-                   now: datetime, images: list[dict] | None = None, carry_id: str | None = None) -> AsyncIterator[dict]:
+                   now: datetime, images: list[dict] | None = None, carry_id: str | None = None,
+                   live: dict | None = None) -> AsyncIterator[dict]:
     """Stream one turn as UI events: progress, text, tool, error, done (always last, with metrics and the ``carry_id``
     the next turn sends back). ``images`` are the owner's shared screenshots as image blocks (``copilot_images.block``),
-    sent with their message; ``carry_id`` names the evidence the conversation's previous turn kept."""
+    sent with their message; ``carry_id`` names the evidence the conversation's previous turn kept. ``live``, when
+    given, is the dict the metrics are kept in as the turn runs, so a consumer that stops early still sees what it spent."""
     started = time.monotonic()
     messages = [dict(m) for m in history]
     replay = getattr(evidence, "label", "") == "replay"
@@ -1360,9 +1362,10 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
         messages[-1]["images"] = list(images)
     usage = _zero_usage()
     spent_usd = 0.0  # each round priced at its own model: a fallback round may be dearer than the next
-    metrics: dict[str, Any] = {"backend": cfg.backend, "evidence": cfg.evidence, "model": getattr(adapter, "model", None) or cfg.model,
-                               "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
-                               "max_silence_ms": 0, "rounds": 0, "tool_calls": []}
+    metrics: dict[str, Any] = live if live is not None else {}
+    metrics.update({"backend": cfg.backend, "evidence": cfg.evidence, "effort": cfg.effort, "model": getattr(adapter, "model", None) or cfg.model,
+                    "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
+                    "max_silence_ms": 0, "rounds": 0, "tool_calls": [], "usage": dict(usage), "cost_usd": 0.0})
     calls = 0
     turn: dict = {"images": len(images or [])}  # per-turn state for _run_tool (one practice proposal, two images)
     last_seen = 0
@@ -1403,6 +1406,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 for key in usage:
                     usage[key] += final.usage.get(key, 0)
                 spent_usd += cost_usd(final.model or metrics["model"], {key: final.usage.get(key, 0) for key in usage})
+                metrics.update(usage=dict(usage), cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
                 if final.model:
                     metrics["model"] = final.model
                 messages.append({"role": "assistant", "content": final.content})
