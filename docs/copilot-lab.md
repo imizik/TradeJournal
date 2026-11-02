@@ -2404,6 +2404,40 @@ Migration `backend/alembic/versions/b7c1d2e3f4a5_copilot_turn_measurement.py`
 accounting (`research_job.spend_json`, the review records) and are not in this
 table. Tests: `backend/tests/test_copilot_turn_record.py`.
 
+### The answer scorecard
+
+`GET /copilot/answer-scorecard?days=7` (owner-only, refused while the lab is
+off; `days` 1–90) reads the turn rows and the saved conversations of the last
+days together (`backend/app/engine/copilot_scorecard.py`) and returns counts:
+
+- **answers**: how many were saved, how many you rated, Helped and Didn't, the
+  Helped rate (null under three ratings, so a lucky pair never reads as 100%),
+  how many you pushed back on (the next message starts with "Push back on"),
+  how many you followed up, how many turns failed.
+- **by_kind**, **by_source**, **by_model**, **by_backend**, **by_tools** (the
+  number of tools read: none, 1, 2–3, 4+): the same counts and the cost and
+  median first text for each; **top_tool_mixes**.
+- **latency** by kind over turns that did not fail: first text and total p50
+  and p90, and the median longest silence.
+- **failed** by error code (`stopped`, `daily_budget`, `timeout`, …).
+- **spend_by_day** by New York day, kind and billing; **cost**: total, per turn,
+  the five dearest threads, and the share of input the cache served.
+
+An answer meets its turn through the `turn_id` saved in its metrics; an older
+answer with none counts when its conversation was created in the window, under
+the kind its title gives (a morning brief, a week review) or `ask`. Research
+jobs' records (`source` other than `copilot`) and the scripted model are left
+out. Each part fails on its own (`{"state": "unavailable"}`), the rest stands.
+No answer text leaves the database.
+
+The desk shows it in the Briefing's Context pane, **This week** tab, above the
+two proofs (`frontend/components/copilot/Inspector.tsx`): "Copilot: Helped 7 of
+9 rated · 23 answers · first text 4.1 s median · $0.38", then pushbacks,
+follow-ups and failed turns, or "could not load". Nothing here changes a prompt,
+a model or a budget; it is the number to read before changing one. Tests:
+`backend/tests/test_copilot_answer_scorecard.py`,
+`frontend/e2e/copilot-desk-context.spec.ts`.
+
 ## Live measurements (2026-10-24)
 
 Sonnet 5.5 on the Messages API, effort `medium` unless noted, replay of Fri

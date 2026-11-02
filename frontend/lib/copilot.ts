@@ -105,6 +105,21 @@ export type Rating = "helped" | "didnt";
 /** How one saved answer went (a small subset of its turn's metrics); what comes back on a reopened conversation. */
 /** ``turn_id`` names the server's ``copilot_turn`` row, so the saved answer and its measurements meet (docs/copilot-lab.md § Measuring the copilot). */
 export type SavedMetrics = { first_text_ms?: number; total_ms?: number; rounds?: number; model?: string; backend?: string; tools?: string[]; error?: string; turn_id?: string };
+/** ``GET /copilot/answer-scorecard`` (docs/copilot-lab.md § The answer scorecard): counts over the last days, each part
+ * ``{state: "unavailable"}`` when its read failed. */
+export type ScorecardGroup = { answers: number; rated: number; helped: number; didnt: number; helped_rate: number | null; cost_usd: number; first_text_ms_p50: number | null };
+export type AnswerScorecard = {
+  state: "ok"; window: { days: number; since: string; until: string };
+  turns: { total: number; by_kind: Record<string, number>; by_source: Record<string, number> } | { state: "unavailable" };
+  answers: { total: number; rated: number; helped: number; didnt: number; helped_rate: number | null; pushback: number; pushback_rate: number | null;
+    follow_ups: number; follow_up_rate: number | null; failed: number } | { state: "unavailable" };
+  by_kind: Record<string, ScorecardGroup> | { state: "unavailable" };
+  latency: Record<string, { turns: number; first_text_ms: { p50: number | null; p90: number | null }; total_ms: { p50: number | null; p90: number | null }; max_silence_ms_p50: number | null }> | { state: "unavailable" };
+  failed: Record<string, number> | { state: "unavailable" };
+  cost: { total_usd: number; per_turn_usd: number | null; top_threads: { investigation_id: string; title: string; usd: number; turns: number }[];
+    cache: { read_tokens: number; input_tokens: number; read_share: number | null } } | { state: "unavailable" };
+};
+export const unavailable = (part: unknown): part is { state: "unavailable" } => !!part && typeof part === "object" && (part as { state?: string }).state === "unavailable";
 /** Where a question is asked from; recorded with its turn. */
 export type TurnSource = "desk" | "charts" | "radar" | "panel";
 export type LabMessage = { role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
