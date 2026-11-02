@@ -238,6 +238,28 @@ TOOLS: list[dict] = [
                                         "limit": {"type": "integer", "description": "Events to return, 1-12 (default 12)"}}},
     },
     {
+        "name": "get_symbol_profile",
+        "description": "What the Symbol page already caches about a company, for a catalyst or valuation question: company and "
+                       "sector, market cap, enterprise value, P/E, price to sales, EV/EBITDA, beta and 30-day volume; 13F "
+                       "institutional ownership; next earnings, last report, next dividend and recent splits; FINRA short "
+                       "interest (shares, % of float, days to cover, change, settlement date) and the borrow flag; analyst "
+                       "targets, ratings, next-quarter estimates and recent actions (unofficial). Every block carries its "
+                       "source and fetch time; name them when you quote a figure.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA}},
+    },
+    {
+        "name": "get_proof",
+        "description": "The product's own proof read-out, for 'are the alerts / plans helping' questions: the exit-habit "
+                       "scorecard since the position alerts went live (verdict, rule, each habit's recent and baseline rate, "
+                       "alert responses and feedback), the plan proof (planned vs unplanned trades, verdict, caveat), the "
+                       "outcomes by kind (scope week: this week's; scope symbol: that symbol's), and the 30-day alert "
+                       "scorecard by the owner's decision. Counts and verdicts only; never a judgement of the owner.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["scope"],
+                         "properties": {"scope": {"type": "string", "enum": ["week", "symbol"]},
+                                        "symbol": {**_SYMBOL_SCHEMA, "description": "Required with scope symbol"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -539,6 +561,14 @@ def validate(name: str, args: Any) -> dict:
         return _level_history(args)
     if name == "get_option_candidates":
         return _option_candidates(args)
+    if name == "get_proof":
+        if args.get("scope") not in ("week", "symbol"):
+            raise ToolInputError("scope must be week or symbol")
+        if args["scope"] == "symbol":
+            return {"scope": "symbol", "symbol": _symbol(args.get("symbol"))}
+        if args.get("symbol") is not None:
+            raise ToolInputError("scope week takes no symbol")
+        return {"scope": "week"}
     if name == "get_investigation_changes":
         try:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
@@ -638,10 +668,13 @@ def compact_peers(raw: dict) -> dict:
 
 def compact_events(raw: dict) -> dict:
     earnings = raw.get("earnings") or {}
+    dividends, splits = raw.get("dividends") or {}, raw.get("splits") or {}
     return {"symbol": raw.get("symbol"), "today": raw.get("today"),
             "next_earnings": earnings.get("next"), "recent_reports": (earnings.get("reports") or [])[:4],
             "state": earnings.get("state"), "message": earnings.get("message"),
-            "fetched_at": earnings.get("fetched_at")}
+            "fetched_at": earnings.get("fetched_at"),
+            "next_dividend": dividends.get("next"),  # an ex-date inside an option's life is a catalyst too
+            "splits": [{"ex_date": s.get("ex_date"), "label": s.get("label")} for s in (splits.get("rows") or [])[:3]]}
 
 
 def group_mismatch(symbol: str, group: str | None, universe: dict) -> dict | None:
@@ -704,7 +737,7 @@ CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
 BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
-                                "get_level_history"})
+                                "get_level_history", "get_proof"})
 # A moment's as-of dates a past candle, not what the evidence says now: "what changed" leaves it out too.
 NOT_CURRENT_TOOLS = BOOK_CONTEXT_TOOLS | {"get_moment"}
 
@@ -921,6 +954,14 @@ class LiveEvidence:
         from app.ai import copilot_options
         return copilot_options.live_candidates(symbol, horizon_days, direction, budget_usd)
 
+    def get_symbol_profile(self, symbol: str) -> dict:
+        from app.ai import copilot_profile
+        return copilot_profile.live_profile(symbol, datetime.now(UTC))
+
+    def get_proof(self, scope: str, symbol: str | None = None) -> dict:
+        from app.ai import copilot_profile
+        return copilot_profile.live_proof(scope, symbol, datetime.now(UTC))
+
     def get_level_history(self, symbol: str, level: float | None = None, side: str | None = None, minutes: int | None = None,
                           entry: float | None = None, lookback_days: int = 180) -> dict:
         from app.ai import copilot_review
@@ -956,6 +997,9 @@ PROVENANCE = {
     "get_market_regime": ("Radar recorded passes (SPY, QQQ, IWM, RSP, sector ETFs) · Tradier index quotes (VIX, TNX) · macro calendar · "
                           "Tradier fundamentals calendar (cached)", "fetched"),
     "get_radar_today": ("Radar recorded passes, saved events, revisions, news checks and ratings", "recorded"),
+    "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
+                           "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
+    "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

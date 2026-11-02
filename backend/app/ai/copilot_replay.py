@@ -142,6 +142,15 @@ class ReplayEvidence:
                 "reason": "Option chains are not in the Radar snapshot, so option candidates are unavailable in replay "
                           "(a live read would show today's quotes, not the frozen moment's)."}
 
+    def get_symbol_profile(self, symbol: str) -> dict:
+        return {"symbol": symbol, "state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
+                "reason": "Fundamentals, short interest and analyst figures are as they are now, not as of the replay moment, "
+                          "so the profile is unavailable in replay. get_symbol_events gives the earnings dates as of it."}
+
+    def get_proof(self, scope: str, symbol: str | None = None) -> dict:
+        return {"scope": scope, "symbol": symbol, "state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
+                "reason": "The proof read-out is hindsight by construction, so it is unavailable in replay."}
+
     def get_peer_moves(self, symbol: str) -> dict:
         return {"symbol": symbol, "state": "unavailable",
                 "reason": "Peer moves read today's quotes, so they are off in replay. Use get_group_comparison for recorded peer returns."}
