@@ -65,6 +65,7 @@ const GROUPS: { name: string; items: NavItem[] }[] = [
     { href: "/signals", label: "Signals", icon: Radio },
     { href: "/morning", label: "Jo", icon: Bot },
     { href: "/proof", label: "Proof", icon: ClipboardCheck },
+    { href: "/experiments", label: "Experiments", icon: FlaskConical },
   ] },
   { name: "Practice", items: [
     { href: "/practice", label: "Daily Practice", icon: Target },

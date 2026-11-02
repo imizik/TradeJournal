@@ -74,6 +74,42 @@ covered in `frontend/e2e/analytics.spec.ts`, using isolated seeded SQLite data.
 These checks do not establish live broker completeness or historical data
 freshness.
 
+## Experiment overview
+
+The owner-only `/experiments` page is a read-only index of five existing
+measurement paths: position alerts, Radar usefulness, Copilot answers,
+planning and the Copilot Shadow book. It reads their current endpoints and
+links to the original feedback and proof screens; it creates no experiment
+assignments, database records, timers, alerts or model calls.
+
+One row shows each path's available sample and measurement state. Selecting a
+row opens one count chart, its measurement window, limits and next review
+step. Position alerts also link to three recent exact alert records. Refresh
+re-reads each source while retaining the selected path. Failed sources and
+unavailable scorecard sections remain unavailable, never zero. Recorded
+activity does not prove current activation; Copilot and Shadow activation
+are labeled only from their status responses. All cost figures come from the
+existing answer scorecard and may exclude other systems' accounting.
+
+The charts describe feedback and sample coverage, not a combined performance
+score. No trend across changing versions is inferred. Radar's event-bearing
+session count is explicitly separate from its frozen first-20 certified
+timing study; that study's census is not connected to this page. Jo tasks,
+Duet, Research Studio, the Factory and the opening-session prototype are
+outside this initial verified-source index.
+
+The initial review is a two-week feasibility checkpoint after use begins:
+inspect unanswered feedback, delivery and usable samples, then decide whether
+a live comparison is feasible. This is not a scheduled job or a promise of
+statistical power. Weekly review may conclude "continue unchanged". The
+[facts-versus-AI preparation](../research/copilot-facts-v1/README.md) supplies
+three invented cases and a free harness smoke run; a controlled paid or live
+comparison has not started.
+
+Frontend: `frontend/app/experiments/page.tsx`,
+`frontend/components/ExperimentsView.tsx`. Browser coverage:
+`frontend/e2e/experiments.spec.ts`.
+
 ## Outcomes
 
 Every output the app makes gets one `outcome` row (`app/engine/outcomes.py`):
