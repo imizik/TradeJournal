@@ -87,3 +87,21 @@ test("missing scorecard deployment and zero ratings remain distinct", async ({ p
   await expect(page.locator("#experiment-detail")).toContainText("Cost unavailable");
   await expect(page.getByRole("figure", { name: "Saved answer feedback" })).toContainText("Not rated");
 });
+
+test("empty Radar with a verdict does not request nonexistent feedback", async ({ page }) => {
+  // radar_proof.build returns both no_data and an ordinary not_enough_data verdict.
+  await page.route("**/radar/proof", route => route.fulfill({ json: {
+    state: "no_data", reason: "No Radar events recorded yet.", rule_version: null, sessions: 0, events: 0,
+    ratings: { useful: 0, already_knew: 0, too_late: 0, irrelevant: 0, unrated: 0 },
+    verdict: { verdict: "not_enough_data", reason: "0 of 20 rated events needed.", rated: 0, timed: 0 },
+  } }));
+  await page.goto("/experiments");
+  const radar = page.getByTestId("experiment-radar");
+  await expect(radar).toContainText("No events recorded");
+  await expect(radar).not.toContainText("Needs feedback");
+  await radar.click();
+  const detail = page.locator("#experiment-detail");
+  await expect(detail).toContainText("No events are available to rate");
+  await expect(detail.getByRole("figure")).toHaveCount(0);
+  await expect(detail.getByRole("link", { name: "Open Radar" })).toBeVisible();
+});

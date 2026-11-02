@@ -88,14 +88,16 @@ function Sources({ selected, onSelect }: { selected: Path | null; onSelect: (pat
   const r = radar.body;
   const radarRow = entry("radar", radar.error);
   if (r) {
+    const empty = r.state === "no_data" || r.events === 0;
     Object.assign(radarRow, {
-      state: !r.verdict ? (r.state === "no_data" ? "No events recorded" : "Unavailable") : r.verdict.rated === 0 ? "Needs feedback" : r.verdict.verdict === "not_enough_data" ? "Collecting" : "Ready to review",
-      sample: r.verdict ? `${r.verdict.rated} / ${r.events ?? 0} events rated` : "—",
+      state: empty ? "No events recorded" : !r.verdict ? "Unavailable" : r.verdict.rated === 0 ? "Needs feedback" : r.verdict.verdict === "not_enough_data" ? "Collecting" : "Ready to review",
+      sample: empty ? "0 events recorded" : r.verdict ? `${r.verdict.rated} / ${r.events ?? 0} events rated` : "—",
       period: r.rule_version ? `${r.rule_version} · ${r.sessions ?? 0} event-bearing sessions in this usefulness read` : undefined,
       result: r.verdict?.reason ?? r.reason ?? "No Radar evidence available.",
-      next: r.verdict ? "Rate events you actually reviewed. Keep the current rules unchanged while the timing study collects evidence." : "Check the Radar source before drawing a conclusion.",
+      next: empty ? "No events are available to rate. Check Radar's recording status; no usefulness conclusion is available." : r.verdict ? "Rate events you actually reviewed. Keep the current rules unchanged while the timing study collects evidence." : "Check the Radar source before drawing a conclusion.",
+      action: empty ? "Open Radar" : "Rate Radar events",
       caveat: "These are usefulness ratings. Event-bearing sessions are not certified sessions in the separate frozen first-20 timing study. That study's progress is not connected here; no timing-study verdict is inferred.",
-      chart: r.ratings ? { title: "Radar usefulness ratings", bars: [
+      chart: !empty && r.ratings ? { title: "Radar usefulness ratings", bars: [
         { label: "Useful", count: r.ratings.useful ?? 0 }, { label: "Already knew", count: r.ratings.already_knew ?? 0 },
         { label: "Too late", count: r.ratings.too_late ?? 0 }, { label: "Irrelevant", count: r.ratings.irrelevant ?? 0 },
         { label: "Not rated", count: r.ratings.unrated ?? 0, muted: true },
