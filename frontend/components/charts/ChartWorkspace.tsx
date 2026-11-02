@@ -2065,7 +2065,7 @@ export default function ChartWorkspace({ initialSymbol }: { initialSymbol?: stri
                 className={`flex w-full items-center justify-between gap-2 rounded px-2 text-left text-[11px] hover:bg-secondary ${narrow ? "min-h-11" : "min-h-7"} ${vwapBandsOn ? "text-foreground" : "text-muted-foreground"}`}>VWAP bands ±1σ{vwapBandsOn ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>}
             </div>)}
             <button onClick={() => setSettings((s) => ({ ...s, indicatorColors: {} }))} disabled={!Object.keys(settings.indicatorColors).length}
-              className={`rounded px-2 text-left text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:text-muted-foreground disabled:hover:bg-transparent ${narrow ? "min-h-11" : "min-h-7"}`}>Reset colors</button>
+              className={`rounded px-2 text-left text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent ${narrow ? "min-h-11" : "min-h-7"}`}>Reset colors</button>
             <div role="group" aria-label="Zoom speed" title="How fast the wheel or a trackpad pinch zooms the charts. Remembered on this device." className="mt-1 border-t border-border px-2 pt-1.5">
               <div className="pb-1 text-[10px] text-muted-foreground">Zoom speed · this device</div>
               <div className="flex overflow-hidden rounded border border-border">

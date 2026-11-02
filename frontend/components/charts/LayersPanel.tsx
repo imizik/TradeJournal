@@ -103,7 +103,7 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
               <div className={`${row} pl-5 ${away ? "opacity-60" : ""}`}>
                 <span className={`shrink-0 rounded-sm ${item.line ? "h-0.5 w-3" : "h-2 w-3"}`} style={{ background: item.color }} />
                 <button aria-label={`Go to ${label}`} title={away ? "Hidden: show it to go to it" : "Show it on the chart"} disabled={away} onClick={() => onJump(group.key, item)}
-                  className={`flex min-w-0 flex-1 text-left text-[11px] text-foreground/80 hover:text-foreground disabled:hover:text-foreground ${tall} ${item.line ? "items-center gap-1.5" : "flex-col justify-center"}`}>
+                  className={`flex min-w-0 flex-1 text-left text-[11px] text-foreground/80 hover:text-foreground disabled:hover:text-foreground/80 ${tall} ${item.line ? "items-center gap-1.5" : "flex-col justify-center"}`}>
                   {/* A level's price fits beside its name; a drawing's span of prices goes underneath. */}
                   <span className="max-w-full truncate">{item.name}</span>{item.detail && <span className={`shrink-0 truncate font-mono text-[10px] text-muted-foreground ${item.line ? "ml-auto" : "max-w-full leading-3"}`}>{item.detail}</span>}
                 </button>
