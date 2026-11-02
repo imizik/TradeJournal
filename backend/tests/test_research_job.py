@@ -81,7 +81,7 @@ def test_only_web_and_lab_tools_with_caps_and_structured_output(saved):
     _run(client)
     [req] = client.requests
     kept_out = ("propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories", "get_owner_context",
-                "get_trade_review", "get_week_review", "get_level_history", "get_option_candidates", "get_moment")
+                "get_trade_review", "get_week_review", "get_level_history", "get_option_candidates", "get_moment", "get_proof")
     assert set(research_job.JOB_TOOLS) == {t["name"] for t in copilot_tools.TOOLS} - set(kept_out)  # an allowlist
     offered = [t["name"] for t in req["tools"]]
     # The lab tools, the two server tools, then the answer tool: nothing else is offered to the model.

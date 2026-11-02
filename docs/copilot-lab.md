@@ -343,9 +343,10 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call nineteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
-  comparison, peer moves, symbol news, earnings dates, quotes (last, day change,
-  volume), the market regime and Radar today (below), saved research,
+  call twenty-one read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  comparison, peer moves, symbol news, earnings dates (with the next dividend
+  and recent splits), quotes (last, day change, volume), the market regime and
+  Radar today, the symbol profile and the proof read-out (all below), saved research,
   investigation changes (below), the chart and book tools below (including the
   trade review and the week review), option candidates (below), one moment on
   the chart (Explain this candle, below), and the owner
@@ -388,6 +389,40 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     fixture serves the NBIS scenario's backdrop and three simulated events.
     Tests: `backend/tests/test_radar_regime.py`, `test_radar_today.py`,
     `test_copilot_regime.py`.
+- **Symbol profile and proof** (`backend/app/ai/copilot_profile.py`, since
+  2026-11-02; the review of 2026-10-31 found the copilot could not answer a
+  catalyst, valuation or "are the alerts helping" question from evidence):
+  - `get_symbol_profile(symbol)` composes what the Symbol page's tabs already
+    cache, each block read on its own: company and sector with a 240-character
+    description, valuation (market cap, enterprise value, shares, P/E, price
+    to sales and book, EV/EBITDA, 60-month beta, 30-day volume) and 13F
+    ownership from `symbol_events.overview`; next earnings, last report, next
+    dividend and recent splits from `symbol_events.events`; FINRA short
+    interest (shares, % of shares outstanding, days to cover, change from the
+    previous settlement, settlement date and its lag note), the short-volume
+    share and the easy-to-borrow flag from `short_feed.view`; analyst targets,
+    ratings, next-quarter estimates, the last three actions and recent report
+    results from `symbol_analysts.view` (unofficial). Every block carries its
+    source and fetch time, a cold or failed block reads `unavailable` with the
+    rest standing, and the prompt tells the model to name the source and age
+    of any figure it quotes. Market data only, so research jobs get it.
+  - `get_proof(scope week|symbol, symbol?)` is the product's own proof as
+    counts and verdicts: the exit-habit scorecard since the position alerts
+    went live (`exit_habits.build`: verdict and reason, each habit's recent
+    and baseline rate, alert responses and feedback coverage), the plan proof
+    (`plan_proof.build`: verdict, caveat, planned and unplanned groups), the
+    outcomes by kind (`outcomes.week` for this week, `outcomes.build` for one
+    symbol) and the 30-day alert scorecard by the owner's decision
+    (`alert_scorecard.scorecard`). No alert, trade or row ids leave; each proof
+    fails alone. It is book context (`BOOK_CONTEXT_TOOLS`), never offered to
+    research jobs, and the prompt says to quote its verdicts as they stand,
+    "not enough data" included, and never to turn a count into a judgement of
+    the owner. The Radar proof is not in it: `radar_proof.build` reads every
+    pass of every event session and has no as-of cut, and the Proof page's
+    Radar tile shows its verdict.
+  - In replay both say `unavailable`: fundamentals are as they are now, and
+    the proof is hindsight by construction. The fixture serves a simulated
+    NBIS profile and proof card. Tests: `backend/tests/test_copilot_profile.py`.
 - **Chart and book tools** (`backend/app/ai/copilot_book.py`):
   - `get_chart_context(symbol, timeframe 1m/5m/15m/1h/1D)` reads the same
     `chart_feed.workspace` as the Charts page. It returns:
@@ -2377,7 +2412,7 @@ python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run 
 python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
 ```
 
-- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 16
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 18
   fixture-answerable cases across the desk's workflows: a briefing, a group
   read, a planted rumour, a follow-up that should reuse carried evidence, "go
   deeper", a candle, a plan, a compare, an open-position review, an

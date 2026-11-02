@@ -91,6 +91,14 @@ class FixtureEvidence:
         from app.ai import copilot_regime
         return copilot_regime.fixture_radar_today(GROUP["name"], _SESSION, group, limit)
 
+    def get_symbol_profile(self, symbol: str) -> dict:
+        from app.ai import copilot_profile
+        return copilot_profile.fixture_profile(symbol, self.get_symbol_events(symbol)["next_earnings"])
+
+    def get_proof(self, scope: str, symbol: str | None = None) -> dict:
+        from app.ai import copilot_profile
+        return copilot_profile.fixture_proof(scope, symbol)
+
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai.copilot_book import compact_chart
         start, low = 1792767600, 92.40  # 2026-10-23 13:40Z, the recorded low in this scenario

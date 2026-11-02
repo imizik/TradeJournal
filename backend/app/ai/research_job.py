@@ -28,7 +28,7 @@ from app.ai import api_runner, copilot, copilot_tools
 # market reads, the chart and the owner's saved research text only. Never the owner's book (positions, trades,
 # memories), which a crafted link could carry out; never a proposal; never another investigation by id.
 JOB_TOOLS = ("get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
-             "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today")
+             "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today", "get_symbol_profile")
 
 
 def same_url(url: str) -> str:

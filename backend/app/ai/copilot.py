@@ -95,6 +95,10 @@ session, say that.
 comparison, and say which it is: the stock, its group, its sector or the whole market, with the numbers. When they ask \
 what Radar saw or what is moving today, get_radar_today lists the session's recorded events (with their latest status \
 and nearby headlines) and the latest pass's leaders and laggards; cite an event by its summary and first-seen time.
+- For a catalyst, valuation, ownership, short-interest or analyst question, read get_symbol_profile and name the source \
+and age of every figure you quote (the caches are a day old; short interest is about two weeks behind). When the \
+owner asks whether the alerts, plans or pings are helping, read get_proof (scope week, or symbol for one name) and \
+quote its verdicts and counts as they stand, "not enough data" included; never turn a count into a judgement of them.
 - Give a concise interpretation first, then the strongest counterarguments and what would change your mind.
 - When the trader disagrees, re-check the specific evidence they cite (call the tool again if needed), then either \
 update your view and say what changed, or defend it with the numbers. Do not cave without evidence and do not dig in \
@@ -628,6 +632,13 @@ class FakeAdapter:
                 yield "text", piece
             yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("helping", "proof", "are the alerts", "are my plans", "are the plans")):
+            scope = "symbol" if symbol and f" {symbol.lower()}" in f" {lower}" and "week" not in lower else "week"
+            args = {"scope": scope, **({"symbol": symbol} if scope == "symbol" else {})}
+            yield "progress", "Reading the proof pages."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_proof", "input": args}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
         if "plan" in lower and allow_tools and (calls := self._plan_calls(symbol, last, results)):
             content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
                        for i, (n, a) in enumerate(calls)]
@@ -642,6 +653,12 @@ class FakeAdapter:
         if isinstance(last["content"], str) and allow_tools and "radar" in lower and any(w in lower for w in ("today", "see", "seen", "session", "record")):
             yield "progress", "Reading what Radar recorded this session."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
+        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("catalyst", "valuation", "short interest", "analyst", "market cap", "who owns")):
+            yield "progress", f"Reading {symbol}'s profile."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_symbol_profile", "input": {"symbol": symbol}},
+                                  {"type": "tool_use", "id": f"fake_{len(messages)}_1", "name": "get_symbol_events", "input": {"symbol": symbol}}],
                                  "tool_use", _zero_usage(), self.model)
             return
         if isinstance(last["content"], str) and allow_tools and "plan" not in lower:
@@ -697,6 +714,47 @@ class FakeAdapter:
         if vix.get("state") == "ok":
             parts.append(f"VIX {vix['last']} ({vix['change_pct']:+.1f}%)")
         return f" Backdrop (Radar pass {radar.get('pass_at')}): {', '.join(parts)}."
+
+    @staticmethod
+    def _proof(data: dict) -> str:
+        """A scripted read of the proof pages: each verdict with its reason and the counts behind it, no judgement."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", "The proof pages could not be read.", f"{data.get('reason') or 'Nothing came back'}.")
+        alerts, plans, card = data.get("alerts") or {}, data.get("plans") or {}, data.get("scorecard") or {}
+        lines = []
+        if alerts.get("state") == "ok":
+            lines.append(f"- Alerts: {alerts.get('verdict')} ({alerts.get('reason')}) over {alerts.get('recent_trades')} trades since {alerts.get('since')}; "
+                         f"{(alerts.get('alerts') or {}).get('sent')} sent, feedback on {((alerts.get('alerts') or {}).get('feedback') or {}).get('responded')}.")
+        if plans.get("state") == "ok":
+            lines.append(f"- Plans: {plans.get('verdict')} ({plans.get('reason')}) across {plans.get('trades')} trades since {plans.get('since')}.")
+        if card.get("state") == "ok":
+            held = (card.get("by_decision") or {}).get("holding") or {}
+            lines.append(f"- Scorecard ({card.get('window_days')} days): {card.get('alerts')} alerts; after Holding, {held.get('better')} better and "
+                         f"{held.get('worse')} worse than selling at the alert ({held.get('vs_alert_usd') or 0:+,.0f} $).")
+        verdicts = {v for v in (alerts.get("verdict"), plans.get("verdict")) if v}
+        word = "Pattern" if verdicts and verdicts != {"not_enough_data"} else "Unclear"
+        return scripted(word, "The proof pages as they stand; the samples decide, not me." if word == "Unclear" else "The proof pages have a verdict.",
+                        f"**Proof ({data.get('scope')}, as of {data.get('as_of')})**\n" + "\n".join(lines),
+                        "the samples reach their rules' minimums.", against="every verdict here is a count under a fixed rule, not causation.")
+
+    @staticmethod
+    def _profile(data: dict) -> str:
+        """A scripted catalyst read: the next earnings, valuation, short interest and analyst targets, each with its source."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", f"No profile for {data.get('symbol')}.", f"{data.get('reason') or 'Nothing is cached'}.")
+        events, val, short, analysts = data.get("events") or {}, data.get("valuation") or {}, data.get("short") or {}, data.get("analysts") or {}
+        nxt = events.get("next_earnings") or {}
+        interest = short.get("interest") or {}
+        targets = (analysts.get("targets") or {}).get("value") or {}
+        lines = [f"- Next earnings {nxt.get('date', 'unknown')} ({nxt.get('status', 'unknown')}; Tradier calendar, fetched {events.get('fetched_at')}).",
+                 f"- Market cap {val.get('market_cap')}, price to sales {val.get('price_to_sales')}, beta {val.get('beta_60_month')} (Tradier, fetched {val.get('fetched_at')}).",
+                 f"- Short interest {interest.get('pct_of_shares_outstanding')}% of shares, {interest.get('days_to_cover')} days to cover, settled "
+                 f"{interest.get('settlement_date')} (FINRA, about two weeks behind).",
+                 f"- Analyst targets mean {targets.get('mean')}, high {targets.get('high')}, low {targets.get('low')} (unofficial)."]
+        return scripted("Focus", f"{data.get('symbol')}: the next report is the dated catalyst.",
+                        f"**{data.get('symbol')} profile (as of {data.get('as_of')})**\n" + "\n".join(lines),
+                        "the report date is confirmed or moves.", against="day-old caches and unofficial analyst figures are context, not a signal.",
+                        read="Thesis unclear · Timing unclear · Contract n/a")
 
     @staticmethod
     def _compare(prompt: str) -> str:
@@ -962,6 +1020,10 @@ class FakeAdapter:
                             "nothing is remembered until you do.")
         if "get_radar_today" in results:
             return FakeAdapter._radar(results["get_radar_today"])
+        if "get_proof" in results:
+            return FakeAdapter._proof(results["get_proof"])
+        if "get_symbol_profile" in results:
+            return FakeAdapter._profile(results["get_symbol_profile"])
         if "get_positions" in results:
             book = results["get_positions"].get("positions") or []
             held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
@@ -1123,6 +1185,22 @@ def _summary(name: str, data: dict) -> str:
     if name in ("owner_context", "get_owner_context"):
         from app.ai import copilot_context
         return copilot_context.summary(data)
+    if name == "get_symbol_profile":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        nxt = (data.get("events") or {}).get("next_earnings") or {}
+        short = ((data.get("short") or {}).get("interest") or {}).get("pct_of_shares_outstanding")
+        parts = [f"next earnings {nxt.get('date', 'unknown')}"]
+        if short is not None:
+            parts.append(f"short {short}% of shares")
+        if (mc := (data.get("valuation") or {}).get("market_cap")) is not None:
+            parts.append(f"market cap {mc / 1e9:.1f}B")
+        return " · ".join(parts)[:160]
+    if name == "get_proof":
+        if data.get("state") != "ok":
+            return (data.get("reason") or "unavailable")[:160]
+        return (f"alerts {(data.get('alerts') or {}).get('verdict', 'unavailable')} · plans {(data.get('plans') or {}).get('verdict', 'unavailable')} · "
+                f"{(data.get('scorecard') or {}).get('alerts', '?')} alerts scored")[:160]
     if name == "get_quotes":
         quotes = data.get("quotes") or {}
         return ", ".join(f"{s} {p}" + (f" ({quotes[s]['change_pct']:+.2f}%)" if (quotes.get(s) or {}).get("change_pct") is not None else "")
