@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 export const POLL_MS = 10_000;
 
 const TONE: Record<ResearchJob["status"], string> = {
-  queued: "bg-muted text-muted-foreground", running: "bg-sky-500/10 text-sky-300", done: "bg-emerald-500/10 text-emerald-300",
+  queued: "bg-muted text-muted-foreground", running: "bg-secondary text-foreground", done: "bg-emerald-500/10 text-emerald-300",
   failed: "bg-rose-500/10 text-rose-300", cancelled: "bg-muted text-muted-foreground",
 };
 

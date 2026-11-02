@@ -8,7 +8,7 @@ import { CONTEXT_MAX, copilotLabHref, type LinkOrigin } from "@/lib/copilot";
 import type { OriginKind } from "@/lib/captures";
 
 /** Primary-styled: the easiest way into the copilot, before an entry. Thumb-sized on a phone unless a caller sizes it for a toolbar. */
-export const PLAN_BUTTON = "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-sky-500 px-3 text-xs font-medium text-white hover:bg-sky-400";
+export const PLAN_BUTTON = "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90";
 
 /** "Plan a trade: " and what the page knows, cut to the deep link's limit. With nothing known, the owner names the ticker. */
 export const planContext = (line = "") => `Plan a trade: ${line.replace(/\s+/g, " ").trim()}`.trim().slice(0, CONTEXT_MAX);

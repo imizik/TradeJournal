@@ -73,18 +73,10 @@ function fmtPct(val: number | null | undefined) {
   return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
 }
 
+const CHIP = "inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-secondary px-2 text-[11.5px] font-medium";
+
 function StatusBadge({ status }: { status: Trade["status"] }) {
-  const cls =
-    status === "open"
-      ? "bg-blue-900/40 text-blue-300"
-      : status === "expired"
-      ? "bg-muted text-muted-foreground"
-      : "bg-muted text-foreground/70";
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>
-      {status}
-    </span>
-  );
+  return <span className={cn(CHIP, status === "open" ? "text-foreground" : "text-muted-foreground")}>{status}</span>;
 }
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -123,8 +115,8 @@ function Th({
   );
 }
 
-function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return <td className={cn("px-2 py-3 sm:px-3", wide && "hidden sm:table-cell")}>{children}</td>;
+function Td({ children, wide, num }: { children: React.ReactNode; wide?: boolean; num?: boolean }) {
+  return <td className={cn("px-2 py-3 sm:px-3", wide && "hidden sm:table-cell", num && "tabular-nums")}>{children}</td>;
 }
 
 export default function TradesTable({
@@ -200,30 +192,24 @@ export default function TradesTable({
                   <div className="mt-0.5 text-xs text-muted-foreground sm:whitespace-nowrap">{contractName(t)}</div>
                 )}
               </Td>
-              <Td><span className={cn("whitespace-nowrap", pnlColor(t.realized_pnl))}>{fmt$(t.realized_pnl)}</span></Td>
+              <Td num><span className={cn("whitespace-nowrap", pnlColor(t.realized_pnl))}>{fmt$(t.realized_pnl)}</span></Td>
               {showAccount && (
                 <Td wide>
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                    accountMap[t.account_id]?.type === "roth_ira"
-                      ? "bg-purple-900/40 text-purple-300"
-                      : "bg-sky-900/40 text-sky-300"
-                  }`}>
-                    {accountMap[t.account_id]?.name ?? "—"}
-                  </span>
+                  <span className={cn(CHIP, "text-muted-foreground")}>{accountMap[t.account_id]?.name ?? "—"}</span>
                 </Td>
               )}
               <Td>
-                <span className="whitespace-nowrap">{fmtDate(t.opened_at, thisYear)}</span>
+                <span className="whitespace-nowrap tabular-nums">{fmtDate(t.opened_at, thisYear)}</span>
                 {t.entry_time_bucket && <span className="hidden text-xs text-muted-foreground sm:block">{bucketName(t.entry_time_bucket)}</span>}
                 {/* Status has no column on a phone; an open trade still says so. */}
                 {t.status === "open" && <span className="mt-1 block sm:hidden"><StatusBadge status={t.status} /></span>}
               </Td>
-              <Td wide><span className="whitespace-nowrap">{t.closed_at ? fmtDate(t.closed_at, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
-              <Td>{t.contracts} <span className="block text-xs text-muted-foreground sm:inline">{t.instrument_type === "stock" ? "shares" : "contracts"}</span></Td>
-              <Td wide>{money(t.avg_entry_premium)}</Td>
-              <Td wide>{t.avg_exit_premium != null ? money(t.avg_exit_premium) : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td wide><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
-              <Td wide><span className="whitespace-nowrap">{t.hold_duration_mins != null ? formatHoldDuration(t.hold_duration_mins) : "—"}</span></Td>
+              <Td wide num><span className="whitespace-nowrap">{t.closed_at ? fmtDate(t.closed_at, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
+              <Td><span className="tabular-nums">{t.contracts}</span> <span className="block text-xs text-muted-foreground sm:inline">{t.instrument_type === "stock" ? "shares" : "contracts"}</span></Td>
+              <Td wide num>{money(t.avg_entry_premium)}</Td>
+              <Td wide num>{t.avg_exit_premium != null ? money(t.avg_exit_premium) : <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide num><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
+              <Td wide num><span className="whitespace-nowrap">{t.hold_duration_mins != null ? formatHoldDuration(t.hold_duration_mins) : "—"}</span></Td>
               <Td wide><StatusBadge status={t.status} /></Td>
             </tr>
           ))}

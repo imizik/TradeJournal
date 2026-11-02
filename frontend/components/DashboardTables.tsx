@@ -75,25 +75,14 @@ function fmtOptionType(val: string | null | undefined) {
   return <span className="uppercase">{val}</span>;
 }
 
-function StatusBadge({ status }: { status: Trade["status"] }) {
-  const cls =
-    status === "open"
-      ? "bg-blue-900/40 text-blue-300"
-      : status === "expired"
-        ? "bg-muted text-muted-foreground"
-        : "bg-muted text-foreground/70";
+const CHIP = "inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-secondary px-2 text-[11.5px] font-medium";
 
-  return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>{status}</span>;
+function StatusBadge({ status }: { status: Trade["status"] }) {
+  return <span className={cn(CHIP, status === "open" ? "text-foreground" : "text-muted-foreground")}>{status}</span>;
 }
 
 function AccountBadge({ accountMap, accountId }: { accountMap: Record<string, Account>; accountId: string }) {
-  const account = accountMap[accountId];
-  const cls =
-    account?.type === "roth_ira"
-      ? "bg-purple-900/40 text-purple-300"
-      : "bg-sky-900/40 text-sky-300";
-
-  return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>{account?.name ?? "-"}</span>;
+  return <span className={cn(CHIP, "text-muted-foreground")}>{accountMap[accountId]?.name ?? "-"}</span>;
 }
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -135,8 +124,8 @@ function Th<K extends string>({
   );
 }
 
-function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return <td className={cn("px-2 py-3 sm:px-4", wide && "hidden sm:table-cell")}>{children}</td>;
+function Td({ children, wide, num }: { children: React.ReactNode; wide?: boolean; num?: boolean }) {
+  return <td className={cn("px-2 py-3 sm:px-4", wide && "hidden sm:table-cell", num && "tabular-nums")}>{children}</td>;
 }
 
 function getOpenSortVal(
@@ -292,7 +281,7 @@ export function OpenPositionsTable({
                       {trade.ticker}
                     </a>
                     {expiresToday && (
-                      <span className="whitespace-nowrap rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+                      <span className="inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-primary/15 px-2 text-[11.5px] font-medium text-primary">
                         Expires today
                       </span>
                     )}
@@ -306,41 +295,41 @@ export function OpenPositionsTable({
                 {!compact && <Td wide>
                   <span className="capitalize">{trade.instrument_type}</span>
                 </Td>}
-                <Td wide>
+                <Td wide num>
                   {trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}
                 </Td>
                 <Td wide>{fmtOptionType(trade.option_type)}</Td>
-                <Td wide>
+                <Td wide num>
                   {trade.expiration ? fmtDateShort(trade.expiration) : <span className="text-muted-foreground/40">-</span>}
                 </Td>
                 <Td>
                   <div className="flex flex-col">
-                    <span className="font-medium">{fmtQty(meta.qtyLeft)}</span>
+                    <span className="font-medium tabular-nums">{fmtQty(meta.qtyLeft)}</span>
                     <span className="whitespace-nowrap text-xs text-muted-foreground">
                       {`opened ${fmtQty(meta.openedQty)}${meta.exitedQty > 0 ? ` | trimmed ${fmtQty(meta.exitedQty)}` : ""}`}
                     </span>
                   </div>
                 </Td>
-                {!compact && <Td wide>{fmtMoney(meta.avgCostLeft)}</Td>}
-                {!compact && <Td wide>{fmtMoney(meta.capitalLeft)}</Td>}
-                <Td>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">—</span>}</Td>
-                {!compact && <Td wide>
+                {!compact && <Td wide num>{fmtMoney(meta.avgCostLeft)}</Td>}
+                {!compact && <Td wide num>{fmtMoney(meta.capitalLeft)}</Td>}
+                <Td num>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">—</span>}</Td>
+                {!compact && <Td wide num>
                   {trade.instrument_type === "option" && quote?.underlying_price != null
                     ? <span className="text-muted-foreground">{fmtMoney(quote.underlying_price)}</span>
                     : <span className="text-muted-foreground/40">—</span>}
                 </Td>}
-                <Td>
+                <Td num>
                   {unrealizedPnl != null ? (
                     <span className={pnlColor(unrealizedPnl)}>{fmt$(unrealizedPnl)}</span>
                   ) : (
                     <span className="text-muted-foreground/40">—</span>
                   )}
                 </Td>
-                {!compact && <Td wide>
+                {!compact && <Td wide num>
                   <span className={pnlColor(meta.realizedSoFar)}>{fmt$(meta.realizedSoFar)}</span>
                 </Td>}
-                {!compact && <Td wide>{fmtDateShort(trade.opened_at)}</Td>}
-                {!compact && <Td wide>{fmtDateShort(meta.lastActivityAt)}</Td>}
+                {!compact && <Td wide num>{fmtDateShort(trade.opened_at)}</Td>}
+                {!compact && <Td wide num>{fmtDateShort(meta.lastActivityAt)}</Td>}
               </tr>
             );
           })}
@@ -425,20 +414,20 @@ export function RecentClosedTable({
               <Td wide>
                 <span className="capitalize">{trade.instrument_type}</span>
               </Td>
-              <Td wide>
+              <Td wide num>
                 {trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}
               </Td>
               <Td wide>{fmtOptionType(trade.option_type)}</Td>
-              <Td wide>
+              <Td wide num>
                 {trade.expiration ? fmtDateShort(trade.expiration) : <span className="text-muted-foreground/40">-</span>}
               </Td>
-              <Td>
+              <Td num>
                 <span className={pnlColor(trade.realized_pnl)}>{fmt$(trade.realized_pnl)}</span>
               </Td>
-              <Td wide>
+              <Td wide num>
                 <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
               </Td>
-              <Td wide>{formatHoldDuration(trade.hold_duration_mins)}</Td>
+              <Td wide num>{formatHoldDuration(trade.hold_duration_mins)}</Td>
               <Td>
                 <StatusBadge status={trade.status} />
               </Td>

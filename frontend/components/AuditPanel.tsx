@@ -24,7 +24,7 @@ function FillAuditBlock({ fill }: { fill: AuditFill }) {
   return (
     <div className="rounded border border-border p-3 space-y-2">
       <div className="flex items-center gap-2">
-        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${fill.is_entry ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"}`}>
+        <span className={`inline-flex h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] font-medium ${fill.is_entry ? "text-foreground" : "text-muted-foreground"}`}>
           {fill.is_entry ? "ENTRY" : "EXIT"}
         </span>
         <span className="text-xs text-muted-foreground">{fill.executed_at_et}</span>
@@ -350,8 +350,8 @@ export default function AuditPanel({ tradeId }: Props) {
         onClick={handleOpen}
         className={`w-full rounded px-3 py-2 text-xs font-semibold transition-colors ${
           open
-            ? "bg-violet-900/60 text-violet-200 hover:bg-violet-900/40"
-            : "bg-muted text-muted-foreground hover:bg-muted/70"
+            ? "bg-secondary text-foreground hover:bg-secondary/70"
+            : "bg-secondary text-muted-foreground hover:text-foreground"
         }`}
       >
         {open ? "Hide Audit" : "Show Audit"}
@@ -361,7 +361,7 @@ export default function AuditPanel({ tradeId }: Props) {
         <div className="mt-3 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-violet-400">Data Audit</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Data Audit</h3>
             <button
               onClick={handleRefresh}
               disabled={loading}

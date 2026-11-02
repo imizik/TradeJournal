@@ -9,7 +9,7 @@ const STAGES: { id: DeskPlanStage; title: string }[] = [
   { id: "armed", title: "Armed" }, { id: "in_position", title: "In position" },
   { id: "exited", title: "Exited this week" }, { id: "done", title: "Done this week" },
 ];
-const DOT: Record<DeskPlanStage, string> = { armed: "bg-sky-400", in_position: "bg-primary", exited: "bg-rose-400", done: "bg-muted-foreground" };
+const DOT: Record<DeskPlanStage, string> = { armed: "bg-foreground/60", in_position: "bg-primary", exited: "bg-rose-400", done: "bg-muted-foreground" };
 
 const pct = (value: number) => `${Math.abs(value).toFixed(1)}%`;
 const signed = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}R`;

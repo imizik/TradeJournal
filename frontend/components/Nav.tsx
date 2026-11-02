@@ -42,32 +42,72 @@ const subscribeFolded = (listener: () => void) => { foldListeners.add(listener);
 export const useFoldedNav = () => useSyncExternalStore(subscribeFolded, () => folded, () => false);
 export const openNavMenu = () => opener?.();
 
-/** The sidebar's pages; ``heading`` starts a new group (everyday pages come first, without one). */
-const navItems: { href: string; label: string; icon: typeof Bot; heading?: string }[] = [
+type NavItem = { href: string; label: string; icon: typeof Bot };
+
+/** The three pages always in view. */
+const PRIMARY: NavItem[] = [
   { href: "/today", label: "Today", icon: Sun }, // owner-only: what matters right now
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
-  { href: "/daily", label: "Daily Review", icon: ClipboardList },
-  { href: "/morning", label: "Jo", icon: Bot },
-  { href: "/trades", label: "Trades", icon: FileText },
-  { href: "/analytics", label: "Analytics", icon: BarChart2 },
-  { href: "/fills", label: "Fills", icon: Activity },
-  { href: "/signals", label: "Signals", icon: Radio, heading: "Signals & practice" },
-  { href: "/scanner", label: "Scanner", icon: Radar },
-  { href: "/radar", label: "Radar", icon: Telescope },
-  { href: "/proof", label: "Proof", icon: ClipboardCheck },
-  { href: "/practice", label: "Daily Practice", icon: Target },
-  { href: "/advisor-review", label: "Advisor review", icon: Scale },
-  { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch, heading: "Labs" },
-  // Owner-only and only while the lab is on; never first in its group, so hiding it never hides the heading.
-  { href: "/copilot-lab", label: "Copilot", icon: MessagesSquare },
-  { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
-  { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
-  { href: "/research/companies", label: "Company Research", icon: FileText },
-  { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
+];
+
+/** Everything else, folded away until asked for. */
+const GROUPS: { name: string; items: NavItem[] }[] = [
+  { name: "Journal", items: [
+    { href: "/trades", label: "Trades", icon: FileText },
+    { href: "/fills", label: "Fills", icon: Activity },
+    { href: "/daily", label: "Daily Review", icon: ClipboardList },
+    { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  ] },
+  { name: "Market", items: [
+    { href: "/radar", label: "Radar", icon: Telescope },
+    { href: "/scanner", label: "Scanner", icon: Radar },
+    { href: "/signals", label: "Signals", icon: Radio },
+    { href: "/morning", label: "Jo", icon: Bot },
+    { href: "/proof", label: "Proof", icon: ClipboardCheck },
+  ] },
+  { name: "Practice", items: [
+    { href: "/practice", label: "Daily Practice", icon: Target },
+    { href: "/advisor-review", label: "Advisor review", icon: Scale },
+    { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
+    { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
+  ] },
+  { name: "Research", items: [
+    { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
+    { href: "/research/companies", label: "Company Research", icon: FileText },
+    { href: "/research/ai-buildout", label: "AI Buildout", icon: FileText },
+  ] },
+];
+
+/** The owner's two housekeeping pages, as quiet links beside Sync. */
+const QUIET: NavItem[] = [
   { href: "/access", label: "Assistant access", icon: FileText },
   { href: "/deploys", label: "Deploys", icon: Rocket },
 ];
+
+const isCurrent = (pathname: string, href: string) => pathname === href || (href !== "/" && pathname.startsWith(href));
+
+/** Which groups are open, on this device only. The current page's group opens by itself without being remembered, and a
+ * click can still close it until the next page. */
+const NAV_GROUPS_KEY = "tradejournal.nav.groups.v1";
+type NavGroups = { isOpen: (name: string) => boolean; toggle: (name: string) => void };
+function useNavGroups(pathname: string): NavGroups {
+  const [remembered, setRemembered] = useState<Record<string, boolean>>({});
+  const [closedHere, setClosedHere] = useState<string | null>(null);
+  useEffect(() => {
+    try { setRemembered(JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) ?? "{}") ?? {}); } catch { /* all folded */ }
+  }, []);
+  useEffect(() => setClosedHere(null), [pathname]);
+  const isOpen = (name: string) => !!remembered[name] || (closedHere !== `${pathname}|${name}` && !!GROUPS.find(group => group.name === name)?.items.some(item => isCurrent(pathname, item.href)));
+  const toggle = (name: string) => {
+    const open = !isOpen(name);
+    const next = { ...remembered, [name]: open };
+    setRemembered(next);
+    setClosedHere(open ? null : `${pathname}|${name}`);
+    try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
+  };
+  return { isOpen, toggle };
+}
 
 const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }> = {
   live: { label: "Live sync", dot: "bg-emerald-400" },
@@ -117,8 +157,8 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
     >
       {running && (
         <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-muted-foreground opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
         </span>
       )}
       <span className="text-[11px] font-medium">Sync</span>
@@ -128,11 +168,11 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
 }
 
 /** While the Copilot Lab is on, the desk is home: it takes Today's place, first in the menu and on the phone's tab bar
- * (Today forwards there), and the Labs entry for the same page goes. */
+ * (Today forwards there). */
 const DESK = { href: "/copilot-lab", label: "Desk", icon: MessagesSquare };
 function withDesk<T extends { href: string }>(items: T[], copilot: boolean): T[] {
   if (!copilot) return items;
-  return items.flatMap(item => (item.href === "/today" ? [{ ...item, ...DESK }] : item.href === "/copilot-lab" ? [] : [item]));
+  return items.map(item => (item.href === "/today" ? { ...item, ...DESK } : item));
 }
 
 /** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */
@@ -181,51 +221,79 @@ function MoreButton({ open, onOpen, trouble }: { open: boolean; onOpen: () => vo
 
 /** The phone's thumb-reachable "Plan a trade": a lit tab beside Charts, owner-only and only while the lab is on. */
 function PlanTab() {
-  return <PlanATrade origin="manual" className="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-sky-300 hover:text-sky-200">
-    <span className="flex h-6 w-9 items-center justify-center rounded-full bg-sky-500 text-white"><Crosshair className="h-4 w-4" aria-hidden /></span>
+  return <PlanATrade origin="manual" className="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-primary hover:text-primary/90">
+    <span className="flex h-6 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground"><Crosshair className="h-4 w-4" aria-hidden /></span>
     <span><span className="sr-only">Plan a trade</span><span aria-hidden>Plan</span></span>
   </PlanATrade>;
 }
 
-function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
+function NavLink({ item: { href, label, icon: Icon }, pathname, onNavigate, rail = false }: { item: NavItem; pathname: string; onNavigate?: () => void; rail?: boolean }) {
+  const isActive = isCurrent(pathname, href);
+  const link = (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      // The rail shows icons only: the name is the link's label and its tooltip.
+      aria-label={rail ? label : undefined}
+      aria-current={isActive ? "page" : undefined}
+      className={cn(
+        // min-h-11 keeps every row a comfortable tap target on a phone.
+        rail
+          ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+          : "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition-colors md:min-h-9",
+        isActive
+          ? "bg-secondary font-medium text-foreground"
+          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {!rail && label}
+      <Pending corner={rail} />
+    </Link>
+  );
+  return <li>{rail ? <NavHint label={label}>{link}</NavHint> : link}</li>;
+}
+
+/** The three primary links, then (unless on the rail, whose More button opens them) the groups this viewer has pages in. */
+function NavLinks({ pathname, groups, onNavigate, rail = false }: { pathname: string; groups?: NavGroups; onNavigate?: () => void; rail?: boolean }) {
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const copilot = useCopilotOn(); // the owner's, and only while the lab is on
-  return (
+  const shown = (item: NavItem) => shownHref(item.href, owner, enabled, journal, grants.market_decision_write);
+  return <>
     <ul className="space-y-1">
-      {withDesk(navItems, copilot).filter(item => shownHref(item.href, owner, enabled, journal, grants.market_decision_write) && (item.href !== "/copilot-lab" || copilot)).map(({ href, label, icon: Icon, heading }) => {
-        const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
-        const link = (
-            <Link
-              href={href}
-              onClick={onNavigate}
-              // The rail shows icons only: the name is the link's label and its tooltip.
-              aria-label={rail ? label : undefined}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                // min-h-11 keeps every row a comfortable tap target on a phone.
-                rail
-                  ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
-                  : "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition-colors md:min-h-9",
-                isActive
-                  ? "bg-secondary font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!rail && label}
-              <Pending corner={rail} />
-            </Link>
-        );
-        return <li key={href}>
-          {heading && (rail
-            ? <div role="separator" aria-label={heading} className="my-2 border-t" />
-            : <h2 className="px-2.5 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{heading}</h2>)}
-          {rail ? <NavHint label={label}>{link}</NavHint> : link}
+      {withDesk(PRIMARY, copilot).filter(shown).map(item => <NavLink key={item.href} item={item} pathname={pathname} onNavigate={onNavigate} rail={rail} />)}
+    </ul>
+    {groups && <ul className="mt-3 space-y-1">
+      {GROUPS.map(({ name, items }) => {
+        const visible = items.filter(shown);
+        if (!visible.length) return null;
+        const open = groups.isOpen(name);
+        return <li key={name}>
+          <button type="button" onClick={() => groups.toggle(name)} aria-expanded={open}
+            className="flex min-h-11 w-full items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground md:min-h-8">
+            <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", open && "rotate-90")} />
+            {name}
+          </button>
+          {open && <ul className="mt-1 space-y-1">
+            {visible.map(item => <NavLink key={item.href} item={item} pathname={pathname} onNavigate={onNavigate} />)}
+          </ul>}
         </li>;
       })}
-    </ul>
-  );
+    </ul>}
+  </>;
+}
+
+/** Assistant access and Deploys: the owner's, small and out of the way. */
+function QuietLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const { owner, grants, enabled } = useAppAccess();
+  return <>
+    {QUIET.filter(({ href }) => shownHref(href, owner, enabled, owner || !!grants.journal_read, grants.market_decision_write)).map(({ href, label }) => {
+      const active = isCurrent(pathname, href);
+      return <Link key={href} href={href} onClick={onNavigate} aria-current={active ? "page" : undefined}
+        className={cn("flex h-11 shrink-0 items-center whitespace-nowrap rounded-md px-1 text-[11px] transition-colors hover:bg-secondary hover:text-foreground md:h-auto md:py-1.5", active ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</Link>;
+    })}
+  </>;
 }
 
 export function Nav({ owner = true, journal = true }: { owner?: boolean; journal?: boolean }) {
@@ -251,6 +319,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   // The desk folds the rail into its bar's Menu button; the full sidebar still shows when this device asked for it.
   const deskMenu = pathname === "/copilot-lab" && !wide;
   const rail = chartsRoute && !wide && !deskMenu;
+  const groups = useNavGroups(pathname);
   useEffect(() => {
     setFolded(deskMenu);
     opener = () => setMenuOpen(true);
@@ -280,7 +349,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       </header>
 
       {menuOpen && (
-        <div role="dialog" aria-modal="true" aria-label="Menu" className={cn("fixed inset-0 z-50", !deskMenu && "md:hidden")}>
+        <div role="dialog" aria-modal="true" aria-label="Menu" className={cn("fixed inset-0 z-50", !deskMenu && !rail && "md:hidden")}>
           <div className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} aria-hidden />
           <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-background p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="mb-6 flex items-start justify-between gap-2">
@@ -304,7 +373,8 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <NavLinks pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+            <NavLinks pathname={pathname} groups={groups} onNavigate={() => setMenuOpen(false)} />
+            <div className="mt-auto flex flex-wrap items-center gap-1 pt-4"><QuietLinks pathname={pathname} onNavigate={() => setMenuOpen(false)} /></div>
           </nav>
         </div>
       )}
@@ -336,6 +406,14 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
             <PanelLeftOpen className="h-4 w-4" />
           </button></NavHint>
           <NavLinks pathname={pathname} rail />
+          <NavHint label="More"><button
+            onClick={() => setMenuOpen(true)}
+            aria-label="More"
+            aria-expanded={menuOpen}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <Menu className="h-4 w-4" />
+          </button></NavHint>
           <div className="mt-auto" />
           {owner && <NavHint label="Plan streak"><PlanStreakChip variant="rail" /></NavHint>}
           {owner && <SyncStatusDot />}
@@ -363,13 +441,14 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           )}
         </div>
 
-        <NavLinks pathname={pathname} />
+        <NavLinks pathname={pathname} groups={groups} />
 
         <div className="mt-auto" />
 
-        {/* Trigger button — bottom right corner of sidebar */}
-        <div className="flex justify-end pb-1 pt-3">
-          {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />}
+        {/* Bottom of the sidebar: the owner's quiet links, and the Sync trigger on the right */}
+        <div className="flex items-center pb-1 pt-3">
+          <QuietLinks pathname={pathname} />
+          {owner && <div className="ml-auto"><SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} compact /></div>}
         </div>
       </nav>
 

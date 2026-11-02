@@ -99,7 +99,7 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
   }
 
   return (
-    <section aria-label={title} className="mt-2 space-y-1.5 rounded border border-sky-500/30 bg-sky-500/5 p-2 text-xs">
+    <section aria-label={title} className="mt-2 space-y-1.5 rounded border border-primary/30 bg-primary/5 p-2 text-xs">
       <p className="font-medium text-foreground">{title} · {proposalText(proposal)}</p>
       {proposal.kind === "watch" && (
         <>

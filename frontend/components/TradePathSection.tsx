@@ -1,6 +1,7 @@
 "use client";
 
 import type { TradePathMetrics } from "@/lib/api";
+import { DashboardCard } from "@/components/dashboard/DashboardCard";
 
 function fmtAbs(val: number | null | undefined, decimals = 2, suffix = "%") {
   if (val == null) return "-";
@@ -42,11 +43,13 @@ function maeColor(val: number | null | undefined) {
   return val > 0 ? "text-red-400" : "text-muted-foreground";
 }
 
-function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+const CHIP = "inline-flex h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] font-medium text-muted-foreground";
+
+function Row({ label, value, valueClass, words }: { label: string; value: string; valueClass?: string; words?: boolean }) {
   return (
-    <div className="flex justify-between border-b border-border py-1.5 text-xs last:border-0">
+    <div className="flex justify-between gap-3 border-b border-border py-1.5 text-xs last:border-0">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium ${valueClass ?? "text-foreground"}`}>{value}</span>
+      <span className={`text-right font-medium ${words ? "" : "tabular-nums"} ${valueClass ?? "text-foreground"}`}>{value}</span>
     </div>
   );
 }
@@ -70,25 +73,18 @@ export default function TradePathSection({ metrics }: Props) {
   const maeVsMfe = hasBar && mae != null ? Math.min((mae / mfe!) * 100, 100) : 0;
 
   return (
-    <div className="rounded-lg border bg-card p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Trade Path
-        </h2>
-        <span className="rounded bg-teal-900/40 px-1.5 py-0.5 text-xs font-medium text-teal-300">
-          Underlying
-        </span>
-      </div>
+    <DashboardCard title="Trade Path" action={<span className={CHIP}>Underlying</span>}>
+      <div className="space-y-4">
 
       {/* Exit efficiency bar */}
       {hasBar && (
         <div>
           <div className="mb-1 flex justify-between text-xs text-muted-foreground">
             <span>Entry</span>
-            <span className={effColor(eff)}>
+            <span className={`tabular-nums ${effColor(eff)}`}>
               {eff!.toFixed(1)}% of move captured
             </span>
-            <span>MFE ({fmtAbs(mfe)})</span>
+            <span className="tabular-nums">MFE ({fmtAbs(mfe)})</span>
           </div>
           <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted">
             {/* MAE adverse zone */}
@@ -156,9 +152,10 @@ export default function TradePathSection({ metrics }: Props) {
             label="Moved in Favor First"
             value={metrics.moved_in_favor_first === 1 ? "Yes" : metrics.moved_in_favor_first === 0 ? "No" : "-"}
             valueClass={metrics.moved_in_favor_first === 1 ? "text-emerald-400" : metrics.moved_in_favor_first === 0 ? "text-red-400" : "text-muted-foreground"}
+            words
           />
-          <Row label="Hold Bucket" value={metrics.hold_duration_bucket ?? "-"} />
-          <Row label="Exit Bucket" value={metrics.exit_time_bucket ?? "-"} />
+          <Row label="Hold Bucket" value={metrics.hold_duration_bucket ?? "-"} words />
+          <Row label="Exit Bucket" value={metrics.exit_time_bucket ?? "-"} words />
         </div>
       </div>
 
@@ -173,10 +170,10 @@ export default function TradePathSection({ metrics }: Props) {
       {hasOptionPath && (
         <div className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="text-[13.5px] font-semibold tracking-tight">
               Option Path
             </h3>
-            <span className="rounded bg-amber-900/40 px-1.5 py-0.5 text-xs font-medium text-amber-300">
+            <span className={CHIP}>
               Contract
             </span>
           </div>
@@ -218,6 +215,7 @@ export default function TradePathSection({ metrics }: Props) {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </DashboardCard>
   );
 }

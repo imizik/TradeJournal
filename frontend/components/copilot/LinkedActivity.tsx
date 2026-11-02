@@ -37,7 +37,7 @@ export default function LinkedActivity({ investigationId, refreshKey }: { invest
       <ul className="space-y-1">
         {alerts.map(alert => (
           <li key={alert.id} className="flex flex-wrap items-center gap-2">
-            <span className={alert.state === "active" ? "rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-300" : "rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300"}>
+            <span className={alert.state === "active" ? "rounded bg-secondary px-1.5 py-0.5 text-foreground" : "rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300"}>
               {alert.plan_role ? ROLE[alert.plan_role][alert.state === "active" ? "armed" : "fired"] : alert.state === "active" ? "Alert · armed" : "Alert · fired"}
             </span>
             <span className="text-foreground">{alert.symbol} · {alertText(alert, alert.price)}</span>
@@ -47,7 +47,7 @@ export default function LinkedActivity({ investigationId, refreshKey }: { invest
         ))}
         {stops.time_stops.map(stop => (
           <li key={stop.id} className="flex flex-wrap items-center gap-2">
-            <span className={stop.delivery === "sent" ? "rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300" : stop.delivery === "scheduled" ? "rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-300" : "rounded bg-muted px-1.5 py-0.5 text-muted-foreground"}>
+            <span className={stop.delivery === "sent" ? "rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-300" : stop.delivery === "scheduled" ? "rounded bg-secondary px-1.5 py-0.5 text-foreground" : "rounded bg-muted px-1.5 py-0.5 text-muted-foreground"}>
               Time stop · {STOP[stop.delivery]}
             </span>
             <span className="text-foreground">{stop.symbol} · {at(stop.due_at)} ET</span>

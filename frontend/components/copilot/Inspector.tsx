@@ -24,7 +24,7 @@ const KIND: Record<DeskTimelineRow["kind"], { label: string; dot: string }> = {
   time_stop: { label: "Time stop", dot: "bg-primary/50" },
   revisit: { label: "Revisit", dot: "bg-muted-foreground" },
   fill: { label: "Fill", dot: "bg-foreground" },
-  thesis: { label: "Thesis watch", dot: "bg-sky-400" },
+  thesis: { label: "Thesis watch", dot: "bg-foreground/60" },
   ping: { label: "Ping", dot: "bg-violet-400" },
   decision: { label: "Decision", dot: "bg-emerald-400" },
 };
@@ -33,7 +33,7 @@ const MAX_TILES = 40;
 type DayTab = "chart" | "timeline" | "week";
 const DAY_TABS: { id: DayTab; label: string }[] = [{ id: "chart", label: "Chart" }, { id: "timeline", label: "Timeline" }, { id: "week", label: "This week" }];
 // The market picture draws fills amber and pings violet (desk_context.market_picture); the day's timeline keeps those.
-const DAY_DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-primary", ping: "bg-violet-400", radar: "bg-sky-400", decision: "bg-emerald-400" };
+const DAY_DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-primary", ping: "bg-violet-400", radar: "bg-foreground/60", decision: "bg-emerald-400" };
 const DAY_SOURCES: Record<string, string> = { fills: "fills", pings: "pings", radar: "Radar", decisions: "decisions", time_stops: "time stops", prep: "prep" };
 const REFRESH_MS = 60_000;
 // This week's tiles: planned before entry, not (no plan, or one saved late), or a suggested plan waiting to be linked.
@@ -104,7 +104,7 @@ function ThreadChart({ thread }: { thread: DeskThreadRef }) {
       <p aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Dot tone="bg-primary">your fills</Dot>
         <Dot tone="bg-violet-400">pings</Dot>
-        <Dot tone="bg-sky-400">Radar</Dot>
+        <Dot tone="bg-foreground/60">Radar</Dot>
         {timeframe === "1D" && <span>· marked on 2m and 15m</span>}
       </p>
     </div>

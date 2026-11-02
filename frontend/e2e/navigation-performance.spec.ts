@@ -72,6 +72,7 @@ for (const layout of ["single", "multi"] as const) test(`navigation load benchma
   // First feedback after clicking a page whose server data is slow (journal trades +2s).
   await request.post(`${backend}/__test/dashboard-state?value=slow`);
   try {
+    await page.getByRole("button", { name: "Journal", exact: true }).click();
     for (let i = 0; i < 3; i++) {
       await page.getByRole("link", { name: "Dashboard", exact: true }).click();
       await expect(page.getByTestId("owner-dashboard")).toBeVisible();

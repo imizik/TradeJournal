@@ -76,7 +76,7 @@ function Row({ row }: { row: PlanPosition }) {
         </div>
       )}
     </Link>
-    {action && <Link href={action.href} className="flex min-h-11 shrink-0 items-center border-l px-3 text-xs font-medium text-sky-300 hover:bg-muted/30">{action.text}</Link>}
+    {action && <Link href={action.href} className="flex min-h-11 shrink-0 items-center border-l px-3 text-xs font-medium text-primary hover:bg-muted/30">{action.text}</Link>}
   </li>;
 }
 

@@ -81,6 +81,7 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await expect(page.getByTestId("practice-decisions")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Daily Practice", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: /^Open menu/ }).click();
+  await page.getByRole("dialog", { name: "Menu" }).getByRole("button", { name: "Practice", exact: true }).click();
   await page.getByRole("link", { name: "Daily Practice", exact: true }).filter({ visible: true }).click();
   await expect(page).toHaveURL(/\/practice$/);
   await expect(page.getByTestId("practice-decisions")).toBeVisible();
@@ -318,6 +319,7 @@ test("attention does not wait for journal statistics, and a slow page answers th
     await expect(page.getByRole("status", { name: "Loading workspace" })).toBeVisible(); // the journal still waits for statistics
     await expect(page.getByRole("status", { name: "Loading workspace" })).toHaveCount(0);
     await state("slow");
+    await page.getByRole("button", { name: "Journal", exact: true }).click();
     await page.getByRole("link", { name: "Trades", exact: true }).click();
     await expect(page.getByTestId("nav-pending")).toBeVisible(); // before the slow journal answers
     await page.screenshot({ path: test.info().outputPath("nav-pending-desktop.png"), clip: { x: 0, y: 0, width: 300, height: 420 } });
