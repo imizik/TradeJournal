@@ -424,6 +424,19 @@ def test_the_owner_can_revisit_an_investigation_later_through_the_route(monkeypa
     assert symbols == ["NBIS"] and title == "Reassess: NBIS bounce"
 
 
+def test_research_now_is_one_job_per_question_and_can_be_asked_again_after_it_fails():
+    saved = inv.create(inv.InvestigationFields(title="Is this the top?", symbol="SMH"))
+    first, created = q.enqueue_revisit(saved["id"], "Is the AI trade topping?", 0)
+    assert created and q.enqueue_revisit(saved["id"], "Is  the AI trade topping?", 0) == (first, False)  # same words
+    other, created = q.enqueue_revisit(saved["id"], "What does Treasury supply mean for SMH?", 0)
+    assert created and other["id"] != first["id"]  # a different question from the same thread, same day
+    with Session(engine) as db:
+        db.get(ResearchJob, uuid.UUID(first["id"])).status = "failed"
+        db.commit()
+    again, created = q.enqueue_revisit(saved["id"], "Is the AI trade topping?", 0)
+    assert created and again["id"] != first["id"]
+
+
 def test_a_question_is_its_own_job_per_investigation_and_can_be_asked_again_after_it_fails():
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
     job_a, _ = q.enqueue_question("Why is NBIS lagging?", ["NBIS"], from_investigation=a)
