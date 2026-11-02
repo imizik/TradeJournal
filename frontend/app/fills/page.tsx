@@ -41,10 +41,13 @@ export default async function FillsPage() {
   // On a phone the fill list comes first; the long manual-entry form is
   // reordered below it rather than making every visit scroll past it.
   return (
-    <div className="flex flex-col space-y-6">
+    <div className="flex flex-col space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Fills</h1>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+        <div className="flex items-baseline gap-2">
+          <h1 className="text-xl font-semibold">Fills</h1>
+          <span className="text-sm tabular-nums text-muted-foreground">{fills.length} recorded</span>
+        </div>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Fills from your broker emails arrive here automatically. Add a manual fill for anything Gmail never had:
           transferred positions, missing cost basis or older starter lots.
         </p>
@@ -55,14 +58,14 @@ export default async function FillsPage() {
       </div>
 
       <section className="order-2 overflow-hidden rounded-lg border bg-card sm:order-none">
-        <div className="border-b px-5 py-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="border-b px-3.5 py-2.5">
+          <h2 className="text-[13.5px] font-semibold tracking-tight">
             Fill History
           </h2>
         </div>
 
         {fills.length === 0 ? (
-          <div className="px-5 py-8 text-sm text-muted-foreground">
+          <div className="p-4 text-sm text-muted-foreground">
             No fills yet. Import email fills or add a manual fill.
           </div>
         ) : (
@@ -89,7 +92,7 @@ export default async function FillsPage() {
                   const href = `/fills/${fill.id}?returnTo=${encodeURIComponent("/fills")}`;
                   return (
                     <tr key={fill.id} className="relative hover:bg-muted/50">
-                      <Td>
+                      <Td num>
                         <a href={href} className="absolute inset-0" aria-label={`View fill ${fill.id}`} />
                         <span className="sm:hidden">{fmtDateTimeShort(fill.executed_at)}</span>
                         <span className="hidden sm:inline">{fmtDateTime(fill.executed_at)}</span>
@@ -105,20 +108,14 @@ export default async function FillsPage() {
                         <span className="capitalize">{fill.instrument_type}</span>
                       </Td>
                       <Td>{fill.side}</Td>
-                      <Td>{fmtQty(fill)}</Td>
-                      <Td>{fmtPrice(fill)}</Td>
-                      <Td wide>{fill.underlying_price_at_fill != null ? `$${fill.underlying_price_at_fill.toFixed(2)}` : "-"}</Td>
-                      <Td wide>{fill.iv_at_fill != null ? `${(fill.iv_at_fill * 100).toFixed(1)}%` : "-"}</Td>
-                      <Td wide>{fill.delta_at_fill != null ? fill.delta_at_fill.toFixed(2) : "-"}</Td>
-                      <Td wide>{fill.rsi_14_at_fill != null ? fill.rsi_14_at_fill.toFixed(1) : "-"}</Td>
+                      <Td num>{fmtQty(fill)}</Td>
+                      <Td num>{fmtPrice(fill)}</Td>
+                      <Td wide num>{fill.underlying_price_at_fill != null ? `$${fill.underlying_price_at_fill.toFixed(2)}` : "-"}</Td>
+                      <Td wide num>{fill.iv_at_fill != null ? `${(fill.iv_at_fill * 100).toFixed(1)}%` : "-"}</Td>
+                      <Td wide num>{fill.delta_at_fill != null ? fill.delta_at_fill.toFixed(2) : "-"}</Td>
+                      <Td wide num>{fill.rsi_14_at_fill != null ? fill.rsi_14_at_fill.toFixed(1) : "-"}</Td>
                       <Td wide>
-                        <span
-                          className={`relative z-10 rounded px-1.5 py-0.5 text-xs font-medium ${
-                            sourceLabel(fill) === "Manual"
-                              ? "bg-amber-900/30 text-amber-300"
-                              : "bg-sky-900/30 text-sky-300"
-                          }`}
-                        >
+                        <span className="relative z-10 inline-flex h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] font-medium text-muted-foreground">
                           {sourceLabel(fill)}
                         </span>
                       </Td>
@@ -137,9 +134,9 @@ export default async function FillsPage() {
 // Phones keep executed time, ticker, side, quantity and price; the enrichment
 // columns return from sm up, and a row still opens the full fill.
 function Th({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return <th className={cn("px-1.5 py-2 text-left font-medium sm:px-4", wide && "hidden sm:table-cell")}>{children}</th>;
+  return <th className={cn("px-1 py-2 text-left font-medium sm:px-4", wide && "hidden sm:table-cell")}>{children}</th>;
 }
 
-function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return <td className={cn("px-1.5 py-3 align-top sm:px-4", wide && "hidden sm:table-cell")}>{children}</td>;
+function Td({ children, wide, num }: { children: React.ReactNode; wide?: boolean; num?: boolean }) {
+  return <td className={cn("px-1 py-3 align-top sm:px-4", wide && "hidden sm:table-cell", num && "tabular-nums")}>{children}</td>;
 }

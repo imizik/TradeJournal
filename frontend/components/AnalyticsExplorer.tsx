@@ -31,9 +31,9 @@ function factor(summary: AnalyticsSummary) {
 }
 
 function Metric({ label, value, detail, tone = "" }: { label: string; value: string; detail?: string; tone?: string }) {
-  return <div className="min-w-0 rounded-lg border bg-card p-4">
+  return <div className="min-w-0 rounded-md border bg-background/40 p-3">
     <p className="text-xs text-muted-foreground">{label}</p>
-    <p className={`mt-1 text-lg font-semibold tabular-nums sm:text-xl ${tone}`}>{value}</p>
+    <p className={`mt-1 text-lg font-medium tabular-nums sm:text-xl ${tone}`}>{value}</p>
     {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
   </div>;
 }
@@ -89,17 +89,18 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
     tradesSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  return <div className="min-w-0 space-y-6">
-    <div className="rounded-lg border bg-card px-4 py-3 text-sm" aria-label="Data coverage">
-      <p><span className="font-semibold">{summary.pnl_count} of {summary.count}</span> selected closed / expired trades have recorded P&amp;L, across {summary.entry_days} entry days.</p>
+  return <div className="min-w-0 space-y-4">
+    <div className="rounded-lg border bg-card px-3.5 py-2.5 text-sm" aria-label="Data coverage">
+      <p><span className="font-semibold tabular-nums">{summary.pnl_count} of {summary.count}</span> selected closed / expired trades have recorded P&amp;L, across {summary.entry_days} entry days.</p>
       <p className="mt-1 text-xs text-muted-foreground">Dates filter the final close in New York time, inclusive. Dollar metrics and win rate use trades with P&amp;L; breakeven trades remain in the denominator.</p>
-      {(data.coverage.missing_pnl > 0 || data.coverage.missing_percentage > 0 || data.coverage.undated_closed_in_scope > 0) && <p className="mt-2 text-xs text-amber-300">
+      {(data.coverage.missing_pnl > 0 || data.coverage.missing_percentage > 0 || data.coverage.undated_closed_in_scope > 0) && <p className="mt-2 text-xs text-red-400">
         {data.coverage.missing_pnl} selected trades missing P&amp;L · {data.coverage.missing_percentage} without a usable return percentage · {data.coverage.undated_closed_in_scope} closed trades in this account/instrument scope excluded because their close date is missing (date eligibility unknown).
       </p>}
     </div>
 
-    <section aria-labelledby="analytics-performance" className="space-y-3">
-      <h2 id="analytics-performance" className="text-sm font-semibold">Performance</h2>
+    <section aria-labelledby="analytics-performance" className="rounded-lg border bg-card">
+      <h2 id="analytics-performance" className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Performance</h2>
+      <div className="space-y-4 p-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Closed P&L" value={money(summary.total_pnl)} tone={color(summary.total_pnl)} />
         <Metric label="Expectancy / trade" value={money(summary.expectancy)} detail="Average recorded dollar P&L" tone={color(summary.expectancy)} />
@@ -110,51 +111,55 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
         <Metric label="Average loser" value={money(summary.avg_loser)} tone={color(summary.avg_loser)} />
         <Metric label="Max closed-trade drawdown" value={money(summary.max_drawdown)} detail="Measured at recorded closes" tone={color(summary.max_drawdown)} />
       </div>
-      <div className="rounded-lg border bg-card p-4"><ClosedPnlCurve curve={data.curve} /></div>
+      <div className="border-t pt-4"><ClosedPnlCurve curve={data.curve} /></div>
+      </div>
     </section>
 
-    <section aria-labelledby="profit-concentration" className="space-y-3">
-      <div>
-        <h2 id="profit-concentration" className="text-sm font-semibold">How concentrated are your profits?</h2>
-        <p className="mt-1 text-xs text-muted-foreground">A sensitivity check: remove the biggest winning trades while keeping all losses. Concentrated gains can be part of a strategy; this alone does not diagnose a problem.</p>
-      </div>
+    <section aria-labelledby="profit-concentration" className="rounded-lg border bg-card">
+      <h2 id="profit-concentration" className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">How concentrated are your profits?</h2>
+      <div className="space-y-3 p-4">
+      <p className="text-xs text-muted-foreground">A sensitivity check: remove the biggest winning trades while keeping all losses. Concentrated gains can be part of a strategy; this alone does not diagnose a problem.</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        {data.concentration.map((item) => <div key={item.limit} className="rounded-lg border bg-card p-4">
+        {data.concentration.map((item) => <div key={item.limit} className="rounded-md border bg-background/40 p-3">
           <p className="text-xs text-muted-foreground">Without your best {item.limit === 1 ? "winner" : `${item.limit} winners`}</p>
-          <p className={`mt-1 text-2xl font-semibold tabular-nums ${color(item.remaining_pnl)}`}>{money(item.remaining_pnl)}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{item.removed_count} winners removed · {percent(item.gross_profit_share)} of gross profits · {money(item.winner_pnl)}</p>
-          {item.removed_count > 0 && <button type="button" onClick={() => drill(`Best ${item.removed_count} winning trades`, item.trade_ids)} className="mt-3 text-sm text-emerald-400 hover:underline">Inspect winners</button>}
+          <p className={`mt-1 text-2xl font-medium tabular-nums ${color(item.remaining_pnl)}`}>{money(item.remaining_pnl)}</p>
+          <p className="mt-2 text-xs tabular-nums text-muted-foreground">{item.removed_count} winners removed · {percent(item.gross_profit_share)} of gross profits · {money(item.winner_pnl)}</p>
+          {item.removed_count > 0 && <button type="button" onClick={() => drill(`Best ${item.removed_count} winning trades`, item.trade_ids)} className="mt-3 inline-flex min-h-11 items-center text-sm text-primary hover:underline sm:min-h-0">Inspect winners</button>}
         </div>)}
       </div>
+      </div>
     </section>
 
-    <section aria-labelledby="breakdown-explorer" className="space-y-3">
+    <section aria-labelledby="breakdown-explorer" className="min-w-0 rounded-lg border bg-card">
+      <h2 id="breakdown-explorer" className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Breakdown explorer</h2>
+      <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><h2 id="breakdown-explorer" className="text-sm font-semibold">Breakdown explorer</h2><p className="mt-1 text-xs text-muted-foreground">Compare groups, then inspect their trades below.</p></div>
+        <p className="text-xs text-muted-foreground">Compare groups, then inspect their trades below.</p>
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <label>Group by<select aria-label="Group by" value={dimension} onChange={(event) => { setDimension(event.target.value as AnalyticsDimension); setSelection(null); setPage(0); }} className="mt-1 block rounded-md border bg-card p-2 text-sm text-foreground">
+          <label>Group by<select aria-label="Group by" value={dimension} onChange={(event) => { setDimension(event.target.value as AnalyticsDimension); setSelection(null); setPage(0); }} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             {DIMENSIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select></label>
-          <label>Sort by<select aria-label="Sort by" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="mt-1 block rounded-md border bg-card p-2 text-sm text-foreground">
+          <label>Sort by<select aria-label="Sort by" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             <option value="total_pnl">Total P&amp;L</option><option value="expectancy">Expectancy</option><option value="median_pnl">Median P&amp;L</option><option value="count">Trade count</option>
           </select></label>
-          <label>Minimum trades<select aria-label="Minimum trades" value={minimum} onChange={(event) => setMinimum(Number(event.target.value))} className="mt-1 block rounded-md border bg-card p-2 text-sm text-foreground">
+          <label>Minimum trades<select aria-label="Minimum trades" value={minimum} onChange={(event) => setMinimum(Number(event.target.value))} className="mt-1 block rounded-md border bg-background p-2 text-sm text-foreground">
             {[1, 10, 20, 50].map((number) => <option key={number} value={number}>{number === 1 ? "All samples" : `${number}+`}</option>)}
           </select></label>
         </div>
       </div>
       <p className="text-xs text-muted-foreground">{info.note}</p>
       <p className="text-xs text-muted-foreground">Selected baseline: {money(summary.expectancy)} / trade · {percent(summary.win_rate)} win rate. “Small sample” means fewer than 20 priced trades; larger samples can still be inconclusive.</p>
-      <div className="max-w-full overflow-x-auto rounded-lg border bg-card">
+      </div>
+      <div className="max-w-full overflow-x-auto border-t">
         <table className="w-full whitespace-nowrap text-sm" aria-label="Analytics breakdown">
           <thead className="border-b text-xs font-medium text-muted-foreground"><tr>
-            {[info.label, "Trades / days", "Total P&L", "Expectancy", "Median P&L", "Win rate", "Profit factor", "Avg return"].map((label) => <th key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}
+            {[info.label, "Trades / days", "Total P&L", "Expectancy", "Median P&L", "Win rate", "Profit factor", "Avg return"].map((label) => <th key={label} className="px-4 py-2 text-left font-medium">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-border">
             {groups.map((group) => <tr key={group.label} className={selection?.label === `${info.label}: ${group.label}` ? "bg-muted/60" : "hover:bg-muted/40"}>
               <td className="px-4 py-3"><button type="button" aria-pressed={selection?.label === `${info.label}: ${group.label}`} onClick={() => drill(`${info.label}: ${group.label}`, group.trade_ids)} className="font-semibold text-foreground underline decoration-muted-foreground/50 underline-offset-4">{group.label}</button>
-                {group.pnl_count < 20 && <span className="ml-2 rounded bg-amber-900/20 px-1.5 py-1 text-[10px] text-amber-300">Small sample</span>}</td>
-              <td className="px-4 py-3 tabular-nums"><span>{group.count} / {group.entry_days}</span>{group.pnl_count !== group.count && <p className="text-xs text-amber-300">{group.pnl_count} with P&amp;L</p>}</td>
+                {group.pnl_count < 20 && <span className="ml-2 inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-secondary px-2 text-[11.5px] font-medium text-muted-foreground">Small sample</span>}</td>
+              <td className="px-4 py-3 tabular-nums"><span>{group.count} / {group.entry_days}</span>{group.pnl_count !== group.count && <p className="text-xs text-muted-foreground">{group.pnl_count} with P&amp;L</p>}</td>
               <td className={`px-4 py-3 tabular-nums ${color(group.total_pnl)}`}>{money(group.total_pnl)}</td>
               <td className={`px-4 py-3 tabular-nums ${color(group.expectancy)}`}>{money(group.expectancy)}</td>
               <td className={`px-4 py-3 tabular-nums ${color(group.median_pnl)}`}>{money(group.median_pnl)}</td>
@@ -166,17 +171,17 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted-foreground">Average return is an unweighted mean of available trade percentages. Dollar results reflect actual sizing; these comparisons do not measure planned risk or prove an edge.</p>
+      <p className="border-t px-3.5 py-2.5 text-xs text-muted-foreground">Average return is an unweighted mean of available trade percentages. Dollar results reflect actual sizing; these comparisons do not measure planned risk or prove an edge.</p>
     </section>
 
-    <section ref={tradesSection} aria-labelledby="analytics-trades" className="scroll-mt-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 id="analytics-trades" className="text-sm font-semibold">{selection?.label ?? "Trades in this selection"}</h2><p className="mt-1 text-xs text-muted-foreground">{trades.length} trades · most recent close first · timestamps in New York time</p></div>
-        {selection && <button type="button" onClick={() => { setSelection(null); setPage(0); }} className="text-sm text-muted-foreground hover:text-foreground">Show all selected trades</button>}
+    <section ref={tradesSection} aria-labelledby="analytics-trades" className="min-w-0 scroll-mt-4 rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+        <div><h2 id="analytics-trades" className="text-[13.5px] font-semibold tracking-tight">{selection?.label ?? "Trades in this selection"}</h2><p className="mt-1 text-xs text-muted-foreground">{trades.length} trades · most recent close first · timestamps in New York time</p></div>
+        {selection && <button type="button" onClick={() => { setSelection(null); setPage(0); }} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground sm:min-h-0">Show all selected trades</button>}
       </div>
-      <div className="max-w-full overflow-x-auto rounded-lg border bg-card">
+      <div className="max-w-full overflow-x-auto">
         <table className="w-full whitespace-nowrap text-sm" aria-label="Analytics trades">
-          <thead className="border-b text-xs font-medium text-muted-foreground"><tr>{["Trade", "Account", "Entered", "Closed", "P&L", "Return"].map((label) => <th key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}</tr></thead>
+          <thead className="border-b text-xs font-medium text-muted-foreground"><tr>{["Trade", "Account", "Entered", "Closed", "P&L", "Return"].map((label) => <th key={label} className="px-4 py-2 text-left font-medium">{label}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">{trades.slice(page * pageSize, (page + 1) * pageSize).map((trade) => <tr key={trade.id} className="hover:bg-muted/40">
             <td className="px-4 py-3"><Link href={`/trades/${trade.id}`} className="font-semibold hover:underline">{trade.ticker}</Link><p className="text-xs text-muted-foreground">{trade.instrument_type === "option" ? `${trade.expiration ?? ""} · ${trade.strike ?? "—"} ${trade.option_type ?? "option"}` : "Stock"} · {trade.status}</p></td>
             <td className="px-4 py-3">{accountNames.get(trade.account_id) ?? "Unknown account"}</td>
@@ -187,10 +192,10 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
           </tr>)}{!trades.length && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No closed trades in this selection. Try a wider date range or reset filters.</td></tr>}</tbody>
         </table>
       </div>
-      {trades.length > pageSize && <div className="flex items-center justify-end gap-3 text-xs">
-        <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded border px-3 py-2 disabled:opacity-40">Previous</button>
-        <span>Page {page + 1} of {Math.ceil(trades.length / pageSize)}</span>
-        <button type="button" disabled={(page + 1) * pageSize >= trades.length} onClick={() => setPage(page + 1)} className="rounded border px-3 py-2 disabled:opacity-40">Next</button>
+      {trades.length > pageSize && <div className="flex items-center justify-end gap-3 border-t px-3.5 py-2.5 text-xs">
+        <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Previous</button>
+        <span className="tabular-nums">Page {page + 1} of {Math.ceil(trades.length / pageSize)}</span>
+        <button type="button" disabled={(page + 1) * pageSize >= trades.length} onClick={() => setPage(page + 1)} className="min-h-11 rounded-md border px-3 hover:bg-secondary disabled:opacity-40 sm:min-h-9">Next</button>
       </div>}
     </section>
   </div>;

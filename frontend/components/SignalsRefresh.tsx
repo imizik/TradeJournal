@@ -31,13 +31,13 @@ export default function SignalsRefresh() {
   }, [refresh]);
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
       <span>Updates every 30 seconds while this tab is visible.</span>
       <button
         type="button"
         onClick={refresh}
         disabled={isPending}
-        className="rounded border px-3 py-1.5 font-medium text-foreground hover:bg-secondary disabled:opacity-50"
+        className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium text-foreground hover:bg-secondary disabled:opacity-50 sm:min-h-9"
       >
         {isPending ? "Updating…" : "Refresh now"}
       </button>

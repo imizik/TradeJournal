@@ -34,15 +34,15 @@ function MarketContext({ fill }: { fill: Fill }) {
   if (fields.length === 0) return null;
 
   return (
-    <div className="rounded-lg border bg-card p-5">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-lg border bg-card">
+      <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">
         Market Context at Fill
       </h2>
-      <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid gap-x-8 gap-y-0 px-4 py-2 sm:grid-cols-3 lg:grid-cols-4">
         {fields.map(({ label, value }) => (
           <div key={label} className="flex justify-between border-b border-border py-2 text-sm last:border-0">
             <span className="text-muted-foreground">{label}</span>
-            <span className="font-medium text-foreground">{value}</span>
+            <span className="font-medium tabular-nums text-foreground">{value}</span>
           </div>
         ))}
       </div>
@@ -72,17 +72,17 @@ export default async function FillDetailPage({
   const cancelHref = returnTo || "/fills";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <a href={cancelHref} className="text-sm text-muted-foreground hover:text-foreground">
           Back
         </a>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">{fillTitle(fill)}</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">{fillTitle(fill)}</h1>
           {newYorkSeconds(fill.executed_at) !== null && <Link href={chartLink({ symbol: fill.ticker, from: newYorkSeconds(fill.executed_at)!, fill: fill.id })}
-            className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Open on chart</Link>}
+            className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9">Open on chart</Link>}
         </div>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Editing a fill rebuilds trades from scratch using the corrected fill history. If this changes how fills group
           together, the original trade detail URL may no longer exist after save.
         </p>

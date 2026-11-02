@@ -218,8 +218,8 @@ test("a past day is a record: problems are named, lateness counts from the slot,
   await expect(headline).toHaveText(/^Briefing on time · 2 of 4 market reads in · 2 missing · 1 late · 1 extra read · MU triggered 10:54 AM/);
   await expect(headline).toHaveAttribute("data-trouble", "true");
   // Only the problems are coloured, not the whole sentence.
-  await expect(headline.getByText("2 missing", { exact: true })).toHaveClass(/text-amber-200/);
-  await expect(headline.getByText("Briefing on time", { exact: true })).not.toHaveClass(/text-amber-200/);
+  await expect(headline.getByText("2 missing", { exact: true })).toHaveClass(/text-primary/);
+  await expect(headline.getByText("Briefing on time", { exact: true })).not.toHaveClass(/text-primary/);
   await expect(jo.getByTestId("jo-day-item").filter({ hasText: "Missing" })).toHaveCount(2);
   await expect(jo.getByTestId("jo-day-item").filter({ hasText: "2:00 read · mixed" })).toContainText("Late · 22 min after 2:00");
   await expect(jo.getByRole("heading", { name: "Coming up" })).toHaveCount(0);
@@ -253,7 +253,7 @@ test("a watch Jo asked for but the app refused is a Done row, with what Jo asked
   await page.route("**/jo/conditional-plans", (route) => route.fulfill({ json: { ...plans(today, midday), refusals: [refusal] } }));
   await page.goto(`/daily/${today}`);
   const headline = page.getByTestId("jo-day-headline");
-  await expect(headline.getByText("1 watch refused", { exact: true })).toHaveClass(/text-amber-200/);
+  await expect(headline.getByText("1 watch refused", { exact: true })).toHaveClass(/text-primary/);
   const row = page.getByTestId("jo-day-item").filter({ hasText: "Jo couldn't watch TSLA: not one of your scanner tickers" });
   await expect(row).toContainText("10:20");
   await expect(row).toContainText("Not saved");

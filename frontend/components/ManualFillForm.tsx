@@ -188,12 +188,12 @@ export default function ManualFillForm({
   }
 
   return (
-    <section className="rounded-lg border bg-card p-5">
-      <div className="mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    <section className="rounded-lg border bg-card">
+      <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">
+        {title}
+      </h2>
+      <div className="px-4 pt-4">
+        <p className="text-sm text-muted-foreground">{description}</p>
         {mode === "edit" && initialFill && (
           <p className="mt-2 text-xs text-muted-foreground">
             Source ID stays fixed as <span className="font-mono text-foreground/80">{initialFill.raw_email_id}</span>.
@@ -201,7 +201,7 @@ export default function ManualFillForm({
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Field>
             <Label htmlFor="account">Account</Label>
@@ -379,7 +379,7 @@ export default function ManualFillForm({
             {cancelHref && (
               <a
                 href={cancelHref}
-                className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
               >
                 Cancel
               </a>
@@ -387,7 +387,7 @@ export default function ManualFillForm({
             <button
               type="submit"
               disabled={busy || accounts.length === 0}
-              className="rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
+              className={`inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium transition-colors disabled:opacity-50 sm:min-h-9 ${mode === "edit" ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border hover:bg-secondary"}`}
             >
               {status === "loading"
                 ? mode === "edit"
@@ -406,7 +406,7 @@ export default function ManualFillForm({
               status === "error"
                 ? "text-red-400"
                 : status === "done"
-                  ? "text-emerald-400"
+                  ? "text-foreground"
                   : "text-muted-foreground"
             }`}
           >
@@ -424,7 +424,7 @@ function Field({ children }: { children: React.ReactNode }) {
 
 function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor: string }) {
   return (
-    <label htmlFor={htmlFor} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
       {children}
     </label>
   );
