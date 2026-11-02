@@ -32,7 +32,8 @@ BREADTH_NOTE = ("One quote per S&P 500 member from the hand-kept list (list_as_o
 VOL_INDEXES = ("VIX9D", "VIX", "VIX3M", "VIX6M", "VVIX", "SKEW")
 POSITIONING_NOTE = ("VIX9D < VIX < VIX3M (contango) is the calm shape; front above back (backwardation) is stress now. "
                     "skew_25d is the 25-delta put's implied volatility minus the 25-delta call's, in vol points: higher "
-                    "means puts are bid. Put/call ratios count this expiry's contracts; open interest is last night's. "
+                    "means puts are bid (null when no strike is within 0.10 of 25 delta). Put/call ratios count this expiry's "
+                    "contracts on the symbol's primary root; open interest is last night's. as_of is the oldest chain's read. "
                     "Greeks and IV are the provider's, refreshed hourly.")
 
 _cache: dict[str, tuple[float, dict]] = {}
@@ -106,16 +107,22 @@ def live_breadth(now: datetime) -> dict:
     return out
 
 
+DELTA_TOLERANCE = 0.10  # a thin chain's nearest strike may be far from 25 delta: then there is no 25-delta figure
+
+
 def _nearest(contracts, target: float):
-    return min(contracts, key=lambda c: abs(abs(c.delta) - target), default=None)
+    found = min(contracts, key=lambda c: abs(abs(c.delta) - target), default=None)
+    return found if found is not None and abs(abs(found.delta) - target) <= DELTA_TOLERANCE else None
 
 
-def chain_stats(chain, spot: float, today: date) -> dict:
-    """One expiry's at-the-money IV, 25-delta skew and put/call ratios."""
-    calls = [c for c in chain.contracts if c.option_type == "call"]
-    puts = [c for c in chain.contracts if c.option_type == "put"]
-    strike = min({c.strike for c in chain.contracts}, key=lambda k: abs(k - spot))
-    atm = [c.iv for c in chain.contracts if c.strike == strike and c.iv]
+def chain_stats(chain, spot: float, today: date, root: str | None = None) -> dict:
+    """One expiry's at-the-money IV, 25-delta skew and put/call ratios, over one root (SPX and SPXW never merge)."""
+    contracts = [c for c in chain.contracts if root is None or c.root == root]
+    calls = [c for c in contracts if c.option_type == "call"]
+    puts = [c for c in contracts if c.option_type == "put"]
+    both = {c.strike for c in calls if c.iv} & {c.strike for c in puts if c.iv}  # an ATM IV is the call and put's mean
+    strike = min(both or {c.strike for c in contracts}, key=lambda k: abs(k - spot))
+    atm = [c.iv for c in contracts if c.strike == strike and c.iv]
     call25 = _nearest([c for c in calls if c.delta is not None and c.iv], 0.25)
     put25 = _nearest([c for c in puts if c.delta is not None and c.iv], 0.25)
 
@@ -165,12 +172,14 @@ def live_positioning(symbol: str, now: datetime) -> dict:
         reads, issue = options_feed.chains(symbol, lambda live: pick_two(live, today))
     except ValueError:
         return {**out, "state": "partial", "expiries": [], "reason": f"{symbol} is not an optionable underlying symbol."}
-    expiries = [chain_stats(read.value, float(spot), today) for read in reads if read.value.contracts]
+    from app.engine.options_positioning import primary_root
+    expiries = [chain_stats(read.value, float(spot), today, primary_root(symbol)) for read in reads if read.value.contracts]
     out.update(spot=round(float(spot), 2), expiries=expiries, state="ok" if expiries and not issue else "partial")
     if issue:
         out["reason"] = issue
     if reads:
-        out["chains_fetched_at"] = datetime.fromtimestamp(min(r.fetched for r in reads), ET).isoformat(timespec="minutes")
+        # A chain read earlier today is served from the feed's cache: the result is as old as its oldest chain.
+        out["as_of"] = out["chains_fetched_at"] = datetime.fromtimestamp(min(r.fetched for r in reads), ET).isoformat(timespec="minutes")
     return out
 
 

@@ -656,12 +656,12 @@ class FakeAdapter:
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
             return
-        if isinstance(last["content"], str) and allow_tools and re.search(r"\b(breadth|average stock|participat\w*|rotation)\b", lower):
+        if isinstance(last["content"], str) and allow_tools and re.search(r"\b(breadth|average stock|participat\w*)\b", lower):
             yield "progress", "Counting the S&P 500's advancers and decliners."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_breadth", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
             return
-        if isinstance(last["content"], str) and allow_tools and re.search(r"(put/call|\bskew\b|\bpriced in\b|\bpositioning\b)", lower):
+        if isinstance(last["content"], str) and allow_tools and re.search(r"(put/call|\bskew\b|\bpositioning\b)", lower):
             yield "progress", "Reading the volatility curve and the chain."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_positioning", "input": {"symbol": "SPY"}}],
                                  "tool_use", _zero_usage(), self.model)
@@ -766,6 +766,8 @@ class FakeAdapter:
     @staticmethod
     def _positioning(data: dict) -> str:
         """A scripted positioning read: the VIX curve and the nearest expiry's skew and put/call ratio."""
+        if data.get("state") == "unavailable":
+            return scripted("Unclear", "Positioning could not be read.", f"{data.get('reason') or 'Nothing came back'}.")
         vix = data.get("vol_indexes") or {}
         near = (data.get("expiries") or [{}])[0]
         body = (f"- VIX curve {vix.get('curve', 'unknown')}: VIX9D {(vix.get('VIX9D') or {}).get('last')}, VIX {(vix.get('VIX') or {}).get('last')}, "

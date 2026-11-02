@@ -1,5 +1,6 @@
 """The copilot's market breadth and options positioning (docs/copilot-lab.md § Breadth and positioning). Offline: Tradier
 and the options feed are stubbed."""
+from dataclasses import replace
 from datetime import date, datetime
 from types import SimpleNamespace
 
@@ -76,6 +77,25 @@ def test_chain_stats_read_atm_iv_skew_and_put_call():
     assert out["days"] == 32 and out["atm_strike"] == 100 and out["atm_iv_pct"] == 21.0
     assert (out["put_25d_iv_pct"], out["call_25d_iv_pct"], out["skew_25d"]) == (30.0, 15.0, 15.0)
     assert out["put_call_volume"] == 2.0 and out["put_call_open_interest"] == 2.5
+
+
+def test_no_25_delta_figure_from_a_strike_far_from_25_delta_and_one_root_only():
+    far = SimpleNamespace(expiration=date(2026, 12, 4), contracts=[
+        contract("call", 100, 0.20, 0.52, 10, 10), contract("put", 100, 0.22, -0.48, 10, 10),
+        contract("call", 130, 0.12, 0.05, 1, 1), contract("put", 70, 0.40, -0.04, 1, 1)])
+    out = b.chain_stats(far, 100.0, date(2026, 11, 2))
+    assert out["skew_25d"] is None and out["put_25d_iv_pct"] is None and out["atm_iv_pct"] == 21.0
+    mixed = SimpleNamespace(expiration=date(2026, 12, 4), contracts=[
+        contract("call", 100, 0.20, 0.52, 100, 100), contract("put", 100, 0.22, -0.48, 100, 100),
+        replace(contract("put", 100, 0.50, -0.48, 900, 900), root="SPXW")])
+    assert b.chain_stats(mixed, 100.0, date(2026, 11, 2), "SPY")["put_call_volume"] == 1.0
+
+
+def test_the_atm_strike_has_both_sides_quoted():
+    chain = SimpleNamespace(expiration=date(2026, 12, 4), contracts=[
+        contract("call", 101, 0.30, 0.50, 1, 1),  # nearest, but no put IV there
+        contract("call", 100, 0.20, 0.55, 1, 1), contract("put", 100, 0.22, -0.45, 1, 1)])
+    assert b.chain_stats(chain, 101.0, date(2026, 11, 2))["atm_strike"] == 100
 
 
 def test_two_expiries_near_and_a_month_out():
