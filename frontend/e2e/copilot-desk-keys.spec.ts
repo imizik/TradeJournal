@@ -293,8 +293,9 @@ test("the conversation remains reachable with either, both, or neither side pane
       await expect(composer).toBeInViewport();
       const rect = (await composer.boundingBox())!;
       for (const side of [rail, inspector]) {
-        const panel = await side.boundingBox();
-        if (panel) expect(rect.x + rect.width <= panel.x + 1 || panel.x + panel.width <= rect.x + 1).toBe(true);
+        if (!(await side.isVisible())) continue;
+        const panel = (await side.boundingBox())!;
+        expect(rect.x + rect.width <= panel.x + 1 || panel.x + panel.width <= rect.x + 1).toBe(true);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     }
