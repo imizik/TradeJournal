@@ -132,7 +132,7 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   };
 
   const touch = at.touch;
-  const row = `flex w-full items-center gap-2.5 px-3 text-left text-xs text-slate-200 outline-none hover:bg-slate-700/60 focus-visible:bg-slate-700/60 disabled:opacity-40 ${touch ? "h-11" : "h-8"}`;
+  const row = `flex w-full items-center gap-2.5 px-3 text-left text-xs text-foreground outline-none hover:bg-border focus-visible:bg-border disabled:opacity-40 ${touch ? "h-11" : "h-8"}`;
   const icon = touch ? 16 : 13;
   const swatch = touch ? "h-11 w-11" : "h-6 w-6";
   const name = level ? "Level" : drawing ? TOOL_NAMES[drawing.kind] : zone ? "Auto level" : "Chart";
@@ -142,15 +142,15 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
 
   // Alerts (C5.1): those on this item, then the three ways to make one.
   const source = alerts?.source;
-  const alertGroup = alerts && (source || alerts.existing.length) ? <div role="menu" aria-label={`${name} alerts`} className="border-t border-slate-700/60 py-1">
-    <div className="px-3 pb-1 pt-1.5 text-[10px] uppercase tracking-wider text-slate-500">Alerts{source ? ` at ${price(source.price)}` : ""}</div>
+  const alertGroup = alerts && (source || alerts.existing.length) ? <div role="menu" aria-label={`${name} alerts`} className="border-t border-border py-1">
+    <div className="px-3 pb-1 pt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Alerts{source ? ` at ${price(source.price)}` : ""}</div>
     {alerts.existing.map((alert) => <div key={alert.id} className="flex items-center gap-1 px-3 text-[11px]">
-      {alert.state === "active" ? <Bell size={12} className="shrink-0 text-amber-300" aria-hidden /> : <BellOff size={12} className="shrink-0 text-slate-500" aria-hidden />}
-      <span className={`min-w-0 flex-1 truncate ${alert.state === "active" ? "text-slate-200" : "text-slate-500"}`}>{alertText(alert, alert.shown)}{alert.state === "fired" ? " · fired" : ""}</span>
+      {alert.state === "active" ? <Bell size={12} className="shrink-0 text-amber-300" aria-hidden /> : <BellOff size={12} className="shrink-0 text-muted-foreground" aria-hidden />}
+      <span className={`min-w-0 flex-1 truncate ${alert.state === "active" ? "text-foreground" : "text-muted-foreground"}`}>{alertText(alert, alert.shown)}{alert.state === "fired" ? " · fired" : ""}</span>
       {alert.state === "fired" && <button role="menuitem" aria-label={`Re-arm ${alertText(alert, alert.shown)}`} title="Arm it again from the current price" onClick={() => { close(); alerts.onRearm(alert.id); }}
-        className={`inline-flex items-center justify-center rounded text-slate-400 hover:bg-slate-700/60 hover:text-slate-100 ${touch ? "h-11 w-11" : "h-7 w-7"}`}><RotateCcw size={icon} /></button>}
+        className={`inline-flex items-center justify-center rounded text-muted-foreground hover:bg-border hover:text-foreground ${touch ? "h-11 w-11" : "h-7 w-7"}`}><RotateCcw size={icon} /></button>}
       <button role="menuitem" aria-label={`Remove ${alertText(alert, alert.shown)}`} title="Remove this alert" onClick={() => { close(); alerts.onRemove(alert.id); }}
-        className={`inline-flex items-center justify-center rounded text-slate-400 hover:bg-slate-700/60 hover:text-rose-300 ${touch ? "h-11 w-11" : "h-7 w-7"}`}><Trash2 size={icon} /></button>
+        className={`inline-flex items-center justify-center rounded text-muted-foreground hover:bg-border hover:text-rose-300 ${touch ? "h-11 w-11" : "h-7 w-7"}`}><Trash2 size={icon} /></button>
     </div>)}
     {source && <>
       <button role="menuitem" className={row} title="When a trade reaches this price" onClick={() => { close(); alerts.onCreate("touches"); }}><BellPlus size={icon} />Alert when price touches</button>
@@ -161,32 +161,32 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   </div> : null;
 
   const body = zone ? <>
-    <div className="flex items-center gap-2 border-b border-slate-700/60 px-3 py-2 text-[11px]">
-      <span className="h-0.5 w-3 shrink-0 rounded-sm bg-slate-400" />
-      <span className="min-w-0 truncate text-slate-300">{zone.label}</span>
-      <span className="ml-auto shrink-0 font-mono text-slate-400">{zone.low === zone.high ? price(zone.low) : `${price(zone.low)}–${price(zone.high)}`}</span>
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-[11px]">
+      <span className="h-0.5 w-3 shrink-0 rounded-sm bg-muted-foreground" />
+      <span className="min-w-0 truncate text-foreground/80">{zone.label}</span>
+      <span className="ml-auto shrink-0 font-mono text-muted-foreground">{zone.low === zone.high ? price(zone.low) : `${price(zone.low)}–${price(zone.high)}`}</span>
     </div>
     {alertGroup}
   </> : item ? <>
-    <div className="flex items-center gap-2 border-b border-slate-700/60 px-3 py-2 text-[11px]">
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-[11px]">
       <span className={`shrink-0 rounded-sm ${level ? "h-0.5 w-3" : "h-2 w-3"}`} style={{ background: color }} />
-      <span className="min-w-0 truncate text-slate-300">{level ? level.label : name}</span>
-      <span className="ml-auto shrink-0 font-mono text-slate-400">{level ? price(level.price) : drawing && summary(drawing)}</span>
+      <span className="min-w-0 truncate text-foreground/80">{level ? level.label : name}</span>
+      <span className="ml-auto shrink-0 font-mono text-muted-foreground">{level ? price(level.price) : drawing && summary(drawing)}</span>
     </div>
     {labelled && <div className="px-3 pt-2">
       <input aria-label={level ? "Level label" : "Note text"} value={draft} maxLength={level ? LEVEL_LABEL_MAX : NOTE_MAX}
         onChange={(e) => setDraft(e.target.value)} onBlur={() => commit()}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); close(); } }}
-        className={`w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs text-slate-100 outline-none focus:border-sky-600 ${touch ? "h-11" : "h-8"}`} />
+        className={`w-full rounded border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-ring ${touch ? "h-11" : "h-8"}`} />
     </div>}
     <div role="group" aria-label={`${name} color`} className="flex flex-wrap items-center gap-0.5 px-2 py-1.5">
       {PALETTE.map(([value, label]) => <button key={value} aria-label={label} aria-pressed={color === value} title={label} onClick={() => commit({ color: value })}
-        className={`inline-flex ${swatch} items-center justify-center rounded ${color === value ? "ring-1 ring-slate-200" : "hover:bg-slate-700/60"}`}>
+        className={`inline-flex ${swatch} items-center justify-center rounded ${color === value ? "ring-1 ring-foreground" : "hover:bg-border"}`}>
         <span className="h-3.5 w-3.5 rounded-full" style={{ background: value }} /></button>)}
     </div>
-    <div role="menu" aria-label={`${name} actions`} className="border-t border-slate-700/60 py-1">
-      {plan && <button role="menuitem" aria-label={`${plan.name}: ${plan.detail}`} className={`${row} text-sky-200`} title="The copilot drafts the plan around your drawn levels. Nothing is sent until you press Send."
-        onClick={() => { close(); plan.run(); }}><Target size={icon} />{plan.name}<span className="ml-auto min-w-0 truncate pl-2 text-[10px] text-slate-400">{plan.detail}</span></button>}
+    <div role="menu" aria-label={`${name} actions`} className="border-t border-border py-1">
+      {plan && <button role="menuitem" aria-label={`${plan.name}: ${plan.detail}`} className={row} title="The copilot drafts the plan around your drawn levels. Nothing is sent until you press Send."
+        onClick={() => { close(); plan.run(); }}><Target size={icon} />{plan.name}<span className="ml-auto min-w-0 truncate pl-2 text-[10px] text-muted-foreground">{plan.detail}</span></button>}
       <button role="menuitem" className={row} title={locked ? "Let it drag again" : "Keep it from being dragged; it still selects, restyles and deletes"} onClick={() => { commit({ locked: !locked }); close(false); }}>{locked ? <LockOpen size={icon} /> : <Lock size={icon} />}{locked ? "Unlock" : "Lock"}</button>
       <button role="menuitem" className={row} onClick={() => { commit({ hidden: true }); close(false); }}><EyeOff size={icon} />Hide</button>
       <button role="menuitem" className={row} onClick={() => { close(); onDuplicate(); }}><Copy size={icon} />Duplicate</button>
@@ -194,38 +194,38 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
     </div>
     {alertGroup}
   </> : view === "main" ? <div role="menu" aria-label="Chart actions" className="py-1">
-    <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-500"><span className="font-semibold text-slate-300">{symbol}</span>{value !== null && <span className="ml-2 font-mono">{price(value)}</span>}</div>
-    {explain && <button role="menuitem" className={`${row} text-sky-200`} title="The copilot explains this candle: what moved it and what you did there. Nothing is sent until you press Send."
-      onClick={() => { close(); explain.run(); }}><MessageSquareText size={icon} />Explain this candle<span className="ml-auto shrink-0 pl-2 font-mono text-[10px] text-slate-400">{explain.detail}</span></button>}
+    <div className="px-3 pb-1.5 pt-1 text-[11px] text-muted-foreground"><span className="font-semibold text-foreground/80">{symbol}</span>{value !== null && <span className="ml-2 font-mono">{price(value)}</span>}</div>
+    {explain && <button role="menuitem" className={row} title="The copilot explains this candle: what moved it and what you did there. Nothing is sent until you press Send."
+      onClick={() => { close(); explain.run(); }}><MessageSquareText size={icon} />Explain this candle<span className="ml-auto shrink-0 pl-2 font-mono text-[10px] text-muted-foreground">{explain.detail}</span></button>}
     {value !== null && <>
       <button role="menuitem" className={row} onClick={() => { onAddLevel(value); close(); }}><Plus size={icon} />Add level at {price(value)}</button>
       <button role="menuitem" className={row} onClick={() => { onCopyPrice(value); close(); }}><Copy size={icon} />Copy price {price(value)}</button>
     </>}
     <button role="menuitem" className={row} onClick={() => { onReset(); close(); }}><LocateFixed size={icon} />Reset chart scale</button>
     <button role="menuitem" aria-haspopup="menu" className={row} onClick={() => setView("layers")}><Layers size={icon} />Layers
-      <span className="ml-auto flex items-center gap-1 text-[10px] text-slate-500">{hiddenCount ? `${hiddenCount} hidden` : ""}<ChevronRight size={icon} /></span></button>
+      <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">{hiddenCount ? `${hiddenCount} hidden` : ""}<ChevronRight size={icon} /></span></button>
   </div> : <div role="menu" aria-label="Layers" className="py-1">
-    <button role="menuitem" className={`${row} text-slate-400`} onClick={() => setView("main")}><ChevronLeft size={icon} />Layers</button>
+    <button role="menuitem" className={`${row} text-muted-foreground`} onClick={() => setView("main")}><ChevronLeft size={icon} />Layers</button>
     {layers.map((layer) => <button key={layer.key} role="menuitemcheckbox" aria-checked={layer.on} className={row} onClick={layer.toggle}>
-      <span className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${layer.on ? "border-sky-400 bg-sky-400/20 text-sky-200" : "border-slate-600"}`}>{layer.on && <Check size={10} />}</span>{layer.label}</button>)}
+      <span className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${layer.on ? "border-primary bg-primary/15 text-primary" : "border-muted-foreground/50"}`}>{layer.on && <Check size={10} />}</span>{layer.label}</button>)}
     {!!hiddenCount && <>
-      <div className="mt-1 border-t border-slate-700/60 px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-slate-500">Hidden {symbol} items</div>
-      {hidden.map((entry) => <button key={entry.id} role="menuitem" aria-label={`Show ${entry.name}`} className={row} onClick={entry.show}><Eye size={icon} /><span className="min-w-0 truncate">{entry.name}</span><span className="ml-auto text-[10px] text-slate-500">Show</span></button>)}
+      <div className="mt-1 border-t border-border px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground">Hidden {symbol} items</div>
+      {hidden.map((entry) => <button key={entry.id} role="menuitem" aria-label={`Show ${entry.name}`} className={row} onClick={entry.show}><Eye size={icon} /><span className="min-w-0 truncate">{entry.name}</span><span className="ml-auto text-[10px] text-muted-foreground">Show</span></button>)}
     </>}
   </div>;
 
   const label = `${name} menu`;
   if (touch) return createPortal(<div className="fixed inset-0 z-[80] flex items-end bg-black/50" onClickCapture={dropLift} onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
     <div ref={panel} role="dialog" aria-label={label} tabIndex={-1} onKeyDown={onKeyDown}
-      className="max-h-[70vh] outline-none w-full overflow-y-auto overscroll-contain rounded-t-xl border-t border-slate-600 bg-[#121924] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-2xl">
-      <div className="mx-auto my-2 h-1 w-10 rounded-full bg-slate-600" aria-hidden />
+      className="max-h-[70vh] outline-none w-full overflow-y-auto overscroll-contain rounded-t-xl border-t border-border bg-card pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-2xl">
+      <div className="mx-auto my-2 h-1 w-10 rounded-full bg-muted-foreground/50" aria-hidden />
       {body}
     </div>
   </div>, document.body);
   // Placed at the pointer, then moved inside the window before it paints.
   return createPortal(<div ref={panel} role="dialog" aria-label={label} tabIndex={-1} onKeyDown={onKeyDown} onContextMenu={(e) => e.preventDefault()}
     style={position ?? { left: at.x, top: at.y }}
-    className="fixed z-[80] max-h-[calc(100vh-16px)] w-60 overflow-y-auto overscroll-contain rounded-md outline-none border border-slate-600 bg-[#121924] shadow-2xl">
+    className="fixed z-[80] max-h-[calc(100vh-16px)] w-60 overflow-y-auto overscroll-contain rounded-md outline-none border border-border bg-card shadow-2xl">
     {body}
   </div>, document.body);
 }

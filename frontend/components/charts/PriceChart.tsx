@@ -145,7 +145,7 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
   if (value === null || (!main && value === "closed")) return null;
   const live = typeof value === "number";
   return <span role="timer" aria-label={`${label} next bar`} title={live ? "Time until this candle closes" : undefined}
-    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-sky-400/10 text-sky-300" : value === "closed" || value === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
+    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-secondary text-foreground" : value === "closed" || value === "paused" ? "bg-secondary text-muted-foreground" : "bg-amber-400/10 text-amber-300"}`}>
     <Timer size={11} />{live ? countdown(value) : CLOCK_TEXT[value]}</span>;
 }
 
@@ -182,34 +182,34 @@ function CandleValues({ id, symbol, main, pending, bars, hover, interval, indica
   // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
   const volumeText = bar ? compactVolume.format(bar.volume) : "";
   const rvolValue = showRvol && bar && bar.rvol !== undefined && !bar.extended ? (typeof bar.rvol === "number"
-    ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
-      RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
-    : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
+    ? <span className="text-muted-foreground" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
+      RVol <span className="text-foreground/80">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
+    : main ? <span className="text-muted-foreground" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
   const emas = (["ema9", "ema20", "ema50", "ema200"] as const).filter((key) => indicators[key]);
   // Why a candle has no VWAP, from how the backend builds it (chart_math.chart_bars): regular-session minutes only, never daily or weekly.
   const vwapWhy = interval === "1D" || interval === "1W" ? "VWAP is an intraday study: daily and weekly candles have none."
     : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
     : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   return (
-    <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "min-h-6 flex-wrap gap-y-0.5 md:pr-16"}`}>
-      <div className={`-ml-1 flex items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1 ${main ? "min-w-0" : "max-w-full flex-none flex-wrap"}`} aria-label={`${id} candle values`}>
-      {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{formatPrice(bar.open)}</span></span><span>H <span className="text-slate-300">{formatPrice(bar.high)}</span></span><span>L <span className="text-slate-300">{formatPrice(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{formatPrice(bar.close)}</span></span>{!main && !isMacroSymbol(symbol) && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
+    <div className={`relative z-10 flex min-w-0 shrink-0 md:pointer-events-none md:absolute md:inset-x-0 md:top-7 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-muted-foreground ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1 md:pr-20" : "min-h-6 flex-wrap gap-y-0.5 md:pr-16"}`}>
+      <div className={`-ml-1 flex items-center gap-2 overflow-hidden rounded bg-background/90 px-1 ${main ? "min-w-0" : "max-w-full flex-none flex-wrap"}`} aria-label={`${id} candle values`}>
+      {pending ? null : bar ? <>{main && <><span>O <span className="text-foreground/80">{formatPrice(bar.open)}</span></span><span>H <span className="text-foreground/80">{formatPrice(bar.high)}</span></span><span>L <span className="text-foreground/80">{formatPrice(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{formatPrice(bar.close)}</span></span>{!main && !isMacroSymbol(symbol) && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
         {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
       </div>
       {!main && timer}
-      {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 rounded bg-[#10151e]/90 px-1 gap-y-0.5 whitespace-normal font-mono text-[10px]">
+      {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 rounded bg-background/90 px-1 gap-y-0.5 whitespace-normal font-mono text-[10px]">
         {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
         {vwapBands && <span className="pointer-events-auto" style={{ color: colors.vwap }} title={bar?.vwap == null ? vwapWhy : bar.vwap_sd == null ? "VWAP band data is unavailable for this candle." : `RTH VWAP bands: ±1σ ${price(bar.vwap - bar.vwap_sd)}–${price(bar.vwap + bar.vwap_sd)}. Volume-weighted HLC3 dispersion since 9:30 ET.`}>VWAP bands {bar?.vwap != null && bar.vwap_sd != null ? "±1σ" : "—"}</span>}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
         {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
         {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}
-        {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group pointer-events-auto relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
-          <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
-          <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
+        {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group pointer-events-auto relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-ring md:inline">
+          <span className="text-foreground/80">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+          <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-border bg-card px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
             {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {formatPrice(bar?.[key])}</span>)}</span>
         </span>}
         {rvolValue}
-        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-muted-foreground" : "text-amber-300/80"}>
           {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
       </div>}
     </div>
@@ -405,14 +405,14 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
     if (!element) return;
     const chart = createChart(element, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "#10151e" }, textColor: "#8593a9", fontSize: 10,
+      layout: { background: { type: ColorType.Solid, color: "#0e0e10" }, textColor: "#8d8d96", fontSize: 10,
         // The status strip credits the library on every layout; one logo, on the main chart, is enough.
-        attributionLogo: main, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
-      grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
+        attributionLogo: main, panes: { separatorColor: "#27272a", separatorHoverColor: "#46464d" } },
+      grid: { vertLines: { color: "#1b1b1e" }, horzLines: { color: "#1b1b1e" } },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" }, horzLine: { color: "#77777f", labelBackgroundColor: "#3a3a40" } },
       // entireTextOnly: a price cut off at a pane's edge is left out rather than printed against the next pane's.
-      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom }, entireTextOnly: true },
-      timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
+      rightPriceScale: { borderColor: "#27272a", minimumWidth: main ? 66 : 54, scaleMargins: { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom }, entireTextOnly: true },
+      timeScale: { borderColor: "#27272a", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
           return kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : etTime(time);
@@ -1170,57 +1170,57 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
-    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} data-quiet-chrome={main ? undefined : ""} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} data-quiet-chrome={main ? undefined : ""} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-background ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-border" : "border-border"}`}>
       {/* From a tablet's width, like TradingView, the title line sits over the top of the chart rather than above it; only its controls take the pointer, so a click or right-click on its text reaches the chart. */}
-      <div className="relative z-20 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 pl-3 pr-1 md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:h-7 md:border-b-0">
+      <div className="relative z-20 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border pl-3 pr-1 md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:h-7 md:border-b-0">
         {/* A narrow chart (C7.4's dividers allow 160px) clips its symbol and interval, never its buttons. */}
-        <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-[#10151e]/90 px-1 text-xs md:[&_button]:pointer-events-auto md:[&_select]:pointer-events-auto">{onPickSymbol
+        <div className="-ml-1 flex min-w-0 items-center gap-2 overflow-hidden rounded bg-background/90 px-1 text-xs md:[&_button]:pointer-events-auto md:[&_select]:pointer-events-auto">{onPickSymbol
           ? <button aria-label={`${id} symbol`} title={follows ? "Follows the main symbol. Choose a symbol for this chart." : "Holds its own symbol. Change it, or follow the main symbol."} onClick={onPickSymbol}
-            className={`-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold tracking-wide hover:bg-slate-800 ${follows ? "text-slate-200" : "text-sky-200"}`}>
-            {symbol}{follows ? <Link2 size={11} className="text-slate-500" aria-hidden /> : <Pin size={11} className="text-sky-300" aria-hidden />}</button>
-          : <span className="font-semibold tracking-wide text-slate-200">{symbol}</span>}
-          <select aria-label={`${main ? "Main" : id} interval`} value={interval} onChange={(e) => onInterval(e.target.value as Interval)} className="rounded border-0 bg-slate-800 px-1.5 py-1 text-[11px] text-slate-300">
+            className={`-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold tracking-wide hover:bg-secondary ${follows ? "text-foreground" : "text-primary"}`}>
+            {symbol}{follows ? <Link2 size={11} className="text-muted-foreground" aria-hidden /> : <Pin size={11} className="text-primary" aria-hidden />}</button>
+          : <span className="font-semibold tracking-wide text-foreground">{symbol}</span>}
+          <select aria-label={`${main ? "Main" : id} interval`} value={interval} onChange={(e) => onInterval(e.target.value as Interval)} className="rounded border-0 bg-secondary px-1.5 py-1 text-[11px] text-foreground/80">
             {supportedIntervals(symbol).map((i) => <option key={i}>{i}</option>)}
           </select>
-          {macro && <span className="text-[9px] text-slate-400" title="Tradier index observations; 4h clock buckets start at New York midnight">{symbol === "US10Y" ? "Yield %" : "Index pts"}</span>}
-          {!macro && main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
+          {macro && <span className="text-[9px] text-muted-foreground" title="Tradier index observations; 4h clock buckets start at New York midnight">{symbol === "US10Y" ? "Yield %" : "Index pts"}</span>}
+          {!macro && main && <span className="hidden text-[10px] text-muted-foreground sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
           {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
-        <div className={`pointer-events-auto flex shrink-0 items-center rounded bg-[#10151e]/90 ${compact ? "gap-0" : "gap-1"}`}>
+        <div className={`pointer-events-auto flex shrink-0 items-center rounded bg-background/90 ${compact ? "gap-0" : "gap-1"}`}>
           {onPlan && !macro && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
-            className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
+            className="inline-flex h-7 items-center gap-1 rounded border px-2 text-[11px] text-foreground hover:bg-secondary"><NotebookPen size={12} />Plan</button>}
           {main && timer}
           <span data-quiet-controls={main ? undefined : ""} className={`flex items-center ${compact ? "gap-0" : "gap-1"}`}>
           {onStudies && <ToolbarMenu floating label={`${id} studies`} title={ownStudies ? "This chart's own studies" : compact ? "Studies: slimmed while this chart is small" : "Studies: same as every chart"}
-            className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${ownStudies ? "text-sky-300" : "text-slate-500"}`}
+            className={`rounded ${button} hover:bg-secondary hover:text-foreground ${ownStudies ? "text-primary" : "text-muted-foreground"}`}
             content={() => <div className="flex w-52 flex-col gap-0.5 text-[11px]">
-              <button aria-pressed={!ownStudies} onClick={() => onStudies(null)} className={`rounded px-2 py-1 text-left hover:bg-slate-800 ${ownStudies ? "text-slate-400" : "text-slate-200"}`}>
-                Automatic<span className="block text-[10px] text-slate-500">{macro ? "Same as every chart; only EMA 9 while this chart is small" : "Same as every chart; only EMA 9 and VWAP while this chart is small"}</span></button>
-              <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">This chart only</p>
+              <button aria-pressed={!ownStudies} onClick={() => onStudies(null)} className={`rounded px-2 py-1 text-left hover:bg-secondary ${ownStudies ? "text-muted-foreground" : "text-foreground"}`}>
+                Automatic<span className="block text-[10px] text-muted-foreground">{macro ? "Same as every chart; only EMA 9 while this chart is small" : "Same as every chart; only EMA 9 and VWAP while this chart is small"}</span></button>
+              <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-muted-foreground">This chart only</p>
               {studiesHidden && <p className="px-2 text-[10px] text-amber-300">Indicators are hidden on every chart.</p>}
               {STUDIES.filter((key) => !macro || !["volume", "vwap"].includes(key)).map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, macro ? (ownStudies?.[k] ?? requested[k]) : indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
-                className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
+                className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-secondary disabled:opacity-50 ${indicators[key] ? "text-foreground" : "text-muted-foreground"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
             </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { actions.current.onUserMove?.(); pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
-          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
-          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><Expand size={13} /></button>}
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { actions.current.onUserMove?.(); pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-muted-foreground hover:bg-secondary hover:text-foreground`}><LocateFixed size={13} /></button>
+          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-secondary hover:text-foreground ${maximized ? "text-primary" : "text-muted-foreground"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
+          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-muted-foreground hover:bg-secondary hover:text-foreground`}><Expand size={13} /></button>}
           </span>
         </div>
       </div>
       <CandleValues id={id} symbol={symbol} main={main} pending={!!pending} bars={panel?.bars} hover={hover} interval={interval} indicators={indicators} colors={colors} vwapBands={vwapBands} rvol={rvol} pastRvol={history?.rvol} showRvol={showRvol} timer={!main && timer} />
-      {macro && <p className="shrink-0 px-3 text-[9px] text-slate-400 md:absolute md:top-12 md:z-10 md:max-w-[calc(100%-4.5rem)] md:rounded md:bg-[#10151e]/90" title="Provider observations, not trades. No volume/VWAP; recent intraday history only.">Tradier · {indexAsOf ? `observed ${instrumentTime(indexAsOf)}` : interval === "1D" && panel?.bars.length ? `daily through ${nyDay(panel.bars[panel.bars.length - 1].time)}` : "observation time unavailable"} · polling</p>}
+      {macro && <p className="shrink-0 px-3 text-[9px] text-muted-foreground md:absolute md:top-12 md:z-10 md:max-w-[calc(100%-4.5rem)] md:rounded md:bg-background/90" title="Provider observations, not trades. No volume/VWAP; recent intraday history only.">Tradier · {indexAsOf ? `observed ${instrumentTime(indexAsOf)}` : interval === "1D" && panel?.bars.length ? `daily through ${nyDay(panel.bars[panel.bars.length - 1].time)}` : "observation time unavailable"} · polling</p>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
         {/* TradingView's "A": shown only once the price axis has been dragged (the candles may be off the pane); one click fits the candles again. */}
         {manualScale && !pending && <button type="button" data-testid={`${id}-price-auto`} aria-label="Auto price scale: fit the candles again" title="Fit the price scale to the candles"
           onClick={() => autoScale.current()} style={{ top: manualScale.top }}
-          className="absolute right-1 z-10 h-[18px] rounded border border-sky-400/50 bg-[#141b26]/90 px-1.5 text-[10px] font-semibold leading-none text-sky-300 hover:bg-sky-400/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-sky-400">Auto</button>}
+          className="absolute right-1 z-10 h-[18px] rounded border border-primary/50 bg-card/90 px-1.5 text-[10px] font-semibold leading-none text-primary hover:bg-primary/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring">Auto</button>}
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10 md:top-14" />}
-        {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-0.5 font-mono text-[10px] text-slate-200 shadow-lg"
+        {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-border bg-card px-2 py-0.5 font-mono text-[10px] text-foreground shadow-lg"
           style={card.above ? { top: Math.max(2, Math.round(card.y) - 26) } : { top: Math.round(card.y) + 8 }}>
-          {chartLabel(cardZone)} {cardZone.low === cardZone.high ? price(cardZone.low) : `${price(cardZone.low)}–${price(cardZone.high)}`}<span className="text-slate-500"> · click for more</span></div>
+          {chartLabel(cardZone)} {cardZone.low === cardZone.high ? price(cardZone.low) : `${price(cardZone.low)}–${price(cardZone.high)}`}<span className="text-muted-foreground"> · click for more</span></div>
         : cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
           // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
@@ -1229,28 +1229,28 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
           const { group } = fillTip;
           const when = `${etTime(group.time, true)} ${intradayInterval(interval) ? `${etTime(group.time)} ET candle` : ""}`;
           const place = { left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - (group.fills.length > 1 ? 30 + group.fills.length * 18 : 30)) };
-          const frame = "absolute z-10 max-w-[calc(100%-1rem)] rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg";
+          const frame = "absolute z-10 max-w-[calc(100%-1rem)] rounded border border-border bg-card px-2 py-1 text-[11px] text-foreground shadow-lg";
           // One fill reads on a line; several are listed, and a pinned list's rows each open their own trade.
           if (group.fills.length === 1) return <div role="tooltip" aria-label="Fill summary" className={`pointer-events-none truncate ${frame}`} style={place}>
             {group.fills[0].label} · {when}{onFill ? " · click for the trade" : ""}</div>;
           return <div role={fillTip.pinned ? "dialog" : "tooltip"} aria-label="Fill summary" data-fill-tip={group.id} className={`${frame} w-56 ${fillTip.pinned ? "" : "pointer-events-none"}`} style={place}>
-            <p className="text-[10px] text-slate-400">{group.fills.length} {group.buy ? "buys" : "sells"} · {when}</p>
+            <p className="text-[10px] text-muted-foreground">{group.fills.length} {group.buy ? "buys" : "sells"} · {when}</p>
             <ul className="mt-0.5">{group.fills.map((fill) => <li key={fill.id}>{fillTip.pinned && onFill
-              ? <button onClick={() => { setFillTip(null); onFill(fill.id); }} className="flex min-h-9 w-full items-center text-left text-sky-300 hover:text-sky-200">{fill.label}</button>
+              ? <button onClick={() => { setFillTip(null); onFill(fill.id); }} className="flex min-h-9 w-full items-center text-left text-foreground underline">{fill.label}</button>
               : <span className="block truncate leading-[18px]">{fill.label}</span>}</li>)}</ul>
-            {!fillTip.pinned && onFill && <p className="text-[10px] text-sky-300">Click to pick a trade</p>}
-            {fillTip.pinned && <button onClick={() => setFillTip(null)} className="mt-0.5 min-h-9 w-full rounded border border-slate-700 text-slate-300">Close</button>}</div>;
+            {!fillTip.pinned && onFill && <p className="text-[10px] text-muted-foreground">Click to pick a trade</p>}
+            {fillTip.pinned && <button onClick={() => setFillTip(null)} className="mt-0.5 min-h-9 w-full rounded border border-border text-foreground/80">Close</button>}</div>;
         })()}
         {newsOpen && !pending && <div role={newsOpen.pinned ? "dialog" : "tooltip"} aria-label="News headlines" data-news-tip={newsOpen.mark.time}
-          className={`absolute z-10 w-64 max-w-[calc(100%-1rem)] space-y-1 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1.5 text-[11px] text-slate-200 shadow-lg ${newsOpen.pinned ? "" : "pointer-events-none"}`}
+          className={`absolute z-10 w-64 max-w-[calc(100%-1rem)] space-y-1 rounded border border-border bg-card px-2 py-1.5 text-[11px] text-foreground shadow-lg ${newsOpen.pinned ? "" : "pointer-events-none"}`}
           style={{ left: Math.max(4, Math.min(newsOpen.x + 10, newsOpen.width - 264)), top: Math.max(4, Math.min(newsOpen.y + 14, newsOpen.height - 40 - newsTip(newsOpen.mark).lines.length * 34)) }}>
-          <p className="text-[10px] text-slate-400">{newsSpan(newsOpen.mark, interval)} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
+          <p className="text-[10px] text-muted-foreground">{newsSpan(newsOpen.mark, interval)} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
           <ul className="space-y-1">{newsTip(newsOpen.mark).lines.map((line, index) => <li key={index} className="line-clamp-2">{line}</li>)}</ul>
-          {newsTip(newsOpen.mark).more > 0 && <p className="text-[10px] text-slate-400">+{newsTip(newsOpen.mark).more} more</p>}
+          {newsTip(newsOpen.mark).more > 0 && <p className="text-[10px] text-muted-foreground">+{newsTip(newsOpen.mark).more} more</p>}
           {newsOpen.pinned ? <div className="flex gap-2 pt-1">
-            {onNews && <button onClick={() => { const ids = newsOpen.mark.articles.map((article) => article.id); setNewsOpen(null); onNews(ids); }} className="min-h-11 flex-1 rounded border border-sky-400/50 px-2 text-sky-300">Read in News</button>}
-            <button onClick={() => setNewsOpen(null)} className="min-h-11 rounded border border-slate-700 px-3 text-slate-300">Close</button></div>
-            : onNews && <p className="text-[10px] text-sky-300">Click to read in News</p>}</div>}
+            {onNews && <button onClick={() => { const ids = newsOpen.mark.articles.map((article) => article.id); setNewsOpen(null); onNews(ids); }} className="min-h-11 flex-1 rounded border px-2 text-foreground">Read in News</button>}
+            <button onClick={() => setNewsOpen(null)} className="min-h-11 rounded border border-border px-3 text-foreground/80">Close</button></div>
+            : onNews && <p className="text-[10px] text-muted-foreground">Click to read in News</p>}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
         {!pending && overlay}
@@ -1260,9 +1260,9 @@ export default function PriceChart({ id, symbol, indexAsOf = null, follows, onPi
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
       {notice && !pending && <p className="shrink-0 px-3 py-1 text-[10px] text-amber-300">{notice}</p>}
-      {pending ? <div role="status" className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center"><span className="rounded-md border border-slate-700/60 bg-[#10151e]/90 px-3 py-1.5 text-sm text-slate-200">{pending}</span></div>
-        : !panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
-      {tool && <div role="status" aria-label="Drawing tool" className="pointer-events-none absolute left-3 top-24 rounded bg-blue-500/90 px-3 py-1.5 text-xs text-white">{(second && SECOND_TEXT[tool]) || PLACE_TEXT[tool]}</div>}
+      {pending ? <div role="status" className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center"><span className="rounded-md border border-border bg-background/90 px-3 py-1.5 text-sm text-foreground">{pending}</span></div>
+        : !panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-muted-foreground">No candles available</div>}
+      {tool && <div role="status" aria-label="Drawing tool" className="pointer-events-none absolute left-3 top-24 rounded-md bg-primary/90 px-3 py-1.5 text-xs text-primary-foreground">{(second && SECOND_TEXT[tool]) || PLACE_TEXT[tool]}</div>}
     </section>
   );
 }

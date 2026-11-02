@@ -24,7 +24,7 @@ function Bars({ metric, quarters }: { metric: Metric; quarters: FinancialQuarter
   const values = quarters.map((q) => q[metric.key] as number | null);
   const top = Math.max(0, ...values.map((value) => value == null ? 0 : Math.abs(value)));
   return <section aria-label={metric.label} className="space-y-1">
-    <h3 className="text-slate-400">{metric.label}</h3>
+    <h3 className="text-muted-foreground">{metric.label}</h3>
     <ol className="grid grid-cols-8 gap-1">
       {quarters.map((q, index) => {
         const value = values[index];
@@ -32,9 +32,9 @@ function Bars({ metric, quarters }: { metric: Metric; quarters: FinancialQuarter
         const change = metric.yoy ? growth(q[metric.yoy] as number | null) : "";
         return <li key={q.end} title={q.gap ? `${quarterName(q)}: reported only in the annual 10-K, not shown` : `${quarterName(q)} ended ${q.end}`} className="min-w-0 text-center">
           <div className="flex h-10 items-end justify-center">
-            {value != null && <div data-testid="bar" style={{ height: `${height}%` }} className={`w-3/4 rounded-sm ${value < 0 ? "bg-rose-500/80" : "bg-sky-500/80"}`} />}
+            {value != null && <div data-testid="bar" style={{ height: `${height}%` }} className={`w-3/4 rounded-sm ${value < 0 ? "bg-rose-500/80" : "bg-muted-foreground/80"}`} />}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[10px] text-slate-200">{value == null ? "—" : metric.format(value)}</div>
+          <div className="mt-0.5 truncate font-mono text-[10px] text-foreground">{value == null ? "—" : metric.format(value)}</div>
           <div className={`h-3 truncate font-mono text-[9px] ${change.startsWith("-") ? "text-rose-300" : "text-emerald-300"}`}>{change}</div>
         </li>;
       })}
@@ -45,15 +45,15 @@ function Bars({ metric, quarters }: { metric: Metric; quarters: FinancialQuarter
 /** Revenue, margins, net income and diluted EPS for the last eight fiscal quarters, from SEC EDGAR (T3.2). */
 export default function SymbolInfoFinancials({ data }: { data: SymbolFinancials }) {
   if (data.state !== "ready") {
-    return <div className="space-y-1 text-xs"><p className={data.state === "none" ? "text-slate-500" : "text-amber-300"}>{data.message ?? "SEC financials are unavailable."}</p></div>;
+    return <div className="space-y-1 text-xs"><p className={data.state === "none" ? "text-muted-foreground" : "text-amber-300"}>{data.message ?? "SEC financials are unavailable."}</p></div>;
   }
   return <div className="space-y-3 text-xs">
-    <ol aria-label="Quarters" className="grid grid-cols-8 gap-1 text-center text-[9px] uppercase tracking-wider text-slate-500">
+    <ol aria-label="Quarters" className="grid grid-cols-8 gap-1 text-center text-[9px] uppercase tracking-wider text-muted-foreground">
       {data.quarters.map((q) => <li key={q.end} className="min-w-0 truncate" title={q.end}>{quarterName(q)}</li>)}
     </ol>
     {METRICS.map((metric) => <Bars key={metric.key} metric={metric} quarters={data.quarters} />)}
     {data.message && <p className="text-[10px] text-amber-300">{data.message}</p>}
-    <p className="text-[10px] text-slate-500">
+    <p className="text-[10px] text-muted-foreground">
       {data.entity ? `${data.entity} · ` : ""}{data.source} · read {readAt(data.fetched_at)}. Margins are calculated from revenue, gross profit and operating income.
       Percentages under a bar are growth against the same fiscal quarter a year earlier. Q4 appears only in the annual 10-K and is not derived (—).
     </p>
