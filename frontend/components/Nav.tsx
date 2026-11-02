@@ -206,9 +206,9 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
                 // min-h-11 keeps every row a comfortable tap target on a phone.
                 rail
                   ? "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
-                  : "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  : "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition-colors md:min-h-9",
                 isActive
-                  ? "bg-secondary text-foreground"
+                  ? "bg-secondary font-medium text-foreground"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground"
               )}
             >
@@ -220,7 +220,7 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
         return <li key={href}>
           {heading && (rail
             ? <div role="separator" aria-label={heading} className="my-2 border-t" />
-            : <h2 className="px-3 pb-2 pt-4 text-xs font-medium text-muted-foreground">{heading}</h2>)}
+            : <h2 className="px-2.5 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{heading}</h2>)}
           {rail ? <NavHint label={label}>{link}</NavHint> : link}
         </li>;
       })}
@@ -282,10 +282,10 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       {menuOpen && (
         <div role="dialog" aria-modal="true" aria-label="Menu" className={cn("fixed inset-0 z-50", !deskMenu && "md:hidden")}>
           <div className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} aria-hidden />
-          <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-card p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
+          <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-background p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="mb-6 flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-foreground">Trade Journal</h2>
+                <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight text-foreground"><span aria-hidden className="h-[22px] w-[22px] shrink-0 rounded-md bg-primary" />Trade Journal</h2>
                 {owner && <SyncStatusLine />}
                 {owner && <PlanStreakChip variant="menu" onNavigate={() => setMenuOpen(false)} />}
                 {/* The charts page hides the phone title bar; the Sync drawer stays reachable here. */}
@@ -327,7 +327,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
       {/* Desktop: on the charts page, a rail of icons that gives the charts the width */}
       {rail && (
-        <nav className="sticky top-0 hidden h-screen w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-card py-2 md:flex">
+        <nav className="sticky top-0 hidden h-screen w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-background py-2 md:flex">
           <NavHint label="Expand navigation"><button
             onClick={() => expand(true)}
             aria-label="Expand navigation"
@@ -344,10 +344,10 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
       )}
 
       {/* Desktop sidebar */}
-      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-card p-4", !rail && !deskMenu && "md:flex")}>
-        <div className="mb-6 flex items-start justify-between gap-2">
+      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r bg-background p-3", !rail && !deskMenu && "md:flex")}>
+        <div className="mb-4 flex items-start justify-between gap-2 px-1.5 pt-1">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
+            <h1 className="flex items-center gap-2.5 text-sm font-semibold tracking-tight text-foreground"><span aria-hidden className="h-[22px] w-[22px] shrink-0 rounded-md bg-primary" />Trade Journal</h1>
             {owner && <SyncStatusLine />}
             {owner && <PlanStreakChip />}
           </div>

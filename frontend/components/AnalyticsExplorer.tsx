@@ -147,7 +147,7 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
       <p className="text-xs text-muted-foreground">Selected baseline: {money(summary.expectancy)} / trade · {percent(summary.win_rate)} win rate. “Small sample” means fewer than 20 priced trades; larger samples can still be inconclusive.</p>
       <div className="max-w-full overflow-x-auto rounded-lg border bg-card">
         <table className="w-full whitespace-nowrap text-sm" aria-label="Analytics breakdown">
-          <thead className="bg-muted text-xs text-muted-foreground"><tr>
+          <thead className="border-b text-xs font-medium text-muted-foreground"><tr>
             {[info.label, "Trades / days", "Total P&L", "Expectancy", "Median P&L", "Win rate", "Profit factor", "Avg return"].map((label) => <th key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-border">
@@ -176,7 +176,7 @@ export default function AnalyticsExplorer({ data, accounts }: { data: Analytics;
       </div>
       <div className="max-w-full overflow-x-auto rounded-lg border bg-card">
         <table className="w-full whitespace-nowrap text-sm" aria-label="Analytics trades">
-          <thead className="bg-muted text-xs text-muted-foreground"><tr>{["Trade", "Account", "Entered", "Closed", "P&L", "Return"].map((label) => <th key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}</tr></thead>
+          <thead className="border-b text-xs font-medium text-muted-foreground"><tr>{["Trade", "Account", "Entered", "Closed", "P&L", "Return"].map((label) => <th key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">{trades.slice(page * pageSize, (page + 1) * pageSize).map((trade) => <tr key={trade.id} className="hover:bg-muted/40">
             <td className="px-4 py-3"><Link href={`/trades/${trade.id}`} className="font-semibold hover:underline">{trade.ticker}</Link><p className="text-xs text-muted-foreground">{trade.instrument_type === "option" ? `${trade.expiration ?? ""} · ${trade.strike ?? "—"} ${trade.option_type ?? "option"}` : "Stock"} · {trade.status}</p></td>
             <td className="px-4 py-3">{accountNames.get(trade.account_id) ?? "Unknown account"}</td>

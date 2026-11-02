@@ -167,7 +167,7 @@ export default function TradesTable({
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
       <table className="w-full text-sm">
-        <thead className="bg-muted text-xs text-muted-foreground uppercase">
+        <thead className="border-b text-xs font-medium text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
             <Th {...thProps("realized_pnl")}>P&amp;L</Th>

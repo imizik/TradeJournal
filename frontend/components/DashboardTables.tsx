@@ -258,7 +258,7 @@ export function OpenPositionsTable({
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
       <table className={cn("w-full text-sm tabular-nums", !compact && "sm:min-w-[1280px]")}>
-        <thead className="bg-muted text-xs uppercase text-muted-foreground">
+        <thead className="border-b text-xs font-medium text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
             {showAccount && <Th {...thProps("account", true)}>Account</Th>}
@@ -388,7 +388,7 @@ export function RecentClosedTable({
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
       <table className="w-full text-sm">
-        <thead className="bg-muted text-xs uppercase text-muted-foreground">
+        <thead className="border-b text-xs font-medium text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
             {showAccount && <Th {...thProps("account", true)}>Account</Th>}

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
 import GmailStatusBanner from "@/components/GmailStatusBanner";
@@ -13,7 +13,9 @@ import AppMain from "@/components/AppMain";
 // Session identity and permissions are evaluated per request in both profiles.
 export const dynamic = "force-dynamic";
 
-const inter = Inter({ subsets: ["latin"] });
+// The app's type is the Copilot desk's: Instrument Sans for text, IBM Plex Mono for numbers (globals.css).
+const sans = Instrument_Sans({ subsets: ["latin"], variable: "--font-sans" });
+const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "Trade Journal",
@@ -42,7 +44,7 @@ export default async function RootLayout({
   const owner = access?.owner ?? false;
   return (
     <html lang="en" className="dark">
-      <body className={inter.className} suppressHydrationWarning>
+      <body className={`${sans.variable} ${mono.variable} font-sans antialiased`} suppressHydrationWarning>
         <AccessProvider access={access ?? { ...PRIVATE_ACCESS, owner: false, enabled: true }}><div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
           {access && <Nav owner={owner} journal={owner || !!access.grants.journal_read} />}
           <ChartSessionProvider><AppMain banner={owner ? <GmailStatusBanner /> : access ? <AssistantSession /> : null}>{children}</AppMain></ChartSessionProvider>

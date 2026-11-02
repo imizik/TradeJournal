@@ -68,7 +68,7 @@ export default async function FillsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm sm:min-w-[1280px]">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
+              <thead className="border-b text-xs font-medium text-muted-foreground">
                 <tr>
                   <Th>Executed</Th>
                   <Th wide>Account</Th>
