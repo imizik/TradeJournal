@@ -1,0 +1,235 @@
+name: Land
+
+# Keeps armed pull requests landable while nobody is watching.
+#
+# A session arms a pull request with GitHub auto-merge once its review is
+# clean (docs/agent/pr-review.md, "Automatic repair and merge"). GitHub then
+# squash-merges it the moment the required checks pass, with or without a
+# live session. The one thing auto-merge cannot do is move the branch when
+# main changes underneath it: a conflicting branch waits forever. This
+# workflow merges main into every armed branch that conflicts; when the merge
+# stops on textual conflicts, Claude resolves them on the owner's plan token
+# (the CLAUDE_CODE_OAUTH_TOKEN secret), never on API credits.
+#
+# Arming is the authorization. An unarmed pull request is never touched
+# (user-gated ones are never armed), and only branches in this repository are
+# merged, never a fork's.
+
+on:
+  push:
+    branches: [main] # the moment other branches can start to conflict
+  schedule:
+    - cron: '*/30 * * * *' # branches that were already behind when armed
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: One pull request number; blank sweeps every armed, conflicting one
+        required: false
+        default: ''
+
+permissions:
+  contents: write # push the merge commit to the pull request branch
+  pull-requests: write # say on the pull request what happened
+  actions: write # start CI and the deployment package on the new head
+
+# One branch at a time; a second trigger waits instead of racing the first.
+concurrency:
+  group: land
+  cancel-in-progress: false
+
+jobs:
+  find:
+    name: Armed pull requests that conflict with main
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.find.outputs.prs }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ONLY: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          owner="${REPO%%/*}"
+          # GitHub works out mergeability lazily: right after a push to main it
+          # answers UNKNOWN, and asking is what makes it compute. Give it a minute.
+          for attempt in 1 2 3 4 5 6; do
+            armed=$(gh pr list --repo "$REPO" --state open --limit 100 \
+                --json number,title,mergeable,autoMergeRequest,isDraft,headRefName,headRefOid,headRepositoryOwner \
+              | jq -c --arg owner "$owner" --arg only "$ONLY" '
+                  [ .[]
+                    | select(.isDraft | not)
+                    | select(.headRepositoryOwner.login == $owner)
+                    | select(if $only == "" then .autoMergeRequest != null
+                             else (.number | tostring) == $only end) ]')
+            unknown=$(jq 'map(select(.mergeable == "UNKNOWN")) | length' <<<"$armed")
+            [ "$unknown" = 0 ] && break
+            sleep 10
+          done
+          prs=$(jq -c '[ .[] | select(.mergeable == "CONFLICTING")
+                         | {number, title, branch: .headRefName, head: .headRefOid} ]' <<<"$armed")
+          echo "armed=$(jq length <<<"$armed") conflicting=$(jq length <<<"$prs")"
+          jq -r '.[] | "#\(.number) \(.branch) conflicts with main"' <<<"$prs"
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+
+  update:
+    name: 'Merge main into #${{ matrix.pr.number }}'
+    needs: find
+    if: needs.find.outputs.prs != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJSON(needs.find.outputs.prs) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ matrix.pr.number }}
+      BRANCH: ${{ matrix.pr.branch }}
+      EXPECTED_HEAD: ${{ matrix.pr.head }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.pr.branch }}
+          fetch-depth: 0
+
+      - name: Merge main
+        id: merge
+        env:
+          HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ "$(git rev-parse HEAD)" != "$EXPECTED_HEAD" ]; then
+            echo "::notice::#$PR moved since the sweep looked; the next run takes it."
+            echo "state=moved" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin main
+          if git merge --no-edit -m "Merge main into $BRANCH" origin/main; then
+            echo "state=clean" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only --diff-filter=U | tee "$RUNNER_TEMP/conflicts.txt"
+          { echo 'files<<EOF'; cat "$RUNNER_TEMP/conflicts.txt"; echo EOF; } >> "$GITHUB_OUTPUT"
+          # What git merged on its own, so the resolution can be checked for
+          # touching nothing else. Stage 0 = already merged; 1-3 = conflicted.
+          git ls-files -s | awk -F'\t' -v list="$RUNNER_TEMP/conflicts.txt" '
+            BEGIN { while ((getline l < list) > 0) c[l] = 1 }
+            { split($1, a, " "); if (a[3] == 0 && !($2 in c)) print }' > "$RUNNER_TEMP/index-before.txt"
+          if [ "$HAS_TOKEN" != 'true' ]; then
+            echo "::error::No CLAUDE_CODE_OAUTH_TOKEN secret, so nothing here can resolve conflicts."
+            echo "state=hands" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "state=conflicts" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the conflicts with Claude
+        if: steps.merge.outputs.state == 'conflicts'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # With a token of its own the action never exchanges an OIDC token,
+          # so no id-token permission is needed (the old review fallback
+          # learned this the hard way).
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(python3 -m py_compile:*),Bash(node --check:*)"
+          prompt: |
+            You are in a checkout of ${{ github.repository }} on branch `${{ matrix.pr.branch }}`,
+            the branch of pull request #${{ matrix.pr.number }}, "${{ matrix.pr.title }}".
+            `git merge origin/main` has stopped on conflicts in these files:
+
+            ${{ steps.merge.outputs.files }}
+
+            Resolve every conflict in those files and in no other file. In each
+            conflicted hunk, `<<<<<<< HEAD` up to `=======` is this branch and
+            `=======` up to `>>>>>>> origin/main` is main.
+            - Keep both sides when they do not contradict each other: an import
+              each side added, a test each side added, two new entries in the same
+              list or table, two new functions.
+            - When they contradict, keep this branch's version of what its pull
+              request is about and main's version of everything else.
+              `git log --oneline origin/main..HEAD` shows what the branch changed;
+              `git log --oneline HEAD..origin/main -- <file>` shows what main did
+              to a file.
+            - Never drop a test, an assertion or a safeguard to make the merge
+              easier. Never leave a conflict marker.
+            - For a lockfile or another generated file, take main's version whole
+              and say so.
+            After editing, run `python3 -m py_compile <file>` on each resolved
+            Python file and `node --check <file>` on each resolved .js or .mjs
+            file; read each resolved .ts or .tsx file once more for balance.
+            Then `git add` exactly the files you resolved. Do not commit, do not
+            push, and do not change any other file. End with one line per file
+            saying what you kept.
+
+      - name: Commit the resolved merge
+        if: steps.merge.outputs.state == 'conflicts'
+        run: |
+          set -euo pipefail
+          unmerged=$(git diff --name-only --diff-filter=U)
+          if [ -n "$unmerged" ]; then
+            echo "::error::Still unmerged: $unmerged"
+            exit 1
+          fi
+          if [ -n "$(git diff --name-only)" ] || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+            echo "::error::The resolution left changes it did not stage:"
+            git status --short
+            exit 1
+          fi
+          if xargs -r grep -nE '^(<{7} |>{7} |={7}$)' -- < "$RUNNER_TEMP/conflicts.txt"; then
+            echo "::error::Conflict markers remain."
+            exit 1
+          fi
+          git ls-files -s | awk -F'\t' -v list="$RUNNER_TEMP/conflicts.txt" '
+            BEGIN { while ((getline l < list) > 0) c[l] = 1 }
+            { split($1, a, " "); if (a[3] == 0 && !($2 in c)) print }' > "$RUNNER_TEMP/index-after.txt"
+          if ! diff "$RUNNER_TEMP/index-before.txt" "$RUNNER_TEMP/index-after.txt"; then
+            echo "::error::The resolution changed files outside the conflict list."
+            exit 1
+          fi
+          git -c core.editor=true commit --no-edit
+          git log -1 --stat
+
+      - name: Push and start the required checks
+        if: steps.merge.outputs.state == 'clean' || steps.merge.outputs.state == 'conflicts'
+        env:
+          STATE: ${{ steps.merge.outputs.state }}
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if ! git push origin "HEAD:refs/heads/$BRANCH"; then
+            echo "::notice::#$PR moved while this ran; the next run takes it."
+            exit 0
+          fi
+          # A push made with the workflow token starts no workflows, so the
+          # required checks would never run on the new head. Start them here;
+          # both workflows accept a manual run and treat it as a full gate.
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh workflow run deployment.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          if [ "$STATE" = conflicts ]; then
+            how="Claude resolved conflicts in: $(tr '\n' ' ' <<<"$FILES")"
+          else
+            how='git merged it without conflicts'
+          fi
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$(cat <<MSG
+          **Land:** merged \`main\` into this branch at ${sha:0:10} because it conflicted; $how. CI and the deployment package were started on that commit by hand (a push from a workflow starts none), and auto-merge lands the pull request when they pass. [Run]($RUN_URL)
+          MSG
+          )"
+
+      - name: Say that hands are needed
+        if: failure() || steps.merge.outputs.state == 'hands'
+        env:
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$(cat <<MSG
+          **Land:** could not bring this branch up to date with \`main\`. Conflicts in: $(tr '\n' ' ' <<<"$FILES"). Merge \`main\` into the branch by hand, resolve, and push; auto-merge takes it from there. [Run]($RUN_URL)
+          MSG
+          )"
