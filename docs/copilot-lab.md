@@ -872,7 +872,8 @@ the line leads with whether the pre-market prep is written; after the close it
 shows the whole day; a closed day says so. The desk bar shows the same read
 beside its title: **Live** (green dot) in the regular session, **Pre-market**,
 or **Closed 16:00** (the calendar's close) after it, and on a wide screen SPY,
-QQQ and VIX's change. At the top of the thread list sits a phase button:
+QQQ and VIX's change. The desk bar keeps the phase action available at every
+width, whether Threads is open or not:
 **Arm today's plans** before 9:30 on a weekday, and **Close the day** after
 16:00, which walks each thread's close question (see Close of day).
 

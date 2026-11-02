@@ -369,7 +369,7 @@ export default function CopilotLab({ link = null, close = false }: { link?: Pane
               <Plus size={14} aria-hidden /><span className="sr-only sm:not-sr-only">New plan</span>
             </button>
             {phaseAction && <button type="button" onClick={runPhase} title={phaseAction.hint}
-              className="hidden min-h-8 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary md:inline-flex">{phaseAction.label}</button>}
+              className="inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium text-foreground hover:bg-secondary md:min-h-8">{phaseAction.label}</button>}
             <button type="button" onClick={toggleContext} aria-pressed={contextShown} aria-label="Context pane" title="Show or hide market context ( ] )"
               className={cn(styles.contextToggle, "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground", contextShown && "bg-secondary")}>
               <PanelRight size={15} aria-hidden /><span>Context</span>

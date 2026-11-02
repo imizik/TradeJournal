@@ -76,14 +76,14 @@ export default function AnalyticsExplorer({ data, accounts, scope }: { data: Ana
   const minimum = [1, 10, 20, 50].includes(requestedMinimum) ? requestedMinimum : 1;
   const groupLabel = searchParams.get("group")?.slice(0, 512) ?? null;
   const requestedWinners = Number(searchParams.get("winnerLimit"));
-  const winnerLimit = [1, 3, 5].includes(requestedWinners) ? requestedWinners : null;
+  const winnerLimit = data.concentration.some(item => item.limit === requestedWinners) ? requestedWinners : null;
   const requestedPage = Number(searchParams.get("page"));
-  const page = Number.isInteger(requestedPage) && requestedPage >= 0 ? Math.min(10000, requestedPage) : 0;
   const selectedTradeId = searchParams.get("trade");
   const tradesSection = useRef<HTMLElement>(null);
   const selectedGroup = groupLabel ? data.breakdowns[dimension].find((item) => item.label === groupLabel) : null;
   const selectedWinners = winnerLimit ? data.concentration.find((item) => item.limit === winnerLimit) : null;
-  const selection = selectedGroup ? { label: `${DIMENSIONS.find((item) => item.value === dimension)?.label}: ${selectedGroup.label}`, ids: selectedGroup.trade_ids }
+  const info = DIMENSIONS.find((item) => item.value === dimension)!;
+  const selection = groupLabel ? { label: `${info.label}: ${groupLabel}`, ids: selectedGroup?.trade_ids ?? [] }
     : selectedWinners ? { label: `Best ${selectedWinners.removed_count} winning trades`, ids: selectedWinners.trade_ids } : null;
   function updateUrl(values: Record<string, string | null>, push = false, hash = window.location.hash) {
     const params = new URLSearchParams(window.location.search);
@@ -96,7 +96,6 @@ export default function AnalyticsExplorer({ data, accounts, scope }: { data: Ana
     window.history[push ? "pushState" : "replaceState"]({}, "", url);
   }
   const summary = data.summary;
-  const info = DIMENSIONS.find((item) => item.value === dimension)!;
   const groups = [...data.breakdowns[dimension]].filter((group) => group.count >= minimum).sort((a, b) => {
     const first = a[sort];
     const second = b[sort];
@@ -108,6 +107,10 @@ export default function AnalyticsExplorer({ data, accounts, scope }: { data: Ana
   const trades = selectedIds ? data.trades.filter((trade) => selectedIds.has(trade.id)) : data.trades;
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const pageSize = 25;
+  const lastPage = Math.max(0, Math.ceil(trades.length / pageSize) - 1);
+  const savedIndex = selectedTradeId ? trades.findIndex(trade => trade.id === selectedTradeId) : -1;
+  const page = savedIndex >= 0 ? Math.floor(savedIndex / pageSize)
+    : Number.isInteger(requestedPage) ? Math.max(0, Math.min(lastPage, requestedPage)) : 0;
   function drillGroup(label: string) {
     updateUrl({ group: label, winnerLimit: null, page: null, trade: null }, true, "#trades");
     tradesSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -216,7 +219,7 @@ export default function AnalyticsExplorer({ data, accounts, scope }: { data: Ana
       <p className="border-t px-3.5 py-2.5 text-xs text-muted-foreground">Average return is an unweighted mean of available trade percentages. Dollar results reflect actual sizing; these comparisons do not measure planned risk or prove an edge.</p>
     </section>
 
-    <section ref={tradesSection} aria-labelledby="analytics-trades" className="min-w-0 scroll-mt-4 rounded-lg border bg-card">
+    <section id="trades" ref={tradesSection} aria-labelledby="analytics-trades" className="min-w-0 scroll-mt-4 rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
         <div><h2 id="analytics-trades" className="text-[13.5px] font-semibold tracking-tight">{selection?.label ?? "Trades in this selection"}</h2><p className="mt-1 text-xs text-muted-foreground">{trades.length} trades · most recent close first · timestamps in New York time</p></div>
         {selection && <button type="button" onClick={() => updateUrl({ group: null, winnerLimit: null, page: null, trade: null }, false, "")} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground sm:min-h-0">Show all selected trades</button>}

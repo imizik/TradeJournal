@@ -113,6 +113,7 @@ test("the list says so when its read fails, and the Briefing and Review my week 
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   const threads = list(page);
   await expect(threads).toContainText("Threads unavailable: Copilot Lab is off.");
   await expect(briefing(page).getByRole("button", { name: "What matters right now?" })).toBeEnabled();

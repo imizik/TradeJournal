@@ -85,6 +85,11 @@ test("group selection, sample filters, and empty results stay honest", async ({ 
   await page.getByLabel("Minimum trades", { exact: true }).selectOption("1");
   await page.getByLabel("Group by", { exact: true }).selectOption("tag");
   await expect(breakdown.getByRole("button", { name: "Untagged", exact: true })).toBeVisible();
+  await page.goto("/analytics?group=ARCHIVED&page=9");
+  await expect(page.getByRole("heading", { name: "Ticker: ARCHIVED" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Analytics trades" })).toContainText("No closed trades in this selection.");
+  await page.goto("/analytics?page=9");
+  await expect(page.getByRole("table", { name: "Analytics trades" }).getByRole("link")).toHaveCount(3);
   await page.goto("/analytics?start=2099-01-01");
   await expect(page.getByLabel("Data coverage")).toContainText("0 of 0");
   await expect(page.getByRole("table", { name: "Analytics trades" })).toContainText("No closed trades in this selection.");

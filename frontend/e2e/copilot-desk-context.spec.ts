@@ -64,7 +64,16 @@ async function lab(page: Page, desk: Desk = {}, showContext = true) {
   });
   await page.goto(`/copilot-lab?investigation=${INV}`);
   await expect(page.getByText("It held the open; the group leads.")).toBeVisible();
-  if (showContext) await page.getByRole("button", { name: "Context pane" }).click();
+  if (showContext) {
+    const phoneTabs = page.getByRole("tablist", { name: "Desk" });
+    if (await phoneTabs.isVisible()) {
+      const tab = phoneTabs.getByRole("tab", { name: "Context" });
+      if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+    } else {
+      const button = page.getByRole("button", { name: "Context pane" });
+      if (await button.getAttribute("aria-pressed") !== "true") await button.click();
+    }
+  }
   return { reads, timeframes, pane: page.getByRole("complementary", { name: "Context" }) };
 }
 
@@ -156,7 +165,7 @@ test("on a 375 px phone the Context tab shows the pane, and its tabs fit", async
   await page.screenshot({ path: test.info().outputPath("desk-context-375.png"), fullPage: true });
 });
 
-test("a symbol opened with no saved conversation shows its Context by the symbol, with no chat needed", async ({ page }) => {
+test("a symbol opened with no saved conversation loads its Context on request, by the symbol", async ({ page }) => {
   const reads: string[] = [];
   await page.route("**/copilot/status", (route) => route.fulfill({ json: ON }));
   await page.route("**/copilot/investigations?*", (route) => route.fulfill({ json: { investigations: [] } }));
@@ -171,6 +180,8 @@ test("a symbol opened with no saved conversation shows its Context by the symbol
   });
   await page.goto("/copilot-lab?symbol=NBIS");
   const pane = page.getByRole("complementary", { name: "Context" });
+  await expect(pane).toBeHidden();
+  await page.getByRole("button", { name: "Context pane" }).click();
   await expect(pane.getByRole("img", { name: /NBIS today: minute bars/ })).toBeVisible();
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=NBIS");
   const tabs = pane.getByRole("tablist", { name: "Context" });
@@ -216,6 +227,8 @@ test("on the Briefing the pane shows the day: QQQ with your fills and pings, the
     failed: { timeout: 1 }, cost: { total_usd: 0.38, per_turn_usd: 0.0165, top_threads: [], cache: { read_tokens: 0, input_tokens: 0, read_share: null } } } }));
   await page.goto("/copilot-lab");
   const pane = page.getByRole("complementary", { name: "Context" });
+  await expect(pane).toBeHidden();
+  await page.getByRole("button", { name: "Context pane" }).click();
   await expect(pane.getByRole("img", { name: /QQQ today: minute bars with your fills/ })).toBeVisible();
   await expect(pane.getByRole("link", { name: "Open in Charts →" })).toHaveAttribute("href", "/charts?symbol=QQQ");
   await expect(pane).toContainText("your fills");
