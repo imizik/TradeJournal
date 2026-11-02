@@ -26,8 +26,9 @@
     --radius: 0.5rem;
   }
 
-  /* Surfaces, text and borders are the Copilot desk's graphite (components/copilot/CopilotLab.module.css);
-     primary stays blue-grey, because amber already means "needs you" across the app. */
+  /* The Copilot desk's look, app-wide: warm graphite surfaces, text and borders, and amber as the one accent
+     (components/copilot/CopilotLab.module.css restates the same values). Amber means "needs you", so a primary
+     button is the screen's one next step, not every button. */
   .dark {
     --background: 240 6% 6%;
     --foreground: 240 5% 93%;
@@ -35,8 +36,8 @@
     --card-foreground: 240 5% 93%;
     --popover: 240 5% 8%;
     --popover-foreground: 240 5% 93%;
-    --primary: 210 40% 70%;
-    --primary-foreground: 240 6% 6%;
+    --primary: 36 88% 59%;
+    --primary-foreground: 36 68% 6%;
     --secondary: 240 5% 11%;
     --secondary-foreground: 240 5% 93%;
     --muted: 240 5% 11%;
@@ -47,8 +48,8 @@
     --destructive-foreground: 210 40% 98%;
     --border: 240 4% 16%;
     --input: 240 4% 16%;
-    --ring: 210 40% 70%;
-    --radius: 0.5rem;
+    --ring: 36 88% 59%;
+    --radius: 0.625rem;
   }
 }
 
@@ -58,6 +59,12 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Every number set in tabular-nums is in Plex Mono, as on the desk. A table or box that carries the class for its
+     digit alignment keeps the text face; its number cells opt in on their own. */
+  .tabular-nums:not(table):not(div) {
+    @apply font-mono;
+    letter-spacing: -0.01em;
   }
 }
 

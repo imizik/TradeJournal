@@ -144,7 +144,7 @@ export default async function StrategyVersionPage({ params }: { params: Promise<
         ) : (
           <div className="overflow-x-auto rounded-lg border bg-card">
             <table className="w-full min-w-[940px] text-sm">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
+              <thead className="border-b text-xs font-medium text-muted-foreground">
                 <tr>
                   <Th>Run</Th>
                   <Th>Period</Th>

@@ -172,7 +172,7 @@ export default function StrategyRunTradesTable({
       ) : (
         <div className={`overflow-x-auto transition-opacity ${loading ? "opacity-60" : ""}`}>
           <table className="w-full min-w-[1380px] text-sm">
-            <thead className="bg-muted/70 text-xs uppercase text-muted-foreground">
+            <thead className="border-b text-xs font-medium text-muted-foreground">
               <tr>
                 <Th>#</Th>
                 <Th>Side</Th>

@@ -86,7 +86,7 @@ export default async function SignalsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px] text-sm">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
+              <thead className="border-b text-xs font-medium text-muted-foreground">
                 <tr>
                   <Th>Received</Th>
                   <Th>Symbol</Th>

@@ -358,7 +358,7 @@ function BreakdownTable({
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[620px] text-sm">
-          <thead className="bg-muted/70 text-xs uppercase text-muted-foreground">
+          <thead className="border-b text-xs font-medium text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left font-medium">Group</th>
               <th className="px-3 py-2 text-right font-medium">Trades</th>

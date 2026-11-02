@@ -416,7 +416,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
               </h2>
             </div>
             <table className="w-full min-w-[1320px] text-sm">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
+              <thead className="border-b text-xs font-medium text-muted-foreground">
                 <tr>
                   <Th>Trade</Th>
                   <Th>Activity</Th>

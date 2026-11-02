@@ -57,7 +57,7 @@ function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
 }
 
 export function AttentionCard({ items, unavailable, scope = null }: { items: AttentionItem[]; unavailable: string[]; scope?: string | null }) {
-  const count = <span className={`inline-grid min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums ${items.length ? "bg-red-500/80 text-white" : "bg-secondary text-muted-foreground"}`}
+  const count = <span className={`inline-grid min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums ${items.length ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"}`}
     aria-label={`${items.length} item${items.length === 1 ? "" : "s"}`}>{items.length}</span>;
   return <DashboardCard title="Attention" action={count}>
     {items.length === 0

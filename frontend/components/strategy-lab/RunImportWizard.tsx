@@ -456,7 +456,7 @@ function PreviewTradesTable({ preview }: { preview: StrategyRunImportPreview }) 
       </div>
       <div className="overflow-x-auto rounded-md border bg-background">
         <table className="w-full min-w-[1040px] text-sm">
-          <thead className="bg-muted/70 text-xs uppercase text-muted-foreground">
+          <thead className="border-b text-xs font-medium text-muted-foreground">
             <tr>
               <Th>#</Th><Th>Side</Th><Th>Entry</Th><Th>Exit</Th><Th>Entry price</Th><Th>Exit price</Th><Th>Qty</Th><Th>Net P&amp;L</Th><Th>Return</Th><Th>Warnings</Th>
             </tr>

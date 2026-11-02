@@ -9,10 +9,10 @@ export default function DataFreshness() {
   const { health, state, lastSuccessAt } = useGmailHealthSnapshot();
   const gmail = state === "unavailable" ? "status unavailable" : health ? health.status : "checking…";
   return <div aria-label="Import freshness" className="min-w-0 px-1 text-xs text-muted-foreground">
-    <p className="tabular-nums">
+    <p>
       <span className="font-medium text-foreground">Import freshness</span> · Gmail: {gmail}
       {health?.last_import_at
-        ? <> · Last successful import check: <time dateTime={health.last_import_at}>{when(health.last_import_at)} ET</time></>
+        ? <> · Last successful import check: <time className="tabular-nums" dateTime={health.last_import_at}>{when(health.last_import_at)} ET</time></>
         : health ? " · No successful import check recorded." : state === "unavailable" ? " · Import status could not load." : " · Checking import status…"}
     </p>
     {state === "unavailable" && <p className="mt-1 text-amber-300">{lastSuccessAt ? <>Showing historical import data; last status check {when(lastSuccessAt)} ET.</> : "Status will retry on the next shared refresh."}</p>}

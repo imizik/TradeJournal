@@ -1,7 +1,8 @@
 /*
- * The Copilot desk (/copilot-lab). Its own palette and type sit over the app's shadcn tokens, scoped to this page
- * until the app-wide redesign: every component inside (bg-card, text-muted-foreground, bg-primary) picks them up.
- * Warm graphite surfaces; amber is the one accent and means "needs you". Numbers set in tabular-nums use Plex Mono.
+ * The Copilot desk (/copilot-lab). Its palette and type are the app's (globals.css, app/layout.tsx) since the restyle;
+ * the tokens are restated here so the desk reads the same under either theme, and every component inside (bg-card,
+ * text-muted-foreground, bg-primary) picks them up. Warm graphite surfaces; amber is the one accent and means
+ * "needs you". Numbers set in tabular-nums use Plex Mono.
  * Panes follow the desk's own width: three at 1100 px, two below that, and three tabs below 760 px. On a wide screen the
  * desk takes the whole screen beside the nav rail, as Charts does (AppMain), and each pane scrolls on its own.
  */
@@ -24,7 +25,7 @@
   --input: 240 4% 16%;
   --ring: 36 88% 59%;
   container-type: inline-size;
-  font-family: var(--desk-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--border));
@@ -33,7 +34,7 @@
 }
 
 .desk :global(.tabular-nums) {
-  font-family: var(--desk-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
   letter-spacing: -0.01em;
 }
 
