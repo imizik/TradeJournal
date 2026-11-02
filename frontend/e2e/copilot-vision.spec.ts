@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openDeskThreads } from "./desk-fixtures";
 
 // The copilot can see: a screenshot attached from the lab's composer, and one arriving from the phone's share sheet.
 // The lab routes are stubbed in the browser (the e2e backend keeps the lab off), so the share route's own request to the
@@ -54,6 +55,7 @@ const box = (page: Page) => page.getByRole("textbox", { name: "Message", exact: 
 test("attach a screenshot: thumbnail, a ready question, the id in the chat body, a text marker in the saved transcript", async ({ page }) => {
   const seen = await lab(page);
   await page.goto("/copilot-lab");
+  await openDeskThreads(page);
   await expect(page.getByText("Nothing open. Plan a trade to start a ticker.")).toBeVisible();
   await page.getByTestId("copilot-image-input").setInputFiles({ name: "chart.png", mimeType: "image/png", buffer: PNG });
   await expect(page.getByRole("img", { name: "Attached screenshot" })).toBeVisible();
