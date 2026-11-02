@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Conclusion } from "./types";
-import { card, et, field, horizonLabel, primary } from "./presentation";
+import { card, cardHead, et, field, horizonLabel, primary } from "./presentation";
 import { command } from "./transport";
 
 export default function Conclusions({runIds,horizon,unit,onSeen,wide=false}:
@@ -25,9 +25,9 @@ export default function Conclusions({runIds,horizon,unit,onSeen,wide=false}:
     finally{if(scopeRef.current===frozen)setSaving(false);}
   }
   return <section className={card+" space-y-3"} aria-label="Conclusions">
-    <div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Keep the reasoning</p><h2 className="mt-1 text-lg font-semibold">What do you conclude?</h2></div>
+    <div className={cardHead}><h2 className="text-[13.5px] font-semibold tracking-tight">What do you conclude?</h2><span className="text-xs text-muted-foreground">Keep the reasoning</span></div>
     <p className="text-xs leading-relaxed text-muted-foreground">For {ids.length===2?"this parent / variant comparison":"this frozen run"} · {horizonLabel(horizon)} · {unit==="percent"?"percent returns":"prior daily ATR(14)"}. A verdict is an exploratory note, not a validated trading edge. New notes append; earlier notes stay intact.</p>
-    {error&&<p role="alert" aria-label="Conclusion error" className="rounded-md border border-amber-500/50 p-2 text-sm text-amber-300">{error}</p>}
+    {error&&<p role="alert" aria-label="Conclusion error" className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-sm text-red-400">{error}</p>}
     <div className={wide?"grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]":"space-y-3"}><label className="block text-xs text-muted-foreground">Verdict<select aria-label="Conclusion verdict" disabled={saving} className={field+" mt-1 text-foreground"} value={verdict} onChange={e=>setVerdict(e.target.value)}>{["Promising","Rejected","Unclear"].map(v=><option key={v}>{v}</option>)}</select></label>
     <label className="block text-xs text-muted-foreground">Why?<textarea aria-label="Conclusion reason" disabled={saving} className={field+" mt-1 min-h-24 resize-y text-foreground"} maxLength={2000} value={reason} placeholder="What did the evidence show, and what remains unanswered?" onChange={e=>setReason(e.target.value)}/></label></div>
     <button className={primary} disabled={saving||loading||!reason.trim()} onClick={save}>{saving?"Saving conclusion…":"Save conclusion"}</button>

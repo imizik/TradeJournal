@@ -61,13 +61,13 @@ function ReplayClip({ clip }: { clip: Clip }) {
   const at = clip.times[Math.min(index, clip.times.length - 1)];
 
   return <section aria-label={`${clip.symbol} replay`} data-testid="replay-clip" className="min-w-0 rounded-lg border bg-card">
-    <h2 className="flex items-baseline gap-2 px-4 py-3 text-sm font-semibold">
+    <h2 className="flex items-baseline gap-2 border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">
       {clip.symbol}
       <span className="ml-auto text-xs font-normal tabular-nums text-muted-foreground" data-testid="replay-clock">{at ? `${clock(at)} ET` : ""}</span>
     </h2>
     <canvas ref={canvas} width={clip.width} height={clip.height} role="img" aria-label={`${clip.symbol} at ${at ? clock(at) : ""}`}
       className="block h-auto w-full bg-[#12151c]" style={{ aspectRatio: `${clip.width} / ${clip.height}` }} />
-    {error ? <p role="status" className="px-4 py-3 text-sm text-amber-300">This clip could not load: {error}</p>
+    {error ? <p role="status" className="px-4 py-3 text-sm text-red-400">This clip could not load: {error}</p>
       : <div className="flex items-center gap-3 px-3 py-2">
         <button type="button" onClick={play} disabled={!frames} aria-label={playing ? `Pause ${clip.symbol}` : `Play ${clip.symbol}`}
           className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border hover:bg-muted/30 disabled:opacity-50">
@@ -75,7 +75,7 @@ function ReplayClip({ clip }: { clip: Clip }) {
         </button>
         <input type="range" min={0} max={last} step={1} value={index} disabled={!frames} aria-label={`Scrub ${clip.symbol}`}
           onChange={e => { setPlaying(false); setIndex(Number(e.target.value)); }}
-          className="h-11 min-w-0 flex-1 accent-sky-400" />
+          className="h-11 min-w-0 flex-1 accent-primary" />
       </div>}
   </section>;
 }
@@ -97,10 +97,10 @@ export default function ReplayView({ date, first = null }: { date: string; first
   const clips = day ? [...day.clips].sort((a, b) => Number(b.symbol === first) - Number(a.symbol === first)) : [];
   return <div className="mx-auto max-w-2xl space-y-3" data-testid="replay">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h1 className="text-lg font-semibold text-foreground">Watch your day</h1>
-      <p className="text-xs text-muted-foreground">{dayLabel(date)}{day ? ` · ${plural(day.fills, "fill")}, ${plural(day.pings, "ping")}` : ""}</p>
+      <h1 className="text-xl font-semibold text-foreground">Watch your day</h1>
+      <p className="text-sm tabular-nums text-muted-foreground">{dayLabel(date)}{day ? ` · ${plural(day.fills, "fill")}, ${plural(day.pings, "ping")}` : ""}</p>
     </div>
-    {error ? <p role="status" className="text-sm text-amber-300">{error}</p>
+    {error ? <p role="status" className="text-sm text-muted-foreground">{error}</p>
       : !day ? <p role="status" className="text-sm text-muted-foreground">Loading the day…</p>
       : clips.map(clip => <ReplayClip key={clip.symbol} clip={clip} />)}
   </div>;

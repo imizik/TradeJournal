@@ -182,12 +182,12 @@ export default function StrategyVersionForm({ strategyId, existingVersions }: Pr
         </div>
 
         {parent && (
-          <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+          <p className="rounded-md border bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
             This version will trace back to {parent.version_label}. Describe only the controlled change below.
           </p>
         )}
         {status === "champion" && currentChampion && (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          <p className="rounded-md border bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
             Saving this version as champion will move {currentChampion.version_label} back to challenger status.
           </p>
         )}
@@ -426,7 +426,7 @@ export default function StrategyVersionForm({ strategyId, existingVersions }: Pr
       </FormSection>
 
       {error && (
-        <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </p>
       )}
@@ -475,20 +475,17 @@ function FormSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-lg border bg-card p-5">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
-      {children}
-    </section>
+    <section aria-label={title} className="rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"><h2 className="text-[13.5px] font-semibold tracking-tight">{title}</h2></div>
+<div className="space-y-4 p-4"><p className="text-sm text-muted-foreground">{description}</p>      {children}
+    </div></section>
   );
 }
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <label htmlFor={htmlFor} className="text-xs text-muted-foreground">
         {label}
       </label>
       {children}

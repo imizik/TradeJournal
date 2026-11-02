@@ -24,7 +24,7 @@ export default function MoatLab({
 
   return (
     <div className="p-5">
-      <div className="text-lg font-semibold text-foreground">
+      <div className="text-[13.5px] font-semibold tracking-tight">
         Moat &amp; Differentiation Lab
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
@@ -40,7 +40,7 @@ export default function MoatLab({
               type="button"
               onClick={() => onSetCluster(id)}
               className={cn(
-                "rounded-md border px-3 py-1.5 font-mono text-xs font-semibold",
+                "rounded-md border px-3 py-1.5 text-xs font-semibold",
                 on
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border bg-card text-muted-foreground hover:text-foreground"
@@ -52,7 +52,7 @@ export default function MoatLab({
         })}
       </div>
 
-      <div className="mb-3 font-mono text-[11px] tracking-wide text-primary">
+      <div className="mb-3 text-[11px] text-primary">
         {cl?.title}
       </div>
 
@@ -68,39 +68,39 @@ export default function MoatLab({
               <button
                 type="button"
                 onClick={() => onOpenTicker(m.ticker)}
-                className="flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground hover:text-primary"
+                className="flex items-center gap-1.5 text-sm font-semibold text-foreground hover:text-primary"
               >
                 <PositionDot open={overlays.openTickers.has(m.ticker)} />
                 {m.ticker}
               </button>
               <span
                 className={cn(
-                  "rounded border px-1.5 py-0.5 font-mono text-[8px] font-semibold tracking-wide",
+                  "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
                   TYPE_BADGE[m.type]
                 )}
               >
                 {TYPE_FULL[m.type]}
               </span>
             </div>
-            <MoatCell label="MAKES / SELLS" value={m.makes} onCommit={set(m.ticker, "makes")} />
-            <MoatCell label="SPECIFIC MOAT" value={m.moat} onCommit={set(m.ticker, "moat")} />
+            <MoatCell label="Makes / sells" value={m.makes} onCommit={set(m.ticker, "makes")} />
+            <MoatCell label="Specific moat" value={m.moat} onCommit={set(m.ticker, "moat")} />
             <MoatCell
-              label="DIFFERENT BECAUSE"
+              label="Different because"
               accent
               value={m.different}
               onCommit={set(m.ticker, "different")}
             />
             <div>
-              <CellLabel>VALUE-CHAIN SEAT</CellLabel>
+              <CellLabel>Value-chain seat</CellLabel>
               <EditableText value={m.valueChain} onCommit={set(m.ticker, "valueChain")} mono />
             </div>
             <div className="flex gap-2">
               <div className="flex-1">
-                <div className="mb-1 font-mono text-[8px] text-emerald-300">BULL</div>
+                <div className="mb-1 text-[10px] text-muted-foreground">Bull</div>
                 <EditableTextarea value={m.bull} onCommit={set(m.ticker, "bull")} minHeight={50} />
               </div>
               <div className="flex-1">
-                <div className="mb-1 font-mono text-[8px] text-red-300">BEAR</div>
+                <div className="mb-1 text-[10px] text-muted-foreground">Bear</div>
                 <EditableTextarea value={m.bear} onCommit={set(m.ticker, "bear")} minHeight={50} />
               </div>
             </div>
@@ -115,7 +115,7 @@ function CellLabel({ children, accent }: { children: React.ReactNode; accent?: b
   return (
     <div
       className={cn(
-        "mb-1 font-mono text-[8px] tracking-wide",
+        "mb-1 text-[10px]",
         accent ? "text-primary" : "text-muted-foreground"
       )}
     >

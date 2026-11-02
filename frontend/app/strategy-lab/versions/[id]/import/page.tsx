@@ -19,19 +19,19 @@ export default async function StrategyRunImportPage({
         >
           ← Back to {version.version_label}
         </Link>
-        <p className="mt-5 text-xs font-medium uppercase tracking-[0.18em] text-sky-300">
-          TradingView evidence
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-foreground">Import a strategy run</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h1 className="text-xl font-semibold text-foreground">Import a strategy run</h1>
+          <span className="text-sm text-muted-foreground">TradingView evidence</span>
+        </div>
+        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
           Preview the Strategy Tester List of Trades CSV, verify its parsing, then bind the
           result to <span className="font-medium text-foreground/90">{version.version_label}</span>.
           This never creates journal fills or trades.
         </p>
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span className="rounded-full border bg-card px-2.5 py-1 capitalize">{version.status}</span>
+          <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground capitalize">{version.status}</span>
           <span
-            className="rounded-full border bg-card px-2.5 py-1 font-mono"
+            className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground tabular-nums"
             title={version.source_fingerprint}
           >
             Version fingerprint {version.source_fingerprint.slice(0, 14)}…
@@ -40,19 +40,15 @@ export default async function StrategyRunImportPage({
       </header>
 
       <section className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Version hypothesis
-          </h2>
-          <p className={`mt-2 text-sm leading-relaxed ${version.hypothesis ? "text-foreground/90" : "text-muted-foreground"}`}>
+        <div className="rounded-lg border bg-card">
+          <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Version hypothesis</h2>
+          <p className={`p-4 text-sm leading-relaxed ${version.hypothesis ? "text-foreground/90" : "text-muted-foreground"}`}>
             {version.hypothesis || "No hypothesis was recorded for this version."}
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Controlled change
-          </h2>
-          <p className={`mt-2 text-sm leading-relaxed ${version.change_summary ? "text-foreground/90" : "text-muted-foreground"}`}>
+        <div className="rounded-lg border bg-card">
+          <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Controlled change</h2>
+          <p className={`p-4 text-sm leading-relaxed ${version.change_summary ? "text-foreground/90" : "text-muted-foreground"}`}>
             {version.change_summary || "No controlled-change summary was recorded."}
           </p>
         </div>

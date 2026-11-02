@@ -22,7 +22,7 @@ export function MonBadge({ mon }: { mon: Mon }) {
   return (
     <span
       className={cn(
-        "rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+        "inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium",
         MON_BADGE[mon]
       )}
     >
@@ -35,7 +35,7 @@ export function TypeBadge({ type }: { type: CoType }) {
   return (
     <span
       className={cn(
-        "rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+        "inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium",
         TYPE_BADGE[type]
       )}
     >
@@ -48,7 +48,7 @@ export function StatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
-        "rounded px-1.5 py-0.5 text-[11px] font-medium",
+        "inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium",
         STATUS_BADGE[status]
       )}
     >
@@ -62,7 +62,7 @@ export function PositionDot({ open }: { open: boolean }) {
   return (
     <span
       title="Open position in journal"
-      className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-400"
+      className="inline-block h-2 w-2 shrink-0 rounded-full bg-foreground"
     />
   );
 }
@@ -78,7 +78,7 @@ export function StatusDot({ status }: { status: Status }) {
 
 export function PriceTag({ price }: { price: number | null | undefined }) {
   return (
-    <span className="font-mono text-xs tabular-nums text-foreground/80">
+    <span className="text-xs tabular-nums text-foreground/80">
       {price == null ? "—" : `$${price.toFixed(2)}`}
     </span>
   );
@@ -103,7 +103,7 @@ export function StarRating({
           className={cn(
             "leading-none",
             size,
-            n <= value ? "text-amber-400" : "text-muted-foreground/30"
+            n <= value ? "text-primary" : "text-muted-foreground/30"
           )}
         >
           ★
@@ -130,7 +130,7 @@ export function Select<T extends string>({
       suppressHydrationWarning
       onChange={(e) => onChange(e.target.value as T)}
       className={cn(
-        "rounded border border-border bg-card px-2 py-1 text-xs text-foreground/90 outline-none focus:border-ring",
+        "rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground/90 outline-none focus:border-ring",
         className
       )}
     >
@@ -176,7 +176,7 @@ export function EditableText({
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
       className={cn(
-        "w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground/90 outline-none focus:border-ring",
+        "w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/90 outline-none focus:border-ring",
         mono && "font-mono",
         className
       )}
@@ -215,7 +215,7 @@ export function EditableTextarea({
         if (local !== value) onCommit(local);
       }}
       className={cn(
-        "w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-[13px] leading-relaxed text-foreground/90 outline-none focus:border-ring",
+        "w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[13px] leading-relaxed text-foreground/90 outline-none focus:border-ring",
         className
       )}
     />
@@ -257,7 +257,7 @@ export function ScoreCell({
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
       className={cn(
-        "w-9 rounded border border-transparent bg-transparent text-center font-mono text-xs tabular-nums outline-none hover:border-border focus:border-ring",
+        "w-9 rounded-md border border-transparent bg-transparent text-center text-xs tabular-nums outline-none hover:border-border focus:border-ring",
         kind === "q" ? qualityColor(value) : riskColor(value)
       )}
     />

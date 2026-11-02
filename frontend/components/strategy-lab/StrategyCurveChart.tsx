@@ -36,13 +36,13 @@ export default function StrategyCurveChart({
 
   if (values.length < 2) {
     return (
-      <section className="rounded-lg border bg-card p-5">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+      <section aria-label={title} className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"><h3 className="text-[13.5px] font-semibold tracking-tight">{title}</h3></div>
+<div className="p-4">        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         <div className="mt-5 rounded-md bg-muted/50 px-4 py-8 text-center text-sm text-muted-foreground">
           This curve is unavailable for the imported data.
         </div>
-      </section>
+      </div></section>
     );
   }
 
@@ -72,12 +72,9 @@ export default function StrategyCurveChart({
   const zeroVisible = minimum <= 0 && maximum >= 0;
 
   return (
-    <section className="rounded-lg border bg-card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </div>
+    <section aria-label={title} className="rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+        <h3 className="text-[13.5px] font-semibold tracking-tight">{title}</h3>
         <div className="text-right text-xs tabular-nums text-muted-foreground">
           <span>{formatValue(values[0].value)}</span>
           <span className="px-1.5">→</span>
@@ -87,7 +84,8 @@ export default function StrategyCurveChart({
         </div>
       </div>
 
-      <div className="mt-4 overflow-x-auto">
+      <p className="px-4 pt-3 text-xs text-muted-foreground">{description}</p>
+      <div className="overflow-x-auto p-4 pt-3">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto min-w-[560px] w-full text-muted-foreground"

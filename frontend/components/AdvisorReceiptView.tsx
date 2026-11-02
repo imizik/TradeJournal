@@ -10,18 +10,18 @@ export default function AdvisorReceiptView({ packet, question, userPlan, request
   receipt: AdvisorReceipt | null | undefined; answer: AdvisorAnswer | null;
 }) {
   const opportunities = Array.isArray(packet.opportunities) ? packet.opportunities as Opportunity[] : [];
-  return <article className="space-y-2 rounded border p-3 break-words" data-testid="advisor-saved-answer">
+  return <article className="space-y-2 rounded-md border p-3 break-words" data-testid="advisor-saved-answer">
     <h4 className="font-semibold">Saved advisor response · requested {advisorStamp(requestedAt)} · received {advisorStamp(receivedAt)}</h4>
     <p className="text-xs">Question: {question}</p><p className="text-xs">User plan: {userPlan}</p>
-    {receipt && <details><summary className="cursor-pointer text-sm">Exact saved advisor receipt</summary><pre data-testid="advisor-receipt" className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs">{pretty(receipt)}</pre></details>}
+    {receipt && <details><summary className="cursor-pointer text-sm">Exact saved advisor receipt</summary><pre data-testid="advisor-receipt" className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">{pretty(receipt)}</pre></details>}
     {answer ? <>
-      <p className="text-xs font-semibold text-amber-800">Advisor interpretation · {receipt?.transport ?? "manual-local"} · caller unverified</p>
+      <p className="text-xs font-semibold text-muted-foreground">Advisor interpretation · {receipt?.transport ?? "manual-local"} · caller unverified</p>
       <p><strong>Summary:</strong> {answer.summary}</p><p><strong>Interpretation:</strong> {answer.interpretation}</p>
       {(["risks", "conditions", "gaps"] as const).map(field => <div key={field}><strong>{field === "conditions" ? "Proposed conditions" : field === "risks" ? "Risks" : "Gaps"}</strong><pre className="whitespace-pre-wrap break-words text-sm">{typeof answer[field] === "string" ? answer[field] : pretty(answer[field])}</pre></div>)}
       <div><strong>Source citations</strong><ul className="list-disc space-y-1 pl-5 text-sm">{answer.references.map((reference, index) => {
         const opportunity = opportunities.find(item => (item.id ?? item.opportunity_id) === reference.opportunity_id);
         const fact = (opportunity?.price_facts ?? opportunity?.context?.price_facts ?? []).find(item => (item.name ?? item.fact_name) === reference.fact_name);
-        return <li key={`${reference.opportunity_id}-${reference.fact_name}-${index}`} className="break-words">{opportunity && fact ? <><strong>{opportunity.symbol ?? reference.opportunity_id}</strong> · {reference.fact_name}: {String(fact.value ?? "value unavailable")} {fact.unit ?? ""} · {fact.source ?? "source unavailable"} · formed {advisorStamp(fact.formed_at)} · observed {advisorStamp(fact.observed_at)}</> : <span className="text-amber-700">Unresolved packet citation: {reference.opportunity_id} · {reference.fact_name}</span>}</li>;
+        return <li key={`${reference.opportunity_id}-${reference.fact_name}-${index}`} className="break-words">{opportunity && fact ? <><strong>{opportunity.symbol ?? reference.opportunity_id}</strong> · {reference.fact_name}: {String(fact.value ?? "value unavailable")} {fact.unit ?? ""} · {fact.source ?? "source unavailable"} · formed {advisorStamp(fact.formed_at)} · observed {advisorStamp(fact.observed_at)}</> : <span className="text-red-400">Unresolved packet citation: {reference.opportunity_id} · {reference.fact_name}</span>}</li>;
       })}</ul></div>
     </> : <p className="text-sm">No advisor response has been received.</p>}
   </article>;

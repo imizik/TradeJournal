@@ -12,8 +12,8 @@ export default async function NewStrategyVersionPage({ params }: { params: Promi
         <Link href={`/strategy-lab/strategies/${strategy.id}`} className="text-sm text-muted-foreground hover:text-foreground">
           ← {strategy.name}
         </Link>
-        <h1 className="mt-3 text-2xl font-semibold text-foreground">New Pine version</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        <h1 className="mt-3 text-xl font-semibold text-foreground">New Pine version</h1>
+        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
           Capture the exact code, controlled change, and execution assumptions before running it in TradingView.
         </p>
       </header>

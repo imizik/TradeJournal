@@ -3,7 +3,8 @@ import type { Definition } from "./types";
 export const field = "w-full min-w-0 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring";
 export const button = "inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40";
 export const primary = button + " bg-primary text-primary-foreground hover:bg-primary/90";
-export const card = "min-w-0 rounded-lg border bg-card p-4 sm:p-5";
+export const cardHead = "-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5";
+export const card = "min-w-0 rounded-lg border bg-card p-4";
 export const titles: Record<string,string> = {
   minutes: "Time since the open", rvol: "Relative volume", gap: "Opening gap",
   day_move: "Move since yesterday", trend: "Distance from the 20-day average",

@@ -18,17 +18,17 @@ type Deploys = {
 };
 
 const OUTCOME: Record<string, { label: string; tone: string }> = {
-  deployed: { label: "Deployed", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
-  "needs-migration": { label: "Waiting: database change", tone: "border-amber-500/40 bg-amber-500/10 text-amber-300" },
-  diverged: { label: "Not installed", tone: "border-amber-500/40 bg-amber-500/10 text-amber-300" },
-  "rolled-back": { label: "Rolled back", tone: "border-amber-500/40 bg-amber-500/10 text-amber-300" },
-  "backup-failed": { label: "Backup failed", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
-  failed: { label: "Failed", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
+  deployed: { label: "Deployed", tone: "bg-secondary text-foreground" },
+  "needs-migration": { label: "Waiting: database change", tone: "bg-primary/15 text-primary" },
+  diverged: { label: "Not installed", tone: "bg-primary/15 text-primary" },
+  "rolled-back": { label: "Rolled back", tone: "bg-primary/15 text-primary" },
+  "backup-failed": { label: "Backup failed", tone: "bg-red-500/10 text-red-400" },
+  failed: { label: "Failed", tone: "bg-red-500/10 text-red-400" },
 };
-const GOOD = "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-const WAIT = "border-amber-500/40 bg-amber-500/10 text-amber-300";
-const BAD = "border-red-500/40 bg-red-500/10 text-red-300";
-const QUIET = "border-border bg-muted text-muted-foreground";
+const GOOD = "bg-secondary text-foreground";
+const WAIT = "bg-primary/15 text-primary";
+const BAD = "bg-red-500/10 text-red-400";
+const QUIET = "bg-secondary text-muted-foreground";
 // The timer runs every three minutes; a check older than this means it stopped.
 const STALE_MINUTES = 15;
 
@@ -59,7 +59,7 @@ function Title({ text, repository }: { text: string; repository?: string }) {
 }
 
 function Badge({ label, tone }: { label: string; tone: string }) {
-  return <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${tone}`}>{label}</span>;
+  return <span className={`shrink-0 inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${tone}`}>{label}</span>;
 }
 
 export default function DeploysView() {
@@ -115,7 +115,7 @@ export default function DeploysView() {
             {status && <Badge {...status} />}
             <span className="text-sm">{checked.result}</span>
           </div>
-          {stale && <p className="text-sm text-amber-300">No check since {timeET(checked.at)}. The auto-deploy timer may have stopped.</p>}
+          {stale && <p className="text-sm text-primary">No check since {timeET(checked.at)}. The auto-deploy timer may have stopped.</p>}
           <p className="text-xs text-muted-foreground">
             Last checked {timeET(checked.at, { seconds: true })} · {checked.enabled ? "on" : "off"}
             {checked.hold ? ` · holds ${checked.hold} New York on weekdays` : " · no market-hours hold"}

@@ -5,9 +5,9 @@ import { useWorkspace } from "@/lib/research/store";
 import type { Mon } from "@/lib/research/types";
 
 const MON_DOT: Record<Mon, string> = {
-  scarcity: "bg-emerald-400",
-  licensing: "bg-sky-400",
-  capex: "bg-red-400",
+  scarcity: "bg-foreground",
+  licensing: "bg-muted-foreground",
+  capex: "bg-muted-foreground/40",
 };
 
 export default function LayerSidebar({
@@ -22,12 +22,12 @@ export default function LayerSidebar({
   let prevGroup: string | null = null;
 
   return (
-    <aside className="w-60 shrink-0 overflow-y-auto border-r border-border bg-card/40">
+    <aside className="max-h-40 w-full shrink-0 overflow-y-auto border-b border-border bg-card md:max-h-none md:w-60 md:border-b-0 md:border-r">
       <div className="px-3 pb-1 pt-3">
-        <div className="font-mono text-[11px] font-semibold tracking-wide text-foreground/80">
-          THE AI BUILDOUT STACK
+        <div className="text-[11px] font-semibold text-foreground/80">
+          The AI buildout stack
         </div>
-        <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+        <div className="mt-0.5 text-[10px] text-muted-foreground">
           revenue ▲ · raw inputs ▼
         </div>
       </div>
@@ -41,7 +41,7 @@ export default function LayerSidebar({
         return (
           <div key={id}>
             {groupLabel && (
-              <div className="px-3 pb-1 pt-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
+              <div className="px-3 pb-1 pt-3 text-[10px] text-muted-foreground">
                 {groupLabel}
               </div>
             )}
@@ -55,7 +55,7 @@ export default function LayerSidebar({
                   : "border-l-2 border-transparent hover:bg-secondary/50"
               )}
             >
-              <span className="w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground/60">
+              <span className="w-4 shrink-0 text-right text-[10px] text-muted-foreground">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", MON_DOT[l.mon])} />
@@ -68,7 +68,7 @@ export default function LayerSidebar({
                 {l.name}
               </span>
               {isStub && (
-                <span className="shrink-0 rounded border border-border px-1 py-px font-mono text-[7px] text-muted-foreground">
+                <span className="shrink-0 rounded-md border border-border px-1 py-px text-[10px] text-muted-foreground">
                   STUB
                 </span>
               )}

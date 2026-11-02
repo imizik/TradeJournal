@@ -99,10 +99,10 @@ export default function StrategyRunTradesTable({
 
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="border-b px-5 py-4">
+      <div className="border-b px-3.5 py-2.5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <h2 className="text-[13.5px] font-semibold tracking-tight">
               Simulated trades
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -155,7 +155,7 @@ export default function StrategyRunTradesTable({
               className="h-9 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             />
           </FilterField>
-          <Button type="submit" size="sm" disabled={loading}>
+          <Button type="submit" size="sm" variant="outline" disabled={loading}>
             {loading ? "Loading" : "Apply filters"}
           </Button>
           <Button type="button" size="sm" variant="ghost" onClick={reset} disabled={loading}>
@@ -196,10 +196,10 @@ export default function StrategyRunTradesTable({
                   <Td><span className="font-medium tabular-nums">{trade.trade_number}</span></Td>
                   <Td>
                     <span
-                      className={`rounded px-2 py-0.5 text-xs font-medium ${
+                      className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${
                         trade.direction === "long"
-                          ? "bg-sky-900/40 text-sky-300"
-                          : "bg-purple-900/40 text-purple-300"
+                          ? "bg-secondary text-foreground"
+                          : "bg-secondary text-muted-foreground"
                       }`}
                     >
                       {trade.direction}

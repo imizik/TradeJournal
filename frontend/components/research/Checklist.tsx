@@ -27,7 +27,7 @@ export default function Checklist({
 
   return (
     <div className="max-w-3xl p-5">
-      <div className="text-lg font-semibold text-foreground">Bear-Case Checklist</div>
+      <div className="text-[13.5px] font-semibold tracking-tight">Bear-Case Checklist</div>
       <div className="mb-4 text-xs text-muted-foreground">
         Run this <b className="text-foreground">before</b> averaging down on a name. This checklist is{" "}
         <b className="text-foreground">per ticker</b> — discipline over emotion.
@@ -38,7 +38,7 @@ export default function Checklist({
           value={ticker}
           suppressHydrationWarning
           onChange={(e) => onSetTicker(e.target.value)}
-          className="rounded-md border border-border bg-card px-3 py-1.5 font-mono text-sm font-semibold text-foreground outline-none focus:border-ring"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-ring"
         >
           {companyOptions.map((o) => (
             <option key={o.ticker} value={o.ticker}>
@@ -47,7 +47,7 @@ export default function Checklist({
           ))}
         </select>
         <PositionDot open={overlays.openTickers.has(ticker)} />
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {done}/{data.checklistTemplate.length} checked
         </span>
       </div>
@@ -64,9 +64,9 @@ export default function Checklist({
                 type="button"
                 onClick={() => setChecklistAnswer(ticker, q.id, { checked: !a.checked })}
                 className={cn(
-                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs font-bold",
+                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-bold",
                   a.checked
-                    ? "border-emerald-500 bg-emerald-500 text-emerald-950"
+                    ? "border-foreground bg-foreground text-background"
                     : "border-border bg-background text-transparent"
                 )}
               >

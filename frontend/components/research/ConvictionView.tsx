@@ -26,7 +26,7 @@ export default function ConvictionView({
 
   return (
     <div className="p-5">
-      <div className="text-lg font-semibold text-foreground">Conviction View</div>
+      <h2 className="text-[13.5px] font-semibold tracking-tight">Conviction View</h2>
       <div className="mb-4 text-xs text-muted-foreground">
         Auto-surfaced: every name scored ★4–5 or business quality ≥ 8, across all layers.
       </div>
@@ -40,20 +40,20 @@ export default function ConvictionView({
                 <button
                   type="button"
                   onClick={() => onOpenTicker(c.ticker)}
-                  className="flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground hover:text-primary"
+                  className="flex items-center gap-1.5 text-sm font-semibold text-foreground hover:text-primary"
                 >
                   <PositionDot open={overlays.openTickers.has(c.ticker)} />
                   {c.ticker}
                 </button>
                 <span className="truncate text-xs text-muted-foreground">{c.name}</span>
-                <span className="ml-auto font-mono text-xs tabular-nums text-foreground/70">
+                <span className="ml-auto text-xs tabular-nums text-foreground/70">
                   {price == null ? "" : `$${price.toFixed(2)}`}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StarRating value={c.stars} onChange={(n) => patchCompany(c.ticker, { stars: n })} size="text-sm" />
-                <span className="font-mono text-[10px] text-muted-foreground">Q {c.q}</span>
-                <span className="font-mono text-[10px] text-muted-foreground">AI {c.ai}</span>
+                <span className="text-[10px] text-muted-foreground">Q {c.q}</span>
+                <span className="text-[10px] text-muted-foreground">AI {c.ai}</span>
                 <MonBadge mon={c.mon} />
                 <TypeBadge type={c.type} />
                 <StatusBadge status={c.status} />

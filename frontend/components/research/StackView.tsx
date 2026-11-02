@@ -37,7 +37,7 @@ function Field({
     >
       <div
         className={cn(
-          "mb-1.5 font-mono text-[10px] uppercase tracking-wide",
+          "mb-1.5 text-xs",
           color ?? "text-muted-foreground"
         )}
       >
@@ -87,7 +87,7 @@ export default function StackView({
       onClick={() => onOpenTicker(ticker)}
       className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 hover:border-ring"
     >
-      <span className="font-mono text-xs font-semibold text-foreground">{ticker}</span>
+      <span className="text-xs font-semibold text-foreground">{ticker}</span>
       <TypeBadge type={type} />
       <PositionDot open={overlays.openTickers.has(ticker)} />
     </button>
@@ -96,7 +96,7 @@ export default function StackView({
   return (
     <div className="max-w-5xl p-5">
       <div className="mb-4 flex items-start gap-3">
-        <div className="mt-1 shrink-0 rounded border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground">
+        <div className="mt-1 shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground">
           {String(num).padStart(2, "0")}
         </div>
         <div className="min-w-0 flex-1">
@@ -104,8 +104,8 @@ export default function StackView({
             {l.name}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[10px] tracking-wide text-muted-foreground">
-              MONETIZES VIA
+            <span className="text-[10px] text-muted-foreground">
+              Monetizes via
             </span>
             <Select
               value={l.mon}
@@ -114,8 +114,8 @@ export default function StackView({
             />
             <MonBadge mon={l.mon} />
             {!l.whyMoney && (
-              <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[9px] text-amber-300">
-                SKELETON — NEEDS RESEARCH
+              <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-primary/15 text-primary">
+                Skeleton: needs research
               </span>
             )}
           </div>
@@ -124,7 +124,7 @@ export default function StackView({
           <button
             type="button"
             onClick={() => onOpenMoat(cluster)}
-            className="mt-1 shrink-0 rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-primary hover:border-ring"
+            className="mt-1 shrink-0 rounded-md border border-border bg-card px-3 py-2 text-xs text-primary hover:border-ring"
           >
             ◧ Moat comparison →
           </button>
@@ -135,21 +135,21 @@ export default function StackView({
         <Field label="What this layer does" full value={l.what} onCommit={set("what")} minHeight={52} />
         <Field
           label="▲ Why it could make money"
-          color="text-emerald-300"
+          color="text-muted-foreground"
           value={l.whyMoney}
           onCommit={set("whyMoney")}
           minHeight={72}
         />
         <Field
           label="▼ Why it could fail"
-          color="text-red-300"
+          color="text-muted-foreground"
           value={l.whyFail}
           onCommit={set("whyFail")}
           minHeight={72}
         />
         <Field
           label="◆ Key bottleneck / demand driver"
-          color="text-amber-300"
+          color="text-muted-foreground"
           full
           value={l.bottleneck}
           onCommit={set("bottleneck")}
@@ -159,7 +159,7 @@ export default function StackView({
       </div>
 
       <div className="mt-5">
-        <div className="mb-2 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+        <div className="mb-2 text-[10px] text-muted-foreground">
           Anchors (mega / large) · {anchors.length}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -170,7 +170,7 @@ export default function StackView({
             <Chip key={c.ticker} ticker={c.ticker} type={c.type} />
           ))}
         </div>
-        <div className="mb-2 mt-4 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+        <div className="mb-2 mt-4 text-[10px] text-muted-foreground">
           Candidates (mid / small / micro) · {candidates.length}
         </div>
         <div className="flex flex-wrap gap-2">

@@ -47,13 +47,13 @@ export default async function StrategyRunPage({
 
         <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-sky-300">
-              Simulated strategy run
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold text-foreground">
-              {run.symbol} · {run.timeframe}
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-xl font-semibold text-foreground">
+                {run.symbol} · {run.timeframe}
+              </h1>
+              <span className="text-sm text-muted-foreground">Simulated strategy run</span>
+            </div>
+            <p className="mt-1 text-sm tabular-nums text-muted-foreground">
               {runPeriod(run.backtest_start, run.backtest_end, run.observed_start_at, run.observed_end_at, run.source_timezone)}
               <span className="mx-2">·</span>
               {run.trade_count} imported trade{run.trade_count === 1 ? "" : "s"}
@@ -67,11 +67,9 @@ export default async function StrategyRunPage({
       </header>
 
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <div className="rounded-lg border bg-card p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Research context
-          </h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="min-w-0 rounded-lg border bg-card">
+          <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Research context</h2>
+          <div className="grid gap-4 p-4 md:grid-cols-2">
             <TextFact
               label="Version hypothesis"
               value={run.version_hypothesis}
@@ -84,7 +82,7 @@ export default async function StrategyRunPage({
             />
             <TextFact label="Run notes" value={run.notes} empty="No run-specific notes." />
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Parameters</p>
+              <p className="text-xs text-muted-foreground">Parameters</p>
               <pre className="mt-2 max-h-52 overflow-auto rounded-md border bg-background p-3 text-xs leading-relaxed text-foreground/85">
                 {JSON.stringify(run.parameters, null, 2)}
               </pre>
@@ -92,11 +90,9 @@ export default async function StrategyRunPage({
           </div>
         </div>
 
-        <div className="rounded-lg border bg-card p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Source identity
-          </h2>
-          <dl className="mt-4 space-y-3 text-sm">
+        <div className="min-w-0 rounded-lg border bg-card">
+          <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Source identity</h2>
+          <dl className="space-y-3 p-4 text-sm">
             <SourceFact label="File" value={run.source_file_name || "TradingView CSV"} />
             <SourceFact label="Source" value={run.source} />
             <SourceFact label="Timezone" value={run.source_timezone} />
@@ -113,7 +109,7 @@ export default async function StrategyRunPage({
 
       <section>
         <div className="mb-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2 className="text-[13.5px] font-semibold tracking-tight">
             Frozen test assumptions
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -153,7 +149,7 @@ export default async function StrategyRunPage({
 function TextFact({ label, value, empty }: { label: string; value: string | null; empty: string }) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p className={`mt-2 text-sm leading-relaxed ${value ? "text-foreground/90" : "text-muted-foreground"}`}>
         {value || empty}
       </p>
@@ -164,7 +160,7 @@ function TextFact({ label, value, empty }: { label: string; value: string | null
 function SourceFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="grid grid-cols-[100px_minmax(0,1fr)] gap-3">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className={`${mono ? "break-all font-mono text-xs" : "text-sm"} text-right text-foreground/85`} title={mono ? value : undefined}>
         {mono && value.length > 24 ? `${value.slice(0, 12)}…${value.slice(-8)}` : value}
       </dd>
@@ -175,7 +171,7 @@ function SourceFact({ label, value, mono = false }: { label: string; value: stri
 function Assumption({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-card p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-2 text-sm font-semibold capitalize text-foreground">{value}</p>
     </div>
   );
@@ -183,11 +179,11 @@ function Assumption({ label, value }: { label: string; value: string }) {
 
 function StatusBadge({ label, metrics }: { label: string; metrics?: "pending" | "ready" | "stale" }) {
   const style = metrics === "ready"
-    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+    ? "bg-secondary text-muted-foreground"
     : metrics === "stale"
-      ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-      : "border-border bg-secondary text-muted-foreground";
-  return <span className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${style}`}>{label}</span>;
+      ? "bg-primary/15 text-primary"
+      : "bg-secondary text-muted-foreground";
+  return <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize ${style}`}>{label}</span>;
 }
 
 function runPeriod(

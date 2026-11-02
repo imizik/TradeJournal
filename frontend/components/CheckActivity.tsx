@@ -49,20 +49,20 @@ export default function CheckActivity({ checkId, facts }: { checkId: string; fac
   }, []);
   const button = (label: string, run: () => Promise<Activity>, small = false) =>
     <button type="button" disabled={busy} onClick={() => void act(run)}
-      className={`${small ? "min-h-9 px-2 text-xs" : "min-h-11 px-3 text-sm"} rounded border disabled:opacity-50`}>{label}</button>;
+      className={`${small ? "min-h-9 px-2 text-xs" : "min-h-11 px-3 text-sm"} rounded-md border disabled:opacity-50`}>{label}</button>;
 
   return <section aria-label="Journal afterwards" data-testid="check-activity" className="space-y-2">
     <h4 className="font-medium">Journal afterwards</h4>
     {!value && !error && <p role="status">Reading the journal…</p>}
     {error && <p role="alert" className="break-words">{error}</p>}
     {value && <>
-      {value.linked.length > 0 && <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Linked by you</p>
+      {value.linked.length > 0 && <div><p className="text-xs text-muted-foreground">Linked by you</p>
         <ul className="divide-y">{value.linked.map(row => <li key={row.link_id} className="py-2" data-testid="check-linked">
           {row.trade ? <TradeLines trade={row.trade} linkedFill={row.fill_id}
             action={button("Unlink", () => unlinkActivity(checkId, facts, row.link_id))} />
             : <p className="flex flex-wrap items-center gap-2">{row.note} {button("Unlink", () => unlinkActivity(checkId, facts, row.link_id))}</p>}
         </li>)}</ul></div>}
-      {value.possible.length > 0 && <div><p className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">Later activity — review needed</p>
+      {value.possible.length > 0 && <div><p className="text-xs font-medium text-primary">Later activity — review needed</p>
         <ul className="divide-y">{value.possible.map(trade => <li key={trade.trade_id} className="py-2" data-testid="check-possible">
           <TradeLines trade={trade} action={button("Link trade", () => linkActivity(checkId, facts, { trade_id: trade.trade_id }))}
             fillAction={fillId => button("Link fill", () => linkActivity(checkId, facts, { fill_id: fillId }), true)} />

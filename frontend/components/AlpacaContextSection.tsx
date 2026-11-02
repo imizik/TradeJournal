@@ -41,11 +41,11 @@ function pctColor(val: number | null | undefined) {
 function Tip({ text }: { text: string }) {
   return (
     <span className="group relative inline-flex items-center ml-1 shrink-0">
-      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground cursor-default select-none leading-none">
+      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground cursor-default select-none leading-none">
         ?
       </span>
       {/* Pops above — won't clip against card bottom */}
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded border border-border bg-popover px-2.5 py-2 text-[11px] leading-relaxed text-foreground shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal">
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded-md border border-border bg-popover px-2.5 py-2 text-[11px] leading-relaxed text-foreground shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal">
         {text}
       </span>
     </span>
@@ -88,14 +88,14 @@ function Flag({ label, value, tip }: { label: string; value: number | null; tip?
   return (
     <span className="group relative">
       <span
-        className={`inline-block rounded px-2 py-0.5 text-xs font-medium cursor-default ${
-          on ? "bg-amber-900/40 text-amber-300" : "bg-muted text-muted-foreground line-through"
+        className={`inline-flex h-[22px] cursor-default items-center rounded-md px-2 text-[11.5px] font-medium ${
+          on ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground line-through"
         }`}
       >
         {label}
       </span>
       {tip && (
-        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded border border-border bg-popover px-2.5 py-2 text-[11px] leading-relaxed text-foreground shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal">
+        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded-md border border-border bg-popover px-2.5 py-2 text-[11px] leading-relaxed text-foreground shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal">
           {tip}
         </span>
       )}
@@ -106,7 +106,7 @@ function Flag({ label, value, tip }: { label: string; value: number | null; tip?
 function SourceBadge({ source }: { source: string }) {
   const label = source.replace("alpaca_", "").toUpperCase();
   return (
-    <span className="rounded bg-violet-900/40 px-1.5 py-0.5 text-xs font-medium text-violet-300">
+    <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground">
       Alpaca/{label}
     </span>
   );
@@ -231,9 +231,9 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
   const rvolLabel = ctx.rvol_time_adjusted != null ? "RVOL (adj)" : "RVOL";
 
   return (
-    <div className="rounded-lg border bg-card p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="space-y-4 rounded-lg border bg-card p-4">
+      <div className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+        <h2 className="text-[13.5px] font-semibold tracking-tight">
           Alpaca Market Context
         </h2>
         <SourceBadge source={source} />
@@ -261,7 +261,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
       <div className="grid grid-cols-2 gap-6">
         {entryCtx && (
           <div>
-            <p className="mb-2 text-xs font-semibold text-blue-400">ENTRY</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">ENTRY</p>
             <p className="mb-2 text-xs text-muted-foreground">
               {entryCtx.calculation_version == null
                 ? "Historical context. Recompute before comparing setups."
@@ -281,7 +281,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
               <Row
                 label={entryCtx.is_itm ? "Moneyness (ITM)" : "Moneyness (OTM)"}
                 value={fmtPct(entryCtx.moneyness_pct)}
-                valueClass={entryCtx.is_itm ? "text-emerald-400" : "text-amber-400"}
+                valueClass={entryCtx.is_itm ? "text-foreground" : "text-muted-foreground"}
                 tip={TIPS.moneyness}
               />
             )}
@@ -289,7 +289,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
         )}
         {exitCtx && (
           <div>
-            <p className="mb-2 text-xs font-semibold text-orange-400">EXIT</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">EXIT</p>
             <Row label="Underlying" value={fmt$(exitCtx.entry_underlying_price)} tip={TIPS.underlying} />
             <Row label="vs VWAP"   value={fmtPct(exitCtx.entry_vs_vwap_pct)}   valueClass={pctColor(exitCtx.entry_vs_vwap_pct)} tip={TIPS.vsVwap} />
             <Row label="RSI-14"    value={fmtNum(exitCtx.entry_rsi_14, 1)}      tip={TIPS.rsi14} />
@@ -301,7 +301,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
       {/* Intraday structure */}
       {entryCtx && (
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
             Intraday Structure
           </p>
           <div className="grid grid-cols-2 gap-6">
@@ -332,7 +332,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
       {/* Setup flags */}
       {flags.length > 0 && (
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
             Setup Flags
           </p>
           <div className="flex flex-wrap gap-1.5">

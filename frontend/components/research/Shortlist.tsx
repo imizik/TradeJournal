@@ -29,7 +29,7 @@ export default function Shortlist({
 
   return (
     <div className="p-5">
-      <div className="text-lg font-semibold text-foreground">Top-10 Shortlist &amp; Pipeline</div>
+      <div className="text-[13.5px] font-semibold tracking-tight">Top-10 Shortlist &amp; Pipeline</div>
       <div className="mb-3 text-xs text-muted-foreground">
         Pin names from anywhere (✛). {items.length}/10 pinned.
       </div>
@@ -38,7 +38,7 @@ export default function Shortlist({
         {STATUS_OPTIONS.map((s) => (
           <span key={s} className="rounded-md border border-border bg-card px-2.5 py-1 text-xs">
             <StatusBadge status={s} />
-            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground">{counts[s] ?? 0}</span>
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{counts[s] ?? 0}</span>
           </span>
         ))}
       </div>
@@ -51,7 +51,7 @@ export default function Shortlist({
               key={c.ticker}
               className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
             >
-              <span className="w-5 text-center font-mono text-xs text-muted-foreground">{i + 1}</span>
+              <span className="w-5 text-center text-xs text-muted-foreground">{i + 1}</span>
               <div className="flex flex-col">
                 <button
                   type="button"
@@ -73,12 +73,12 @@ export default function Shortlist({
               <button
                 type="button"
                 onClick={() => onOpenTicker(c.ticker)}
-                className="flex w-20 items-center gap-1.5 font-mono text-sm font-semibold text-foreground hover:text-primary"
+                className="flex w-20 items-center gap-1.5 text-sm font-semibold text-foreground hover:text-primary"
               >
                 <PositionDot open={overlays.openTickers.has(c.ticker)} />
                 {c.ticker}
               </button>
-              <span className="w-16 font-mono text-xs tabular-nums text-foreground/70">
+              <span className="w-16 text-xs tabular-nums text-foreground/70">
                 {price == null ? "—" : `$${price.toFixed(2)}`}
               </span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.name}</span>
@@ -91,7 +91,7 @@ export default function Shortlist({
               />
               <Link
                 href={`/trades?ticker=${c.ticker}`}
-                className="font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                className="text-[11px] text-muted-foreground hover:text-foreground"
                 title="View journal trades"
               >
                 journal →
@@ -100,7 +100,7 @@ export default function Shortlist({
                 type="button"
                 onClick={() => toggleShort(c.ticker)}
                 title="Unpin"
-                className="text-primary hover:text-red-400"
+                className="text-muted-foreground hover:text-red-400"
               >
                 ✚
               </button>

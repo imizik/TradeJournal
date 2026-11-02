@@ -6,11 +6,11 @@ import { exitText, getShadowWeek, money, planTitle, weekShift, type ShadowDecisi
 import { cn } from "@/lib/utils";
 
 const BADGE: Record<ShadowDecision["decision"], { label: string; className: string }> = {
-  plan: { label: "Plan", className: "bg-sky-500/10 text-sky-300" },
+  plan: { label: "Plan", className: "bg-secondary text-foreground" },
   skip: { label: "Skip", className: "bg-muted text-muted-foreground" },
   not_decided: { label: "Not decided", className: "bg-muted text-muted-foreground" },
   filtered: { label: "Below the bar", className: "bg-muted text-muted-foreground" },
-  error: { label: "Error", className: "bg-amber-500/10 text-amber-300" },
+  error: { label: "Error", className: "bg-red-500/10 text-red-400" },
   deciding: { label: "Deciding…", className: "bg-muted text-muted-foreground" },
 };
 const STATUS: Partial<Record<ShadowDecision["status"], string>> = {
@@ -23,7 +23,7 @@ function Decision({ d }: { d: ShadowDecision }) {
   return (
     <li className="rounded-lg border bg-card p-3 text-sm" data-testid="shadow-decision">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", badge.className)}>{badge.label}</span>
+        <span className={cn("inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium", badge.className)}>{badge.label}</span>
         <span className="min-w-0 break-words font-medium text-foreground">{d.event.summary}</span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">Radar {d.session_date} {nyTime(d.event.first_seen_at)}{d.decided_at ? ` · decided ${nyTime(d.decided_at)}` : ""}</p>
@@ -38,7 +38,7 @@ function Decision({ d }: { d: ShadowDecision }) {
             {d.entry ? <span>In {d.entry.price}{d.entry.shares ? ` × ${d.entry.shares}` : ""} at {nyTime(d.entry.at)}</span> : null}
             {d.exit ? <span>Out {d.exit.price} at {nyTime(d.exit.at)} ({exitText(d.exit.reason)})</span> : null}
             {d.result ? (
-              <span className={cn("font-medium", d.result.pnl >= 0 ? "text-emerald-300" : "text-rose-300")}>
+              <span className={cn("font-medium", d.result.pnl >= 0 ? "text-emerald-400" : "text-red-400")}>
                 {money(d.result.pnl)}{d.result.return_pct != null ? ` (${d.result.return_pct}%)` : ""}
               </span>
             ) : null}
@@ -81,7 +81,7 @@ export default function ShadowBookView() {
     return () => controller.abort();
   }, [week]);
 
-  if (error && !data) return <p role="alert" className="text-xs text-amber-300">{error}</p>;
+  if (error && !data) return <p role="alert" className="text-xs text-red-400">{error}</p>;
   if (!data) return null;
   const { shadow, owner, note } = data.summary;
   const thisWeek = week === undefined;
@@ -90,7 +90,7 @@ export default function ShadowBookView() {
   return (
     <section aria-label="Shadow book" className="space-y-2" data-testid="shadow-book">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">Shadow book</h2>
+        <h2 className="text-[13.5px] font-semibold tracking-tight">Shadow book</h2>
         <div className="flex items-center gap-1 text-xs">
           <button type="button" className="h-9 rounded-md border px-2.5" onClick={() => setWeek(weekShift(data.week.start, -1))}>Earlier week</button>
           <button type="button" className="h-9 rounded-md border px-2.5 disabled:opacity-40" disabled={thisWeek} onClick={() => setWeek(undefined)}>This week</button>

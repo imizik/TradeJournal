@@ -51,7 +51,7 @@ function lines(value: Status): Line[] {
   ];
 }
 
-const dot: Record<Tone, string> = { ok: "bg-emerald-600", warn: "bg-amber-500", bad: "bg-red-600" };
+const dot: Record<Tone, string> = { ok: "bg-muted-foreground", warn: "bg-primary", bad: "bg-red-400" };
 const word: Record<Tone, string> = { ok: "OK", warn: "Attention", bad: "Problem" };
 
 export default function AdvisorConnectionStatus({ canManage }: { canManage: boolean }) {
@@ -80,10 +80,10 @@ export default function AdvisorConnectionStatus({ canManage }: { canManage: bool
     queueMicrotask(() => { if (active) void reload(); });
     return () => { active = false; sequence.current += 1; controller.current?.abort(); };
   }, [reload]);
-  return <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="advisor-connection-status" aria-labelledby="advisor-connection-heading">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="advisor-connection-heading" className="font-semibold">Advisor connection</h2>
-      <button type="button" onClick={() => void reload()} disabled={loading} className="min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">Check again</button>
+  return <section className="mx-auto mb-4 max-w-4xl rounded-lg border bg-card p-4 text-sm" data-testid="advisor-connection-status" aria-labelledby="advisor-connection-heading">
+    <div className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5 mb-3">
+      <h2 id="advisor-connection-heading" className="text-[13.5px] font-semibold tracking-tight">Advisor connection</h2>
+      <button type="button" onClick={() => void reload()} disabled={loading} className="min-h-11 rounded-md border px-3 py-2 text-sm disabled:opacity-50">Check again</button>
     </div>
     {loading && <p role="status" className="mt-2">Checking the advisor connection…</p>}
     {error && <div role="alert" className="mt-2 break-words"><p>{error}</p><p className="text-muted-foreground">The advisor units may be stopped after a host reboot or deploy. Operator: verify the installation, then start the sockets before the services.</p></div>}

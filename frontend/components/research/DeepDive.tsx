@@ -8,10 +8,10 @@ import { DEEP_FIELDS, STATUS_OPTIONS } from "@/lib/research/constants";
 import { EditableTextarea, MonBadge, Select, StarRating, TypeBadge } from "./primitives";
 
 const TONE_LABEL: Record<string, string> = {
-  ai: "text-sky-300",
-  risk: "text-amber-300",
-  bull: "text-emerald-300",
-  bear: "text-red-300",
+  ai: "text-muted-foreground",
+  risk: "text-muted-foreground",
+  bull: "text-muted-foreground",
+  bear: "text-muted-foreground",
   neutral: "text-muted-foreground",
 };
 
@@ -53,7 +53,7 @@ export default function DeepDive({
           value={ticker}
           suppressHydrationWarning
           onChange={(e) => onSetTicker(e.target.value)}
-          className="rounded-md border border-border bg-card px-3 py-1.5 font-mono text-sm font-semibold text-foreground outline-none focus:border-ring"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-ring"
         >
           {companyOptions.map((o) => (
             <option key={o.ticker} value={o.ticker}>
@@ -74,7 +74,7 @@ export default function DeepDive({
           type="button"
           onClick={() => toggleShort(ticker)}
           className={cn(
-            "rounded-md border px-3 py-1 font-mono text-xs",
+            "rounded-md border px-3 py-1 text-xs",
             c.short
               ? "border-primary bg-primary/10 text-primary"
               : "border-border bg-card text-muted-foreground hover:text-foreground"
@@ -86,14 +86,14 @@ export default function DeepDive({
 
       {/* Journal overlay */}
       <div className="mb-4 flex flex-wrap items-center gap-4 rounded-md border border-border bg-card px-4 py-2.5 text-xs">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="text-[10px] text-muted-foreground">
           Journal
         </span>
         <Metric label="Price" value={price == null ? "—" : `$${price.toFixed(2)}`} />
         <Metric
           label="Position"
           value={open ? "OPEN" : "—"}
-          valueClass={open ? "text-emerald-400" : "text-muted-foreground"}
+          valueClass={open ? "text-foreground" : "text-muted-foreground"}
         />
         <Metric label="Closed trades" value={stat ? String(stat.count) : "0"} />
         <Metric
@@ -107,7 +107,7 @@ export default function DeepDive({
         />
         <Link
           href={`/trades?ticker=${ticker}`}
-          className="ml-auto font-mono text-[11px] text-muted-foreground hover:text-foreground"
+          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
         >
           view trades →
         </Link>
@@ -124,7 +124,7 @@ export default function DeepDive({
           >
             <div
               className={cn(
-                "mb-1.5 font-mono text-[10px] uppercase tracking-wide",
+                "mb-1.5 text-xs",
                 TONE_LABEL[f.tone ?? "neutral"]
               )}
             >
@@ -155,7 +155,7 @@ function Metric({
   return (
     <span className="flex items-center gap-1.5">
       <span className="text-muted-foreground">{label}</span>
-      <span className={cn("font-mono tabular-nums text-foreground/90", valueClass)}>
+      <span className={cn("tabular-nums text-foreground/90", valueClass)}>
         {value}
       </span>
     </span>

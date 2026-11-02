@@ -43,13 +43,13 @@ type Grades = { schema_version: "check-owner-grades-v1"; days: number; checks: n
 
 const LABEL: Record<Verdict, string> = { go: "Go", wait: "Wait", pass: "Pass", insufficient_data: "Not enough data" };
 const TONE: Record<Verdict, string> = {
-  go: "border-emerald-600 text-emerald-700 dark:text-emerald-400", wait: "border-amber-500 text-amber-700 dark:text-amber-400",
-  pass: "border-red-600 text-red-700 dark:text-red-400", insufficient_data: "border-muted-foreground text-muted-foreground",
+  go: "border-border text-foreground", wait: "border-primary/40 text-primary",
+  pass: "border-border text-muted-foreground", insufficient_data: "border-muted-foreground text-muted-foreground",
 };
 const COHORT: Record<string, string> = { same_setup: "Same setup", same_ticker_side: "Same ticker and side" };
 
 const Pill = ({ verdict }: { verdict: Verdict }) =>
-  <span className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-xs font-medium ${TONE[verdict] ?? TONE.insufficient_data}`}>{LABEL[verdict] ?? verdict}</span>;
+  <span className={`inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-xs font-medium ${TONE[verdict] ?? TONE.insufficient_data}`}>{LABEL[verdict] ?? verdict}</span>;
 const idea = (c: { ticker: string | number | null; side: string | number | null; instrument: string | number | null; option_type?: string | number | null }) =>
   [c.ticker, c.side, c.instrument === "option" ? (c.option_type ?? "option") : c.instrument].filter(Boolean).join(" · ");
 const SESSION: Record<string, string> = { rth: "regular session", premarket: "premarket", afterhours: "after hours", closed: "market closed" };
@@ -87,7 +87,7 @@ function GradeView({ value }: { value: Grades }) {
     <h3 className="font-medium">How the checks did <span className="font-normal text-muted-foreground">last {value.days} days · {value.settled} of {value.checks} settled</span></h3>
     {grade.final_checks === 0 ? <p className="mt-1 text-muted-foreground">Nothing settled yet. A check settles after its window ends and the journal has its trades; ask Jo to review the day.</p> : <>
       <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[20rem] text-sm">
-        <thead className="text-xs text-muted-foreground"><tr><th className="text-left font-normal">Rules said</th><th className="px-2 text-right font-normal">Checks</th>
+        <thead className="border-b text-xs font-medium text-muted-foreground"><tr><th className="text-left font-normal">Rules said</th><th className="px-2 text-right font-normal">Checks</th>
           <th className="px-2 text-right font-normal">Went its way</th><th className="px-2 text-right font-normal">Median move</th><th className="pl-2 text-right font-normal">You traded · P&amp;L</th></tr></thead>
         <tbody><GradeRow label="Go" group={grade.by_rules_verdict.go} /><GradeRow label="Wait" group={grade.by_rules_verdict.wait} /><GradeRow label="Pass" group={grade.by_rules_verdict.pass} /></tbody>
       </table></div>
@@ -220,14 +220,14 @@ export default function PretradeChecks({ journal = false }: { journal?: boolean 
     if (listing && !loading && value && /^chk_[0-9a-f-]{36}$/.test(value) && wanted.current !== value) { wanted.current = value; void toggle(value); }
   }, [listing, loading, toggle]);
 
-  if (dormant) return journal ? <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="pretrade-checks-dormant">
-    <h2 className="font-semibold">Pre-trade checks</h2>
+  if (dormant) return journal ? <section className="mx-auto mb-4 max-w-4xl rounded-lg border bg-card p-4 text-sm" data-testid="pretrade-checks-dormant">
+    <div className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5 mb-3"><h2 className="text-[13.5px] font-semibold tracking-tight">Pre-trade checks</h2></div>
     <p className="mt-1">Saved advice isn&apos;t connected to the journal yet, so Jo&apos;s checks and what happened after them can&apos;t be shown here.</p>
   </section> : null;
-  return <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="pretrade-checks" aria-labelledby="pretrade-checks-heading">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="pretrade-checks-heading" className="font-semibold">Pre-trade checks</h2>
-      <button type="button" onClick={() => void reload()} disabled={loading} className="min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">Refresh</button>
+  return <section className="mx-auto mb-4 max-w-4xl rounded-lg border bg-card p-4 text-sm" data-testid="pretrade-checks" aria-labelledby="pretrade-checks-heading">
+    <div className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5 mb-3">
+      <h2 id="pretrade-checks-heading" className="text-[13.5px] font-semibold tracking-tight">Pre-trade checks</h2>
+      <button type="button" onClick={() => void reload()} disabled={loading} className="min-h-11 rounded-md border px-3 py-2 text-sm disabled:opacity-50">Refresh</button>
     </div>
     <p className="mt-1 text-muted-foreground">What Jo asked, the rules&apos; answer and the data behind it. Saved checks never change.</p>
     {loading && <p role="status" className="mt-2">Loading saved checks…</p>}

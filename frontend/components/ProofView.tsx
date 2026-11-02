@@ -27,9 +27,9 @@ export type PlanProof = { go_live: string; trades: number; groups: PlanGroup[]; 
   verdict: { verdict: Verdict; reason: string; rule: string; planned: number; unplanned: number; caveat: string } };
 
 export const VERDICT: Record<Verdict, { label: string; tone: string }> = {
-  helping: { label: "Helping", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
-  not_helping: { label: "Not helping", tone: "border-red-500/40 bg-red-500/10 text-red-300" },
-  not_enough_data: { label: "Not enough data", tone: "border-border bg-muted text-muted-foreground" },
+  helping: { label: "Helping", tone: "bg-secondary text-foreground" },
+  not_helping: { label: "Not helping", tone: "bg-primary/15 text-primary" },
+  not_enough_data: { label: "Not enough data", tone: "bg-secondary text-muted-foreground" },
 };
 const RATING: [string, string][] = [["useful", "Useful"], ["already_knew", "Already knew"], ["too_late", "Too late"], ["irrelevant", "Irrelevant"], ["unrated", "Not rated"]];
 const MOVERS: [string, string][] = [["radar_first", "Radar first"], ["not_in_movers", "Never in Movers top 10"],
@@ -56,7 +56,7 @@ function VerdictBlock({ verdict, reason, sample, rule, testId, label }: { verdic
   const v = VERDICT[verdict];
   return <div className="space-y-1.5" data-testid={testId}>
     <div className="flex flex-wrap items-center gap-2">
-      <span className={`rounded-md border px-2 py-0.5 text-sm font-semibold ${v.tone}`}>{label ?? v.label}</span>
+      <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${v.tone}`}>{label ?? v.label}</span>
       <span className="text-sm">{reason}</span>
     </div>
     <p className="text-xs text-muted-foreground">Sample: {sample}</p>
@@ -66,14 +66,14 @@ function VerdictBlock({ verdict, reason, sample, rule, testId, label }: { verdic
 
 function Counts({ title, rows, counts }: { title: string; rows: [string, string][]; counts: Record<string, number> }) {
   return <div className="space-y-1">
-    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+    <h3 className="text-[13.5px] font-semibold tracking-tight">{title}</h3>
     <ul className="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">{rows.map(([key, label]) =>
       <li key={key} className="flex justify-between gap-3 text-xs"><span className="text-muted-foreground">{label}</span><span className="tabular-nums">{counts[key] ?? 0}</span></li>)}</ul>
   </div>;
 }
 
 function Status({ error, what }: { error: boolean; what: string }) {
-  return <p role="status" className={`text-sm ${error ? "text-amber-300" : "text-muted-foreground"}`}>{error ? `${what} could not load.` : `Loading ${what.toLowerCase()}…`}</p>;
+  return <p role="status" className={`text-sm ${error ? "text-red-400" : "text-muted-foreground"}`}>{error ? `${what} could not load.` : `Loading ${what.toLowerCase()}…`}</p>;
 }
 
 function AlertsProof() {
@@ -102,7 +102,7 @@ function RadarProofCard() {
   return <DashboardCard title="Does Radar find what you'd miss, early enough?" action={<Link href="/radar" className={dashboardLink}>Open Radar →</Link>}>
     {!body ? <Status error={error} what="Radar proof" />
       : !body.verdict ? <div className="space-y-1.5" data-testid="proof-radar-verdict">
-        <span className={`rounded-md border px-2 py-0.5 text-sm font-semibold ${VERDICT.not_enough_data.tone}`}>{VERDICT.not_enough_data.label}</span>
+        <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${VERDICT.not_enough_data.tone}`}>{VERDICT.not_enough_data.label}</span>
         <p className="text-sm text-muted-foreground">{body.reason ?? "Radar is off."}</p>
       </div>
       : <div className="space-y-4">
@@ -130,7 +130,7 @@ function PlanningProofCard() {
       <p className="text-xs text-muted-foreground">A secondary read, not a third proof.</p>
       <VerdictBlock testId="proof-planning-verdict" verdict={body.verdict.verdict} reason={body.verdict.reason} rule={body.verdict.rule}
         sample={`${body.verdict.planned} planned vs ${body.verdict.unplanned} unplanned closed long options since ${body.go_live}; ${late} with a late plan, not counted`} />
-      <p className="text-xs text-amber-300" data-testid="proof-planning-caveat">{body.caveat}</p>
+      <p className="text-xs text-muted-foreground" data-testid="proof-planning-caveat">{body.caveat}</p>
       <ul className="space-y-2">{body.groups.map((g) => <li key={g.key} className="space-y-0.5" data-testid={`plan-group-${g.key}`}>
         <p className="text-sm">{g.label}</p>
         <p className="flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
@@ -158,7 +158,7 @@ function OutcomesCard() {
     {body ? <div className="space-y-3">
       <p className="text-sm" data-testid="proof-outcomes-caveat">Counts and price paths, not causation.</p>
       {kinds.length ? <div className="overflow-x-auto"><table className="w-full text-xs tabular-nums" data-testid="proof-outcomes">
-        <thead className="text-left text-muted-foreground"><tr>
+        <thead className="border-b text-left text-xs font-medium text-muted-foreground"><tr>
           <th className="py-1 pr-3 font-medium">Since {body.since}</th><th className="py-1 pr-3 font-medium">Count</th>
           <th className="py-1 pr-3 font-medium">Median +1d</th><th className="py-1 pr-3 font-medium">What you did</th>
           <th className="py-1 font-medium">Vs alternative</th></tr></thead>

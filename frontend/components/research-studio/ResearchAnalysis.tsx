@@ -1,6 +1,6 @@
 import type { Config, Result } from "./types";
 import { Distribution, Scatter } from "./ResearchPlots";
-import { card, field, horizonLabel, returnValue, titles } from "./presentation";
+import { card, cardHead, field, horizonLabel, returnValue, titles } from "./presentation";
 
 export default function ResearchAnalysis({result,previous,horizon,unit,axis,setHorizon,setUnit,setAxis,config,select}:
   {result:Result;previous:boolean;horizon:string;unit:string;axis:string;setHorizon:(s:string)=>void;setUnit:(s:string)=>void;setAxis:(s:string)=>void;config:Config;select:(id:string)=>void}) {
@@ -11,7 +11,7 @@ export default function ResearchAnalysis({result,previous,horizon,unit,axis,setH
     y:e.outcomes[horizon][unit as "percent"|"prior_daily_atr14"]})).filter(e=>e.y!==null);
   const interval=summary.uncertainty.intervals.difference;
   return <section className={card+" space-y-4"} aria-label="Analysis">
-    <div className="flex flex-wrap justify-between gap-3"><div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">02 · Read the evidence</p><h2 className="mt-1 text-lg font-semibold">What happened next{previous ? " · Previous result" : ""}</h2></div>
+    <div className={cardHead}><div className="flex flex-wrap items-baseline gap-x-2"><h2 className="text-[13.5px] font-semibold tracking-tight">What happened next{previous ? " · Previous result" : ""}</h2><span className="text-xs text-muted-foreground">02 · Read the evidence</span></div>
       <div className="flex flex-wrap gap-2"><label className="text-xs text-muted-foreground">Forward window<select aria-label="Horizon" className={field+" mt-1 text-foreground"} value={horizon} onChange={e=>setHorizon(e.target.value)}>{["15m","30m","60m","session_close"].map(h=><option value={h} key={h}>{horizonLabel(h)}</option>)}</select></label><label className="text-xs text-muted-foreground">Return units<select aria-label="Return unit" className={field+" mt-1 text-foreground"} value={unit} onChange={e=>setUnit(e.target.value)}><option value="percent">Percent of next open</option><option value="prior_daily_atr14">Prior daily ATR(14)</option></select></label></div>
     </div>
     <div className="grid gap-3 sm:grid-cols-3">{[
@@ -20,7 +20,7 @@ export default function ResearchAnalysis({result,previous,horizon,unit,axis,setH
     <p data-testid="analysis-count" className="text-sm"><strong>N {summary.event_n}</strong> with this endpoint · Ordinary {summary.ordinary_n} · Matched ordinary {summary.matched_ordinary_n}</p>
     <div className="space-y-2 rounded-md bg-secondary/50 p-3 text-xs leading-relaxed">
       <p>The baseline is the mean at similar times for the same tickers, weighted to this event mix. It includes moments that meet your conditions. Reference: immediate next complete five-minute open; missing endpoints stay unavailable.</p>
-      <p className={interval ? "" : "text-amber-300"}><strong>95% uncertainty for the difference:</strong> {interval ? interval.map(v=>returnValue(v,unit,true)).join(" to ") : "Unavailable · "+(summary.uncertainty.unavailable_reason==="insufficient_weeks" ? "not enough eligible calendar weeks" : "not enough valid joint draws")}. {summary.uncertainty.eligible_weeks} weeks · {summary.uncertainty.valid_draws} valid / {summary.uncertainty.invalid_draws} invalid draws.</p>
+      <p className={interval ? "" : "text-primary"}><strong>95% uncertainty for the difference:</strong> {interval ? interval.map(v=>returnValue(v,unit,true)).join(" to ") : "Unavailable · "+(summary.uncertainty.unavailable_reason==="insufficient_weeks" ? "not enough eligible calendar weeks" : "not enough valid joint draws")}. {summary.uncertainty.eligible_weeks} weeks · {summary.uncertainty.valid_draws} valid / {summary.uncertainty.invalid_draws} invalid draws.</p>
       <p>Descriptive exploratory research. Weeks are approximate blocks; adaptive choices remain exploratory. 30 minutes is primary. This is not a trading P&amp;L or independent validation.</p>
     </div>
     <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Endpoint exclusions and immutable identities</summary><pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify({exclusions:summary.event_exclusions,data:result.population.data_id,code:result.analysis_code_id,specification:result.spec},null,2)}</pre></details>
