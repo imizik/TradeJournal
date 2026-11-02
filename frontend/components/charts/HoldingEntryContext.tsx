@@ -26,29 +26,29 @@ export default function HoldingEntryContext({ symbol, tradeId }: { symbol: strin
   }, [open, symbol, tradeId, retry]);
   const data = result?.data;
   const entry = data?.entry;
-  return <section aria-label="Since first recorded entry" className="rounded border border-slate-700 p-2">
-    <button type="button" aria-expanded={open} onClick={() => { setResult(null); setOpen(!open); }} className="min-h-11 w-full text-left font-medium text-slate-200">
+  return <section aria-label="Since first recorded entry" className="rounded border border-border p-2">
+    <button type="button" aria-expanded={open} onClick={() => { setResult(null); setOpen(!open); }} className="min-h-11 w-full text-left font-medium text-foreground">
       {open ? "▾" : "▸"} Since first recorded entry
     </button>
     {open && <div className="space-y-2">
       {!result ? <p role="status">Loading recorded movement…</p> : result.error ? <p role="alert" className="text-amber-300">Since-entry context unavailable. Previous values hidden until a fresh read succeeds.</p> : data && <>
         {entry && <p>First recorded entry: {entry.recorded_at.slice(0, 10)} · {nyTime(entry.recorded_at)} ET.</p>}
         {data.reason && <p className="text-amber-300">{data.reason}</p>}
-        {entry?.baseline_at && <p className="text-slate-300">Post-entry baseline: {nyTime(entry.baseline_at, true)} ET · {Math.round(entry.baseline_delay_seconds ?? 0)}s after recorded entry. The initial move is excluded.</p>}
-        {data.window && <p className="text-slate-400">{data.live ? "Recorded window" : "Regular-session snapshot"}: {nyTime(data.window.start, true)}–{nyTime(data.window.end, true)} ET.</p>}
+        {entry?.baseline_at && <p className="text-foreground/80">Post-entry baseline: {nyTime(entry.baseline_at, true)} ET · {Math.round(entry.baseline_delay_seconds ?? 0)}s after recorded entry. The initial move is excluded.</p>}
+        {data.window && <p className="text-muted-foreground">{data.live ? "Recorded window" : "Regular-session snapshot"}: {nyTime(data.window.start, true)}–{nyTime(data.window.end, true)} ET.</p>}
         {data.rows.length > 0 && <dl aria-label="Stock and market since entry" className="space-y-1">
-          {data.rows.filter((row) => row.role !== "peer").map((row) => <div key={row.symbol} className="flex justify-between gap-2"><dt>{row.symbol}</dt><dd className="font-mono text-slate-100">{pctText(row.change_pct, 2)}</dd></div>)}
+          {data.rows.filter((row) => row.role !== "peer").map((row) => <div key={row.symbol} className="flex justify-between gap-2"><dt>{row.symbol}</dt><dd className="font-mono text-foreground">{pctText(row.change_pct, 2)}</dd></div>)}
         </dl>}
-        {data.coverage && <p className="text-slate-200">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available}/{data.coverage.peers_total} peers available<br /><span className="text-slate-400">{data.group?.name}</span></p>}
-        {data.coverage && <p className="text-[10px] text-slate-400">{data.coverage.recorded_minutes}/{data.coverage.expected_minutes} minutes recorded. All returns share the same endpoint passes.</p>}
+        {data.coverage && <p className="text-foreground">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available}/{data.coverage.peers_total} peers available<br /><span className="text-muted-foreground">{data.group?.name}</span></p>}
+        {data.coverage && <p className="text-[10px] text-muted-foreground">{data.coverage.recorded_minutes}/{data.coverage.expected_minutes} minutes recorded. All returns share the same endpoint passes.</p>}
         {data.rows.length > 0 && <details>
-          <summary className="cursor-pointer py-2 text-sky-300">Peer changes & observation times</summary>
+          <summary className="cursor-pointer py-2 text-foreground">Peer changes & observation times</summary>
           <ComparisonRows data={data} />
-          <p className="mt-2 break-words text-[10px] text-slate-500">{data.source}. Recorded: {data.recorded_versions?.join(", ") ?? data.universe_version}; current group: {data.universe_version}. Known equivalent memberships only.</p>
+          <p className="mt-2 break-words text-[10px] text-muted-foreground">{data.source}. Recorded: {data.recorded_versions?.join(", ") ?? data.universe_version}; current group: {data.universe_version}. Known equivalent memberships only.</p>
         </details>}
       </>}
-      <p className="text-slate-400">Underlying moves, not option P&amp;L or a sell signal. Adds and partial exits do not reset the original entry. Recorded execution time can be minute-level; import time is unknown.</p>
-      <button type="button" onClick={() => { setResult(null); setRetry((n) => n + 1); }} className="min-h-11 text-sky-300 underline">Refresh since-entry context</button>
+      <p className="text-muted-foreground">Underlying moves, not option P&amp;L or a sell signal. Adds and partial exits do not reset the original entry. Recorded execution time can be minute-level; import time is unknown.</p>
+      <button type="button" onClick={() => { setResult(null); setRetry((n) => n + 1); }} className="min-h-11 text-foreground underline">Refresh since-entry context</button>
     </div>}
   </section>;
 }

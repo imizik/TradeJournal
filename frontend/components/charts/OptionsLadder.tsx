@@ -8,7 +8,7 @@ import { contracts, gexText, openInterestChangeText, openInterestPeriodText, opt
 import Sheet from "./Sheet";
 
 const REFRESH_MS = 60_000;
-const LABEL = "text-[9px] uppercase tracking-[0.18em] text-slate-500";
+const LABEL = "text-[9px] uppercase tracking-[0.18em] text-muted-foreground";
 
 /**
  * The strike ladder (C4.5) as a dealer-positioning view: a range bar with the
@@ -74,7 +74,7 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
   const pocketed = (strike: number) => (data?.air_pockets ?? []).some((pocket) => strike >= pocket.low && strike <= pocket.high);
 
   const marker = (index: number) => index === split && at !== null && <div ref={spotRow} role="separator" aria-label={`Price ${price(at)}`}
-    className="flex items-center gap-1 px-1 text-[9px] text-sky-300"><span className="h-px flex-1 bg-sky-400/50" />{price(at)}<span className="h-px flex-1 bg-sky-400/50" /></div>;
+    className="flex items-center gap-1 px-1 text-[9px] text-foreground"><span className="h-px flex-1 bg-muted-foreground/50" />{price(at)}<span className="h-px flex-1 bg-muted-foreground/50" /></div>;
 
   const strikeRow = (row: OptionStrike, index: number) => {
     const chosen = highlight === row.strike;
@@ -89,45 +89,45 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
       <button aria-label={`Strike ${price(row.strike)}${named ? `, ${named}` : ""}`} aria-pressed={chosen} onClick={() => onStrike(row.strike)}
         title={`${detail} Click to mark ${price(row.strike)} on the charts.`}
         className={`grid w-full grid-cols-[3.25rem_1fr_3.75rem] items-center gap-2 rounded px-1 font-mono text-[11px] ${tap}
-          ${chosen ? "bg-sky-400/20" : bracket.has(row.strike) ? "bg-sky-400/10" : "hover:bg-slate-800/60"}`}>
-        <span className={`text-right ${bracket.has(row.strike) ? "text-sky-300" : named ? "text-slate-100" : "text-slate-400"}`}>
-          {tag ? <span className="mr-1 text-[9px] text-slate-500">{tag}</span> : pocketed(row.strike) && <span title="Air pocket: thin gamma, price tends to cross fast" className="mr-1 text-[9px] text-violet-300/80">AIR</span>}{strikeText(row.strike)}</span>
-        <span aria-hidden className="h-2.5 overflow-hidden rounded-full bg-slate-800/70">
+          ${chosen ? "bg-primary/20" : bracket.has(row.strike) ? "bg-secondary" : "hover:bg-secondary"}`}>
+        <span className={`text-right ${bracket.has(row.strike) ? "text-foreground" : named ? "text-foreground" : "text-muted-foreground"}`}>
+          {tag ? <span className="mr-1 text-[9px] text-muted-foreground">{tag}</span> : pocketed(row.strike) && <span title="Air pocket: thin gamma, price tends to cross fast" className="mr-1 text-[9px] text-violet-300/80">AIR</span>}{strikeText(row.strike)}</span>
+        <span aria-hidden className="h-2.5 overflow-hidden rounded-full bg-secondary/70">
           <span className={`block h-full rounded-full ${bar}`} style={{ width: `${Math.max(2, Math.round(Math.abs(gamma) / topGamma * 100))}%` }} /></span>
-        <span className={`text-right ${row.gamma == null || Math.round(gamma) === 0 ? "text-slate-600" : gamma < 0 ? "text-rose-400" : "text-emerald-400"}`}>{gexText(row.gamma)}</span>
+        <span className={`text-right ${row.gamma == null || Math.round(gamma) === 0 ? "text-muted-foreground" : gamma < 0 ? "text-rose-400" : "text-emerald-400"}`}>{gexText(row.gamma)}</span>
       </button>
     </div>;
   };
 
   const body = <>
-    <div className="flex items-center justify-between gap-2 border-b border-slate-700/40 py-1.5 pl-3 pr-1">
+    <div className="flex items-center justify-between gap-2 border-b border-border py-1.5 pl-3 pr-1">
       <h2 className="flex min-w-0 items-baseline gap-2 font-mono">
-        <span className="text-sm font-semibold text-slate-100">{symbol}</span>
-        {at !== null && <span className="text-sm text-sky-300">${price(at)}</span>}
+        <span className="text-sm font-semibold text-foreground">{symbol}</span>
+        {at !== null && <span className="text-sm text-foreground">${price(at)}</span>}
         {net !== null && <span title="Net dollar gamma across every strike in scope, on the assumed dealer side"
           className={`rounded border px-1 text-[9px] tracking-wider ${net < 0 ? "border-rose-500/50 bg-rose-500/10 text-rose-300" : "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"}`}>{net < 0 ? "NEG γ" : "POS γ"}</span>}
       </h2>
-      <button aria-label="Close strike ladder" title="Close the strike ladder" onClick={onClose} className={`inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200 ${sheet ? "h-11 w-11" : "h-7 w-7"}`}><X size={14} /></button>
+      <button aria-label="Close strike ladder" title="Close the strike ladder" onClick={onClose} className={`inline-flex shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground ${sheet ? "h-11 w-11" : "h-7 w-7"}`}><X size={14} /></button>
     </div>
-    <div className="border-b border-slate-700/40 px-3 py-2">
-      <div role="group" aria-label="Ladder expirations" className="flex overflow-hidden rounded border border-slate-700/70 text-[10px]">
+    <div className="border-b border-border px-3 py-2">
+      <div role="group" aria-label="Ladder expirations" className="flex overflow-hidden rounded border border-border text-[10px]">
         {(Object.keys(SCOPE_NAMES) as OptionsScope[]).map((scope) => <button key={scope} aria-pressed={layer.scope === scope} onClick={() => onLayer({ scope })}
-          className={`flex-1 px-1 ${tap} ${layer.scope === scope ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{SCOPE_NAMES[scope]}</button>)}
+          className={`flex-1 px-1 ${tap} ${layer.scope === scope ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{SCOPE_NAMES[scope]}</button>)}
       </div>
     </div>
-    {!shown ? <p role="status" className="px-3 py-3 text-xs text-slate-500">Loading the {symbol} ladder…</p>
-      : shown.error ? <div role="alert" className="px-3 py-3 text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className={`mt-2 rounded border border-slate-700 px-3 ${tap}`}>Retry ladder</button></div>
-      : !rows.length || !data ? <p role="status" className="px-3 py-3 text-xs text-slate-500">{data?.message ?? "No strikes listed."}</p>
+    {!shown ? <p role="status" className="px-3 py-3 text-xs text-muted-foreground">Loading the {symbol} ladder…</p>
+      : shown.error ? <div role="alert" className="px-3 py-3 text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className={`mt-2 rounded border border-border px-3 ${tap}`}>Retry ladder</button></div>
+      : !rows.length || !data ? <p role="status" className="px-3 py-3 text-xs text-muted-foreground">{data?.message ?? "No strikes listed."}</p>
       : <>
         <RangeBar data={data} rows={rows} />
         <Pressure data={data} />
-        <div aria-label={`${symbol} strikes`} role="group" className="mx-2 rounded-lg border border-slate-700/50 bg-slate-900/40 px-1.5 pb-1.5">
+        <div aria-label={`${symbol} strikes`} role="group" className="mx-2 rounded-lg border border-border bg-card px-1.5 pb-1.5">
           <p className={`${LABEL} px-1 py-2`}>Dealer ladder · near spot</p>
           {rows.map(strikeRow)}
           {split === -1 && marker(-1)}
         </div>
         <Read data={data} />
-        <p className="px-3 pb-3 text-[10px] leading-4 text-slate-500">
+        <p className="px-3 pb-3 text-[10px] leading-4 text-muted-foreground">
           Gamma is dollar gamma for a 1% move, signed with dealers assumed long calls and short puts: open interest does not say who holds a contract.
           {data.rows[0]?.oi_change ? ` ${openInterestPeriodText(data.rows[0].oi_change).replace(/\.$/, "")}.` : ""} {optionsAsOf(data)}</p>
       </>}
@@ -141,7 +141,7 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
 function RangeBar({ data, rows }: { data: Ladder; rows: OptionStrike[] }) {
   const marks = [
     { name: "Put wall", value: data.walls.put_oi ?? null, text: "text-rose-400", tick: "bg-rose-400" },
-    { name: "Flip", value: data.flip?.price ?? null, text: "text-sky-400", tick: "bg-sky-400" },
+    { name: "Flip", value: data.flip?.price ?? null, text: "text-foreground", tick: "bg-foreground" },
     { name: "Max pain", value: data.max_pain?.price ?? null, text: "text-amber-300", tick: "bg-amber-300" },
     { name: "Call wall", value: data.walls.call_oi ?? null, text: "text-emerald-400", tick: "bg-emerald-400" },
   ].filter((mark): mark is typeof mark & { value: number } => mark.value !== null);
@@ -169,21 +169,21 @@ function RangeBar({ data, rows }: { data: Ladder; rows: OptionStrike[] }) {
         style={{ ...(mark.anchor === "end" ? { right: `${100 - mark.spot}%` } : { left: `${mark.spot}%` }), top: `${mark.lane * 14}px` }}>{mark.name} {strikeText(mark.value)}</span>)}
     </div>
     <div className="relative mt-1.5 h-2">
-      {move && <span aria-hidden title="Expected move" className="absolute -inset-y-1.5 rounded border border-dashed border-sky-300/60 bg-sky-400/10"
+      {move && <span aria-hidden title="Expected move" className="absolute -inset-y-1.5 rounded border border-dashed border-muted-foreground/60 bg-foreground/10"
         style={{ left: `${at(Math.max(low, data.spot! - move))}%`, width: `${at(Math.min(high, data.spot! + move)) - at(Math.max(low, data.spot! - move))}%` }} />}
-      <div aria-hidden className="absolute inset-0 overflow-hidden rounded-full bg-slate-800">
+      <div aria-hidden className="absolute inset-0 overflow-hidden rounded-full bg-secondary">
         {ascending.map((row) => <span key={row.strike} className={`absolute inset-y-0 ${(row.gamma ?? 0) < 0 ? "bg-rose-500" : "bg-emerald-500"}`}
           style={{ left: `${at(row.strike - step / 2)}%`, width: `${Math.max(0.5, at(row.strike + step / 2) - at(row.strike - step / 2))}%`, opacity: row.gamma == null ? 0.15 : 0.55 }} />)}
         {(data.air_pockets ?? []).map((pocket) => <span key={pocket.low} className="absolute inset-y-0 bg-[repeating-linear-gradient(135deg,rgba(196,181,253,0.55)_0_2px,transparent_2px_5px)]"
           style={{ left: `${at(pocket.low - step / 2)}%`, width: `${at(pocket.high + step / 2) - at(pocket.low - step / 2)}%` }} />)}
       </div>
       {marks.map((mark) => <span key={mark.name} aria-hidden className={`absolute -top-1 h-4 w-0.5 -translate-x-1/2 ${mark.tick}`} style={{ left: `${at(mark.value)}%` }} />)}
-      {data.spot !== null && <span aria-hidden className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-sky-200 bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.7)]" style={{ left: `${at(data.spot)}%` }} />}
+      {data.spot !== null && <span aria-hidden className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground" style={{ left: `${at(data.spot)}%` }} />}
     </div>
-    {data.spot !== null && <div className="relative mt-1.5 h-3 font-mono text-[10px] text-sky-300">
+    {data.spot !== null && <div className="relative mt-1.5 h-3 font-mono text-[10px] text-foreground">
       <span className="absolute -translate-x-1/2" style={{ left: `${Math.min(92, Math.max(8, at(data.spot)))}%` }}>{price(data.spot)}</span></div>}
-    {(move || data.air_pockets?.length) ? <p className="mt-1 flex justify-center gap-3 text-[9px] text-slate-500">
-      {move && <span><span aria-hidden className="mr-1 inline-block h-2 w-3 rounded-sm border border-dashed border-sky-300/60 bg-sky-400/10 align-middle" />expected move</span>}
+    {(move || data.air_pockets?.length) ? <p className="mt-1 flex justify-center gap-3 text-[9px] text-muted-foreground">
+      {move && <span><span aria-hidden className="mr-1 inline-block h-2 w-3 rounded-sm border border-dashed border-muted-foreground/60 bg-foreground/10 align-middle" />expected move</span>}
       {data.air_pockets?.length ? <span><span aria-hidden className="mr-1 inline-block h-2 w-3 rounded-sm bg-[repeating-linear-gradient(135deg,rgba(196,181,253,0.55)_0_2px,transparent_2px_5px)] align-middle" />air pocket</span> : null}
     </p> : null}
     <figcaption className="sr-only">{marks.map((mark) => `${mark.name} ${price(mark.value)}`).join(", ")}{data.spot !== null ? `, price ${price(data.spot)}` : ""}</figcaption>
@@ -198,39 +198,39 @@ function Pressure({ data }: { data: Ladder }) {
   const move = data.expected_move?.state === "ready" ? data.expected_move : null;
   const day = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
   const inPocket = data.spot !== null && pockets.find((pocket) => data.spot! >= pocket.low && data.spot! <= pocket.high);
-  return <section aria-label="Pressure" className="mx-2 mb-2 rounded-lg border border-slate-700/50 bg-slate-900/40 px-3 pb-2">
+  return <section aria-label="Pressure" className="mx-2 mb-2 rounded-lg border border-border bg-card px-3 pb-2">
     <div className="flex items-baseline justify-between gap-2 py-2">
       <h3 className={LABEL}>Pressure · P(touch)</h3>
-      <span className="font-mono text-[9px] text-slate-500">{data.touch ? `by ${day(data.touch.expiration)}` : ""}</span>
+      <span className="font-mono text-[9px] text-muted-foreground">{data.touch ? `by ${day(data.touch.expiration)}` : ""}</span>
     </div>
-    {move && data.spot !== null && <p className="mb-1.5 font-mono text-[10px] text-sky-300/90">
-      EM {strikeText(Number((data.spot - move.move!).toFixed(2)))} – {strikeText(Number((data.spot + move.move!).toFixed(2)))} <span className="text-slate-500">(±{move.move!.toFixed(2)})</span></p>}
-    {!move && <p className="mb-1.5 text-[10px] text-slate-500">No expected move priced, so levels are ranked by distance{data.expected_move?.reason ? `: ${data.expected_move.reason}` : "."}</p>}
+    {move && data.spot !== null && <p className="mb-1.5 font-mono text-[10px] text-muted-foreground">
+      EM {strikeText(Number((data.spot - move.move!).toFixed(2)))} – {strikeText(Number((data.spot + move.move!).toFixed(2)))} <span className="text-muted-foreground">(±{move.move!.toFixed(2)})</span></p>}
+    {!move && <p className="mb-1.5 text-[10px] text-muted-foreground">No expected move priced, so levels are ranked by distance{data.expected_move?.reason ? `: ${data.expected_move.reason}` : "."}</p>}
     <ol className="font-mono">
       {levels.map((level) => <li key={level.price} aria-label={`${level.names.join(" + ")} ${price(level.price)}, ${level.touch == null ? "touch chance unavailable" : `${Math.round(level.touch * 100)}% touch chance`}`}
-        className={`border-t border-slate-700/40 py-1.5 ${level.inside_move === false ? "opacity-60" : ""}`}>
+        className={`border-t border-border py-1.5 ${level.inside_move === false ? "opacity-60" : ""}`}>
         <div className="flex items-baseline gap-2 text-[11px]">
-          <span className={`w-3 ${level.side === "above" ? "text-emerald-400" : level.side === "below" ? "text-rose-400" : "text-sky-300"}`}>{level.side === "above" ? "↑" : level.side === "below" ? "↓" : "•"}</span>
-          <span className="w-12 text-slate-100">{strikeText(level.price)}</span>
-          <span className="min-w-0 flex-1 text-[10px] leading-tight text-slate-400">{level.names.join(" + ")}{level.names.length > 1 && <span className="ml-1 text-amber-300">×{level.names.length}</span>}</span>
-          <span className="w-9 text-right text-slate-100">{level.touch == null ? "—" : `${Math.round(level.touch * 100)}%`}</span>
+          <span className={`w-3 ${level.side === "above" ? "text-emerald-400" : level.side === "below" ? "text-rose-400" : "text-muted-foreground"}`}>{level.side === "above" ? "↑" : level.side === "below" ? "↓" : "•"}</span>
+          <span className="w-12 text-foreground">{strikeText(level.price)}</span>
+          <span className="min-w-0 flex-1 text-[10px] leading-tight text-muted-foreground">{level.names.join(" + ")}{level.names.length > 1 && <span className="ml-1 text-amber-300">×{level.names.length}</span>}</span>
+          <span className="w-9 text-right text-foreground">{level.touch == null ? "—" : `${Math.round(level.touch * 100)}%`}</span>
         </div>
         <div className="ml-5 mt-1 flex items-center gap-2">
-          <span aria-hidden className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
-            <span className="block h-full rounded-full bg-sky-400/80" style={{ width: `${Math.round((level.touch ?? 0) * 100)}%` }} /></span>
-          <span className="whitespace-nowrap text-right text-[9px] text-slate-500">{level.distance >= 0 ? "+" : "−"}{Math.abs(level.distance * 100).toFixed(2)}% · {level.inside_move == null ? "" : level.inside_move ? "inside EM" : "beyond EM"}</span>
+          <span aria-hidden className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
+            <span className="block h-full rounded-full bg-muted-foreground" style={{ width: `${Math.round((level.touch ?? 0) * 100)}%` }} /></span>
+          <span className="whitespace-nowrap text-right text-[9px] text-muted-foreground">{level.distance >= 0 ? "+" : "−"}{Math.abs(level.distance * 100).toFixed(2)}% · {level.inside_move == null ? "" : level.inside_move ? "inside EM" : "beyond EM"}</span>
         </div>
       </li>)}
     </ol>
-    {pockets.length > 0 && <div className="mt-1 border-t border-slate-700/40 pt-1.5">
+    {pockets.length > 0 && <div className="mt-1 border-t border-border pt-1.5">
       <p className={`${LABEL} pb-1`}>Air pockets</p>
       {inPocket && <p role="note" className="pb-1 text-[10px] text-violet-200">Price is inside the {strikeText(inPocket.low)}–{strikeText(inPocket.high)} pocket: little hedging here, so moves can run.</p>}
       <ul className="font-mono text-[10px]">
         {pockets.map((pocket) => <li key={pocket.low} className="flex justify-between py-0.5 text-violet-200/90">
-          <span>{strikeText(pocket.low)} – {strikeText(pocket.high)}</span><span className="text-slate-500">{pocket.strikes} thin strikes</span></li>)}
+          <span>{strikeText(pocket.low)} – {strikeText(pocket.high)}</span><span className="text-muted-foreground">{pocket.strikes} thin strikes</span></li>)}
       </ul>
     </div>}
-    <p className="pt-1.5 text-[9px] leading-4 text-slate-500">Model estimates from the straddle&apos;s IV, not forecasts. Levels within 0.15% merge (×n). Air pockets: strikes under 15% of the largest net gamma within twice the expected move.</p>
+    <p className="pt-1.5 text-[9px] leading-4 text-muted-foreground">Model estimates from the straddle&apos;s IV, not forecasts. Levels within 0.15% merge (×n). Air pockets: strikes under 15% of the largest net gamma within twice the expected move.</p>
   </section>;
 }
 
@@ -245,24 +245,24 @@ function Read({ data }: { data: Ladder }) {
     { name: "Call wall", value: strikeText(data.walls.call_oi), tone: "text-emerald-400", note: "most call open interest" },
     { name: "Put wall", value: strikeText(data.walls.put_oi), tone: "text-rose-400", note: "most put open interest" },
     { name: "Top gamma", value: strikeText(data.top_gamma), tone: "text-amber-300", note: "largest net gamma strike" },
-    { name: "Gamma flip", value: data.flip ? strikeText(data.flip.price) : "—", tone: "text-sky-400", note: data.flip ? (data.flip.price == null ? data.flip.note : "model estimate") : "SPY, QQQ and SPX only" },
+    { name: "Gamma flip", value: data.flip ? strikeText(data.flip.price) : "—", tone: "text-foreground", note: data.flip ? (data.flip.price == null ? data.flip.note : "model estimate") : "SPY, QQQ and SPX only" },
     { name: "Max pain", value: strikeText(data.max_pain?.price), tone: "text-amber-300", note: data.max_pain ? `${day(data.max_pain.expiration)} · folklore, not a forecast` : data.max_pain_reason },
     { name: "Net GEX · in scope", value: gexText(data.net_gamma), tone: (data.net_gamma ?? 0) < 0 ? "text-rose-400" : "text-emerald-400", note: "per 1%, assumed dealer side" },
-    { name: "Expected move", value: move?.state === "ready" && move.move != null ? `±${move.move.toFixed(2)}` : "—", tone: "text-slate-100",
+    { name: "Expected move", value: move?.state === "ready" && move.move != null ? `±${move.move.toFixed(2)}` : "—", tone: "text-foreground",
       note: move?.state === "ready" ? `${percent(move.percent)} · ${day(move.expiration)} straddle${move.iv ? ` · IV ${percent(move.iv)}` : ""}` : move?.reason ?? "no straddle priced yet" },
     { name: "P(touch) call wall", value: percent(data.touch?.call_wall), tone: "text-emerald-400", note: touchNote },
     { name: "P(touch) put wall", value: percent(data.touch?.put_wall), tone: "text-rose-400", note: touchNote },
-    { name: "Put / call", value: `${data.totals?.put_call_oi?.toFixed(2) ?? "—"} OI · ${data.totals?.put_call_volume?.toFixed(2) ?? "—"} vol`, tone: "text-slate-300" },
+    { name: "Put / call", value: `${data.totals?.put_call_oi?.toFixed(2) ?? "—"} OI · ${data.totals?.put_call_volume?.toFixed(2) ?? "—"} vol`, tone: "text-foreground/80" },
   ];
-  return <section aria-label="The read" className="m-2 rounded-lg border border-slate-700/50 bg-slate-900/40 px-3 pb-1">
+  return <section aria-label="The read" className="m-2 rounded-lg border border-border bg-card px-3 pb-1">
     <h3 className={`${LABEL} py-2`}>The read</h3>
     <dl className="font-mono">
-      {lines.map((line) => <div key={line.name} className="border-t border-slate-700/40 py-1.5">
+      {lines.map((line) => <div key={line.name} className="border-t border-border py-1.5">
         <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-[10px] uppercase tracking-wider text-slate-400">{line.name}</dt>
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{line.name}</dt>
           <dd className={`text-xs ${line.tone}`}>{line.value}</dd>
         </div>
-        {line.note && <p className="text-right text-[9px] text-slate-500">{line.note}</p>}
+        {line.note && <p className="text-right text-[9px] text-muted-foreground">{line.note}</p>}
       </div>)}
     </dl>
   </section>;

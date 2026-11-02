@@ -20,7 +20,7 @@ export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRe
 }) {
   const alerts = data?.alerts ?? [];
   const active = alerts.filter((alert) => alert.state === "active").length;
-  const icon = `inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 ${narrow ? "h-11 w-11" : "h-6 w-6"}`;
+  const icon = `inline-flex shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary ${narrow ? "h-11 w-11" : "h-6 w-6"}`;
   // Open for an alert that is waiting, or one whose phone message did not go: that is status, not first-use help.
   const undelivered = alerts.some((alert) => alert.event && alert.event.delivery !== "sent");
   const attention = active > 0 || undelivered;
@@ -33,17 +33,17 @@ export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRe
       const event = alert.event;
       return <li key={alert.id} className="text-[11px]" aria-label={`${text}, ${alert.state}`}>
         <div className="flex items-center gap-1.5">
-          {alert.state === "active" ? <Bell size={12} className="shrink-0 text-amber-300" aria-hidden /> : <BellOff size={12} className="shrink-0 text-slate-500" aria-hidden />}
-          <span className={`min-w-0 flex-1 truncate ${alert.state === "active" ? "text-slate-200" : "text-slate-500"}`} title={alert.label}>{text}</span>
-          {alert.state === "fired" && <button aria-label={`Re-arm ${text}`} title="Arm it again from the current price" onClick={() => onRearm(alert)} className={`${icon} hover:text-slate-200`}><RotateCcw size={12} /></button>}
+          {alert.state === "active" ? <Bell size={12} className="shrink-0 text-amber-300" aria-hidden /> : <BellOff size={12} className="shrink-0 text-muted-foreground" aria-hidden />}
+          <span className={`min-w-0 flex-1 truncate ${alert.state === "active" ? "text-foreground" : "text-muted-foreground"}`} title={alert.label}>{text}</span>
+          {alert.state === "fired" && <button aria-label={`Re-arm ${text}`} title="Arm it again from the current price" onClick={() => onRearm(alert)} className={`${icon} hover:text-foreground`}><RotateCcw size={12} /></button>}
           <button aria-label={`Remove ${text}`} title="Remove this alert" onClick={() => onRemove(alert)} className={`${icon} hover:text-rose-300`}><Trash2 size={12} /></button>
         </div>
-        <p className="ml-[18px] truncate text-[10px] text-slate-500">{[alert.label, alert.session === "extended" ? "extended hours" : "regular hours"].filter(Boolean).join(" · ")}</p>
+        <p className="ml-[18px] truncate text-[10px] text-muted-foreground">{[alert.label, alert.session === "extended" ? "extended hours" : "regular hours"].filter(Boolean).join(" · ")}</p>
         {moved?.has(alert.id) && <p className="ml-[18px] text-[10px] text-amber-300/90">That strike no longer carries the level it was made from; the alert stays at {price(shown)}.</p>}
-        {event && <p className="ml-[18px] text-[10px] text-slate-400">
+        {event && <p className="ml-[18px] text-[10px] text-muted-foreground">
           Fired {etTime(event.event_at, true)} {etTime(event.event_at)} ET at {price(event.price)}{event.source === "minute_bars" ? " (1-minute bar)" : ""} · <span
             className={event.delivery === "sent" ? "text-emerald-400" : "text-amber-300"} title={event.error ?? undefined}>{deliveryText(event, !!data?.phone)}</span></p>}
       </li>;
-    })}</ul> : <p className="text-[11px] leading-5 text-slate-500">No alerts yet.</p>}
+    })}</ul> : <p className="text-[11px] leading-5 text-muted-foreground">No alerts yet.</p>}
   </DockSection>;
 }

@@ -51,26 +51,26 @@ export default function SymbolInfoPeers({ symbol, result, onSelect, movement, on
   // A failed read or a stale list opens the block whatever was saved.
   const problem = !!shown?.error || (!!data && (data.source.state === "stale" || (data.state === "ready" && data.quotes.state !== "ok") || (data.state !== "ready" && data.state !== "none")));
   return <Block name="peers" title="Peers" forceOpen={problem || sessionFirst}><div role="group" aria-label="Peers">
-    {!shown ? <p role="status" className="text-xs text-slate-500">Loading peers…</p>
-      : shown.error ? <p className="text-xs text-slate-500">Peers unavailable.</p>
+    {!shown ? <p role="status" className="text-xs text-muted-foreground">Loading peers…</p>
+      : shown.error ? <p className="text-xs text-muted-foreground">Peers unavailable.</p>
       : data && data.state === "ready" ? <>
-        <p className="mb-1 text-[10px] text-slate-500">Day change</p>
+        <p className="mb-1 text-[10px] text-muted-foreground">Day change</p>
         <div className="flex flex-wrap gap-1">
           {data.peers.map((peer) => {
             const change = peer.change_percentage;
             return <button key={peer.symbol} aria-label={`Peer ${peer.symbol}`} title={`${peer.name ?? peer.symbol}${peer.last != null ? ` · $${peer.last.toFixed(2)}` : ""} · ${source}`}
-              onClick={() => onSelect(peer.symbol)} className="flex min-h-11 items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] hover:border-sky-400/60 lg:min-h-0">
-              <span className="font-medium text-slate-200">{peer.symbol}</span>
-              <span className={change == null ? "text-slate-500" : change > 0 ? "text-emerald-300" : change < 0 ? "text-rose-300" : "text-slate-400"}>
+              onClick={() => onSelect(peer.symbol)} className="flex min-h-11 items-center gap-1 rounded border border-border px-2 py-1 text-[11px] hover:border-muted-foreground/60 lg:min-h-0">
+              <span className="font-medium text-foreground">{peer.symbol}</span>
+              <span className={change == null ? "text-muted-foreground" : change > 0 ? "text-emerald-300" : change < 0 ? "text-rose-300" : "text-muted-foreground"}>
                 {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}</span>
             </button>;
           })}
         </div>
-        {data.source.provider === "curated" && <p className="mt-1 text-[10px] text-slate-500">{data.source.label}</p>}
+        {data.source.provider === "curated" && <p className="mt-1 text-[10px] text-muted-foreground">{data.source.label}</p>}
         {(data.source.state === "stale" || data.quotes.state !== "ok") && <p className="mt-1 text-[10px] text-amber-300">{data.quotes.state !== "ok" ? `Quotes: ${data.quotes.message ?? "unavailable"}` : data.source.message}</p>}
       </>
-      : data && data.state === "none" ? <p className="text-xs text-slate-500">No related companies listed for {symbol} (funds and ETFs have none).</p>
-      : <p className="text-xs text-slate-500">{data?.source.message ?? "Peers unavailable."}</p>}
+      : data && data.state === "none" ? <p className="text-xs text-muted-foreground">No related companies listed for {symbol} (funds and ETFs have none).</p>
+      : <p className="text-xs text-muted-foreground">{data?.source.message ?? "Peers unavailable."}</p>}
   </div>{onGroup && <GroupMovement sessionFirst={sessionFirst} result={movement ?? null} onGroup={onGroup} onSelect={onSelect} />}</Block>;
 }
 
@@ -79,39 +79,39 @@ function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFir
   const [period, setPeriod] = useState<"recent" | "session" | "recovery">(sessionFirst ? "session" : "recent");
   const response = result?.data;
   const data = period === "recovery" ? response?.recovery_context : period === "session" ? response?.session_context : response;
-  return <div role="group" aria-label="Group movement" className="mt-3 border-t border-slate-700/60 pt-2 text-xs">
-    <p className="font-medium text-slate-200">Group movement</p>
+  return <div role="group" aria-label="Group movement" className="mt-3 border-t border-border pt-2 text-xs">
+    <p className="font-medium text-foreground">Group movement</p>
     <div className="my-2 flex gap-1" aria-label="Movement window">
       {(["recent", "session", "recovery"] as const).map((value) => <button key={value} aria-pressed={period === value}
-        onClick={() => setPeriod(value)} className={`min-h-11 rounded border px-2 py-1 lg:min-h-8 ${period === value ? "border-sky-400 text-sky-300" : "border-slate-700 text-slate-400"}`}>
+        onClick={() => setPeriod(value)} className={`min-h-11 rounded border px-2 py-1 lg:min-h-8 ${period === value ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
         {value === "recent" ? "15 min" : value === "session" ? "Session" : "From low"}
       </button>)}
     </div>
-    {period === "session" && <p className="mb-2 text-[11px] text-slate-400">Since the first usable recorded sample, not market open or the session low. A late start misses earlier moves; this does not establish a sustained recovery.</p>}
-    {period === "recovery" && <p className="mb-2 text-[11px] text-slate-400">All rows use the selected stock’s recorded-low pass, not each peer’s own low. This does not establish a sustained recovery.</p>}
-    {!result ? <p role="status" className="mt-1 text-slate-500">Loading recorded movement…</p>
+    {period === "session" && <p className="mb-2 text-[11px] text-muted-foreground">Since the first usable recorded sample, not market open or the session low. A late start misses earlier moves; this does not establish a sustained recovery.</p>}
+    {period === "recovery" && <p className="mb-2 text-[11px] text-muted-foreground">All rows use the selected stock’s recorded-low pass, not each peer’s own low. This does not establish a sustained recovery.</p>}
+    {!result ? <p role="status" className="mt-1 text-muted-foreground">Loading recorded movement…</p>
       : result.error ? <p className="mt-1 text-amber-300">Group movement unavailable. Previous values hidden until a fresh read succeeds.</p>
-      : !data ? <p className="mt-1 text-slate-400">{response?.reason ?? "This comparison window is unavailable."}</p>
+      : !data ? <p className="mt-1 text-muted-foreground">{response?.reason ?? "This comparison window is unavailable."}</p>
       : <>
-        {data.group && <label className="mt-2 block text-slate-400">Compare group
+        {data.group && <label className="mt-2 block text-muted-foreground">Compare group
           <select aria-label="Comparison group" value={data.group.name} onChange={(event) => {
             const group = data.groups.find((g) => g.name === event.target.value); if (group) onGroup(group);
-          }} className="mt-1 min-h-11 w-full min-w-0 rounded border border-slate-600 bg-slate-900 px-1 text-xs text-slate-200 lg:min-h-8">
+          }} className="mt-1 min-h-11 w-full min-w-0 rounded border border-border bg-card px-1 text-xs text-foreground lg:min-h-8">
             {data.groups.map((g) => <option key={g.name}>{g.name}</option>)}
           </select>
         </label>}
-        {data.reason && <p className={`mt-2 ${data.state === "stale" || data.state === "partial" ? "text-amber-300" : "text-slate-400"}`}>{data.reason}</p>}
-        {period === "recovery" && data.low_anchor && <p className="my-2 text-slate-200">{data.low_anchor.symbol} sampled low ${data.low_anchor.price.toFixed(2)} · {nyTime(data.low_anchor.pass_at)} ET</p>}
+        {data.reason && <p className={`mt-2 ${data.state === "stale" || data.state === "partial" ? "text-amber-300" : "text-muted-foreground"}`}>{data.reason}</p>}
+        {period === "recovery" && data.low_anchor && <p className="my-2 text-foreground">{data.low_anchor.symbol} sampled low ${data.low_anchor.price.toFixed(2)} · {nyTime(data.low_anchor.pass_at)} ET</p>}
         {period === "recovery" && data.at_recorded_low && <p className="my-2 text-amber-300">Still at the recorded low — no net rebound.</p>}
-        {period === "recovery" && data.low_search && <div className="my-2 text-[10px] text-slate-400">
+        {period === "recovery" && data.low_search && <div className="my-2 text-[10px] text-muted-foreground">
           <p>Low search: {data.session} · {nyTime(data.low_search.start)}–{nyTime(data.low_search.end)} ET. {data.low_search.eligible_minutes} of {data.low_search.expected_minutes} minutes with eligible {data.symbol} samples; {data.low_search.omitted_samples} samples omitted.</p>
           <p>Recording may start late or miss lower prices between samples. Selecting another stock recalculates the anchor.</p>
         </div>}
-        {data.window && <p className="my-2 text-[11px] text-slate-400">{data.live ? "Recorded" : "Last recorded session"} {data.session}<br />{nyTime(data.window.start)}–{nyTime(data.window.end)} ET</p>}
-        {data.coverage && <p className="mb-2 text-slate-300">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available} of {data.coverage.peers_total} peers available</p>}
-        {data.coverage && <p className="mb-2 text-[10px] text-slate-500">{data.coverage.recorded_minutes} of {data.coverage.expected_minutes} minutes recorded. Returns use the two endpoint passes.</p>}
+        {data.window && <p className="my-2 text-[11px] text-muted-foreground">{data.live ? "Recorded" : "Last recorded session"} {data.session}<br />{nyTime(data.window.start)}–{nyTime(data.window.end)} ET</p>}
+        {data.coverage && <p className="mb-2 text-foreground/80">{data.coverage.peers_up} up · {data.coverage.peers_down} down · {data.coverage.peers_available} of {data.coverage.peers_total} peers available</p>}
+        {data.coverage && <p className="mb-2 text-[10px] text-muted-foreground">{data.coverage.recorded_minutes} of {data.coverage.expected_minutes} minutes recorded. Returns use the two endpoint passes.</p>}
         <ComparisonRows data={data} onSelect={onSelect} onGroup={onGroup} />
-        <p className="mt-2 break-words text-[10px] text-slate-500">{data.source} · {data.universe_version}. Sampled price changes, not candle confirmation or a trade signal.</p>
+        <p className="mt-2 break-words text-[10px] text-muted-foreground">{data.source} · {data.universe_version}. Sampled price changes, not candle confirmation or a trade signal.</p>
       </>}
   </div>;
 }
@@ -120,14 +120,14 @@ function GroupMovement({ result, onGroup, onSelect, sessionFirst }: { sessionFir
 /** Shared endpoint rows; holding context is read-only and does not change charts. */
 export function ComparisonRows({ data, onSelect, onGroup }: { data: GroupComparison; onSelect?(symbol: string): void; onGroup?(group: RadarGroup): void }) {
   return <ul className="space-y-1" aria-label="Same-window movements">
-          {data.rows.map((row) => <li key={row.symbol} className="border-b border-slate-800 pb-1">
+          {data.rows.map((row) => <li key={row.symbol} className="border-b border-border pb-1">
             <button disabled={!onSelect} onClick={() => { if (data.group) onGroup?.(data.group); onSelect?.(row.symbol); }} aria-label={`Compare chart ${row.symbol}`}
               className="flex min-h-11 w-full items-center justify-between gap-2 text-left lg:min-h-7">
-              <span className="text-slate-200">{row.symbol}<span className="ml-1 text-[10px] text-slate-500">{row.role === "selected" ? "selected" : row.role === "benchmark" ? "benchmark" : ""}</span></span>
-              <span className={row.change_pct == null ? "text-slate-500" : row.change_pct > 0 ? "text-emerald-300" : row.change_pct < 0 ? "text-rose-300" : "text-slate-400"}>{row.change_pct == null ? "—" : `${row.change_pct > 0 ? "+" : ""}${row.change_pct.toFixed(2)}%`}</span>
+              <span className="text-foreground">{row.symbol}<span className="ml-1 text-[10px] text-muted-foreground">{row.role === "selected" ? "selected" : row.role === "benchmark" ? "benchmark" : ""}</span></span>
+              <span className={row.change_pct == null ? "text-muted-foreground" : row.change_pct > 0 ? "text-emerald-300" : row.change_pct < 0 ? "text-rose-300" : "text-muted-foreground"}>{row.change_pct == null ? "—" : `${row.change_pct > 0 ? "+" : ""}${row.change_pct.toFixed(2)}%`}</span>
             </button>
             {row.reason && <p className="text-[10px] text-amber-300">{row.reason}</p>}
-            {row.start && row.end && <details className="text-[10px] text-slate-500"><summary className="cursor-pointer">Observation times</summary>
+            {row.start && row.end && <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">Observation times</summary>
               <p>Trades: {nyTime(row.start.trade_at, true)} → {nyTime(row.end.trade_at, true)} ET</p>
               <p>Read: {nyTime(row.start.retrieved_at, true)} → {nyTime(row.end.retrieved_at, true)} ET</p>
             </details>}

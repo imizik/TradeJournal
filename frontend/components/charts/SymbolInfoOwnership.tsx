@@ -40,10 +40,10 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
   return <>
   <Block name="ownership" title="Ownership" forceOpen={(company.state !== "ready" && company.state !== "none") || !!shown?.error || !!data?.message || (!!data && data.state !== "ready" && data.state !== "none")}><div className="space-y-3">
     <div aria-label="13F institutional holders" role="group" className="space-y-1.5">
-      <h4 className="text-slate-300">Institutions (13F){owners?.as_of ? <span className="font-normal text-slate-500"> · as of {owners.as_of}</span> : null}</h4>
-      {company.state !== "ready" ? <p className={company.state === "none" ? "text-slate-500" : "text-amber-300"}>{company.state === "none" ? unavailable : company.message ?? "Not loaded yet."}</p>
-        : !owners ? <p className="text-slate-500">Tradier lists no 13F filers for this symbol.</p>
-        : !ownersReported(owners) ? <p className="text-slate-500">13F summary not reported by Tradier for this symbol.</p>
+      <h4 className="text-foreground/80">Institutions (13F){owners?.as_of ? <span className="font-normal text-muted-foreground"> · as of {owners.as_of}</span> : null}</h4>
+      {company.state !== "ready" ? <p className={company.state === "none" ? "text-muted-foreground" : "text-amber-300"}>{company.state === "none" ? unavailable : company.message ?? "Not loaded yet."}</p>
+        : !owners ? <p className="text-muted-foreground">Tradier lists no 13F filers for this symbol.</p>
+        : !ownersReported(owners) ? <p className="text-muted-foreground">13F summary not reported by Tradier for this symbol.</p>
         : <Rows>
           <Row label="Holders" value={owners.holders ? count(owners.holders) : "—"} title={owners.holders ? label : `${WHY_ZERO} ${label}`} />
           <Row label="Held by institutions" value={percent(owners.percent_held)} title={label} explain={EXPLAIN.held} />
@@ -57,11 +57,11 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
     </div>
 
     <div aria-label="Insider activity" role="group" className="space-y-1.5">
-      <h4 className="flex flex-wrap items-baseline gap-x-1.5 text-slate-300">Insiders, last 90 days
-        {data && <span title="Yahoo's insider feed is not an official source" className="text-[10px] font-normal text-slate-500">{data.source}</span>}</h4>
-      {fund ? <p className="text-slate-500">Not available for ETFs or funds.</p>
+      <h4 className="flex flex-wrap items-baseline gap-x-1.5 text-foreground/80">Insiders, last 90 days
+        {data && <span title="Yahoo's insider feed is not an official source" className="text-[10px] font-normal text-muted-foreground">{data.source}</span>}</h4>
+      {fund ? <p className="text-muted-foreground">Not available for ETFs or funds.</p>
         : shown?.error ? <p className="text-amber-300">{shown.error}</p>
-        : !data ? <p role="status" className="text-slate-500">Loading insider activity…</p>
+        : !data ? <p role="status" className="text-muted-foreground">Loading insider activity…</p>
         : data.state === "ready" ? <>
           <Rows>
             <Row label="Open-market buys" value={`${count(data.buys?.count)} · ${shares(data.buys?.shares)} sh`} />
@@ -69,23 +69,23 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
             <Row label="Net shares" value={data.net_shares == null ? "—" : signed(data.net_shares, `${shares(Math.abs(data.net_shares))} sh`)} />
             <Row label="Net value" value={data.net_value == null ? "—" : signed(data.net_value, money(data.net_value))} title={data.net_value == null ? "Yahoo gave no value for at least one counted transaction." : undefined} />
           </Rows>
-          {data.buys?.count === 0 && data.sells?.count === 0 && <p className="text-slate-500">No open-market insider buys or sells in this window.</p>}
-          {data.latest && data.latest.length > 0 && <ul aria-label="Latest insider transactions" className="divide-y divide-slate-800/70">
+          {data.buys?.count === 0 && data.sells?.count === 0 && <p className="text-muted-foreground">No open-market insider buys or sells in this window.</p>}
+          {data.latest && data.latest.length > 0 && <ul aria-label="Latest insider transactions" className="divide-y divide-border">
             {data.latest.map((row, index) => <li key={`${row.date}-${row.insider}-${index}`} className="py-1" title={`${row.insider ?? "Unknown"}${row.position ? ` · ${row.position}` : ""} · ${row.date}`}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate text-slate-300">{row.insider ?? "Unknown"}</span>
+                <span className="min-w-0 truncate text-foreground/80">{row.insider ?? "Unknown"}</span>
                 <span className={`shrink-0 whitespace-nowrap font-mono ${row.kind === "buy" ? "text-emerald-300" : "text-rose-300"}`}>{row.kind === "buy" ? "Buy" : "Sell"} {shares(row.shares)}</span>
               </div>
-              <div className="flex items-baseline justify-between gap-2 text-[10px] text-slate-500">
+              <div className="flex items-baseline justify-between gap-2 text-[10px] text-muted-foreground">
                 <span className="min-w-0 truncate">{row.date}{row.position ? ` · ${row.position}` : ""}</span>
                 {row.value != null && <span className="shrink-0 whitespace-nowrap font-mono">{money(row.value)}</span>}
               </div>
             </li>)}
           </ul>}
-          <p className="text-[10px] text-slate-500">{data.note}{data.excluded ? ` ${data.excluded} other filings left out.` : ""}</p>
+          <p className="text-[10px] text-muted-foreground">{data.note}{data.excluded ? ` ${data.excluded} other filings left out.` : ""}</p>
           {data.message && <p className="text-[10px] text-amber-300">{data.message} Showing the cached copy ({readAt(data.fetched_at)}).</p>}
         </>
-        : <p className={data.state === "none" ? "text-slate-500" : "text-amber-300"}>{data.message ?? "Insider activity is unavailable."}</p>}
+        : <p className={data.state === "none" ? "text-muted-foreground" : "text-amber-300"}>{data.message ?? "Insider activity is unavailable."}</p>}
     </div>
   </div></Block>
   {children}

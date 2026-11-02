@@ -12,7 +12,7 @@ function Block({ title, block, none, children }: { title: string; block: EventsB
   return <section aria-label={title} className="space-y-1.5">
     <h3 className={HEADING}>{title}</h3>
     {block.state === "ready" ? children
-      : block.state === "none" ? <p className="text-slate-500">{none}</p>
+      : block.state === "none" ? <p className="text-muted-foreground">{none}</p>
       : <p className="text-amber-300">{block.message ?? "Not loaded yet."}</p>}
     {block.state === "ready" && block.message && <p className="text-[10px] text-amber-300">{block.message} Showing the copy {readAt(block.fetched_at)}.</p>}
   </section>;
@@ -20,9 +20,9 @@ function Block({ title, block, none, children }: { title: string; block: EventsB
 
 function DividendRow({ label, row }: { label: string; row: Dividend | null }) {
   return <div className="py-0.5" title={row ? `Observed · Tradier type ${row.type || "—"}${row.record_date ? ` · record ${row.record_date}` : ""}${row.declared ? ` · declared ${row.declared}` : ""}` : undefined}>
-    <div className="flex items-baseline justify-between gap-2"><dt className="min-w-0 truncate text-slate-500">{label}</dt>
-      <dd className="shrink-0 whitespace-nowrap text-slate-200">{row ? <>{eventDay(row.ex_date)} · <span className="font-mono">{money(row.amount, row.currency)}</span></> : "None announced"}</dd></div>
-    {row?.pay_date && <p className="text-right text-[10px] text-slate-500">pays {eventDay(row.pay_date)}</p>}
+    <div className="flex items-baseline justify-between gap-2"><dt className="min-w-0 truncate text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 whitespace-nowrap text-foreground">{row ? <>{eventDay(row.ex_date)} · <span className="font-mono">{money(row.amount, row.currency)}</span></> : "None announced"}</dd></div>
+    {row?.pay_date && <p className="text-right text-[10px] text-muted-foreground">pays {eventDay(row.pay_date)}</p>}
   </div>;
 }
 
@@ -35,20 +35,20 @@ export default function SymbolInfoEvents({ data }: { data: SymbolEvents }) {
   return <div className="space-y-4 text-[11px]">
     <Block title="Next earnings" block={earnings} none={`Tradier lists no earnings for ${data.symbol}. ETFs, funds and indices do not report them.`}>
       {next && days !== null ? <div className="space-y-1">
-        <p className="flex flex-wrap items-center gap-2 text-sm text-slate-100">
+        <p className="flex flex-wrap items-center gap-2 text-sm text-foreground">
           <span title="Observed · the date Tradier's calendar gives">{eventDay(next.date)}</span>
           <span title={next.status === "estimated" ? "Estimated · Tradier's estimate; the company has not announced this date" : "Observed · the company's announced date"}
             className={`rounded border px-1.5 py-0.5 text-[10px] ${next.status === "estimated" ? "border-dashed border-violet-400/50 text-violet-200" : "border-violet-400/60 bg-violet-400/10 text-violet-200"}`}>
             {next.status === "estimated" ? "Estimated" : "Confirmed"}</span>
         </p>
-        <p className="text-slate-400"><span title={`Calculated · New York calendar days; the chart shows a badge within ${BADGE_DAYS}`}>{away(days)}</span> · {next.label}</p>
-        <p className="text-slate-500" title={earnings.time_note}>Time of day not published</p>
-      </div> : <p className="text-slate-400">Not announced. Nothing is shown until Tradier lists a date.</p>}
+        <p className="text-muted-foreground"><span title={`Calculated · New York calendar days; the chart shows a badge within ${BADGE_DAYS}`}>{away(days)}</span> · {next.label}</p>
+        <p className="text-muted-foreground" title={earnings.time_note}>Time of day not published</p>
+      </div> : <p className="text-muted-foreground">Not announced. Nothing is shown until Tradier lists a date.</p>}
       {earnings.reports.length > 0 && <div>
-        <h4 className="mt-3 text-[10px] uppercase tracking-wider text-slate-500">Past reports · last {earnings.reports.length}</h4>
-        <ul className="mt-1 divide-y divide-slate-800">
+        <h4 className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground">Past reports · last {earnings.reports.length}</h4>
+        <ul className="mt-1 divide-y divide-border">
           {earnings.reports.map((report) => <li key={report.date} className="flex justify-between gap-2 py-1.5" title="Observed · confirmed report date">
-            <span className="text-slate-300">{eventDay(report.date)}</span><span className="text-slate-500">{report.label}</span></li>)}
+            <span className="text-foreground/80">{eventDay(report.date)}</span><span className="text-muted-foreground">{report.label}</span></li>)}
         </ul>
       </div>}
     </Block>
@@ -61,8 +61,8 @@ export default function SymbolInfoEvents({ data }: { data: SymbolEvents }) {
     <Block title="Splits · last two years" block={splits} none={`No splits on record for ${data.symbol}.`}>
       {splits.rows.length ? <ul className="space-y-1">
         {splits.rows.map((split) => <li key={split.ex_date} className="flex justify-between gap-2" title={`Observed · ${split.to} new shares for every ${split.from}`}>
-          <span className="text-slate-300">{eventDay(split.ex_date)}</span><span className="font-mono text-slate-200">{split.label}</span></li>)}
-      </ul> : <p className="text-slate-500">No splits in the last two years</p>}
+          <span className="text-foreground/80">{eventDay(split.ex_date)}</span><span className="font-mono text-foreground">{split.label}</span></li>)}
+      </ul> : <p className="text-muted-foreground">No splits in the last two years</p>}
     </Block>
     <SourceFooter items={[{ source: earnings.source, at: earnings.fetched_at, label: "Earnings" }, { source: dividends.source, at: dividends.fetched_at, label: "Dividends" }, { source: splits.source, at: splits.fetched_at, label: "Splits" }]} />
   </div>;

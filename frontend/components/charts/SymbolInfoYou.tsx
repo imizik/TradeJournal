@@ -8,18 +8,18 @@ const holding = (minutes: number | null) => minutes == null ? "—" : minutes < 
 const contract = (trade: SymbolTrade) => trade.instrument_type === "stock" ? "Stock" : `${trade.strike ?? "—"} ${trade.option_type ?? "option"} · ${trade.expiration ?? "—"}`;
 
 function TradeLink({ trade, symbol }: { trade: SymbolTrade; symbol: string }) {
-  return <Link href={`/trades/${trade.id}`} className="block rounded px-1 py-2 hover:bg-slate-800 focus-visible:outline-sky-400">
-    <span className="flex justify-between gap-2 text-slate-300"><span className="min-w-0 break-words">{symbol} · {contract(trade)}</span><span className="shrink-0 font-mono">{money(trade.realized_pnl)}</span></span>
-    <span className="mt-1 block text-[10px] text-slate-500">{trade.account_name} · {trade.last4} · {trade.status}</span>
-    <span className="block text-[10px] text-slate-500">{wallTime(trade.closed_at ?? trade.opened_at)}</span>
+  return <Link href={`/trades/${trade.id}`} className="block rounded px-1 py-2 hover:bg-secondary focus-visible:outline-ring">
+    <span className="flex justify-between gap-2 text-foreground/80"><span className="min-w-0 break-words">{symbol} · {contract(trade)}</span><span className="shrink-0 font-mono">{money(trade.realized_pnl)}</span></span>
+    <span className="mt-1 block text-[10px] text-muted-foreground">{trade.account_name} · {trade.last4} · {trade.status}</span>
+    <span className="block text-[10px] text-muted-foreground">{wallTime(trade.closed_at ?? trade.opened_at)}</span>
   </Link>;
 }
 
 export default function SymbolInfoYou({ data }: { data: SymbolJournal }) {
   const checked = new Date(data.as_of).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" });
   return <div className="space-y-4 text-[11px]">
-    {!data.total_trades ? <p className="text-slate-400">No trades on this symbol</p> : <>
-      <p className="text-[10px] leading-4 text-slate-500">All journal history. Results use completed trades, including expirations. Open trades are separate.</p>
+    {!data.total_trades ? <p className="text-muted-foreground">No trades on this symbol</p> : <>
+      <p className="text-[10px] leading-4 text-muted-foreground">All journal history. Results use completed trades, including expirations. Open trades are separate.</p>
       <Rows>
         {([
           ["Closed trades", data.closed_trades, "Observed · stored closed and expired trades"],
@@ -31,10 +31,10 @@ export default function SymbolInfoYou({ data }: { data: SymbolJournal }) {
       </Rows>
       {!!data.missing_pnl && <p className="text-amber-300">{data.missing_pnl} completed trades have no P&L. Total and win rate unavailable; best/worst use known results.</p>}
       <div><h3 className={HEADING}>Open positions · {data.open_positions.length} trades</h3>
-        {data.open_positions.length ? <><p className="mt-1 text-[10px] text-slate-500">P&L shown is realized on partial exits, when available.</p>{data.open_positions.map((trade) => <TradeLink key={trade.id} trade={trade} symbol={data.symbol} />)}</> : <p className="mt-1 text-slate-500">No open positions</p>}</div>
-      <div title={`Calculated · ranked by stored completed-trade P&L · read ${checked}`}><h3 className={HEADING}>Best trade</h3>{data.best_trade ? <TradeLink trade={data.best_trade} symbol={data.symbol} /> : <p className="mt-1 text-slate-500">—</p>}</div>
-      <div title={`Calculated · ranked by stored completed-trade P&L · read ${checked}`}><h3 className={HEADING}>Worst trade</h3>{data.worst_trade ? <TradeLink trade={data.worst_trade} symbol={data.symbol} /> : <p className="mt-1 text-slate-500">—</p>}</div>
-      <div><h3 className={HEADING}>Recent trades</h3><p className="mt-1 text-[10px] text-slate-500">Latest close or opening · observed</p>{data.recent_trades.map((trade) => <TradeLink key={trade.id} trade={trade} symbol={data.symbol} />)}</div>
+        {data.open_positions.length ? <><p className="mt-1 text-[10px] text-muted-foreground">P&L shown is realized on partial exits, when available.</p>{data.open_positions.map((trade) => <TradeLink key={trade.id} trade={trade} symbol={data.symbol} />)}</> : <p className="mt-1 text-muted-foreground">No open positions</p>}</div>
+      <div title={`Calculated · ranked by stored completed-trade P&L · read ${checked}`}><h3 className={HEADING}>Best trade</h3>{data.best_trade ? <TradeLink trade={data.best_trade} symbol={data.symbol} /> : <p className="mt-1 text-muted-foreground">—</p>}</div>
+      <div title={`Calculated · ranked by stored completed-trade P&L · read ${checked}`}><h3 className={HEADING}>Worst trade</h3>{data.worst_trade ? <TradeLink trade={data.worst_trade} symbol={data.symbol} /> : <p className="mt-1 text-muted-foreground">—</p>}</div>
+      <div><h3 className={HEADING}>Recent trades</h3><p className="mt-1 text-[10px] text-muted-foreground">Latest close or opening · observed</p>{data.recent_trades.map((trade) => <TradeLink key={trade.id} trade={trade} symbol={data.symbol} />)}</div>
     </>}
     <SourceFooter items={[{ source: data.source, at: Date.parse(data.as_of) / 1000 }]} />
   </div>;

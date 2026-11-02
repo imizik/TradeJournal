@@ -23,7 +23,7 @@ function againstPeers(value: number | null, field: PeerRatio, peers: PeerValuati
   const median = peers?.state === "ready" ? peers.median[field] ?? null : null;
   if (median == null) return { value: number(value), note: "" };
   return {
-    value: <>{number(value)}<span className="text-slate-500"> · peers {number(median, median >= 100 ? 0 : 1)}</span></>,
+    value: <>{number(value)}<span className="text-muted-foreground"> · peers {number(median, median >= 100 ? 0 : 1)}</span></>,
     note: `\nPeers: median of ${peers?.counted[field]} ${group ? `in ${group}` : "related companies"} with a positive value · ${peers?.source} · ${readAt(peers?.fetched_at ?? null)}`,
   };
 }
@@ -32,7 +32,7 @@ function againstPeers(value: number | null, field: PeerRatio, peers: PeerValuati
 /** One dataset's block: its rows, or why there are none. The source line is the tab's single footer. */
 function Dataset({ name, title, block, unavailable, children }: { name: string; title: string; block: OverviewBlock; unavailable: string; children: ReactNode }) {
   return <Block name={name} title={title} forceOpen={block.state !== "ready" && block.state !== "none" || !!block.message}>
-    {block.state === "ready" ? children : <p className={block.state === "none" ? "text-slate-500" : "text-amber-300"}>{block.state === "none" ? unavailable : block.message ?? "Not loaded yet."}</p>}
+    {block.state === "ready" ? children : <p className={block.state === "none" ? "text-muted-foreground" : "text-amber-300"}>{block.state === "none" ? unavailable : block.message ?? "Not loaded yet."}</p>}
     {block.state === "ready" && block.message && <p className="text-[10px] text-amber-300">{block.message} Showing the cached copy ({readAt(block.fetched_at)}).</p>}
   </Block>;
 }
@@ -72,17 +72,17 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt, peers,
         <Row label="Day range" value={quote?.day_low == null || quote?.day_high == null ? "—" : range(quote.day_low, quote.day_high)} title={qTitle} />
         <Row label="52-week range" value={weekLow == null || weekHigh == null ? "—" : range(weekLow, weekHigh)} title={qTitle} explain={EXPLAIN.week52} />
       </Rows>
-      {weekPosition != null && <div title={qTitle} className="relative mt-1 h-1 rounded bg-slate-700" role="img" aria-label={`Price is ${Math.round(weekPosition)} percent through the 52-week range`}><span className="absolute -top-0.5 h-2 w-1 rounded bg-sky-300" style={{ left: `${weekPosition}%` }} /></div>}
+      {weekPosition != null && <div title={qTitle} className="relative mt-1 h-1 rounded bg-border" role="img" aria-label={`Price is ${Math.round(weekPosition)} percent through the 52-week range`}><span className="absolute -top-0.5 h-2 w-1 rounded bg-foreground" style={{ left: `${weekPosition}%` }} /></div>}
     </Block>
 
     <Dataset name="company" title="Company" block={company} unavailable={noFundamentals}>
-      {name && <h4 title={company.name ? blockLabel(company) : qTitle} className="font-medium text-slate-200">{name}</h4>}
+      {name && <h4 title={company.name ? blockLabel(company) : qTitle} className="font-medium text-foreground">{name}</h4>}
       <Rows>
         <Row label="Sector" value={company.sector ?? "—"} title={blockLabel(company)} />
         <Row label="Employees" value={number(company.employees, 0)} title={blockLabel(company)} />
         <Row label="IPO date" value={company.ipo_date ?? "—"} title={blockLabel(company)} />
       </Rows>
-      {company.description && <p title={blockLabel(company)} className="line-clamp-2 leading-4 text-slate-400">{company.description}</p>}
+      {company.description && <p title={blockLabel(company)} className="line-clamp-2 leading-4 text-muted-foreground">{company.description}</p>}
     </Dataset>
 
     <Dataset name="statistics" title="Key statistics" block={statistics} unavailable={noFundamentals}>

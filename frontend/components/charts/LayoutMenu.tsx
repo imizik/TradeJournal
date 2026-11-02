@@ -5,8 +5,8 @@ import { Check, Pencil, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
 import { LAYOUT_NAME_MAX, LAYOUT_PRESETS, MAX_LAYOUTS, layoutName, layoutSummary, nameTaken, sameArrangement } from "@/lib/charts";
 import type { Arrangement, LayoutPreset, SavedLayout } from "@/lib/charts";
 
-const small = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent sm:h-8 sm:w-8";
-const field = "h-9 min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 text-xs text-slate-100 outline-none focus:border-sky-600";
+const small = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent sm:h-8 sm:w-8";
+const field = "h-9 min-w-0 flex-1 rounded border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-ring";
 
 /**
  * Named layouts: pick one to arrange the panels that way, save the current
@@ -61,21 +61,21 @@ export default function LayoutMenu({ layouts, current, onApply, onPreset, onSave
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-start sm:px-4 sm:pb-0 sm:pt-[12vh]"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Saved layouts"
-        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-700 bg-[#121924] shadow-2xl outline-none">
-        <div className="flex items-center justify-between border-b border-slate-700/60 px-3 py-2.5">
-          <h2 className="text-xs font-medium text-slate-200">Layouts <span className="ml-1 text-slate-500">{layouts.length}/{MAX_LAYOUTS}</span></h2>
+        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-card shadow-2xl outline-none">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
+          <h2 className="text-xs font-medium text-foreground">Layouts <span className="ml-1 text-muted-foreground">{layouts.length}/{MAX_LAYOUTS}</span></h2>
           <button className={small} aria-label="Close layouts" onClick={onClose}><X size={14} /></button>
         </div>
 
-        <ul aria-label="Built-in layouts" className="border-b border-slate-700/60 py-1">
+        <ul aria-label="Built-in layouts" className="border-b border-border py-1">
           {LAYOUT_PRESETS.map((preset) => <li key={preset.id} className="px-2">
-            <button onClick={() => onPreset(preset)} aria-label={`Use ${preset.name} preset`} className="flex min-h-11 w-full flex-col justify-center rounded-md px-2 py-1.5 text-left hover:bg-slate-800/60">
-              <span className="text-xs font-medium text-slate-100">{preset.name}</span>
-              <span className="truncate text-[10px] text-slate-500">{preset.detail}</span>
+            <button onClick={() => onPreset(preset)} aria-label={`Use ${preset.name} preset`} className="flex min-h-11 w-full flex-col justify-center rounded-md px-2 py-1.5 text-left hover:bg-secondary">
+              <span className="text-xs font-medium text-foreground">{preset.name}</span>
+              <span className="truncate text-[10px] text-muted-foreground">{preset.detail}</span>
             </button>
           </li>)}
         </ul>
-        {layouts.length > MAX_LAYOUTS && <p className="border-b border-slate-700/60 px-4 py-2 text-[11px] leading-4 text-amber-300">Two devices each saved a layout at the limit, so both are kept. Delete one before saving another.</p>}
+        {layouts.length > MAX_LAYOUTS && <p className="border-b border-border px-4 py-2 text-[11px] leading-4 text-amber-300">Two devices each saved a layout at the limit, so both are kept. Delete one before saving another.</p>}
         <ul aria-label="Saved layouts list" className="py-1">
           {layouts.map((layout) => {
             const active = sameArrangement(layout, current);
@@ -89,36 +89,36 @@ export default function LayoutMenu({ layouts, current, onApply, onPreset, onSave
               </form>
             </li>;
             if (row?.kind === "delete") return <li key={layout.id} className="flex items-center gap-1 px-3 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-xs text-slate-300">Delete {layout.name}?</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-foreground/80">Delete {layout.name}?</span>
               <button className="h-9 rounded-md bg-rose-500/15 px-3 text-xs text-rose-200 hover:bg-rose-500/25 sm:h-8" onClick={() => { onDelete(layout.id); edit(null); }}>Delete</button>
-              <button className="h-9 rounded-md px-3 text-xs text-slate-300 hover:bg-slate-800 sm:h-8" onClick={() => edit(null)}>Keep</button>
+              <button className="h-9 rounded-md px-3 text-xs text-foreground/80 hover:bg-secondary sm:h-8" onClick={() => edit(null)}>Keep</button>
             </li>;
             return <li key={layout.id} className="flex items-center gap-0.5 px-2">
               <button onClick={() => onApply(layout.id)} aria-current={active || undefined} aria-label={`Use layout ${layout.name}`}
-                className={`flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1.5 text-left hover:bg-slate-800/60 ${active ? "bg-sky-400/10" : ""}`}>
-                <span className="flex items-center gap-1.5 text-xs font-medium text-slate-100"><span className="truncate">{layout.name}</span>{active && <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-normal text-sky-300"><Check size={11} />In use</span>}</span>
-                <span className="truncate font-mono text-[10px] text-slate-500">{layoutSummary(layout)}</span>
+                className={`flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1.5 text-left hover:bg-secondary ${active ? "bg-primary/10" : ""}`}>
+                <span className="flex items-center gap-1.5 text-xs font-medium text-foreground"><span className="truncate">{layout.name}</span>{active && <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-normal text-primary"><Check size={11} />In use</span>}</span>
+                <span className="truncate font-mono text-[10px] text-muted-foreground">{layoutSummary(layout)}</span>
               </button>
               <button className={small} aria-label={`Update ${layout.name} with the current arrangement`} title="Replace with the current arrangement" disabled={active} onClick={() => onUpdate(layout.id)}><RefreshCw size={13} /></button>
               <button className={small} aria-label={`Rename ${layout.name}`} title="Rename" onClick={() => edit({ id: layout.id, kind: "rename", value: layout.name })}><Pencil size={13} /></button>
               <button className={`${small} hover:text-rose-300`} aria-label={`Delete ${layout.name}`} title="Delete" onClick={() => edit({ id: layout.id, kind: "delete", value: "" })}><Trash2 size={13} /></button>
             </li>;
           })}
-          {!layouts.length && <li className="px-4 py-3 text-xs leading-5 text-slate-500">No saved layouts yet. Arrange the charts, then save them below, for example &ldquo;0DTE SPY&rdquo; or &ldquo;Names&rdquo;.</li>}
+          {!layouts.length && <li className="px-4 py-3 text-xs leading-5 text-muted-foreground">No saved layouts yet. Arrange the charts, then save them below, for example &ldquo;0DTE SPY&rdquo; or &ldquo;Names&rdquo;.</li>}
         </ul>
 
-        <form onSubmit={save} className="space-y-2 border-t border-slate-700/60 p-3">
-          <label htmlFor="layout-name" className="block text-[11px] text-slate-400">Save the current arrangement as</label>
+        <form onSubmit={save} className="space-y-2 border-t border-border p-3">
+          <label htmlFor="layout-name" className="block text-[11px] text-muted-foreground">Save the current arrangement as</label>
           <div className="flex gap-2">
             <input id="layout-name" aria-label="Layout name" value={name} maxLength={LAYOUT_NAME_MAX} placeholder="Layout name" className={field} onChange={(e) => { setName(e.target.value); setError(""); }} />
-            <button type="submit" className="h-9 shrink-0 rounded-md border border-slate-700/60 px-3 text-xs hover:bg-slate-800 sm:h-8">Save layout</button>
+            <button type="submit" className="h-9 shrink-0 rounded-md border border-border px-3 text-xs hover:bg-secondary sm:h-8">Save layout</button>
           </div>
           {error && <p role="alert" className="text-[11px] text-amber-300">{error}</p>}
-          <p className="text-[10px] leading-4 text-slate-500">A layout keeps the intervals, the symbols charts hold, the chart sizes and linked time ranges. The main symbol, levels and watchlist stay as they are.</p>
+          <p className="text-[10px] leading-4 text-muted-foreground">A layout keeps the intervals, the symbols charts hold, the chart sizes and linked time ranges. The main symbol, levels and watchlist stay as they are.</p>
         </form>
-        {onResetSizes && <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 px-3 py-2">
-          <span className="text-[10px] leading-4 text-slate-500">Dividers moved too far? Put every chart and the side panel back to their default sizes.</span>
-          <button className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs hover:bg-slate-800" onClick={onResetSizes}><RotateCcw size={12} />Reset chart sizes</button>
+        {onResetSizes && <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+          <span className="text-[10px] leading-4 text-muted-foreground">Dividers moved too far? Put every chart and the side panel back to their default sizes.</span>
+          <button className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-secondary" onClick={onResetSizes}><RotateCcw size={12} />Reset chart sizes</button>
         </div>}
       </div>
     </div>

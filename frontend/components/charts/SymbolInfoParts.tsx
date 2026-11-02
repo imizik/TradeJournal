@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { readAt } from "@/lib/symbolInfo";
 
 /** Small group heading used by every symbol-info tab. */
-export const HEADING = "text-[10px] font-medium uppercase tracking-wider text-slate-500";
+export const HEADING = "text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
 
 /**
  * One fact on one line: the label on the left in muted text (it truncates, with the full text in
@@ -20,12 +20,12 @@ export function Row({ label, value, title, tone, hint, explain }: { label: strin
   const id = useId();
   const tip = [title ?? hint ?? label, explain].filter(Boolean).join("\n\n");
   return <div title={tip} className="flex flex-wrap items-baseline justify-between gap-x-2 py-0.5">
-    <dt className="min-w-0 flex-1 truncate text-slate-500">{explain
+    <dt className="min-w-0 flex-1 truncate text-muted-foreground">{explain
       ? <button type="button" aria-expanded={open} aria-controls={open ? `${id}-why` : undefined} onClick={() => setOpen(!open)}
-        className="max-w-full truncate text-left underline decoration-slate-600 decoration-dotted underline-offset-2 hover:text-slate-300">{label}</button>
+        className="max-w-full truncate text-left underline decoration-muted-foreground decoration-dotted underline-offset-2 hover:text-foreground">{label}</button>
       : label}</dt>
-    <dd className={`shrink-0 whitespace-nowrap font-mono ${tone ?? "text-slate-200"}`}>{value}</dd>
-    {explain && open && <dd id={`${id}-why`} data-explain className="basis-full pb-1 pt-0.5 text-[10px] leading-4 text-slate-400">{explain}</dd>}
+    <dd className={`shrink-0 whitespace-nowrap font-mono ${tone ?? "text-foreground"}`}>{value}</dd>
+    {explain && open && <dd id={`${id}-why`} data-explain className="basis-full pb-1 pt-0.5 text-[10px] leading-4 text-muted-foreground">{explain}</dd>}
   </div>;
 }
 
@@ -46,11 +46,11 @@ export function Block({ name, title, defaultOpen = true, forceOpen, side, childr
     setChosen(!open);
     try { localStorage.setItem(key, open ? "0" : "1"); } catch { /* keep working without storage */ }
   };
-  return <section aria-label={title} className="overflow-hidden rounded-md border border-slate-700/60 bg-slate-950/40">
-    <h3 className="flex items-center gap-1 bg-slate-800/40 pr-2">
+  return <section aria-label={title} className="overflow-hidden rounded-md border border-border bg-background/40">
+    <h3 className="flex items-center gap-1 bg-secondary/40 pr-2">
       <button type="button" aria-expanded={open} aria-controls={`${id}-body`} onClick={toggle}
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-1 px-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:text-slate-100 lg:min-h-7">
-        {open ? <ChevronDown size={12} className="shrink-0 text-slate-500" aria-hidden /> : <ChevronRight size={12} className="shrink-0 text-slate-500" aria-hidden />}
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-1 px-2 text-left text-[10px] font-semibold uppercase tracking-wider text-foreground/80 hover:text-foreground lg:min-h-7">
+        {open ? <ChevronDown size={12} className="shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight size={12} className="shrink-0 text-muted-foreground" aria-hidden />}
         <span className="truncate">{title}</span>
       </button>
       {side}
@@ -79,7 +79,7 @@ export function SourceFooter({ items, note }: { items: FooterSource[]; note?: Re
     groups.set(String(item.at), group);
   }
   const line = [...groups.values()].map((group) => text({ source: group.sources.join(" + "), at: group.at })).join("; ");
-  return <div className="space-y-1 border-t border-slate-800 pt-2 text-[10px] leading-4 text-slate-500" data-source-footer>
+  return <div className="space-y-1 border-t border-border pt-2 text-[10px] leading-4 text-muted-foreground" data-source-footer>
     <p title={items.map((item) => `${item.label ? `${item.label}: ` : ""}${text(item)}`).join("\n")}>{line}</p>
     {note}
   </div>;

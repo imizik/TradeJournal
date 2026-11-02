@@ -34,46 +34,46 @@ export default function SelectionBar({ panel, level, drawing, focusText = false,
   const [draft, setDraft] = useState(drawing?.text ?? "");
   const [styling, setStyling] = useState(false);
   const unlock = (level ?? drawing)?.locked && <button aria-label="Unlock" title="Locked: it selects but does not drag. Unlock." onClick={onUnlock}
-    className={`${square} text-amber-300 hover:bg-slate-800`}><Lock size={13} /></button>;
+    className={`${square} text-amber-300 hover:bg-secondary`}><Lock size={13} /></button>;
   if (level) {
     const color = !level.color || level.color === LEVEL_COLOR ? "#9cc2ff" : level.color;
-    return <div role="toolbar" aria-label={`Selected level on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] items-center gap-1 rounded-md border border-slate-600 bg-[#121924]/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
-    <span className="h-0.5 w-3 shrink-0" style={{ background: color }} /><span className="min-w-0 truncate text-slate-300">{level.label}</span><span className="font-mono" style={{ color }}>{price(level.price)}</span>
+    return <div role="toolbar" aria-label={`Selected level on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] items-center gap-1 rounded-md border border-border bg-card/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
+    <span className="h-0.5 w-3 shrink-0" style={{ background: color }} /><span className="min-w-0 truncate text-foreground/80">{level.label}</span><span className="font-mono" style={{ color }}>{price(level.price)}</span>
     {unlock}
-    <button aria-label="Delete selected level" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-rose-300`}><Trash2 size={13} /></button>
-    <button aria-label="Deselect level" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-slate-200`}><X size={13} /></button>
+    <button aria-label="Delete selected level" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-muted-foreground hover:bg-secondary hover:text-rose-300`}><Trash2 size={13} /></button>
+    <button aria-label="Deselect level" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-muted-foreground hover:bg-secondary hover:text-foreground`}><X size={13} /></button>
   </div>;
   }
   if (!drawing) return null;
   const name = TOOL_NAMES[drawing.kind];
   const span = summary(drawing);
   const commit = () => { const text = draft.trim().slice(0, NOTE_MAX); if (text && text !== drawing.text) onEdit?.({ text }); else setDraft(drawing.text ?? ""); };
-  return <div role="toolbar" aria-label={`Selected drawing on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-0.5 rounded-md border border-slate-600 bg-[#121924]/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
+  return <div role="toolbar" aria-label={`Selected drawing on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-0.5 rounded-md border border-border bg-card/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
     <div className="flex min-w-0 items-center gap-1">
       <span className="h-2 w-3 shrink-0 rounded-sm" style={{ background: drawing.color }} />
-      <span className="shrink-0 text-slate-300">{name}</span>
-      {span && <span className="min-w-0 truncate font-mono text-slate-400">{span}</span>}
+      <span className="shrink-0 text-foreground/80">{name}</span>
+      {span && <span className="min-w-0 truncate font-mono text-muted-foreground">{span}</span>}
       {drawing.kind === "note" && <input aria-label="Note text" value={draft} maxLength={NOTE_MAX} autoFocus={focusText} onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => setDraft(e.target.value)} onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(drawing.text ?? ""); e.preventDefault(); e.stopPropagation(); } }}
-        className="h-7 w-32 min-w-0 rounded border border-slate-700 bg-[#10151e] px-1.5 text-[11px] text-slate-200 outline-none focus:border-sky-600" />}
-      <button aria-label="Style" aria-expanded={styling} title="Color, width and extensions" onClick={() => setStyling((v) => !v)} className={`${square} ml-auto ${styling ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Palette size={13} /></button>
+        className="h-7 w-32 min-w-0 rounded border border-border bg-background px-1.5 text-[11px] text-foreground outline-none focus:border-ring" />}
+      <button aria-label="Style" aria-expanded={styling} title="Color, width and extensions" onClick={() => setStyling((v) => !v)} className={`${square} ml-auto ${styling ? "bg-border text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}><Palette size={13} /></button>
       {unlock}
-      <button aria-label="Delete selected drawing" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-rose-300`}><Trash2 size={13} /></button>
-      <button aria-label="Deselect drawing" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-slate-200`}><X size={13} /></button>
+      <button aria-label="Delete selected drawing" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-muted-foreground hover:bg-secondary hover:text-rose-300`}><Trash2 size={13} /></button>
+      <button aria-label="Deselect drawing" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-muted-foreground hover:bg-secondary hover:text-foreground`}><X size={13} /></button>
     </div>
     {styling && <div role="group" className="flex flex-wrap items-center gap-1 pb-0.5" aria-label={`${name} style`}>
       {PALETTE.map(([color, label]) => <button key={color} aria-label={`${label} ${name.toLowerCase()}`} aria-pressed={drawing.color === color} title={label} onClick={() => onEdit?.({ color })}
-        className={`${small} ${drawing.color === color ? "ring-1 ring-slate-200" : ""}`}><span className="h-3.5 w-3.5 rounded-full" style={{ background: color }} /></button>)}
+        className={`${small} ${drawing.color === color ? "ring-1 ring-foreground" : ""}`}><span className="h-3.5 w-3.5 rounded-full" style={{ background: color }} /></button>)}
       {(drawing.kind === "ray" || drawing.kind === "trend") && <span className="ml-1 flex items-center gap-0.5">
         {([1, 2, 3] as LineWidth[]).map((width) => <button key={width} aria-label={`Line width ${width}`} aria-pressed={drawing.width === width} title={`${width}px line`} onClick={() => onEdit?.({ width })}
-          className={`${small} ${drawing.width === width ? "bg-slate-700" : "hover:bg-slate-800"}`}><span className="w-3.5 rounded-full bg-slate-300" style={{ height: width + 0.5 }} /></button>)}
+          className={`${small} ${drawing.width === width ? "bg-border" : "hover:bg-secondary"}`}><span className="w-3.5 rounded-full bg-foreground/80" style={{ height: width + 0.5 }} /></button>)}
       </span>}
       {drawing.kind === "trend" && <span className="ml-1 flex items-center gap-0.5">
         <button aria-label="Extend left" aria-pressed={!!drawing.extendLeft} title="Extend the line to the left" onClick={() => onEdit?.({ extendLeft: !drawing.extendLeft })}
-          className={`${small} ${drawing.extendLeft ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:bg-slate-800"}`}><ArrowLeftToLine size={13} /></button>
+          className={`${small} ${drawing.extendLeft ? "bg-border text-foreground" : "text-muted-foreground hover:bg-secondary"}`}><ArrowLeftToLine size={13} /></button>
         <button aria-label="Extend right" aria-pressed={!!drawing.extendRight} title="Extend the line to the right" onClick={() => onEdit?.({ extendRight: !drawing.extendRight })}
-          className={`${small} ${drawing.extendRight ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:bg-slate-800"}`}><ArrowRightToLine size={13} /></button>
+          className={`${small} ${drawing.extendRight ? "bg-border text-foreground" : "text-muted-foreground hover:bg-secondary"}`}><ArrowRightToLine size={13} /></button>
       </span>}
     </div>}
   </div>;

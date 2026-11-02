@@ -5262,7 +5262,7 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   });
   expect(overlap.height).toBeGreaterThan(0);
   expect(overlap.covered).toBe(true);
-  expect(overlap.background).toBe("rgb(20, 27, 38)");
+  expect(overlap.background).toBe("rgb(19, 19, 21)");
   await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
   await card.getByRole("button", { name: "Close level card" }).click();
   // Off the chart, so a hover card cannot open where the pinned one was.

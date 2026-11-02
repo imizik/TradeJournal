@@ -24,12 +24,12 @@ export default function PlanFromDrawing({ pair, narrow, onPlan, onSwap }: { pair
     <button type="button" onClick={onPlan} aria-label={`${planThisName(pair)}: ${prices}`}
       title={pair.trigger ? `The copilot drafts a ${pair.side} plan around entry ${pair.trigger.price.toFixed(2)} and invalidation ${pair.invalidation.price.toFixed(2)}. Nothing is sent until you press Send.`
         : `The copilot drafts the entry and the plan around your invalidation at ${pair.invalidation.price.toFixed(2)}. Nothing is sent until you press Send.`}
-      className={`inline-flex min-w-0 items-center gap-1.5 rounded-md bg-sky-500 px-2.5 text-xs font-medium text-white shadow-lg hover:bg-sky-400 ${size}`}>
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-lg hover:bg-primary/90 ${size}`}>
       <Target size={13} aria-hidden className="shrink-0" /><span className="shrink-0">{planThisName(pair)}</span>
-      <span className="min-w-0 truncate font-mono text-[11px] text-sky-50/90">{prices}</span>
+      <span className="min-w-0 truncate font-mono text-[11px] text-primary-foreground/90">{prices}</span>
     </button>
     {pair.trigger && <button type="button" onClick={onSwap} aria-label="Swap entry and invalidation" title={`Make it a ${pair.side === "long" ? "short" : "long"}: entry ${pair.invalidation.price.toFixed(2)}, invalidation ${pair.trigger.price.toFixed(2)}`}
-      className={`inline-flex shrink-0 items-center justify-center rounded-md border border-sky-400/50 bg-[#121924]/95 text-sky-200 shadow-lg hover:bg-slate-800 ${narrow ? "h-11 w-11" : "h-7 w-7"}`}><ArrowUpDown size={14} /></button>}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md border border-primary/50 bg-card/95 text-primary shadow-lg hover:bg-secondary ${narrow ? "h-11 w-11" : "h-7 w-7"}`}><ArrowUpDown size={14} /></button>}
   </div>;
 }
 

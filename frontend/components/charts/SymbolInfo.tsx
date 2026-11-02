@@ -187,24 +187,24 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
   // default group's values as though they belonged to the handed-off group.
   const shownMovement = handoffGroup && movement?.data?.group?.name !== handoffGroup.name ? null : movement;
   const peers = onSelectSymbol ? <div id={`${id}-peers`}><SymbolInfoPeers key={radarGroup || "normal"} sessionFirst={!!radarGroup} symbol={symbol} result={peersResult} movement={shownMovement} onGroup={owner ? (onComparisonGroup ?? setLocalGroup) : undefined} onSelect={onSelectSymbol} /></div> : null;
-  return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
-    <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
+  return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
+    <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-foreground lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
       {/* One row. Names never squeeze into each other: a narrow dock scrolls the row sideways, and the chosen tab is kept in view. */}
-      <div ref={tabRow} role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-slate-700/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div ref={tabRow} role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
             const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
             if (next != null) { event.preventDefault(); event.stopPropagation(); select(TABS[next]); document.getElementById(`${id}-${TABS[next]}`)?.focus(); }
-          }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-sky-400 bg-sky-400/5 text-sky-300" : "border-transparent text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
+          }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-2">
         {radarGroup && view.tab === "Overview" && peers}
-        {owner && view.tab === "Overview" && <AskCopilot symbol={symbol} className="mb-2 inline-flex min-h-11 items-center rounded border border-slate-700 px-3 text-xs text-slate-200 hover:bg-slate-800 lg:min-h-0 lg:py-1" />}
+        {owner && view.tab === "Overview" && <AskCopilot symbol={symbol} className="mb-2 inline-flex min-h-11 items-center rounded border border-border px-3 text-xs text-foreground hover:bg-secondary lg:min-h-0 lg:py-1" />}
         {owner && view.tab === "Overview" && <div id={`${id}-holding`}><HoldingContext key={symbol} symbol={symbol} positions={positions} onPeers={onPeers ?? (() => document.getElementById(`${id}-peers`)?.scrollIntoView({ block: "start" }))} /></div>}
-        {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
+        {view.tab === "You" && !journal ? <p className="text-xs text-muted-foreground">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-muted-foreground">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null}
               peers={peersResult?.symbol === symbol ? peersResult.data?.valuation : null}
               peerGroup={peersResult?.symbol === symbol && peersResult.data?.source.provider === "curated" ? peersResult.data.source.label.replace(/^Peer group: /, "") : undefined}>{radarGroup ? null : peers}</SymbolInfoOverview>
@@ -213,8 +213,8 @@ export default function SymbolInfo({ symbol, positions, price, quote, quoteFetch
             : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={lit?.symbol === symbol ? lit : null} />
             : view.tab === "Financials" ? <SymbolInfoFinancials data={shown.data as SymbolFinancials} />
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
-          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
-          : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
+          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-border px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
+          : <p role="status" className="text-xs text-muted-foreground">Loading {BUILT[view.tab].name}…</p>}
         {/* Peers are Overview's last block; while Overview loads or fails they still show below. */}
         {!radarGroup && view.tab === "Overview" && !shown?.data && peers && <div className="mt-3">{peers}</div>}
       </div>
