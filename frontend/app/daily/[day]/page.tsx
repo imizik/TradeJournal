@@ -552,7 +552,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                           <div className="mt-3 flex flex-wrap gap-1.5">
                             {chips.map((chip) => (
                               <span key={`${fill.id}-${chip.label}`} className={CHIP}>
-                                {chip.label}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
+                                {chip.label}{" "}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
                               </span>
                             ))}
                           </div>
@@ -561,7 +561,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             {alpacaChips.map((chip) => (
                               <span key={`${fill.id}-alpaca-${chip.label}`} className={CHIP}>
-                                {chip.label}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
+                                {chip.label}{" "}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
                               </span>
                             ))}
                           </div>
