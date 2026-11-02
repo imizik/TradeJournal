@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, AsyncIterator
+from urllib.parse import urlsplit
 
 from app.ai import copilot_tools
 
@@ -100,6 +101,15 @@ and nearby headlines) and the latest pass's leaders and laggards; cite an event 
 and age of every figure you quote (the caches are a day old; short interest is about two weeks behind). When the \
 owner asks whether the alerts, plans or pings are helping, read get_proof (scope week, or symbol for one name) and \
 quote its verdicts and counts as they stand, "not enough data" included; never turn a count into a judgement of them.
+- When web_search is offered (at most three searches a turn), use it for what the app's tools do not carry: macro and \
+policy (the Fed, rates, Treasury supply, fiscal), politics and elections, geopolitics, industry news, and what a company \
+or its customers said. Prices, levels, moves and the owner's book still come from the tools. Name the publisher and date \
+of what you use, say when a search found nothing current, and never put the owner's positions, sizes, trades or account \
+labels in a query. A turn reads a few search results, not the articles. When the question ties several drivers \
+together (macro, politics, war, debt, positioning: "is this the top?") or needs a long document, answer what the evidence \
+supports and then offer the deeper read: propose_plan kind=revisit with horizon_days 0 and the question as the owner \
+would ask it. Confirmed, it is a background research job that reads the full articles for minutes, cites its sources \
+and saves its result to this thread.
 - Give a concise interpretation first, then the strongest counterarguments and what would change your mind.
 - When the trader disagrees, re-check the specific evidence they cite (call the tool again if needed), then either \
 update your view and say what changed, or defend it with the numbers. Do not cave without evidence and do not dig in \
@@ -431,7 +441,8 @@ class AnthropicAdapter:
     def request(self, system: str, messages: list[dict], tools: list[dict], allow_tools: bool) -> dict:
         kwargs: dict[str, Any] = {
             "model": self.cfg.model, "max_tokens": self.cfg.max_tokens, "system": system, "messages": [wire(m) for m in messages],
-            "tools": [{**t, "eager_input_streaming": True} for t in tools],
+            # A server tool (web search) runs at Anthropic and takes no streaming option.
+            "tools": [t if "type" in t else {**t, "eager_input_streaming": True} for t in tools],
             "thinking": {"type": "adaptive", "display": "updates"}, "output_config": {"effort": self.cfg.effort},
             "cache_control": {"type": "ephemeral"}, "betas": [PROGRESS_BETA],
         }
@@ -1544,13 +1555,70 @@ async def owner_context(evidence, symbol: str | None, cfg: Settings) -> tuple[st
     return copilot_context.block(pack), event
 
 
+# A live API turn may search the web: Anthropic's server-side search, about WEB_SEARCHES a turn, a cent each on top of
+# tokens. No web fetch: the query is the only thing that leaves, and a page cannot steer a request to a URL. Replay (the
+# web is hindsight) and the fixture never search.
+WEB_SEARCHES = 3
+WEB_SEARCH_TOOL = "web_search_20260209"
+WEB_LINKS = 8
+WEB_SEARCH_USD = 0.01  # per search, as api_runner prices it
+WEB_TURN_EXTRA_USD = 0.15  # a turn that may search reads pages of results: its cap is the turn budget plus this
+
+
+def web_tool(left: int) -> list[dict]:
+    """The search tool for one request. Once offered in a turn it stays in every later round: a search's result (and
+    its code-execution filtering) can arrive in the next round, and the API refuses a history whose server tool is gone.
+    So a spent budget still offers one use a round; the turn's rounds and spend cap bound the rest."""
+    return [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": max(1, left)}]
+
+
+def _host(url: str) -> str:
+    try:
+        return re.sub(r"^www\.", "", urlsplit(url).hostname or "")
+    except ValueError:  # e.g. an unmatched bracket
+        return ""
+
+
+def web_row(search_id: str | None, query: str | None, found: Any, now: datetime) -> dict:
+    """The UI's evidence row for one web search: the query, what came back and its links."""
+    event: dict[str, Any] = {"type": "tool", "id": search_id, "name": "web_search", "input": {"query": query or ""}}
+    if isinstance(found, list):
+        pages = [r for r in found if isinstance(r, dict) and r.get("type") == "web_search_result"
+                 and str(r.get("url") or "").startswith(("https://", "http://"))]
+        links = [{"title": str(r.get("title") or r["url"])[:160], "url": str(r["url"])[:500],
+                  **({"page_age": str(r["page_age"])[:40]} if r.get("page_age") else {})} for r in pages[:WEB_LINKS]]
+        links = list({link["url"]: link for link in links}.values())
+        hosts = [h for h in dict.fromkeys(_host(link["url"]) for link in links) if h]
+        event.update(status="ok", links=links, summary=f"{len(pages)} results" + (f": {', '.join(hosts[:4])}" if hosts else ""))
+    else:
+        code = found.get("error_code", "no result") if isinstance(found, dict) else "no result"
+        event.update(status="error", summary=f"search failed ({code})")
+    event["provenance"] = copilot_tools.provenance("web_search", {"as_of": now.isoformat(timespec="minutes")}, "live")
+    return event
+
+
+def web_events(content: list[dict], now: datetime, pending: dict[str, str]) -> tuple[int, list[dict]]:
+    """One round's web searches: ``(searches started, rows for results that arrived)``. A result can arrive a round after
+    its search, so ``pending`` keeps the queries (by search id) still waiting across the turn's rounds."""
+    started = 0
+    for block in content:
+        if block.get("type") == "server_tool_use" and block.get("name") == "web_search":
+            pending[str(block.get("id"))] = query = str((block.get("input") or {}).get("query") or "")[:500]
+            started += 1
+            log.info("copilot web search: %s", query)  # what left the server, in the journal for any turn (Telegram too)
+    rows = [web_row(b.get("tool_use_id"), pending.pop(str(b.get("tool_use_id")), None), b.get("content"), now)
+            for b in content if b.get("type") == "web_search_tool_result"]
+    return started, rows
+
+
 async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapter, evidence,
                    now: datetime, images: list[dict] | None = None, carry_id: str | None = None,
-                   live: dict | None = None) -> AsyncIterator[dict]:
+                   live: dict | None = None, web: bool = False) -> AsyncIterator[dict]:
     """Stream one turn as UI events: progress, text, tool, error, done (always last, with metrics and the ``carry_id``
     the next turn sends back). ``images`` are the owner's shared screenshots as image blocks (``copilot_images.block``),
     sent with their message; ``carry_id`` names the evidence the conversation's previous turn kept. ``live``, when
-    given, is the dict the metrics are kept in as the turn runs, so a consumer that stops early still sees what it spent."""
+    given, is the dict the metrics are kept in as the turn runs, so a consumer that stops early still sees what it spent.
+    ``web`` lets a turn the owner asked search the web (live evidence on the API only); background turns never do."""
     started = time.monotonic()
     messages = [dict(m) for m in history]
     replay = getattr(evidence, "label", "") == "replay"
@@ -1571,7 +1639,11 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     metrics.update({"backend": cfg.backend, "evidence": cfg.evidence, "effort": cfg.effort, "model": getattr(adapter, "model", None) or cfg.model,
                     "first_feedback_ms": None, "first_progress_ms": None, "first_text_ms": None,
                     "max_silence_ms": 0, "rounds": 0, "tool_calls": [], "usage": dict(usage), "cost_usd": 0.0})
-    calls = 0
+    calls = searched = 0
+    web = web and cfg.backend == "anthropic" and mode == "live"
+    cap = cfg.turn_budget_usd + (WEB_TURN_EXTRA_USD if web else 0.0)
+    web_offered = False
+    waiting: dict[str, str] = {}  # web searches whose result has not arrived yet: id -> query
     turn: dict = {"images": len(images or [])}  # per-turn state for _run_tool (one practice proposal, two images)
     last_seen = 0
 
@@ -1596,7 +1668,9 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
             for round_no in range(cfg.max_rounds):
                 final: Round | None = None
                 allow = round_no < cfg.max_rounds - 1 and calls < cfg.max_tool_calls
-                async for kind, value in adapter.stream_round(SYSTEM_PROMPT, messages, copilot_tools.TOOLS, allow):
+                web_offered = web_offered or (web and allow and searched < WEB_SEARCHES)
+                tools = copilot_tools.TOOLS + (web_tool(WEB_SEARCHES - searched) if web_offered else [])
+                async for kind, value in adapter.stream_round(SYSTEM_PROMPT, messages, tools, allow):
                     if kind == "text":
                         seen("first_text_ms")
                         yield {"type": "text", "delta": value}
@@ -1611,15 +1685,29 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                 for key in usage:
                     usage[key] += final.usage.get(key, 0)
                 spent_usd += cost_usd(final.model or metrics["model"], {key: final.usage.get(key, 0) for key in usage})
+                started, rows = web_events(final.content, now, waiting)
+                searched += started
+                spent_usd += started * WEB_SEARCH_USD
+                for event in rows:
+                    seen()
+                    # The query is kept with the turn's record: what left the server is visible after the fact.
+                    metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")} | {"query": event["input"]["query"]})
+                    yield event
                 metrics.update(usage=dict(usage), cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
                 if final.model:
                     metrics["model"] = final.model
                 messages.append({"role": "assistant", "content": final.content})
                 spent = spent_usd if cfg.backend == "anthropic" else 0.0
-                over_budget = spent is not None and spent >= cfg.turn_budget_usd
+                over_budget = spent is not None and spent >= cap
+                stopped = {"type": "error", "code": "budget", "message": f"Stopped: this turn reached its ${cap:.2f} API spend cap."}
                 if final.stop_reason == "refusal":
                     yield {"type": "error", "code": "refusal", "message": "The model declined to answer this request."}
                     break
+                if final.stop_reason == "pause_turn":  # the API paused a long server-side search; sending it back resumes it
+                    if over_budget:
+                        yield stopped
+                        break
+                    continue
                 tool_uses = [b for b in final.content if b.get("type") == "tool_use"]
                 if not tool_uses:
                     if final.stop_reason == "max_tokens":
@@ -1629,7 +1717,7 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
                     yield {"type": "error", "code": "truncated", "message": "A tool request was cut off; nothing ran."}
                     break
                 if over_budget:
-                    yield {"type": "error", "code": "budget", "message": f"Stopped: this turn reached its ${cfg.turn_budget_usd:.2f} API spend cap."}
+                    yield stopped
                     break
                 runnable, refused = tool_uses[: max(0, cfg.max_tool_calls - calls)], tool_uses[max(0, cfg.max_tool_calls - calls):]
                 calls += len(runnable)
@@ -1654,6 +1742,10 @@ async def run_turn(history: list[dict], symbol: str | None, cfg: Settings, adapt
     except Exception as exc:  # the stream has started: end it with an honest error, never silently
         log.warning("copilot turn failed: %s", type(exc).__name__)
         yield {"type": "error", "code": "internal", "message": "The copilot turn failed unexpectedly."}
+    for search_id, query in waiting.items():  # searched, but the turn ended before a result came back
+        event = web_row(search_id, query, None, now)
+        metrics["tool_calls"].append({k: event.get(k) for k in ("name", "status", "ms")} | {"query": query})
+        yield event
     seen()  # the turn's end: a long wait before the answer finished counts as silence too
     metrics.update(total_ms=elapsed(), usage=usage, cost_usd=round(spent_usd, 6) if cfg.backend == "anthropic" else 0.0)
     log.info("copilot turn backend=%s model=%s first_feedback_ms=%s first_text_ms=%s max_silence_ms=%s total_ms=%s "

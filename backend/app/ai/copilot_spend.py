@@ -114,7 +114,7 @@ def kind_of(question: str, tool_names: Iterable[str], proposal_kinds: Iterable[s
 
 async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, evidence, now: datetime, *, kind: str | None,
                         source: str, images: list[dict] | None = None, carry_id: str | None = None,
-                        investigation_id: uuid.UUID | str | None = None) -> AsyncIterator[dict]:
+                        investigation_id: uuid.UUID | str | None = None, web: bool = False) -> AsyncIterator[dict]:
     """``copilot.run_turn`` with its row: the same events, the ``done`` event carrying ``turn_id``, and one
     ``copilot_turn`` row whatever happens. A turn the consumer stops before ``done`` is recorded with what it spent and
     ``error="stopped"``. ``kind`` None means: work it out from the turn (``kind_of``)."""
@@ -129,7 +129,8 @@ async def recorded_turn(history: list[dict], symbol: str | None, cfg, adapter, e
     question = user_text(history[-1]["content"]) if history else ""
     finished = False
     try:
-        async for event in copilot.run_turn(history, symbol, cfg, adapter, evidence, now, images=images, carry_id=carry_id, live=live):
+        async for event in copilot.run_turn(history, symbol, cfg, adapter, evidence, now, images=images, carry_id=carry_id, live=live,
+                                              web=web):
             etype = event.get("type")
             if etype == "error" and error is None:
                 error = event.get("code")

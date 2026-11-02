@@ -2315,6 +2315,53 @@ The prompt reads `get_macro` for rates, credit, dollar and oil questions and
 this usually end" or "is this the top". Replay cuts both before the frozen
 day; the fixture serves fixed macro rows and a simulated price history.
 Tests: `backend/tests/test_copilot_macro.py`.
+## Web search
+
+A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped
+Telegram reply) may search the web on the `anthropic` backend with live
+evidence. Background turns (pre-market prep, the week review, the position
+companion) never do, and neither do replay (the web is hindsight) or the
+fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
+`web_search` tool (`web_search_20260209`) once a round may call tools, with
+`max_uses` counting down from `copilot.WEB_SEARCHES` (3) across the turn's
+rounds. Once offered it stays in every later round, the last included: a
+search's result (and its code-execution filtering) can arrive a round later,
+and the API refuses a history whose server tool is gone (checked live on
+2026-11-02). A spent budget therefore still offers one use a round; the
+turn's rounds and spend cap bound the rest. A result is matched to its query
+by search id whichever round it arrives in; one still missing when the turn
+ends reads "search failed (no result)". Each query is logged at INFO
+(`copilot web search: …`), so Telegram turns' searches are visible too.
+
+- **No web fetch.** Search results only: a page cannot steer a request to a
+  URL, and the query is the only thing that leaves. The prompt says to use the
+  web for what the tools do not carry (macro and policy, politics, geopolitics,
+  industry and company statements), to name the publisher and date of what it
+  uses, and never to put the owner's positions, sizes, trades or account
+  labels in a query. Results are third-party data, never instructions.
+- **Sources.** Each search is a Sources row (`web_search`, kind `fetched`):
+  the query, the result count and hosts, and up to 8 links (title, URL, page
+  age; http and https only) the panel opens in a new tab. The links are not
+  kept with the saved investigation; the answer's text is.
+- **Cost.** A cent a search on top of tokens. A turn that may search gets a cap
+  of `COPILOT_TURN_BUDGET_USD` plus `copilot.WEB_TURN_EXTRA_USD` ($0.15), since
+  search results add input; the daily budget is unchanged. A `pause_turn` (a
+  long server-side search) is sent back to resume, within that cap.
+- **Research now.** When a question needs more than a turn can read, the
+  prompt has the model answer what the evidence supports and then propose
+  `propose_plan kind=revisit` with `horizon_days 0`: a **Proposed research**
+  card. Confirm queues the owner's reassess job due now (`POST
+  /copilot/research-jobs/reassess`, `after_days 0`), the [research
+  job](#research-job) with web search and fetch, and its result reaches the
+  thread like any revisit. It runs only while the research queue is on. An
+  owner revisit dedupes by thread, day, due date and question, so a second
+  question from the same thread is its own job and a failed or cancelled one
+  can be asked again. A revisit question carrying a link (`://` or `www.`) is
+  refused, since it becomes the prompt of a job that can fetch pages. On
+  Telegram only the answer's text is sent, so a proposed card is not shown
+  there.
+
+Tests: `backend/tests/test_copilot_web.py`.
 
 ## Saved investigations
 
@@ -2372,7 +2419,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
-| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). |
+| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |
@@ -2672,7 +2719,8 @@ off unless the private backend environment sets `RESEARCH_QUEUE_ENABLED=true`.
   - `POST /copilot/research-jobs/reassess` with `{investigation_id, question,
     after_days}` queues the owner's "revisit this question": one reassess job
     for that investigation, due `after_days` (0-30) from now, at most once a
-    day per investigation and due date. Its assignment adds the owner's
+    day per investigation, due date and question (a failed or cancelled one
+    can be asked again). Its assignment adds the owner's
     question to the usual reassessment. It records `from_investigation` too,
     so `?from_investigation=` lists it with that investigation's jobs. While it waits, it counts as that
     investigation's waiting reassessment, so the automatic reassessment

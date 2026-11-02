@@ -209,10 +209,13 @@ def enqueue_revisit(investigation_id: str, question: str, after_days: int = 0,
     except inv.InvestigationError as exc:
         raise QueueError("not_found", str(exc)) from exc
     due = _utcnow() + timedelta(days=after_days)
+    # The question is in the key, so a different question from the same thread the same day is its own job; a failed
+    # or cancelled one can be asked again.
+    key = f"reassess:{saved['id']}:owner:{_today()}:{after_days}:{_digest(question)}"
+    _retire_finished(key, session)
     # from_investigation too: the lab reads one investigation's jobs with GET /copilot/research-jobs?from_investigation=.
     return enqueue("reassess", {"investigation_id": saved["id"], "question": question, "requested_by": "owner",
-                                "from_investigation": saved["id"]},
-                   f"reassess:{saved['id']}:owner:{_today()}:{after_days}", session, due=due)
+                                "from_investigation": saved["id"]}, key, session, due=due)
 
 
 def list_jobs(status: str | None = None, limit: int = 50, session: Session | None = None,
