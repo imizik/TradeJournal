@@ -60,6 +60,15 @@ def _tool_bucket(n: int) -> str:
     return "none" if n == 0 else "1" if n == 1 else "2-3" if n <= 3 else "4+"
 
 
+def _tools(turn: CopilotTurn) -> list:
+    """The turn's tool names; a malformed value reads as none rather than failing the whole card."""
+    try:
+        names = json.loads(turn.tool_names or "[]")
+    except ValueError:
+        return []
+    return names if isinstance(names, list) else []
+
+
 def _kind_from_title(title: str | None) -> str | None:
     for prefix, kind in TITLE_KINDS:
         if (title or "").startswith(prefix):
@@ -87,7 +96,7 @@ def _answers(db: Session, since: datetime, turns: dict[str, CopilotTurn]) -> lis
                 continue  # an older answer, or one whose turn is outside the window
             following = transcript[i + 1] if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user" else None
             next_text = (following or {}).get("content") or ""
-            tools = json.loads(turn.tool_names) if turn is not None and turn.tool_names else (metrics.get("tools") or [])
+            tools = _tools(turn) if turn is not None else (metrics.get("tools") or [])
             answers.append({
                 "investigation_id": str(inv_id), "title": title, "rating": message.get("rating"),
                 "kind": (turn.kind if turn is not None and turn.kind else None) or _kind_from_title(title) or "ask",
@@ -129,6 +138,7 @@ def answer_scorecard(db: Session, now: datetime, days: int = 7) -> dict:
     def read_turns():
         nonlocal turns_list
         turns_list = [t for t in db.exec(select(CopilotTurn).where(col(CopilotTurn.started_at) >= since)).all() if t.backend != "fake"]
+        db.expunge_all()  # plain objects from here on: a later section's rollback must not make each row re-read itself
         return {"total": len(turns_list), "by_kind": dict(sorted(Counter(t.kind or "unknown" for t in turns_list).items())),
                 "by_source": dict(sorted(Counter(t.source or "unknown" for t in turns_list).items()))}
 

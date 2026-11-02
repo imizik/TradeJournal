@@ -274,8 +274,7 @@ function WeekCopilot() {
     const a = card.body.answers, c = card.body.cost, l = card.body.latency;
     if (unavailable(a)) line = "could not count the answers";
     else {
-      const ask = !unavailable(l) ? l.ask ?? Object.values(l)[0] : undefined;
-      const wait = seconds(ask?.first_text_ms.p50);
+      const wait = seconds(!unavailable(l) ? l.ask?.first_text_ms.p50 : undefined);  // the desk's questions; a scheduled kind would mislead here
       line = <>Helped <span className="tabular-nums">{a.helped}</span> of <span className="tabular-nums">{a.rated}</span> rated · <span className="tabular-nums">{a.total}</span> answer{a.total === 1 ? "" : "s"}
         {wait && <> · first text <span className="tabular-nums">{wait}</span> median</>}
         {!unavailable(c) && <> · <span className="tabular-nums">${c.total_usd.toFixed(2)}</span></>}</>;

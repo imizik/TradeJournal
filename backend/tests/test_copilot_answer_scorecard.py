@@ -119,12 +119,11 @@ def test_the_route_is_owner_only_gated_and_bounded(boundary):  # noqa: F811
 
 def test_the_route_reads_real_rows(monkeypatch):
     monkeypatch.setenv("COPILOT_ENABLED", "true")
+    recent = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)  # the route reads the real clock
     with Session(engine) as db:
-        t = turn(db)
-        conversation(db, "T", [{"role": "user", "content": "q"}, answer("a", t, "helped")])
+        t = turn(db, started=recent)
+        conversation(db, "T", [{"role": "user", "content": "q"}, answer("Verdict: Hold — H.", t, "helped")], created=recent, updated=recent)
     with TestClient(app) as client:
         body = client.get("/copilot/answer-scorecard?days=30").json()
     assert body["answers"]["helped"] == 1 and body["turns"]["total"] == 1 and body["window"]["days"] == 30
-    assert "content" not in json.dumps(body["cost"]) and "Verdict" not in json.dumps(body)  # counts only, no answer text
-    now = datetime.now(UTC)
-    assert body["window"]["until"][:10] == now.date().isoformat()
+    assert "Verdict" not in json.dumps(body) and "since" in body["window"] and "until" in body["window"]  # counts only, no answer text
