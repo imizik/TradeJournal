@@ -56,6 +56,7 @@ const navItems: { href: string; label: string; icon: typeof Bot; heading?: strin
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/radar", label: "Radar", icon: Telescope },
   { href: "/proof", label: "Proof", icon: ClipboardCheck },
+  { href: "/experiments", label: "Experiments", icon: FlaskConical },
   { href: "/practice", label: "Daily Practice", icon: Target },
   { href: "/advisor-review", label: "Advisor review", icon: Scale },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch, heading: "Labs" },

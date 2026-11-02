@@ -23,7 +23,7 @@ export type RadarProof = { state: string; reason: string | null; rule_version?: 
 type HabitTally = { n: number; trades: number; pct: number | null };
 type PlanGroup = { key: "planned" | "unplanned" | "late"; label: string; in_verdict: boolean; trades: number; pnl: number;
   mean_return_pct: number | null; median_return_pct: number | null; win_rate: number | null; habits: Record<string, HabitTally> };
-type PlanProof = { go_live: string; trades: number; groups: PlanGroup[]; caveat: string;
+export type PlanProof = { go_live: string; trades: number; groups: PlanGroup[]; caveat: string;
   verdict: { verdict: Verdict; reason: string; rule: string; planned: number; unplanned: number; caveat: string } };
 
 export const VERDICT: Record<Verdict, { label: string; tone: string }> = {
@@ -40,14 +40,16 @@ const share = (v: number | null | undefined) => v == null ? "—" : `${Math.roun
 export function useJson<T>(path: string) {
   const [body, setBody] = useState<T | null>(null);
   const [error, setError] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     fetch(apiUrl(path), { cache: "no-store", signal: controller.signal })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(setBody).catch(() => { if (!controller.signal.aborted) setError(true); });
+      .then(data => { setBody(data); setCheckedAt(Date.now()); })
+      .catch(() => { if (!controller.signal.aborted) { setError(true); setCheckedAt(Date.now()); } });
     return () => controller.abort();
   }, [path]);
-  return { body, error };
+  return { body, error, checkedAt };
 }
 
 function VerdictBlock({ verdict, reason, sample, rule, testId, label }: { verdict: Verdict; reason: string; sample: string; rule: string; testId: string; label?: string }) {
