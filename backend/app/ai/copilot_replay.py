@@ -60,9 +60,29 @@ class ReplayEvidence:
     def get_quotes(self, symbols: list[str]) -> dict:
         latest = self.passes[0]
         rows = self.store.pass_quotes([latest["id"]])[latest["id"]]
+
+        def quote(r: dict) -> dict:
+            prev = r.get("prev_close")
+            change = round((r["last"] / prev - 1) * 100, 2) if r.get("last") and prev else None
+            return {"last": r["last"], "change_pct": change, "volume": r.get("volume"), "prev_close": prev,
+                    "day_high": r.get("high"), "day_low": r.get("low"), "trade_time": r.get("retrieved_at")}
+
         return {"fetched_at": latest["started_at"], "state": "ok", "source_note": "last recorded Radar pass at or before the replay time",
                 "prices": {s: rows[s]["last"] if s in rows else None for s in symbols},
+                "quotes": {s: quote(rows[s]) for s in symbols if s in rows},
                 "not_recorded": [s for s in symbols if s not in rows]}
+
+    def get_market_regime(self, symbol: str | None = None) -> dict:
+        from app.ai import copilot_regime
+        nxt = self.get_symbol_events(symbol).get("next_earnings") if symbol else None
+        return copilot_regime.replay_regime(self.store, self.session, self.now, self.at, symbol, nxt)
+
+    def get_radar_today(self, group: str | None = None, limit: int = 12) -> dict:
+        from app.ai import copilot_regime
+        from app.ai.copilot_tools import MAX_RESULT_CHARS
+        out = copilot_regime.replay_radar_today(self.store, self.session, self.now, group, limit, MAX_RESULT_CHARS)
+        out["as_of"] = self.at.isoformat(timespec="minutes")
+        return out
 
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         return {"symbol": symbol, "timeframe": timeframe, "state": "unavailable",

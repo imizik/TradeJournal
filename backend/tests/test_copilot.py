@@ -1037,7 +1037,7 @@ def test_investigation_changes_fit_whole_at_every_cap():
     out = copilot_tools.investigation_changes(saved["id"])
     assert (len(out["alerts"]), len(out["research_jobs"]), len(out["results"])) == (
         copilot_tools.CHANGE_ALERTS, copilot_tools.CHANGE_JOBS, copilot_tools.CHANGE_RESULTS)
-    assert len(out["evidence_as_of"]) == len(tools) <= copilot_tools.CHANGE_EVIDENCE
+    assert len(out["evidence_as_of"]) == min(len(tools), copilot_tools.CHANGE_EVIDENCE)  # the cap keeps twelve, whole
     assert not {e["tool"] for e in out["evidence_as_of"]} & copilot_tools.NOT_CURRENT_TOOLS
     text = copilot_tools.bounded(out)
     assert len(text) <= copilot_tools.MAX_RESULT_CHARS - 200, len(text)  # headroom for longer ids or times
