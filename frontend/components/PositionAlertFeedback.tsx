@@ -75,7 +75,7 @@ export default function PositionAlertFeedback({ tradeId, alertId, initial, answe
         <textarea value={reason} maxLength={500} rows={2} disabled={saving || conflict} onChange={e => setReason(e.target.value)}
           className="mt-1 block w-full rounded-md border bg-background p-2 text-sm" />
       </label>
-      {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="submit" disabled={!rating || saving || conflict} className="min-h-11 rounded-md bg-primary px-3 font-medium text-primary-foreground disabled:opacity-50">
           {saving ? "Saving…" : "Save feedback"}

@@ -15,10 +15,10 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const invalidFilters = result.status === "rejected" && /-> (400|404|422)/.test(String(result.reason));
 
   return (
-    <div className="min-w-0 space-y-6">
-      <div>
+    <div className="min-w-0 space-y-4">
+      <div className="flex flex-wrap items-baseline gap-x-2">
         <h1 className="text-xl font-semibold">Analytics</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Explore your results and the trades behind them.</p>
+        <span className="text-sm text-muted-foreground">Explore your results and the trades behind them.</span>
       </div>
       <form action="/analytics" className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
         <label className="min-w-0 text-xs text-muted-foreground">
@@ -49,8 +49,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           </select>
         </label>
         <div className="flex items-end gap-3">
-          <button type="submit" className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background">Apply filters</button>
-          <Link href="/analytics" className="py-2 text-sm text-muted-foreground hover:text-foreground">Reset</Link>
+          <button type="submit" className="inline-flex min-h-11 items-center whitespace-nowrap rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9">Apply filters</button>
+          <Link href="/analytics" className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground sm:min-h-9">Reset</Link>
         </div>
       </form>
       {result.status === "fulfilled" ? (

@@ -11,9 +11,9 @@ import { getMarketReads, type MarketReadSession, type MarketReadText } from "@/l
 const zone = "America/New_York";
 const time = (value: string) => new Date(value).toLocaleTimeString("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" });
 const slotTime = (slot: string) => { const [h, m] = slot.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")}`; };
-const ok = "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-const warn = "border-amber-500/40 bg-amber-500/10 text-amber-200";
-const muted = "border-border bg-secondary/40 text-muted-foreground";
+const ok = "bg-secondary text-foreground";
+const warn = "bg-primary/15 text-primary";
+const muted = "bg-secondary text-muted-foreground";
 const link = "text-sm text-primary hover:underline";
 const ACTIVE: PlanState[] = ["pending_activation", "watching", "triggered"];
 
@@ -290,13 +290,13 @@ export function phoneAlerts(data: JoDayData, day: string) {
 function PhoneAlerts({ data, day, live }: { data: JoDayData; day: string; live: boolean }) {
   const { alerts, unread } = phoneAlerts(data, day);
   return <div data-testid="jo-phone-alerts">
-    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{live ? "Phone alerts today" : "Phone alerts"}</h3>
+    <h3 className="text-xs font-medium text-muted-foreground">{live ? "Phone alerts today" : "Phone alerts"}</h3>
     {alerts.length ? <ul className="mt-1">{alerts.map((a) => <li key={a.key} className="border-t first:border-t-0" data-testid="jo-phone-alert">
       <div className="flex min-w-0 items-start gap-x-3 py-2 text-sm">
         <span className="w-[4.5rem] shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">{a.at ? time(a.at) : "—"}</span>
         <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <span className="min-w-0 break-words">{a.about}</span>
-          <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${a.outcome[1]}`}>{a.outcome[0]}</span>
+          <span className={`inline-flex h-[22px] items-center whitespace-nowrap rounded-md px-2 text-[11.5px] font-medium ${a.outcome[1]}`}>{a.outcome[0]}</span>
         </span>
       </div></li>)}</ul>
       : <p className="mt-1 py-2 text-sm text-muted-foreground">No phone alerts recorded{live ? " today" : " for this day"}.</p>}
@@ -305,7 +305,7 @@ function PhoneAlerts({ data, day, live }: { data: JoDayData; day: string; live: 
   </div>;
 }
 
-const icons: Record<Item["icon"], [string, string]> = { done: ["✓", "text-emerald-400"], warn: ["!", "text-amber-300"], watch: ["◉", "text-sky-300"], next: ["○", "text-muted-foreground"], skip: ["–", "text-muted-foreground"] };
+const icons: Record<Item["icon"], [string, string]> = { done: ["✓", "text-muted-foreground"], warn: ["!", "text-primary"], watch: ["◉", "text-foreground"], next: ["○", "text-muted-foreground"], skip: ["–", "text-muted-foreground"] };
 
 function Row({ item }: { item: Item }) {
   const [glyph, tone] = icons[item.icon];
@@ -314,7 +314,7 @@ function Row({ item }: { item: Item }) {
     <span aria-hidden="true" className={`w-3 shrink-0 text-center ${tone}`}>{glyph}</span>
     <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1">
       <span className="min-w-0 break-words">{item.label}{item.sub && <span className="block text-xs text-muted-foreground">{item.sub}</span>}</span>
-      {item.badge && <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${item.badge[1]}`}>{item.badge[0]}</span>}
+      {item.badge && <span className={`inline-flex h-[22px] items-center whitespace-nowrap rounded-md px-2 text-[11.5px] font-medium ${item.badge[1]}`}>{item.badge[0]}</span>}
     </span>
   </div>;
   return <li className="border-t first:border-t-0" data-testid="jo-day-item">
@@ -325,7 +325,7 @@ function Row({ item }: { item: Item }) {
 
 function Group({ title, items, empty }: { title: string; items: Item[]; empty: string }) {
   return <div>
-    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
+    <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
     {items.length ? <ul className="mt-1">{items.map((i) => <Row key={i.key} item={i} />)}</ul> : <p className="mt-1 py-2 text-sm text-muted-foreground">{empty}</p>}
   </div>;
 }
@@ -334,17 +334,16 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
   const { data, refresh } = useJoDay(day, live);
   const headline = data ? joHeadline(data, day, live) : null;
   const items = data ? joItems(data, day, live) : null;
-  return <section id="jo" className="scroll-mt-28 space-y-4 rounded-lg border bg-card p-5 md:scroll-mt-16" data-testid="jo-day">
-    <div className="flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Jo&apos;s day</h2>
-        {headline ? <p className="mt-1 text-base text-foreground" data-testid="jo-day-headline" data-trouble={headline.trouble}>
-          {headline.parts.map((part, i) => <span key={i}>{i ? " · " : ""}<span className={part.tone === "trouble" ? "text-amber-200" : part.tone === "news" ? "text-sky-300" : undefined}>{part.text}</span></span>)}</p>
-          : <p role="status" className="mt-1 text-sm text-muted-foreground">Loading Jo&apos;s records…</p>}
-      </div>
-      <button type="button" onClick={refresh} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm hover:bg-secondary">Refresh</button>
+  return <section id="jo" className="scroll-mt-28 rounded-lg border bg-card md:scroll-mt-16" data-testid="jo-day">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+      <h2 className="text-[13.5px] font-semibold tracking-tight">Jo&apos;s day</h2>
+      <button type="button" onClick={refresh} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9">Refresh</button>
     </div>
-    {data?.failed.length ? <p role="alert" className={`rounded-md border px-3 py-2 text-sm ${warn}`}>Couldn&apos;t load {data.failed.join(", ")}. What&apos;s shown may be incomplete.</p> : null}
+    <div className="space-y-4 p-4">
+        {headline ? <p className="text-base text-foreground" data-testid="jo-day-headline" data-trouble={headline.trouble}>
+          {headline.parts.map((part, i) => <span key={i}>{i ? " · " : ""}<span className={part.tone === "trouble" ? "text-primary" : part.tone === "news" ? "font-medium" : undefined}>{part.text}</span></span>)}</p>
+          : <p role="status" className="text-sm text-muted-foreground">Loading Jo&apos;s records…</p>}
+    {data?.failed.length ? <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-400">Couldn&apos;t load {data.failed.join(", ")}. What&apos;s shown may be incomplete.</p> : null}
     {data?.readsOff && <p className="text-xs text-muted-foreground" data-testid="jo-day-reads-note">{data.readsOff === "unavailable"
       ? "Market-read records aren't available on this server, so reads can't be shown."
       : "Market watch is off on this server, so no new reads will arrive; saved reads are shown."}</p>}
@@ -361,5 +360,6 @@ export default function JoDay({ day, live }: { day: string; live: boolean }) {
       <a className={link} href="/morning/watches">Price watches →</a>
       <a className={link} href={`/scanner?day=${day}`}>Scanner for this day →</a>
     </p>
+    </div>
   </section>;
 }

@@ -13,7 +13,7 @@ export default async function PlanLinkPage({ searchParams }: { searchParams: Pro
   const trade = (Array.isArray(raw) ? raw[0] : raw ?? "").trim();
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <h1 className="text-lg font-semibold text-foreground">Link your plan</h1>
+      <h1 className="text-xl font-semibold">Link your plan</h1>
       {UUID_RE.test(trade) ? <PlanLinkConfirm key={trade} tradeId={trade.toLowerCase()} />
         : <p role="alert" className="text-sm text-muted-foreground">This link names no trade. Open the trade from the journal instead.</p>}
     </div>

@@ -160,8 +160,8 @@ function Metric({
 }) {
   return (
     <div className="rounded-lg border bg-card p-3">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-lg font-medium tabular-nums ${valueClass}`}>{value}</p>
     </div>
   );
 }
@@ -207,7 +207,7 @@ export default function PerformanceOverview({ trades, compact = false, analytics
     <section aria-labelledby="performance-heading" className={compact ? "min-w-0 space-y-3 rounded-lg border bg-card p-4" : "space-y-3"}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="performance-heading" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2 id="performance-heading" className="text-[13.5px] font-semibold tracking-tight">
             Trading Performance
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">{periodTrades.length} closed trades in the selected period</p>
@@ -221,7 +221,7 @@ export default function PerformanceOverview({ trades, compact = false, analytics
               onClick={() => setPeriod(option)}
               className={`min-h-11 rounded-md px-2.5 py-1 text-xs font-medium transition-colors sm:min-h-0 ${
                 period === option
-                  ? "bg-foreground text-background"
+                  ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -234,10 +234,10 @@ export default function PerformanceOverview({ trades, compact = false, analytics
       <div className={compact ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_230px]" : ""}>
       <div className={compact ? "min-w-0" : "rounded-lg border bg-card p-4 sm:p-5"}>
         <div className="mb-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {PERIOD_LABEL[period]}{" "}Closed P&amp;L
           </p>
-          <p className={`mt-1 font-semibold tabular-nums ${compact ? "text-2xl" : "text-3xl sm:text-4xl"} ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+          <p className={`mt-1 font-medium tabular-nums ${compact ? "text-2xl" : "text-3xl sm:text-4xl"} ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
             {formatMoney(totalPnl)}
           </p>
         </div>

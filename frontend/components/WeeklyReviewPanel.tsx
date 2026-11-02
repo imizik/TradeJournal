@@ -1,19 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { DashboardCard as Card } from "@/components/dashboard/DashboardCard";
 import { api, WeeklyLeak, WeeklyResult, WeeklyReview, WeeklyRuleCheck, WeeklyRuleKey, WeeklyTradeRow } from "@/lib/api";
 import { mondayOf, money, newYorkToday } from "@/lib/format";
 
 const RESULTS: { key: WeeklyResult; label: string; tone: string }[] = [
-  { key: "kept", label: "Kept", tone: "border-emerald-500/60 text-emerald-300" },
-  { key: "partly", label: "Partly", tone: "border-amber-500/60 text-amber-300" },
-  { key: "broken", label: "Broken", tone: "border-red-500/60 text-red-300" },
-  { key: "not_enough", label: "Not enough trades", tone: "border-border text-muted-foreground" },
+  { key: "kept", label: "Kept", tone: "bg-secondary text-foreground" },
+  { key: "partly", label: "Partly", tone: "bg-secondary text-foreground" },
+  { key: "broken", label: "Broken", tone: "bg-primary/15 text-primary" },
+  { key: "not_enough", label: "Not enough trades", tone: "bg-secondary text-muted-foreground" },
 ];
 const STATE = {
-  kept: { label: "Kept", tone: "border-emerald-500/50 text-emerald-300" },
-  broke: { label: "Broke", tone: "border-red-500/50 text-red-300" },
-  unmeasured: { label: "Can't tell", tone: "border-border text-muted-foreground" },
+  kept: { label: "Kept", tone: "bg-secondary text-foreground" },
+  broke: { label: "Broke", tone: "bg-primary/15 text-primary" },
+  unmeasured: { label: "Can't tell", tone: "bg-secondary text-muted-foreground" },
 } as const;
 
 const dayLabel = (iso: string, year = false) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US",
@@ -53,14 +54,14 @@ export default function WeeklyReviewPanel({ initial }: { initial: WeeklyReview }
   const dirty = pick !== undefined && (pick !== savedPick || (note.trim() || null) !== (review.chosen?.note ?? null));
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <a href="/daily" className="text-sm text-muted-foreground hover:text-foreground">Review Calendar</a>
         <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
-          <h1 className="text-xl font-semibold text-foreground">Week of {dayLabel(week)} – {dayLabel(review.week_end, true)}</h1>
+          <h1 className="text-xl font-semibold">Week of {dayLabel(week)} – {dayLabel(review.week_end, true)}</h1>
           <nav className="flex gap-3 text-sm" aria-label="Other weeks">
-            <a href={`/daily/week/${mondayOf(week, -7)}`} className="text-blue-400 hover:text-blue-300">← Previous week</a>
-            {!isCurrent && <a href={`/daily/week/${mondayOf(week, 7)}`} className="text-blue-400 hover:text-blue-300">Next week →</a>}
+            <a href={`/daily/week/${mondayOf(week, -7)}`} className="inline-flex min-h-11 items-center text-muted-foreground hover:text-foreground sm:min-h-0">← Previous week</a>
+            {!isCurrent && <a href={`/daily/week/${mondayOf(week, 7)}`} className="inline-flex min-h-11 items-center text-muted-foreground hover:text-foreground sm:min-h-0">Next week →</a>}
           </nav>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -69,7 +70,7 @@ export default function WeeklyReviewPanel({ initial }: { initial: WeeklyReview }
         </p>
       </div>
 
-      {error && <p className="rounded border border-red-500/50 p-3 text-sm text-red-300" role="alert">{error}</p>}
+      {error && <p className="rounded-md border border-red-500/50 p-3 text-sm text-red-400" role="alert">{error}</p>}
 
       <Card title="Last week's rule">
         {!review.previous ? <p className="text-sm text-muted-foreground">No rule was chosen for this week.</p>
@@ -111,12 +112,12 @@ export default function WeeklyReviewPanel({ initial }: { initial: WeeklyReview }
         <label className="mt-3 block text-xs text-muted-foreground">
           Note (optional)
           <input value={note} onChange={(event) => setNote(event.target.value)} maxLength={280} disabled={busy || pick === null}
-            placeholder="e.g. sell half at +10%" className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground" />
+            placeholder="e.g. sell half at +10%" className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm text-foreground" />
         </label>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" disabled={busy || !dirty || !!review.chosen?.result}
             onClick={() => save(() => api.chooseWeeklyRule(week, pick ?? null, pick ? note.trim() || null : null))}
-            className="rounded bg-foreground px-3 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50">
+            className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:min-h-9">
             {busy ? "Saving…" : review.chosen ? "Save change" : "Save"}
           </button>
           {review.chosen && <span className="text-xs text-muted-foreground">
@@ -129,7 +130,7 @@ export default function WeeklyReviewPanel({ initial }: { initial: WeeklyReview }
           <ul className="space-y-1 text-sm">
             {review.history.map((row) => (
               <li key={row.week_start} className="flex flex-wrap items-baseline gap-2">
-                <a href={`/daily/week/${row.week_start}`} className="w-28 shrink-0 text-xs text-blue-400 hover:text-blue-300">Week of {dayLabel(row.week_start)}</a>
+                <a href={`/daily/week/${row.week_start}`} className="w-28 shrink-0 text-xs tabular-nums text-muted-foreground underline underline-offset-2 hover:text-foreground">Week of {dayLabel(row.week_start)}</a>
                 <span className="text-foreground/90">{row.label ?? "Skipped"}</span>
                 {row.result && <Badge tone={RESULTS.find((r) => r.key === row.result)?.tone}>{RESULTS.find((r) => r.key === row.result)?.label}</Badge>}
                 {row.rule_key && !row.result && <span className="text-xs text-muted-foreground">not checked</span>}
@@ -148,17 +149,8 @@ export default function WeeklyReviewPanel({ initial }: { initial: WeeklyReview }
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border bg-card p-4 sm:p-5" aria-label={title}>
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 function Badge({ tone, children }: { tone?: string; children: React.ReactNode }) {
-  return <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${tone ?? "border-border text-muted-foreground"}`}>{children}</span>;
+  return <span className={`inline-flex h-[22px] w-fit shrink-0 items-center whitespace-nowrap rounded-md px-2 text-[11.5px] font-medium ${tone ?? "bg-secondary text-muted-foreground"}`}>{children}</span>;
 }
 
 function PreviousRule({ rule, note, check, result, busy, onConfirm }: {
@@ -173,7 +165,7 @@ function PreviousRule({ rule, note, check, result, busy, onConfirm }: {
       </div>
       <p className="text-foreground/90">
         {check.tested === 0 ? "No trade since you chose it has tested this rule yet."
-          : <>{plural(check.tested, "trade")} tested it: <span className="text-emerald-300">{check.kept} kept</span>, <span className="text-red-300">{check.broke} broke</span>.</>}
+          : <>{plural(check.tested, "trade")} tested it: <span className="font-medium">{check.kept} kept</span>, <span className="font-medium">{check.broke} broke</span>.</>}
         {check.unmeasured > 0 && ` ${plural(check.unmeasured, "losing trade")} can't be checked (no price path or time of day).`}
         {stillOpen > 0 && ` ${stillOpen} still open, not judged yet.`}
         {check.order_unclear > 0 && ` ${plural(check.order_unclear, "trade")} on the day you chose it has no time, so it isn't counted.`}
@@ -186,7 +178,7 @@ function PreviousRule({ rule, note, check, result, busy, onConfirm }: {
         <div className="flex flex-wrap gap-2" role="group" aria-label="Result for last week's rule">
           {RESULTS.map((option) => (
             <button key={option.key} type="button" disabled={busy} aria-pressed={result === option.key} onClick={() => onConfirm(option.key)}
-              className={`rounded border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${result === option.key ? `${option.tone} bg-background` : "border-border text-muted-foreground hover:text-foreground"}`}>
+              className={`inline-flex min-h-11 items-center rounded-md border px-2.5 text-xs font-medium transition-colors disabled:opacity-50 sm:min-h-9 ${result === option.key ? "border-primary/60 bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
               {option.label}{option.key === check.suggested && !result ? " (suggested)" : ""}
             </button>
           ))}
@@ -229,9 +221,9 @@ function TradeList({ trades }: { trades: WeeklyTradeRow[] }) {
       {trades.map((row, index) => (
         <li key={`${row.trade_id ?? row.contract}-${index}`} className="flex flex-wrap items-baseline gap-2 text-xs">
           {row.state && <Badge tone={STATE[row.state].tone}>{STATE[row.state].label}</Badge>}
-          {row.trade_id ? <a href={`/trades/${row.trade_id}`} className="font-medium text-blue-400 hover:text-blue-300">{row.contract}</a>
+          {row.trade_id ? <a href={`/trades/${row.trade_id}`} className="font-medium text-foreground underline underline-offset-2 hover:text-muted-foreground">{row.contract}</a>
             : <span className="text-muted-foreground" title="The fill this was judged on is no longer in a trade">{row.contract} (no longer in the journal)</span>}
-          <span className="text-muted-foreground">{when(row.opened_at)}</span>
+          <span className="tabular-nums text-muted-foreground">{when(row.opened_at)}</span>
           <span className={`tabular-nums ${pnlColor(row.realized_pnl)}`}>{money(row.realized_pnl, { signed: true, cents: false })}</span>
         </li>
       ))}
@@ -241,7 +233,7 @@ function TradeList({ trades }: { trades: WeeklyTradeRow[] }) {
 
 function Choice({ selected, onSelect, title, detail }: { selected: boolean; onSelect: () => void; title: string; detail: string }) {
   return (
-    <label className={`flex cursor-pointer gap-3 rounded-md border p-3 transition-colors ${selected ? "border-sky-500/60 bg-sky-500/10" : "border-border hover:border-foreground/40"}`}>
+    <label className={`flex cursor-pointer gap-3 rounded-md border p-3 transition-colors ${selected ? "border-primary/60 bg-primary/10" : "hover:border-foreground/40"}`}>
       <input type="radio" name="weekly-rule" checked={selected} onChange={onSelect} className="mt-1" />
       <span>
         <span className="block text-sm text-foreground">{title}</span>

@@ -45,8 +45,9 @@ export default function FillInterruptCard({ tradeId, interruptId, noted }: { tra
 
   if (row === undefined) return <p role="status" className="text-sm text-muted-foreground">Loading the message…</p>;
   if (row === null) return <p role="status" className="text-sm text-muted-foreground">This message is unavailable for this position.</p>;
-  return <section aria-label="Pattern interrupt" data-testid="fill-interrupt" className="rounded-lg border border-primary/60 bg-card p-5 text-sm">
-    <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pattern at your fill</h2>
+  return <section aria-label="Pattern interrupt" data-testid="fill-interrupt" className="rounded-lg border border-primary/60 bg-card text-sm">
+    <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Pattern at your fill</h2>
+    <div className="p-4">
     <p className="text-base font-semibold">{row.title}</p>
     <p className="text-muted-foreground">{row.contract}{row.executed_at != null && <> · filled {time(row.executed_at)}</>}</p>
     <ul className="mt-2 space-y-1">{row.lines.map(l => <li key={l}>{l}</li>)}</ul>
@@ -54,7 +55,8 @@ export default function FillInterruptCard({ tradeId, interruptId, noted }: { tra
       {row.noted_at != null ? <span role="status">Noted {time(row.noted_at)}.</span>
         : owner && <button type="button" onClick={() => void note()}
           className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-muted">Noted</button>}
-      {error && <span role="alert" className="text-amber-300">{error}</span>}
+      {error && <span role="alert" className="text-red-400">{error}</span>}
+    </div>
     </div>
   </section>;
 }
