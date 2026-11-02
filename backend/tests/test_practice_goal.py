@@ -151,6 +151,7 @@ def test_the_prompt_asks_for_one_scored_practice_and_leads_with_the_score():
 def test_the_job_allowlist_is_unchanged():
     assert research_job.JOB_TOOLS == ("get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events",
                                       "get_quotes", "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today", "get_symbol_profile",
+                                      "get_macro", "get_base_rates",
                                       "get_breadth", "get_positioning")
     assert not [t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS) if "propose_plan" in t["name"] or "week_review" in t["name"]]
 

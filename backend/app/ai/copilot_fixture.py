@@ -91,6 +91,14 @@ class FixtureEvidence:
         from app.ai import copilot_regime
         return copilot_regime.fixture_radar_today(GROUP["name"], _SESSION, group, limit)
 
+    def get_macro(self) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.fixture_macro()
+
+    def get_base_rates(self, symbol: str, drawdown_pct: float | None = None) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.fixture_base_rates(symbol, drawdown_pct)
+
     def get_breadth(self) -> dict:
         from app.ai import copilot_breadth
         return copilot_breadth.fixture_breadth()

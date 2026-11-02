@@ -142,6 +142,14 @@ class ReplayEvidence:
                 "reason": "Option chains are not in the Radar snapshot, so option candidates are unavailable in replay "
                           "(a live read would show today's quotes, not the frozen moment's)."}
 
+    def get_macro(self) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.replay_macro(self.at)
+
+    def get_base_rates(self, symbol: str, drawdown_pct: float | None = None) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.replay_base_rates(symbol, drawdown_pct, self.at)
+
     def get_breadth(self) -> dict:
         from app.ai import copilot_breadth
         return {"state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
