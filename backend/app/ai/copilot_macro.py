@@ -14,7 +14,9 @@ import csv
 import io
 import logging
 import math
+import os
 import statistics
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -82,7 +84,9 @@ def _cached(series_id: str, start: date, now: float) -> tuple[str | None, float 
         log.warning("FRED %s unavailable: %s", series_id, type(exc).__name__)
         return (path.read_text(), stamp) if stamp is not None else (None, None)
     FRED_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    part = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.part")
+    part.write_text(text)
+    os.replace(part, path)  # a reader never sees half a file
     return text, now
 
 
@@ -145,9 +149,19 @@ def live_macro(now: datetime) -> dict:
     return macro(now.timestamp())
 
 
+def _uncached(series_id: str, start: date, now: float) -> tuple[str | None, float | None]:
+    """A replay's own read from its start: the shared cache starts about 400 days before today, not the frozen day."""
+    try:
+        return _fetch(series_id, start), now
+    except Exception as exc:  # noqa: BLE001 - that series reads unavailable
+        log.warning("FRED %s unavailable: %s", series_id, type(exc).__name__)
+        return None, None
+
+
 def replay_macro(at: datetime) -> dict:
     """Cut before the replay's day: FRED publishes a day's value the next business day."""
-    return {**macro(time.time(), until=at.astimezone(ET).date()), "cut": f"values dated before {at.astimezone(ET).date()}"}
+    day = at.astimezone(ET).date()
+    return {**macro(time.time(), until=day, fetch=_uncached), "cut": f"values dated before {day}"}
 
 
 def fixture_macro() -> dict:
@@ -197,7 +211,7 @@ def base_rates(symbol: str, bars: list[dict], drawdown_pct: float | None = None)
     dd, high_at = _drawdowns(closes)
     last = len(closes) - 1
     now_pct = -dd[last] * 100
-    threshold = float(drawdown_pct) if drawdown_pct is not None else math.floor(now_pct)
+    threshold = float(drawdown_pct) if drawdown_pct is not None else math.floor(round(now_pct, 6))  # 0.29 * 100 < 29
     current = {"close": closes[last], "date": days[last].isoformat(), "drawdown_pct": round(-now_pct, 2),
                "high": closes[high_at[last]], "high_date": days[high_at[last]].isoformat()}
     if threshold < 3:
@@ -214,7 +228,8 @@ def base_rates(symbol: str, bars: list[dict], drawdown_pct: float | None = None)
             back = next((j for j in range(i + 1, last + 1) if closes[j] >= high), None)
             episodes.append({"i": i, "date": days[i].isoformat(), "drawdown_pct": _pct(dd[i]),
                              **{f"fwd_{h}d_pct": _pct(closes[i + h] / closes[i] - 1) for h in HORIZONS if i + h <= last},
-                             "further_drop_63d_pct": _pct(min(closes[i + 1:i + 64]) / closes[i] - 1) if i < last else None,
+                             # Only once 63 later closes exist: a shorter window's low is not the same measure.
+                             "further_drop_63d_pct": _pct(min(closes[i + 1:i + 64]) / closes[i] - 1) if i + 63 <= last else None,
                              "recovered_high_in_days": back - i if back is not None else None})
     if episodes and not armed:
         episodes[-1]["ongoing"] = True  # the drawdown has not recovered to half the threshold since it began

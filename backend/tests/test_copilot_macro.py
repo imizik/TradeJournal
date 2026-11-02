@@ -77,6 +77,23 @@ def test_base_rates_count_each_drawdown_once_against_the_baseline():
     assert out["horizons"]["5d"]["baseline"]["n"] == 179  # every day from the first full year on and out["recovered_high"] == {"of": 1, "recovered": 1, "median_days": 22}
 
 
+def test_the_default_depth_is_todays_whole_percent_despite_float_error():
+    out = m.base_rates("XYZ", bars([100.0] * 400 + [71.0]))  # 29% down: 0.29 * 100 is 28.999999999999996
+    assert out["threshold_pct"] == 29 and out["recent"][-1]["further_drop_63d_pct"] is None  # no 63 later closes yet
+
+
+def test_a_replay_reads_fred_from_its_own_start_not_the_shared_cache(monkeypatch):
+    starts = []
+
+    def fetch(series_id, start):
+        starts.append(start)
+        return csv([(date(2024, 1, 2), 4.0), (date(2024, 3, 1), 4.2)])
+    monkeypatch.setattr(m, "_fetch", fetch)
+    monkeypatch.setattr(m, "_cached", lambda *_: pytest.fail("replay must not read the live cache"))
+    out = m.replay_macro(datetime(2024, 3, 1, 11, tzinfo=ET))
+    assert set(starts) == {date(2024, 3, 1) - timedelta(days=400)} and out["latest_date"] == "2024-01-02"
+
+
 def test_base_rates_need_history_and_a_drawdown():
     assert m.base_rates("NEW", bars([10.0] * 100))["state"] == "unavailable"
     flat = m.base_rates("SPY", bars([100.0] * 400))

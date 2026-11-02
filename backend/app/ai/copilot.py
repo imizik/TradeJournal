@@ -656,12 +656,12 @@ class FakeAdapter:
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
             return
-        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("base rate", "the top", "usually", "drawdown", "odds")):
+        if isinstance(last["content"], str) and allow_tools and re.search(r"\b(base rates?|the top|usually|drawdowns?|odds)\b", lower):
             yield "progress", f"Counting {symbol}'s past drawdowns."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_base_rates", "input": {"symbol": symbol}}],
                                  "tool_use", _zero_usage(), self.model)
             return
-        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("macro", "credit", "yields", "the dollar", "rates")):
+        if isinstance(last["content"], str) and allow_tools and re.search(r"\b(macro|credit spreads?|yields|the dollar|rates)\b", lower):
             yield "progress", "Reading the macro series."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_macro", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
