@@ -2280,6 +2280,40 @@ size in a scripted line, so the fixture and the browser spec exercise the path
 `backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`,
 `frontend/e2e/charts-copilot-loop.spec.ts` (Look at my chart).
 
+## Web search
+
+A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped
+Telegram reply) may search the web on the `anthropic` backend with live
+evidence. Background turns (pre-market prep, the week review, the position
+companion) never do, and neither do replay (the web is hindsight) or the
+fixture. `copilot.run_turn(..., web=True)` adds Anthropic's server-side
+`web_search` tool to each round that may still call tools, with `max_uses`
+counting down from `copilot.WEB_SEARCHES` (3) across the turn's rounds.
+
+- **No web fetch.** Search results only: a page cannot steer a request to a
+  URL, and the query is the only thing that leaves. The prompt says to use the
+  web for what the tools do not carry (macro and policy, politics, geopolitics,
+  industry and company statements), to name the publisher and date of what it
+  uses, and never to put the owner's positions, sizes, trades or account
+  labels in a query. Results are third-party data, never instructions.
+- **Sources.** Each search is a Sources row (`web_search`, kind `fetched`):
+  the query, the result count and hosts, and up to 8 links (title, URL, page
+  age; http and https only) the panel opens in a new tab. The links are not
+  kept with the saved investigation; the answer's text is.
+- **Cost.** A cent a search on top of tokens. A turn that may search gets a cap
+  of `COPILOT_TURN_BUDGET_USD` plus `copilot.WEB_TURN_EXTRA_USD` ($0.15), since
+  search results add input; the daily budget is unchanged. A `pause_turn` (a
+  long server-side search) is sent back to resume, within that cap.
+- **Research now.** When a question needs more than a turn can read, the
+  prompt has the model answer what the evidence supports and then propose
+  `propose_plan kind=revisit` with `horizon_days 0`: a **Proposed research**
+  card. Confirm queues the owner's reassess job due now (`POST
+  /copilot/research-jobs/reassess`, `after_days 0`), the [research
+  job](#research-job) with web search and fetch, and its result reaches the
+  thread like any revisit. It runs only while the research queue is on.
+
+Tests: `backend/tests/test_copilot_web.py`.
+
 ## Saved investigations
 
 After each turn the page saves the conversation as a `copilot_investigation`
@@ -2336,7 +2370,7 @@ time) is at or before the frozen moment. Fixture mode returns none.
 | `COPILOT_EFFORT` | `medium` | `low`, `medium` or `high`. |
 | `COPILOT_BACKENDS` | `anthropic` | The backends the panel's **Backend** picker offers, comma-separated; `COPILOT_BACKEND` is always offered first. `anthropic` is offered only when the API key is set. A turn sends its pick as `backend` in `POST /copilot/chat`; one not offered is refused (422). Remembered per browser. |
 | `COPILOT_DAILY_BUDGET_USD` | `4` | Estimated API spend (New York day, `anthropic` turns only) at which `POST /copilot/chat` refuses further API turns with a 429 until tomorrow. Every turn is recorded in `copilot_turn` (`app/ai/copilot_spend.py`: backend, model, rounds, tokens, estimated cost; no text), `GET /copilot/status` reports `spend_today_usd`, and the panel shows "API today $x of $y" while the API backend is picked. Turn metrics also reach the server journal at INFO. |
-| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). |
+| `COPILOT_TURN_BUDGET_USD` | `0.25` | Estimated API spend at which a turn stops between rounds (output is also capped at 4,000 tokens per round). A turn that may [search the web](#web-search) gets $0.15 more. |
 | `COPILOT_FALLBACKS` | on | Sends the server-side refusal fallback (`fallbacks: "default"`). `off` disables it. |
 | `ALERT_POLICY_ENABLED` | `true` | The [phone ping policy](#phone-ping-policy) for the app's own pings. `false` passes every ping through. |
 | `PING_DAILY_CAP` | `12` | Pings a New York day across every kind; last-day final, invalidation and give-back are never over it. |

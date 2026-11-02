@@ -20,6 +20,8 @@ export type CopilotStatus =
 export type ToolEvent = {
   type: "tool"; id: string; name: string; status: "running" | "ok" | "error"; input?: Record<string, unknown>;
   summary?: string; ms?: number; provenance?: { source: string; kind: "recorded" | "fetched" | "cached" | "simulated" | "replay" | "saved" | "proposal"; as_of: string | number | null; state?: string | null };
+  /** web_search only: the pages the search returned, shown as links under Sources. */
+  links?: { title: string; url: string; page_age?: string }[];
   /** get_level_history only: the counts the plan card shows under its invalidation (never ids). */
   history?: LevelHistory;
   /** get_option_candidates only: the contracts the plan card offers as a pick list for its contract. */

@@ -14,7 +14,8 @@ const practiceTarget = (p: Extract<Proposal, { kind: "practice" }>) =>
 /** What the card says will be created, exactly as Confirm sends it. */
 export function proposalText(proposal: Proposal): string {
   if (proposal.kind === "memory") return `${proposal.memory_kind}${proposal.symbol ? ` · ${proposal.symbol}` : ""}`;
-  if (proposal.kind === "revisit") return `Research again in ${proposal.horizon_days} day${proposal.horizon_days === 1 ? "" : "s"}: ${proposal.question}`;
+  if (proposal.kind === "revisit") return proposal.horizon_days === 0 ? `Research now, in the background: ${proposal.question}`
+    : `Research again in ${proposal.horizon_days} day${proposal.horizon_days === 1 ? "" : "s"}: ${proposal.question}`;
   if (proposal.kind === "trade_plan") return `${proposal.symbol} ${proposal.direction} ${proposal.instrument}`;
   if (proposal.kind === "practice") return practiceTarget(proposal);
   return `${proposal.symbol} ${levelText(proposal)}`;
@@ -47,7 +48,8 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
   const watch = proposal.kind === "watch";
   const memory = proposal.kind === "memory";
   const practice = proposal.kind === "practice";
-  const title = watch ? "Proposed watch" : memory ? "Proposed memory" : practice ? "Proposed practice" : "Proposed revisit";
+  const now = proposal.kind === "revisit" && proposal.horizon_days === 0;  // research now: a background job with the web
+  const title = watch ? "Proposed watch" : memory ? "Proposed memory" : practice ? "Proposed practice" : now ? "Proposed research" : "Proposed revisit";
   // A memory or a practice needs no investigation: each is saved as the owner's own words.
   const ready = memory || practice ? text.trim().length > 0 : !!investigationId;
 
@@ -85,7 +87,8 @@ export default function ProposalCard({ proposal, investigationId, alertsSupporte
         said = `Alert set: ${proposalText(proposal)} (${proposal.symbol} was ${number(quote.last)}).`;
       } else {
         const made = await enqueueRevisit(investigationId!, proposal.question, proposal.horizon_days);
-        const queued = made.created ? "Revisit queued." : "This revisit was already queued today.";
+        const queued = now ? (made.created ? "Research queued: it searches the web, cites its sources and saves its result to this thread in a few minutes."
+          : "This research was already queued today.") : made.created ? "Revisit queued." : "This revisit was already queued today.";
         said = made.queue_enabled ? queued : `${queued} The research queue is off, so it waits until the queue is turned on.`;
       }
       setNote(said);

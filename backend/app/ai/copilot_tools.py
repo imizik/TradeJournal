@@ -266,7 +266,8 @@ TOOLS: list[dict] = [
                        "alert on `symbol` at `price` (condition touches, crosses or closes_beyond; closes_beyond needs "
                        "`interval` 1m-4h), with a short `label` (at most 60 characters) and `why` (at most 300). "
                        "kind=revisit: research this investigation again after `horizon_days` (1-30), focused on "
-                       "`question` (at most 500 characters). kind=memory: something the owner said that is worth "
+                       "`question` (at most 500 characters); `horizon_days` 0 is research now: a background job with web "
+                       "search and page reading that runs for minutes, cites its sources and saves its result here. kind=memory: something the owner said that is worth "
                        "remembering across conversations: `memory_kind` (statement, thesis, preference or lesson), "
                        "`text` (their words or a faithful paraphrase, at most 400 characters), optional "
                        "`interpretation` (what it should change about how you work, at most 300) and optional `symbol` "
@@ -292,7 +293,7 @@ TOOLS: list[dict] = [
                                         "interval": {"type": "string", "description": "closes_beyond only: 1m, 3m, 5m, 15m, 30m, 1h or 4h"},
                                         "label": {"type": "string"}, "why": {"type": "string"},
                                         "question": {"type": "string"},
-                                        "horizon_days": {"type": "integer", "description": "1-30, default 1"},
+                                        "horizon_days": {"type": "integer", "description": "revisit: 0 (research now) to 30, default 1"},
                                         "memory_kind": {"type": "string", "enum": ["statement", "thesis", "preference", "lesson"]},
                                         "text": {"type": "string"}, "interpretation": {"type": "string"},
                                         "direction": {"type": "string", "enum": ["long", "short"]},
@@ -416,8 +417,8 @@ def _proposal(args: dict) -> dict:
         return out
     if kind == "revisit":
         days = args.get("horizon_days", 1)
-        if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
-            raise ToolInputError("horizon_days must be 1-30")
+        if not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 30:
+            raise ToolInputError("horizon_days must be 0-30")
         return {"kind": "revisit", "question": _text(args, "question", 500), "horizon_days": days}
     if kind == "trade_plan":
         return _trade_plan(args)
@@ -1000,6 +1001,7 @@ PROVENANCE = {
     "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
                            "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
     "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
+    "web_search": ("Anthropic web search (third-party pages, untrusted)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

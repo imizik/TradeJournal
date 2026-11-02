@@ -45,7 +45,7 @@ const TOOL_LABEL: Record<string, string> = {
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
-  get_moment: "That moment",
+  get_moment: "That moment", web_search: "Web search",
 };
 
 /** The turn's latest get_option_candidates result for an options plan's symbol and view, when the model asked for it. */
@@ -227,6 +227,16 @@ function Sources({ tools, metrics }: { tools: ToolEvent[]; metrics?: TurnMetrics
             {tool.input ? ` (${Object.values(tool.input).flat().join(", ")})` : ""}: {tool.summary ?? tool.status}
             {tool.provenance && <> · {tool.provenance.source} · as of {asOfText(tool.provenance.as_of)}</>}
             {tool.ms !== undefined && <> · {tool.ms} ms</>}
+            {tool.links && tool.links.length > 0 && (
+              <ul className="mt-0.5 space-y-0.5 pl-3">
+                {tool.links.map(link => (
+                  <li key={link.url} className="truncate">
+                    <a href={link.url} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted hover:text-foreground">{link.title}</a>
+                    {link.page_age && <> · {link.page_age}</>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
         {looked.length > 0 && <li>Looked at: {looked.join(", ")}</li>}
