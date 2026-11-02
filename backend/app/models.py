@@ -898,6 +898,17 @@ class CopilotTurn(SQLModel, table=True):
     cache_read_input_tokens: int = 0
     cost_usd: float = Field(default=0.0, sa_column=Column(DECIMAL_18_6, nullable=False))
     total_ms: Optional[int] = None
+    # Measurement (docs/copilot-lab.md § Measuring the copilot); null on rows written before it.
+    kind: Optional[str] = Field(default=None, index=True)  # ask | plan | review | week_review | moment | changes | compare | pushback | briefing | prep | companion | shadow
+    source: Optional[str] = None  # desk | charts | radar | panel | telegram | prep | week_review | companion | shadow
+    investigation_id: Optional[uuid.UUID] = Field(default=None, index=True)  # the saved conversation, linked when it is saved
+    tool_names: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # JSON list, the owner-context read left out
+    first_text_ms: Optional[int] = None
+    max_silence_ms: Optional[int] = None
+    cache_creation_input_tokens: Optional[int] = None
+    error: Optional[str] = None  # the turn's error code, "stopped" when the owner stopped it, a refusal code when none ran
+    effort: Optional[str] = None
+    evidence: Optional[str] = None  # live | fixture | replay
 
 
 class PhonePing(SQLModel, table=True):

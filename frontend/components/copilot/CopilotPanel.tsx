@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import {
   AUTO_WEEK_REVIEW_TITLE, answerParts, asOfText, verdictPending, copilotStatus, pickedModel, rememberModel, pickedBackend, rememberBackend, createInvestigation, fromSaved, getInvestigation, getPractice, listInvestigations, saveOutcome, saveRating, streamTurn, toSaved, planOrigin, updateInvestigation, whatChangedPrompt, IMAGE_PREFILL, MAX_IMAGES, imageUrl, spokenText, uploadImage,
   type Backend, type Compare, type CopilotStatus, type LinkOrigin, type Findings, type Investigation, type InvestigationSummary, type LabMessage, type LevelHistory, type Proposal, type ProposalOutcome, type Rating, type ToolEvent, type TradePlan, type TurnMetrics, type OptionCandidates, type DrawnPlan,
-  BRIEFING_TITLE,
+  BRIEFING_TITLE, type TurnSource,
 } from "@/lib/copilot";
 import Link from "next/link";
 import { Eye, ImagePlus, Loader2, MoreHorizontal, Plus, Reply, X } from "lucide-react";
@@ -416,6 +416,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
   desk?: DeskHooks;
 }) {
   const panel = variant === "panel";
+  // Where this question is asked from, recorded with its turn: the desk page, the Charts dock, a Radar drawer, or another panel.
+  const source: TurnSource = !panel ? "desk" : link?.origin?.kind === "radar_event" ? "radar" : pageSymbol ? "charts" : "panel";
   const { owner } = useAppAccess();
   const opening = link?.context && !link.investigation ? `Context: ${link.context}\n\n` : panel && pageContext ? `Context: ${pageContext}\n\n` : "";
   const [status, setStatus] = useState<CopilotStatus | null>(null);
@@ -864,8 +866,8 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
             tools: at < 0 ? [...tools, event] : tools.map((t, i) => i === at ? { ...t, ...event } : t) };
         });
         else if (event.type === "error") update(last => ({ ...last, error: { code: event.code, message: event.message } }));
-        else if (event.type === "done") { update(last => ({ ...last, progress: undefined, metrics: event.metrics, carry: event.carry_id ?? undefined })); setAnswered(n => n + 1); }
-      }, controller.signal, model, shots.map(s => s.id), backend, carry);
+        else if (event.type === "done") { update(last => ({ ...last, progress: undefined, metrics: event.metrics, carry: event.carry_id ?? undefined, turnId: event.turn_id ?? undefined })); setAnswered(n => n + 1); }
+      }, controller.signal, model, shots.map(s => s.id), backend, carry, source, current?.id ?? null);
     } catch (error) {
       update(last => ({ ...last, error: controller.signal.aborted ? { code: "stopped", message: "Stopped." }
         : { code: "network", message: error instanceof Error && error.message ? "Copilot Lab could not be reached." : "Copilot Lab failed." } }));

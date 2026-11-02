@@ -13,6 +13,7 @@ Plain Python, no HTTP: pass a ``Session`` or let each call open its own.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import uuid
@@ -25,6 +26,8 @@ from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.models import CopilotInvestigation
+
+log = logging.getLogger(__name__)
 
 SYMBOL_PATTERN = r"^[A-Z][A-Z0-9.\-]{0,9}$"
 MAX_TRANSCRIPT_CHARS = 400_000  # message text and stored cards together
@@ -116,6 +119,7 @@ class AnswerMetrics(_Strict):
     backend: str | None = Field(None, max_length=40)
     tools: list[str] | None = Field(None, max_length=50)
     error: str | None = Field(None, max_length=80)
+    turn_id: str | None = Field(None, pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")  # its copilot_turn row
 
     @field_validator("tools")
     @classmethod
@@ -268,6 +272,20 @@ def _fill(row: CopilotInvestigation, fields: InvestigationFields, stored: dict[s
         row.findings_json = json.dumps(fields.findings.model_dump(exclude_none=True))
 
 
+def _link_turns(db: Session, row: CopilotInvestigation) -> None:
+    """Point the saved answers' ``copilot_turn`` rows at this conversation (docs/copilot-lab.md § Measuring the copilot).
+    Its own transaction after the save: a failure here never undoes the save."""
+    from app.ai import copilot_spend
+    ids = [m.get("metrics", {}).get("turn_id") for m in json.loads(row.transcript_json) if m.get("metrics", {}).get("turn_id")]
+    if not ids:
+        return
+    try:
+        copilot_spend.link(db, row.id, ids)
+    except Exception:  # noqa: BLE001 - bookkeeping; the conversation is already saved
+        db.rollback()
+        log.warning("copilot turns not linked to %s", row.id, exc_info=True)
+
+
 def _row(db: Session, investigation_id: str | uuid.UUID) -> CopilotInvestigation:
     try:
         key = investigation_id if isinstance(investigation_id, uuid.UUID) else uuid.UUID(str(investigation_id))
@@ -286,6 +304,7 @@ def create(fields: InvestigationFields, source: Source = "copilot", session: Ses
         db.add(row)
         db.commit()
         db.refresh(row)
+        _link_turns(db, row)
         return full(row)
 
 
@@ -303,6 +322,7 @@ def update(investigation_id: str | uuid.UUID, fields: InvestigationFields, revis
         db.add(row)
         db.commit()
         db.refresh(row)
+        _link_turns(db, row)
         return full(row)
 
 

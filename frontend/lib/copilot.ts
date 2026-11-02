@@ -76,7 +76,7 @@ export type CopilotEvent =
   | ToolEvent
   | ({ type: "proposal" } & Proposal)
   | { type: "error"; code: string; message: string }
-  | { type: "done"; metrics: TurnMetrics; carry_id?: string | null };
+  | { type: "done"; metrics: TurnMetrics; carry_id?: string | null; turn_id?: string | null };
 
 /** A step the model proposed (propose_plan). It is only a card: nothing exists until the owner confirms it. Saved
  * with its answer: ``client_id`` is the card's one id for its replayable saves (minted when it arrives, so a Confirm
@@ -103,8 +103,11 @@ export type TradePlan = Extract<Proposal, { kind: "trade_plan" }>;
 /** ``images``: an owner message's screenshot thumbnails (this browser only; the saved text carries SHARED_MARKER). */
 export type Rating = "helped" | "didnt";
 /** How one saved answer went (a small subset of its turn's metrics); what comes back on a reopened conversation. */
-export type SavedMetrics = { first_text_ms?: number; total_ms?: number; rounds?: number; model?: string; backend?: string; tools?: string[]; error?: string };
-export type LabMessage = { role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics;
+/** ``turn_id`` names the server's ``copilot_turn`` row, so the saved answer and its measurements meet (docs/copilot-lab.md § Measuring the copilot). */
+export type SavedMetrics = { first_text_ms?: number; total_ms?: number; rounds?: number; model?: string; backend?: string; tools?: string[]; error?: string; turn_id?: string };
+/** Where a question is asked from; recorded with its turn. */
+export type TurnSource = "desk" | "charts" | "radar" | "panel";
+export type LabMessage = { role: "user" | "assistant"; content: string; rating?: Rating; savedMetrics?: SavedMetrics; images?: string[]; progress?: string; proposals?: Proposal[]; tools?: ToolEvent[]; error?: { code: string; message: string }; metrics?: TurnMetrics; turnId?: string;
   /** The server's id for the evidence this answer read, sent with the next message; never saved. */
   carry?: string };
 
@@ -263,11 +266,11 @@ export function speechText(message: Pick<LabMessage, "content" | "proposals" | "
 
 export async function streamTurn(history: { role: "user" | "assistant"; content: string }[], symbol: string | null,
   onEvent: (event: CopilotEvent) => void, signal: AbortSignal, model: string | null = null, imageIds: string[] = [],
-  backend: Backend | null = null, carryId: string | null = null) {
+  backend: Backend | null = null, carryId: string | null = null, source: TurnSource = "desk", investigationId: string | null = null) {
   const response = await fetch(apiUrl("/copilot/chat"), {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ messages: history, symbol, ...(model ? { model } : {}), ...(imageIds.length ? { image_ids: imageIds } : {}),
-      ...(backend ? { backend } : {}), ...(carryId ? { carry_id: carryId } : {}) }),
+      ...(backend ? { backend } : {}), ...(carryId ? { carry_id: carryId } : {}), source, ...(investigationId ? { investigation_id: investigationId } : {}) }),
     signal, cache: "no-store",
   });
   if (!response.ok || !response.body) {
@@ -435,6 +438,7 @@ export function savedMetrics(m: LabMessage): SavedMetrics | undefined {
   const out: SavedMetrics = t ? { first_text_ms: t.first_text_ms ?? undefined, total_ms: t.total_ms, rounds: t.rounds, model: t.model.slice(0, 80),
     backend: t.backend.slice(0, 40), tools: t.tool_calls.map(c => c.name).slice(0, 50) } : {};
   if (m.error) out.error = m.error.code.slice(0, 80);
+  if (m.turnId) out.turn_id = m.turnId;
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as SavedMetrics;
 }
 /** Asking Jo to argue against a confirmed plan (docs/agent/dots-integration.md § Jo research role): a pending request

@@ -369,7 +369,7 @@ def test_a_failed_turn_pings_the_raw_facts_labelled_as_such(engine, phone):
 
 def test_a_turn_through_the_labs_backend_respects_its_limits(engine, phone, monkeypatch):
     """The real ``run_turn`` on the fake backend: a budget stop mid-turn is a failed turn, so the raw facts go out."""
-    async def over_budget(history, symbol, cfg, adapter, evidence, now):
+    async def over_budget(history, symbol, cfg, adapter, evidence, now, **kwargs):
         assert symbol is None and history[-1]["content"].startswith("Morning brief")
         yield {"type": "text", "delta": "NBIS expires "}
         yield {"type": "error", "code": "budget", "message": f"Stopped: this turn reached its ${cfg.turn_budget_usd:.2f} API spend cap."}

@@ -33,6 +33,7 @@ and rating writes are idempotent, a repeated ``why`` or question asks once more.
 """
 
 import asyncio
+import contextlib
 import logging
 import re
 import uuid
@@ -283,6 +284,8 @@ class Replies:
         if cfg.backend == "anthropic":
             spent = await asyncio.to_thread(copilot_spend.spent_today)
             if spent >= cfg.daily_budget_usd:
+                await asyncio.to_thread(copilot_spend.record_refused, kind="ask", source="telegram", backend=cfg.backend,
+                                        code="daily_budget", symbol=symbol)
                 return f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
         try:
             adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
@@ -293,21 +296,17 @@ class Replies:
         now = datetime.now(ET)
         parts: list[str] = []
         errors: list[str] = []
-        done = None
         try:
-            turn = copilot.run_turn(history, symbol, cfg, adapter, evidence, now)
-            async for event in turn:
-                if event.get("type") == "text":
-                    parts.append(event.get("delta") or "")
-                elif event.get("type") == "error":
-                    errors.append(event.get("message") or "")
-                elif event.get("type") == "done":
-                    done = event.get("metrics")
+            turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, now, kind=None, source="telegram")
+            async with contextlib.aclosing(turn) as events:
+                async for event in events:
+                    if event.get("type") == "text":
+                        parts.append(event.get("delta") or "")
+                    elif event.get("type") == "error":
+                        errors.append(event.get("message") or "")
         finally:
             if hasattr(adapter, "aclose"):
                 await adapter.aclose()
-            if done:
-                await asyncio.to_thread(copilot_spend.record, done, symbol)
         answer = "".join(parts).strip()
         if errors:
             answer = (answer + "\n\n" if answer else "") + " ".join(errors)

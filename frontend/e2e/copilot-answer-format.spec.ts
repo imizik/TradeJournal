@@ -24,7 +24,8 @@ const TURN = sse([
   { type: "tool", id: "q1", name: "get_quotes", status: "ok", summary: "NBIS 87.74", ms: 2, provenance: simulated("Tradier", "stale") },
   ...ANSWER.match(/\S+\s*/g)!.map((delta) => ({ type: "text", delta })),
   { type: "done", metrics: { backend: "fake", evidence: "fixture", model: "fake-scripted", first_text_ms: 1, total_ms: 2, rounds: 2, tool_calls: [],
-    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 } },
+    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, cost_usd: 0 },
+    turn_id: "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f" },
 ]);
 const PLAN = { id: "toolu_plan", kind: "trade_plan", symbol: "NBIS", direction: "long", instrument: "stock", contract: null,
   thesis: "NBIS reclaims the level overhead with its group.", entry_trigger: { condition: "crosses", price: 95.9, interval: null },
@@ -144,7 +145,7 @@ test("an answer leads with its verdict and headline, keeps Changes if plain, and
   await didnt.click();
   await expect(didnt).toHaveAttribute("aria-pressed", "false");
   await expect.poll(() => seen.puts.filter((p) => "rating" in p)).toEqual([{ rating: "helped" }, { rating: "didnt" }, { rating: null }]);
-  expect(seen.posts[0]).toMatchObject({ transcript: [{}, { metrics: { total_ms: 2, rounds: 2, model: "fake-scripted" } }] });
+  expect(seen.posts[0]).toMatchObject({ transcript: [{}, { metrics: { total_ms: 2, rounds: 2, model: "fake-scripted", turn_id: "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f" } }] });
 
   // Saved, the thread's next steps are offered instead.
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();

@@ -2370,6 +2370,40 @@ python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl 
   outcomes; the Proof pages own those. Tests:
   `backend/tests/test_copilot_eval.py`, `backend/tests/test_copilot_answer.py`.
 
+### What every turn records
+
+Every model turn the app runs writes one `copilot_turn` row through
+`copilot_spend.recorded_turn` (the desk and the Charts dock, Telegram, the
+morning brief, the week review, the companion) or `copilot_spend.record` (the
+shadow book). Besides the model, rounds, tokens and cost it already kept, a row
+now says what the turn was for and how it went:
+
+- `kind`: `ask`, `briefing`, `plan`, `review`, `week_review`, `moment`,
+  `changes`, `compare`, `pushback`, `prep`, `companion` or `shadow`. For a
+  desk, dock or Telegram question the server works it out from the owner's
+  words, the tools read, the cards proposed and the answer's shape
+  (`copilot_spend.kind_of`); the scheduled senders name theirs.
+- `source`: `desk`, `charts`, `radar`, `panel` (the browser says which, in
+  `POST /copilot/chat`'s `source`), or `telegram`, `prep`, `week_review`,
+  `companion`, `shadow`.
+- `tool_names` (the owner-context read left out), `first_text_ms`,
+  `max_silence_ms`, `cache_creation_input_tokens`, `effort`, `evidence`.
+- `error`: the turn's error code; `stopped` when the owner stopped the answer
+  mid-stream (its cost so far is kept, so the daily cap never undercounts);
+  `daily_budget` on a zero-cost row when the budget was already spent and no
+  model ran. The morning brief is refused past the cap like a desk turn; the
+  week review runs regardless.
+- `investigation_id`: the saved conversation. The `done` event carries the
+  row's `turn_id`; the browser keeps it in the answer's saved `metrics`, and
+  saving the investigation links the rows (`copilot_spend.link`), so a
+  conversation's cost and the Helped / Didn't on each answer meet. The first
+  answer of a new thread links at its first save.
+
+Migration `backend/alembic/versions/b7c1d2e3f4a5_copilot_turn_measurement.py`
+(additive, nullable). Research jobs and the structured reviews keep their own
+accounting (`research_job.spend_json`, the review records) and are not in this
+table. Tests: `backend/tests/test_copilot_turn_record.py`.
+
 ## Live measurements (2026-10-24)
 
 Sonnet 5.5 on the Messages API, effort `medium` unless noted, replay of Fri

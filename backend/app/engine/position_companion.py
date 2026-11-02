@@ -47,6 +47,7 @@ Nothing here places, changes or suggests an order, and every prompt says so.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 from datetime import UTC, date, datetime, timedelta
 import json
@@ -352,6 +353,8 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
     if model and copilot.MODEL_ID.match(model):
         cfg = dataclasses.replace(cfg, model=model)
     if cfg.backend == "anthropic" and await asyncio.to_thread(copilot_spend.spent_today) >= cfg.daily_budget_usd:
+        await asyncio.to_thread(copilot_spend.record_refused, kind="companion", source="companion", backend=cfg.backend,
+                                code="daily_budget", symbol=symbol)
         return "", f"Today's copilot API budget (${cfg.daily_budget_usd:.2f}) is spent."
     try:
         adapter = await asyncio.to_thread(copilot.adapter_for, cfg)
@@ -359,24 +362,22 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
     except copilot.CopilotError as exc:
         return "", exc.message
     history = [{"role": "user", "content": question}]
-    parts, error, done = [], None, None
+    parts, error = [], None
     try:
-        turn = copilot.run_turn(history, symbol, cfg, adapter, evidence, datetime.fromtimestamp(now, ET))
-        async for event in turn:
-            if event.get("type") == "text":
-                parts.append(event.get("delta") or "")
-            elif event.get("type") == "error" and error is None:
-                error = event.get("message") or event.get("code") or "error"
-            elif event.get("type") == "done":
-                done = event.get("metrics")
+        turn = copilot_spend.recorded_turn(history, symbol, cfg, adapter, evidence, datetime.fromtimestamp(now, ET),
+                                           kind="companion", source="companion")
+        async with contextlib.aclosing(turn) as events:
+            async for event in events:
+                if event.get("type") == "text":
+                    parts.append(event.get("delta") or "")
+                elif event.get("type") == "error" and error is None:
+                    error = event.get("message") or event.get("code") or "error"
     except Exception as exc:  # noqa: BLE001 - a failed turn is recorded on the row, never raised into the loop
         log.warning("Companion turn failed: %s", type(exc).__name__)
         error = "The copilot turn failed unexpectedly."
     finally:
         if hasattr(adapter, "aclose"):
             await adapter.aclose()
-        if done:
-            await asyncio.to_thread(copilot_spend.record, done, symbol)
     answer = "".join(parts).strip()
     if error is None and not answer:
         error = "The copilot wrote nothing."

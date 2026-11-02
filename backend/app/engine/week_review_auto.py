@@ -177,11 +177,26 @@ def message(row: WeekReviewAuto) -> tuple[str, str, str]:
     return row.title or TITLE, body(row), path
 
 
-def _save(db: Session, title: str, question: str, written: str, conclusion: str | None, evidence: list[dict]) -> str:
+def _metrics(events: list[dict]) -> dict | None:
+    """The answer's saved metrics from the turn's ``done`` event (its id, speed, model and tools), so the saved review links
+    to its ``copilot_turn`` row like a desk answer does."""
+    done = next((e for e in events if e.get("type") == "done"), None)
+    if not done:
+        return None
+    m = done.get("metrics") or {}
+    out = {"first_text_ms": m.get("first_text_ms"), "total_ms": m.get("total_ms"), "rounds": m.get("rounds"),
+           "model": (m.get("model") or "")[:80] or None, "backend": (m.get("backend") or "")[:40] or None,
+           "tools": [c["name"][:64] for c in m.get("tool_calls") or [] if c.get("name")][:50] or None, "turn_id": done.get("turn_id")}
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _save(db: Session, title: str, question: str, written: str, conclusion: str | None, evidence: list[dict],
+          metrics: dict | None = None) -> str:
     from app.engine import copilot_investigations as investigations
+    answer = {"role": "assistant", "content": written[:20_000], **({"metrics": metrics} if metrics else {})}
     fields = investigations.InvestigationFields(
         title=title, conclusion=conclusion[:280] if conclusion else None, evidence=evidence[:400],
-        transcript=[{"role": "user", "content": question}, {"role": "assistant", "content": written[:20_000]}])
+        transcript=[{"role": "user", "content": question}, answer])
     return investigations.create(fields, session=db)["id"]
 
 
@@ -209,7 +224,7 @@ class WeekReviews:
     @staticmethod
     def _lab_turn(question: str, now: float) -> tuple[str, str | None, list[dict]]:
         events: list[dict] = []
-        answer, error = _turn(question, now, events)
+        answer, error = _turn(question, now, events, kind="week_review")
         return answer, error, events
 
     def run(self) -> None:
@@ -284,7 +299,7 @@ class WeekReviews:
             if row is None or row.delivery != "preparing":
                 return  # given up meanwhile: never sent late
             investigation_id = _save(db, week_title(monday), question, saved_text, conclusion,
-                                     _evidence(events) if error is None else [])
+                                     _evidence(events) if error is None else [], _metrics(events))
             queued = db.exec(update(WeekReviewAuto).where(WeekReviewAuto.id == row_id, WeekReviewAuto.delivery == "preparing").values(
                 delivery="pending", investigation_id=investigation_id, title=ping_title(review), body="\n".join(shown),
                 proposal_json=json.dumps(proposal) if proposal else None, fallback=error is not None,
