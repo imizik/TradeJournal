@@ -168,36 +168,17 @@ def assert_moomoo_credentials_are_loaded_as_service_user():
 
 
 RESEARCH_CHECK = """
-import os
-from pathlib import Path
-import claude_agent_sdk
-assert not (Path(claude_agent_sdk.__file__).parent / "_bundled/claude").exists(), "the SDK must not bundle its own CLI"
-from app.ai import research_job
-binary, env = research_job.prepare("api_key")  # Claude Code itself reports the API key as its sign-in
-assert binary == os.environ["TJ_CLAUDE_BIN"], binary
-assert env["ANTHROPIC_API_KEY"] == os.environ["ANTHROPIC_API_KEY"] and env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
-assert env["CLAUDE_CONFIG_DIR"] == os.environ["TJ_CLAUDE_CONFIG_DIR"] + "/research-api"
-# Plan auth on Postgres (the owner's decision, docs/copilot-lab.md). The env above holds an API key too: Claude Code
-# reports oauth_token with no API key source only if that key never reaches it, so this passes only without a leak.
-binary, env = research_job.prepare("plan")
-assert binary == os.environ["TJ_CLAUDE_BIN"], binary
-assert env["CLAUDE_CODE_OAUTH_TOKEN"] == os.environ["CLAUDE_CODE_OAUTH_TOKEN"] and env["ANTHROPIC_API_KEY"] == ""
-assert env["CLAUDE_CONFIG_DIR"] == os.environ["TJ_CLAUDE_CONFIG_DIR"] + "/research-plan"
-print("research job ready", claude_agent_sdk.__version__)
+from app.ai import api_runner, research_job, shadow_turn
+assert api_runner.configured() and research_job.JOB_TOOLS and shadow_turn.SHADOW_TOOLS
+print("research job ready")
 """
 
 
 def assert_research_job_ready(release):
-    """The release runs research jobs on its own bin/claude with either RESEARCH_AUTH. No model call: the key and the
-    token are dummies, and Claude Code's sign-in report is local."""
-    pinned = json.loads((release / "release.json").read_text())["claude_code"]
-    version = control.run(release / "bin/claude", "--version", capture_output=True, text=True).stdout.strip()
-    assert version.startswith(f"{pinned} "), version
+    """The release imports the API runner and sees the key. No model call: the key is a dummy."""
     # runuser is in /usr/sbin on Ubuntu, and subprocess resolves it on this env's PATH.
-    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": str(control.STATE / "claude"), "DATABASE_URL": URL,
-           "TJ_CLAUDE_BIN": str(release / "bin/claude"), "TJ_CLAUDE_CONFIG_DIR": str(control.STATE / "claude"),
-           "CLAUDE_CODE_OAUTH_TOKEN": "ci-dummy-plan-token", "ANTHROPIC_API_KEY": "ci-dummy-not-a-key",
-           "PYTHONDONTWRITEBYTECODE": "1"}
+    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": str(control.STATE), "DATABASE_URL": URL,
+           "ANTHROPIC_API_KEY": "ci-dummy-not-a-key", "PYTHONDONTWRITEBYTECODE": "1"}
     check = subprocess.run(["runuser", "-u", "tradejournal", "--", str(release / "backend/.venv/bin/python"), "-c", RESEARCH_CHECK],
                            cwd=release / "backend", env=env, capture_output=True, text=True, check=False)
     assert check.returncode == 0 and "research job ready" in check.stdout, (check.stdout + check.stderr)[-3000:]

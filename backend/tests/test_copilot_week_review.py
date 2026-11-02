@@ -294,7 +294,7 @@ def test_the_tool_is_validated_routed_labelled_and_never_a_job_tool(monkeypatch)
     copilot_tools.call(copilot_tools.LiveEvidence(), "get_week_review", {"week_start": "2026-10-21"})
     assert seen == [None, "2026-10-21"]
     assert copilot_tools.provenance("get_week_review", {"state": "ok"}, "live")["kind"] == "saved"
-    assert "get_week_review" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_week_review" not in research_job.LAB_TOOLS
+    assert "get_week_review" not in research_job.JOB_TOOLS and "get_week_review" not in {t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS)}
     assert "get_week_review" in copilot_tools.BOOK_CONTEXT_TOOLS
 
 

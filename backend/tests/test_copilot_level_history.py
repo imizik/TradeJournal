@@ -197,7 +197,7 @@ def test_the_tool_is_validated_routed_labelled_and_never_a_job_tool(monkeypatch)
     copilot_tools.call(copilot_tools.LiveEvidence(), "get_level_history", v("get_level_history", {"symbol": "NBIS", "level": 92.3, "side": "below", "entry": 95.9}))
     assert seen == [("NBIS", {"level": 92.3, "side": "below", "minutes": None, "entry": 95.9, "lookback_days": 180})]
     assert copilot_tools.provenance("get_level_history", {"state": "ok"}, "live")["kind"] == "saved"
-    assert "get_level_history" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_level_history" not in research_job.LAB_TOOLS
+    assert "get_level_history" not in research_job.JOB_TOOLS and "get_level_history" not in {t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS)}
     assert "get_level_history" in copilot_tools.BOOK_CONTEXT_TOOLS
 
 

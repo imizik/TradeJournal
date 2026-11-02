@@ -361,8 +361,7 @@ async def run_turn(question: str, symbol: str, now: float) -> tuple[str, str | N
     history = [{"role": "user", "content": question}]
     parts, error, done = [], None, None
     try:
-        turn = (adapter.run_turn(history, symbol, cfg, evidence, datetime.fromtimestamp(now, ET)) if hasattr(adapter, "run_turn")
-                else copilot.run_turn(history, symbol, cfg, adapter, evidence, datetime.fromtimestamp(now, ET)))
+        turn = copilot.run_turn(history, symbol, cfg, adapter, evidence, datetime.fromtimestamp(now, ET))
         async for event in turn:
             if event.get("type") == "text":
                 parts.append(event.get("delta") or "")

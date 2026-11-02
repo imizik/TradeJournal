@@ -204,7 +204,7 @@ a whole) and writes its review rows directly, holds
 its own file lock in `TJ_PLAN_REVIEW_DIR` so two runs never overlap, and
 records its outcome in a status file in that directory
 (`GET /daily-review/runner`). It calls Claude only through
-`app.ai.plan_runner` (the Claude plan token); after a failed or interrupted
+`app.ai.api_runner` (`ANTHROPIC_API_KEY`); after a failed or interrupted
 run, the next run tries that day again.
 
 ## A3 finite daily preparation

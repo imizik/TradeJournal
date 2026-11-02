@@ -251,7 +251,7 @@ def test_the_tool_is_validated_routed_labelled_and_never_a_job_tool(monkeypatch)
     with pytest.raises(copilot_tools.ToolInputError, match="no trade"):
         copilot_tools.call(copilot_tools.LiveEvidence(), "get_trade_review", {"trade_id": tid.lower()})
     assert copilot_tools.provenance("get_trade_review", {"state": "ok"}, "live")["kind"] == "saved"
-    assert "get_trade_review" not in research_job.JOB_TOOLS and "mcp__tradejournal__get_trade_review" not in research_job.LAB_TOOLS
+    assert "get_trade_review" not in research_job.JOB_TOOLS and "get_trade_review" not in {t["name"] for t in research_job.lab_tools(research_job.JOB_TOOLS)}
     assert "get_trade_review" in copilot_tools.BOOK_CONTEXT_TOOLS  # "what changed" leaves it out of the evidence times
 
 

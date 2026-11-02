@@ -1,5 +1,5 @@
 """The monthly review: its statistics, context and gaps, the nightly run's
-first-of-month trigger and the routes. Claude Code is a fake; nothing reaches a network."""
+first-of-month trigger and the routes. The Messages API is scripted; nothing reaches a network."""
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -12,12 +12,12 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.ai import monthly_reviewer, plan_runner
+from app.ai import api_runner, monthly_reviewer
 from app.database import get_session
 from app.jobs import plan_reviews
 from app.models import Account, CaptureLink, DailyReviewRecord, Fill, FillMarketContext, MonthlyReviewRecord, Trade, TradeFill
 from app.routers.monthly_review import router
-from tests.test_plan_reviews import FAKE_CLAUDE, Fake  # noqa: F401  (the same fake Claude Code)
+from tests.test_plan_reviews import Fake  # the same scripted Messages API
 
 ACCOUNT = UUID(int=1)
 MONTHLY = {"summary": "Mornings paid, afternoons leaked.", "month_grade": "B: consistent size", "edge": [], "leaks": [],
@@ -38,21 +38,17 @@ def engine():
 
 @pytest.fixture
 def fake(tmp_path, monkeypatch):
-    import stat
-
-    binary = tmp_path / "claude"
-    binary.write_text(FAKE_CLAUDE)
-    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    fake = Fake(tmp_path)
-    fake.set(answer=MONTHLY)
-    for key, value in {"TJ_CLAUDE_BIN": str(binary), "TJ_CLAUDE_CONFIG_DIR": str(tmp_path / "config"),
-                       "TJ_PLAN_REVIEW_DIR": str(tmp_path / "state"), "CLAUDE_CODE_OAUTH_TOKEN": "plan-token"}.items():
-        monkeypatch.setenv(key, value)
+    fake = Fake()
+    fake.set(MONTHLY)
+    built = []
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(api_runner.anthropic, "Anthropic", lambda **kwargs: built.append(kwargs) or fake.client)
+    monkeypatch.setenv("TJ_PLAN_REVIEW_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("AI_REVIEW_BACKEND", raising=False)
+    monkeypatch.delenv("TJ_PLAN_REVIEW_MODEL", raising=False)
     monkeypatch.setattr(monthly_reviewer, "_spy_days", lambda month, gaps: {date(2026, 9, 1): "SPY up >0.5%", date(2026, 9, 2): "SPY down >0.5%"})
-    plan_runner._checked.clear()
+    fake.built = built
     yield fake
-    plan_runner._checked.clear()
 
 
 def trade(number, opened, pnl, *, ticker="SPY", premium=200, hold=20, closed=None):
@@ -115,7 +111,7 @@ def test_the_first_run_of_a_month_writes_last_months_review_once(engine, fake, m
     with Session(engine) as session:
         assert plan_reviews.plan_month(session, date(2026, 9, 30)) is None  # September is not over
         assert plan_reviews.plan_month(session, date(2026, 10, 1)) == "2026-09"
-        fake.set(answer={**MONTHLY})
+        fake.set({**MONTHLY})
         # The latest day (Sep 30) also needs its daily review; the fake answers both with the monthly shape, so the
         # daily one fails its required fields and is recorded, while the month is written.
         status = plan_reviews.run(session, today=date(2026, 10, 1))
@@ -144,13 +140,15 @@ def test_routes_list_months_generate_and_read(engine, fake, client, monkeypatch)
     assert [(row["month"], row["closed_trades"], row["saved"]) for row in client.get("/monthly-review").json()] == [
         ("2026-09", 1, False), ("2026-08", 1, False)]
     response = client.post("/monthly-review", json={"month": "2026-09"})
-    assert response.status_code == 200 and response.json()["review"]["generated_by"].endswith("on the Claude plan")
+    assert response.status_code == 200 and response.json()["review"]["generated_by"].endswith("through the Anthropic API")
     assert client.get("/monthly-review/2026-09").json()["review"]["one_commitment"] == "No entries after 15:00"
     assert client.get("/monthly-review").json()[0]["grade"] == "B: consistent size"
     assert client.post("/monthly-review", json={"month": "2026-07"}).status_code == 404
     assert client.post("/monthly-review", json={"month": "Sept"}).status_code == 400
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
-    assert client.post("/monthly-review", json={"month": "2026-09"}).status_code == 503
+    assert fake.built[0]["base_url"] == "https://api.anthropic.com"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    response = client.post("/monthly-review", json={"month": "2026-09"})
+    assert response.status_code == 503 and "not set up" in response.json()["detail"]
 
 
 def test_a_review_written_mid_month_or_before_late_trades_is_replaced_after_the_month_ends(engine, fake):

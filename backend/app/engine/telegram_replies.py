@@ -295,8 +295,7 @@ class Replies:
         errors: list[str] = []
         done = None
         try:
-            turn = (adapter.run_turn(history, symbol, cfg, evidence, now) if hasattr(adapter, "run_turn")
-                    else copilot.run_turn(history, symbol, cfg, adapter, evidence, now))
+            turn = copilot.run_turn(history, symbol, cfg, adapter, evidence, now)
             async for event in turn:
                 if event.get("type") == "text":
                     parts.append(event.get("delta") or "")

@@ -5,9 +5,9 @@ import type { PlanPosition } from "@/components/dashboard/PlansCard";
 
 export type CopilotStatus =
   | { enabled: false; reason: string }
-  | { enabled: true; backend: "fake" | "anthropic" | "plan"; evidence: "fixture" | "live" | "replay"; model: string; effort: string;
+  | { enabled: true; backend: "fake" | "anthropic"; evidence: "fixture" | "live" | "replay"; model: string; effort: string;
       replay?: { at: string; session: string; passes_before: number; last_pass_at: string } | { error: string };
-      fallbacks: boolean; key_configured: boolean; plan_configured: boolean; tools: string[];
+      fallbacks: boolean; key_configured: boolean; tools: string[];
       /** The models a turn may pick (the server's default first); absent on older servers. */
       models?: string[];
       /** The backends a turn may pick (the server's default first), and today's estimated API spend against its cap. */
@@ -66,7 +66,7 @@ export type TurnMetrics = {
   first_feedback_ms?: number | null; first_progress_ms?: number | null; max_silence_ms?: number;
   tool_calls: { name: string; status: string; ms: number }[];
   usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
-  /** For the plan backend, an API-price equivalent: the Claude plan is not billed per token. */
+  /** Turns saved from the old plan backend carry an API-price equivalent and this billing label. */
   cost_usd: number | null; billing?: "claude_plan";
 };
 
@@ -135,7 +135,7 @@ export function parseFrame(frame: string): CopilotEvent | null {
 }
 
 /** Stream one turn. History is text-only: the server re-reads evidence rather than trusting the browser. */
-export type Backend = "anthropic" | "plan";
+export type Backend = "anthropic";
 export const MODEL_KEY = "copilot.model";
 export const BACKEND_KEY = "copilot.backend";
 

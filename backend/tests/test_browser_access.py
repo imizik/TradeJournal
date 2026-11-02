@@ -434,7 +434,7 @@ def test_journal_read_assistant_cannot_retrieve_owner_thought_reviews_or_calenda
 
 
 def test_review_inherits_private_provenance_from_prior_day_rules(boundary, monkeypatch):
-    from app.ai import plan_runner, review_context
+    from app.ai import api_runner, review_context
     from app.models import Account, DailyReviewRecord, DayJournalEntry, Trade
 
     boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
@@ -465,9 +465,9 @@ def test_review_inherits_private_provenance_from_prior_day_rules(boundary, monke
             "best_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
             "worst_trade": {"trade_id": None, "ticker": None, "reason": "No trade"},
             "patterns": [], "next_session_rules": [seen["private_rule"]], "rules_check": [], "vs_baseline": [],
-            "data_gaps": [], "expectation_checks": []}, "author": "test", "input_tokens": 0,
-            "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
-    monkeypatch.setattr(plan_runner, "ask", ask)
+            "data_gaps": [], "expectation_checks": []}, "author": "test", "usage": {
+            "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0}})()
+    monkeypatch.setattr(api_runner, "ask", ask)
 
     generated = boundary.owner.post("/daily-review", json={"day": day_b.isoformat(), "trade_ids": [str(trade_id)]})
     assert generated.status_code == 200, generated.text

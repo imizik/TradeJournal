@@ -95,10 +95,7 @@ events that kept going most and the four that reversed most at +60 min. It asks 
 job what set them apart (news timing, sector or group participation, time of day), with citations and at
 most two testable ideas for a later rule version.
 
-- **Plan only.** It runs on the owner's subscription (`RESEARCH_AUTH=plan`); any other setting is
-  refused, and a result that did not sign in with the plan is discarded.
-- **Where it runs.** Plan mode runs only against a local database, so this is a Mac step, not a server
-  job.
+- **Where it runs.** On the server's weekly timer, on API credits.
 - **What it saves.** Nothing in the app. The review goes to `--out`.
 - **What it is.** It sees outcomes, so it is hindsight: input to the next rule version, never a change to
   the current one or its decision. `--dry-run` prints the question without running a job.

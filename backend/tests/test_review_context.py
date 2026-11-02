@@ -103,7 +103,7 @@ def test_owner_thoughts_join_the_day_context_and_their_symbols_get_market_contex
 
 
 def test_per_trade_review_excludes_private_day_thoughts_from_model_context(session, offline, monkeypatch):
-    from app.ai import plan_runner, reviewer
+    from app.ai import api_runner, reviewer
 
     session.add(DayJournalEntry(operation_id="private-thought", day=DAY, kind="outlook",
                                 text="SECRET private morning plan", created_at=datetime(2026, 9, 30, 12)))
@@ -114,8 +114,9 @@ def test_per_trade_review_excludes_private_day_thoughts_from_model_context(sessi
         return type("Answer", (), {"data": {"strategy": "ORB", "flags": [], "summary": "Reviewed",
             "entry_quality": "Clear", "exit_quality": "Clear", "suggestions": [],
             "market_read": "Mixed", "plan_check": None, "data_gaps": []},
-            "author": "test", "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0})()
-    monkeypatch.setattr(plan_runner, "ask", ask)
+            "author": "test", "usage": {
+                "input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0, "seconds": 0}})()
+    monkeypatch.setattr(api_runner, "ask", ask)
 
     review = reviewer.review_trade(trade(77), [], session=session)
 

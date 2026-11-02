@@ -277,7 +277,7 @@ export type DayJournalWrite = {
 export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };
 export type PlanCheck = { ticker: string; planned: string; did: string; result: "followed" | "deviated" | "partly" | "no_plan" };
 
-/** The nightly reviews on the Claude plan (backend app/jobs/plan_reviews.py): the last run's status file. */
+/** The nightly reviews (backend app/jobs/plan_reviews.py): the last run's status file. */
 export type PlanRunnerStatus = {
   configured: boolean;
   status: null | {

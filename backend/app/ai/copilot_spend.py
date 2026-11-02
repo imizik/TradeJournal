@@ -1,8 +1,8 @@
 """Each copilot turn's model and cost (``copilot_turn``), and the day's API spend against ``COPILOT_DAILY_BUDGET_USD``.
 
 A turn's ``done`` metrics are recorded once the stream ends: backend, model, rounds, tokens and the estimated USD.
-Only ``billing == "api"`` rows (the ``anthropic`` backend) count toward the day's budget; the plan is not billed per
-token and the fake backend makes no call. Days are New York days. No prompt or answer text is kept here.
+Only ``billing == "api"`` rows (the desk's ``anthropic`` backend) count toward the day's budget; shadow-book turns are
+recorded apart under their own turn cap, and the fake backend makes no call. Days are New York days. No prompt or answer text is kept here.
 """
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from datetime import UTC, datetime
 
 log = logging.getLogger(__name__)
 
-BILLING = {"anthropic": "api", "plan": "claude_plan", "fake": "none"}
+# "plan" only labels turns recorded before everything moved to the API.
+BILLING = {"anthropic": "api", "shadow": "api_background", "plan": "claude_plan", "fake": "none"}
 
 
 def _day_start_utc() -> datetime:

@@ -57,14 +57,14 @@ def get_monthly_review(month: str, session: Session = Depends(get_session)):
 @router.post("")
 def create_monthly_review(body: MonthlyReviewRequest, session: Session = Depends(get_session)):
     month = _month(body.month)
-    from app.ai import monthly_reviewer, plan_runner
+    from app.ai import api_runner, monthly_reviewer
 
     try:
         record, review = monthly_reviewer.generate(session, month)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=f"No closed trades in {month}") from exc
-    except plan_runner.PlanUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Monthly review is not set up on the Claude plan: {exc}") from exc
+    except api_runner.ApiUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Monthly review is not set up: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Monthly review generation failed: {exc}") from exc
     return {"month": record.month, "review": review, "generated_at": record.updated_at, "trade_count": record.trade_count}

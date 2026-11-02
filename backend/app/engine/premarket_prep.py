@@ -420,7 +420,7 @@ def fallback_lines(pack: dict) -> list[str]:
 def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str | None]:
     """One lab turn on the owner's prompt: ``(answer, error)``. An error means the answer cannot be used. ``events``, when
     given, collects every turn event (the week review reads its tool and proposal events)."""
-    from app.ai import copilot
+    from app.ai import copilot, copilot_spend
     cfg = copilot.settings()
     now_et = datetime.fromtimestamp(now, ET)
     history = [{"role": "user", "content": text}]
@@ -430,14 +430,14 @@ def _turn(text: str, now: float, events: list | None = None) -> tuple[str, str |
         evidence = copilot.evidence_for(cfg)
         parts, error = [], None
         try:
-            # The plan backend's SDK runs its own tool loop, so it supplies the whole turn (as the chat route does).
-            turn = (adapter.run_turn(history, None, cfg, evidence, now_et) if hasattr(adapter, "run_turn")
-                    else copilot.run_turn(history, None, cfg, adapter, evidence, now_et))
+            turn = copilot.run_turn(history, None, cfg, adapter, evidence, now_et)
             async for event in turn:
                 if events is not None:
                     events.append(event)
                 if event["type"] == "text":
                     parts.append(event["delta"])
+                elif event["type"] == "done":
+                    await asyncio.to_thread(copilot_spend.record, event.get("metrics") or {})
                 elif event["type"] == "error" and error is None:
                     error = event.get("message") or event.get("code") or "error"
         finally:

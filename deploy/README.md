@@ -78,10 +78,7 @@ python3.12 deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-$(date
 ```
 
 The build uses `git archive HEAD`, installs npm's lockfile, and resolves Python
-runtime wheels once into the artifact, including the `copilot-plan` extra
-(the Claude Agent SDK for Copilot Lab research jobs). That extra is built from
-its sdist, so it carries no second Claude Code; jobs run the release's
-`bin/claude`. Reuse the same artifact for rollback;
+runtime wheels once into the artifact. Reuse the same artifact for rollback;
 a later rebuild can resolve newer Python dependencies. Generated caches,
 local configuration, OAuth tokens and databases are excluded. The VPS never
 runs npm, a Next build, or an online pip install. ARM hosts need an ARM build;
@@ -801,50 +798,35 @@ The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
 
-### Nightly reviews on the Claude plan (opt-in)
+### Nightly reviews (opt-in)
 
 `tradejournal-plan-reviews.timer` writes the Daily Review for the latest
 trading day at 20:10 New York (after Sync Everything, enrichment, the options
-catch-up and the day's final minute bars), with Claude Code on the owner's Claude plan, never API
-credits. It reviews that day when it has no review, gained trades since its
-review, or went stale; it never backfills older days, which get a review from
-their own Daily Review button. On its first run of a new month it also writes
-last month's monthly review. The buttons use the same plan. The release
-carries Claude Code at the version `deploy/claude-code/package.json` pins, as
-`bin/claude`; its state is under `/var/lib/tradejournal/claude` and the last
-run's status in `/var/lib/tradejournal/plan-reviews/status.json`, which the
-Daily Review calendar shows. A failed run, or the enabled timer being off,
-reaches the phone through the alert check.
+catch-up and the day's final minute bars), through the Anthropic API with
+`ANTHROPIC_API_KEY` from `backend.env`. It reviews that day when it has no review,
+gained trades since its review, or went stale; it never backfills older days,
+which get a review from their own Daily Review button. On its first run of a new
+month it also writes last month's monthly review. The buttons use the same API
+path. The last run's status is in `/var/lib/tradejournal/plan-reviews/status.json`,
+which the Daily Review calendar shows. A failed run, or the enabled timer being
+off, reaches the phone through the alert check.
 
-Turn it on once, after a release that contains it:
+Turn it on once, after a release that contains it: run it by hand, then enable the schedule:
 
-1. On a computer signed in to the Claude plan, run `claude setup-token` and
-   copy the token it prints.
-2. On the VPS, create the token file. `read -rs` waits for the token without
-   showing it; paste it and press Enter:
-
-   ```bash
-   sudo install -m 600 -o root -g root /dev/null /etc/tradejournal/claude-plan.env
-   read -rs TOKEN && printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" | sudo tee /etc/tradejournal/claude-plan.env > /dev/null; unset TOKEN
-   sudo systemctl restart tradejournal-api
-   ```
-
-3. Try one run by hand, then enable the schedule:
-
-   ```bash
-   sudo systemctl start tradejournal-plan-reviews.service
-   sudo journalctl -u tradejournal-plan-reviews.service -n 40
-   sudo systemctl enable --now tradejournal-plan-reviews.timer
-   ```
+```bash
+sudo systemctl start tradejournal-plan-reviews.service
+sudo journalctl -u tradejournal-plan-reviews.service -n 40
+sudo systemctl enable --now tradejournal-plan-reviews.timer
+```
 
 An enabled timer survives releases; a release never enables it. A rollback to
 a release from before this feature removes the units, so after rolling forward
 again, enable the timer once more. To stop the
 nightly reviews, `sudo systemctl disable --now tradejournal-plan-reviews.timer`.
-The run uses the plan's usage like any Claude Code session, about one review a
-trading day; a failed call (for example the plan's limit) is recorded and the
-next run tries again. `claude-plan.env.example` lists the optional model,
-timeout and budget.
+A failed call is recorded and the next run tries again. `TJ_PLAN_REVIEW_MODEL`
+(`claude-sonnet-5-5`) and `TJ_PLAN_REVIEW_TIMEOUT` (300 seconds) are optional.
+Rolling back to a release before the API move needs `/etc/tradejournal/claude-plan.env`,
+so keep that file for a while.
 
 ### A3 Practice preparation (opt-in, disabled)
 

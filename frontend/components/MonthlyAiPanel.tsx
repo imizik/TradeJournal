@@ -16,7 +16,7 @@ const COMMITMENT = {
   partly: "border-amber-500/50 text-amber-300", unclear: "border-border text-muted-foreground",
 } as const;
 
-/** One month's review on the Claude plan: where the P&L came from and leaked, habits, rules, one commitment. */
+/** One month's review: where the P&L came from and leaked, habits, rules, one commitment. */
 export default function MonthlyAiPanel({ month, monthLabel, closedTrades, initialReview = null, initialGeneratedAt = null }: {
   month: string; monthLabel: string; closedTrades: number; initialReview?: MonthlyReview | null; initialGeneratedAt?: string | null;
 }) {
@@ -45,7 +45,7 @@ export default function MonthlyAiPanel({ month, monthLabel, closedTrades, initia
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Monthly Review</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Claude review, on your Claude plan, across the {closedTrades} trade{closedTrades === 1 ? "" : "s"} that closed in {monthLabel}.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Claude review across the {closedTrades} trade{closedTrades === 1 ? "" : "s"} that closed in {monthLabel}.</p>
         </div>
         <button type="button" onClick={run} disabled={!owner || status === "loading"}
           className="rounded bg-foreground px-3 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50">

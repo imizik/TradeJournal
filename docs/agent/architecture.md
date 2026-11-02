@@ -100,9 +100,8 @@ service and reads shadow decisions back through two one-way file directories
 ([shadow S1 interfaces](shadow-s1-contract.md#interfaces)).
 
 The nightly daily reviews run on the server itself
-(`tradejournal-plan-reviews.timer`, opt-in): Claude Code, pinned in the release
-as `bin/claude`, asks Claude on the owner's Claude plan token, never API
-credits, and the reviews are saved to the production database
+(`tradejournal-plan-reviews.timer`, opt-in): they ask Claude through the Anthropic
+API, and the reviews are saved to the production database
 (`app/jobs/plan_reviews.py`, `deploy/README.md`).
 
 Two scheduled processes run off the server, neither touching a database (the
@@ -110,10 +109,9 @@ first is started by launchd on the development Mac):
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
-  Alpaca and ntfy, has Claude (`claude -p`, no tools) answer the week's brief
-  on the Claude plan token, never API credits, and writes only to that
-  branch, which is never merged (`docs/strategy-factory.md`). The direct
-  Anthropic API call remains only behind an explicit `--use-api`.
+  Alpaca and ntfy, has Claude (the Anthropic API, no tools) answer the week's brief
+  on API credits, and writes only to that
+  branch, which is never merged (`docs/strategy-factory.md`).
 - The daily documentation drift pass, a Claude Code routine in Anthropic's
   cloud on the Claude plan (claude.ai/code/routines, "Daily docs drift
   pass"), started every day at 13:00 UTC from a fresh clone of `main`. Once 20 code

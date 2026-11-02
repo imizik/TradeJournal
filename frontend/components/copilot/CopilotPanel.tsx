@@ -280,14 +280,14 @@ function Metrics({ metrics }: { metrics: TurnMetrics }) {
       {metrics.max_silence_ms !== undefined && <> · longest wait {seconds(metrics.max_silence_ms)}</>}{" "}
       · {metrics.tool_calls.length} tool{metrics.tool_calls.length === 1 ? "" : "s"}
       {tokens > 0 && <> · {input.toLocaleString()} in{u.cache_read_input_tokens ? ` (${u.cache_read_input_tokens.toLocaleString()} cache read)` : ""} / {u.output_tokens.toLocaleString()} out</>}
-      {metrics.cost_usd !== null && <> · ${metrics.cost_usd.toFixed(4)}{metrics.backend === "fake" ? " (no API call)" : metrics.backend === "plan" ? " API-equivalent · Claude plan (no API credits)" : " est."}</>}
+      {metrics.cost_usd !== null && <> · ${metrics.cost_usd.toFixed(4)}{metrics.backend === "fake" ? " (no API call)" : metrics.backend === "plan" ? " API-equivalent · Claude plan" : " est."}</>}
     </p>
   );
 }
 
 /** The lab's backing and evidence as two chips, or (``quiet``, the desk) one small line. The page's own description says
  * what the lab may and may not do. */
-const BACKEND_LABEL: Record<Backend, string> = { plan: "Claude plan (no API credits)", anthropic: "Claude API (credits)" };
+const BACKEND_LABEL: Record<Backend, string> = { anthropic: "Claude API (credits)" };
 
 function StatusLine({ status, error, model, onModel, backend, onBackend, quiet = false }: { status: CopilotStatus | null; error: string | null; quiet?: boolean;
   model: string | null; onModel: (model: string | null) => void; backend: Backend | null; onBackend: (backend: Backend | null) => void }) {
@@ -305,7 +305,7 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
       ? "flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground [&>*+*]:before:mr-1.5 [&>*+*]:before:content-['·']"
       : "flex flex-wrap items-center gap-2 text-xs text-muted-foreground"}>
       <span className={chip(simulated ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300")}>
-        {simulated ? "Simulated model — no API calls" : effective === "plan" ? `Claude plan (no API credits) · ${model ?? status.model}` : `Claude API · ${model ?? status.model}`}
+        {simulated ? "Simulated model — no API calls" : `Claude API · ${model ?? status.model}`}
       </span>
       {!simulated && (status.backends?.length ?? 0) > 1 && (
         <label className="inline-flex items-center gap-1">
@@ -341,7 +341,6 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
         </span>
       )}
       {status.backend === "anthropic" && !status.key_configured && <span className="text-rose-300">API key not set</span>}
-      {status.backend === "plan" && !status.plan_configured && <span className="text-rose-300">Plan token or Agent SDK not set up</span>}
     </p>
   );
 }

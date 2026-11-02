@@ -1,5 +1,4 @@
 import json
-import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from statistics import median
@@ -26,14 +25,8 @@ def review_trading_day(
     trades: list[Trade],
     fills_by_trade_id: dict[str, list[Fill]],
     session: Session,
-    backend: str | None = None,
 ) -> dict:
-    """One day's review, from Claude on the owner's plan (app.ai.plan_runner).
-
-    The Anthropic API is used only when ``AI_REVIEW_BACKEND=api`` is set
-    explicitly and the caller does not pin ``backend="plan"`` (the nightly run
-    always does); nothing falls back to it.
-    """
+    """One day's review, from Claude through the Anthropic API (app.ai.api_runner)."""
     context = _assemble_daily_context(day, trades, fills_by_trade_id, session)
     context["history"] = _history_context(date.fromisoformat(day), session)
     from app.ai import review_context
@@ -41,18 +34,12 @@ def review_trading_day(
     context["day_context"] = review_context.build(session, date.fromisoformat(day), trades, include_owner_thoughts=True)
     review_context_data = context["day_context"]
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
-    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
-    if chosen == "api":
-        review = _review_with_api(message)
-        review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
-    else:
-        from app.ai import plan_runner
+    from app.ai import api_runner
 
-        answer = plan_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
-        review = answer.data
-        review["generated_by"] = answer.author
-        review["usage"] = {"input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
-                           "api_equivalent_usd": answer.api_equivalent_usd, "seconds": answer.seconds}
+    answer = api_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
+    review = answer.data
+    review["generated_by"] = answer.author
+    review["usage"] = answer.usage
     missing = [field for field in REVIEW_FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
@@ -83,24 +70,6 @@ def review_trading_day(
     )
     review["prompt_version"] = PROMPT_VERSION
     return review
-
-
-def _review_with_api(message: str) -> dict:
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    response = client.messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=4000,
-        system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
-    )
-    response_text = ""
-    try:
-        response_text = response.content[0].text
-        return _parse_json_response(response_text)
-    except (json.JSONDecodeError, IndexError, AttributeError) as exc:
-        raise ValueError(f"Failed to parse AI response as JSON: {exc}. Response starts: {response_text[:300]!r}") from exc
 
 
 def _history_context(review_day: date, session: Session) -> dict:

@@ -1,9 +1,8 @@
-"""Ask the Copilot Lab research job, on the Claude plan, what set apart the Radar events that kept going from those that reversed.
+"""Ask the Copilot Lab research job, on API credits, what set apart the Radar events that kept going from those that reversed.
 
 Reads the scorer's output (``scripts/radar_outcomes.py``), picks the events that went furthest each way at +60 min
-over the chosen sessions, and runs one research job (``app.ai.research_job``) with ``RESEARCH_AUTH=plan`` only: the
-owner's subscription token, never an API key; any other auth setting is refused before anything runs. The job runs
-where the plan mode allows it (a local database) and saves nothing; the review goes to ``--out``.
+over the chosen sessions, and runs one research job (``app.ai.research_job``). It needs ``ANTHROPIC_API_KEY`` and saves nothing; the review goes
+to ``--out``.
 
 It sees outcomes, so it is hindsight: ideas for a later rule version, never a change to the current one or its
 decision (``research/radar-outcomes/spec.md``).
@@ -12,7 +11,6 @@ decision (``research/radar-outcomes/spec.md``).
 """
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -83,19 +81,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"question": question, "symbols": symbols}, indent=2))
         return 0
     load_env_files()
-    if os.environ.get("RESEARCH_AUTH", "plan").strip().lower() != "plan":
-        print("refused: this review runs only on the Claude plan (RESEARCH_AUTH=plan), never an API key.", file=sys.stderr)
-        return 2
     from app.ai import copilot, copilot_tools, research_job
     from app.engine.chart_math import ET
     try:
-        result = research_job.run(question, symbols, copilot_tools.LiveEvidence(), datetime.now(ET), mode="plan", save=False,
+        result = research_job.run(question, symbols, copilot_tools.LiveEvidence(), datetime.now(ET), save=False,
                                   title=f"Radar outcomes review {args.since}..{args.until or 'latest'}")
     except (copilot.CopilotError, research_job.ResearchError) as exc:
         print(f"{exc.code}: {exc.message}", file=sys.stderr)
-        return 2
-    if result.get("auth") != "plan":  # belt and braces: the record states the sign-in it actually used
-        print("refused: the job did not run on the plan.", file=sys.stderr)
         return 2
     text = json.dumps(result, indent=2, default=str)
     if args.out:

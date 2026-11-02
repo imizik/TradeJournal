@@ -1,7 +1,7 @@
 """Run one Copilot Lab research job by hand and print its cited assessment (docs/copilot-lab.md § Research job).
 
 Owner-only and manual: no scheduler, wake-up or notification. Research only; it saves no plan, watch or alert.
-``RESEARCH_AUTH=plan`` (default, local database only) or ``api_key``; ``RESEARCH_BUDGET_USD`` caps the job (0.50).
+Needs ``ANTHROPIC_API_KEY``; ``RESEARCH_BUDGET_USD`` caps the job (0.50).
 
     python scripts/run_research_job.py "Why are neoclouds weak today?" --symbols NBIS,CRWV,APLD \\
         [--evidence fixture|live|replay] [--replay-store /abs/radar.sqlite --replay-at 2026-10-23T11:12] [--out job.json]
@@ -41,7 +41,7 @@ def main() -> int:
         symbols = copilot_tools.validate("get_quotes", {"symbols": tickers})["symbols"] if tickers else []
     except copilot_tools.ToolInputError as exc:
         parser.error(str(exc))
-    cfg = copilot.Settings(enabled=True, backend="plan", evidence=args.evidence, model=copilot.DEFAULT_MODEL, effort="medium",
+    cfg = copilot.Settings(enabled=True, backend="anthropic", evidence=args.evidence, model=copilot.DEFAULT_MODEL, effort="medium",
                            fallbacks=False, key_configured=False, replay_store=args.replay_store or "", replay_at=args.replay_at or "")
     try:
         evidence = copilot.evidence_for(cfg)

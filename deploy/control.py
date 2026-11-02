@@ -32,8 +32,8 @@ AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tr
 AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
 PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
-# The nightly daily reviews on the Claude plan: opt-in like practice, enabled
-# once by the owner after /etc/tradejournal/claude-plan.env holds the token.
+# The nightly daily reviews through the Anthropic API: opt-in like practice, enabled
+# once by the owner.
 PLAN_REVIEW_UNITS = ["tradejournal-plan-reviews.service", "tradejournal-plan-reviews.timer"]
 COMPANY_RESEARCH_UNITS = ["tradejournal-company-research.service", "tradejournal-company-research.timer"]
 OPT_IN_TIMERS = ["tradejournal-practice.timer", "tradejournal-plan-reviews.timer", "tradejournal-company-research.timer"]
@@ -153,7 +153,7 @@ def install(archive: Path, digest: str) -> Path:
             shutil.rmtree(cache)
         cache.symlink_to(STATE / "frontend-cache" / destination.name)
         run("/usr/bin/python3.12", "-m", "venv", backend / ".venv")
-        run(backend / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links", destination / "wheels", "trade-journal-backend[copilot-plan]==0.1.0")
+        run(backend / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links", destination / "wheels", "trade-journal-backend==0.1.0")
         CONFIG.mkdir(parents=True, exist_ok=True, mode=0o700)
         for filename in ("backend.env", "migration.env"):
             target = CONFIG / filename

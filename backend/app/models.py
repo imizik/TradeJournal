@@ -889,7 +889,7 @@ class CopilotTurn(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     started_at: datetime = Field(default_factory=utc_now_naive, index=True)
     backend: str  # anthropic | plan | fake
-    billing: str  # api | claude_plan | none
+    billing: str  # api | api_background | claude_plan (before the API move) | none
     model: Optional[str] = None
     symbol: Optional[str] = None
     rounds: int = 0
@@ -2100,7 +2100,7 @@ class ResearchJob(SQLModel, table=True):
     dedupe_key: str = Field(sa_column=Column(String, nullable=False, unique=True))
     attempts: int = Field(default=0)
     error: Optional[str] = None                 # last failure, short text
-    cost_usd: Optional[float] = None            # summed over attempts (API-equivalent on the plan)
+    cost_usd: Optional[float] = None            # summed over attempts
     # One entry per attempt, {at, usd, estimated}: the attempt's budget is charged when it starts and replaced by the
     # real cost once known, so the daily cap counts retries, timeouts, cancels and restarts.
     spend_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))

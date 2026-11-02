@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -38,11 +37,9 @@ def review_trade(
     companion_trades: Optional[list[Trade]] = None,
     stats: Optional[dict] = None,
     session: Optional[Session] = None,
-    backend: str | None = None,
 ) -> dict:
-    """One trade's review, from Claude on the owner's plan (app.ai.plan_runner), like the daily review.
+    """One trade's review, from Claude through the Anthropic API (app.ai.api_runner), like the daily review.
 
-    The Anthropic API is used only when ``AI_REVIEW_BACKEND=api`` is set explicitly; nothing falls back to it.
     The day's context (plans, market, sector, news, option walls, alerts) comes from ``review_context`` for
     the trade's New York open date.
     """
@@ -52,41 +49,17 @@ def review_trade(
 
         context["day_context"] = review_context.build(session, trade.opened_at.date(), [trade])
     message = f"Review this trade:\n\n{json.dumps(context, indent=2, default=str)}"
-    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
-    if chosen == "api":
-        review = _review_with_api(message)
-        review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
-    else:
-        from app.ai import plan_runner
+    from app.ai import api_runner
 
-        answer = plan_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
-        review = answer.data
-        review["generated_by"] = answer.author
-        review["usage"] = {"input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
-                           "api_equivalent_usd": answer.api_equivalent_usd, "seconds": answer.seconds}
+    answer = api_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
+    review = answer.data
+    review["generated_by"] = answer.author
+    review["usage"] = answer.usage
     missing = [field for field in REVIEW_FIELDS if field not in review]
     if missing:
         raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
     review["prompt_version"] = PROMPT_VERSION
     return review
-
-
-def _review_with_api(message: str) -> dict:
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    response = client.messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=2000,
-        system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
-    )
-    response_text = ""
-    try:
-        response_text = response.content[0].text
-        return _parse_json_response(response_text)
-    except (json.JSONDecodeError, IndexError, AttributeError) as exc:
-        raise ValueError(f"Failed to parse AI response: {exc}. Response starts: {response_text[:300]!r}") from exc
 
 
 def _assemble_context(

@@ -87,7 +87,7 @@ def test_retry_with_backoff_then_failed_and_non_retryable_fails_at_once():
     other, _ = q.enqueue_question("q2", [])
     _claim()
     assert q.record_outcome(other["id"], cost_usd=None, investigation_id=None,
-                            error={"code": "plan_local_only", "message": "x"})["status"] == "failed"
+                            error={"code": "api_auth", "message": "x"})["status"] == "failed"
 
 
 def test_cancelled_while_running_stays_cancelled_and_restart_requeues():
@@ -155,8 +155,8 @@ def test_runner_runs_one_job_and_records_the_result():
 
 def test_runner_retries_failures_and_records_missing_saves():
     job, _ = q.enqueue_question("Why?", [])
-    out = asyncio.run(_runner(_done(error={"code": "sdk", "message": "boom"})).run_once())
-    assert out["status"] == "queued" and out["error"] == "sdk: boom"
+    out = asyncio.run(_runner(_done(error={"code": "api", "message": "boom"})).run_once())
+    assert out["status"] == "queued" and out["error"] == "api: boom"
     other, _ = q.enqueue_question("Other", [])
     out = asyncio.run(_runner(_done(saved=None)).run_once())
     assert out["id"] == other["id"] and out["status"] == "failed" and out["error"].startswith("save_failed")
@@ -273,7 +273,7 @@ def test_retry_pending_cancelled_and_interrupted_attempts_all_count():
     failing, _ = q.enqueue_question("sdk", [])
 
     async def sdk_fail(question, symbols, evidence, *, now, title, lim):
-        return {"status": "error", "error": {"code": "sdk", "message": "x"}, "metrics": {"cost_usd": 0.3}, "saved_id": None}
+        return {"status": "error", "error": {"code": "api", "message": "x"}, "metrics": {"cost_usd": 0.3}, "saved_id": None}
 
     assert asyncio.run(_runner(sdk_fail).run_once())["status"] == "queued"
     assert q.spent_today() == pytest.approx(0.3)  # real cost of a job that is not finished yet
