@@ -95,6 +95,7 @@ session, say that.
 comparison, and say which it is: the stock, its group, its sector or the whole market, with the numbers. When they ask \
 what Radar saw or what is moving today, get_radar_today lists the session's recorded events (with their latest status \
 and nearby headlines) and the latest pass's leaders and laggards; cite an event by its summary and first-seen time.
+- Before calling a move a market selloff, a rotation or a narrow rally, read get_breadth: how many S&P 500 members rose, the median and equal-weight change, new highs and lows, and the sectors; quote counts with the time. For "is fear priced in", "are puts bid" or how the options market sees a name, read get_positioning (SPY by default, or the symbol): the VIX curve, at-the-money IV, 25-delta skew and put/call ratios, each with its as-of.
 - For a catalyst, valuation, ownership, short-interest or analyst question, read get_symbol_profile and name the source \
 and age of every figure you quote (the caches are a day old; short interest is about two weeks behind). When the \
 owner asks whether the alerts, plans or pings are helping, read get_proof (scope week, or symbol for one name) and \
@@ -655,6 +656,16 @@ class FakeAdapter:
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and re.search(r"\b(breadth|average stock|participat\w*|rotation)\b", lower):
+            yield "progress", "Counting the S&P 500's advancers and decliners."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_breadth", "input": {}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
+        if isinstance(last["content"], str) and allow_tools and re.search(r"(put/call|\bskew\b|\bpriced in\b|\bpositioning\b)", lower):
+            yield "progress", "Reading the volatility curve and the chain."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_positioning", "input": {"symbol": "SPY"}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("catalyst", "valuation", "short interest", "analyst", "market cap", "who owns")):
             yield "progress", f"Reading {symbol}'s profile."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_symbol_profile", "input": {"symbol": symbol}},
@@ -736,6 +747,33 @@ class FakeAdapter:
         return scripted(word, "The proof pages as they stand; the samples decide, not me." if word == "Unclear" else "The proof pages have a verdict.",
                         f"**Proof ({data.get('scope')}, as of {data.get('as_of')})**\n" + "\n".join(lines),
                         "the samples reach their rules' minimums.", against="every verdict here is a count under a fixed rule, not causation.")
+
+    @staticmethod
+    def _breadth(data: dict) -> str:
+        """A scripted breadth read: advancers, the median member, highs and lows, the weakest sector."""
+        if data.get("state") == "unavailable":
+            return scripted("Unclear", "Breadth could not be read.", f"{data.get('reason') or 'No quotes came back'}.")
+        sectors = data.get("by_sector") or {}
+        weakest = min(sectors, key=lambda k: sectors[k].get("median_day_pct") or 0) if sectors else None
+        body = (f"- {data['advancers']} of {data['quoted']} S&P 500 members up ({data['up_share']}); median {data['median_day_pct']}%.\n"
+                f"- New 52-week highs {data['new_52w_highs']}, lows {data['new_52w_lows']}; "
+                f"{data['20pct_or_more_below_52w_high']} of members 20% or more below their high.")
+        if weakest:
+            body += f"\n- Weakest sector: {weakest} (median {sectors[weakest].get('median_day_pct')}%)."
+        return scripted("Unclear", "The average stock, counted.", f"**Breadth (as of {data.get('as_of')})**\n{body}",
+                        "more members join the move or sit it out.", against="one day's tally is not a trend.")
+
+    @staticmethod
+    def _positioning(data: dict) -> str:
+        """A scripted positioning read: the VIX curve and the nearest expiry's skew and put/call ratio."""
+        vix = data.get("vol_indexes") or {}
+        near = (data.get("expiries") or [{}])[0]
+        body = (f"- VIX curve {vix.get('curve', 'unknown')}: VIX9D {(vix.get('VIX9D') or {}).get('last')}, VIX {(vix.get('VIX') or {}).get('last')}, "
+                f"VIX3M {(vix.get('VIX3M') or {}).get('last')}.\n"
+                f"- {data.get('symbol')} {near.get('expiration')}: ATM IV {near.get('atm_iv_pct')}%, 25-delta skew {near.get('skew_25d')} pts, "
+                f"put/call volume {near.get('put_call_volume')}.")
+        return scripted("Unclear", "How the options market is priced, not where it goes.", f"**Positioning (as of {data.get('as_of')})**\n{body}",
+                        "the curve flips or skew moves several points.", against="IV is the provider's, refreshed hourly.")
 
     @staticmethod
     def _profile(data: dict) -> str:
@@ -1024,6 +1062,10 @@ class FakeAdapter:
             return FakeAdapter._proof(results["get_proof"])
         if "get_symbol_profile" in results:
             return FakeAdapter._profile(results["get_symbol_profile"])
+        if "get_breadth" in results:
+            return FakeAdapter._breadth(results["get_breadth"])
+        if "get_positioning" in results:
+            return FakeAdapter._positioning(results["get_positioning"])
         if "get_positions" in results:
             book = results["get_positions"].get("positions") or []
             held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
@@ -1196,6 +1238,16 @@ def _summary(name: str, data: dict) -> str:
         if (mc := (data.get("valuation") or {}).get("market_cap")) is not None:
             parts.append(f"market cap {mc / 1e9:.1f}B")
         return " · ".join(parts)[:160]
+    if name == "get_breadth":
+        if data.get("state") == "unavailable":
+            return (data.get("reason") or "unavailable")[:160]
+        return (f"{data.get('advancers')} up / {data.get('decliners')} down of {data.get('quoted')} · median {data.get('median_day_pct')}% · "
+                f"highs {data.get('new_52w_highs')} lows {data.get('new_52w_lows')}")[:160]
+    if name == "get_positioning":
+        near = (data.get("expiries") or [{}])[0]
+        vix = data.get("vol_indexes") or {}
+        return (f"VIX curve {vix.get('curve', '?')} · {data.get('symbol')} ATM IV {near.get('atm_iv_pct')}% · skew {near.get('skew_25d')} · "
+                f"P/C vol {near.get('put_call_volume')}")[:160]
     if name == "get_proof":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]

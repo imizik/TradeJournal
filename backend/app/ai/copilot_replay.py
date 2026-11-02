@@ -142,6 +142,16 @@ class ReplayEvidence:
                 "reason": "Option chains are not in the Radar snapshot, so option candidates are unavailable in replay "
                           "(a live read would show today's quotes, not the frozen moment's)."}
 
+    def get_breadth(self) -> dict:
+        from app.ai import copilot_breadth
+        return {"state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
+                "reason": copilot_breadth.REPLAY_REASON.format("Breadth")}
+
+    def get_positioning(self, symbol: str = "SPY") -> dict:
+        from app.ai import copilot_breadth
+        return {"symbol": symbol, "state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
+                "reason": copilot_breadth.REPLAY_REASON.format("Positioning")}
+
     def get_symbol_profile(self, symbol: str) -> dict:
         return {"symbol": symbol, "state": "unavailable", "as_of": self.at.isoformat(timespec="minutes"),
                 "reason": "Fundamentals, short interest and analyst figures are as they are now, not as of the replay moment, "

@@ -2280,6 +2280,33 @@ size in a scripted line, so the fixture and the browser spec exercise the path
 `backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`,
 `frontend/e2e/charts-copilot-loop.spec.ts` (Look at my chart).
 
+## Breadth and positioning
+
+Two market-data tools in `app/ai/copilot_breadth.py`, offered to every turn and
+to research jobs and the shadow book. Both read current data only, so replay
+says they are unavailable; the fixture serves fixed numbers.
+
+- **`get_breadth`** asks whether the average stock is taking part. One Tradier
+  quote request (about 0.3 s) for the S&P 500 members in the hand-kept
+  `backend/app/data/sp500.json` (from the Wikipedia constituents table, with
+  its `as_of`; refresh it now and then, as the index changes a few names a
+  quarter; BRK.B is quoted as `BRK/B`) gives advancers and decliners, the
+  share up, the median and equal-weight day change, new 52-week highs and
+  lows (today's high or low reaching the provider's 52-week figure), the share
+  within 5% of the 52-week high and the share 20% or more below it, overall
+  and by GICS sector. Cached three minutes in memory.
+- **`get_positioning(symbol = SPY)`** asks how afraid the options market is:
+  the Cboe volatility indexes (VIX9D, VIX, VIX3M, VIX6M, VVIX, SKEW) with the
+  curve called contango, backwardation or mixed, and for the symbol the
+  nearest expiry at least five days out and the one nearest 30 days, read
+  through the options feed's cached chains: at-the-money IV, the 25-delta
+  put and call IV and their difference (skew, in vol points), and put/call
+  volume and open interest. IV and greeks are ORATS figures refreshed hourly.
+
+The prompt reads `get_breadth` before calling a move a selloff, a rotation or
+a narrow rally, and `get_positioning` for "is fear priced in" or "are puts
+bid". Tests: `backend/tests/test_copilot_breadth.py`.
+
 ## Saved investigations
 
 After each turn the page saves the conversation as a `copilot_investigation`
@@ -2412,12 +2439,12 @@ python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run 
 python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
 ```
 
-- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 19
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 21
   fixture-answerable cases across the desk's workflows: a briefing, a group
   read, a planted rumour, a follow-up that should reuse carried evidence, "go
   deeper", a candle, a plan, a compare, an open-position review, an
-  invalidation question, a closed-trade review, the week review, a theme and an
-  order-bait prompt. A case is the owner's words plus `expects`: `read`,
+  invalidation question, a closed-trade review, the week review, a theme, a breadth
+  read, a positioning read and an order-bait prompt. A case is the owner's words plus `expects`: `read`,
   `against`, `long_ok`, `planted_rumour`, `carried_tools`, `verdict_in`,
   `tools_any`, `tools_none`, `known_figures`. A case with `carry_from` runs
   after its parent with the parent's answer in the history and its `carry_id`;

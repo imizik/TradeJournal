@@ -260,6 +260,23 @@ TOOLS: list[dict] = [
                                         "symbol": {**_SYMBOL_SCHEMA, "description": "Required with scope symbol"}}},
     },
     {
+        "name": "get_breadth",
+        "description": "Whether the average stock is taking part, from one quote per S&P 500 member: advancers and "
+                       "decliners, the median and equal-weight day change, new 52-week highs and lows, the share within 5% "
+                       "of its 52-week high and the share 20% or more below it, overall and by GICS sector. Read it before "
+                       "calling a move a market selloff, a rotation or a narrow rally.",
+        "input_schema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    {
+        "name": "get_positioning",
+        "description": "How afraid the options market is: the Cboe volatility indexes (VIX9D, VIX, VIX3M, VIX6M, VVIX, SKEW) "
+                       "and their curve, and for `symbol` (default SPY) the near and about-30-day expiries' at-the-money "
+                       "implied volatility, 25-delta put-call skew and put/call volume and open interest. Read it for 'is "
+                       "fear priced in' or 'are puts bid'; IV and greeks are the provider's, refreshed hourly.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"symbol": {**_SYMBOL_SCHEMA, "description": "Optional underlying, default SPY"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -576,6 +593,10 @@ def validate(name: str, args: Any) -> dict:
             raise ToolInputError("investigation_id must be a saved investigation's id (a UUID)") from None
     if name == "get_market_regime":
         return {"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {}
+    if name == "get_breadth":
+        return {}
+    if name == "get_positioning":
+        return {"symbol": _symbol(args["symbol"]) if args.get("symbol") is not None else "SPY"}
     if name == "get_radar_today":
         out = {}
         if args.get("group") is not None:
@@ -897,6 +918,14 @@ class LiveEvidence:
         from app.ai import copilot_regime
         return copilot_regime.live_radar_today(group, limit, datetime.now(UTC), MAX_RESULT_CHARS)
 
+    def get_breadth(self) -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.live_breadth(datetime.now(UTC))
+
+    def get_positioning(self, symbol: str = "SPY") -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.live_positioning(symbol, datetime.now(UTC))
+
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai import copilot_book
         return copilot_book.chart_context(symbol, timeframe)
@@ -1000,6 +1029,8 @@ PROVENANCE = {
     "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
                            "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
     "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
+    "get_breadth": ("Tradier quotes for the hand-kept S&P 500 list; counts computed here", "fetched"),
+    "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 
