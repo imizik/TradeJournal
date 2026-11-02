@@ -95,6 +95,7 @@ session, say that.
 comparison, and say which it is: the stock, its group, its sector or the whole market, with the numbers. When they ask \
 what Radar saw or what is moving today, get_radar_today lists the session's recorded events (with their latest status \
 and nearby headlines) and the latest pass's leaders and laggards; cite an event by its summary and first-seen time.
+- For rates, credit, the dollar, oil, financial conditions or "is this macro", read get_macro and quote each series with its date (FRED is a business day or more behind) and where it sits in its one-year range; widening credit spreads beside falling stocks is the classic sign of stress spreading beyond one trade. When the owner asks how a drawdown usually ends, whether "this is the top", or for odds, read get_base_rates for the symbol (and SPY or QQQ for the market) and give the counts as counts: n episodes, the median forward return and share up beside the baseline, the further drop and recoveries. Fewer than 10 episodes is an anecdote; a lean you give must say what it rests on.
 - For a catalyst, valuation, ownership, short-interest or analyst question, read get_symbol_profile and name the source \
 and age of every figure you quote (the caches are a day old; short interest is about two weeks behind). When the \
 owner asks whether the alerts, plans or pings are helping, read get_proof (scope week, or symbol for one name) and \
@@ -655,6 +656,16 @@ class FakeAdapter:
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
                                  "tool_use", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("base rate", "the top", "usually", "drawdown", "odds")):
+            yield "progress", f"Counting {symbol}'s past drawdowns."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_base_rates", "input": {"symbol": symbol}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
+        if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("macro", "credit", "yields", "the dollar", "rates")):
+            yield "progress", "Reading the macro series."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_macro", "input": {}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and any(w in lower for w in ("catalyst", "valuation", "short interest", "analyst", "market cap", "who owns")):
             yield "progress", f"Reading {symbol}'s profile."
             yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_symbol_profile", "input": {"symbol": symbol}},
@@ -736,6 +747,32 @@ class FakeAdapter:
         return scripted(word, "The proof pages as they stand; the samples decide, not me." if word == "Unclear" else "The proof pages have a verdict.",
                         f"**Proof ({data.get('scope')}, as of {data.get('as_of')})**\n" + "\n".join(lines),
                         "the samples reach their rules' minimums.", against="every verdict here is a count under a fixed rule, not causation.")
+
+    @staticmethod
+    def _macro(data: dict) -> str:
+        """A scripted macro read: each series with its date, its month's change and its place in the year's range."""
+        if data.get("state") == "unavailable":
+            return scripted("Unclear", "The macro series could not be read.", "FRED did not answer and nothing is cached.")
+        lines = [f"- {r['label']}: {r['value']} on {r['date']} (1m {r.get('chg_1m')}, {r.get('range_pct_1y')}% of its 1y range)."
+                 for r in data.get("series") or [] if r.get("state") != "unavailable"]
+        return scripted("Unclear", "The macro backdrop as numbers; it does not time a trade.",
+                        f"**Macro (FRED, latest {data.get('latest_date')})**\n" + "\n".join(lines),
+                        "credit spreads and yields move together against stocks.", against="FRED runs a business day or more behind.")
+
+    @staticmethod
+    def _base_rates(data: dict) -> str:
+        """A scripted base-rate read: episodes, the 63-day median and share up beside the baseline, recoveries."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", f"No base rate for {data.get('symbol')}.", f"{data.get('reason') or 'Not enough history'}.")
+        h = (data.get("horizons") or {}).get("63d") or {}
+        ep, base, rec = h.get("episodes") or {}, h.get("baseline") or {}, data.get("recovered_high") or {}
+        body = (f"- {data['episodes']} past drops of {data['threshold_pct']:g}% or more from a one-year high since {data['since']}; "
+                f"today {data['current']['drawdown_pct']}%.\n"
+                f"- 63 days later: median {ep.get('median_pct')}%, up {ep.get('up_share')} of the time (n {ep.get('n')}); every day's "
+                f"baseline {base.get('median_pct')}%, up {base.get('up_share')}.\n"
+                f"- {rec.get('recovered')} of {rec.get('of')} regained the high, median {rec.get('median_days')} trading days.")
+        return scripted("Unclear", "Counts of the past, not odds for this time.", f"**{data['symbol']} base rates (closes to {data['latest_close']})**\n{body}",
+                        "the episode count grows or a different drawdown depth is asked.", against="few episodes and changing regimes.")
 
     @staticmethod
     def _profile(data: dict) -> str:
@@ -1024,6 +1061,10 @@ class FakeAdapter:
             return FakeAdapter._proof(results["get_proof"])
         if "get_symbol_profile" in results:
             return FakeAdapter._profile(results["get_symbol_profile"])
+        if "get_base_rates" in results:
+            return FakeAdapter._base_rates(results["get_base_rates"])
+        if "get_macro" in results:
+            return FakeAdapter._macro(results["get_macro"])
         if "get_positions" in results:
             book = results["get_positions"].get("positions") or []
             held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
@@ -1196,6 +1237,17 @@ def _summary(name: str, data: dict) -> str:
         if (mc := (data.get("valuation") or {}).get("market_cap")) is not None:
             parts.append(f"market cap {mc / 1e9:.1f}B")
         return " · ".join(parts)[:160]
+    if name == "get_macro":
+        rows = {r["id"]: r for r in data.get("series") or [] if r.get("state") != "unavailable"}
+        parts = [f"{label} {rows[i]['value']}" for i, label in (("DGS10", "10y"), ("BAMLH0A0HYM2", "HY spread"), ("DCOILWTICO", "WTI"))
+                 if i in rows]
+        return (" · ".join(parts) or (data.get("state") or "unavailable"))[:160]
+    if name == "get_base_rates":
+        if data.get("state") != "ok":
+            return (data.get("reason") or data.get("state") or "unavailable")[:160]
+        h = ((data.get("horizons") or {}).get("63d") or {}).get("episodes") or {}
+        return (f"{data['episodes']} drops of {data['threshold_pct']:g}%+ since {data['since'][:4]} · 63d median {h.get('median_pct')}% "
+                f"(n {h.get('n')})")[:160]
     if name == "get_proof":
         if data.get("state") != "ok":
             return (data.get("reason") or "unavailable")[:160]

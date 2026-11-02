@@ -260,6 +260,27 @@ TOOLS: list[dict] = [
                                         "symbol": {**_SYMBOL_SCHEMA, "description": "Required with scope symbol"}}},
     },
     {
+        "name": "get_macro",
+        "description": "The macro backdrop as numbers, from public FRED series: the 2-year and 10-year Treasury yields, the "
+                       "10y-2y curve, the 10-year real yield and breakeven inflation, the effective fed funds rate, high-yield "
+                       "and investment-grade credit spreads, the broad dollar, WTI oil and the Chicago Fed's financial conditions "
+                       "index. Each with its date, change over a week, a month and three months, and where it sits in its "
+                       "one-year range. FRED values arrive a business day or more late; quote each with its date.",
+        "input_schema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    {
+        "name": "get_base_rates",
+        "description": "What followed past drawdowns like the current one in the symbol's own daily history (Tradier, back to "
+                       "its listing): episodes where the close first fell at least `drawdown_pct` (default: today's depth, "
+                       "whole percent) below its one-year closing high, their forward returns at 5, 21, 63 and 126 trading "
+                       "days beside every day's baseline, the further drop within 63 days, how many regained the high and "
+                       "how fast, and the recent episodes with dates. Counts of the past, not a forecast: quote n and the "
+                       "baseline with every figure.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol"],
+                         "properties": {"symbol": _SYMBOL_SCHEMA,
+                                        "drawdown_pct": {"type": "number", "description": "Optional: depth below the one-year high, 3-80"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -576,6 +597,16 @@ def validate(name: str, args: Any) -> dict:
             raise ToolInputError("investigation_id must be a saved investigation's id (a UUID)") from None
     if name == "get_market_regime":
         return {"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {}
+    if name == "get_macro":
+        return {}
+    if name == "get_base_rates":
+        out = {"symbol": _symbol(args.get("symbol"))}
+        depth = args.get("drawdown_pct")
+        if depth is not None:
+            if isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not 3 <= depth <= 80:
+                raise ToolInputError("drawdown_pct must be a number from 3 to 80")
+            out["drawdown_pct"] = float(depth)
+        return out
     if name == "get_radar_today":
         out = {}
         if args.get("group") is not None:
@@ -897,6 +928,14 @@ class LiveEvidence:
         from app.ai import copilot_regime
         return copilot_regime.live_radar_today(group, limit, datetime.now(UTC), MAX_RESULT_CHARS)
 
+    def get_macro(self) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.live_macro(datetime.now(UTC))
+
+    def get_base_rates(self, symbol: str, drawdown_pct: float | None = None) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.live_base_rates(symbol, drawdown_pct)
+
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai import copilot_book
         return copilot_book.chart_context(symbol, timeframe)
@@ -1000,6 +1039,8 @@ PROVENANCE = {
     "get_symbol_profile": ("Tradier fundamentals, calendar, dividends and corporate actions (cached a day) · FINRA short interest "
                            "and Tradier easy-to-borrow (Polygon, cached) · Yahoo / Webull analysts (unofficial, cached)", "cached"),
     "get_proof": ("Proof pages: exit habits and alert feedback, plan proof, outcomes, alert scorecard (TradeJournal)", "saved"),
+    "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),
+    "get_base_rates": ("Tradier daily history through the chart feed (split-adjusted); counts computed here", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

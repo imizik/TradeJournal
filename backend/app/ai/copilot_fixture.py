@@ -91,6 +91,14 @@ class FixtureEvidence:
         from app.ai import copilot_regime
         return copilot_regime.fixture_radar_today(GROUP["name"], _SESSION, group, limit)
 
+    def get_macro(self) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.fixture_macro()
+
+    def get_base_rates(self, symbol: str, drawdown_pct: float | None = None) -> dict:
+        from app.ai import copilot_macro
+        return copilot_macro.fixture_base_rates(symbol, drawdown_pct)
+
     def get_symbol_profile(self, symbol: str) -> dict:
         from app.ai import copilot_profile
         return copilot_profile.fixture_profile(symbol, self.get_symbol_events(symbol)["next_earnings"])

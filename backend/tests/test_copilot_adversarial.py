@@ -39,7 +39,8 @@ CLEAN = {"unseen_citations": [], "unread_evidence_refs": [], "after_evidence_tim
 # Tools a background job may hold: market reads and the owner's saved research text. Never the book, never an action,
 # never another investigation by id. get_chart_context (market data, PR #459) is listed so that PR keeps passing.
 JOB_SAFE = {"get_group_comparison", "get_peer_moves", "get_symbol_news", "get_symbol_events", "get_quotes",
-            "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today", "get_symbol_profile"}  # market data only, never the book
+            "get_saved_research", "get_chart_context", "get_market_regime", "get_radar_today", "get_symbol_profile",
+            "get_macro", "get_base_rates"}  # market data only, never the book
 NEVER_IN_JOBS = {"propose_plan", "get_investigation_changes", "get_positions", "get_trades", "get_memories", "get_owner_context",
                  "get_trade_review", "get_week_review", "get_level_history", "get_option_candidates", "get_moment", "get_proof"}
 
