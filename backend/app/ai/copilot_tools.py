@@ -281,6 +281,23 @@ TOOLS: list[dict] = [
                                         "drawdown_pct": {"type": "number", "description": "Optional: depth below the one-year high, 3-80"}}},
     },
     {
+        "name": "get_breadth",
+        "description": "Whether the average stock is taking part, from one quote per S&P 500 member: advancers and "
+                       "decliners, the median and equal-weight day change, new 52-week highs and lows, the share within 5% "
+                       "of its 52-week high and the share 20% or more below it, overall and by GICS sector. Read it before "
+                       "calling a move a market selloff, a rotation or a narrow rally.",
+        "input_schema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    {
+        "name": "get_positioning",
+        "description": "How afraid the options market is: the Cboe volatility indexes (VIX9D, VIX, VIX3M, VIX6M, VVIX, SKEW) "
+                       "and their curve, and for `symbol` (default SPY) the near and about-30-day expiries' at-the-money "
+                       "implied volatility, 25-delta put-call skew and put/call volume and open interest. Read it for 'is "
+                       "fear priced in' or 'are puts bid'; IV and greeks are the provider's, refreshed hourly.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"symbol": {**_SYMBOL_SCHEMA, "description": "Optional underlying, default SPY"}}},
+    },
+    {
         "name": "propose_plan",
         "description": "Propose ONE concrete next step for the owner to confirm in the lab. It saves and activates "
                        "nothing: the owner sees a card and only their Confirm creates anything. kind=watch: a price "
@@ -612,6 +629,10 @@ def validate(name: str, args: Any) -> dict:
                 raise ToolInputError("drawdown_pct must be a number from 3 to 80")
             out["drawdown_pct"] = float(depth)
         return out
+    if name == "get_breadth":
+        return {}
+    if name == "get_positioning":
+        return {"symbol": _symbol(args["symbol"]) if args.get("symbol") is not None else "SPY"}
     if name == "get_radar_today":
         out = {}
         if args.get("group") is not None:
@@ -941,6 +962,14 @@ class LiveEvidence:
         from app.ai import copilot_macro
         return copilot_macro.live_base_rates(symbol, drawdown_pct)
 
+    def get_breadth(self) -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.live_breadth(datetime.now(UTC))
+
+    def get_positioning(self, symbol: str = "SPY") -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.live_positioning(symbol, datetime.now(UTC))
+
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai import copilot_book
         return copilot_book.chart_context(symbol, timeframe)
@@ -1047,6 +1076,8 @@ PROVENANCE = {
     "web_search": ("Anthropic web search (third-party pages, untrusted)", "fetched"),
     "get_macro": ("FRED, Federal Reserve Bank of St. Louis (daily and weekly series, cached 6 h)", "fetched"),
     "get_base_rates": ("Tradier daily history through the chart feed (split-adjusted); counts computed here", "fetched"),
+    "get_breadth": ("Tradier quotes for the hand-kept S&P 500 list; counts computed here", "fetched"),
+    "get_positioning": ("Tradier quotes (Cboe volatility indexes) · options feed chains (Tradier, ORATS IV hourly)", "fetched"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

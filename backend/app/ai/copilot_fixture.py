@@ -99,6 +99,14 @@ class FixtureEvidence:
         from app.ai import copilot_macro
         return copilot_macro.fixture_base_rates(symbol, drawdown_pct)
 
+    def get_breadth(self) -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.fixture_breadth()
+
+    def get_positioning(self, symbol: str = "SPY") -> dict:
+        from app.ai import copilot_breadth
+        return copilot_breadth.fixture_positioning(symbol)
+
     def get_symbol_profile(self, symbol: str) -> dict:
         from app.ai import copilot_profile
         return copilot_profile.fixture_profile(symbol, self.get_symbol_events(symbol)["next_earnings"])
