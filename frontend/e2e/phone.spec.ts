@@ -49,8 +49,8 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
 
   await page.getByRole("button", { name: "Open menu" }).click();
   const menu = page.getByRole("dialog", { name: "Menu" });
-  await expect(menu.getByRole("heading", { name: "Labs" })).toBeVisible();
-  expect((await menu.getByRole("link").allTextContents()).slice(0, 7)).toEqual(["Today", "Dashboard", "Charts", "Daily Review", "Jo", "Trades", "Analytics"]);
+  expect((await menu.getByRole("link").allTextContents()).slice(0, 3)).toEqual(["Today", "Dashboard", "Charts"]);
+  for (const group of ["Market", "Practice", "Research", "Journal"]) await menu.getByRole("button", { name: group, exact: true }).click();
   for (const name of ["Fills", "Signals", "Scanner", "Advisor review", "Strategy Lab", "Research Studio", "Level 2 lab", "AI Buildout"]) {
     await menu.getByRole("link", { name, exact: true }).scrollIntoViewIfNeeded();
     await expect(menu.getByRole("link", { name, exact: true })).toBeInViewport();
@@ -122,7 +122,7 @@ test("a trade opens to a readable detail page", async ({ page }) => {
   // squeezed to a few pixels.
   const widths = await page.evaluate(() => ({
     content: Math.max(
-      ...[...document.querySelectorAll("main h2")].map((el) => el.getBoundingClientRect().width),
+      ...[...document.querySelectorAll("main h2")].map((el) => (el.closest("section") ?? el).getBoundingClientRect().width), // the card, as a card's title is only as wide as its text
     ),
     viewport: window.innerWidth,
     scrollWidth: document.documentElement.scrollWidth,

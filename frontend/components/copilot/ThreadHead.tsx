@@ -33,11 +33,11 @@ function chipOf(data: DeskThreadPlan | null, draft: boolean, stage: string | nul
   if (!data) return null;
   // The copilot adopted this unplanned position: its plan is a draft until Confirm arms the invalidation.
   if (adopted && data.position) return data.plan?.invalidation?.state === "armed"
-    ? { text: "Adopted · armed", tone: "bg-sky-400/10 text-sky-300" } : { text: "Adopted", tone: "bg-amber-400/10 text-amber-300" };
+    ? { text: "Adopted · armed", tone: "bg-secondary text-foreground" } : { text: "Adopted", tone: "bg-amber-400/10 text-amber-300" };
   if (data.position) return { text: "In position", tone: "bg-emerald-400/10 text-emerald-300" };
   const plan = data.plan;
   if (plan && ([plan.entry, plan.invalidation].some(level => level?.state === "armed") || plan.time_stop?.state === "pending"))
-    return { text: "Armed", tone: "bg-sky-400/10 text-sky-300" };
+    return { text: "Armed", tone: "bg-secondary text-foreground" };
   if (plan) return { text: plan.position === "closed" ? "Closed" : "Plan done", tone: "bg-secondary text-muted-foreground" };
   if (data.unavailable) return { text: "Plan unavailable", tone: "bg-secondary text-muted-foreground" };
   return { text: "Not planned", tone: "bg-secondary text-muted-foreground" };

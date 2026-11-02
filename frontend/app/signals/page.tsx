@@ -18,7 +18,7 @@ function Th({ children }: { children?: React.ReactNode }) {
 
 function Pill({ className, children }: { className: string; children: React.ReactNode }) {
   return (
-    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${className}`}>
+    <span className={`inline-flex h-[22px] items-center whitespace-nowrap rounded-md px-2 text-[11.5px] font-medium capitalize ${className}`}>
       {children}
     </span>
   );
@@ -26,9 +26,9 @@ function Pill({ className, children }: { className: string; children: React.Reac
 
 function SummaryCard({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <div className="rounded-lg border bg-card px-5 py-4">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
+    <div className="rounded-lg border bg-card px-4 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1.5 text-2xl font-medium tabular-nums text-foreground">{value}</div>
       {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
     </div>
   );
@@ -50,17 +50,22 @@ export default async function SignalsPage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Signals</h1>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-xl font-semibold">Signals</h1>
+            <span className="text-sm tabular-nums text-muted-foreground">{counts.total} recent</span>
+          </div>
+          <SignalsRefresh />
+        </div>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           TradingView alerts and their latest scalp analysis. Read-only: nothing here places an order or
           changes your fills and trades.
         </p>
-        <SignalsRefresh />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <SummaryCard label="Alerts" value={counts.total} hint="Most recent 200" />
         <SummaryCard label="Tradeable verdicts" value={counts.tradeable} hint="long or short scalp" />
         <SummaryCard label="Awaiting analysis" value={counts.pending} hint="Pending or running" />
@@ -73,14 +78,14 @@ export default async function SignalsPage() {
       </div>
 
       <section className="overflow-hidden rounded-lg border bg-card">
-        <div className="border-b px-5 py-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="border-b px-3.5 py-2.5">
+          <h2 className="text-[13.5px] font-semibold tracking-tight">
             Alert History
           </h2>
         </div>
 
         {alerts.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+          <div className="p-4 text-sm text-muted-foreground">
             No alerts received yet. New TradingView alerts will appear here automatically.
           </div>
         ) : (
@@ -103,7 +108,7 @@ export default async function SignalsPage() {
               <tbody>
                 {alerts.map((alert: TradingViewAlert) => (
                   <tr key={alert.alert_id} className="border-t hover:bg-secondary/40">
-                    <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
+                    <td className="whitespace-nowrap px-4 py-2 tabular-nums text-muted-foreground">
                       {fmtAlertTime(alert.received_at)}
                     </td>
                     <td className="px-4 py-2 font-medium text-foreground">{alert.symbol}</td>
@@ -127,7 +132,7 @@ export default async function SignalsPage() {
                     <td className="px-4 py-2 text-right">
                       <Link
                         href={`/signals/${encodeURIComponent(alert.alert_id)}`}
-                        className="text-xs font-medium text-sky-400 hover:underline"
+                        className="inline-flex min-h-11 items-center text-xs font-medium text-foreground underline underline-offset-2 hover:text-muted-foreground sm:min-h-0"
                       >
                         Detail
                       </Link>

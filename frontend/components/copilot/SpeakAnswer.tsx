@@ -93,7 +93,7 @@ export function useSpeakAnswer({ ready, turn, message, busy, listening, disabled
         rememberSpeak(!on);
       }}
       className={cn("flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded border disabled:opacity-40",
-        on ? "border-sky-400/60 bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground")}>
+        on ? "border-primary/60 bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground")}>
       {on ? <Volume2 className={cn("h-5 w-5", speaking && "animate-pulse")} /> : <VolumeX className="h-5 w-5" />}
     </button>
   );

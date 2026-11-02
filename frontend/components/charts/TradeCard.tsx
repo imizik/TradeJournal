@@ -10,33 +10,33 @@ import { fetchOptionMark, MARK_STALE_SECONDS, type MetricState, type ObservedUnd
 const STATE: Record<MetricState, { text: string; style: string }> = {
   current: { text: "Current", style: "bg-emerald-400/10 text-emerald-300" },
   stale: { text: "Stale", style: "bg-amber-400/10 text-amber-300" },
-  missing: { text: "Missing", style: "bg-slate-800 text-slate-400" },
+  missing: { text: "Missing", style: "bg-secondary text-muted-foreground" },
 };
 const SOURCES: Record<string, string> = { alpaca_sip: "Alpaca SIP", alpaca_iex: "Alpaca IEX (one exchange)", fill_enrichment: "fill enrichment", polygon: "Polygon" };
 const SIDES: Record<string, string> = { buy_to_open: "Buy to open", sell_to_close: "Sell to close", sell_to_open: "Sell to open", buy_to_close: "Buy to close", buy: "Buy", sell: "Sell" };
 
 const money = (value: number | null | undefined) => value == null ? "—" : `${value < 0 ? "−" : value > 0 ? "+" : ""}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (value: number | null | undefined, digits = 2) => value == null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}%`;
-const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-slate-300" : value > 0 ? "text-emerald-400" : "text-rose-400";
+const tone = (value: number | null | undefined) => value == null || value === 0 ? "text-foreground/80" : value > 0 ? "text-emerald-400" : "text-rose-400";
 const when = (stamp: number) => `${etTime(stamp, true)} ${etTime(stamp)} ET`;
 const qty = (value: number) => value % 1 ? value.toFixed(4).replace(/0+$/, "") : String(value);
 const source = (name?: string | null) => name ? SOURCES[name] ?? name : "unknown source";
 const flag = (value: boolean | null | undefined) => value == null ? "—" : value ? "Yes" : "No";
 
-function Row({ label, value, className = "text-slate-300", title }: { label: string; value: React.ReactNode; className?: string; title?: string }) {
-  return <div className="flex justify-between gap-3" title={title}><span className="text-slate-500">{label}</span><span className={`text-right font-mono ${className}`}>{value}</span></div>;
+function Row({ label, value, className = "text-foreground/80", title }: { label: string; value: React.ReactNode; className?: string; title?: string }) {
+  return <div className="flex justify-between gap-3" title={title}><span className="text-muted-foreground">{label}</span><span className={`text-right font-mono ${className}`}>{value}</span></div>;
 }
 function Section({ title, state, note, children }: { title: string; state?: MetricState; note?: string; children?: React.ReactNode }) {
-  return <section aria-label={title} className="mt-2 border-t border-slate-700/50 pt-2">
-    <div className="mb-1 flex items-center gap-2"><h3 className="text-[11px] font-medium text-slate-200">{title}</h3>
+  return <section aria-label={title} className="mt-2 border-t border-border pt-2">
+    <div className="mb-1 flex items-center gap-2"><h3 className="text-[11px] font-medium text-foreground">{title}</h3>
       {state && <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATE[state].style}`}>{STATE[state].text}</span>}</div>
     {children && <div className="space-y-0.5">{children}</div>}
-    {note && <p className="mt-1 text-[10px] leading-4 text-slate-500">{note}</p>}
+    {note && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{note}</p>}
   </section>;
 }
 function Underlying({ value }: { value: ObservedUnderlying | null }) {
-  if (!value) return <span className="text-slate-500">underlying not recorded</span>;
-  return <span title={value.single_venue ? "Read from one exchange's prints" : undefined}>underlying {price(value.price)} <span className="text-slate-500">({source(value.source)})</span></span>;
+  if (!value) return <span className="text-muted-foreground">underlying not recorded</span>;
+  return <span title={value.single_venue ? "Read from one exchange's prints" : undefined}>underlying {price(value.price)} <span className="text-muted-foreground">({source(value.source)})</span></span>;
 }
 
 /**
@@ -68,26 +68,26 @@ export default function TradeCard({ card, loading, error, last, onClose, onShow 
   };
   const path = card?.path;
   const context = card?.context;
-  return <div className="p-3 text-[11px] text-slate-300" aria-label="Trade card" role="region">
+  return <div className="p-3 text-[11px] text-foreground/80" aria-label="Trade card" role="region">
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-semibold text-slate-100">{trade?.contract ?? card?.fill?.contract ?? "Trade"}</h2>
-        {trade && <p className="text-[10px] text-slate-400">{trade.account ? `${trade.account.name} ··${trade.account.last4}` : "Unknown account"} · {trade.direction === "short" ? "Short" : "Long"} · <span className={trade.status === "open" ? "text-sky-300" : ""}>{trade.status === "expired" ? "Expired" : trade.status === "open" ? "Open" : "Closed"}</span></p>}
+        <h2 className="truncate text-sm font-semibold text-foreground">{trade?.contract ?? card?.fill?.contract ?? "Trade"}</h2>
+        {trade && <p className="text-[10px] text-muted-foreground">{trade.account ? `${trade.account.name} ··${trade.account.last4}` : "Unknown account"} · {trade.direction === "short" ? "Short" : "Long"} · <span className={trade.status === "open" ? "text-foreground" : ""}>{trade.status === "expired" ? "Expired" : trade.status === "open" ? "Open" : "Closed"}</span></p>}
       </div>
-      <button aria-label="Close trade card" onClick={onClose} className="-m-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200"><X size={14} /></button>
+      <button aria-label="Close trade card" onClick={onClose} className="-m-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"><X size={14} /></button>
     </div>
-    {loading && <p role="status" className="mt-2 flex items-center gap-1.5 text-slate-400"><Loader2 size={12} className="animate-spin" />Reading the journal…</p>}
+    {loading && <p role="status" className="mt-2 flex items-center gap-1.5 text-muted-foreground"><Loader2 size={12} className="animate-spin" />Reading the journal…</p>}
     {error && <p role="alert" className="mt-2 text-rose-300">{error}</p>}
-    {card && !trade && <p className="mt-2 text-slate-400">{card.note}</p>}
+    {card && !trade && <p className="mt-2 text-muted-foreground">{card.note}</p>}
     {trade && <>
-      <p className="mt-1.5 text-[10px] leading-4 text-slate-500">{trade.price_note}</p>
+      <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{trade.price_note}</p>
       <div className="mt-1.5 space-y-0.5">
         <Row label="Opened" value={when(trade.opened_at)} />
         <Row label={trade.status === "expired" ? "Expired" : "Closed"} value={trade.closed_at ? when(trade.closed_at) : "—"} />
         <Row label={option ? "Contracts" : "Shares"} value={qty(trade.contracts)} />
         <Row label="Avg entry" value={`$${price(trade.avg_entry)}${unit}`} />
         <Row label="Avg exit" value={trade.avg_exit == null ? "—" : `$${price(trade.avg_exit)}${unit}`} />
-        {trade.status !== "open" && <Row label="Realized P&L" value={<>{money(trade.realized_pnl)} <span className="text-slate-500">{pct(trade.pnl_pct)}</span></>} className={tone(trade.realized_pnl)} />}
+        {trade.status !== "open" && <Row label="Realized P&L" value={<>{money(trade.realized_pnl)} <span className="text-muted-foreground">{pct(trade.pnl_pct)}</span></>} className={tone(trade.realized_pnl)} />}
       </div>
       {position && <Section title="Still open">
         <Row label={option ? "Contracts open" : "Shares open"} value={qty(position.open)} />
@@ -98,23 +98,23 @@ export default function TradeCard({ card, loading, error, last, onClose, onShow 
             {mark.data ? <>
               <Row label={`Mark (${mark.data.basis ?? "none"})`} value={mark.data.mark_per_contract == null ? "unavailable" : `$${price(mark.data.mark_per_contract)}/contract`} />
               <Row label="Open P&L" value={money(mark.data.open_pnl)} className={tone(mark.data.open_pnl)} />
-              <p className={`text-[10px] ${markAge != null && markAge > MARK_STALE_SECONDS ? "text-amber-300" : "text-slate-500"}`}>
+              <p className={`text-[10px] ${markAge != null && markAge > MARK_STALE_SECONDS ? "text-amber-300" : "text-muted-foreground"}`}>
                 {mark.data.quoted_at == null ? "No quote came back for this contract." : `${markAge != null && markAge > MARK_STALE_SECONDS ? "Stale: " : ""}quoted ${markAge! < 60 ? `${markAge}s` : `${Math.floor(markAge! / 60)}m`} ago by ${mark.data.provider ?? "the quotes provider"}.`}</p>
             </> : null}
-            <button onClick={() => void askMark()} disabled={mark.state === "loading"} className="mt-1 inline-flex min-h-8 items-center gap-1 rounded border border-slate-700 px-2 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-50">
+            <button onClick={() => void askMark()} disabled={mark.state === "loading"} className="mt-1 inline-flex min-h-8 items-center gap-1 rounded border border-border px-2 text-[11px] text-foreground hover:bg-secondary disabled:opacity-50">
               {mark.state === "loading" && <Loader2 size={11} className="animate-spin" />}{mark.data ? "Refresh mark" : "Get mark and open P&L"}</button>
             {mark.state === "error" && <p role="alert" className="text-[10px] text-rose-300">{mark.error}</p>}
           </div>}
       </Section>}
       {card.plans !== undefined && <Section title="Plan">
         {card.plans.length ? card.plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)
-          : <p className="text-slate-500">No plan linked. Plans saved with Plan trade are linked from Needs linking.</p>}
+          : <p className="text-muted-foreground">No plan linked. Plans saved with Plan trade are linked from Needs linking.</p>}
       </Section>}
       <Section title="Entries and exits">
-        <ol className="space-y-1">{(card.fills ?? []).map((fill) => <li key={fill.id} className={card.fill?.id === fill.id ? "rounded bg-sky-400/10 px-1 -mx-1" : ""}>
-          <div className="flex justify-between gap-2"><span><span className={fill.role === "entry" ? "text-sky-300" : "text-amber-300"}>{SIDES[fill.side] ?? fill.side}</span> {qty(fill.qty)} @ <span className="font-mono">${price(fill.price)}</span></span>
-            <Link href={`/fills/${fill.id}`} className="shrink-0 text-[10px] text-slate-500 hover:text-sky-300">{etTime(fill.time, true)} {etTime(fill.time)}</Link></div>
-          {option && fill.role === "entry" && <div className="text-[10px] text-slate-500"><Underlying value={fill.underlying} /></div>}
+        <ol className="space-y-1">{(card.fills ?? []).map((fill) => <li key={fill.id} className={card.fill?.id === fill.id ? "rounded bg-primary/10 px-1 -mx-1" : ""}>
+          <div className="flex justify-between gap-2"><span><span className={fill.role === "entry" ? "text-foreground" : "text-muted-foreground"}>{SIDES[fill.side] ?? fill.side}</span> {qty(fill.qty)} @ <span className="font-mono">${price(fill.price)}</span></span>
+            <Link href={`/fills/${fill.id}`} className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground">{etTime(fill.time, true)} {etTime(fill.time)}</Link></div>
+          {option && fill.role === "entry" && <div className="text-[10px] text-muted-foreground"><Underlying value={fill.underlying} /></div>}
         </li>)}</ol>
       </Section>
       {path && <Section title="Path (MFE / MAE)" state={path.state} note={[path.note, path.source ? `Source: ${source(path.source)}.` : ""].filter(Boolean).join(" ")}>
@@ -138,10 +138,10 @@ export default function TradeCard({ card, loading, error, last, onClose, onShow 
           <Row label="From premarket high / low" value={`${pct(context.entry_distance_from_premarket_high_pct)} / ${pct(context.entry_distance_from_premarket_low_pct)}`} />
         </>}
       </Section>}
-      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-700/50 pt-2">
-        <Link href={`/trades/${trade.id}`} className="inline-flex min-h-8 items-center rounded border border-slate-700 px-2 text-slate-200 hover:bg-slate-800">Trade page</Link>
-        {card.fill && <Link href={`/fills/${card.fill.id}`} className="inline-flex min-h-8 items-center rounded border border-slate-700 px-2 text-slate-200 hover:bg-slate-800">Fill page</Link>}
-        {onShow && <button onClick={() => onShow(trade.opened_at, trade.closed_at ?? trade.opened_at)} className="inline-flex min-h-8 items-center rounded border border-slate-700 px-2 text-slate-200 hover:bg-slate-800">Show whole trade</button>}
+      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border pt-2">
+        <Link href={`/trades/${trade.id}`} className="inline-flex min-h-8 items-center rounded border border-border px-2 text-foreground hover:bg-secondary">Trade page</Link>
+        {card.fill && <Link href={`/fills/${card.fill.id}`} className="inline-flex min-h-8 items-center rounded border border-border px-2 text-foreground hover:bg-secondary">Fill page</Link>}
+        {onShow && <button onClick={() => onShow(trade.opened_at, trade.closed_at ?? trade.opened_at)} className="inline-flex min-h-8 items-center rounded border border-border px-2 text-foreground hover:bg-secondary">Show whole trade</button>}
       </div>
     </>}
   </div>;

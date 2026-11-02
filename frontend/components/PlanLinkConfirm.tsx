@@ -17,8 +17,8 @@ function PlanText({ plan }: { plan: LinkPlan }) {
 }
 
 function Done({ page, plan, again }: { page: PlanLinkPage; plan: LinkPlan; again?: boolean }) {
-  return <section aria-label="Linked" className="space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm">
-    <h2 className="text-base font-semibold text-emerald-300">{again ? "Already linked" : "Linked"}</h2>
+  return <section aria-label="Linked" className="space-y-3 rounded-lg border bg-card p-4 text-sm">
+    <h2 className="text-[13.5px] font-semibold tracking-tight">{again ? "Already linked" : "Linked"}</h2>
     <p>{page.trade.contract} is linked to your plan &ldquo;{plan.setup}&rdquo; (captured {captureTime(plan.received_at)}, {TIMING_LABEL[plan.timing].toLowerCase()}).</p>
     <div className="flex flex-wrap gap-2">
       <Link href={`/trades/${page.trade.id}`} className={quiet}>Open the trade</Link>
@@ -46,7 +46,7 @@ export default function PlanLinkConfirm({ tradeId }: { tradeId: string }) {
     return () => { active = false; };
   }, [tradeId]);
 
-  if (loadError) return <p role="alert" className="text-sm text-amber-300">{loadError}</p>;
+  if (loadError) return <p role="alert" className="text-sm text-red-400">{loadError}</p>;
   if (!page) return <p role="status" className="text-sm text-muted-foreground">Loading the position…</p>;
 
   async function link(plan: LinkPlan) {
@@ -79,7 +79,7 @@ export default function PlanLinkConfirm({ tradeId }: { tradeId: string }) {
     {linked ? <Done page={page} plan={linked} />
       : page.linked.length ? <Done page={page} plan={page.linked[0]} again />
       : <>
-        {refused && <p role="alert" className="rounded border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-200">Not linked. {refused}</p>}
+        {refused && <p role="alert" className="rounded-md border border-primary/40 bg-primary/15 p-3 text-sm text-primary">Not linked. {refused}</p>}
         {candidates.length === 0 ? <p className="text-sm text-muted-foreground">No saved plan is waiting to be linked to this position.</p>
           : !declined && <>
             <p className="text-sm text-foreground">{several ? `${candidates.length} of your saved plans match this fill. Which one was it?` : "Was this your plan?"}</p>
@@ -87,7 +87,7 @@ export default function PlanLinkConfirm({ tradeId }: { tradeId: string }) {
               <PlanText plan={plan} />
               <button type="button" onClick={() => link(plan)} disabled={working !== null}
                 aria-label={several ? `Link ${plan.setup} captured ${captureTime(plan.received_at)}` : "Link"}
-                className={`${big} bg-primary text-primary-foreground disabled:opacity-60`}>{working === plan.capture_id ? "Linking…" : "Link"}</button>
+                className={`${big} disabled:opacity-60 ${several ? "border hover:bg-muted" : "bg-primary text-primary-foreground"}`}>{working === plan.capture_id ? "Linking…" : "Link"}</button>
             </li>)}</ul>
             <button type="button" onClick={() => setDeclined(true)} className={`${quiet} w-full`}>{several ? "None of these" : "Not this plan"}</button>
           </>}

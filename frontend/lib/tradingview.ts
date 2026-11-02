@@ -11,34 +11,11 @@ export function verdictLabel(verdict: TradingViewVerdict | null): string {
 }
 
 export function verdictClasses(verdict: TradingViewVerdict | null): string {
-  switch (verdict) {
-    case "long_scalp":
-      return "bg-emerald-500/15 text-emerald-400";
-    case "short_scalp":
-      return "bg-sky-500/15 text-sky-400";
-    case "wait":
-      return "bg-amber-500/15 text-amber-400";
-    case "no_trade":
-      return "bg-red-500/15 text-red-400";
-    default:
-      return "bg-secondary text-muted-foreground";
-  }
+  return verdict === "long_scalp" || verdict === "short_scalp" ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground";
 }
 
 export function statusClasses(status: string): string {
-  switch (status) {
-    case "done":
-      return "bg-emerald-500/15 text-emerald-400";
-    case "pending":
-    case "running":
-      return "bg-sky-500/15 text-sky-400";
-    case "skipped":
-      return "bg-amber-500/15 text-amber-400";
-    case "error":
-      return "bg-red-500/15 text-red-400";
-    default:
-      return "bg-secondary text-muted-foreground";
-  }
+  return status === "error" ? "bg-red-500/15 text-red-400" : "bg-secondary text-muted-foreground";
 }
 
 /** Snapshot scalars keep their exact source text; render it without coercing. */

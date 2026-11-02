@@ -5,6 +5,7 @@ import { api, Fill, FillMarketContext, Trade, TradePathMetrics } from "@/lib/api
 import AlpacaContextSection from "@/components/AlpacaContextSection";
 import TradePathSection from "@/components/TradePathSection";
 import AuditPanel from "@/components/AuditPanel";
+import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import Link from "next/link";
 import { ChartCandlestick } from "lucide-react";
 import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
@@ -33,11 +34,11 @@ function fmtPct(val: number | null | undefined) {
   return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
 }
 
-function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+function Row({ label, value, valueClass, words }: { label: string; value: string; valueClass?: string; words?: boolean }) {
   return (
-    <div className="flex justify-between border-b border-border py-2 text-sm last:border-0">
+    <div className="flex justify-between gap-3 border-b border-border py-2 text-sm last:border-0">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium ${valueClass ?? "text-foreground"}`}>{value}</span>
+      <span className={`text-right font-medium ${words ? "" : "tabular-nums"} ${valueClass ?? "text-foreground"}`}>{value}</span>
     </div>
   );
 }
@@ -120,19 +121,11 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
     }
   };
 
-  const statusColor =
-    trade.status === "open"
-      ? "bg-blue-900/40 text-blue-300"
-      : trade.status === "expired"
-        ? "bg-muted text-muted-foreground"
-        : "bg-muted text-foreground/70";
-
   const sizeLabel = trade.instrument_type === "stock" ? "Shares" : "Contracts";
   const returnTo = `/trades?ticker=${encodeURIComponent(trade.ticker)}`;
-  const planSection = plans && plans.length > 0 && <section aria-label="Pre-trade plan" className="rounded-lg border bg-card p-5">
-    <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
+  const planSection = plans && plans.length > 0 && <DashboardCard title="Pre-trade plan">
     <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
-  </section>;
+  </DashboardCard>;
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -143,7 +136,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           {back.label}
         </a>
         <h1 className="text-xl font-semibold text-foreground">{tradeTitle(trade)}</h1>
-        <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor}`}>
+        <span className={`inline-flex h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] font-medium ${trade.status === "open" ? "text-foreground" : "text-muted-foreground"}`}>
           {trade.status}
         </span>
         {newYorkSeconds(trade.opened_at) !== null && <Link href={chartLink({ symbol: trade.ticker, from: newYorkSeconds(trade.opened_at)!, to: newYorkSeconds(trade.closed_at) ?? newYorkSeconds(trade.opened_at), trade: trade.id })}
@@ -162,10 +155,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
       {/* An alert asks you to review your exit plan, so the plan follows it rather than the summary. */}
       {alert && planSection}
 
-      <div className="rounded-lg border bg-card p-5">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Trade Summary
-        </h2>
+      <DashboardCard title="Trade Summary">
         <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">
           <div>
             <Row label={sizeLabel} value={String(trade.contracts)} />
@@ -180,13 +170,13 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
               label="Hold Duration"
               value={trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}
             />
-            <Row label="Entry Bucket" value={trade.entry_time_bucket ?? "-"} />
+            <Row label="Entry Bucket" value={trade.entry_time_bucket ?? "-"} words />
             <Row label="Opened" value={etTime(trade.opened_at)} />
             <Row label="Closed" value={trade.closed_at ? etTime(trade.closed_at) : "-"} />
-            <Row label="Expired Worthless" value={trade.expired_worthless ? "Yes" : "No"} />
+            <Row label="Expired Worthless" value={trade.expired_worthless ? "Yes" : "No"} words />
           </div>
         </div>
-      </div>
+      </DashboardCard>
 
       {!alert && planSection}
 
@@ -194,15 +184,9 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
 
       <TradeAdvice tradeId={id} />
 
-      <div className="rounded-lg border bg-card p-5">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Fill Timeline
-          </h2>
-          <p className="text-xs text-muted-foreground">
+      <DashboardCard title="Fill Timeline" action={<p className="text-xs text-muted-foreground">
             Edit a fill to correct the position history. Saving rebuilds trades and returns you to the ticker view.
-          </p>
-        </div>
+          </p>}>
         <div className="space-y-2">
           {fills.map((fill) => {
             const chips: { label: string; value: string }[] = [];
@@ -225,27 +209,27 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
               <a
                 key={fill.id}
                 href={`/fills/${fill.id}?returnTo=${encodeURIComponent(returnTo)}`}
-                className="block rounded-md bg-muted px-4 py-3 text-sm transition-colors hover:bg-muted/80"
+                className="block rounded-md bg-secondary px-4 py-3 text-sm transition-colors hover:bg-secondary/70"
               >
                 {/* Wraps on a phone: five fixed cells clipped the Edit fill link. */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span
-                    className={`w-20 shrink-0 rounded px-2 py-0.5 text-center text-xs font-semibold ${
-                      isEntryFill(fill) ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"
+                    className={`inline-flex h-[22px] w-16 shrink-0 items-center justify-center rounded-md bg-background px-2 text-[11.5px] font-medium ${
+                      isEntryFill(fill) ? "text-foreground" : "text-muted-foreground"
                     }`}
                   >
                     {isEntryFill(fill) ? "ENTRY" : "EXIT"}
                   </span>
-                  <span className="text-xs text-muted-foreground">{etTime(fill.executed_at)}</span>
-                  <span className="font-medium">{fill.contracts}x @ ${fill.price}</span>
-                  <span className="text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{etTime(fill.executed_at)}</span>
+                  <span className="font-medium tabular-nums">{fill.contracts}x @ ${fill.price}</span>
+                  <span className="tabular-nums text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
                   <span className="text-xs font-medium text-foreground/80 sm:ml-auto">Edit fill</span>
                 </div>
                 {chips.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {chips.map(({ label, value }) => (
-                      <span key={label} className="rounded bg-background/60 px-1.5 py-0.5 text-xs text-muted-foreground">
-                        <span className="text-foreground/50">{label}</span> {value}
+                      <span key={label} className="rounded bg-background px-1.5 py-0.5 text-xs">
+                        <span className="text-muted-foreground">{label}</span> <span className="tabular-nums text-foreground">{value}</span>
                       </span>
                     ))}
                   </div>
@@ -254,7 +238,7 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
             );
           })}
         </div>
-      </div>
+      </DashboardCard>
 
       {fills && Object.keys(alpacaContexts).length > 0 && (
         <AlpacaContextSection fills={fills} contexts={alpacaContexts} />
@@ -262,19 +246,15 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
 
       {pathMetrics && <TradePathSection metrics={pathMetrics} />}
 
-      <div className="rounded-lg border bg-card p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI Review</h2>
-          {(trade.ai_review || reviewLoading) && (
+      <DashboardCard title="AI Review" action={(trade.ai_review || reviewLoading) && (
             <button
               onClick={handleReviewClick}
               disabled={reviewLoading}
-              className="text-xs font-medium text-blue-400 hover:text-blue-300 disabled:text-muted-foreground"
+              className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-70"
             >
               {reviewLoading ? "Generating..." : "Regenerate"}
             </button>
-          )}
-        </div>
+          )}>
         {reviewError && <p className="mb-2 text-sm text-red-400">{reviewError}</p>}
         {trade.ai_review ? (
           <AiReview raw={trade.ai_review} />
@@ -284,12 +264,12 @@ export default function TradeDetailPage({ params, searchParams }: { params: Prom
           <button
             onClick={handleReviewClick}
             disabled={reviewLoading}
-            className="rounded bg-blue-900/40 px-3 py-2 text-sm font-medium text-blue-300 hover:bg-blue-900/60 disabled:bg-muted disabled:text-muted-foreground"
+            className="rounded-md border px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary disabled:text-muted-foreground"
           >
             Generate Review
           </button>
         )}
-      </div>
+      </DashboardCard>
     </div>
 
     {/* Right column — sticky audit panel (below the trade on small screens) */}
@@ -311,14 +291,12 @@ function AiReview({ raw }: { raw: string }) {
           </p>
         )}
         {review.strategy && (
-          <div className="rounded bg-blue-900/30 px-3 py-2">
-            <span className="text-xs font-medium text-blue-300">{review.strategy}</span>
-          </div>
+          <div><span className="inline-flex min-h-[22px] items-center rounded-md bg-secondary px-2 text-[11.5px] font-medium text-foreground">{review.strategy}</span></div>
         )}
         {review.flags?.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {review.flags.map((flag: string) => (
-              <span key={flag} className="rounded bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-300">
+              <span key={flag} className="inline-flex min-h-[22px] items-center rounded-md bg-primary/15 px-2 text-[11.5px] font-medium text-primary">
                 {flag}
               </span>
             ))}

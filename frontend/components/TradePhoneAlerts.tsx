@@ -97,8 +97,8 @@ export default function TradePhoneAlerts({ tradeId, alertId, answer, symbol, sta
         : a.mark != null ? <>at {money(a.gain)} ({pct(a.gain_pct)}) with {a.contracts} open</> : <>no live quote, {a.contracts} open</>}
     </div>
   </li>)}</ul>;
-  return <section aria-label="Phone alerts" data-testid="trade-phone-alerts" className={`rounded-lg border bg-card p-5 text-sm ${alertId ? "border-primary/60" : ""}`}>
-    <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{alertId ? "Position alert" : "Phone alerts"}</h2>
+  return <section aria-label="Phone alerts" data-testid="trade-phone-alerts" className={`rounded-lg border bg-card p-4 text-sm ${alertId ? "border-primary/60" : ""}`}>
+    <h2 className="mb-2 text-[13.5px] font-semibold tracking-tight">{alertId ? "Position alert" : "Phone alerts"}</h2>
     {alertId && !body && <p role="status">{failed ? "This alert could not be loaded. Reload the page to try again." : "Loading the selected alert…"}</p>}
     {alertId && body && !selected && <p role="status">This alert is unavailable for this position. It may have been removed or the link may be incorrect.</p>}
     {alertId && (failed || (body && !selected)) && askHref && status === "open" && <Link href={askHref}

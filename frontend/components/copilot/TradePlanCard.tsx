@@ -70,7 +70,7 @@ function FromDrawing({ name, drawn, value }: { name: string; drawn: number | nul
   // Only the invalidation was drawn: the trigger is the copilot's.
   if (drawn === null) return <span className="block text-xs text-muted-foreground">Drafted by the copilot</span>;
   const same = Math.abs(Number(value) - drawn) < 0.005;
-  return <span aria-label={`${name} from your drawing`} className={cn("block text-xs", same ? "text-sky-300" : "text-amber-300")}>
+  return <span aria-label={`${name} from your drawing`} className={cn("block text-xs", same ? "text-foreground" : "text-amber-300")}>
     {same ? "From your drawing" : `Changed from your drawing: ${drawn.toFixed(2)}`}</span>;
 }
 
@@ -298,7 +298,7 @@ export default function TradePlanCard({ plan, investigationId, alertsSupported, 
 
   const locked = started;
   return (
-    <section aria-label="Proposed trade plan" className="mt-2 space-y-2 rounded border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
+    <section aria-label="Proposed trade plan" className="mt-2 space-y-2 rounded border border-primary/30 bg-primary/5 p-3 text-sm">
       <p className="font-medium text-foreground">
         Proposed trade plan · {plan.symbol} · {SIDE_LABEL[side]}{contract ? ` · ${contract}` : ""}
       </p>

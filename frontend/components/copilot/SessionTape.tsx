@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 60_000;
 // Amber is kept for what still needs you (a time stop ahead); what already happened stays quiet.
-const DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-emerald-400", ping: "bg-muted-foreground", radar: "bg-sky-400", decision: "bg-foreground" };
+const DOT: Record<DeskSessionEvent["kind"], string> = { fill: "bg-emerald-400", ping: "bg-muted-foreground", radar: "bg-foreground/60", decision: "bg-foreground" };
 const KIND: Record<DeskSessionEvent["kind"], [string, string]> = {
   fill: ["fill", "fills"], ping: ["ping", "pings"], radar: ["Radar event", "Radar events"], decision: ["decision", "decisions"],
 };

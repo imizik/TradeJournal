@@ -231,7 +231,7 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
     if (canSave) void submit();
   };
   const sideButton = (value: CaptureSide) => <button key={value} type="button" aria-pressed={side === value} onClick={() => { setSide(value); setError(""); }}
-    className={`rounded-md border px-2.5 text-xs ${narrow ? "min-h-11" : "min-h-8"} ${side === value ? "border-sky-400 bg-sky-400/15 text-sky-100" : "border-slate-700 text-slate-300 hover:bg-slate-800"}`}>{SIDE_LABEL[value]}</button>;
+    className={`rounded-md border px-2.5 text-xs ${narrow ? "min-h-11" : "min-h-8"} ${side === value ? "border-primary bg-primary/15 text-primary" : "border-border text-foreground/80 hover:bg-secondary"}`}>{SIDE_LABEL[value]}</button>;
   const accountLabel = accounts.find((row) => row.id === account)?.label;
   // What has been chosen and typed so far, for the copilot to argue with before the entry (cut to the link's limit).
   const optionSide = !!side && OPTION_SIDES.has(side);
@@ -240,15 +240,15 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
   const transcriber = setup?.transcriber;
 
   const panel = <div ref={dialog} role="dialog" aria-modal="true" aria-label="Plan trade" tabIndex={-1} onKeyDown={onKey}
-    className={`${narrow ? "max-h-[88vh] w-full rounded-t-xl border-t pb-[max(0.75rem,env(safe-area-inset-bottom))]" : "max-h-[calc(100vh-6rem)] w-[380px] rounded-xl border"} overflow-y-auto overscroll-contain border-slate-600 bg-[#121924] text-slate-300 shadow-2xl outline-none`}>
-    {narrow && <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-600" aria-hidden />}
-    <div className="flex items-center gap-2 border-b border-slate-700/60 px-3 py-2">
-      <h2 className="text-xs font-medium text-slate-200">Plan trade</h2>
-      <span className="text-[10px] text-slate-500">Main chart</span>
+    className={`${narrow ? "max-h-[88vh] w-full rounded-t-xl border-t pb-[max(0.75rem,env(safe-area-inset-bottom))]" : "max-h-[calc(100vh-6rem)] w-[380px] rounded-xl border"} overflow-y-auto overscroll-contain border-border bg-card text-foreground/80 shadow-2xl outline-none`}>
+    {narrow && <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-muted-foreground/50" aria-hidden />}
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <h2 className="text-xs font-medium text-foreground">Plan trade</h2>
+      <span className="text-[10px] text-muted-foreground">Main chart</span>
       <div className="ml-auto flex items-center gap-1">
         <button type="button" aria-label="Capture setup" aria-pressed={editing} title="Default account and favorite templates" onClick={() => setEditing((v) => !v)}
-          className={`inline-flex items-center justify-center rounded-md ${narrow ? "h-11 w-11" : "h-7 w-7"} ${editing ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800"}`}><Settings2 size={14} /></button>
-        <button type="button" aria-label="Close plan" disabled={busy} onClick={onClose} className={`inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 disabled:opacity-40 ${narrow ? "h-11 w-11" : "h-7 w-7"}`}><X size={14} /></button>
+          className={`inline-flex items-center justify-center rounded-md ${narrow ? "h-11 w-11" : "h-7 w-7"} ${editing ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary"}`}><Settings2 size={14} /></button>
+        <button type="button" aria-label="Close plan" disabled={busy} onClick={onClose} className={`inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-secondary disabled:opacity-40 ${narrow ? "h-11 w-11" : "h-7 w-7"}`}><X size={14} /></button>
       </div>
     </div>
 
@@ -258,11 +258,11 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
         {editingSymbol ? <input aria-label="Plan symbol" autoFocus value={symbol} maxLength={15} disabled={!!stuck}
           onChange={(event) => setSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9./-]/g, ""))} onBlur={() => { if (!symbol) setSymbol(opened); setEditingSymbol(false); }}
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setEditingSymbol(false); } }}
-          className="h-8 w-24 rounded border border-slate-600 bg-[#10151e] px-2 text-base font-semibold uppercase text-white outline-none focus:border-sky-500" />
-          : <span data-testid="plan-symbol" className="text-lg font-semibold tracking-tight text-white">{symbol}</span>}
-        {!editingSymbol && !stuck && <button type="button" onClick={() => setEditingSymbol(true)} className="text-[10px] text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline">Change</button>}
+          className="h-8 w-24 rounded border border-border bg-background px-2 text-base font-semibold uppercase text-foreground outline-none focus:border-ring" />
+          : <span data-testid="plan-symbol" className="text-lg font-semibold tracking-tight text-foreground">{symbol}</span>}
+        {!editingSymbol && !stuck && <button type="button" onClick={() => setEditingSymbol(true)} className="text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Change</button>}
         <select aria-label="Plan account" value={account} disabled={!!stuck} onChange={(event) => setAccount(event.target.value)}
-          className={`ml-auto max-w-[60%] rounded border bg-[#10151e] px-1.5 text-[11px] outline-none ${narrow ? "h-11" : "h-7"} ${account ? "border-slate-700 text-slate-200" : "border-amber-400/60 text-amber-200"}`}>
+          className={`ml-auto max-w-[60%] rounded border bg-background px-1.5 text-[11px] outline-none ${narrow ? "h-11" : "h-7"} ${account ? "border-border text-foreground" : "border-amber-400/60 text-amber-200"}`}>
           {!account && <option value="">Choose account…</option>}
           {accounts.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
         </select>
@@ -275,40 +275,40 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
 
     <fieldset disabled={!!stuck} className="space-y-3 px-3 py-2.5">
       <div role="group" aria-label="What you are taking">
-        <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Taking</p>
+        <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Taking</p>
         <div className="flex flex-wrap gap-1.5">
           {FAVORITE_SIDES.map(sideButton)}
           {(more || (side && MORE_SIDES.includes(side))) ? MORE_SIDES.map(sideButton)
-            : <button type="button" aria-expanded={false} onClick={() => setMore(true)} className={`inline-flex items-center gap-1 rounded-md px-2 text-xs text-slate-500 hover:text-slate-300 ${narrow ? "min-h-11" : "min-h-8"}`}>More<ChevronDown size={12} /></button>}
+            : <button type="button" aria-expanded={false} onClick={() => setMore(true)} className={`inline-flex items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground ${narrow ? "min-h-11" : "min-h-8"}`}>More<ChevronDown size={12} /></button>}
         </div>
       </div>
 
       <div role="group" aria-label="Plan template">
-        <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Plan</p>
+        <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Plan</p>
         <div className="space-y-1.5">
           {templates.map((row) => <button key={row.id} type="button" aria-pressed={template === row.id} onClick={() => { setTemplate(row.id); setDiscretionary(false); setError(""); }}
-            className={`block w-full rounded-md border px-2.5 py-1.5 text-left ${template === row.id ? "border-sky-400 bg-sky-400/10" : "border-slate-700 hover:bg-slate-800"}`}>
-            <span className="block text-xs font-medium text-slate-100">{row.setup_label}</span>
+            className={`block w-full rounded-md border px-2.5 py-1.5 text-left ${template === row.id ? "border-primary bg-primary/10" : "border-border hover:bg-secondary"}`}>
+            <span className="block text-xs font-medium text-foreground">{row.setup_label}</span>
             {/* The whole saved wording, visible before saving. */}
-            <span className="mt-0.5 block whitespace-pre-wrap text-[11px] leading-4 text-slate-400">{row.wording}</span>
+            <span className="mt-0.5 block whitespace-pre-wrap text-[11px] leading-4 text-muted-foreground">{row.wording}</span>
           </button>)}
           <button type="button" aria-pressed={discretionary} onClick={() => { setDiscretionary(true); setTemplate(null); setError(""); }}
-            className={`block w-full rounded-md border px-2.5 py-1.5 text-left ${discretionary ? "border-sky-400 bg-sky-400/10" : "border-slate-700 hover:bg-slate-800"}`}>
-            <span className="block text-xs font-medium text-slate-100">Discretionary / no explicit plan</span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">Saved as intent with the plan unspecified.</span>
+            className={`block w-full rounded-md border px-2.5 py-1.5 text-left ${discretionary ? "border-primary bg-primary/10" : "border-border hover:bg-secondary"}`}>
+            <span className="block text-xs font-medium text-foreground">Discretionary / no explicit plan</span>
+            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">Saved as intent with the plan unspecified.</span>
           </button>
-          {!templates.length && <p className="text-[10px] leading-4 text-slate-500">No favorite templates yet. Add up to three with <Settings2 size={10} className="inline" aria-label="Capture setup" />; until then, use Discretionary or a voice note.</p>}
+          {!templates.length && <p className="text-[10px] leading-4 text-muted-foreground">No favorite templates yet. Add up to three with <Settings2 size={10} className="inline" aria-label="Capture setup" />; until then, use Discretionary or a voice note.</p>}
         </div>
       </div>
 
       <input aria-label="Plan note" placeholder="Short note (optional)" value={note} maxLength={500} onChange={(event) => setNote(event.target.value)}
-        className={`w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} />
+        className={`w-full rounded border border-border bg-background px-2 text-xs outline-none focus:border-ring ${narrow ? "h-11" : "h-8"}`} />
       <div>
-        <button type="button" aria-expanded={details} onClick={() => setDetails((v) => !v)} className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300">Contract and size (optional)<ChevronDown size={11} className={details ? "rotate-180" : ""} /></button>
+        <button type="button" aria-expanded={details} onClick={() => setDetails((v) => !v)} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground">Contract and size (optional)<ChevronDown size={11} className={details ? "rotate-180" : ""} /></button>
         {details && <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-          <input aria-label="Plan strike" type="number" step="any" min="0" placeholder="Strike" disabled={!side || !OPTION_SIDES.has(side)} value={strike} onChange={(event) => setStrike(event.target.value)} className="h-8 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none disabled:opacity-40" />
-          <input aria-label="Plan expiration" type="date" disabled={!side || !OPTION_SIDES.has(side)} value={expiration} onChange={(event) => setExpiration(event.target.value)} className="h-8 rounded border border-slate-700 bg-[#10151e] px-1 text-[11px] outline-none disabled:opacity-40" />
-          <input aria-label="Plan quantity" type="number" step="any" min="0" placeholder="Qty" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="h-8 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none" />
+          <input aria-label="Plan strike" type="number" step="any" min="0" placeholder="Strike" disabled={!side || !OPTION_SIDES.has(side)} value={strike} onChange={(event) => setStrike(event.target.value)} className="h-8 rounded border border-border bg-background px-2 font-mono text-xs outline-none disabled:opacity-40" />
+          <input aria-label="Plan expiration" type="date" disabled={!side || !OPTION_SIDES.has(side)} value={expiration} onChange={(event) => setExpiration(event.target.value)} className="h-8 rounded border border-border bg-background px-1 text-[11px] outline-none disabled:opacity-40" />
+          <input aria-label="Plan quantity" type="number" step="any" min="0" placeholder="Qty" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="h-8 rounded border border-border bg-background px-2 font-mono text-xs outline-none" />
         </div>}
       </div>
     </fieldset>
@@ -317,16 +317,16 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
       onNeedChoice={() => setError(!account ? "Choose the journal account first." : "Choose what you are taking first.")}
       onSave={() => recorder.recording && void submit(recorder.recording)} transcriber={transcriber} />
 
-    <div className="sticky bottom-0 space-y-1.5 border-t border-slate-700/60 bg-[#121924] px-3 py-2">
+    <div className="sticky bottom-0 space-y-1.5 border-t border-border bg-card px-3 py-2">
       {error && <p role="alert" className="text-[11px] leading-4 text-amber-300">{error}</p>}
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">{accountLabel ? `${symbol} · ${accountLabel}` : `${symbol} · no account chosen`}</span>
+        <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{accountLabel ? `${symbol} · ${accountLabel}` : `${symbol} · no account chosen`}</span>
         {/* Enter on the link follows it rather than saving the plan. */}
         <span data-own-enter className="contents"><PlanATrade symbol={symbol} origin="chart" line={`pressure-test my plan before I enter. ${typed}`} title="Open the copilot with this plan to argue with it before you enter. Nothing is sent until you press Send."
-          className={`inline-flex shrink-0 items-center rounded-md border border-sky-500/60 px-3 text-xs font-medium text-sky-200 hover:bg-sky-500/15 ${narrow ? "h-11" : "h-8"}`}>Pressure-test with copilot</PlanATrade></span>
+          className={`inline-flex shrink-0 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary ${narrow ? "h-11" : "h-8"}`}>Pressure-test with copilot</PlanATrade></span>
         {stuck ? <button type="button" data-own-enter onClick={() => void deliver(stuck)} disabled={saving} className={`inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-3 text-xs font-medium text-amber-100 hover:bg-amber-500/30 ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}Retry</button>
           : <button type="button" data-own-enter onClick={() => void submit()} disabled={!canSave} title={canSave ? "Save plan (Enter)" : "Choose what you are taking and a plan"}
-            className={`inline-flex items-center gap-1.5 rounded-md bg-sky-500 px-3 text-xs font-medium text-white hover:bg-sky-400 disabled:bg-slate-700 disabled:text-slate-400 ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}{saving ? "Saving…" : "Save plan"}</button>}
+            className={`inline-flex items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:bg-secondary disabled:text-muted-foreground ${narrow ? "h-11" : "h-8"}`}>{saving && <Loader2 size={12} className="animate-spin" />}{saving ? "Saving…" : "Save plan"}</button>}
       </div>
     </div>
   </div>;
@@ -344,7 +344,7 @@ function VoiceControls({ recorder, narrow, disabled, ready, onNeedChoice, onSave
   const { phase, mode, elapsed, recording, reason } = recorder;
   const live = phase === "recording" || phase === "asking";
   const begin = (how: "hold" | "tap") => { if (!ready) { onNeedChoice(); return; } void recorder.start(how); };
-  return <section aria-label="Voice plan" className="space-y-1.5 border-t border-slate-700/60 px-3 py-2.5">
+  return <section aria-label="Voice plan" className="space-y-1.5 border-t border-border px-3 py-2.5">
     <div className="flex items-center gap-2">
       {phase !== "review" && (live && mode === "tap"
         ? <button type="button" data-own-enter onClick={() => recorder.stop(true)} disabled={phase === "asking"}
@@ -356,22 +356,22 @@ function VoiceControls({ recorder, narrow, disabled, ready, onNeedChoice, onSave
           onPointerCancel={() => recorder.interrupt("Recording stopped when the press was interrupted. Save what was recorded, or discard it.")}
           onClick={(event) => { if (event.detail === 0) begin("tap"); }}
           onContextMenu={(event) => event.preventDefault()}
-          className={`inline-flex touch-none select-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${narrow ? "h-11" : "h-9"} ${live ? "border-rose-400 bg-rose-500/20 text-rose-100" : "border-slate-600 text-slate-200 hover:bg-slate-800"} disabled:opacity-40`}>
+          className={`inline-flex touch-none select-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${narrow ? "h-11" : "h-9"} ${live ? "border-rose-400 bg-rose-500/20 text-rose-100" : "border-border text-foreground hover:bg-secondary"} disabled:opacity-40`}>
           <Mic size={13} className={phase === "recording" ? "animate-pulse text-rose-300" : ""} />{phase === "asking" ? "Allow the microphone…" : live ? "Release to save" : "Hold to record"}</button>)}
       {phase === "recording" && <span role="timer" aria-label="Recording time" className="font-mono text-xs text-rose-200">{secs(elapsed)} / 0:30</span>}
-      {live && <button type="button" data-own-enter onClick={recorder.discard} className="ml-auto text-[11px] text-slate-400 hover:text-slate-200">Discard</button>}
-      {!live && phase !== "review" && <span className="text-[10px] leading-4 text-slate-500">or tap it, then Stop &amp; save. Up to 30 seconds.</span>}
+      {live && <button type="button" data-own-enter onClick={recorder.discard} className="ml-auto text-[11px] text-muted-foreground hover:text-foreground">Discard</button>}
+      {!live && phase !== "review" && <span className="text-[10px] leading-4 text-muted-foreground">or tap it, then Stop &amp; save. Up to 30 seconds.</span>}
     </div>
     {phase === "review" && recording && <div className="space-y-1.5">
       <audio controls src={recording.url} className="h-8 w-full" aria-label="Recorded clip" />
       <div className="flex items-center gap-2">
-        <button type="button" data-own-enter disabled={disabled} onClick={onSave} className={`inline-flex items-center gap-1.5 rounded-md bg-sky-500 px-3 text-xs font-medium text-white hover:bg-sky-400 disabled:opacity-40 ${narrow ? "h-11" : "h-8"}`}>Save recording</button>
-        <button type="button" data-own-enter disabled={disabled} onClick={recorder.discard} className={`inline-flex items-center gap-1 rounded-md px-2 text-xs text-slate-400 hover:text-slate-200 ${narrow ? "h-11" : "h-8"}`}><Trash2 size={12} />Discard</button>
-        <span className="ml-auto font-mono text-[10px] text-slate-500">{secs(recording.ms)}</span>
+        <button type="button" data-own-enter disabled={disabled} onClick={onSave} className={`inline-flex items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40 ${narrow ? "h-11" : "h-8"}`}>Save recording</button>
+        <button type="button" data-own-enter disabled={disabled} onClick={recorder.discard} className={`inline-flex items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground ${narrow ? "h-11" : "h-8"}`}><Trash2 size={12} />Discard</button>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground">{secs(recording.ms)}</span>
       </div>
     </div>}
     {reason && <p role="status" className="text-[11px] leading-4 text-amber-300">{reason}</p>}
-    <p className="text-[10px] leading-4 text-slate-500">What am I taking, why here, and what would change my mind? Saving also requests a transcript. {transcriber?.note}</p>
+    <p className="text-[10px] leading-4 text-muted-foreground">What am I taking, why here, and what would change my mind? Saving also requests a transcript. {transcriber?.note}</p>
   </section>;
 }
 
@@ -380,30 +380,30 @@ function SetupEditor({ setup, narrow, onSetup }: { setup: CaptureSetup; narrow: 
   const [draft, setDraft] = useState<{ id: string | null; setup_label: string; wording: string } | null>(null);
   const [problem, setProblem] = useState("");
   const run = (work: Promise<CaptureSetup>, after?: () => void) => work.then((next) => { onSetup(next); setProblem(""); after?.(); }).catch((error: Error) => setProblem(error.message));
-  const field = `w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600 ${narrow ? "min-h-11" : "min-h-8"}`;
-  return <section aria-label="Capture setup" className="space-y-2 border-b border-slate-700/60 bg-[#0f141c] px-3 py-2.5">
-    <label className="flex items-center gap-2 text-[11px] text-slate-400">Default account
+  const field = `w-full rounded border border-border bg-background px-2 text-xs outline-none focus:border-ring ${narrow ? "min-h-11" : "min-h-8"}`;
+  return <section aria-label="Capture setup" className="space-y-2 border-b border-border bg-background px-3 py-2.5">
+    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">Default account
       <select aria-label="Default account" value={setup.default_account_id ?? ""} onChange={(event) => run(saveDefaultAccount(event.target.value || null))}
-        className={`ml-auto rounded border border-slate-700 bg-[#10151e] px-1.5 text-[11px] text-slate-200 ${narrow ? "h-11" : "h-7"}`}>
+        className={`ml-auto rounded border border-border bg-background px-1.5 text-[11px] text-foreground ${narrow ? "h-11" : "h-7"}`}>
         <option value="">None (choose each time)</option>
         {setup.accounts.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
       </select>
     </label>
-    <p className="text-[10px] uppercase tracking-wider text-slate-500">Favorite templates ({setup.templates.length}/{setup.max_templates})</p>
+    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Favorite templates ({setup.templates.length}/{setup.max_templates})</p>
     {setup.templates.map((row) => <div key={row.id} className="flex items-start gap-1.5 text-[11px]">
-      <div className="min-w-0 flex-1"><span className="font-medium text-slate-200">{row.setup_label}</span> <span className="text-[10px] text-slate-600">rev {row.revision}</span><p className="whitespace-pre-wrap text-slate-400">{row.wording}</p></div>
-      <button type="button" aria-label={`Edit ${row.setup_label}`} onClick={() => setDraft({ id: row.id, setup_label: row.setup_label, wording: row.wording })} className="p-1 text-slate-500 hover:text-slate-200"><Pencil size={12} /></button>
-      <button type="button" aria-label={`Remove ${row.setup_label}`} onClick={() => run(removeTemplate(row.id))} className="p-1 text-slate-500 hover:text-rose-300"><Trash2 size={12} /></button>
+      <div className="min-w-0 flex-1"><span className="font-medium text-foreground">{row.setup_label}</span> <span className="text-[10px] text-muted-foreground">rev {row.revision}</span><p className="whitespace-pre-wrap text-muted-foreground">{row.wording}</p></div>
+      <button type="button" aria-label={`Edit ${row.setup_label}`} onClick={() => setDraft({ id: row.id, setup_label: row.setup_label, wording: row.wording })} className="p-1 text-muted-foreground hover:text-foreground"><Pencil size={12} /></button>
+      <button type="button" aria-label={`Remove ${row.setup_label}`} onClick={() => run(removeTemplate(row.id))} className="p-1 text-muted-foreground hover:text-rose-300"><Trash2 size={12} /></button>
     </div>)}
     {draft ? <form className="space-y-1.5" onSubmit={(event) => { event.preventDefault(); run(draft.id ? editTemplate(draft.id, draft.setup_label, draft.wording) : addTemplate(draft.setup_label, draft.wording), () => setDraft(null)); }}>
       <input aria-label="Template name" autoFocus placeholder="Setup name, e.g. Reclaim" maxLength={40} value={draft.setup_label} onChange={(event) => setDraft({ ...draft, setup_label: event.target.value })} className={field} />
       <textarea aria-label="Template wording" placeholder="Your own invalidation or exit plan, e.g. Out on a 5m close back below the level." maxLength={400} rows={2} value={draft.wording}
         onChange={(event) => setDraft({ ...draft, wording: event.target.value })} className={`${field} py-1.5`} />
-      <div className="flex gap-2"><button type="submit" className="h-8 rounded-md bg-slate-700 px-3 text-xs text-slate-100 hover:bg-slate-600">{draft.id ? "Save template" : "Add template"}</button>
-        <button type="button" onClick={() => setDraft(null)} className="h-8 px-2 text-xs text-slate-400">Cancel</button></div>
-      {draft.id && <p className="text-[10px] text-slate-500">Plans already saved keep the wording they were saved with.</p>}
+      <div className="flex gap-2"><button type="submit" className="h-8 rounded-md bg-secondary px-3 text-xs text-foreground hover:bg-border">{draft.id ? "Save template" : "Add template"}</button>
+        <button type="button" onClick={() => setDraft(null)} className="h-8 px-2 text-xs text-muted-foreground">Cancel</button></div>
+      {draft.id && <p className="text-[10px] text-muted-foreground">Plans already saved keep the wording they were saved with.</p>}
     </form> : setup.templates.length < setup.max_templates && <button type="button" onClick={() => setDraft({ id: null, setup_label: "", wording: "" })}
-      className="inline-flex items-center gap-1 text-[11px] text-sky-300 hover:text-sky-200"><Plus size={12} />Add template</button>}
+      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"><Plus size={12} />Add template</button>}
     {problem && <p role="alert" className="text-[11px] text-amber-300">{problem}</p>}
   </section>;
 }

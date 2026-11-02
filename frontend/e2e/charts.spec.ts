@@ -4328,11 +4328,12 @@ test("on the charts page the journal navigation is a rail that expands and is re
   const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
   expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
   await page.screenshot({ path: test.info().outputPath("navigation-rail-desktop.png") });
-  // Every page is still a named link, the current one marked, with sync status and the Sync drawer reachable.
-  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research Studio", "AI Buildout"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  // The three primary pages are named links, the current one marked, with sync status and the Sync drawer reachable.
+  for (const name of ["Today", "Dashboard", "Charts"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(rail.getByRole("link", { name: "Trades", exact: true })).toHaveCount(0);
   await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
-  for (const name of ["Dashboard", "Charts", "Research Studio", "AI Buildout"]) {
+  for (const name of ["Today", "Charts", "Dashboard"]) {
     await rail.getByRole("link", { name, exact: true }).hover();
     await expect(page.getByRole("tooltip")).toHaveText(name);
     expect((await page.getByRole("tooltip").boundingBox())!.x).toBeGreaterThan(48);
@@ -4345,8 +4346,8 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(page.getByRole("tooltip")).toHaveText("Charts");
   await page.mouse.move(300, 100);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
-  await rail.getByRole("link", { name: "Research Studio", exact: true }).focus();
-  await expect(page.getByRole("tooltip")).toHaveText("Research Studio");
+  await rail.getByRole("button", { name: "More", exact: true }).focus();
+  await expect(page.getByRole("tooltip")).toHaveText("More");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   const narrow = (await drawn(page, "main").boundingBox())!.width;
@@ -4360,8 +4361,13 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(rail).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
-  // Other pages keep the full sidebar.
-  await rail.getByRole("link", { name: "Fills", exact: true }).click();
+  // More opens the menu with everything else; other pages keep the full sidebar.
+  await rail.getByRole("button", { name: "More", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "Menu" });
+  await drawer.getByRole("button", { name: "Journal", exact: true }).click();
+  await drawer.getByRole("button", { name: "Research", exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath("navigation-rail-more.png") });
+  await drawer.getByRole("link", { name: "Fills", exact: true }).click();
   await expect(page).toHaveURL(/\/fills$/);
   await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeVisible();
@@ -5262,7 +5268,7 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   });
   expect(overlap.height).toBeGreaterThan(0);
   expect(overlap.covered).toBe(true);
-  expect(overlap.background).toBe("rgb(20, 27, 38)");
+  expect(overlap.background).toBe("rgb(19, 19, 21)");
   await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
   await card.getByRole("button", { name: "Close level card" }).click();
   // Off the chart, so a hover card cannot open where the pinned one was.

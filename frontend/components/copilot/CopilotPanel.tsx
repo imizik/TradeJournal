@@ -336,7 +336,7 @@ function StatusLine({ status, error, model, onModel, backend, onBackend, quiet =
             : `Replay · clock frozen at ${new Date(status.replay.at).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · recorded Radar data`}
         </span>
       ) : (
-        <span className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-sky-500/10 text-sky-300")}>
+        <span className={chip(status.evidence === "fixture" ? "bg-amber-500/10 text-amber-300" : "bg-secondary text-foreground")}>
           {status.evidence === "fixture" ? "Simulated market data" : "Read-only TradeJournal data"}
         </span>
       )}
@@ -1316,7 +1316,7 @@ function CopilotPanel({ link = null, variant = "page", pageSymbol, pageContext, 
       {desk && !small && <p className="px-1 text-[11px] text-muted-foreground">Research on read-only evidence. No orders: a plan, watch or revisit exists only once you confirm it.</p>}
       {(voice.available || speak.available) && !small && (
         <div className="flex flex-wrap items-center justify-between gap-x-3">
-          {spoken ? <span role="status" className="text-xs text-sky-300">Heard you. Review the message, then Send.</span> : <span />}
+          {spoken ? <span role="status" className="text-xs text-foreground">Heard you. Review the message, then Send.</span> : <span />}
           <span className={cn("flex flex-wrap items-center gap-x-3", desk && !tray && "max-md:hidden")}>{voice.setting}{speak.setting}</span>
         </div>
       )}

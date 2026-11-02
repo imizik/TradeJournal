@@ -105,6 +105,7 @@ test("signals pause when hidden, resume immediately, and stop on navigation", as
   await expect(page.getByRole("cell", { name: "SPY", exact: true })).toBeVisible();
   expect(refreshes).toHaveLength(1);
 
+  await page.getByRole("button", { name: "Journal", exact: true }).click();
   await page.getByRole("link", { name: "Trades", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "Trades", exact: true })).toBeVisible();
   const afterNavigation: string[] = [];

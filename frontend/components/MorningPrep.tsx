@@ -7,8 +7,8 @@ import { chartPathLink, timestampET } from "@/lib/dayJournal";
 import { newYorkToday } from "@/lib/format";
 
 const PREFIX = "SPY/QQQ morning prep";
-const field = "mt-1 min-h-11 w-full rounded border bg-background px-3 py-2 text-sm";
-const button = "min-h-11 rounded border px-3 text-sm hover:bg-secondary disabled:opacity-50";
+const field = "mt-1 min-h-11 w-full rounded-md border bg-background px-3 py-2 text-sm";
+const button = "min-h-11 rounded-md border px-3 text-sm hover:bg-secondary disabled:opacity-50";
 type Scenario = { symbol: string; family: string; level: string; trigger: string; invalidation: string; timeStop: string };
 const blank = (): Scenario => ({ symbol: "SPY", family: "Continuation", level: "", trigger: "", invalidation: "", timeStop: "" });
 const kinds = ["prior_day_high", "prior_day_low", "prior_day_close", "premarket_high", "premarket_low", "overnight_high", "overnight_low"];
@@ -103,27 +103,27 @@ export default function MorningPrep({ day, onSaved }: { day: string; onSaved: ()
     void save({ operation_id: crypto.randomUUID(), kind: "outlook", text, not_traded: false });
   }
 
-  return <section className="rounded-lg border bg-card p-4" aria-label="SPY and QQQ morning prep">
-    <button type="button" className="flex min-h-11 w-full items-center justify-between text-left font-semibold" aria-expanded={open} onClick={() => setOpen(!open)}>
-      SPY / QQQ prep <span className="text-sm font-normal text-muted-foreground">2–3 scenarios total {open ? "−" : "+"}</span>
+  return <section className="rounded-lg border bg-card" aria-label="SPY and QQQ morning prep">
+    <button type="button" className="flex min-h-11 w-full items-center justify-between px-3.5 py-2.5 text-left text-[13.5px] font-semibold tracking-tight" aria-expanded={open} onClick={() => setOpen(!open)}>
+      SPY / QQQ prep <span className="text-xs font-normal text-muted-foreground">2–3 scenarios total {open ? "−" : "+"}</span>
     </button>
-    {open && <div className="space-y-4 pt-3">
+    {open && <div className="space-y-4 border-t p-4">
       <p className="text-sm text-muted-foreground">Use Jo’s market backdrop above, map the levels, then write only the setups you would take. A valid pass is not a freeze.</p>
-      {day !== newYorkToday() ? <p className="text-sm text-amber-300">Historical day: live levels are not loaded. Chart links open the selected day; new notes keep today’s receipt time.</p> : <>
+      {day !== newYorkToday() ? <p className="text-sm text-muted-foreground">Historical day: live levels are not loaded. Chart links open the selected day; new notes keep today’s receipt time.</p> : <>
         <button type="button" className={button} onClick={() => setRefresh((r) => r + 1)}>Refresh levels</button>
         {!map && !mapError && <p role="status">Loading level map…</p>}
-        {mapError && <p role="alert" className="text-amber-300">{mapError}</p>}
+        {mapError && <p role="alert" className="text-red-400">{mapError}</p>}
       </>}
       <div className="grid gap-3 sm:grid-cols-2">{["SPY", "QQQ"].map((symbol) => {
         const data = symbol === "SPY" ? map : map?.extras?.QQQ;
         const levels = data?.auto_levels;
         const members = Array.from(new Map((levels?.zones.flatMap((z) => z.members) ?? []).map((l) => [`${l.kind}:${l.price}`, l])).values());
         const usable = levels?.day === day;
-        return <div key={symbol} className="rounded border p-3">
+        return <div key={symbol} className="rounded-md border p-3">
           <a className="inline-flex min-h-11 items-center text-primary underline" href={chartPathLink(symbol, day)}>Open {symbol} chart / alerts →</a>
           {levels && <p className="text-xs text-muted-foreground">Map for {levels.day} · calculation cutoff {timestampET(new Date(levels.as_of * 1000).toISOString())}. Refresh before acting.</p>}
           {data?.intraday_as_of && <p className="text-xs text-muted-foreground">Latest intraday data: {timestampET(new Date(data.intraday_as_of * 1000).toISOString())}</p>}
-          {map?.delayed && <p className="text-xs text-amber-300">Delayed feed; confirm current price before acting.</p>}
+          {map?.delayed && <p className="text-xs text-primary">Delayed feed; confirm current price before acting.</p>}
           {usable ? <><dl className="grid grid-cols-2 gap-1 text-sm">{kinds.map((kind) => {
             const l = members.find((m) => m.kind === kind);
             return <div key={kind} className="contents"><dt>{l?.label ?? kind.replaceAll("_", " ")}</dt><dd className="text-right tabular-nums">{l ? `${l.price}${l.developing ? " · developing" : ""}` : "Unavailable"}</dd></div>;
@@ -131,24 +131,24 @@ export default function MorningPrep({ day, onSaved }: { day: string; onSaved: ()
             {members.filter((l) => /^(prior_week|swing)_/.test(l.kind)).map((l) => <p key={`${l.kind}:${l.price}`}>{l.label}: {l.price} · {l.evidence} · {l.source ?? "source unavailable"}</p>)}
             {members.filter((l) => kinds.includes(l.kind)).map((l) => <p key={l.kind}>{l.label}: {l.source ?? "source unavailable"} · {l.evidence}</p>)}
           </details></> : <p className="text-sm text-muted-foreground">No level map for this selected day.</p>}
-          {data?.issues?.map((issue) => <p key={issue} className="text-xs text-amber-300">{issue}</p>)}
-          {Object.entries(levels?.missing ?? {}).map(([group, reason]) => <p key={group} className="text-xs text-amber-300">{group}: {reason}</p>)}
+          {data?.issues?.map((issue) => <p key={issue} className="text-xs text-red-400">{issue}</p>)}
+          {Object.entries(levels?.missing ?? {}).map(([group, reason]) => <p key={group} className="text-xs text-red-400">{group}: {reason}</p>)}
         </div>;
       })}</div>
       <p className="text-xs text-muted-foreground">In Charts, right-click a level to set a touch, cross or close-beyond phone alert. Choose regular hours to wait for the open. Alerts keep the price you saved; developing ranges can change. A ping is a prompt to inspect, not a trade signal.</p>
-      {!!saved.length && <div className="space-y-2"><h3 className="text-sm font-medium">Saved prep</h3>{saved.map((e) => <details key={e.id} className="rounded border p-2"><summary className="min-h-11 cursor-pointer py-2">Saved {timestampET(e.created_at)}</summary><p className="whitespace-pre-wrap text-sm">{e.text}</p></details>)}</div>}
+      {!!saved.length && <div className="space-y-2"><h3 className="text-sm font-medium">Saved prep</h3>{saved.map((e) => <details key={e.id} className="rounded-md border p-2"><summary className="min-h-11 cursor-pointer py-2">Saved {timestampET(e.created_at)}</summary><p className="whitespace-pre-wrap text-sm">{e.text}</p></details>)}</div>}
       <details open={!saved.length || !!pending}><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">{saved.length ? "Write another morning prep" : "Write morning prep"}</summary>
       <fieldset disabled={busy || !!pending} className="space-y-3 disabled:opacity-60">
         <label className="block text-sm">One-sentence macro read<input className={field} value={macro} maxLength={400} onChange={(e) => setMacro(e.target.value)} /></label>
         <label className="block text-sm">Contract / smallest-size convention<input className={field} placeholder="Your expiration, contract-selection and size rule" value={contract} maxLength={400} onChange={(e) => setContract(e.target.value)} /></label>
         <label className="block text-sm">1–2 higher-timeframe levels<input className={field} value={higher} maxLength={300} onChange={(e) => setHigher(e.target.value)} /></label>
-        {scenarios.map((s, i) => <fieldset key={i} className="space-y-2 rounded border p-3"><legend className="px-1 text-sm font-medium">Scenario {i + 1}</legend>
+        {scenarios.map((s, i) => <fieldset key={i} className="space-y-2 rounded-md border p-3"><legend className="px-1 text-sm font-medium">Scenario {i + 1}</legend>
           <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">Symbol<select aria-label={`Scenario ${i + 1} symbol`} className={field} value={s.symbol} onChange={(e) => setScenarios((old) => old.map((v, n) => n === i ? { ...v, symbol: e.target.value } : v))}><option>SPY</option><option>QQQ</option></select></label>
           <label className="text-sm">Family<select aria-label={`Scenario ${i + 1} family`} className={field} value={s.family} onChange={(e) => setScenarios((old) => old.map((v, n) => n === i ? { ...v, family: e.target.value } : v))}>{["Continuation", "Rebound / reclaim", "Rejection / fade"].map((v) => <option key={v}>{v}</option>)}</select></label></div>
           {([['level', 'Level'], ['trigger', 'Trigger'], ['invalidation', 'Invalidation'], ['timeStop', 'Time stop']] as const).map(([key, label]) => <label key={key} className="block text-sm">{label}<input aria-label={`Scenario ${i + 1} ${label.toLowerCase()}`} className={field} maxLength={250} value={s[key]} onChange={(e) => setScenarios((old) => old.map((v, n) => n === i ? { ...v, [key]: e.target.value } : v))} /></label>)}
         </fieldset>)}
         <div className="flex flex-wrap gap-2"><button type="button" className={button} onClick={() => setScenarios((s) => s.length === 2 ? [...s, { ...blank(), family: "Rejection / fade" }] : s.slice(0, 2))}>{scenarios.length === 2 ? "Add third scenario" : "Remove third scenario"}</button>
-        <button type="button" className={button} disabled={!valid} onClick={savePrep}>Save morning prep</button></div>
+        <button type="button" className="min-h-11 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50" disabled={!valid} onClick={savePrep}>Save morning prep</button></div>
       </fieldset>
       </details>
       <fieldset disabled={busy || !!pending} className="space-y-2 border-t pt-3"><legend className="text-sm font-medium">Log a freeze</legend>

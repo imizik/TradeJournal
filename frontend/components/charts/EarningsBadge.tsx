@@ -18,6 +18,6 @@ export default function EarningsBadge({ earnings, compact = false, className = "
   const title = `${next.label} earnings ${eventDay(next.date)}: ${estimated ? "Tradier's estimate; the company has not confirmed it" : "confirmed"}. Time of day not published. ${earnings.source}.`;
   const short = text.replace("Earnings in ", "E ").replace("Earnings today", "E today").replace("Earnings tomorrow", "E 1 d").replace(" · est.", "?");
   return <span role="note" aria-label={text} title={title}
-    className={`${className} shrink-0 whitespace-nowrap rounded border bg-[#10151e]/90 px-1.5 py-0.5 font-mono text-[10px] text-violet-200 ${estimated ? "border-dashed border-violet-400/50" : "border-violet-400/60"}`}>
+    className={`${className} shrink-0 whitespace-nowrap rounded border bg-background/90 px-1.5 py-0.5 font-mono text-[10px] text-violet-200 ${estimated ? "border-dashed border-violet-400/50" : "border-violet-400/60"}`}>
     {compact ? short : <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{text}</span></>}</span>;
 }

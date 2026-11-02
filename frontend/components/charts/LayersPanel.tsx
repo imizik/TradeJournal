@@ -53,7 +53,7 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
   });
   const size = sheet ? "h-11 w-11" : "h-6 w-6";
   const icon = sheet ? 16 : 12;
-  const button = `inline-flex ${size} shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent`;
+  const button = `inline-flex ${size} shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent`;
   // On a desktop, an item's quiet buttons wait for the pointer or focus; on and off states always show.
   const quiet = sheet ? "" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100";
   const row = `group flex items-center gap-1.5 ${sheet ? "min-h-11 px-3" : "min-h-7 px-2"}`;
@@ -61,8 +61,8 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
   const tall = sheet ? "min-h-11" : "py-1";
 
   const body = <>
-    <div className={`flex items-center justify-between border-b border-slate-700/40 ${sheet ? "px-3 py-2" : "px-3 py-2.5"}`}>
-      <h2 className="text-xs font-medium text-slate-200">Layers</h2>
+    <div className={`flex items-center justify-between border-b border-border ${sheet ? "px-3 py-2" : "px-3 py-2.5"}`}>
+      <h2 className="text-xs font-medium text-foreground">Layers</h2>
       <button aria-label="Close layers" title="Close layers" onClick={onClose} className={button}><X size={icon + 1} /></button>
     </div>
     {groups.map((group) => {
@@ -71,18 +71,18 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
       const items = "items" in group ? group.items : [];
       const allLocked = items.length > 0 && items.every((item) => item.locked);
       const symbols = [...new Set(items.map((item) => item.symbol))];
-      return <div key={group.key} role="group" aria-label={group.name} className="border-b border-slate-800 last:border-b-0">
-        <div className={`${row} ${group.hidden ? "text-slate-500" : "text-slate-200"}`}>
+      return <div key={group.key} role="group" aria-label={group.name} className="border-b border-border last:border-b-0">
+        <div className={`${row} ${group.hidden ? "text-muted-foreground" : "text-foreground"}`}>
           <button aria-expanded={open} aria-label={`${group.name}${count === null ? "" : `, ${count}`}`} onClick={() => fold(group.key)}
             className={`flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-medium ${tall}`}>
-            {open ? <ChevronDown size={icon} className="shrink-0 text-slate-500" /> : <ChevronRight size={icon} className="shrink-0 text-slate-500" />}
-            <span className="truncate">{group.name}</span>{count !== null && <span className="text-[10px] font-normal text-slate-500">{count}</span>}
+            {open ? <ChevronDown size={icon} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={icon} className="shrink-0 text-muted-foreground" />}
+            <span className="truncate">{group.name}</span>{count !== null && <span className="text-[10px] font-normal text-muted-foreground">{count}</span>}
           </button>
           {"items" in group && !!items.length && <button aria-label={`${allLocked ? "Unlock" : "Lock"} all ${group.noun}`} aria-pressed={allLocked}
             title={allLocked ? `Let every ${group.noun.replace(/s$/, "")} drag again` : `Keep every ${group.noun.replace(/s$/, "")} from being dragged`}
             onClick={() => onGroupLock(group.key)} className={`${button} ${allLocked ? "text-amber-300" : ""}`}>{allLocked ? <Lock size={icon} /> : <LockOpen size={icon} />}</button>}
           {"info" in group && <button aria-label={`About ${group.name}`} title={`About ${group.name}`} aria-expanded={explained.includes(group.key)} aria-controls={`layer-info-${group.key}`}
-            onClick={() => explain(group.key)} className={`${button} ${explained.includes(group.key) ? "bg-slate-800 text-sky-300" : ""}`}><Info size={icon} /></button>}
+            onClick={() => explain(group.key)} className={`${button} ${explained.includes(group.key) ? "bg-secondary text-foreground" : ""}`}><Info size={icon} /></button>}
           <button aria-label={`${group.hidden ? "Show" : "Hide"} ${group.name}`} aria-pressed={group.hidden} title={group.hidden ? `Show ${group.name} on every chart` : `Hide ${group.name} on every chart`}
             onClick={() => onGroupHidden(group.key)} className={`${button} ${group.hidden ? "text-amber-300" : ""}`}>{group.hidden ? <EyeOff size={icon} /> : <Eye size={icon} />}</button>
           {"items" in group && !!items.length && <button aria-label={`Delete all ${group.noun}`} title={`Delete every ${group.noun.replace(/s$/, "")} listed here`}
@@ -91,21 +91,21 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
         {confirming === group.key && "items" in group && <div role="alert" className={`flex items-center gap-2 bg-rose-500/10 text-[11px] text-rose-200 ${sheet ? "px-3 py-2" : "px-3 py-1.5"}`}>
           <span className="min-w-0 flex-1">Delete {items.length} {items.length === 1 ? group.noun.replace(/s$/, "") : group.noun}{symbols.length > 1 ? ` (${symbols.join(", ")})` : ""}? Undo brings them back.</span>
           <button onClick={() => { onGroupDelete(group.key); setConfirming(null); }} className={`rounded bg-rose-500/80 px-2 font-medium text-white hover:bg-rose-500 ${sheet ? "h-11" : "h-6"}`}>Delete</button>
-          <button onClick={() => setConfirming(null)} className={`rounded px-2 text-slate-300 hover:bg-slate-800 ${sheet ? "h-11" : "h-6"}`}>Cancel</button>
+          <button onClick={() => setConfirming(null)} className={`rounded px-2 text-foreground/80 hover:bg-secondary ${sheet ? "h-11" : "h-6"}`}>Cancel</button>
         </div>}
         {open && "items" in group && <div className="pb-1">
-          {!items.length && <p className="px-3 pb-2 text-[10px] text-slate-600">None on these charts.</p>}
+          {!items.length && <p className="px-3 pb-2 text-[10px] text-muted-foreground">None on these charts.</p>}
           {items.map((item, index) => {
             const label = `${item.name}${item.detail ? ` ${item.detail}` : ""}`;
             const away = item.hidden || group.hidden;
             return <div key={item.id}>
-              {symbols.length > 1 && item.symbol !== items[index - 1]?.symbol && <div className="px-3 pb-0.5 pt-1.5 text-[9px] uppercase tracking-wider text-slate-600">{item.symbol}</div>}
+              {symbols.length > 1 && item.symbol !== items[index - 1]?.symbol && <div className="px-3 pb-0.5 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">{item.symbol}</div>}
               <div className={`${row} pl-5 ${away ? "opacity-60" : ""}`}>
                 <span className={`shrink-0 rounded-sm ${item.line ? "h-0.5 w-3" : "h-2 w-3"}`} style={{ background: item.color }} />
                 <button aria-label={`Go to ${label}`} title={away ? "Hidden: show it to go to it" : "Show it on the chart"} disabled={away} onClick={() => onJump(group.key, item)}
-                  className={`flex min-w-0 flex-1 text-left text-[11px] text-slate-300 hover:text-sky-200 disabled:hover:text-slate-300 ${tall} ${item.line ? "items-center gap-1.5" : "flex-col justify-center"}`}>
+                  className={`flex min-w-0 flex-1 text-left text-[11px] text-foreground/80 hover:text-foreground disabled:hover:text-foreground/80 ${tall} ${item.line ? "items-center gap-1.5" : "flex-col justify-center"}`}>
                   {/* A level's price fits beside its name; a drawing's span of prices goes underneath. */}
-                  <span className="max-w-full truncate">{item.name}</span>{item.detail && <span className={`shrink-0 truncate font-mono text-[10px] text-slate-500 ${item.line ? "ml-auto" : "max-w-full leading-3"}`}>{item.detail}</span>}
+                  <span className="max-w-full truncate">{item.name}</span>{item.detail && <span className={`shrink-0 truncate font-mono text-[10px] text-muted-foreground ${item.line ? "ml-auto" : "max-w-full leading-3"}`}>{item.detail}</span>}
                 </button>
                 <button aria-label={`${item.locked ? "Unlock" : "Lock"} ${label}`} aria-pressed={item.locked} onClick={() => onItem(item, { locked: !item.locked })}
                   className={`${button} ${item.locked ? "text-amber-300" : quiet}`}>{item.locked ? <Lock size={icon} /> : <LockOpen size={icon} />}</button>
@@ -118,17 +118,17 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
         </div>}
         {open && "filters" in group && <OptionFilters filters={group.filters} sheet={sheet} onChange={(patch) => onOptions?.(patch)} />}
         {open && "labels" in group && <FillLabelChoice labels={group.labels} sheet={sheet} onChange={(labels) => onLabels?.(labels)} />}
-        {open && "small" in group && <label className={`flex items-center gap-2 px-3 pb-2 pl-5 text-[10px] text-slate-400 ${sheet ? "min-h-11" : ""}`}>
-          <input type="checkbox" checked={group.small} onChange={(event) => onNewsSmall?.(event.target.checked)} className="accent-sky-400" />
+        {open && "small" in group && <label className={`flex items-center gap-2 px-3 pb-2 pl-5 text-[10px] text-muted-foreground ${sheet ? "min-h-11" : ""}`}>
+          <input type="checkbox" checked={group.small} onChange={(event) => onNewsSmall?.(event.target.checked)} className="accent-primary" />
           News on small charts
         </label>}
-        {"info" in group && <p id={`layer-info-${group.key}`} hidden={!explained.includes(group.key)} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.info}</p>}
-        {open && "status" in group && !!group.status && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.status}</p>}
+        {"info" in group && <p id={`layer-info-${group.key}`} hidden={!explained.includes(group.key)} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-muted-foreground">{group.info}</p>}
+        {open && "status" in group && !!group.status && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-muted-foreground">{group.status}</p>}
         {open && "studies" in group && <div className="pb-1">
           {group.studies.map((study) => <div key={study.key} className={`${row} pl-5 ${group.hidden ? "opacity-60" : ""}`}>
-            <span className={`min-w-0 flex-1 truncate text-[11px] ${study.on ? "text-slate-300" : "text-slate-600"}`}>{study.label}</span>
+            <span className={`min-w-0 flex-1 truncate text-[11px] ${study.on ? "text-foreground/80" : "text-muted-foreground"}`}>{study.label}</span>
             <button aria-label={`${study.on ? "Hide" : "Show"} ${study.label}`} aria-pressed={!study.on} onClick={() => onStudy(study.key)}
-              className={`${button} ${study.on ? "" : "text-slate-600"}`}>{study.on ? <Eye size={icon} /> : <EyeOff size={icon} />}</button>
+              className={`${button} ${study.on ? "" : "text-muted-foreground"}`}>{study.on ? <Eye size={icon} /> : <EyeOff size={icon} />}</button>
           </div>)}
         </div>}
       </div>;
@@ -144,10 +144,10 @@ const LABEL_NAMES: Record<FillLabels, string> = { off: "Off", latest: "Latest tr
 function FillLabelChoice({ labels, sheet, onChange }: { labels: FillLabels; sheet: boolean; onChange(labels: FillLabels): void }) {
   const tall = sheet ? "min-h-11" : "min-h-6";
   return <div className="space-y-1 px-3 pb-2 pl-5 text-[10px]">
-    <div className="text-slate-500">Fill labels</div>
-    <div role="group" aria-label="Fill labels" className="flex overflow-hidden rounded border border-slate-700/70">
+    <div className="text-muted-foreground">Fill labels</div>
+    <div role="group" aria-label="Fill labels" className="flex overflow-hidden rounded border border-border">
       {FILL_LABELS.map((mode) => <button key={mode} aria-pressed={labels === mode} onClick={() => onChange(mode)}
-        className={`flex-1 px-1 ${tall} ${labels === mode ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{LABEL_NAMES[mode]}</button>)}
+        className={`flex-1 px-1 ${tall} ${labels === mode ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{LABEL_NAMES[mode]}</button>)}
     </div>
   </div>;
 }
@@ -155,21 +155,21 @@ function FillLabelChoice({ labels, sheet, onChange }: { labels: FillLabels; shee
 /** The options layer's filters (C4.4), saved with the workspace. */
 function OptionFilters({ filters, sheet, onChange }: { filters: OptionsLayer; sheet: boolean; onChange(patch: Partial<OptionsLayer>): void }) {
   const tall = sheet ? "min-h-11" : "min-h-6";
-  const segment = (on: boolean) => `flex-1 px-1 ${tall} ${on ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`;
+  const segment = (on: boolean) => `flex-1 px-1 ${tall} ${on ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`;
   return <div className="space-y-1.5 px-3 pb-2 pl-5 text-[10px]">
-    <div role="group" aria-label="Rank strikes by" className="flex overflow-hidden rounded border border-slate-700/70">
+    <div role="group" aria-label="Rank strikes by" className="flex overflow-hidden rounded border border-border">
       {(Object.keys(MEASURE_NAMES) as OptionsMeasure[]).map((mode) => <button key={mode} aria-pressed={filters.mode === mode} onClick={() => onChange({ mode })} className={segment(filters.mode === mode)}>{MEASURE_NAMES[mode]}</button>)}
     </div>
-    <div role="group" aria-label="Option expirations" className="flex overflow-hidden rounded border border-slate-700/70">
+    <div role="group" aria-label="Option expirations" className="flex overflow-hidden rounded border border-border">
       {(Object.keys(SCOPE_NAMES) as OptionsScope[]).map((scope) => <button key={scope} aria-pressed={filters.scope === scope} onClick={() => onChange({ scope })} className={segment(filters.scope === scope)}>{SCOPE_NAMES[scope]}</button>)}
     </div>
-    <div className={`flex items-center justify-between gap-2 text-slate-400 ${tall}`}>
+    <div className={`flex items-center justify-between gap-2 text-muted-foreground ${tall}`}>
       <label htmlFor="options-nearest">Strikes each side</label>
-      <select id="options-nearest" value={filters.nearest} onChange={(event) => onChange({ nearest: Number(event.target.value) })} className={`rounded border-0 bg-slate-800 px-1.5 text-slate-200 ${tall}`}>
+      <select id="options-nearest" value={filters.nearest} onChange={(event) => onChange({ nearest: Number(event.target.value) })} className={`rounded border-0 bg-secondary px-1.5 text-foreground ${tall}`}>
         {Array.from({ length: OPTIONS_NEAREST.max - OPTIONS_NEAREST.min + 1 }, (_, i) => OPTIONS_NEAREST.min + i).map((count) => <option key={count}>{count}</option>)}
       </select>
     </div>
-    <label className={`flex items-center gap-2 ${filters.mode === "gamma" ? "text-slate-400" : "text-slate-600"} ${tall}`} title="Open interest does not say who holds a contract: a sign needs an assumed dealer side.">
+    <label className={`flex items-center gap-2 ${filters.mode === "gamma" ? "text-muted-foreground" : "text-muted-foreground"} ${tall}`} title="Open interest does not say who holds a contract: a sign needs an assumed dealer side.">
       <input type="checkbox" checked={filters.signed} disabled={filters.mode !== "gamma"} onChange={(event) => onChange({ signed: event.target.checked })} className="accent-amber-400" />
       Signed gamma and flip (assumed)
     </label>

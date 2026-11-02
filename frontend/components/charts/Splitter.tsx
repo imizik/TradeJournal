@@ -95,5 +95,5 @@ export default function Splitter({ label, orientation, now, min, max, text, clas
     }}
     className={`relative z-10 shrink-0 touch-none select-none outline-none transition-colors before:absolute before:content-[''] ${vertical
       ? "cursor-col-resize before:-inset-x-[3px] before:inset-y-0"
-      : "cursor-row-resize before:-inset-y-[3px] before:inset-x-0"} ${dragging ? "bg-sky-400/70" : "hover:bg-sky-400/40 focus-visible:bg-sky-400/70"} ${className}`} />;
+      : "cursor-row-resize before:-inset-y-[3px] before:inset-x-0"} ${dragging ? "bg-muted-foreground/70" : "hover:bg-muted-foreground/40 focus-visible:bg-muted-foreground/70"} ${className}`} />;
 }

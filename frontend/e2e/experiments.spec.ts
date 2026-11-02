@@ -16,7 +16,16 @@ for (const [size, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844
     // Real seeded endpoints: the overview must agree with its existing source, not a new calculation.
     const habits = await (await page.request.get("/api/backend/analytics/exit-habits")).json();
     const radar = await (await page.request.get("/api/backend/radar/proof")).json();
-    await page.goto("/experiments");
+    await page.goto("/");
+    if (size === "phone") await page.getByRole("button", { name: /^Open menu/ }).click();
+    const navigation = size === "phone"
+      ? page.getByRole("dialog", { name: "Menu" })
+      : page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Market", exact: true }) });
+    await navigation.getByRole("button", { name: "Market", exact: true }).click();
+    await navigation.getByRole("link", { name: "Experiments", exact: true }).click();
+    await expect(page).toHaveURL(/\/experiments$/);
+    if (size === "phone") await expect(navigation).toHaveCount(0);
+    else await expect(navigation.getByRole("link", { name: "Experiments", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByTestId("experiment-alerts")).toContainText(`${habits.feedback.responded} / ${habits.feedback.total} alerts answered`);
     await expect(page.getByTestId("experiment-radar")).toContainText(`${radar.verdict.rated} / ${radar.events} events rated`);
     const detail = page.locator("#experiment-detail");

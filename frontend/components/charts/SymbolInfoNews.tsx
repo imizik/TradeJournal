@@ -7,7 +7,7 @@ import { ago, listedNews, newYorkTime, readAt } from "@/lib/symbolInfo";
 import type { NewsArticle, SymbolNews } from "@/lib/symbolInfo";
 
 export const LIT_MS = 6000;
-const TONE = { positive: "text-emerald-300", negative: "text-rose-300", neutral: "text-slate-300" };
+const TONE = { positive: "text-emerald-300", negative: "text-rose-300", neutral: "text-foreground/80" };
 
 function Article({ article, symbol, minute, lit, first }: { article: NewsArticle; symbol: string; minute: number; lit: boolean; first: boolean }) {
   const [open, setOpen] = useState(false);
@@ -16,23 +16,23 @@ function Article({ article, symbol, minute, lit, first }: { article: NewsArticle
   useEffect(() => { if (lit && first) row.current?.scrollIntoView?.({ block: "nearest" }); }, [lit, first]);
   const mine = article.sentiment.find((s) => s.ticker === symbol);
   const more = article.tickers.length - 1;
-  return <li ref={row} data-news-lit={lit || undefined} className={`space-y-1 py-2 ${lit ? "-mx-1 rounded bg-sky-400/10 px-1 ring-1 ring-sky-400/60" : ""}`}>
+  return <li ref={row} data-news-lit={lit || undefined} className={`space-y-1 py-2 ${lit ? "-mx-1 rounded bg-primary/10 px-1 ring-1 ring-primary/60" : ""}`}>
     <div className="flex items-start justify-between gap-2">
-      <a href={article.url} target="_blank" rel="noopener noreferrer" className="min-w-0 text-slate-100 hover:text-sky-300">{article.headline}</a>
-      <button aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} summary: ${article.headline}`} onClick={() => setOpen(!open)} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-200 lg:min-h-0 lg:min-w-0">
+      <a href={article.url} target="_blank" rel="noopener noreferrer" className="min-w-0 text-foreground hover:underline">{article.headline}</a>
+      <button aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} summary: ${article.headline}`} onClick={() => setOpen(!open)} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground lg:min-h-0 lg:min-w-0">
         {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
     </div>
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
       <time dateTime={article.published_at} title={newYorkTime(article.published_at)}>{ago(article.published_at, minute * 60_000)}</time>
       <span>{article.publisher ?? "Unknown source"}</span>
       {more > 0 && <span title={`Tagged tickers: ${article.tickers.join(", ")}`}>+{more}</span>}
       {mine && <span title={`Polygon's sentiment for ${symbol}, not ours${mine.reasoning ? `: ${mine.reasoning}` : ""}`} className={TONE[mine.sentiment]}>Sentiment: {mine.sentiment}</span>}
     </p>
-    {open && <div className="space-y-1 text-slate-300">
+    {open && <div className="space-y-1 text-foreground/80">
       <p>{article.summary ?? "No summary from the provider."}</p>
-      {article.sentiment.map((s) => <p key={s.ticker} className="text-[10px] text-slate-400"><span className={TONE[s.sentiment]}>{s.ticker} {s.sentiment}</span> · Polygon&apos;s opinion{s.reasoning ? `: ${s.reasoning}` : ""}</p>)}
-      <a href={article.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sky-300">Read at {article.publisher ?? "the source"} <ExternalLink size={11} aria-hidden /></a>
+      {article.sentiment.map((s) => <p key={s.ticker} className="text-[10px] text-muted-foreground"><span className={TONE[s.sentiment]}>{s.ticker} {s.sentiment}</span> · Polygon&apos;s opinion{s.reasoning ? `: ${s.reasoning}` : ""}</p>)}
+      <a href={article.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-foreground underline">Read at {article.publisher ?? "the source"} <ExternalLink size={11} aria-hidden /></a>
     </div>}
   </li>;
 }
@@ -65,16 +65,16 @@ export default function SymbolInfoNews({ data, focus = null }: { data: SymbolNew
   const bothDown = data.sources.every((s) => s.state === "failed" || s.state === "not_configured");
   return <div className="space-y-3 text-[11px]">
     <div className="flex items-center justify-between gap-2">
-      <label className="flex min-h-11 items-center gap-2 text-slate-300 lg:min-h-0" title="Hides articles that tag more than three symbols">
+      <label className="flex min-h-11 items-center gap-2 text-foreground/80 lg:min-h-0" title="Hides articles that tag more than three symbols">
         <input type="checkbox" checked={focused} onChange={(event) => setFocused(event.target.checked)} /> Focused
       </label>
-      {fresh > 0 && <button onClick={() => setShown(data.articles)} className="min-h-11 rounded border border-sky-400/50 px-3 py-2 text-sky-300 lg:min-h-0">{fresh} new</button>}
+      {fresh > 0 && <button onClick={() => setShown(data.articles)} className="min-h-11 rounded border px-3 py-2 text-foreground lg:min-h-0">{fresh} new</button>}
     </div>
-    {rows.length > 0 ? <ul className="divide-y divide-slate-700/40">{rows.map((a) => <Article key={a.id} article={a} symbol={data.symbol} minute={minute} lit={!!lit?.ids.has(a.id)} first={a.id === firstLit} />)}</ul>
-      : data.articles.length > 0 ? <p className="text-slate-500">No focused headlines. {hidden} roundup {hidden === 1 ? "article is" : "articles are"} hidden; turn Focused off to read {hidden === 1 ? "it" : "them"}.</p>
-      : bothDown ? null : <p className="text-slate-500">No news in the last {data.days} days.</p>}
+    {rows.length > 0 ? <ul className="divide-y divide-border">{rows.map((a) => <Article key={a.id} article={a} symbol={data.symbol} minute={minute} lit={!!lit?.ids.has(a.id)} first={a.id === firstLit} />)}</ul>
+      : data.articles.length > 0 ? <p className="text-muted-foreground">No focused headlines. {hidden} roundup {hidden === 1 ? "article is" : "articles are"} hidden; turn Focused off to read {hidden === 1 ? "it" : "them"}.</p>
+      : bothDown ? null : <p className="text-muted-foreground">No news in the last {data.days} days.</p>}
     {reading.map((s) => <p key={s.provider} role="status" className="text-[10px] text-amber-300">
       {s.label}: {s.message ?? "unavailable"}{s.state === "stale" && s.fetched_at !== null ? ` Copy ${readAt(s.fetched_at)}.` : ""}</p>)}
-    <p className="text-[10px] text-slate-500">{data.sources.filter((s) => s.state === "ok" || s.state === "stale").map((s) => s.label).join(" + ") || "No source"} · observed · newest first{data.sources.some((s) => s.provider === "polygon" && s.state !== "failed" && s.state !== "not_configured") ? ` · ${data.sentiment_note}` : ""}</p>
+    <p className="text-[10px] text-muted-foreground">{data.sources.filter((s) => s.state === "ok" || s.state === "stale").map((s) => s.label).join(" + ") || "No source"} · observed · newest first{data.sources.some((s) => s.provider === "polygon" && s.state !== "failed" && s.state !== "not_configured") ? ` · ${data.sentiment_note}` : ""}</p>
   </div>;
 }

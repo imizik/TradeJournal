@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-sm text-foreground">{value}</dd>
     </div>
   );
@@ -27,12 +27,12 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="border-b px-5 py-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="border-b px-3.5 py-2.5">
+        <h2 className="text-[13.5px] font-semibold tracking-tight">
           {title}
         </h2>
       </div>
-      <div className="px-5 py-4">{children}</div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
@@ -86,28 +86,28 @@ export default async function SignalDetailPage({
   const scalp = alert.assessment?.assessment ?? null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <Link href="/signals" className="text-xs font-medium text-sky-400 hover:underline">
+        <Link href="/signals" className="text-sm text-muted-foreground hover:text-foreground">
           ← Signals
         </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold">
             {alert.symbol} {alert.setup}
           </h1>
           <span
-            className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${verdictClasses(alert.verdict)}`}
+            className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize ${verdictClasses(alert.verdict)}`}
           >
             {verdictLabel(alert.verdict)}
           </span>
           <span
-            className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusClasses(alert.analysis_status)}`}
+            className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize ${statusClasses(alert.analysis_status)}`}
           >
             {alert.analysis_status}
           </span>
         </div>
         <p className="mt-2 font-mono text-xs break-all text-muted-foreground">{alert.alert_id}</p>
-        <SignalsRefresh />
+        <div className="mt-2"><SignalsRefresh /></div>
       </div>
 
       <Card title="Alert">
@@ -175,13 +175,13 @@ export default async function SignalDetailPage({
 
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="mb-2 text-xs font-medium text-muted-foreground">
                   Reasons for
                 </h3>
                 <ReasonList items={scalp.reasons_for} tone="for" />
               </div>
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="mb-2 text-xs font-medium text-muted-foreground">
                   Reasons against
                 </h3>
                 <ReasonList items={scalp.reasons_against} tone="against" />
@@ -190,10 +190,10 @@ export default async function SignalDetailPage({
 
             {scalp.missing.length > 0 && (
               <div className="mt-6">
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="mb-2 text-xs font-medium text-muted-foreground">
                   Missing data
                 </h3>
-                <p className="text-sm text-amber-400">{scalp.missing.join(", ")}</p>
+                <p className="text-sm text-red-400">{scalp.missing.join(", ")}</p>
               </div>
             )}
           </Card>
@@ -238,7 +238,7 @@ export default async function SignalDetailPage({
               />
             </dl>
 
-            <h3 className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <h3 className="mb-2 mt-6 text-xs font-medium text-muted-foreground">
               Targets
             </h3>
             {scalp.targets.length === 0 ? (

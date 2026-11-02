@@ -40,24 +40,27 @@ export default async function DailyReviewPage() {
   const jo = access.owner ? await joMonths(groups.slice(0, JO_MONTHS).map(([month]) => month)) : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
             Back to Dashboard
           </a>
-          <h1 className="mt-2 text-xl font-semibold text-foreground">Daily Review Calendar</h1>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+            <h1 className="text-xl font-semibold">Daily Review Calendar</h1>
+            <span className="text-sm tabular-nums text-muted-foreground">{days.length} trade days</span>
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">Pick any trading day to open or generate its saved AI review.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {access.owner && (
-            <a href="/daily/week" className="rounded border border-sky-500/50 px-3 py-2 text-sm font-medium text-sky-300 transition-colors hover:bg-secondary">
+            <a href="/daily/week" className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9">
               Weekly Review
             </a>
           )}
           <a
             href="/trades"
-            className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
           >
             All Trades
           </a>
@@ -66,7 +69,7 @@ export default async function DailyReviewPage() {
 
       {access.owner && <PlanReviewStatus runner={runner} />}
       <PracticeRunLinks runs={practice.runs} />
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-3">
         <StatCard label="Trade Days" value={String(days.length)} />
         <StatCard label="Saved Reviews" value={String(savedCount)} />
         <StatCard label="Need Review" value={String(days.length - savedCount)} />
@@ -77,7 +80,7 @@ export default async function DailyReviewPage() {
           No trades found yet.
         </section>
       ) : (
-        <div className="space-y-6" data-testid="daily-calendar">
+        <div className="space-y-4" data-testid="daily-calendar">
           <Legend jo={jo} />
           {groups.map(([month, monthDays]) => (
             <MonthGrid key={month} month={month} days={monthDays} weekends={weekends} review={monthly.get(month)} jo={jo} />
@@ -98,7 +101,7 @@ function PlanReviewStatus({ runner }: { runner: PlanRunnerStatus | null }) {
     : !status ? "Nightly AI reviews: set up, no run yet (each night at 8:10 PM ET)."
     : status.state === "running" ? `Nightly AI reviews: running since ${when(status.started_at)}.`
     : [`Nightly AI reviews: last run ${when(status.finished_at ?? status.started_at)}`, status.message].filter(Boolean).join(" · ");
-  return <p role="status" aria-label="Nightly AI reviews" className={`rounded border px-3 py-2 text-xs ${problem ? "border-amber-500/50 text-amber-200" : "border-border text-muted-foreground"}`}>
+  return <p role="status" aria-label="Nightly AI reviews" className={`rounded-lg border bg-card px-3.5 py-2 text-xs ${problem ? "border-primary/40 text-primary" : "text-muted-foreground"}`}>
     {text}{status?.state === "failed" && status.failed[0] && <span className="block">{status.failed[0].error}</span>}
   </p>;
 }
@@ -152,7 +155,7 @@ function joMark(jo: JoMonths, day: string): JoMark | null {
   return fine ? { tone: "ok", text: "briefing and reads on time" } : null;
 }
 
-const JO_TONE: Record<JoMark["tone"], [string, string]> = { trouble: ["!", "text-amber-300"], news: ["◉", "text-sky-300"], ok: ["✓", "text-emerald-400"], unknown: ["?", "text-muted-foreground"] };
+const JO_TONE: Record<JoMark["tone"], [string, string]> = { trouble: ["!", "text-primary"], news: ["◉", "text-foreground"], ok: ["✓", "text-muted-foreground"], unknown: ["?", "text-muted-foreground"] };
 
 function JoBadge({ mark }: { mark: JoMark }) {
   const [glyph, tone] = JO_TONE[mark.tone];
@@ -177,7 +180,7 @@ function tint(pnl: number | null | undefined) {
 
 const REVIEW_STATE = {
   saved: { dot: "bg-emerald-400", label: "Reviewed" },
-  stale: { dot: "bg-amber-400", label: "Review needs refresh" },
+  stale: { dot: "bg-primary", label: "Review needs refresh" },
   open: { dot: "", label: "Not reviewed" },
 } as const;
 const reviewState = (day: DailyReviewIndexItem) => day.source_data_stale ? REVIEW_STATE.stale : day.saved ? REVIEW_STATE.saved : REVIEW_STATE.open;
@@ -204,23 +207,23 @@ function MonthGrid({ month, days, weekends, review, jo }: { month: string; days:
   const anyClosed = days.some((day) => day.closed_pnl != null);
 
   return (
-    <section className="space-y-2" aria-label={monthLabel(days[0].day)}>
-      <div className="flex items-baseline justify-between gap-3">
+    <section className="rounded-lg border bg-card" aria-label={monthLabel(days[0].day)}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-3.5 py-2.5">
         <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{monthLabel(days[0].day)}</h2>
-          {review && <a href={`/daily/month/${month}`} className="text-xs font-medium text-blue-400 hover:text-blue-300">
+          <h2 className="text-[13.5px] font-semibold tracking-tight">{monthLabel(days[0].day)}</h2>
+          {review && <a href={`/daily/month/${month}`} className="inline-flex min-h-11 items-center text-xs text-primary hover:underline sm:min-h-0">
             {review.saved ? `Month review · ${(review.grade ?? "").split(":")[0] || "saved"}` : "Run month review"}</a>}
         </div>
         {anyClosed && <p className="text-xs text-muted-foreground">Closed P&amp;L <span className={`font-medium tabular-nums ${pnlColor(closed)}`}>{money(closed, { signed: true, cents: false })}</span></p>}
       </div>
-      <div className={`grid gap-1.5 sm:gap-2 ${weekends ? "grid-cols-7" : "grid-cols-5"}`}>
-        {WEEKDAYS.slice(0, columns).map((name) => <p key={name} className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{name}</p>)}
+      <div className={`grid gap-1 p-1.5 sm:gap-2 sm:p-3.5 ${weekends ? "grid-cols-7" : "grid-cols-5"}`}>
+        {WEEKDAYS.slice(0, columns).map((name) => <p key={name} className="px-1 text-[11px] font-medium text-muted-foreground">{name}</p>)}
         {cells.map((dayNumber, index) => {
           if (dayNumber === null) return <div key={`pad-${index}`} />;
           const day = byDay.get(dayNumber);
           const date = `${month}-${String(dayNumber).padStart(2, "0")}`;
           const mark = jo ? joMark(jo, date) : null;
-          const empty = "flex min-h-14 flex-col justify-between rounded-md border border-border/50 p-1.5 text-xs text-muted-foreground/50 sm:min-h-20 sm:p-2";
+          const empty = "flex min-h-14 flex-col justify-between rounded-md border border-border/50 p-1 text-xs text-muted-foreground sm:min-h-20 sm:p-2";
           // A day with no trades but a Jo record opens that day's Jo section.
           if (!day) return mark
             ? <a key={dayNumber} href={`/daily/${date}#jo`} aria-label={`${formatDate(date)}: no trades, Jo: ${mark.text}`} className={`${empty} transition-colors hover:border-foreground/40`}>
@@ -232,13 +235,13 @@ function MonthGrid({ month, days, weekends, review, jo }: { month: string; days:
           return (
             <a key={dayNumber} href={`/daily/${day.day}`} aria-label={`${formatDate(day.day)}: ${trades}, ${pnl}, ${state.label.toLowerCase()}${mark ? `, Jo: ${mark.text}` : ""}`}
               title={day.generated_at ? `Saved ${timeET(day.generated_at, { year: true })}` : state.label}
-              className={`flex min-h-14 flex-col justify-between rounded-md border p-1.5 transition-colors hover:border-foreground/40 sm:min-h-20 sm:p-2 ${tint(day.closed_pnl)}`}>
+              className={`flex min-h-14 flex-col justify-between rounded-md border p-1 transition-colors hover:border-foreground/40 sm:min-h-20 sm:p-2 ${tint(day.closed_pnl)}`}>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-semibold text-foreground">{dayNumber}</span>
+                <span className="text-xs font-semibold tabular-nums text-foreground">{dayNumber}</span>
                 {state.dot && <span className={`h-2 w-2 shrink-0 rounded-full ${state.dot}`} aria-hidden />}
               </div>
               <div>
-                <p className={`text-xs font-semibold tabular-nums sm:text-sm ${day.closed_pnl == null ? "text-muted-foreground" : pnlColor(day.closed_pnl)}`}>
+                <p className={`font-semibold tabular-nums sm:text-sm sm:tracking-normal ${weekends ? "text-[10px] tracking-tighter" : "text-xs"} ${day.closed_pnl == null ? "text-muted-foreground" : pnlColor(day.closed_pnl)}`}>
                   {day.closed_pnl == null ? "—" : money(day.closed_pnl, { signed: true, cents: false })}
                 </p>
                 <p className="hidden text-[11px] text-muted-foreground sm:block">{trades}</p>
@@ -258,13 +261,13 @@ function Legend({ jo }: { jo: JoMonths | null }) {
       <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-500/30" aria-hidden />Closed green</span>
       <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-red-500/30" aria-hidden />Closed red</span>
       <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />Reviewed</span>
-      <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />Review needs refresh</span>
+      <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" aria-hidden />Review needs refresh</span>
       <span>Darker means a bigger day. Click a day to open its review.</span>
       {jo && <span className="basis-full" data-testid="jo-calendar-legend">
-        Jo (last {JO_MONTHS} months): <span className="text-amber-300">Jo !</span> missed or late briefing or read, or a refused watch ·{" "}
-        <span className="text-sky-300">Jo ◉</span> a price watch triggered · <span className="text-emerald-400">Jo ✓</span> briefing and reads on time ·{" "}
+        Jo (last {JO_MONTHS} months): <span className="text-primary">Jo !</span> missed or late briefing or read, or a refused watch ·{" "}
+        <span className="text-foreground">Jo ◉</span> a price watch triggered · <span className="text-foreground">Jo ✓</span> briefing and reads on time ·{" "}
         Jo ? a record is unknown, not fine. No mark: no Jo record.
-        {jo.failed.length > 0 && <span className="text-amber-200"> Couldn&apos;t load {jo.failed.join(", ")}, so those marks are missing.</span>}
+        {jo.failed.length > 0 && <span className="text-red-400"> Couldn&apos;t load {jo.failed.join(", ")}, so those marks are missing.</span>}
       </span>}
     </div>
   );
@@ -282,9 +285,9 @@ function StatCard({
   valueClass?: string;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
+    <div className="min-w-0 rounded-lg border bg-card px-4 py-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1.5 text-2xl font-medium tabular-nums ${valueClass}`}>{value}</p>
     </div>
   );
 }

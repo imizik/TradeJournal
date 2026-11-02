@@ -41,7 +41,7 @@ export const HELD: Record<string, string> = { merged: "Merged", suppressed: "Qui
 export const clock = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }) : "";
 const ok = <T extends { state: string }>(section: T | Unavailable): section is T => section.state !== "unavailable";
 
-const ROW = "flex min-h-11 min-w-0 items-center gap-2 rounded border bg-background/40 px-3 py-2";
+const ROW = "flex min-h-11 min-w-0 items-center gap-2 rounded-md border bg-background/40 px-3 py-2";
 const LINK_ROW = `${ROW} hover:bg-muted/30`;
 
 /** A link row while it has somewhere to go, else the same row without a link (a copilot link while the lab is off). */
@@ -59,22 +59,22 @@ function Section({ title, count, unavailable = false, note, children, tone, aler
 }) {
   const empty = !unavailable && count === 0;
   return <section aria-label={title} data-testid="today-section" data-empty={empty || undefined} className={cn("min-w-0 rounded-lg border bg-card", empty && "bg-card/50")}>
-    <h2 className={cn("flex items-baseline gap-2 px-4 text-sm font-semibold", empty ? "py-2.5 text-muted-foreground" : "py-3")}>
+    <h2 className={cn("flex items-baseline gap-2 px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight", empty ? "text-muted-foreground" : "border-b")}>
       <span>{title}</span>
       {!unavailable && <span className={cn("tabular-nums", !empty && tone)} data-testid="today-count">{count}</span>}
       {note && <span className="ml-auto text-xs font-normal text-muted-foreground">{note}</span>}
     </h2>
     {unavailable
-      ? <p role="status" className="px-4 pb-3 text-sm text-amber-300">Could not read this right now.</p>
-      : !empty && children && <div className="px-4 pb-4">{children}</div>}
+      ? <p role="status" className="p-3.5 text-sm text-red-400">Could not read this right now.</p>
+      : !empty && children && <div className="p-3.5">{children}</div>}
     {/* A part that failed says so even when the rest of the section is empty. */}
-    {!unavailable && alert && <div className="px-4 pb-3">{alert}</div>}
+    {!unavailable && alert && <div className="px-3.5 pb-3">{alert}</div>}
   </section>;
 }
 
 function ActNow({ section, lab }: { section: Today["act_now"]; lab: boolean }) {
   if (!ok(section)) return <Section title="Act now" count={0} unavailable />;
-  return <Section title="Act now" count={section.rows.length} tone="text-amber-300"
+  return <Section title="Act now" count={section.rows.length} tone="text-primary"
     note={section.open_positions ? `${section.open_positions} open` : undefined}>
     <ul className="grid gap-2">{section.rows.map(row => (
       <Row key={row.trade_id} testId="today-act-row" label={`Review ${row.contract}`}
@@ -85,7 +85,7 @@ function ActNow({ section, lab }: { section: Today["act_now"]; lab: boolean }) {
             {money(row.unrealized_usd, { signed: true, cents: false })}{row.unrealized_pct != null && ` · ${row.unrealized_pct > 0 ? "+" : ""}${row.unrealized_pct.toFixed(0)}%`}
           </span>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs tabular-nums text-amber-300">{row.reasons.map(r => <span key={r.kind}>{r.text}</span>)}</div>
+        <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs tabular-nums text-primary">{row.reasons.map(r => <span key={r.kind}>{r.text}</span>)}</div>
       </Row>))}
     </ul>
   </Section>;
@@ -93,7 +93,7 @@ function ActNow({ section, lab }: { section: Today["act_now"]; lab: boolean }) {
 
 function Plans({ section, lab }: { section: Today["plans"]; lab: boolean }) {
   if (!ok(section)) return <Section title="Plans near a trigger" count={0} unavailable />;
-  return <Section title="Plans near a trigger" count={section.rows.length} tone="text-sky-300"
+  return <Section title="Plans near a trigger" count={section.rows.length} 
     note={section.armed ? `${section.armed} armed` : undefined}>
     <ul className="grid gap-2">{section.rows.map(row => (
       <Row key={row.path} testId="today-plan-row" label={`Open the ${row.symbol} plan`} href={lab ? row.path : null}>
@@ -116,7 +116,7 @@ function NewSince({ section, lab }: { section: Today["new"]; lab: boolean }) {
   const count = (radar?.count ?? 0) + (thesis?.count ?? 0) + (prep ? 1 : 0);
   const failed = [!radar && "Radar", !thesis && "thesis watch", !ok(section.prep) && "pre-market prep"].filter(Boolean);
   const note = radar?.state === "off" ? "Radar off" : undefined;
-  const alert = failed.length > 0 && <p role="status" className="text-xs text-amber-300">Could not read {failed.join(", ")} right now.</p>;
+  const alert = failed.length > 0 && <p role="status" className="text-xs text-red-400">Could not read {failed.join(", ")} right now.</p>;
   return <Section title="New since you looked" count={count} note={note} alert={alert}>
     <ul className="grid gap-2">
       {prep && <Row testId="today-prep-row" label="Open today's pre-market prep" href={lab ? prep.path : null}>
@@ -142,7 +142,7 @@ function Held({ section }: { section: Today["held"] }) {
   if (!ok(section)) return <Section title="Held back" count={0} unavailable />;
   return <Section title="Held back" count={section.count}>
     <ul className="grid gap-2">{section.rows.map((row, i) => (
-      <li key={i} data-testid="today-held-row" className="min-h-11 min-w-0 rounded border bg-background/40 px-3 py-2">
+      <li key={i} data-testid="today-held-row" className="min-h-11 min-w-0 rounded-md border bg-background/40 px-3 py-2">
         <p className="text-xs text-muted-foreground">{HELD[row.decision] ?? row.decision} · {row.kind} · {clock(row.at)}</p>
         <p className="break-words text-sm font-medium">{row.title}</p>
         <p className="line-clamp-3 whitespace-pre-line break-words text-xs text-muted-foreground">{row.body}</p>
@@ -159,8 +159,8 @@ function Week({ section, lab }: { section: Today["week"]; lab: boolean }) {
     {section.week_pending > 0 && <span className="text-muted-foreground">{section.week_pending} pending</span>}
   </div>;
   return <section aria-label="Your week so far" data-testid="today-section" className="min-w-0 rounded-lg border bg-card">
-    <h2 className="px-4 py-3 text-sm font-semibold">Your week so far</h2>
-    <div className="px-4 pb-4">{lab ? <Link href={REVIEW_WEEK} aria-label="Review my week" className="block min-h-11 rounded py-2 hover:bg-muted/30">{body}</Link> : body}</div>
+    <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Your week so far</h2>
+    <div className="p-3.5">{lab ? <Link href={REVIEW_WEEK} aria-label="Review my week" className="block min-h-11 rounded-md py-2 hover:bg-muted/30">{body}</Link> : body}</div>
   </section>;
 }
 
@@ -195,14 +195,14 @@ export default function TodayView() {
   }, []);
 
   return <div className="mx-auto max-w-2xl space-y-3" data-testid="today">
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h1 className="text-lg font-semibold text-foreground">Today</h1>
-      {body && <p className="text-xs text-muted-foreground" data-testid="today-as-of">As of {clock(body.as_of)} ET</p>}
-      {body && error && <p className="text-xs text-amber-300">Not refreshed</p>}
-      {body?.quote_issue && <p className="text-xs text-amber-300">Prices: {body.quote_issue}</p>}
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <h1 className="text-xl font-semibold">Today</h1>
+      {body && <p className="text-sm tabular-nums text-muted-foreground" data-testid="today-as-of">As of {clock(body.as_of)} ET</p>}
+      {body && error && <p className="text-xs text-red-400">Not refreshed</p>}
+      {body?.quote_issue && <p className="text-xs text-red-400">Prices: {body.quote_issue}</p>}
       {body && <WatchDayLink from={body.day} className="ml-auto inline-flex h-9 items-center gap-1.5 self-center rounded-md border px-3 text-sm font-medium hover:bg-muted/30" />}
     </div>
-    {error && !body ? <p role="status" className="text-sm text-amber-300">Today could not load: {error}</p>
+    {error && !body ? <p role="status" className="text-sm text-red-400">Today could not load: {error}</p>
       : !body ? <p role="status" className="text-sm text-muted-foreground">Reading what matters now…</p>
       : <>
         <ActNow section={body.act_now} lab={lab} />

@@ -28,7 +28,7 @@ const SOURCE: Record<string, string> = { positions: "positions", plans: "plans",
 type TickerState = "held" | "armed" | "exited" | "watching" | "closed";
 const STATE: Record<TickerState, { text: string; tone: string }> = {
   held: { text: "Held", tone: "bg-emerald-400/10 text-emerald-300" },
-  armed: { text: "Plan armed", tone: "bg-sky-400/10 text-sky-300" },
+  armed: { text: "Plan armed", tone: "bg-secondary text-foreground" },
   exited: { text: "Exited", tone: "bg-secondary text-muted-foreground" },
   watching: { text: "Watching", tone: "bg-secondary text-muted-foreground" },
   closed: { text: "Closed", tone: "bg-secondary text-muted-foreground" },
@@ -186,7 +186,7 @@ function TickerRow({ ticker, open, expanded, onExpand, active, actions, pick, sk
         <span className="flex min-w-0 items-center gap-1.5">
           {ticker.needs
             ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-            : unread ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" /> : <span aria-hidden className="w-1.5 shrink-0" />}
+            : unread ? <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> : <span aria-hidden className="w-1.5 shrink-0" />}
           <span className="shrink-0 font-semibold text-foreground">{ticker.symbol}</span>
           <span className={cn("shrink-0 rounded px-1 text-[10px] leading-4", state.tone)}>{state.text}</span>
           {ticker.value && (
@@ -358,7 +358,7 @@ export default function ThreadRail({ actions, active = null, activeSymbol = null
               <span className="flex items-center gap-1.5">
                 <Home size={14} aria-hidden className="shrink-0 text-muted-foreground" />
                 <span className="font-semibold text-foreground">Main</span>
-                {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" />}
+                {radarNew > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className="ml-auto flex shrink-0 gap-2 text-xs tabular-nums text-muted-foreground">
                   {toAnswer > 0 && <span className="text-primary" title="Alerts to answer and Radar hits to rate, in Main">{toAnswer} to answer</span>}
                   {radar.length > 0 && <span title="Radar hits since your last Radar visit; rate them in Main">{radar.length} Radar</span>}

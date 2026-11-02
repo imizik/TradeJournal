@@ -1,4 +1,5 @@
 import { requireAccess } from "@/lib/accessServer";
+import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import DayReviewWorkflow from "@/components/DayReviewWorkflow";
 import ReviewMyWeek from "@/components/copilot/ReviewMyWeek";
 import JoDay from "@/components/JoDay";
@@ -100,11 +101,8 @@ function tradeLabel(trade: Trade) {
   return `${optionType} ${strike} ${trade.expiration ?? "-"}`;
 }
 
-function accountBadgeClass(account: Account | undefined) {
-  return account?.type === "roth_ira"
-    ? "bg-purple-900/40 text-purple-300"
-    : "bg-sky-900/40 text-sky-300";
-}
+const CHIP = "inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-secondary px-2 text-[11.5px] font-medium text-muted-foreground";
+const AMBER_CHIP = "inline-flex h-[22px] items-center whitespace-nowrap rounded-md bg-primary/15 px-2 text-[11.5px] font-medium text-primary";
 
 function currentMark(trade: Trade, quote: PositionQuote | undefined) {
   if (!quote) return null;
@@ -267,7 +265,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <nav aria-label="Daily Review navigation" className="-ml-2 flex flex-wrap items-center text-sm text-muted-foreground">
@@ -283,16 +281,18 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
               </a>
             ))}
           </nav>
-          <h1 className="mt-2 text-xl font-semibold text-foreground">Daily Review</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {selectedDay === newYorkToday() ? "Current trading day" : "Trading day"}: {dayLabel}
-          </p>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+            <h1 className="text-xl font-semibold">Daily Review</h1>
+            <span className="text-sm tabular-nums text-muted-foreground">
+              {selectedDay === newYorkToday() ? "Current trading day" : "Trading day"}: {dayLabel}
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {fridaysMonday(selectedDay) && <ReviewMyWeek monday={fridaysMonday(selectedDay)!} />}
           <a
             href="/trades"
-            className="rounded border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-secondary sm:min-h-9"
           >
             All Trades
           </a>
@@ -301,7 +301,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
 
       <nav
         aria-label="Sections of this day"
-        className="sticky top-[calc(3.5625rem+env(safe-area-inset-top))] z-20 -mx-1 flex gap-1 overflow-x-auto rounded-md border bg-card/95 p-1 backdrop-blur md:top-0"
+        className="sticky top-[calc(3.5625rem+env(safe-area-inset-top))] z-20 -mx-1 flex gap-1 overflow-x-auto rounded-lg border bg-card/95 p-1 backdrop-blur md:top-0"
       >
         {[
           ...(access.owner ? [{ href: "#jo", label: "Jo's day" }, { href: "#thoughts", label: "Your thoughts" }] : []),
@@ -312,7 +312,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
           <a
             key={section.href}
             href={section.href}
-            className="inline-flex min-h-11 shrink-0 items-center rounded px-3 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground md:min-h-9"
+            className="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground md:min-h-9"
           >
             {section.label}
           </a>
@@ -334,9 +334,9 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
       />
 
       <div id="trades" className="scroll-mt-28 space-y-4 md:scroll-mt-16">
-      <section aria-label="Day totals" className="rounded-lg border bg-card px-5 py-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Trades</h2>
-        <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 xl:grid-cols-7">
+      <section aria-label="Day totals" className="rounded-lg border bg-card">
+        <h2 className="border-b px-3.5 py-2.5 text-[13.5px] font-semibold tracking-tight">Trades</h2>
+        <dl className="grid p-4 grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 xl:grid-cols-7">
           <DayFigure label="Trades" value={String(selectedTrades.length)} />
           <DayFigure label="Fills" value={String(fillCount)} />
           <DayFigure label="Realized P&L" value={fmtSignedMoney(realizedPnl)} valueClass={pnlColor(realizedPnl)} />
@@ -359,14 +359,11 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <>
           <section className="grid gap-4 lg:grid-cols-3">
             {tickerSummary.map((summary) => (
-              <div key={summary.ticker} className="rounded-lg border bg-card p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold">{summary.ticker}</h2>
-                  <span className={pnlColor(summary.realizedPnl + (summary.unrealizedPnl ?? 0))}>
-                    {fmtSignedMoney(summary.realizedPnl + (summary.unrealizedPnl ?? 0))}
-                  </span>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <DashboardCard key={summary.ticker} title={summary.ticker} action={
+                <span className={`text-sm tabular-nums ${pnlColor(summary.realizedPnl + (summary.unrealizedPnl ?? 0))}`}>
+                  {fmtSignedMoney(summary.realizedPnl + (summary.unrealizedPnl ?? 0))}
+                </span>}>
+                <div className="grid grid-cols-2 gap-3 text-sm">
                   <MiniMetric label="Trades" value={String(summary.count)} />
                   <MiniMetric label="Still Open" value={String(summary.open)} />
                   <MiniMetric label="Realized" value={fmtSignedMoney(summary.realizedPnl)} valueClass={pnlColor(summary.realizedPnl)} />
@@ -376,7 +373,7 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                     valueClass={pnlColor(summary.unrealizedPnl)}
                   />
                 </div>
-              </div>
+              </DashboardCard>
             ))}
           </section>
 
@@ -387,15 +384,10 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
           </section>
 
           {sessionBehavior && (
-            <section className="rounded-lg border bg-card p-5">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Session Behavior
-                </h2>
-                <span className="text-xs text-muted-foreground">
-                  {sessionBehavior.total} entry fill{sessionBehavior.total !== 1 ? "s" : ""} with context
-                </span>
-              </div>
+            <DashboardCard title="Session Behavior" action={
+              <span className="text-xs text-muted-foreground">
+                {sessionBehavior.total} entry fill{sessionBehavior.total !== 1 ? "s" : ""} with context
+              </span>}>
               <div className="flex flex-wrap gap-2">
                 <BehaviorChip label="Chase" count={sessionBehavior.chase} total={sessionBehavior.total} warn />
                 <BehaviorChip label="Trend Aligned" count={sessionBehavior.trendAligned} total={sessionBehavior.total} good />
@@ -406,12 +398,12 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                 <BehaviorChip label="Near Resistance" count={sessionBehavior.nearResistance} total={sessionBehavior.total} warn />
                 <BehaviorChip label="Near Support" count={sessionBehavior.nearSupport} total={sessionBehavior.total} good />
               </div>
-            </section>
+            </DashboardCard>
           )}
 
           <section className="overflow-x-auto rounded-lg border bg-card">
-            <div className="border-b px-5 py-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="border-b px-3.5 py-2.5">
+              <h2 className="text-[13.5px] font-semibold tracking-tight">
                 Trade Snapshot
               </h2>
             </div>
@@ -455,16 +447,16 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                         <ActivityBadge activity={activity} />
                       </Td>
                       <Td>
-                        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${accountBadgeClass(account)}`}>
+                        <span className={CHIP}>
                           {account?.name ?? "-"}
                         </span>
                       </Td>
                       <Td>
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground/80">
+                        <span className={CHIP}>
                           {trade.status}
                         </span>
                       </Td>
-                      <Td>
+                      <Td num>
                         {openMeta && trade.status === "open" ? (
                           <div className="flex flex-col">
                             <span>{fmtQty(openMeta.qtyLeft)}</span>
@@ -477,9 +469,9 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                           fmtQty(trade.contracts)
                         )}
                       </Td>
-                      <Td>{fmtMoney(trade.avg_entry_premium)}</Td>
-                      <Td>{fmtMoney(trade.avg_exit_premium)}</Td>
-                      <Td>
+                      <Td num>{fmtMoney(trade.avg_entry_premium)}</Td>
+                      <Td num>{fmtMoney(trade.avg_exit_premium)}</Td>
+                      <Td num>
                         <div className="flex flex-col">
                           <span>{fmtMoney(mark)}</span>
                           {quote?.underlying_price != null && trade.instrument_type === "option" && (
@@ -487,18 +479,18 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                           )}
                         </div>
                       </Td>
-                      <Td>
+                      <Td num>
                         <span className={pnlColor(trade.realized_pnl)}>{fmtSignedMoney(trade.realized_pnl)}</span>
                       </Td>
-                      <Td>
+                      <Td num>
                         <span className={pnlColor(unrealized)}>{unrealized != null ? fmtSignedMoney(unrealized) : "-"}</span>
                       </Td>
-                      <Td>
+                      <Td num>
                         <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
                       </Td>
-                      <Td>{trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}</Td>
-                      <Td>{formatDateTime(trade.opened_at)}</Td>
-                      <Td>{formatDateTime(trade.closed_at)}</Td>
+                      <Td num>{trade.hold_duration_mins != null ? formatHoldDuration(trade.hold_duration_mins) : "-"}</Td>
+                      <Td num>{formatDateTime(trade.opened_at)}</Td>
+                      <Td num>{formatDateTime(trade.closed_at)}</Td>
                     </tr>
                   );
                 })}
@@ -506,26 +498,26 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
             </table>
           </section>
 
-          <section className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <section className="rounded-lg border bg-card">
+            <div className="border-b px-3.5 py-2.5">
+              <h2 className="text-[13.5px] font-semibold tracking-tight">
                 Fill Timeline
               </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Includes every fill attached to the selected trades, including earlier entries for trades closed on this day.
               </p>
             </div>
 
             {rows.map(({ trade, fills }) => (
-              <div key={trade.id} className="rounded-lg border bg-card">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+              <div key={trade.id} className="border-b last:border-b-0">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-secondary/40 px-3.5 py-2.5">
                   <div>
                     <a href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="font-semibold hover:underline">
                       {trade.ticker}
                     </a>
                     <span className="ml-2 text-sm text-muted-foreground">{tradeLabel(trade)}</span>
                   </div>
-                  <span className={pnlColor(trade.realized_pnl)}>{fmtSignedMoney(trade.realized_pnl)}</span>
+                  <span className={`text-sm tabular-nums ${pnlColor(trade.realized_pnl)}`}>{fmtSignedMoney(trade.realized_pnl)}</span>
                 </div>
                 <div className="divide-y divide-border">
                   {fills.map((fill) => {
@@ -537,25 +529,21 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                       <a
                         key={fill.id}
                         href={`/fills/${fill.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`}
-                        className="block px-5 py-4 transition-colors hover:bg-muted/50"
+                        className="block px-3.5 py-3 transition-colors hover:bg-muted/50"
                       >
                         <div className="flex flex-wrap items-center gap-3 text-sm">
-                          <span
-                            className={`w-16 rounded px-2 py-0.5 text-center text-xs font-semibold ${
-                              isEntryFill(fill) ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"
-                            }`}
-                          >
+                          <span className={`${CHIP} w-16 justify-center ${isEntryFill(fill) ? "!text-foreground" : ""}`}>
                             {isEntryFill(fill) ? "ENTRY" : "EXIT"}
                           </span>
-                          <span className="text-muted-foreground">{formatDateTime(fill.executed_at)}</span>
-                          <span className="font-medium">
+                          <span className="tabular-nums text-muted-foreground">{formatDateTime(fill.executed_at)}</span>
+                          <span className="font-medium tabular-nums">
                             {fill.side} {fmtQty(fill.contracts)} @ {fmtMoney(fill.price)}
                           </span>
-                          <span className="text-muted-foreground">
+                          <span className="tabular-nums text-muted-foreground">
                             {fmtMoney(fill.contracts * fill.price)} notional
                           </span>
                           {activeFlags.map((flag) => (
-                            <span key={flag.label} className={`rounded px-1.5 py-0.5 text-xs font-medium ${flag.cls}`}>
+                            <span key={flag.label} className={flag.cls}>
                               {flag.label}
                             </span>
                           ))}
@@ -563,8 +551,8 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                         {chips.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-1.5">
                             {chips.map((chip) => (
-                              <span key={`${fill.id}-${chip.label}`} className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                                <span className="text-foreground/60">{chip.label}</span> {chip.value}
+                              <span key={`${fill.id}-${chip.label}`} className={CHIP}>
+                                {chip.label}{" "}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
                               </span>
                             ))}
                           </div>
@@ -572,8 +560,8 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                         {alpacaChips.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             {alpacaChips.map((chip) => (
-                              <span key={`${fill.id}-alpaca-${chip.label}`} className="rounded bg-violet-900/20 px-1.5 py-0.5 text-xs text-muted-foreground">
-                                <span className="text-violet-400/70">{chip.label}</span> {chip.value}
+                              <span key={`${fill.id}-alpaca-${chip.label}`} className={CHIP}>
+                                {chip.label}{" "}<span className="ml-1 tabular-nums text-foreground">{chip.value}</span>
                               </span>
                             ))}
                           </div>
@@ -600,7 +588,7 @@ function DayFigure({ label, value, valueClass = "text-foreground" }: { label: st
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</dd>
+      <dd className={`mt-0.5 text-lg font-medium tabular-nums ${valueClass}`}>{value}</dd>
     </div>
   );
 }
@@ -616,8 +604,8 @@ function MiniMetric({
 }) {
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 font-semibold ${valueClass}`}>{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 font-medium tabular-nums ${valueClass}`}>{value}</p>
     </div>
   );
 }
@@ -632,46 +620,34 @@ function ActivityList({
   selectedDay: string | null;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-        <span className="text-sm font-semibold text-foreground">{trades.length}</span>
-      </div>
+    <DashboardCard title={title} action={<span className="text-sm tabular-nums text-muted-foreground">{trades.length}</span>}>
       {trades.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">None</p>
+        <p className="text-sm text-muted-foreground">None</p>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className="space-y-2">
           {trades.map((trade) => (
-            <a key={trade.id} href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="flex items-center justify-between gap-3 rounded bg-muted px-3 py-2 text-sm hover:bg-muted/80">
+            <a key={trade.id} href={`/trades/${trade.id}?returnTo=${encodeURIComponent(`/daily/${selectedDay}`)}`} className="flex items-center justify-between gap-3 rounded-md border bg-background/40 px-3 py-2 text-sm hover:bg-muted/30">
               <span className="font-medium">{trade.ticker}</span>
               <ActivityBadge activity={tradeActivityForDay(trade, selectedDay)} />
             </a>
           ))}
         </div>
       )}
-    </div>
+    </DashboardCard>
   );
 }
 
 function ActivityBadge({ activity }: { activity: string }) {
-  const config =
-    activity === "same_day"
-      ? { label: "Same Day", cls: "bg-blue-900/40 text-blue-300" }
-      : activity === "opened"
-        ? { label: "Opened", cls: "bg-emerald-900/40 text-emerald-300" }
-        : activity === "closed"
-          ? { label: "Closed", cls: "bg-orange-900/40 text-orange-300" }
-          : { label: "Carry", cls: "bg-muted text-muted-foreground" };
-
-  return <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${config.cls}`}>{config.label}</span>;
+  const label = activity === "same_day" ? "Same Day" : activity === "opened" ? "Opened" : activity === "closed" ? "Closed" : "Carry";
+  return <span className={CHIP}>{label}</span>;
 }
 
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="px-4 py-2 text-left font-medium">{children}</th>;
 }
 
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3 align-top">{children}</td>;
+function Td({ children, num }: { children: React.ReactNode; num?: boolean }) {
+  return <td className={`px-4 py-3 align-top ${num ? "tabular-nums" : ""}`}>{children}</td>;
 }
 
 function buildAlpacaChips(ctx: FillMarketContext | null): { label: string; value: string }[] {
@@ -693,15 +669,15 @@ function buildAlpacaChips(ctx: FillMarketContext | null): { label: string; value
 
 function buildActiveFlags(ctx: FillMarketContext): { label: string; cls: string }[] {
   const flags: { label: string; cls: string }[] = [];
-  if (ctx.is_chase_entry === 1) flags.push({ label: "Chase", cls: "bg-red-900/40 text-red-300" });
-  if (ctx.is_late_move === 1) flags.push({ label: "Late Move", cls: "bg-red-900/40 text-red-300" });
-  if (ctx.is_near_resistance_on_call_entry === 1) flags.push({ label: "Near Resistance", cls: "bg-amber-900/40 text-amber-300" });
-  if (ctx.is_near_support_on_put_entry === 1) flags.push({ label: "Near Support", cls: "bg-amber-900/40 text-amber-300" });
-  if (ctx.is_trend_aligned === 1) flags.push({ label: "Trend Aligned", cls: "bg-emerald-900/40 text-emerald-300" });
-  if (ctx.is_vwap_reclaim === 1) flags.push({ label: "VWAP Reclaim", cls: "bg-emerald-900/40 text-emerald-300" });
-  if (ctx.is_opening_range_breakout === 1) flags.push({ label: "OR Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
-  if (ctx.is_premarket_breakout === 1) flags.push({ label: "PM Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
-  if (ctx.is_overnight === 1) flags.push({ label: "Outside regular hours", cls: "bg-muted text-muted-foreground" });
+  if (ctx.is_chase_entry === 1) flags.push({ label: "Chase", cls: AMBER_CHIP });
+  if (ctx.is_late_move === 1) flags.push({ label: "Late Move", cls: AMBER_CHIP });
+  if (ctx.is_near_resistance_on_call_entry === 1) flags.push({ label: "Near Resistance", cls: AMBER_CHIP });
+  if (ctx.is_near_support_on_put_entry === 1) flags.push({ label: "Near Support", cls: AMBER_CHIP });
+  if (ctx.is_trend_aligned === 1) flags.push({ label: "Trend Aligned", cls: CHIP });
+  if (ctx.is_vwap_reclaim === 1) flags.push({ label: "VWAP Reclaim", cls: CHIP });
+  if (ctx.is_opening_range_breakout === 1) flags.push({ label: "OR Breakout", cls: CHIP });
+  if (ctx.is_premarket_breakout === 1) flags.push({ label: "PM Breakout", cls: CHIP });
+  if (ctx.is_overnight === 1) flags.push({ label: "Outside regular hours", cls: CHIP });
   return flags;
 }
 
@@ -710,7 +686,6 @@ function BehaviorChip({
   count,
   total,
   warn = false,
-  good = false,
 }: {
   label: string;
   count: number;
@@ -719,17 +694,11 @@ function BehaviorChip({
   good?: boolean;
 }) {
   const active = count > 0;
-  const cls = active
-    ? warn
-      ? "border-red-800/50 bg-red-900/20 text-red-300"
-      : good
-        ? "border-emerald-800/50 bg-emerald-900/20 text-emerald-300"
-        : "border-border bg-muted text-foreground"
-    : "border-border bg-transparent text-muted-foreground/50";
+  const cls = !active ? `${CHIP} !bg-transparent` : warn ? AMBER_CHIP : `${CHIP} !text-foreground`;
   return (
-    <span className={`rounded border px-2.5 py-1 text-xs font-medium ${cls}`}>
+    <span className={cls}>
       {label}
-      {active && <span className="ml-1.5 font-bold">{count}/{total}</span>}
+      {active && <span className="ml-1.5 tabular-nums">{count}/{total}</span>}
     </span>
   );
 }

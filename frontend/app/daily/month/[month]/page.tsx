@@ -16,10 +16,13 @@ export default async function MonthlyReviewPage({ params }: { params: Promise<{ 
   const row = months.find((item) => item.month === month);
   if (!row) notFound();
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <a href="/daily" className="text-sm text-muted-foreground hover:text-foreground">Review Calendar</a>
-        <h1 className="mt-2 text-xl font-semibold text-foreground">{monthLabel(month)}</h1>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+          <h1 className="text-xl font-semibold">{monthLabel(month)}</h1>
+          <span className="text-sm tabular-nums text-muted-foreground">{row.closed_trades} closed</span>
+        </div>
       </div>
       <MonthlyAiPanel month={month} monthLabel={monthLabel(month)} closedTrades={row.closed_trades}
         initialReview={saved?.review ?? null} initialGeneratedAt={saved?.generated_at ?? null} />

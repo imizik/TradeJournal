@@ -12,11 +12,13 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 
 ## The screens
 
-The private sidebar and phone More menu (`components/Nav.tsx`) put the everyday
-pages first (Today for the owner, Dashboard, Charts, Daily Review, Jo, Trades, Analytics, Fills), then
-**Signals & practice** (Signals, Scanner, Radar, Proof, Experiments, Daily Practice, Advisor review),
-then **Labs** (Strategy Lab, Copilot for the owner while `COPILOT_ENABLED=true`, Research Studio, Level 2 lab and AI Buildout). Assistant access remains available when enabled. A **Sync**
-button opens a drawer on any page.
+The private sidebar and phone More menu (`components/Nav.tsx`) keep three pages in
+view (Today for the owner, or the Copilot desk in its place while `COPILOT_ENABLED=true`; Dashboard; Charts). Four
+groups sit below them, collapsed by default and remembered per device, with the current page's group opening by itself:
+**Journal** (Trades, Fills, Daily Review, Analytics), **Market** (Radar, Scanner, Signals, Jo, Proof, Experiments),
+**Practice** (Daily Practice, Advisor review, Strategy Lab, Level 2 lab) and **Research** (Research Studio, Company Research, AI Buildout).
+A group with no page for this viewer is not drawn. Assistant access (when enabled) and Deploys are small owner-only links beside the **Sync**
+button, which opens a drawer on any page.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
 |---|---|---|---|---|
