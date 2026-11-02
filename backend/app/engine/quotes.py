@@ -86,6 +86,9 @@ class OptionQuoteResult:
     # neither may be written to a fill's *_at_fill columns.
     provider: str | None = None
     iv_updated_at: str | None = None
+    # Tradier only (ORATS, the same hourly stamp); yfinance gives none.
+    delta: float | None = None
+    theta: float | None = None
 
 
 @dataclass
@@ -211,6 +214,8 @@ def _tradier_option_quotes(requests: list[OptionQuoteRequest]) -> list[OptionQuo
                     iv=quote.iv_mid,
                     provider=PROVIDER_TRADIER,
                     iv_updated_at=quote.greeks_updated_at,
+                    delta=quote.delta,
+                    theta=quote.theta,
                 )
                 if quote
                 else OptionQuoteResult(provider=PROVIDER_TRADIER)

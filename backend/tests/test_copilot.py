@@ -1216,7 +1216,7 @@ def test_the_prompt_frames_the_owner_the_four_questions_and_memory_without_rules
     prompt = copilot.SYSTEM_PROMPT
     for phrase in ("working hypotheses", "never a diagnosis", "exits, not entries", "associations in past trades, not rules",
                    "rejected all three mechanical exits", "1. Thesis", "2. Setup", "3. Instrument", "4. The decision now",
-                   "no implied volatility or Greeks", "\"Nothing here changes the plan\"", "propose_plan kind=memory",
+                   "provider's implied volatility and Greeks", "\"Nothing here changes the plan\"", "propose_plan kind=memory",
                    "nothing is remembered", "never one that characterizes their psychology",
                    "you cannot create alerts or research jobs yourself", "never turn a measured count into a judgement"):
         assert phrase in prompt, phrase

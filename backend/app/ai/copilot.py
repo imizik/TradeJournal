@@ -72,8 +72,8 @@ Four separate questions for any trade idea. Answer the ones the moment needs and
 2. Setup: is there evidence for entering now rather than later (group confirmation, a level, relative strength, catalyst \
 timing), or is the move already extended?
 3. Instrument: do the option's expiry, strike and premium fit that horizon and the move it needs? A thesis in months \
-expressed through a contract that expires in days is a mismatch worth naming, not a bad thesis. Option quotes here are \
-marks only: no implied volatility or Greeks are available, so say that rather than estimate them.
+expressed through a contract that expires in days is a mismatch worth naming, not a bad thesis. Option quotes carry the \
+provider's implied volatility and Greeks, refreshed hourly: quote them with their as-of, and never estimate one that is missing.
 4. The decision now: has anything changed that bears on the thesis, or only on the position (time held, gain given back, \
 expiry near)? Keep those two apart; a valid thesis does not by itself argue for holding a particular contract.
 "Nothing here changes the plan" and "this is not worth a trade" are complete answers. Give them plainly when they are \
@@ -173,8 +173,9 @@ unknown.
 - When the owner names an option or a horizon, or before you propose a trade_plan on options, call get_option_candidates \
 (the symbol, the horizon in days, the direction, their budget if they gave one) and compare 2-3 of its contracts against \
 the horizon: a thesis in weeks through a contract that expires in days is a mismatch to name. Premium, spread and \
-break-even move are the numbers to quote, with the chain's as-of. Never recommend a specific contract as advice: present \
-the trade-offs and let them choose.
+break-even move are the numbers to quote, with the chain's as-of; set the break-even move against the expiry's expected \
+move (move_needed_vs_expected above 1 needs more than the market prices in), and on a hold of days name theta per day. \
+Never recommend a specific contract as advice: present the trade-offs and let them choose.
 - If the context line or a tool result marks the data as SIMULATED, say plainly in your answer that the numbers are \
 simulated demo data, not real market data, and never present them as recorded or live.
 - You cannot place orders or change accounts, and you cannot save plans, memories or alerts yourself: propose_plan only \
@@ -850,8 +851,15 @@ class FakeAdapter:
             lines.append(f"- {expiry['expiry']} ({r['days']} d) {r['strike']:g} {r['type']}: ${r['ask']} ask"
                          + (f" (${cost:,.0f} a contract)" if cost is not None else "")
                          + f", spread {r['spread_pct']}%, needs {r['breakeven_move_pct']:+.1f}% by expiry to break even; {fit}.")
-        lines.append("Delta and implied volatility are unavailable here, so I haven't estimated them. These are trade-offs, "
-                     "not a recommendation: the contract is your pick.")
+        quoted = [r for r in data["candidates"] if r.get("iv_pct") is not None]
+        if quoted:
+            r = quoted[0]
+            lines.append(f"The provider's figures ({data.get('greeks_note', 'as given')}): {r['strike']:g} {r['type']} delta {r['delta']}, "
+                         f"IV {r['iv_pct']}%, theta {r['theta']} a share a day.")
+        moves = [(e["expiry"], e["expected_move"]) for e in data["expiries"] if (e.get("expected_move") or {}).get("state") == "ready"]
+        if moves:
+            lines.append("Expected move by expiry (the at-the-money straddle): " + "; ".join(f"{d} ±{m['move_pct']}%" for d, m in moves) + ".")
+        lines.append("These are trade-offs, not a recommendation: the contract is your pick.")
         return scripted("Focus", f"Weigh each expiry against your {horizon}-day horizon; the contract is your pick.", "\n".join(lines))
 
     @staticmethod

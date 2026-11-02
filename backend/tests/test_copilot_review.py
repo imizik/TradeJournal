@@ -149,8 +149,8 @@ def _seed_open(db, monkeypatch):
     from app.engine import quotes
     monkeypatch.setattr(copilot_book, "_warm_option_quotes", lambda trades: None)
     monkeypatch.setattr(quotes, "get_stock_quotes", lambda symbols: {s: 95.0 for s in symbols})
-    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (310.0, "2026-10-23T15:10:00Z") if trade.instrument_type == "option"
-                        else (q.get(trade.ticker), None))
+    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (310.0, "2026-10-23T15:10:00Z", {"iv_pct": 61.0, "delta": 0.52}) if trade.instrument_type == "option"
+                        else (q.get(trade.ticker), None, {}))
     trade = db.get(Trade, HELD)
     entries = db.exec(select(Fill).join(TradeFill, TradeFill.fill_id == Fill.id)
                       .where(TradeFill.trade_id == trade.id, TradeFill.role == "entry")).all()
@@ -200,7 +200,7 @@ def test_an_open_position_reads_now_plan_alerts_and_comparison(db, monkeypatch):
 
 def test_an_open_position_without_a_quote_says_so(db, monkeypatch):
     _seed_open(db, monkeypatch)
-    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (None, None))
+    monkeypatch.setattr(copilot_book, "_mark", lambda trade, q: (None, None, {}))
     now = copilot_review.trade_review(str(HELD), session=db)["now"]
     assert "open_pnl_usd" not in now and "given_back_from_peak_usd" not in now and "No current quote" in now["quote"]
     stock = copilot_review.trade_review(str(UUID(int=11)), session=db)  # an open stock: no expiry, no watch

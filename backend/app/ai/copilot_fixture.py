@@ -438,9 +438,10 @@ class FixtureEvidence:
 
 def simulated_chains(symbol: str, spot: float, today) -> dict:
     """SIMULATED option chains: strikes every 2.5 from 80 to 115, premiums from a fixed 75% volatility rule of thumb
-    (intrinsic value plus 0.4 x price x vol x sqrt(years), fading away from the money), 4% wide. Not market data."""
+    (intrinsic value plus 0.4 x price x vol x sqrt(years), fading away from the money), 4% wide, with Greeks from the
+    same rule (delta from moneyness, theta from the premium's decay over the days left). Not market data."""
     from datetime import date, datetime, timezone
-    from math import exp, log, sqrt
+    from math import erf, exp, log, sqrt
     from app.engine.options_models import OptionChain, OptionContract
     dates = [date(2026, 10, 23), date(2026, 10, 30), date(2026, 11, 6), date(2026, 11, 13), date(2026, 11, 20),
              date(2026, 12, 18), date(2027, 1, 15), date(2027, 3, 19)]
@@ -457,11 +458,17 @@ def simulated_chains(symbol: str, spot: float, today) -> dict:
                 mid = max(intrinsic + 0.4 * spot * scale * exp(-0.5 * (log(strike / spot) / scale) ** 2), 0.05)
                 half = max(0.02 * mid, 0.025)
                 occ = f"{symbol}{expiry:%y%m%d}{kind[0].upper()}{round(strike * 1000):08d}"
+                d1 = (log(spot / strike) + 0.5 * 0.75 ** 2 * years) / (0.75 * sqrt(years))
+                n_d1 = 0.5 * (1 + erf(d1 / sqrt(2)))
+                delta = n_d1 if kind == "call" else n_d1 - 1
+                days_left = max((expiry - today).days, 1)
                 contracts.append(OptionContract(
                     symbol=occ, underlying=symbol, root=symbol, expiration=expiry, option_type=kind, strike=strike, multiplier=100,
                     bid=round(max(mid - half, 0), 2), ask=round(mid + half, 2), last=round(mid, 2), bid_size=10, ask_size=10,
                     volume=int(400 * exp(-abs(strike - spot) / 6)), open_interest=int(3000 * exp(-abs(strike - spot) / 10)),
-                    bid_time=fetched, ask_time=fetched, trade_time=fetched, iv=None, iv_smoothed=None, delta=None, gamma=None,
-                    theta=None, vega=None, greeks_updated_at=None))
+                    bid_time=fetched, ask_time=fetched, trade_time=fetched, iv=0.75, iv_smoothed=0.74, delta=round(delta, 3),
+                    gamma=round(exp(-0.5 * d1 ** 2) / (spot * 0.75 * sqrt(years) * sqrt(2 * 3.141592653589793)), 4),
+                    theta=round(-(mid - intrinsic) / days_left / 2, 4), vega=round(spot * sqrt(years) * exp(-0.5 * d1 ** 2) / 100, 4),
+                    greeks_updated_at="2026-10-23 10:00:00"))
         out[expiry] = OptionChain(symbol, expiry, "simulated", fetched, tuple(contracts))
     return out

@@ -1,7 +1,7 @@
 """Option candidates (docs/copilot-lab.md § Option candidates): real contracts from the existing chain code for the
 instrument question. Expiries bracket the horizon, strikes run from about 5% in the money to 10% out on the view's side,
-the per-contract, spread, distance and break-even arithmetic is exact, a budget counts contracts at the ask, delta and
-IV stay unavailable, the answer is capped and bounded, an unavailable provider says so; validated, routed and labelled,
+the per-contract, spread, distance and break-even arithmetic is exact, a budget counts contracts at the ask, the
+provider's IV and Greeks pass through, the answer is capped and bounded, an unavailable provider says so; validated, routed and labelled,
 simulated in the fixture, unavailable in replay, never given to research jobs; the scripted model compares contracts and
 the plan card gets a pick list; the system prompt asks for trade-offs, never advice."""
 import asyncio
@@ -101,9 +101,12 @@ def test_per_contract_spread_distance_break_even_and_budget():
     [call] = copilot_options.candidates("NBIS", [expiry], {expiry: stub}, SPOT, TODAY, 21, "long", budget_usd=1000)["candidates"]
     assert call == {"expiry": "2026-11-13", "days": 21, "type": "call", "strike": 105.0, "bid": 2.4, "ask": 2.6, "mid": 2.5,
                     "per_contract": {"bid": 240.0, "ask": 260.0, "mid": 250.0}, "spread_pct": 8.0, "open_interest": 1200, "volume": 85,
-                    "delta": "unavailable", "iv": "unavailable",  # the chain carries provider greeks; they are not passed on
                     "to_strike_pct": 5.0, "breakeven_move_pct": 7.6,  # 105 + 2.60 = 107.60, +7.6% from 100
+                    "iv_pct": 60.0, "delta": 0.5, "theta": -0.1, "theta_per_contract_usd": -10.0,  # the provider's greeks, as given
                     "budget_buys": {"contracts": 3, "cost_usd": 780.0}}
+    out = copilot_options.candidates("NBIS", [expiry], {expiry: stub}, SPOT, TODAY, 21, "long")
+    assert out["greeks_as_of"] == "2026-10-23 10:00:00" and "ORATS" in out["greeks_note"]
+    assert out["expiries"][0]["expected_move"]["state"] in ("ready", "none", "too_wide")
     [put] = copilot_options.candidates("NBIS", [expiry], {expiry: stub}, SPOT, TODAY, 21, "short", budget_usd=210)["candidates"]
     assert put["breakeven_move_pct"] == -7.1 and put["to_strike_pct"] == -5.0  # 95 - 2.10 = 92.90
     assert "open_interest" not in put and "volume" not in put  # not listed, so not shown
@@ -235,7 +238,9 @@ def test_replay_is_unavailable_and_the_fixture_is_a_simulated_nbis_chain():
     fixture = FixtureEvidence().get_option_candidates("NBIS", 21, "long", 1500.0)
     assert fixture["simulated"] is True and fixture["state"] == "ok" and fixture["spot"] == 94.35
     assert [e["expiry"] for e in fixture["expiries"]] == ["2026-11-06", "2026-11-13", "2026-11-20"]
-    assert len(fixture["candidates"]) == 8 and all(r["delta"] == r["iv"] == "unavailable" for r in fixture["candidates"])
+    assert len(fixture["candidates"]) == 8 and all(isinstance(r["delta"], float) and r["iv_pct"] == 75.0 for r in fixture["candidates"])
+    assert all(e["expected_move"]["state"] == "ready" and e["expected_move"]["move_pct"] > 0 for e in fixture["expiries"])
+    assert all(r["move_needed_vs_expected"] > 0 for r in fixture["candidates"])
     assert len(copilot_tools.bounded({**copilot.SIMULATED_MARKER, **fixture})) <= copilot_tools.MAX_RESULT_CHARS
     assert copilot_tools.provenance("get_option_candidates", fixture, "fixture")["kind"] == "simulated"
     assert FixtureEvidence().get_option_candidates("CRWV", 21, "long")["state"] == "unavailable"
@@ -255,14 +260,14 @@ def test_the_scripted_model_compares_contracts_and_the_card_gets_a_pick_list():
     assert tool["provenance"]["kind"] == "simulated" and tool["summary"] == "8 calls across 3 expiries for a 21-day horizon"
     picks = tool["candidates"]
     assert picks["symbol"] == "NBIS" and picks["simulated"] is True and len(picks["picks"]) == 8
-    assert picks["picks"][0] == {"label": "Nov 6 '26 95C", "days": 14, "ask_contract": 565.0, "ask": 5.65, "delta": None}
+    assert picks["picks"][0]["label"] == "Nov 6 '26 95C" and picks["picks"][0]["ask_contract"] == 565.0 and 0 < picks["picks"][0]["delta"] < 1
     assert picks["as_of"] == tool["provenance"]["as_of"]  # the premium's read time, for "Size it for me"
     assert all(len(p["label"]) <= 40 for p in picks["picks"])  # fits the plan's contract hint
     text = "".join(e["delta"] for e in events if e["type"] == "text")
     assert "2026-11-06 (14 d) 95 call: $5.65 ask ($565 a contract), spread 4.0%, needs +6.7% by expiry to break even; " \
            "expires before your horizon: a mismatch to name." in text
     assert "2026-11-13 (21 d) 95 call" in text and "covers the horizon" in text and "runs past the horizon" in text
-    assert "not a recommendation" in text and "haven't estimated them" in text
+    assert "not a recommendation" in text and "IV 75.0%" in text and "Expected move by expiry" in text
     assert copilot.option_candidates_card({"state": "unavailable"}) is None
 
 
@@ -272,9 +277,11 @@ def test_the_prompt_asks_for_candidates_as_trade_offs_never_advice():
                    "compare 2-3 of its contracts against the horizon",
                    "a thesis in weeks through a contract that expires in days is a mismatch to name",
                    "Premium, spread and break-even move are the numbers to quote",
+                   "set the break-even move against the expiry's expected move", "name theta per day",
                    "Never recommend a specific contract as advice: present the trade-offs and let them choose"):
         assert phrase in prompt, phrase
-    # The pinned instrument sentences stay: no IV or Greeks, so they are never estimated.
-    for phrase in ("3. Instrument", "no implied volatility or Greeks", "a mismatch worth naming, not a bad thesis",
+    # The pinned instrument sentences: the provider's IV and Greeks are quoted with their as-of, never estimated.
+    for phrase in ("3. Instrument", "provider's implied volatility and Greeks, refreshed hourly", "never estimate one that is missing",
+                   "a mismatch worth naming, not a bad thesis",
                    "exactly one propose_plan kind=trade_plan", "Before you propose a trade_plan, call get_level_history"):
         assert phrase in prompt, phrase

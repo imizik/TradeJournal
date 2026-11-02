@@ -205,8 +205,9 @@ TOOLS: list[dict] = [
                        "`horizon_days` (the last before it, the first at or after it, the next after), strikes from about 5% "
                        "in the money to 10% out. Each: expiry, days to expiry, strike, bid/ask/mid per share and per contract, "
                        "spread % of mid, open interest and volume when listed, distance to strike %, the break-even move % "
-                       "by expiry at the ask, and with `budget_usd` how many contracts it buys at the ask. Delta and implied "
-                       "volatility are unavailable (never estimate them). Quotes with as_of, not a recommendation.",
+                       "by expiry at the ask, and with `budget_usd` how many contracts it buys at the ask; the provider's implied "
+                       "volatility, delta and theta with their hourly as-of (greeks_as_of), and each expiry's expected move "
+                       "from the at-the-money straddle. Never estimate a figure that is missing. Quotes with as_of, not a recommendation.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbol", "horizon_days", "direction"],
                          "properties": {"symbol": _SYMBOL_SCHEMA,
                                         "horizon_days": {"type": "integer", "description": "How long the thesis needs, in calendar days (1-365)"},

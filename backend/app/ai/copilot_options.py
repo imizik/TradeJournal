@@ -2,8 +2,10 @@
 
 Read-only. Picks a few real contracts from the existing chain code (`options_feed`, Tradier, the same cache and
 pacing as the Charts page) so the model can compare expiry, strike, premium, spread and break-even against the
-owner's horizon. Every market number is the provider's quote passed through or plain arithmetic on it; delta and
-implied volatility are reported as unavailable, never estimated. It ranks nothing and recommends nothing.
+owner's horizon. Every market number is the provider's quote passed through or plain arithmetic on it: the chain's
+ORATS implied volatility and Greeks come through as given, with their own hourly timestamp, and the at-the-money
+straddle gives each expiry's expected move (`options_implied.straddle`). Nothing is estimated where the provider gave
+nothing. It ranks nothing and recommends nothing.
 """
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ import json
 import math
 from datetime import date, datetime, timedelta, timezone
 
-from app.engine.options_implied import days_to
+from app.engine.options_implied import days_to, straddle
 from app.engine.options_models import OptionChain, OptionContract
 from app.engine.options_positioning import primary_root
 
@@ -19,13 +21,19 @@ MAX_CANDIDATES = 8
 ITM, OTM = 0.05, 0.10  # strikes from about 5% in the money to 10% out
 UNAVAILABLE = "unavailable"
 SIDE = {"long": "call", "short": "put"}
-UNITS = ("Premiums are per share as quoted (bid, ask, mid); per_contract is per share x the contract's multiplier. "
+UNITS = ("Premiums are per share as quoted (bid, ask, mid, last); per_contract is per share x the contract's multiplier. "
          "spread_pct is (ask - bid) / mid. to_strike_pct is the strike's distance from the price; breakeven_move_pct is "
          "the move the underlying needs by expiry to break even paying the ask. Open interest is OCC's previous-close "
-         "figure; volume is today's so far. spot is the quote service's last price (cached up to a minute), read with "
-         "the chains; as_of is the oldest chain's read time.")
+         "figure; volume is today's so far. iv_pct is the provider's (ORATS) implied volatility in percent, annualized; "
+         "delta and theta are the provider's, theta per share per day as quoted (theta_per_contract_usd x the multiplier); "
+         "greeks_as_of is the provider's own hourly stamp, passed through as given. Each expiry's expected_move "
+         "is the at-the-money straddle's mid (call + put) in dollars and as move_pct of the price, with its quote time; "
+         "move_needed_vs_expected is breakeven_move_pct / move_pct (above 1 needs more than the market prices in). spot "
+         "is the quote service's last price (cached up to a minute), read with the chains; as_of is the oldest chain's "
+         "read time.")
 NOTE = ("Real contracts to compare against the horizon, not a recommendation: present the trade-offs and let the owner "
-        "choose. Delta and implied volatility are unavailable here and must not be estimated.")
+        "choose. A Greek or volatility the provider did not give is null; never estimate one.")
+GREEKS_NOTE = "ORATS, refreshed hourly; the stamp is the provider's own, in the time zone it gives."
 
 
 def pick_expirations(live: list[date], today: date, horizon_days: int) -> list[date]:
@@ -77,12 +85,16 @@ def _row(c: OptionContract, spot: float, today: date, budget_usd: float | None) 
            "per_contract": UNAVAILABLE if not c.multiplier else
            {"bid": round(c.bid * c.multiplier, 2), "ask": round(c.ask * c.multiplier, 2), "mid": round(mid * c.multiplier, 2)},
            "spread_pct": round((c.ask - c.bid) / mid * 100, 1)}
+    if c.last is not None:
+        row["last"] = round(c.last, 4)
     if c.open_interest is not None:
         row["open_interest"] = c.open_interest
     if c.volume is not None:
         row["volume"] = c.volume
-    row.update(delta=UNAVAILABLE, iv=UNAVAILABLE, to_strike_pct=round((c.strike - spot) / spot * 100, 2),
-               breakeven_move_pct=round((breakeven - spot) / spot * 100, 2))
+    row.update(to_strike_pct=round((c.strike - spot) / spot * 100, 2), breakeven_move_pct=round((breakeven - spot) / spot * 100, 2),
+               iv_pct=None if c.iv is None else round(c.iv * 100, 1), delta=_num(c.delta, 3), theta=_num(c.theta, 4))
+    if c.theta is not None and c.multiplier:
+        row["theta_per_contract_usd"] = round(c.theta * c.multiplier, 2)
     if budget_usd is not None:
         if c.multiplier:
             count = math.floor(budget_usd / (c.ask * c.multiplier) + 1e-9)
@@ -90,6 +102,26 @@ def _row(c: OptionContract, spot: float, today: date, budget_usd: float | None) 
         else:
             row["budget_buys"] = UNAVAILABLE
     return row
+
+
+def _num(value, digits: int):
+    return None if value is None else round(float(value), digits)
+
+
+def expected_move(chain: OptionChain, spot: float) -> dict:
+    """One expiry's expected move from its at-the-money straddle (``options_implied.straddle`` without the one-minute
+    freshness rule: these are cached chain reads, labelled by their quote time), or why there is none."""
+    s = straddle(chain, spot)
+    if s.get("state") != "ready":
+        return {"state": s.get("state", "none"), **({"reason": s["reason"]} if s.get("reason") else {})}
+    return {"state": "ready", "strike": s["strike"], "move_usd": round(s["move"], 2), "move_pct": round(s["percent"] * 100, 1),
+            "iv_pct": None if s.get("iv") is None else round(s["iv"] * 100, 1), "quoted_at": s.get("quoted_at")}
+
+
+def _greeks_stamp(chains: dict[date, OptionChain], present: list[date]) -> dict:
+    """The provider's Greeks timestamp, once for the answer (it is the same hourly stamp on every contract of a read)."""
+    stamps = {c.greeks_updated_at for d in present for c in chains[d].contracts if c.greeks_updated_at}
+    return {"greeks_as_of": sorted(stamps)[-1], "greeks_note": GREEKS_NOTE} if stamps else {}
 
 
 def _bounded(out: dict, most: int) -> dict:
@@ -113,12 +145,17 @@ def candidates(symbol: str, chosen: list[date], chains: dict[date, OptionChain],
     order = sorted(chosen, key=lambda d: ("first_at_or_after", "after", "before").index(roles[d]))
     present = [d for d in order if d in chains]
     caps = {d: MAX_CANDIDATES // len(present) + (i < MAX_CANDIDATES % len(present)) for i, d in enumerate(present)} if present else {}
-    rows, no_quote = [], 0
+    rows, no_quote, moves = [], 0, {}
     for d in present:
         window = [c for c in chains[d].contracts if c.root == root and c.option_type == side and low <= c.strike <= high]
         usable = [c for c in window if _usable(c)]
         no_quote += len(window) - len(usable)
-        rows += [_row(c, spot, today, budget_usd) for c in _spread(usable, spot, caps[d])]
+        moves[d] = expected_move(chains[d], spot)
+        for c in _spread(usable, spot, caps[d]):
+            row = _row(c, spot, today, budget_usd)
+            if moves[d].get("move_pct"):
+                row["move_needed_vs_expected"] = round(abs(row["breakeven_move_pct"]) / moves[d]["move_pct"], 1)
+            rows.append(row)
     rows.sort(key=lambda r: (r["expiry"], r["strike"]))
     missing = [d for d in chosen if d not in chains]
     state = "ok" if rows and not missing else "partial" if rows else "unavailable" if missing else "none"
@@ -126,9 +163,11 @@ def candidates(symbol: str, chosen: list[date], chains: dict[date, OptionChain],
            "horizon_days": horizon_days, "horizon_date": (today + timedelta(days=horizon_days)).isoformat(),
            "spot": round(spot, 4), "budget_usd": budget_usd,
            "expiries": [{"expiry": d.isoformat(), "days": days_to(d, today), "role": roles[d], "weekday": d.strftime("%a"),
-                         **({"missing": True} if d in missing else {})} for d in sorted(chosen)],
+                         **({"missing": True} if d in missing else {}), **({"expected_move": moves[d]} if d in moves else {})}
+                        for d in sorted(chosen)],
            "reaches_horizon": any(role != "before" for role in roles.values()),
-           "candidates": rows, "units": UNITS, "note": NOTE}
+           "candidates": rows, "units": UNITS, "note": NOTE,
+           **_greeks_stamp(chains, present)}
     if not out["reaches_horizon"]:
         out["horizon_note"] = "No listed expiration reaches the horizon; these are the longest listed."
     if no_quote:
