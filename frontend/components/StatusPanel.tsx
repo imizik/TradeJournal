@@ -21,7 +21,7 @@ const JOB_LABELS: Record<keyof Jobs, string> = {
 };
 
 const JOB_COLORS: Record<keyof Jobs, { bar: string; dot: string }> = {
-  polygon: { bar: "bg-sky-500", dot: "bg-sky-400" },
+  polygon: { bar: "bg-muted-foreground", dot: "bg-muted-foreground" },
   alpaca:  { bar: "bg-violet-500", dot: "bg-violet-400" },
   path:    { bar: "bg-teal-500", dot: "bg-teal-400" },
 };
@@ -295,7 +295,7 @@ export default function StatusPanel({ open, onClose }: Props) {
                       done={coverage.fills.polygon_enriched}
                       total={coverage.fills.total}
                       missing={coverage.fills.polygon_missing}
-                      color="bg-sky-500"
+                      color="bg-muted-foreground"
                     />
                     <CoverageRow
                       label="Alpaca Context"

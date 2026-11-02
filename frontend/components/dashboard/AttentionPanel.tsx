@@ -10,10 +10,10 @@ const SHOWN = 6;
 // Read once per request, after the sources arrive, so ages are measured against them.
 const requestTime = () => Date.now();
 const DOT: Record<AttentionPriority, string> = {
-  integrity: "bg-red-400", data: "bg-red-400", soon: "bg-amber-400", alert: "bg-sky-400", follow_up: "bg-muted-foreground",
+  integrity: "bg-red-400", data: "bg-red-400", soon: "bg-amber-400", alert: "bg-foreground", follow_up: "bg-muted-foreground",
 };
 const CUE: Record<AttentionPriority, string> = {
-  integrity: "text-red-300", data: "text-red-300", soon: "text-amber-300", alert: "text-sky-300", follow_up: "text-muted-foreground",
+  integrity: "text-red-300", data: "text-red-300", soon: "text-amber-300", alert: "text-foreground", follow_up: "text-muted-foreground",
 };
 
 /** Streams in after the rest of the Dashboard: its extra sources (alerts,

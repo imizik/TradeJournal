@@ -78,7 +78,7 @@ function waitDescription(job: SyncJob) {
 }
 
 function statusClass(status: string) {
-  if (status === "running" || status === "queued") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  if (status === "running" || status === "queued") return "border-border bg-secondary text-foreground";
   if (status === "waiting_api") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
   if (status === "succeeded") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
   if (status === "failed") return "border-red-500/30 bg-red-500/10 text-red-300";
@@ -125,7 +125,7 @@ function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
       );
     }
     return (
-      <span className="hidden max-w-[320px] items-center gap-1.5 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-300 sm:inline-flex">
+      <span className="hidden max-w-[320px] items-center gap-1.5 rounded border border-border bg-secondary px-2.5 py-1.5 text-xs text-foreground sm:inline-flex">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span className="truncate">{job.label}{pct == null ? "" : ` · ${pct}%`}</span>
       </span>
@@ -405,10 +405,10 @@ function SyncCenterDrawer({
           )}
 
           {summary?.running && summary.active_job && (
-            <div className="mt-3 rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+            <div className="mt-3 rounded-lg border bg-secondary p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300/80">Active now</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active now</p>
                   <p className="mt-0.5 truncate text-sm font-medium text-foreground">{summary.active_job.label}</p>
                   {summary.active_job.message && (
                     <p className="mt-1 truncate text-xs text-muted-foreground">{summary.active_job.message}</p>
@@ -544,7 +544,7 @@ function JobProgress({ job, compact = false }: { job: SyncJob; compact?: boolean
   const failed = job.status === "failed";
   const complete = job.status === "succeeded";
   const waiting = waitSeconds != null;
-  const barColor = failed ? "bg-red-500" : waiting ? "bg-amber-400" : complete ? "bg-emerald-500" : "bg-sky-500";
+  const barColor = failed ? "bg-red-500" : waiting ? "bg-amber-400" : complete ? "bg-emerald-500" : "bg-muted-foreground";
 
   return (
     <div className={compact ? "mt-2" : "mt-3"}>
@@ -576,7 +576,7 @@ function JobProgress({ job, compact = false }: { job: SyncJob; compact?: boolean
             style={{ width: `${pct}%` }}
           />
         ) : job.running ? (
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-sky-500" />
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-muted-foreground" />
         ) : null}
       </div>
 

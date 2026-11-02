@@ -31,6 +31,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await expect(page.getByText("No practice runs are shared with this assistant for this day.")).toBeVisible();
   await expect(page.getByText("No decision records are shared with this assistant.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Fills", exact: true })).toHaveCount(0);
+  // Only the groups holding a page this assistant may open are drawn.
+  for (const name of ["Market", "Practice", "Research"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Prepare today", exact: true })).toBeDisabled();
   expect(journalRequests).toEqual([]);
   const assistantSession = await (await page.request.get("/api/access/me")).json();

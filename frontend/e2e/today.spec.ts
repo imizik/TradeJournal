@@ -85,7 +85,7 @@ test("the sections in priority order, each row linking to where you act, refresh
   await expect(page.getByTestId("today-week")).toContainText("3 of 5 entries planned");
   await expect(page.getByTestId("today-week")).toContainText("Streak 2 · best 4");
   // Desktop: Today sits ahead of Dashboard in the sidebar; one readable column, not stretched across 1440.
-  const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("heading", { name: "Labs" }) });
+  const sidebar = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Journal", exact: true }) });
   expect((await sidebar.getByRole("link").allTextContents()).slice(0, 2)).toEqual(["Today", "Dashboard"]);
   await expect(sidebar.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
   expect((await page.getByTestId("today").boundingBox())!.width).toBeLessThanOrEqual(672);

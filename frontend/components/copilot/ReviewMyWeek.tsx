@@ -28,10 +28,10 @@ export function usePracticeLine(on: boolean): string | null {
 /** The lab home's line under Review my week; nothing while no goal is active. */
 export function PracticeLine({ className }: { className?: string }) {
   const line = usePracticeLine(true);
-  return line ? <p className={className ?? "text-xs text-sky-200/80"}>{line}</p> : null;
+  return line ? <p className={className ?? "text-xs text-muted-foreground"}>{line}</p> : null;
 }
 
-const BUTTON = "inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-sky-500/60 px-3 text-xs font-medium text-sky-200 hover:bg-sky-500/15 sm:min-h-9";
+const BUTTON = "inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary sm:min-h-9";
 
 /**
  * "Review my week": opens the Copilot Lab with "Review my week" in the message box, so one Send gets the weekly review
@@ -45,7 +45,7 @@ export default function ReviewMyWeek({ monday, className, practice = false }: { 
   return <Link href={weekReviewHref(monday)} className={cn(className ?? BUTTON, line && "min-w-0 shrink py-1")}
     title="Open the copilot with a review of your trading week. Nothing is sent until you press Send.">
     <CalendarCheck size={14} aria-hidden />
-    {line ? <span className="flex flex-col items-start leading-tight">Review my week<span className="whitespace-normal text-left text-[11px] font-normal text-sky-200/80">{line}</span></span>
+    {line ? <span className="flex flex-col items-start leading-tight">Review my week<span className="whitespace-normal text-left text-[11px] font-normal text-muted-foreground">{line}</span></span>
       : "Review my week"}
   </Link>;
 }
