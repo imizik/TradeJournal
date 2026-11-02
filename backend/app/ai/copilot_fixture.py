@@ -77,7 +77,19 @@ class FixtureEvidence:
 
     def get_quotes(self, symbols: list[str]) -> dict:
         prices = {"NBIS": 94.35, "CRWV": 131.20, "APLD": 27.85, "SPY": 671.10, "QQQ": 598.40}
-        return {"fetched_at": AT, "prices": {s: prices.get(s) for s in symbols}}
+        return {"fetched_at": AT, "state": "ok", "prices": {s: prices.get(s) for s in symbols},
+                "quotes": {s: {"last": prices[s], "change_pct": _SESSION.get(s), "volume": None, "prev_close": None,
+                               "day_high": None, "day_low": None, "trade_time": AT} for s in symbols if s in prices},
+                "not_found": [s for s in symbols if s not in prices]}
+
+    def get_market_regime(self, symbol: str | None = None) -> dict:
+        from app.ai import copilot_regime
+        nxt = self.get_symbol_events(symbol)["next_earnings"] if symbol else None
+        return copilot_regime.fixture_regime(symbol, _SESSION, nxt)
+
+    def get_radar_today(self, group: str | None = None, limit: int = 12) -> dict:
+        from app.ai import copilot_regime
+        return copilot_regime.fixture_radar_today(GROUP["name"], _SESSION, group, limit)
 
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai.copilot_book import compact_chart

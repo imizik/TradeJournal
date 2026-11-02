@@ -20,6 +20,7 @@ MAX_RESULT_CHARS = 6000
 MAX_SYMBOLS = 8
 MAX_NEWS = 8
 MAX_SAVED = 5
+MAX_RADAR_EVENTS = 12
 
 _SYMBOL_SCHEMA = {"type": "string", "description": "US stock or ETF ticker, e.g. NBIS"}
 
@@ -63,7 +64,8 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_quotes",
-        "description": "Current last price for up to 8 tickers. Price only; no change or volume.",
+        "description": "Current quotes for up to 8 tickers from one read: last price, day change % versus the previous close, "
+                       "volume and the trade time. Use get_market_regime for the market's backdrop.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["symbols"],
                          "properties": {"symbols": {"type": "array", "items": _SYMBOL_SCHEMA}}},
     },
@@ -213,6 +215,26 @@ TOOLS: list[dict] = [
                                         "direction": {"type": "string", "enum": ["long", "short"],
                                                       "description": "long = expects up (calls), short = expects down (puts)"},
                                         "budget_usd": {"type": "number", "description": "Optional: dollars to spend, positive, at most 1,000,000"}}},
+    },
+    {
+        "name": "get_market_regime",
+        "description": "The backdrop a move sits in: SPY, QQQ, IWM and RSP (day % and last 15 minutes) and, with `symbol`, its "
+                       "sector ETF and how far the symbol is ahead of or behind it, from the latest recorded Radar pass; VIX and the "
+                       "10-year yield (fetched); today's and the next trading day's FOMC, CPI and jobs releases; and the symbol's next "
+                       "earnings when cached. Read it before saying whether a move is the stock, its group, its sector or the market.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"symbol": {**_SYMBOL_SCHEMA, "description": "Optional: the symbol whose sector and earnings to include"}}},
+    },
+    {
+        "name": "get_radar_today",
+        "description": "What Radar recorded this session, as its screen shows: saved events newest first (kind, symbols, benchmark, "
+                       "group, first seen, summary, measures, latest revision, nearby headlines, the owner's rating), and the latest "
+                       "pass's movers (SPY and QQQ day %, five leaders and laggards against SPY, the curated groups). Recorded "
+                       "sampled observations with their own times, not live quotes. `group` keeps events of one curated group or "
+                       "one symbol; `limit` caps the events (1-12).",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "properties": {"group": {"type": "string", "description": "Optional curated group name or one ticker"},
+                                        "limit": {"type": "integer", "description": "Events to return, 1-12 (default 12)"}}},
     },
     {
         "name": "propose_plan",
@@ -521,6 +543,19 @@ def validate(name: str, args: Any) -> dict:
             return {"investigation_id": str(uuid.UUID(str(args.get("investigation_id"))))}
         except ValueError:
             raise ToolInputError("investigation_id must be a saved investigation's id (a UUID)") from None
+    if name == "get_market_regime":
+        return {"symbol": _symbol(args["symbol"])} if args.get("symbol") is not None else {}
+    if name == "get_radar_today":
+        out = {}
+        if args.get("group") is not None:
+            if not isinstance(args["group"], str) or not 0 < len(args["group"].strip()) <= 120:
+                raise ToolInputError("group must be a short curated group name or one ticker")
+            out["group"] = args["group"].strip()
+        limit = args.get("limit", MAX_RADAR_EVENTS)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_RADAR_EVENTS:
+            raise ToolInputError(f"limit must be 1-{MAX_RADAR_EVENTS}")
+        out["limit"] = limit
+        return out
     out = {"symbol": _symbol(args.get("symbol"))}
     if name == "get_group_comparison" and args.get("group") is not None:
         if not isinstance(args["group"], str) or not 0 < len(args["group"]) <= 120:
@@ -537,6 +572,10 @@ def validate(name: str, args: Any) -> dict:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _stamp(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _pct(value):
@@ -660,7 +699,7 @@ def _iso(value) -> str | None:
 
 
 # Caps chosen so the largest possible answer still fits in MAX_RESULT_CHARS (a cut would break the JSON).
-CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool
+CHANGE_EVIDENCE, CHANGE_ALERTS, CHANGE_JOBS, CHANGE_RESULTS = 12, 6, 5, 2  # one evidence entry per tool, the first twelve
 # The owner context rows and trade reviews are the owner's own book and words, not market evidence: "what changed"
 # leaves them out.
 BOOK_CONTEXT_TOOLS = frozenset({"owner_context", "get_owner_context", "get_trade_review", "get_week_review",
@@ -800,8 +839,29 @@ class LiveEvidence:
         return investigation_changes(investigation_id)
 
     def get_quotes(self, symbols: list[str]) -> dict:
-        from app.engine.quotes import get_stock_quotes
-        return {"fetched_at": _now(), "prices": get_stock_quotes(symbols)}
+        from app.engine.chart_feed import ChartFeedError, chart_feed
+        try:
+            rows, stamp, issue = chart_feed.quote_rows(symbols)
+        except ChartFeedError as exc:  # Tradier not configured or cooling down: the dashboard's quote engine (Alpaca too), price only
+            from app.engine.quotes import get_stock_quotes
+            return {"fetched_at": _now(), "state": "ok", "prices": get_stock_quotes(symbols), "quotes": {},
+                    "source_note": f"quote engine (60 s cache), price only: {exc}"}
+        found = {r["symbol"]: r for r in rows}
+        return {"fetched_at": _stamp(stamp), "state": "ok" if found else "unavailable", **({"issue": issue} if issue else {}),
+                "prices": {s: found[s].get("last") if s in found else None for s in symbols},
+                "quotes": {s: {"last": r.get("last"), "change_pct": _pct(r.get("change_percentage")), "volume": r.get("volume"),
+                               "prev_close": r.get("previous_close"), "day_high": r.get("day_high"), "day_low": r.get("day_low"),
+                               "trade_time": _stamp(r["trade_time"]) if r.get("trade_time") else None}
+                           for s in symbols if (r := found.get(s))},
+                "not_found": [s for s in symbols if s not in found]}
+
+    def get_market_regime(self, symbol: str | None = None) -> dict:
+        from app.ai import copilot_regime
+        return copilot_regime.live_regime(symbol, datetime.now(UTC))
+
+    def get_radar_today(self, group: str | None = None, limit: int = MAX_RADAR_EVENTS) -> dict:
+        from app.ai import copilot_regime
+        return copilot_regime.live_radar_today(group, limit, datetime.now(UTC), MAX_RESULT_CHARS)
 
     def get_chart_context(self, symbol: str, timeframe: str) -> dict:
         from app.ai import copilot_book
@@ -871,7 +931,7 @@ PROVENANCE = {
     "get_peer_moves": ("Polygon related companies · Tradier quotes", "fetched"),
     "get_symbol_news": ("Alpaca (Benzinga) · Polygon news", "fetched"),
     "get_symbol_events": ("Tradier fundamentals calendar (cached)", "cached"),
-    "get_quotes": ("Tradier / Alpaca quotes (60 s cache)", "fetched"),
+    "get_quotes": ("Tradier quotes (Charts feed, 15 s cache; the quote engine's 60 s cache when the feed is unavailable)", "fetched"),
     "get_saved_research": ("Saved investigations and research results (TradeJournal)", "saved"),
     "get_investigation_changes": ("Saved investigation, its alerts and research jobs (TradeJournal)", "saved"),
     "get_chart_context": ("Charts workspace feed (Tradier today, stored sessions, automatic levels)", "fetched"),
@@ -892,6 +952,9 @@ PROVENANCE = {
     "get_level_history": ("Journal closed trades in the symbol replayed over cached minute bars at the drafted level or time mark "
                           "(TradeJournal)", "saved"),
     "get_option_candidates": ("Tradier option chains (Charts options feed cache) · Tradier / Alpaca quote", "fetched"),
+    "get_market_regime": ("Radar recorded passes (SPY, QQQ, IWM, RSP, sector ETFs) · Tradier index quotes (VIX, TNX) · macro calendar · "
+                          "Tradier fundamentals calendar (cached)", "fetched"),
+    "get_radar_today": ("Radar recorded passes, saved events, revisions, news checks and ratings", "recorded"),
     "propose_plan": ("A proposal for the owner to confirm; nothing saved", "proposal"),
 }
 

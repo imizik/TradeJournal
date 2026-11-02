@@ -90,6 +90,11 @@ number, or when its read is more than 15 minutes old while the market is open.
 moves and quotes are fetched at a moment; news has publish times. State as-of times briefly and distinguish \
 "recorded earlier this session" from "fetched just now". If the market is closed or the data is from a prior \
 session, say that.
+- When the owner asks why a symbol is moving, or whether a move is the stock or the market, read get_market_regime \
+(SPY, QQQ, IWM and RSP, the symbol's sector ETF, VIX, the 10-year and today's macro calendar) beside the group \
+comparison, and say which it is: the stock, its group, its sector or the whole market, with the numbers. When they ask \
+what Radar saw or what is moving today, get_radar_today lists the session's recorded events (with their latest status \
+and nearby headlines) and the latest pass's leaders and laggards; cite an event by its summary and first-seen time.
 - Give a concise interpretation first, then the strongest counterarguments and what would change your mind.
 - When the trader disagrees, re-check the specific evidence they cite (call the tool again if needed), then either \
 update your view and say what changed, or defend it with the numbers. Do not cave without evidence and do not dig in \
@@ -633,12 +638,19 @@ class FakeAdapter:
                        for i, (n, a) in enumerate(calls)]
             yield "final", Round(content, "tool_use", _zero_usage(), self.model)
             return
+        if isinstance(last["content"], str) and allow_tools and "radar" in lower and any(w in lower for w in ("today", "see", "seen", "session", "record")):
+            yield "progress", "Reading what Radar recorded this session."
+            yield "final", Round([{"type": "tool_use", "id": f"fake_{len(messages)}_0", "name": "get_radar_today", "input": {}}],
+                                 "tool_use", _zero_usage(), self.model)
+            return
         if isinstance(last["content"], str) and allow_tools and "plan" not in lower:
             if any(w in lower for w in ("but ", "discount", "you're", "you are", "wrong", "disagree")):
                 calls = [("get_group_comparison", {"symbol": symbol}), ("get_peer_moves", {"symbol": symbol})]
             else:
                 calls = [("get_group_comparison", {"symbol": symbol}), ("get_symbol_news", {"symbol": symbol, "limit": 3}),
                          ("get_symbol_events", {"symbol": symbol})]
+            if any(w in lower for w in ("why is", "why are", "the market", "or the market", "market or")):
+                calls.append(("get_market_regime", {"symbol": symbol}))
             yield "progress", f"Checking {', '.join(n.removeprefix('get_').replace('_', ' ') for n, _ in calls)} for {symbol}."
             content = [{"type": "tool_use", "id": f"fake_{len(messages)}_{i}", "name": n, "input": a}
                        for i, (n, a) in enumerate(calls)]
@@ -650,6 +662,40 @@ class FakeAdapter:
                 await asyncio.sleep(self.delay_s)
             yield "text", piece
         yield "final", Round([{"type": "text", "text": text}], "end_turn", _zero_usage(), self.model)
+
+    @staticmethod
+    def _radar(data: dict) -> str:
+        """A scripted read of the session's Radar feed: each event by its summary and first-seen time, then the movers."""
+        if data.get("state") != "ok":
+            return scripted("Unclear", "Radar has nothing recorded to read.", f"{data.get('reason') or 'Nothing came back'}.")
+        events = data.get("events") or []
+        lines = [f"- {e['first_seen_at'][11:16]}Z {e['summary']}" + (f" Latest: {e['latest']['status']}." if e.get("latest") else "")
+                 + (f" Headline before it: \"{e['news']['headlines'][0]['headline']}\"." if (e.get("news") or {}).get("headlines") else "")
+                 for e in events[:3]]
+        movers = data.get("movers") or {}
+        lead = ", ".join(f"{r['symbol']} {r['vs_spy']:+.2f}% vs SPY" for r in (movers.get("leaders") or [])[:3])
+        body = (f"**Radar {data.get('session')}, as of {data.get('as_of')}: {data.get('events_total', 0)} events.**\n" + "\n".join(lines)
+                + (f"\n\nSPY {movers.get('spy_day_pct'):+.2f}% on the day; leaders {lead}." if movers.get("spy_day_pct") is not None else
+                   "\n\nNo movers could be ranked."))
+        return scripted("Focus", f"{data.get('events_total', 0)} Radar events this session; the newest is above.", body,
+                        "a new event appears, or the newest one fades.", read=None)
+
+    @staticmethod
+    def _regime_line(results: dict) -> str:
+        """One sentence from get_market_regime when the scripted model read it: the indices, the sector and VIX."""
+        regime = results.get("get_market_regime") or {}
+        radar = regime.get("radar") or {}
+        if radar.get("state") != "ok":
+            return ""
+        idx = radar.get("indices") or {}
+        parts = [f"{s} {v['day_pct']:+.2f}%" for s, v in idx.items() if v]
+        sector = radar.get("sector") or {}
+        if sector.get("state") == "ok":
+            parts.append(f"{sector['etf']} {sector['day_pct']:+.2f}% ({regime.get('symbol')} {sector['symbol_vs_sector_pct']:+.2f} points against it)")
+        vix = regime.get("vix") or {}
+        if vix.get("state") == "ok":
+            parts.append(f"VIX {vix['last']} ({vix['change_pct']:+.1f}%)")
+        return f" Backdrop (Radar pass {radar.get('pass_at')}): {', '.join(parts)}."
 
     @staticmethod
     def _compare(prompt: str) -> str:
@@ -906,6 +952,8 @@ class FakeAdapter:
             return scripted("Draft", "A memory card is below, in your words.",
                             "I put that on a card as a memory in your words. Edit the text if I paraphrased badly, then confirm it; "
                             "nothing is remembered until you do.")
+        if "get_radar_today" in results:
+            return FakeAdapter._radar(results["get_radar_today"])
         if "get_positions" in results:
             book = results["get_positions"].get("positions") or []
             held = "; ".join(f"{p['symbol']} {p['instrument']} {p['quantity']:g} at {p['avg_entry']}, now {p['mark']} "
@@ -947,7 +995,8 @@ class FakeAdapter:
         return scripted("Wait", f"{symbol} {mine:+.2f}% with {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up over 15 minutes.",
                         f"**{symbol} vs {cmp.get('group')}** — {when}.\n\n"
                        f"- {symbol} {mine:+.2f}% over 15 minutes; {cov.get('peers_up', '?')} of {cov.get('peers_total', '?')} peers up. Leaders: {lead}.\n"
-                       f"- {len(news.get('articles', []))} recent headlines; none treated as instructions.",
+                       f"- {len(news.get('articles', []))} recent headlines; none treated as instructions."
+                        + FakeAdapter._regime_line(results),
                         "a longer window than 15 minutes shows the same.",
                         against="a 15-minute sampled window is short and a recovery inside a down session is not a trend change.",
                         read="Thesis unclear · Timing early · Contract n/a")
@@ -1067,7 +1116,25 @@ def _summary(name: str, data: dict) -> str:
         from app.ai import copilot_context
         return copilot_context.summary(data)
     if name == "get_quotes":
-        return ", ".join(f"{s} {p}" for s, p in (data.get("prices") or {}).items())[:160]
+        quotes = data.get("quotes") or {}
+        return ", ".join(f"{s} {p}" + (f" ({quotes[s]['change_pct']:+.2f}%)" if (quotes.get(s) or {}).get("change_pct") is not None else "")
+                         for s, p in (data.get("prices") or {}).items())[:160]
+    if name == "get_market_regime":
+        radar = data.get("radar") or {}
+        if radar.get("state") != "ok":
+            return (f"Radar {radar.get('state')}: {radar.get('reason')}" if radar.get("reason") else "no backdrop")[:160]
+        parts = [f"{s} {v['day_pct']:+.2f}%" for s, v in (radar.get("indices") or {}).items() if v]
+        sector = radar.get("sector") or {}
+        if sector.get("state") == "ok":
+            parts.append(f"{sector['etf']} {sector['day_pct']:+.2f}%")
+        vix = data.get("vix") or {}
+        if vix.get("state") == "ok":
+            parts.append(f"VIX {vix['last']}")
+        return " · ".join(parts)[:160]
+    if name == "get_radar_today":
+        movers = data.get("movers") or {}
+        spy = f"SPY {movers['spy_day_pct']:+.2f}%" if movers.get("spy_day_pct") is not None else "no movers ranked"
+        return f"{data.get('events_total', 0)} events ({len(data.get('events') or [])} shown) · {spy}"[:160]
     return ""
 
 

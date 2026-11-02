@@ -343,8 +343,9 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call seventeen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
-  comparison, peer moves, symbol news, earnings dates, quotes, saved research,
+  call nineteen read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  comparison, peer moves, symbol news, earnings dates, quotes (last, day change,
+  volume), the market regime and Radar today (below), saved research,
   investigation changes (below), the chart and book tools below (including the
   trade review and the week review), option candidates (below), one moment on
   the chart (Explain this candle, below), and the owner
@@ -352,6 +353,41 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   also call `propose_plan`, which writes nothing (see Confirm a plan). Each tool
   reads an existing service in-process and returns a compact result with its
   source and as-of time. No market math is reimplemented.
+- **Market regime and Radar today** (`backend/app/ai/copilot_regime.py`, since
+  2026-11-02; the review of 2026-10-31 found the copilot had no way to say
+  whether a move was the stock or the market):
+  - `get_market_regime(symbol?)` is the backdrop: SPY, QQQ, IWM and RSP (day %,
+    since open, opening gap, last 15 minutes) and, with a symbol, its sector
+    ETF with the symbol's distance from it and from SPY, all from the latest
+    recorded Radar pass (`app/engine/radar_regime.py`, the arithmetic Movers
+    now uses, benchmark rows kept); VIX and the 10-year yield through the chart
+    feed's index quotes (`chart_indices`, one bounded GET, 15 s cache); the
+    macro calendar's FOMC, CPI and jobs releases for today and the next trading
+    day; and the symbol's next earnings from the fundamentals cache only (a cold
+    symbol says so and refreshes in the background; `get_symbol_events` waits
+    for it). On a day Radar has not recorded, the newest recorded session stands
+    in and the result says `prior_session`. Each block degrades alone: Radar
+    off, the feed cooling down or an uncovered calendar day each read
+    `unavailable` with a reason, never a guess.
+  - `get_radar_today(group?, limit 1-12)` is the session's Radar feed as the
+    screen shows it (`app/engine/radar_today.py`): saved events newest first
+    with kind, symbols, benchmark, group, first-seen time, summary, measures,
+    the latest revision, the latest news check's first three headlines (no
+    links) and the owner's rating; and the latest pass's movers (SPY and QQQ
+    day %, five leaders and laggards against SPY, six curated groups). `group`
+    keeps one curated group's events or one symbol's. Longer feeds drop the
+    oldest events, never cut JSON.
+  - Both are market data only, so research jobs and the shadow book get them
+    (`research_job.JOB_TOOLS`); the system prompt tells the model to read the
+    regime beside the group comparison for "why is X moving" and to cite a
+    Radar event by its summary and first-seen time.
+  - In replay, every recorded read is cut at the frozen moment (events first
+    seen, revisions recorded, news checks made and passes started after it
+    never appear; ratings carry no time, so a cut never shows them) and VIX and
+    the 10-year read `unavailable`: the snapshot has no index quotes. The
+    fixture serves the NBIS scenario's backdrop and three simulated events.
+    Tests: `backend/tests/test_radar_regime.py`, `test_radar_today.py`,
+    `test_copilot_regime.py`.
 - **Chart and book tools** (`backend/app/ai/copilot_book.py`):
   - `get_chart_context(symbol, timeframe 1m/5m/15m/1h/1D)` reads the same
     `chart_feed.workspace` as the Charts page. It returns:
@@ -2332,7 +2368,7 @@ python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run 
 python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
 ```
 
-- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 14
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 16
   fixture-answerable cases across the desk's workflows: a briefing, a group
   read, a planted rumour, a follow-up that should reuse carried evidence, "go
   deeper", a candle, a plan, a compare, an open-position review, an

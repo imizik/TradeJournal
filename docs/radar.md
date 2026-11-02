@@ -483,6 +483,20 @@ rankings, benchmarks and group counts; an ineligible earlier quote leaves 15 min
 blank. Saved developments appear first, including their existing revisions,
 news and feedback. Movers refresh every 60 seconds while the tab is visible.
 
+## What the copilot reads
+
+Since 2026-11-02 the copilot has two read-only tools over the same store
+([Copilot Lab](copilot-lab.md#what-runs)): `get_radar_today`
+(`backend/app/engine/radar_today.py`) returns the session's saved events newest
+first with their latest revision, latest news check and rating, plus the latest
+pass's movers in the shape above (five leaders and laggards, six groups), and
+`get_market_regime` (`backend/app/engine/radar_regime.py`) returns the benchmark
+rows Movers now computes and drops: SPY, QQQ, IWM, RSP and a stock's sector
+ETF with the same day, since-open, gap and 15-minute arithmetic. Both take a
+moment to cut at, so a replay never sees an event, revision, headline or pass
+from after its frozen time; live reads pass no cut. Neither calls a provider or
+writes to the store.
+
 ## Charts group movement
 
 The owner approved a read-only peer comparison on October 22, 2026. Charts
