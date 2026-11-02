@@ -2412,7 +2412,7 @@ python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run 
 python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
 ```
 
-- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 18
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 19
   fixture-answerable cases across the desk's workflows: a briefing, a group
   read, a planted rumour, a follow-up that should reuse carried evidence, "go
   deeper", a candle, a plan, a compare, an open-position review, an
