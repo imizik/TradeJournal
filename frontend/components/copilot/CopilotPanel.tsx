@@ -45,7 +45,7 @@ const TOOL_LABEL: Record<string, string> = {
   get_chart_context: "Chart", get_positions: "Positions", get_trades: "Trades", get_memories: "Memories",
   owner_context: "Your context", get_owner_context: "Your context", get_trade_review: "Trade review",
   get_week_review: "Week review", get_level_history: "Your history here", get_option_candidates: "Option candidates",
-  get_moment: "That moment", web_search: "Web search",
+  get_moment: "That moment", web_search: "Web search", get_macro: "Macro (FRED)", get_base_rates: "Base rates",
 };
 
 /** The turn's latest get_option_candidates result for an options plan's symbol and view, when the model asked for it. */

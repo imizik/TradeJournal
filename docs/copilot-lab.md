@@ -2280,6 +2280,41 @@ size in a scripted line, so the fixture and the browser spec exercise the path
 `backend/tests/test_copilot_images.py`, `frontend/e2e/copilot-vision.spec.ts`,
 `frontend/e2e/charts-copilot-loop.spec.ts` (Look at my chart).
 
+## Macro and base rates
+
+Two market-data tools in `app/ai/copilot_macro.py`, offered to every turn and
+to research jobs and the shadow book:
+
+- **`get_macro`** reads public FRED series through the fredgraph CSV download
+  (no key): the 2-year and 10-year yields, the 10y-2y curve, the 10-year real
+  yield and breakeven, the effective fed funds rate, high-yield and
+  investment-grade credit spreads (ICE BofA OAS), the broad dollar, WTI and
+  the Chicago Fed's NFCI. Each has its date, its change over a week, a month
+  and three months (rates and spreads in basis points, the dollar and oil in
+  percent, NFCI as a difference) and where it sits in its one-year range.
+  Series are fetched in parallel and cached six hours in `backend/data/fred/`;
+  a failed fetch uses the stale file (marked `stale`) or leaves that series
+  unavailable, and the rest stand. FRED publishes a day's value the next
+  business day, so each series carries its own date.
+- **`get_base_rates(symbol, drawdown_pct?)`** counts what followed past
+  drawdowns in the symbol's own daily history: the chart feed's whole Tradier
+  series (split-adjusted, dividends left out; SPY from 1996, QQQ from 2000,
+  SMH from 2012) plus today's bar. An episode starts at the first close at
+  least `drawdown_pct` (default today's depth, whole percent; 3-80) below the
+  trailing 252-day closing high and ends once the drawdown recovers to half
+  that; the last is marked `ongoing` until then. It returns forward returns
+  at 5, 21, 63 and 126 trading days (n, median, share up, worst, best) beside
+  the same history's every-day baseline, the further drop within 63 days, how
+  many regained the high they fell from and how fast, and the ten most recent
+  episodes with dates. Counts of the past, not odds; the prompt says to give n
+  and the baseline with every figure and to call fewer than 10 episodes an
+  anecdote.
+
+The prompt reads `get_macro` for rates, credit, dollar and oil questions and
+`get_base_rates` (the symbol, and SPY or QQQ for the market) for "how does
+this usually end" or "is this the top". Replay cuts both before the frozen
+day; the fixture serves fixed macro rows and a simulated price history.
+Tests: `backend/tests/test_copilot_macro.py`.
 ## Web search
 
 A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped
@@ -2460,12 +2495,12 @@ python -m scripts.copilot_eval report --run data/copilot_eval/runs/sonnet --run 
 python -m scripts.copilot_eval export --out data/copilot_eval/owner-cases.jsonl  # your real questions as cases, ids stripped
 ```
 
-- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 19
+- **Cases.** `backend/tests/fixtures/copilot_eval/starter.jsonl` holds 21
   fixture-answerable cases across the desk's workflows: a briefing, a group
   read, a planted rumour, a follow-up that should reuse carried evidence, "go
   deeper", a candle, a plan, a compare, an open-position review, an
-  invalidation question, a closed-trade review, the week review, a theme and an
-  order-bait prompt. A case is the owner's words plus `expects`: `read`,
+  invalidation question, a closed-trade review, the week review, a theme, a macro
+  read, a base-rate question and an order-bait prompt. A case is the owner's words plus `expects`: `read`,
   `against`, `long_ok`, `planted_rumour`, `carried_tools`, `verdict_in`,
   `tools_any`, `tools_none`, `known_figures`. A case with `carry_from` runs
   after its parent with the parent's answer in the history and its `carry_id`;
