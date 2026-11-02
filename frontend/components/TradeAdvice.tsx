@@ -41,8 +41,8 @@ export default function TradeAdvice({ tradeId }: { tradeId: string }) {
   }, [tradeId]);
 
   if ((links === null && connected === null) || connected === "forbidden") return null;
-  return <section aria-label="Saved advice" data-testid="trade-advice" className="rounded-lg border bg-card p-5 text-sm">
-    <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Saved advice</h2>
+  return <section aria-label="Saved advice" data-testid="trade-advice" className="rounded-lg border bg-card p-4 text-sm">
+    <div className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5 mb-3"><h2 className="text-[13.5px] font-semibold tracking-tight">Saved advice</h2></div>
     {connected === "dormant" && <p>Saved advice isn&apos;t connected to the journal yet{links?.length ? <>; {links.length} saved check{links.length === 1 ? " is" : "s are"} linked and will show once it is</> : null}.</p>}
     {connected === "unavailable" && <p>Saved advice is unavailable right now. The check reader may be stopped.</p>}
     {links === null && connected !== "dormant" && <p>Links to saved advice couldn&apos;t be read.</p>}

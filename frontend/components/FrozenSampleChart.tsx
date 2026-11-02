@@ -17,7 +17,7 @@ export default function FrozenSampleChart({ context, compact = false, decisionRe
     const cutoff = historical && typeof context.packet.simulated_as_of === "string" ? context.packet.simulated_as_of : context.captured_at;
     window = frozenWindow(context.packet.recent_minute_bars, cutoff);
   } catch (error) {
-    return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 rounded border p-3"><h4 className="font-semibold">Frozen evidence chart</h4><p role="status">Chart unavailable: {error instanceof Error ? error.message : "Invalid frozen data."} Inspect the original packet.</p></section>;
+    return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 rounded-md border p-3"><h4 className="font-semibold">Frozen evidence chart</h4><p role="status">Chart unavailable: {error instanceof Error ? error.message : "Invalid frozen data."} Inspect the original packet.</p></section>;
   }
   const { minutes, quarters } = window;
   const bars: (FrozenMinute | FrozenQuarter)[] = interval === "1m" ? minutes : quarters;
@@ -50,8 +50,8 @@ export default function FrozenSampleChart({ context, compact = false, decisionRe
     if (!previous || previous.vw === null || bar.at - previous.at !== step || ("complete" in previous && !previous.complete)) segments.push([]);
     segments.at(-1)!.push(`${x(bar.at)},${y(bar.vw)}`);
   });
-  return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 space-y-3 rounded border p-3 text-sm" data-context-id={context.context_id} data-evidence-sha256={context.context_sha256}>
-    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">Frozen evidence chart</h4><div className="flex gap-2" aria-label={`${context.symbol} frozen interval`}>{(["1m", "15m"] as const).map(value => <button type="button" key={value} aria-pressed={interval === value} onClick={() => setInterval(value)} className="rounded border px-2 py-1">{value}</button>)}</div></div>
+  return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 space-y-3 rounded-md border p-3 text-sm" data-context-id={context.context_id} data-evidence-sha256={context.context_sha256}>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">Frozen evidence chart</h4><div className="flex gap-2" aria-label={`${context.symbol} frozen interval`}>{(["1m", "15m"] as const).map(value => <button type="button" key={value} aria-pressed={interval === value} onClick={() => setInterval(value)} className="rounded-md border px-2 py-1">{value}</button>)}</div></div>
     <p>{minutes.length} completed frozen minutes · USD/share · volume in shares · Eastern time.</p>
     <p className="text-xs text-muted-foreground">{historical ? <>Historical cutoff <time dateTime={String(context.packet.simulated_as_of)}>{new Date(String(context.packet.simulated_as_of)).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</time> · retrieved <time dateTime={context.packet.retrieved_at as string}>{new Date(String(context.packet.retrieved_at)).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</time>. Historical prices; simulated execution.</> : <>Cutoff <time dateTime={context.captured_at}>{new Date(context.captured_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</time>. {context.packet.market_pilot ? "Real frozen market evidence; no live refresh or execution." : decisionReplay ? "Invented evidence only; the continuation is revealed after your choice is saved." : "Invented evidence only; no live feed or replay continuation."}</>}</p>
     <svg viewBox="0 0 400 300" role="img" aria-label={`${context.symbol} frozen ${interval} price and volume`} className="block w-full" data-testid="frozen-candles">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type ScannerSettings } from "@/lib/api";
 
-const button = "inline-flex min-h-11 items-center justify-center rounded border px-3 text-sm hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50";
+const button = "inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50";
 
 export default function ScannerTickers() {
   const [saved, setSaved] = useState<ScannerSettings | null>(null);
@@ -79,22 +79,23 @@ export default function ScannerTickers() {
     }
   }
 
-  return <section aria-label="Scanner tickers" className="rounded-lg border bg-card p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="text-sm font-semibold">Scanner tickers{saved && <span className="ml-2 font-normal text-muted-foreground">{(editing ? symbols : saved.symbols).length} / {saved.max_symbols}</span>}</h2>
+  return <section aria-label="Scanner tickers" className="rounded-lg border bg-card">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+      <h2 className="text-[13.5px] font-semibold tracking-tight">Scanner tickers{saved && <span className="ml-2 font-normal text-muted-foreground">{(editing ? symbols : saved.symbols).length} / {saved.max_symbols}</span>}</h2>
       {saved && !editing && <button className={button} disabled={busy} onClick={() => { setEditing(true); setNotice(""); }}>Edit tickers</button>}
     </div>
-    {!saved && !error && <p className="mt-2 text-sm text-muted-foreground">Loading tickers…</p>}
+    <div className="p-4">
+    {!saved && !error && <p className="text-sm text-muted-foreground">Loading tickers…</p>}
     {saved && <>
-      <div className="mt-3 flex flex-wrap gap-2" aria-label={editing ? "Selected tickers" : "Saved tickers"}>
+      <div className="flex flex-wrap gap-2" aria-label={editing ? "Selected tickers" : "Saved tickers"}>
         {(editing ? symbols : saved.symbols).map((symbol) => editing
           ? <button key={symbol} aria-label={`Remove ${symbol}`} disabled={busy} onClick={() => { setSymbols(symbols.filter((s) => s !== symbol)); setError(""); }} className={`${button} gap-2 bg-secondary font-medium`}>{symbol}<span aria-hidden="true">×</span></button>
-          : <span key={symbol} className="rounded bg-secondary px-2.5 py-1 text-sm font-medium">{symbol}</span>)}
+          : <span key={symbol} className="rounded-md bg-secondary px-2.5 py-1 text-sm font-medium">{symbol}</span>)}
       </div>
       {editing && <form className="mt-3" onSubmit={(event) => { event.preventDefault(); add(); }}>
         <label htmlFor="scanner-ticker-input" className="text-sm font-medium">Add tickers</label>
         <div className="mt-1 flex gap-2">
-          <input id="scanner-ticker-input" value={input} onChange={(event) => setInput(event.target.value)} disabled={busy} autoCapitalize="characters" autoComplete="off" spellCheck={false} placeholder="e.g. MU, NVDA" aria-describedby="scanner-ticker-help" className="min-h-11 min-w-0 flex-1 rounded border bg-background px-3 text-sm uppercase placeholder:normal-case" />
+          <input id="scanner-ticker-input" value={input} onChange={(event) => setInput(event.target.value)} disabled={busy} autoCapitalize="characters" autoComplete="off" spellCheck={false} placeholder="e.g. MU, NVDA" aria-describedby="scanner-ticker-help" className="min-h-11 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm uppercase placeholder:normal-case" />
           <button type="submit" disabled={busy || !input.trim()} className={button}>Add</button>
         </div>
         <p id="scanner-ticker-help" className="mt-2 text-xs text-muted-foreground">Up to {saved.max_symbols} US stock or ETF tickers. Market-data and option-contract availability still apply.</p>
@@ -105,10 +106,11 @@ export default function ScannerTickers() {
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Changes are unsaved until you select Save tickers. An empty list pauses new setups.</p>
       </form>}
-      {!saved.symbols.length && !editing && <p className="mt-2 text-sm text-amber-300">No tickers selected. New setups are paused.</p>}
+      {!saved.symbols.length && !editing && <p className="mt-2 text-sm text-primary">No tickers selected. New setups are paused.</p>}
       <p className="mt-3 text-xs text-muted-foreground">Applies to future scans on every device, regardless of the day shown above. Existing paper trades keep being monitored. Saving does not switch the scanner on.</p>
     </>}
     {error && <div className="mt-3"><p role="alert" className="break-words text-sm text-red-400">{error}</p>{!saved && <button className={`${button} mt-2`} disabled={busy} onClick={() => void load()}>Reload tickers</button>}</div>}
-    {notice && <p role="status" className="mt-3 text-sm text-emerald-400">{notice}</p>}
+    {notice && <p role="status" className="mt-3 text-sm text-foreground">{notice}</p>}
+  </div>
   </section>;
 }

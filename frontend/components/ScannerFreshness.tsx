@@ -44,10 +44,10 @@ export default function ScannerFreshness({ updatedAt, monitoring, live }: { upda
 
   const status = monitoringText(monitoring);
   return (
-    <section aria-label="Scanner freshness" className="space-y-1 rounded-lg border bg-card px-4 py-3 text-sm">
+    <section aria-label="Scanner freshness" className="space-y-1 rounded-lg border bg-card px-3.5 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <button type="button" onClick={refresh} disabled={pending}
-          className="inline-flex min-h-11 items-center rounded border px-3 hover:bg-secondary disabled:opacity-50">
+          className="inline-flex min-h-11 items-center rounded-md border px-3 hover:bg-secondary disabled:opacity-50">
           {pending ? "Refreshing…" : "Refresh"}
         </button>
         <span className="text-muted-foreground">
@@ -55,7 +55,7 @@ export default function ScannerFreshness({ updatedAt, monitoring, live }: { upda
           {live ? ` · refreshes every ${REFRESH_SECONDS} s while this tab is visible` : " · past day, no auto-refresh"}
         </span>
       </div>
-      <p className={status.warn ? "text-amber-300" : "text-muted-foreground"}>
+      <p className={status.warn ? "text-primary" : "text-muted-foreground"}>
         <span className="font-medium text-foreground">Scanner monitoring now:</span> {status.text}
         <span className="ml-1 text-xs">(checked {etTime(monitoring.checked_at)} ET)</span>
       </p>

@@ -26,12 +26,12 @@ export default async function StrategyDetailPage({ params }: { params: Promise<{
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold text-foreground">{strategy.name}</h1>
-              <span className="rounded-full border bg-card px-2.5 py-1 text-xs font-medium capitalize text-muted-foreground">
+              <h1 className="text-xl font-semibold text-foreground">{strategy.name}</h1>
+              <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground capitalize">
                 {humanize(strategy.setup_type)}
               </span>
             </div>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
               {strategy.description || "No strategy description has been recorded yet."}
             </p>
           </div>
@@ -55,13 +55,13 @@ export default async function StrategyDetailPage({ params }: { params: Promise<{
 
       {strategy.versions.length === 0 ? (
         <section className="rounded-lg border border-dashed bg-card p-10 text-center">
-          <h2 className="font-semibold text-foreground">Store Pine v1</h2>
+          <h2 className="text-[13.5px] font-semibold tracking-tight">Store Pine v1</h2>
           <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
             A version captures the full Pine source, hypothesis, parameters, and execution assumptions that produce a run.
           </p>
           <Link
             href={`/strategy-lab/strategies/${strategy.id}/versions/new`}
-            className="mt-5 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="mt-5 inline-flex rounded-md border px-4 py-2 text-sm font-medium hover:bg-secondary"
           >
             Create first version
           </Link>
@@ -69,7 +69,7 @@ export default async function StrategyDetailPage({ params }: { params: Promise<{
       ) : (
         <section className="space-y-4">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Version history</h2>
+            <h2 className="text-[13.5px] font-semibold tracking-tight">Version history</h2>
             <p className="mt-1 text-xs text-muted-foreground">Newest first. Run-backed versions are locked for result-affecting changes.</p>
           </div>
 
@@ -80,7 +80,7 @@ export default async function StrategyDetailPage({ params }: { params: Promise<{
       )}
 
       {runPage.total > runPage.items.length && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+        <p className="rounded-md border bg-card px-4 py-3 text-sm text-muted-foreground">
           Showing the newest {runPage.items.length} of {runPage.total} runs. Open a version to focus its history.
         </p>
       )}
@@ -91,7 +91,7 @@ export default async function StrategyDetailPage({ params }: { params: Promise<{
 function VersionCard({ version, runs }: { version: StrategyVersionSummary; runs: StrategyRunSummary[] }) {
   return (
     <article className="overflow-hidden rounded-lg border bg-card">
-      <div className="p-5">
+      <div className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -100,7 +100,7 @@ function VersionCard({ version, runs }: { version: StrategyVersionSummary; runs:
               </Link>
               <StatusBadge status={version.status} />
               {version.locked && (
-                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+                <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground">
                   Locked after run
                 </span>
               )}
@@ -129,12 +129,12 @@ function VersionCard({ version, runs }: { version: StrategyVersionSummary; runs:
         </div>
       </div>
 
-      <div className="border-t bg-background/30 px-5 py-4">
+      <div className="border-t px-4 py-3">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs font-medium text-muted-foreground">
             TradingView runs · {runs.length}
           </p>
-          <Link href={`/strategy-lab/versions/${version.id}/import`} className="text-xs font-medium text-sky-300 hover:text-sky-200">
+          <Link href={`/strategy-lab/versions/${version.id}/import`} className="text-xs font-medium text-primary hover:underline">
             Import run
           </Link>
         </div>
@@ -159,9 +159,9 @@ function RunRow({ run }: { run: StrategyRunSummary }) {
         : "Metrics pending";
   const metricsClass =
     run.metrics_status === "ready"
-      ? "bg-emerald-500/10 text-emerald-300"
+      ? "bg-secondary text-muted-foreground"
       : run.metrics_status === "stale"
-        ? "bg-amber-500/10 text-amber-200"
+        ? "bg-primary/15 text-primary"
         : "bg-secondary text-muted-foreground";
 
   return (
@@ -174,7 +174,7 @@ function RunRow({ run }: { run: StrategyRunSummary }) {
           <p className="text-sm font-semibold text-foreground">{run.symbol} · {run.timeframe}</p>
           <p className="mt-1 text-xs text-muted-foreground">{dateRange(run.backtest_start, run.backtest_end)}</p>
         </div>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${metricsClass}`}>
+        <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${metricsClass}`}>
           {metricsLabel}
         </span>
       </div>
@@ -188,16 +188,16 @@ function RunRow({ run }: { run: StrategyRunSummary }) {
 }
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border bg-card p-4"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p></div>;
+  return <div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1.5 text-2xl font-medium tabular-nums text-foreground">{value}</p></div>;
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const style = status === "champion" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : status === "challenger" ? "border-sky-500/30 bg-sky-500/10 text-sky-300" : "border-border bg-secondary text-muted-foreground";
-  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${style}`}>{status}</span>;
+  const style = status === "champion" ? "bg-secondary text-foreground" : "bg-secondary text-muted-foreground";
+  return <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium capitalize ${style}`}>{status}</span>;
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-full border bg-background px-2 py-1">{children}</span>;
+  return <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground">{children}</span>;
 }
 
 function humanize(value: string) { return value.replace(/_/g, " "); }
@@ -205,5 +205,5 @@ function formatDate(value: string) { return formatStrategyDateTime(value, "UTC",
 function dateRange(start: string | null, end: string | null) { return start || end ? `${start ?? "Start unknown"} → ${end ?? "End unknown"}` : "Backtest dates not recorded"; }
 function costLabel(type: string, value: string | number | null) { return type === "none" ? "No" : `${humanize(type)}${value == null ? "" : ` ${value}`}`; }
 function signed(value: string | number) { const number = Number(value); return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`; }
-function pnlClass(value: string | number | null) { if (value == null) return "text-muted-foreground"; return Number(value) >= 0 ? "text-emerald-300" : "text-red-300"; }
+function pnlClass(value: string | number | null) { if (value == null) return "text-muted-foreground"; return Number(value) >= 0 ? "text-emerald-400" : "text-red-400"; }
 function formatMoney(value: string | number | null, currency: string) { if (value == null) return "P&L unavailable"; const number = Number(value); return `${number >= 0 ? "+" : "-"}${new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(Math.abs(number))}`; }

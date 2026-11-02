@@ -76,12 +76,12 @@ export default function RunMetricsPanel({
 
   if (!metrics) {
     return (
-      <section className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-6">
+      <section className="rounded-lg border border-primary/30 bg-primary/10 p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-amber-300">
+            <div className="flex items-center gap-2 text-primary">
               <AlertTriangle className="h-4 w-4" />
-              <h2 className="font-semibold">Run metrics are pending</h2>
+              <h2 className="text-[13.5px] font-semibold tracking-tight">Run metrics are pending</h2>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
               The imported trades are safely stored. Calculate the versioned summary to unlock coverage,
@@ -100,12 +100,12 @@ export default function RunMetricsPanel({
 
   if (status === "stale") {
     return (
-      <section className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-6">
+      <section className="rounded-lg border border-primary/30 bg-primary/10 p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-amber-300">
+            <div className="flex items-center gap-2 text-primary">
               <AlertTriangle className="h-4 w-4" />
-              <h2 className="font-semibold">Run metrics need an upgrade</h2>
+              <h2 className="text-[13.5px] font-semibold tracking-tight">Run metrics need an upgrade</h2>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
               This run has metrics from {metrics.calculation_version}, which may not contain the
@@ -136,7 +136,7 @@ export default function RunMetricsPanel({
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <h2 className="text-[13.5px] font-semibold tracking-tight">
               Run performance
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -215,18 +215,18 @@ export default function RunMetricsPanel({
       <section
         className={`rounded-lg border p-4 ${
           complete
-            ? "border-emerald-900/50 bg-emerald-950/20"
-            : "border-amber-900/50 bg-amber-950/20"
+            ? "border-border bg-secondary/50"
+            : "border-primary/30 bg-primary/10"
         }`}
       >
         <div className="flex items-start gap-3">
           {complete ? (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           ) : (
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           )}
           <div className="min-w-0 flex-1">
-            <h3 className={`text-sm font-semibold ${complete ? "text-emerald-300" : "text-amber-300"}`}>
+            <h3 className={`text-sm font-semibold ${complete ? "text-foreground" : "text-primary"}`}>
               {complete ? "Complete accounting and chronology" : "Partial source coverage"}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -236,7 +236,7 @@ export default function RunMetricsPanel({
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {Object.entries(metrics.coverage.fields).map(([field, item]) => (
-                <div key={field} className="rounded bg-background/40 px-3 py-2 text-xs">
+                <div key={field} className="rounded-md bg-background/40 px-3 py-2 text-xs">
                   <p className="font-medium text-foreground">{readableReason(field)}</p>
                   <p className="mt-0.5 text-muted-foreground">
                     {item.available}/{metrics.coverage.total_trades} available
@@ -306,9 +306,9 @@ export default function RunMetricsPanel({
         />
       </div>
 
-      <section className="rounded-lg border bg-card p-5">
-        <h3 className="text-sm font-semibold text-foreground">Excursion and concentration</h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Excursion and concentration" className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"><h3 className="text-[13.5px] font-semibold tracking-tight">Excursion and concentration</h3></div>
+<div className="p-4">        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard label="Average MFE" value={formatMoney(metrics.average_mfe, currency)} />
           <MetricCard label="Median MFE" value={formatMoney(metrics.median_mfe, currency)} />
           <MetricCard label="Average MAE" value={formatMoney(metrics.average_mae, currency)} />
@@ -317,7 +317,7 @@ export default function RunMetricsPanel({
           <MetricCard label="Top 3 share" value={formatPercentPoints(metrics.top_3_profit_contribution_pct, 1)} />
           <MetricCard label="Top 5 share" value={formatPercentPoints(metrics.top_5_profit_contribution_pct, 1)} />
         </div>
-      </section>
+      </div></section>
     </div>
   );
 }
@@ -335,8 +335,8 @@ function MetricCard({
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-xl font-medium tabular-nums ${valueClass}`}>{value}</p>
       {note && <p className="mt-1 text-[11px] text-muted-foreground">{note}</p>}
     </div>
   );
@@ -353,8 +353,8 @@ function BreakdownTable({
 }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="border-b px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="border-b px-3.5 py-2.5">
+        <h3 className="text-[13.5px] font-semibold tracking-tight">{title}</h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[620px] text-sm">

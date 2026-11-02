@@ -65,22 +65,21 @@ export default function Cockpit() {
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-lg border border-border bg-background">
       {/* Top bar */}
-      <div className="flex h-11 shrink-0 items-center gap-4 border-b border-border bg-card px-3">
-        <div className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-wide text-primary">
-          ▰ AI BUILDOUT{" "}
-          {/* eslint-disable-next-line react/jsx-no-comment-textnodes -- "//" here is a visual separator, not a comment */}
-          <span className="text-muted-foreground/50">//</span> COCKPIT
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-card px-3.5 py-2.5">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h1 className="whitespace-nowrap text-xl font-semibold">AI Buildout</h1>
+          <span className="text-sm text-muted-foreground">Cockpit</span>
         </div>
-        <div className="flex gap-0.5 rounded-md border border-border p-0.5">
+        <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-md bg-secondary p-0.5">
           {TABS.map((t) => (
             <button
               key={t.v}
               type="button"
               onClick={() => setView(t.v)}
               className={cn(
-                "rounded px-2.5 py-1 font-mono text-[11px] font-semibold tracking-wide",
+                "shrink-0 rounded-md px-2.5 py-1 text-xs font-medium",
                 view === t.v
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -93,7 +92,7 @@ export default function Cockpit() {
             <div
               key={c.status}
               title={c.status}
-              className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground"
+              className="flex items-center gap-1 text-xs tabular-nums text-muted-foreground"
             >
               <span className={cn("h-1.5 w-1.5 rounded-sm", STATUS_DOT[c.status])} />
               <span className="font-semibold text-foreground/80">{counts[c.status] ?? 0}</span>
@@ -105,16 +104,16 @@ export default function Cockpit() {
       </div>
 
       {/* Macro signposts */}
-      <div className="flex shrink-0 items-stretch border-b border-border bg-card/40">
-        <div className="flex items-center border-r border-border px-3 font-mono text-[9px] leading-tight tracking-wide text-muted-foreground">
-          MACRO
+      <div className="flex shrink-0 items-stretch overflow-x-auto border-b border-border bg-card">
+        <div className="flex items-center border-r border-border px-3 text-[10px] leading-tight text-muted-foreground">
+          Macro
           <br />
-          SIGNPOSTS
+          signposts
         </div>
         {data.signposts.map((s) => (
           <div
             key={s.id}
-            className="flex min-w-0 flex-1 flex-col justify-center gap-1 border-r border-border px-3 py-1.5"
+            className="flex min-w-[9rem] flex-1 flex-col justify-center gap-1 border-r border-border px-3 py-1.5"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-[10px] text-muted-foreground" title={s.label}>
@@ -124,7 +123,7 @@ export default function Cockpit() {
                 type="button"
                 onClick={() => cycleSignpost(s.id)}
                 className={cn(
-                  "shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold",
+                  "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold",
                   SIGNAL_BADGE[s.level]
                 )}
               >
@@ -137,14 +136,14 @@ export default function Cockpit() {
                 if (e.target.value !== s.notes) patchSignpost(s.id, { notes: e.target.value });
               }}
               placeholder="note…"
-              className="w-full border-b border-border bg-transparent py-0.5 font-mono text-[10px] text-foreground/80 outline-none focus:border-ring"
+              className="w-full border-b border-border bg-transparent py-0.5 text-[10px] text-foreground/80 outline-none focus:border-ring"
             />
           </div>
         ))}
       </div>
 
       {/* Body */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <LayerSidebar activeLayer={activeLayer} onSelect={selectLayer} />
         <main className="min-w-0 flex-1 overflow-auto">
           {view === "stack" && (
@@ -167,11 +166,11 @@ export default function Cockpit() {
 function SaveIndicator({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
   const map = {
     idle: { text: "", cls: "" },
-    saving: { text: "Saving…", cls: "text-amber-400" },
-    saved: { text: "Saved", cls: "text-emerald-400" },
+    saving: { text: "Saving…", cls: "text-muted-foreground" },
+    saved: { text: "Saved", cls: "text-muted-foreground" },
     error: { text: "Save failed", cls: "text-red-400" },
   } as const;
   const { text, cls } = map[state];
   if (!text) return null;
-  return <span className={cn("font-mono text-[10px]", cls)}>{text}</span>;
+  return <span className={cn("text-[10px]", cls)}>{text}</span>;
 }

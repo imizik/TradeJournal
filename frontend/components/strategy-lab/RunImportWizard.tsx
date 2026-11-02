@@ -142,7 +142,7 @@ export default function RunImportWizard({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border bg-card p-5">
+      <section className="rounded-lg border bg-card p-4">
         <StepHeading
           number="1"
           title="Preview the TradingView export"
@@ -153,7 +153,7 @@ export default function RunImportWizard({
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)_auto] lg:items-end">
           <Field label="List of Trades CSV" htmlFor="strategy-run-csv">
             <label htmlFor="strategy-run-csv" className="flex h-10 cursor-pointer items-center gap-3 rounded-md border bg-background px-3 text-base sm:text-sm hover:bg-secondary/40">
-              <FileSpreadsheet className="h-4 w-4 shrink-0 text-sky-300" />
+              <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-foreground/85">
                 {file?.name || "Choose CSV file"}
               </span>
@@ -189,14 +189,14 @@ export default function RunImportWizard({
               <option value="UTC" />
             </datalist>
           </Field>
-          <Button type="button" onClick={runPreview} disabled={!file || busy}>
+          <Button type="button" variant={preview ? "outline" : "default"} onClick={runPreview} disabled={!file || busy}>
             {phase === "previewing" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {phase === "previewing" ? "Reading CSV" : preview ? "Preview again" : "Preview CSV"}
           </Button>
         </div>
 
         {error && (
-          <div className="mt-4 flex items-start gap-2 rounded-md border border-red-900/50 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="break-words">{error}</span>
           </div>
@@ -205,7 +205,7 @@ export default function RunImportWizard({
 
       {preview && <PreviewReport preview={preview} />}
 
-      <form onSubmit={commit} className="rounded-lg border bg-card p-5">
+      <form onSubmit={commit} className="rounded-lg border bg-card p-4">
         <StepHeading
           number="2"
           title="Describe and store the run"
@@ -219,7 +219,7 @@ export default function RunImportWizard({
             Complete the CSV preview to unlock run metadata and import.
           </div>
         ) : !preview.can_commit ? (
-          <div className="mt-5 rounded-md border border-amber-900/50 bg-amber-950/20 p-4 text-sm text-amber-200">
+          <div className="mt-5 rounded-md border border-primary/30 bg-primary/10 p-4 text-sm text-primary">
             This preview cannot be committed. Resolve rejected trades or open the existing duplicate run, then preview the corrected export.
           </div>
         ) : (
@@ -297,7 +297,7 @@ export default function RunImportWizard({
                   checked={extendedHours}
                   disabled={phase === "committing"}
                   onChange={(event) => setExtendedHours(event.target.checked)}
-                  className="h-4 w-4 rounded border-border"
+                  className="h-4 w-4 rounded-md border-border"
                 />
                 Extended-hours data included
               </label>
@@ -321,7 +321,7 @@ export default function RunImportWizard({
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t pt-5">
               <div className="flex max-w-2xl items-start gap-2 text-xs text-muted-foreground">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                 The server will reparse the same file and verify its content hash, preview fingerprint, and version fingerprint before committing.
               </div>
               <Button
@@ -345,16 +345,16 @@ export default function RunImportWizard({
 
 function PreviewReport({ preview }: { preview: StrategyRunImportPreview }) {
   return (
-    <section className="space-y-5 rounded-lg border bg-card p-5">
+    <section className="space-y-5 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             {preview.can_commit ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <CheckCircle2 className="h-5 w-5 text-foreground" />
             ) : (
-              <AlertTriangle className="h-5 w-5 text-amber-400" />
+              <AlertTriangle className="h-5 w-5 text-primary" />
             )}
-            <h2 className="font-semibold text-foreground">
+            <h2 className="text-[13.5px] font-semibold tracking-tight">
               {preview.can_commit ? "Preview is ready" : "Preview needs attention"}
             </h2>
           </div>
@@ -362,15 +362,15 @@ function PreviewReport({ preview }: { preview: StrategyRunImportPreview }) {
             {preview.source_file_name || "CSV export"} · {preview.encoding} · timestamps interpreted as {preview.source_timezone}
           </p>
         </div>
-        <span className="rounded-full border bg-background px-2.5 py-1 font-mono text-[11px] text-muted-foreground" title={preview.source_sha256}>
+        <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground tabular-nums" title={preview.source_sha256}>
           SHA-256 {preview.source_sha256.slice(0, 12)}…
         </span>
       </div>
 
       {preview.duplicate_run_id && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-900/50 bg-sky-950/20 px-4 py-3 text-sm">
-          <span className="text-sky-200">These exact CSV bytes were already imported for this version.</span>
-          <Link href={`/strategy-lab/runs/${preview.duplicate_run_id}`} className="font-medium text-sky-300 hover:underline">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-secondary/50 px-4 py-3 text-sm">
+          <span className="text-foreground">These exact CSV bytes were already imported for this version.</span>
+          <Link href={`/strategy-lab/runs/${preview.duplicate_run_id}`} className="font-medium text-primary hover:underline">
             Open existing run →
           </Link>
         </div>
@@ -387,7 +387,7 @@ function PreviewReport({ preview }: { preview: StrategyRunImportPreview }) {
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-md border bg-background p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Observed trade window</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Observed trade window</h3>
           <p className="mt-2 text-sm text-foreground/90">
             {formatStrategyDateTime(preview.observed_start_at, preview.source_timezone)}
             <span className="mx-2 text-muted-foreground">→</span>
@@ -395,7 +395,7 @@ function PreviewReport({ preview }: { preview: StrategyRunImportPreview }) {
           </p>
         </div>
         <details className="rounded-md border bg-background p-4">
-          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
             Detected column mapping ({Object.keys(preview.mapping).length})
           </summary>
           <dl className="mt-3 grid gap-1 text-xs">
@@ -417,17 +417,17 @@ function PreviewReport({ preview }: { preview: StrategyRunImportPreview }) {
       )}
 
       {preview.rejected_trades.length > 0 && (
-        <details className="rounded-md border border-amber-900/50 bg-amber-950/10 p-4" open>
-          <summary className="cursor-pointer text-sm font-semibold text-amber-200">
+        <details className="rounded-md border border-primary/30 bg-primary/10 p-4" open>
+          <summary className="cursor-pointer text-sm font-semibold text-primary">
             Rejected trade groups ({preview.rejected_trade_count}){preview.rejected_trades_truncated ? " · list truncated" : ""}
           </summary>
           <div className="mt-3 space-y-3">
             {preview.rejected_trades.map((trade, index) => (
-              <div key={`${trade.trade_number ?? "unknown"}-${index}`} className="rounded border border-amber-900/40 bg-background/50 p-3">
+              <div key={`${trade.trade_number ?? "unknown"}-${index}`} className="rounded-md border border-border bg-background/50 p-3">
                 <p className="text-xs font-medium text-foreground">
                   Trade {trade.trade_number ?? "unknown"} · {trade.raw_row_count} source row{trade.raw_row_count === 1 ? "" : "s"}
                 </p>
-                <ul className="mt-2 space-y-1 text-xs text-amber-200/90">
+                <ul className="mt-2 space-y-1 text-xs text-primary">
                   {trade.issues.map((issue, issueIndex) => (
                     <li key={`${issue.code}-${issueIndex}`}>• {issue.message}</li>
                   ))}
@@ -449,10 +449,10 @@ function PreviewTradesTable({ preview }: { preview: StrategyRunImportPreview }) 
     <div>
       <div className="mb-2 flex items-end justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Parsed trade sample</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Parsed trade sample</h3>
           <p className="mt-1 text-xs text-muted-foreground">Review pairing, timestamps, quantities, and source P&amp;L before import.</p>
         </div>
-        {preview.preview_truncated && <span className="text-xs text-amber-300">Preview truncated</span>}
+        {preview.preview_truncated && <span className="text-xs text-primary">Preview truncated</span>}
       </div>
       <div className="overflow-x-auto rounded-md border bg-background">
         <table className="w-full min-w-[1040px] text-sm">
@@ -501,13 +501,13 @@ function FrozenAssumptions({ version }: { version: StrategyVersionDetail }) {
   return (
     <div className="mt-5 rounded-md border bg-background p-4">
       <div className="flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-sky-300" />
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inherited version assumptions</h3>
+        <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-[13.5px] font-semibold tracking-tight">Inherited version assumptions</h3>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {values.map(([label, value]) => (
           <div key={label}>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+            <p className="text-[11px] text-muted-foreground">{label}</p>
             <p className="mt-1 text-sm font-medium capitalize text-foreground">{value}</p>
           </div>
         ))}
@@ -531,11 +531,11 @@ function StepHeading({
 }) {
   return (
     <div className={`flex items-start gap-3 ${disabled ? "opacity-60" : ""}`}>
-      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${complete ? "bg-emerald-500/20 text-emerald-300" : "bg-sky-500/15 text-sky-300"}`}>
+      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold ${complete ? "bg-secondary text-foreground" : "bg-primary/15 text-primary"}`}>
         {complete ? <CheckCircle2 className="h-4 w-4" /> : number}
       </div>
       <div>
-        <h2 className="font-semibold text-foreground">{title}</h2>
+        <h2 className="text-[13.5px] font-semibold tracking-tight">{title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
     </div>
@@ -565,18 +565,18 @@ function Field({
 }
 
 function PreviewStat({ label, value, suffix = "", tone }: { label: string; value: number; suffix?: string; tone?: "good" | "warn" }) {
-  const color = tone === "good" ? "text-emerald-300" : tone === "warn" ? "text-amber-300" : "text-foreground";
-  return <div className="rounded-md border bg-background p-3"><p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p><p className={`mt-1 text-lg font-semibold tabular-nums ${color}`}>{value}{suffix}</p></div>;
+  const color = tone === "good" ? "text-foreground" : tone === "warn" ? "text-primary" : "text-foreground";
+  return <div className="rounded-md border bg-background p-3"><p className="text-[11px] text-muted-foreground">{label}</p><p className={`mt-1 text-lg font-semibold tabular-nums ${color}`}>{value}{suffix}</p></div>;
 }
 
 function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) {
   return (
-    <details className="rounded-md border border-amber-900/50 bg-amber-950/10 p-4">
-      <summary className="cursor-pointer text-sm font-semibold text-amber-200">{title}</summary>
-      <ul className="mt-3 space-y-2 text-xs text-amber-100/80">
+    <details className="rounded-md border border-primary/30 bg-primary/10 p-4">
+      <summary className="cursor-pointer text-sm font-semibold text-primary">{title}</summary>
+      <ul className="mt-3 space-y-2 text-xs text-primary">
         {issues.map((issue, index) => (
           <li key={`${issue.code}-${issue.trade_number ?? "none"}-${index}`}>
-            <span className="font-mono text-amber-300">{issue.code}</span> · {issue.message}
+            <span className="font-mono text-primary">{issue.code}</span> · {issue.message}
             {issue.trade_number != null ? ` · trade ${issue.trade_number}` : ""}
             {issue.row_number != null ? ` · row ${issue.row_number}` : ""}
           </li>

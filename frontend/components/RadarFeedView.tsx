@@ -12,10 +12,10 @@ import RadarMovers from "@/components/RadarMovers";
 import { cn } from "@/lib/utils";
 
 const NEVER_VISITED = "1970-01-01T00:00:00Z";
-const STATE_TONE = { off: "text-muted-foreground", no_data: "text-muted-foreground", recording: "text-emerald-300", stale: "text-amber-300" } as const;
+const STATE_TONE = { off: "text-muted-foreground", no_data: "text-muted-foreground", recording: "text-foreground", stale: "text-red-400" } as const;
 const DIRECTION = {
-  up: { label: "Up", className: "bg-emerald-500/10 text-emerald-300" },
-  down: { label: "Down", className: "bg-rose-500/10 text-rose-300" },
+  up: { label: "Up", className: "bg-emerald-500/10 text-emerald-400" },
+  down: { label: "Down", className: "bg-red-500/10 text-red-400" },
 };
 const KIND = { relative_to_spy: "vs SPY", relative_to_sector: "vs sector", group_move: "Group move", dip_turn: "Dip turning up" };
 
@@ -23,7 +23,7 @@ function Evidence({ rows }: { rows: RadarDetail["event"]["evidence"] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
-        <thead className="text-muted-foreground">
+        <thead className="border-b text-xs font-medium text-muted-foreground">
           <tr><th className="pb-1 text-left font-medium">Symbol</th><th className="pb-1 text-right font-medium">Last</th>
             <th className="pb-1 text-right font-medium">Change</th><th className="pb-1 text-right font-medium">Quote time</th></tr>
         </thead>
@@ -129,8 +129,8 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
       </section>
       <div className="flex flex-wrap items-center gap-2">
         {detail.plans?.planned && <span aria-label="Plan marks" className="flex gap-1 text-[11px] font-medium">
-          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">Planned</span>
-          {detail.plans.traded && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300">Traded</span>}</span>}
+          <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground">Planned</span>
+          {detail.plans.traded && <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-foreground">Traded</span>}</span>}
         <PlanATrade symbol={symbol} origin="radar_event" originRef={event.event_id} line={`Radar ${nyTime(detail.event.first_seen_at, true)}: ${event.summary}`} />
         <Link href={radarEventChartHref(detail.event)} className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium text-foreground hover:bg-secondary">
           Open chart · {symbol}
@@ -143,13 +143,13 @@ function Detail({ event, onRated }: { event: RadarFeedEvent; onRated: (rating: R
           {RATINGS.map(({ value, label }) => (
             <button key={value} type="button" aria-pressed={rating === value} onClick={() => rate(value)}
               className={cn("h-10 rounded-md border px-3 text-xs font-medium transition-colors sm:h-9",
-                rating === value ? "border-sky-500/50 bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
+                rating === value ? "border-primary/40 bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>
               {label}
             </button>
           ))}
         </div>
       </div>
-      {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -166,12 +166,12 @@ function EventCard({ event, fresh, open, linked, onToggle, onRated }: {
     <li ref={ref} className="rounded-lg border bg-card" data-testid="radar-event">
       <button type="button" onClick={onToggle} aria-expanded={open} className="w-full min-w-0 p-3 text-left">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", direction.className)}>{direction.label}</span>
+          <span className={cn("inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium", direction.className)}>{direction.label}</span>
           <span className="text-sm font-semibold text-foreground">{event.symbols.join(", ")}</span>
           <span className="text-xs text-muted-foreground">{KIND[event.kind]} · {against}</span>
-          {fresh && <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">New</span>}
+          {fresh && <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-primary/15 text-primary">New</span>}
           {RULE_TAGS[event.rule_version] && (
-            <span className="rounded border border-amber-500/30 px-1.5 py-0.5 text-[11px] text-amber-300" data-testid="radar-rules-tag">
+            <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground" data-testid="radar-rules-tag">
               {RULE_TAGS[event.rule_version]}
             </span>
           )}
@@ -258,7 +258,7 @@ export default function RadarFeedView() {
     return () => clearInterval(timer);
   }, [live, load, session]);
 
-  if (error && !feed) return <p role="alert" className="rounded-lg border bg-card p-3 text-sm text-amber-300">{error}</p>;
+  if (error && !feed) return <p role="alert" className="rounded-lg border bg-card p-3 text-sm text-red-400">{error}</p>;
   if (!feed) return <p role="status" className="text-sm text-muted-foreground">Loading Radar…</p>;
 
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
@@ -274,7 +274,7 @@ export default function RadarFeedView() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border bg-card px-3 py-2.5" role="status" data-testid="radar-coverage">
+      <div className="rounded-lg border bg-card px-3.5 py-2.5" role="status" data-testid="radar-coverage">
         <p className={cn("text-sm", STATE_TONE[feed.state])}>{coverageLine(feed)}</p>
         {feed.session && feed.state !== "off" && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -292,10 +292,10 @@ export default function RadarFeedView() {
           <p className="mt-1 text-xs text-muted-foreground">Not in the latest pass: {feed.coverage.symbols_missing.slice(0, 12).join(", ")}{feed.coverage.symbols_missing.length > 12 ? "…" : ""}</p>
         )}
       </div>
-      {error && <p role="alert" className="text-xs text-amber-300">{error}</p>}
-      {notice && <p role="alert" className="text-xs text-amber-300">{notice}</p>}
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+      {notice && <p role="alert" className="text-xs text-red-400">{notice}</p>}
 
-      {feed.state !== "off" && <h2 className="text-base font-semibold">Developments</h2>}
+      {feed.state !== "off" && <h2 className="text-[13.5px] font-semibold tracking-tight">Developments</h2>}
 
       {feed.state !== "off" && feed.events.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -304,13 +304,13 @@ export default function RadarFeedView() {
       )}
       {newEvents.length > 0 && (
         <section aria-label="New since your last visit" className="space-y-2">
-          <h2 className="text-sm font-semibold text-foreground">New since your last visit</h2>
+          <h2 className="text-[13.5px] font-semibold tracking-tight">New since your last visit</h2>
           <ul className="space-y-2">{newEvents.map(card)}</ul>
         </section>
       )}
       {earlier.length > 0 && (
         <section aria-label={feed.session === today ? "Earlier today" : "Earlier in this session"} className="space-y-2">
-          <h2 className="text-sm font-semibold text-foreground">{feed.session === today ? "Earlier today" : "Earlier in this session"}</h2>
+          <h2 className="text-[13.5px] font-semibold tracking-tight">{feed.session === today ? "Earlier today" : "Earlier in this session"}</h2>
           <ul className="space-y-2">{earlier.map(card)}</ul>
         </section>
       )}

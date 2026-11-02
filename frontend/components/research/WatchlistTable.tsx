@@ -140,7 +140,7 @@ export default function WatchlistTable({
           value={filters.q}
           onChange={(e) => setFilter("q", e.target.value)}
           placeholder="⌕ ticker / name"
-          className="w-44 rounded border border-border bg-card px-2 py-1.5 font-mono text-xs outline-none focus:border-ring"
+          className="w-44 rounded-md border border-border bg-card px-2 py-1.5 text-xs outline-none focus:border-ring"
         />
         <FilterSelect
           value={filters.layer}
@@ -181,11 +181,11 @@ export default function WatchlistTable({
         <button
           type="button"
           onClick={() => setFilters(EMPTY_FILTERS)}
-          className="rounded border border-border bg-card px-2.5 py-1.5 font-mono text-xs text-muted-foreground hover:text-foreground"
+          className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
         >
           clear
         </button>
-        <span className="ml-auto font-mono text-xs text-muted-foreground">
+        <span className="ml-auto text-xs text-muted-foreground">
           {rows.length} / {total} names · click ✛ to pin
         </span>
       </div>
@@ -193,7 +193,7 @@ export default function WatchlistTable({
       {/* Table */}
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full border-collapse text-xs">
-          <thead className="border-b border-border bg-card/60">
+          <thead className="border-b text-xs font-medium text-muted-foreground">
             <tr>
               <Th className="w-6" />
               <Th col="ticker">Ticker</Th>
@@ -234,7 +234,7 @@ export default function WatchlistTable({
                       onClick={() => toggleShort(c.ticker)}
                       className={cn(
                         "text-sm leading-none",
-                        c.short ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"
+                        c.short ? "text-primary" : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       {c.short ? "✚" : "✛"}
@@ -244,13 +244,13 @@ export default function WatchlistTable({
                     <button
                       type="button"
                       onClick={() => onOpenTicker(c.ticker)}
-                      className="flex items-center gap-1.5 font-mono font-semibold text-foreground hover:text-primary"
+                      className="flex items-center gap-1.5 font-semibold text-foreground hover:text-primary"
                     >
-                      {open && <span className="h-2 w-2 rounded-full bg-emerald-400" title="Open position" />}
+                      {open && <span className="h-2 w-2 rounded-full bg-foreground" title="Open position" />}
                       {c.ticker}
                     </button>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1.5 font-mono tabular-nums text-foreground/70">
+                  <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-foreground/70">
                     {price == null ? "—" : `$${price.toFixed(2)}`}
                   </td>
                   <td className="max-w-[160px] truncate px-2 py-1.5 text-foreground/80" title={c.name}>
@@ -300,7 +300,7 @@ export default function WatchlistTable({
         </table>
       </div>
       <div className="mt-2 text-right">
-        <Link href="/trades" className="font-mono text-[11px] text-muted-foreground hover:text-foreground">
+        <Link href="/trades" className="text-[11px] text-muted-foreground hover:text-foreground">
           open journal trades →
         </Link>
       </div>
@@ -335,7 +335,7 @@ function FilterSelect<T extends string>({
       value={value}
       suppressHydrationWarning
       onChange={(e) => onChange(e.target.value)}
-      className="rounded border border-border bg-card px-2 py-1.5 font-mono text-xs text-foreground/80 outline-none focus:border-ring"
+      className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground/80 outline-none focus:border-ring"
     >
       <option value="">{placeholder}</option>
       {options.map((o) => (

@@ -14,9 +14,9 @@ export const MON_LABEL: Record<Mon, string> = {
 
 // Badge classes (solid pill) for monetization model.
 export const MON_BADGE: Record<Mon, string> = {
-  scarcity: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
-  licensing: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
-  capex: "bg-red-500/15 text-red-300 border border-red-500/30",
+  scarcity: "bg-secondary text-foreground",
+  licensing: "bg-secondary text-muted-foreground",
+  capex: "bg-secondary text-muted-foreground",
 };
 
 export const TYPE_LABEL: Record<CoType, string> = {
@@ -36,33 +36,33 @@ export const TYPE_FULL: Record<CoType, string> = {
 };
 
 export const TYPE_BADGE: Record<CoType, string> = {
-  core: "text-emerald-300 border-emerald-500/40",
-  picks: "text-sky-300 border-sky-500/40",
-  cyclical: "text-violet-300 border-violet-500/40",
-  moonshot: "text-amber-300 border-amber-500/40",
-  hype: "text-red-300 border-red-500/40",
+  core: "bg-secondary text-foreground",
+  picks: "bg-secondary text-muted-foreground",
+  cyclical: "bg-secondary text-muted-foreground",
+  moonshot: "bg-secondary text-muted-foreground",
+  hype: "bg-secondary text-muted-foreground",
 };
 
 export const STATUS_BADGE: Record<Status, string> = {
-  Untouched: "bg-muted text-muted-foreground",
-  Researching: "bg-amber-500/15 text-amber-300",
-  Watchlist: "bg-sky-500/15 text-sky-300",
-  Position: "bg-emerald-500/15 text-emerald-300",
-  Passed: "bg-red-500/15 text-red-300",
+  Untouched: "bg-secondary text-muted-foreground",
+  Researching: "bg-secondary text-foreground",
+  Watchlist: "bg-secondary text-foreground",
+  Position: "bg-secondary text-foreground",
+  Passed: "bg-secondary text-muted-foreground",
 };
 
 export const STATUS_DOT: Record<Status, string> = {
   Untouched: "bg-muted-foreground/50",
-  Researching: "bg-amber-400",
-  Watchlist: "bg-sky-400",
-  Position: "bg-emerald-400",
-  Passed: "bg-red-400",
+  Researching: "bg-muted-foreground",
+  Watchlist: "bg-foreground/70",
+  Position: "bg-foreground",
+  Passed: "bg-muted-foreground/30",
 };
 
 export const SIGNAL_BADGE: Record<SignalLevel, string> = {
-  G: "bg-emerald-500 text-emerald-950",
-  A: "bg-amber-400 text-amber-950",
-  R: "bg-red-500 text-red-950",
+  G: "bg-secondary text-foreground",
+  A: "bg-primary/15 text-primary",
+  R: "bg-red-500/10 text-red-400",
 };
 
 export const SIGNAL_NEXT: Record<SignalLevel, SignalLevel> = {
@@ -97,20 +97,20 @@ export const PRIO_OPTIONS: Prio[] = ["A", "B", "C"];
 
 // Score → text color. Opportunity scores (higher = greener).
 export function qualityColor(v: number): string {
-  if (v >= 8) return "text-emerald-300";
-  if (v >= 6) return "text-emerald-400/80";
-  if (v >= 4) return "text-amber-300/80";
+  if (v >= 8) return "text-foreground";
+  if (v >= 6) return "text-foreground/80";
+  if (v >= 4) return "text-muted-foreground";
   if (v > 0) return "text-muted-foreground";
-  return "text-muted-foreground/40";
+  return "text-muted-foreground";
 }
 
 // Risk scores (higher = redder).
 export function riskColor(v: number): string {
   if (v >= 9) return "text-red-400";
-  if (v >= 7) return "text-orange-400";
-  if (v >= 4) return "text-amber-300";
-  if (v > 0) return "text-emerald-400/70";
-  return "text-muted-foreground/40";
+  if (v >= 7) return "text-primary";
+  if (v >= 4) return "text-foreground/80";
+  if (v > 0) return "text-muted-foreground";
+  return "text-muted-foreground";
 }
 
 export const MOAT_CLUSTER_LABELS: Record<string, string> = {

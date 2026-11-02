@@ -3,7 +3,7 @@ export function Distribution({values, select}: {values: {id:string;y:number}[];s
   const lo = Math.min(...values.map(v=>v.y)), hi=Math.max(...values.map(v=>v.y)), width=(hi-lo||1)/10;
   const bins=Array.from({length:10},(_,i)=>values.filter(v=>Math.min(9,Math.floor((v.y-lo)/width))===i));
   const max=Math.max(...bins.map(b=>b.length));
-  return <div className="flex h-28 items-end gap-1" aria-label="Outcome distribution">{bins.map((b,i)=><button key={i} className="bg-sky-700 min-w-0 flex-1 text-xs hover:bg-sky-500" style={{height:`${Math.max(10,b.length/max*100)}%`}} title={`${(lo+i*width).toFixed(3)} to ${(lo+(i+1)*width).toFixed(3)}: ${b.length}`} disabled={!b.length} onClick={()=>select(b[0].id)} aria-label={`Distribution bin ${i+1}: ${b.length} occurrences; inspect first`}>{b.length}</button>)}</div>;
+  return <div className="flex h-28 items-end gap-1" aria-label="Outcome distribution">{bins.map((b,i)=><button key={i} className="bg-muted-foreground/50 min-w-0 flex-1 text-xs hover:bg-muted-foreground" style={{height:`${Math.max(10,b.length/max*100)}%`}} title={`${(lo+i*width).toFixed(3)} to ${(lo+(i+1)*width).toFixed(3)}: ${b.length}`} disabled={!b.length} onClick={()=>select(b[0].id)} aria-label={`Distribution bin ${i+1}: ${b.length} occurrences; inspect first`}>{b.length}</button>)}</div>;
 }
 export function Scatter({values, select}: {values: {id:string;x:number;y:number}[];select:(id:string)=>void}) {
   if (!values.length) return <p>No paired feature/outcome observations.</p>;

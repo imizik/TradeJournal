@@ -5,14 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import { getMovers, groupLine, radarChartHref, moversHeader, pctText, type RadarMover, type RadarMovers } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 
-const tone = (value: number | null) => (value == null ? "text-muted-foreground" : value > 0 ? "text-emerald-300" : value < 0 ? "text-rose-300" : "text-foreground");
+const tone = (value: number | null) => (value == null ? "text-muted-foreground" : value > 0 ? "text-emerald-400" : value < 0 ? "text-red-400" : "text-foreground");
 
 function Table({ title, rows, movers, allGroups }: { title: string; rows: RadarMover[]; movers: RadarMovers; allGroups: boolean }) {
   return (
     <section aria-label={title} className="min-w-0 space-y-1">
       <h3 className="text-xs font-semibold text-foreground">{title}</h3>
       <table className="w-full table-fixed text-xs">
-        <thead className="text-muted-foreground">
+        <thead className="border-b text-xs font-medium text-muted-foreground">
           <tr>
             <th className="w-[26%] pb-1 text-left font-medium">Symbol</th>
             <th className="pb-1 text-right font-medium">Day</th>
@@ -85,18 +85,15 @@ export default function RadarMovers({ session }: { session: string | undefined }
 
   const ranked = movers?.header != null;
   return (
-    <section id="radar-movers" aria-label="Movers now" className="space-y-3 rounded-lg border bg-card p-3" data-testid="radar-movers">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">Latest recorded movers</h2>
-        <p className="text-xs text-muted-foreground">A plain ranking of the latest recorded pass, not alerts. Biggest and smallest moves against SPY; nothing here is a signal.</p>
-      </div>
-      {error && <p role="alert" className="text-xs text-amber-300">Movers could not be refreshed. Showing the last reading.</p>}
+    <section id="radar-movers" aria-label="Movers now" className="rounded-lg border bg-card" data-testid="radar-movers">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"><h2 className="text-[13.5px] font-semibold tracking-tight">Latest recorded movers</h2></div>
+<div className="space-y-3 p-4"><p className="text-xs text-muted-foreground">A plain ranking of the latest recorded pass, not alerts. Biggest and smallest moves against SPY; nothing here is a signal.</p>      {error && <p role="alert" className="text-xs text-red-400">Movers could not be refreshed. Showing the last reading.</p>}
       {!movers && !error && <p role="status" className="text-xs text-muted-foreground">Loading movers…</p>}
       {movers && !ranked && <p className="text-xs text-muted-foreground" data-testid="radar-movers-empty">{movers.reason ?? "No movers to show yet."}</p>}
       {movers && ranked && (
         <>
-          <p className={cn("text-sm font-medium tabular-nums", movers.state === "stale" ? "text-amber-300" : "text-foreground")} data-testid="radar-movers-header">{moversHeader(movers)}</p>
-          {movers.state === "stale" && <p className="text-xs text-amber-300">{movers.reason}</p>}
+          <p className={cn("text-sm font-medium tabular-nums", movers.state === "stale" ? "text-red-400" : "text-foreground")} data-testid="radar-movers-header">{moversHeader(movers)}</p>
+          {movers.state === "stale" && <p className="text-xs text-red-400">{movers.reason}</p>}
           <div className="grid gap-4 lg:grid-cols-2">
             <Table title="Leaders" rows={movers.leaders} movers={movers} allGroups={allGroups} />
             <Table title="Laggards" rows={movers.laggards} movers={movers} allGroups={allGroups} />
@@ -111,7 +108,7 @@ export default function RadarMovers({ session }: { session: string | undefined }
               {movers.groups.slice(0, allGroups ? undefined : 10).map((g) => <li key={g.name} id={`radar-group-${g.name}`} className="text-xs text-muted-foreground" data-testid="radar-mover-group">
                 <span>{groupLine(g)}</span>
                 {g.most && <Link href={radarChartHref(g.most.symbol, movers, g.name, allGroups)}
-                  className="ml-2 inline-flex min-h-11 items-center text-sky-300 underline underline-offset-2"
+                  className="ml-2 inline-flex min-h-11 items-center text-primary hover:underline"
                   aria-label={`Compare ${g.name} in Charts with ${g.most.symbol}`}>Compare in Charts</Link>}
               </li>)}
             </ul>
@@ -124,6 +121,6 @@ export default function RadarMovers({ session }: { session: string | undefined }
           </div>
         </>
       )}
-    </section>
+    </div></section>
   );
 }

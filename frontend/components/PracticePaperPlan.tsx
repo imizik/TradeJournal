@@ -11,8 +11,8 @@ const num = (v: unknown, digits = 2) => (typeof v === "number" ? v.toFixed(digit
 const detailOf = (err: unknown, fallback: string) => (err instanceof Error ? err.message.replace(/^API \S+ -> \d+:?\s*/, "") || fallback : fallback);
 
 export function PaperBadge({ status }: { status: PaperState["status"] }) {
-  const tone = status === "unarmed" ? "bg-amber-500/10 text-amber-700" : "bg-sky-500/10 text-sky-700";
-  return <span className={`rounded-full px-2 py-0.5 text-xs ${tone}`}>PRACTICE · PAPER · {status.toUpperCase()}</span>;
+  const tone = status === "unarmed" ? "bg-secondary text-muted-foreground" : "bg-primary/15 text-primary";
+  return <span className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium ${tone}`}>PRACTICE · PAPER · {status.toUpperCase()}</span>;
 }
 
 function eventDetail(e: PaperEvent): string {
@@ -35,20 +35,20 @@ function Flags({ e }: { e: PaperEvent }) {
   const delivery = e.delivery == null || e.delivery === "none" ? "" : e.delivery === "sent" ? "phone alert sent" : e.delivery_error ? `phone alert ${e.delivery}: ${e.delivery_error}` : `phone alert ${e.delivery}`;
   return (
     <>
-      {flags.map((f) => <span key={f} className="ml-1 rounded bg-amber-500/10 px-1 text-amber-700">{f}</span>)}
-      {delivery && <span className={`ml-1 ${e.delivery === "sent" ? "text-emerald-700" : e.delivery_error || e.delivery === "expired" ? "text-red-600" : "text-slate-500"}`}>{delivery}</span>}
+      {flags.map((f) => <span key={f} className="ml-1 rounded-md bg-secondary px-1 text-muted-foreground">{f}</span>)}
+      {delivery && <span className={`ml-1 ${e.delivery === "sent" ? "text-foreground" : e.delivery_error || e.delivery === "expired" ? "text-red-400" : "text-muted-foreground"}`}>{delivery}</span>}
     </>
   );
 }
 
 function Outcome({ label, o }: { label: string; o: PaperOutcome }) {
   return (
-    <div className="rounded border bg-background p-2">
+    <div className="rounded-md border bg-background p-2">
       <p className="font-medium">{label} <span className="text-muted-foreground">({o.cost_version})</span></p>
       <p>Paper entry {num(o.entry_fill)} → exit {num(o.exit_fill)} ({o.exit_kind})</p>
       <p>Net {num(o.net_per_share)}/share · planned R {num(o.planned_r, 3)}</p>
       <p>Simulated entry-to-stop exposure {num(o.entry_to_stop_exposure)}/share</p>
-      {(o.ambiguous || o.gap) && <p className="text-amber-700">{[o.ambiguous && "ambiguous bar", o.gap && "gap"].filter(Boolean).join(" · ")}</p>}
+      {(o.ambiguous || o.gap) && <p className="text-primary">{[o.ambiguous && "ambiguous bar", o.gap && "gap"].filter(Boolean).join(" · ")}</p>}
     </div>
   );
 }
@@ -89,7 +89,7 @@ export default function PracticePaperPlan({ recordId, onState }: { recordId: str
   }
 
   return (
-    <div data-testid="paper-plan" className="space-y-2 rounded border border-sky-500/30 bg-sky-500/5 p-3">
+    <div data-testid="paper-plan" className="space-y-2 rounded-md border bg-secondary/50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium">Practice paper timeline</span>
         {state && <PaperBadge status={state.status} />}
@@ -97,13 +97,13 @@ export default function PracticePaperPlan({ recordId, onState }: { recordId: str
       {state && <button onClick={load} className="underline">Refresh paper timeline</button>}
       <p className="text-muted-foreground">Paper only. No real order is ever placed.</p>
       {!state && !loadError && <p role="status">Loading paper state…</p>}
-      {loadError && <p role="alert" className="text-red-600">{loadError} <button onClick={load} className="underline">Retry</button></p>}
+      {loadError && <p role="alert" className="text-red-400">{loadError} <button onClick={load} className="underline">Retry</button></p>}
       {owner && state?.status === "unarmed" && (
-        <button onClick={arm} disabled={arming} className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
+        <button onClick={arm} disabled={arming} className="rounded-md bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
           {arming ? "Arming paper plan…" : "Arm paper plan"}
         </button>
       )}
-      {armError && <p role="alert" className="text-red-600">{armError}</p>}
+      {armError && <p role="alert" className="text-red-400">{armError}</p>}
       {state && state.events.length > 0 && (
         <ol className="space-y-1">
           {state.events.map((e) => (

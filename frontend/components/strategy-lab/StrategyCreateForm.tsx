@@ -46,16 +46,11 @@ export default function StrategyCreateForm() {
   }
 
   return (
-    <section className="rounded-lg border bg-card p-5">
-      <div className="mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          New strategy
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Start with the research idea. The exact Pine source belongs to a version next.
-        </p>
+    <section aria-label="New strategy" className="rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5">
+        <h2 className="text-[13.5px] font-semibold tracking-tight">New strategy</h2>
       </div>
-
+<div className="p-4"><p className="mb-4 text-sm text-muted-foreground">Start with the research idea. The exact Pine source belongs to a version next.</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Name" htmlFor="strategy-name">
           <input
@@ -98,7 +93,7 @@ export default function StrategyCreateForm() {
         </FormField>
 
         {error && (
-          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {error}
           </p>
         )}
@@ -107,7 +102,7 @@ export default function StrategyCreateForm() {
           {busy ? "Creating strategy..." : "Create strategy"}
         </Button>
       </form>
-    </section>
+    </div></section>
   );
 }
 
@@ -122,7 +117,7 @@ function FormField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <label htmlFor={htmlFor} className="text-xs text-muted-foreground">
         {label}
       </label>
       {children}

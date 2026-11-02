@@ -28,7 +28,7 @@ export function DecisionCard({ record, focused, openToken, withPaper, idPrefix =
       <summary className="cursor-pointer list-none">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-semibold">{record.symbol} · {record.decision.toUpperCase()}</span>
-          {record.decision === "take" && paper ? <PaperBadge status={paper.status} /> : <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700">{sample ? "SIMULATED · UNARMED" : "PRACTICE · UNARMED"}</span>}
+          {record.decision === "take" && paper ? <PaperBadge status={paper.status} /> : <span className="inline-flex h-[22px] items-center rounded-md px-2 text-[11.5px] font-medium bg-secondary text-muted-foreground">{sample ? "SIMULATED · UNARMED" : "PRACTICE · UNARMED"}</span>}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{record.actor} · received {new Date(record.received_at).toLocaleString("en-US", { timeZone: ET })} ET</p>
         {record.decision === "take" && <p className="mt-2 text-sm">Trigger {plan.trigger_level ?? "—"} · Stop {plan.stop ?? "—"} · Target {plan.target ?? "—"} ({plan.target_source?.source ?? "source unavailable"})</p>}
@@ -44,8 +44,8 @@ export function DecisionCard({ record, focused, openToken, withPaper, idPrefix =
           <div><dt className="text-muted-foreground">Evidence SHA-256</dt><dd className="break-all">{record.evidence_sha256}</dd></div>
           <div><dt className="text-muted-foreground">Record SHA-256</dt><dd className="break-all">{record.record_sha256}</dd></div>
         </dl>
-        <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.evidence, null, 2)}</pre>
-        {record.decision === "take" && <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.plan, null, 2)}</pre>}
+        <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.evidence, null, 2)}</pre>
+        {record.decision === "take" && <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.plan, null, 2)}</pre>}
         {!market && !historical && <a href={`/charts?symbol=${encodeURIComponent(record.symbol)}`} className="mt-3 inline-block text-primary underline">Open {record.symbol} in Charts</a>}
       </div>
     </details>
@@ -59,7 +59,7 @@ export default function PracticeDecisions({ records, focusId }: { records: Decis
   return (
     <section className="space-y-3" data-testid="practice-decisions">
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Practice decisions</h2>
+        <h2 className="text-[13.5px] font-semibold tracking-tight">Practice decisions</h2>
         <p className="mt-1 text-xs text-muted-foreground">Frozen choices and evidence. Practice only; a TAKE is a paper plan once you arm it, never a real order.</p>
       </div>
       {owner && <PracticeDecisionForm />}
