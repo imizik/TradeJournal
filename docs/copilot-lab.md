@@ -2357,8 +2357,9 @@ Outside the regular session a quote's last price and day change are the
 regular session's, so before the open every name reads flat at the prior
 close. `app/ai/copilot_extended.py` reads Tradier's 1-minute timesales with
 `session_filter=all` (04:00-20:00 New York) through the chart feed, the same
-request the Charts tab makes for today (15 s cache; a completed session six
-hours), and adds an `extended` block outside the regular session:
+request the Charts tab makes for today (15 s cache; a completed session is kept
+in the module's own 48-session cache, outside the chart feed's, and an empty
+read is not kept), and adds an `extended` block outside the regular session:
 
 - **Pre-market** (04:00 to the open): each name's pre-market last, change
   against the previous session's regular close, high, low, volume and dollar

@@ -28,10 +28,11 @@ def rows(day, *bars):
 def feed(monkeypatch):
     """Serves stored timesales by day and records each read; the calendar is the clock unless a test sets hours."""
     state = {"days": {}, "reads": [], "hours": {}, "fail": set()}
+    x._past.clear()
 
     def read(path, params, ttl, keep=True):
         day = date.fromisoformat(params["start"][:10])
-        state["reads"].append((params["symbol"], day, ttl))
+        state["reads"].append((params["symbol"], day, keep))
         if params["symbol"] in state["fail"]:
             raise ChartFeedError("Chart requests are cooling down to stay within the data allowance.", "rate_limited")
         return {"series": {"data": state["days"].get((params["symbol"], day), [])}}, 0.0, None
@@ -90,7 +91,7 @@ def test_before_four_no_request_goes_out_for_today(feed):
     out = x.extended(["QQQ"], at(TUE, "02:00"))["symbols"]["QQQ"]
     assert out["last_session"]["after_hours"]["change_pct"] == -0.5
     assert all(day != TUE for _, day, _ in feed["reads"])  # Tradier refuses a start in the future
-    assert {ttl for _, day, ttl in feed["reads"]} == {x.PAST_TTL_S}
+    assert {keep for _, day, keep in feed["reads"]} == {False}  # past sessions stay out of the Charts tab's cache
 
 
 def test_regular_hours_add_nothing_and_a_failed_read_is_unavailable(feed):
@@ -145,3 +146,18 @@ def test_the_pre_market_pilots_scan_is_ranked_by_its_move_against_spy(tmp_path, 
     assert (out["checkpoint"], out["up"], out["down"], out["flagged"]) == ("08:50", 2, 1, ["AMD"])
     assert [m["symbol"] for m in out["movers"]] == ["AMD", "MRVL", "SPY"]
     assert x.premarket_scan(str(radar), MON)["state"] == "none"
+
+
+def test_a_past_session_is_read_once_and_kept_out_of_the_charts_cache(feed):
+    feed["days"][("SPY", MON)] = rows(MON, ("15:59", 700.0, 100), ("16:30", 707.0, 100))
+    feed["days"][("SPY", TUE)] = rows(TUE, ("08:00", 714.0, 100))
+    for minute in ("08:10", "08:20"):
+        x.extended(["SPY"], at(TUE, minute))
+    assert [(day, keep) for _, day, keep in feed["reads"]] == [(MON, False), (TUE, True), (TUE, True)]
+
+
+def test_an_empty_past_read_is_not_remembered(feed):
+    feed["days"][("SPY", TUE)] = rows(TUE, ("08:00", 714.0, 100))
+    x.extended(["SPY"], at(TUE, "08:10"))
+    feed["days"][("SPY", MON)] = rows(MON, ("15:59", 700.0, 100))
+    assert x.extended(["SPY"], at(TUE, "08:20"))["symbols"]["SPY"]["premarket"]["change_pct"] == 2.0

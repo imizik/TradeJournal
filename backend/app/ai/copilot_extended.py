@@ -18,14 +18,18 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
 
 from app.engine.chart_math import ET, normalize_bars, session_windows
 
 log = logging.getLogger(__name__)
+_past: OrderedDict[tuple[str, date], list[dict]] = OrderedDict()
+_lock = threading.Lock()
 
 TODAY_TTL_S = 15  # the Charts tab's own key and lifetime for today's minutes
-PAST_TTL_S = 6 * 3600  # a completed session does not change
+PAST_SESSIONS = 48  # completed sessions kept here, not in the chart feed's 96-entry cache the Charts tab relies on
 LOOKBACK_DAYS = 6  # a long weekend plus a holiday
 MAX_SYMBOLS = 8
 PREMARKET_MOVERS = 10
@@ -70,13 +74,24 @@ def _bars(symbol: str, day: date, now: datetime) -> list[dict]:
     if now < datetime.combine(day, datetime.min.time(), ET).replace(hour=4):
         return []  # Tradier refuses a start in the future, and that failure would cool every chart read down
     today = day == now.astimezone(ET).date()
+    if not today:
+        with _lock:
+            if (symbol, day) in _past:
+                _past.move_to_end((symbol, day))
+                return _past[(symbol, day)]
     data, _, _ = chart_feed.read("/v1/markets/timesales", {
         "symbol": symbol, "interval": "1min", "session_filter": "all",
         "start": day.strftime("%Y-%m-%d 04:00"), "end": day.strftime("%Y-%m-%d 20:00"),
-    }, TODAY_TTL_S if today else PAST_TTL_S)
+    }, TODAY_TTL_S, keep=today)  # today's key is the Charts tab's; a past session is kept here instead
     cut = now.timestamp()
-    return [b for b in normalize_bars(_rows(data, "series", "data"))
+    bars = [b for b in normalize_bars(_rows(data, "series", "data"))
             if b["time"] + 60 <= cut and datetime.fromtimestamp(b["time"], ET).date() == day]
+    if not today and bars:
+        with _lock:  # a past session is final; an empty read is not kept, so a provider hiccup is not remembered
+            _past[(symbol, day)] = bars
+            while len(_past) > PAST_SESSIONS:
+                _past.popitem(last=False)
+    return bars
 
 
 def _session(symbol: str, before: date, now: datetime) -> tuple[date, list[dict]] | None:
