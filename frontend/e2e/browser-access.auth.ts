@@ -16,6 +16,9 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await expect(ownerPage.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   const ownerSession = await (await owner.request.get("/api/access/me")).json();
   expect(ownerSession.owner).toBe(true);
+  const study = await owner.request.get("/api/backend/scalp-shortlist?day=2026-11-04");
+  expect(study.status()).toBe(200);
+  expect((await study.json()).day).toBe("2026-11-04");
   const identifier = `dot-${Date.now()}`;
   const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": ownerSession.csrf }, data: { identifier, grants: { symbols: ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "MU", "NBIS"], run_ids: [], journal_read: false } } });
   expect(created.status()).toBe(201);
@@ -36,6 +39,11 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await expect(page.getByRole("button", { name: "Prepare today", exact: true })).toBeDisabled();
   expect(journalRequests).toEqual([]);
   const assistantSession = await (await page.request.get("/api/access/me")).json();
+  expect((await page.request.get("/api/backend/scalp-shortlist")).status()).toBe(403);
+  expect((await page.request.post("/api/backend/scalp-shortlist/2026-11-04/decisions", {
+    headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf },
+    data: { symbol: "NVDA", choice: "pass" },
+  })).status()).toBe(403);
   const forbidden = await page.request.post("/api/backend/fills", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} });
   expect(forbidden.status()).toBe(403);
   expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
