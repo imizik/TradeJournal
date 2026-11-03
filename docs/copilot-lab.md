@@ -184,7 +184,7 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
     week are lines inside the Briefing, not rows in the list: "N new on
     Radar ▾" lists the Radar events since the last Radar visit, each opening
     the desk on its decision (a stock hit) or Radar (a group event). Main
-    shows their count ("18 Radar", a sky dot while one is unseen in this
+    shows their count ("18 Radar", an amber dot while one is unseen in this
     browser) and, in amber, how many alerts and Radar hits wait for an answer
     ("3 to answer"). Open conversations about no ticker (a Briefing turn, a week
     review) are listed under it, title and date: today's, the open one and the
@@ -341,10 +341,11 @@ untouched, except that a confirmed memory is saved as one of Jo's memories
   (`backend/app/access_manifest.py`), and `frontend/lib/backendProxy.ts`
   refuses `copilot` for the assistant profile.
 - One turn (`backend/app/ai/copilot.py`) streams the answer and lets the model
-  call twenty-one read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
+  call twenty-five read-only tools (`backend/app/ai/copilot_tools.py`): Radar group
   comparison, peer moves, symbol news, earnings dates (with the next dividend
   and recent splits), quotes (last, day change, volume), the market regime and
-  Radar today, the symbol profile and the proof read-out (all below), saved research,
+  Radar today, the symbol profile and the proof read-out, macro series and
+  drawdown base rates, S&P 500 breadth and options positioning (all below), saved research,
   investigation changes (below), the chart and book tools below (including the
   trade review and the week review), option candidates (below), one moment on
   the chart (Explain this candle, below), and the owner
