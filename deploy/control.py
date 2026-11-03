@@ -203,7 +203,7 @@ def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
     # The bridge owns a provider socket and must stop before its frontend and
     # release target are replaced, including when rolling back old releases.
-    for service in [*SHORTLIST_TIMERS, *SHORTLIST_SERVICES, DEPTH_RECORDER, *DEPTH_UPLOAD_UNITS, MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *COMPANY_RESEARCH_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in [DEPTH_RECORDER, *DEPTH_UPLOAD_UNITS, MOOMOO_SERVICE, "tradejournal-assistant.service", *SHORTLIST_TIMERS, *SHORTLIST_SERVICES, *RETIRED_SERVICES, *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *COMPANY_RESEARCH_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
