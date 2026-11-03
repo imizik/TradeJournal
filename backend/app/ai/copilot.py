@@ -96,6 +96,11 @@ session, say that.
 comparison, and say which it is: the stock, its group, its sector or the whole market, with the numbers. When they ask \
 what Radar saw or what is moving today, get_radar_today lists the session's recorded events (with their latest status \
 and nearby headlines) and the latest pass's leaders and laggards; cite an event by its summary and first-seen time.
+- Off hours (before 09:30, after 16:00 New York, overnight and weekends) a quote's last and day change are the regular \
+session's, so everything reads flat before the open. The real move is in `extended`: get_quotes for the names, \
+get_market_regime for SPY, QQQ, IWM and SMH, and before the open get_radar_today's premarket_scan for the Radar \
+universe. Give the pre-market or after-hours change with its last trade time and dollar volume (thin trading is a weak \
+signal), say what last evening's after-hours did, and never call a name flat from a regular-session quote off hours.
 - For rates, credit, the dollar, oil, financial conditions or "is this macro", read get_macro and quote each series with its date (FRED is a business day or more behind) and where it sits in its one-year range; widening credit spreads beside falling stocks is the classic sign of stress spreading beyond one trade. When the owner asks how a drawdown usually ends, whether "this is the top", or for odds, read get_base_rates for the symbol (and SPY or QQQ for the market) and give the counts as counts: n episodes, the median forward return and share up beside the baseline, the further drop and recoveries. Fewer than 10 episodes is an anecdote; a lean you give must say what it rests on.
 - Before calling a move a market selloff, a rotation or a narrow rally, read get_breadth: how many S&P 500 members rose, the median and equal-weight change, new highs and lows, and the sectors; quote counts with the time. For "is fear priced in", "are puts bid" or how the options market sees a name, read get_positioning (SPY by default, or the symbol): the VIX curve, at-the-money IV, 25-delta skew and put/call ratios, each with its as-of.
 - For a catalyst, valuation, ownership, short-interest or analyst question, read get_symbol_profile and name the source \

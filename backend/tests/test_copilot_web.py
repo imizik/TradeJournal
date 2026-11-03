@@ -201,3 +201,18 @@ def test_a_turn_whose_last_round_still_paused_ends_with_an_error_not_a_blank_ans
 
 def copilot_text(events):
     return "".join(e.get("delta", "") for e in events if e["type"] == "text")
+
+
+def test_what_a_multi_round_turn_records_passes_the_save_rules():
+    """The page saves each answer's metrics and evidence; #652 shipped a turn whose timings the save refused (422)."""
+    from app.engine.copilot_investigations import AnswerMetrics, EvidenceRef
+    adapter = Rounds((search(0), "pause_turn"), (search(1), "pause_turn"), ([{"type": "text", "text": "Answer."}], "end_turn"))
+    events = turn(adapter)
+    metrics = events[-1]["metrics"]
+    AnswerMetrics.model_validate({"first_text_ms": metrics["first_text_ms"], "total_ms": metrics["total_ms"], "rounds": metrics["rounds"],
+                                  "model": metrics["model"][:80], "backend": metrics["backend"][:40],
+                                  "tools": [c["name"] for c in metrics["tool_calls"]][:50]})
+    for event in events:
+        if event["type"] == "tool" and event.get("status") == "ok" and event.get("provenance"):
+            EvidenceRef.model_validate({"tool": event["name"], "as_of": event["provenance"]["as_of"],
+                                        "kind": event["provenance"]["kind"], "message": 1})

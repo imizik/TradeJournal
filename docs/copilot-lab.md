@@ -2359,6 +2359,41 @@ says they are unavailable; the fixture serves fixed numbers.
 The prompt reads `get_breadth` before calling a move a selloff, a rotation or
 a narrow rally, and `get_positioning` for "is fear priced in" or "are puts
 bid". Tests: `backend/tests/test_copilot_breadth.py`.
+
+## Extended hours
+
+Outside the regular session a quote's last price and day change are the
+regular session's, so before the open every name reads flat at the prior
+close. `app/ai/copilot_extended.py` reads Tradier's 1-minute timesales with
+`session_filter=all` (04:00-20:00 New York) through the chart feed, the same
+request the Charts tab makes for today (15 s cache; a completed session is kept
+in the module's own 48-session cache, outside the chart feed's, and an empty
+read is not kept), and adds an `extended` block outside the regular session:
+
+- **Pre-market** (04:00 to the open): each name's pre-market last, change
+  against the previous session's regular close, high, low, volume and dollar
+  volume, and that previous session's after-hours move.
+- **After-hours** (the close to 20:00): the move since today's regular close.
+- **Closed** (overnight, weekends, holidays): the latest session's complete
+  after-hours.
+
+Reference closes come from the minute bars and the market calendar (early
+closes and holidays included), not from the quote's fields: the last regular
+minute's close, within cents of the official closing auction price. No request goes
+out for today before 04:00 (Tradier refuses a start in the future, which would
+cool the chart feed down). Tradier has no overnight (20:00-04:00) trading.
+
+`get_quotes` carries it for its names (up to 8, one or two reads each) and
+`get_market_regime` for SPY, QQQ, IWM, SMH and the symbol. A result that would
+pass the tool limit sheds last evening's after-hours, then the ranges, then
+the last names (`trimmed` says which), rather than being cut mid-JSON. Before the open
+`get_radar_today` adds `premarket_scan`: the Radar pre-market pilot's latest
+recorded scan (08:50 or 09:20, when `RADAR_PREMARKET_ENABLED` is on), the
+universe's moves against SPY, up and down counts and the flagged names. The
+prompt says to give the off-hours change with its last trade time and dollar
+volume and never to call a name flat from a regular-session quote off hours.
+Live only; replay and the fixture leave it out. Tests:
+`backend/tests/test_copilot_extended.py`.
 ## Web search
 
 A turn the owner asked (the desk's `POST /copilot/chat` and a typed or tapped
