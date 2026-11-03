@@ -1,5 +1,5 @@
 {
-  "commit": "d418a7d8b9615505d92e36bb0001c6849d0ae623",
-  "date": "2026-10-30",
-  "note": "Reconciled 9cff89c2..d418a7d8 (40 code commits, #586-#625: copilot desk checklists, short answers, compare, Telegram pings and replies, position companion, fill interrupts, evening review, outcomes, Radar dip rule, Jo research role, option rolls, Company Research). Fixed: feature-map Company Research screen, option rolls and seven new test modules; Company Research refresh in the sync lane; Jo research role no longer 'this PR'/'once merged'; level alerts send through phone.py (Telegram or ntfy). Not checked: per-PR prose in copilot-lab, radar and company-research docs; deploy/README; live host states."
+  "commit": "03dcbd22e3faf56d246ab05a8b2b349205f7094f",
+  "date": "2026-11-03",
+  "note": "Reconciled d418a7d8..03dcbd22 (24 code commits, #628-#649 and two follow-ups: API move, Land auto-merge, copilot turn record and scorecard, eval harness, new copilot tools, desk-look redesign, grouped nav). Fixed: feature-map AI reviews run on the API (not the plan), Copilot proof column adds macro/breadth/web tests, phone More menu wording and nav-groups spec; copilot-lab tool count 21->25 with macro/breadth listed, Main's unseen-Radar dot is amber. Not checked: deploy/README; per-PR prose in copilot-lab beyond counts; live host states."
 }
