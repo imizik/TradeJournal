@@ -298,7 +298,7 @@ def test_anthropic_adapter_streams_bounded_tools_and_reports_cost(monkeypatch):
     # The pack's row is the first thing the trader sees, then the progress note, then text: equal only when both land
     # in the same millisecond (as they did on #470's CI run), so order, not equality.
     assert metrics["first_feedback_ms"] <= metrics["first_progress_ms"] <= metrics["first_text_ms"]
-    assert 0 <= metrics["max_silence_ms"] <= metrics["total_ms"]
+    assert 0 <= metrics["max_silence_ms"] <= metrics["total_ms"] < 60_000  # elapsed time, not the clock (a saved answer allows an hour)
 
 
 def test_without_fallbacks_only_the_progress_beta_is_sent(monkeypatch):

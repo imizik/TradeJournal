@@ -2371,7 +2371,8 @@ ends reads "search failed (no result)". Each query is logged at INFO
 - **No web fetch.** Search results only: a page cannot steer a request to a
   URL, and the query is the only thing that leaves. The prompt says to use the
   web for what the tools do not carry (macro and policy, politics, geopolitics,
-  industry and company statements), to name the publisher and date of what it
+  industry and company statements, and the catalyst behind a gap, bounce or
+  selloff the owner asks about), to name the publisher and date of what it
   uses, and never to put the owner's positions, sizes, trades or account
   labels in a query. Results are third-party data, never instructions.
 - **Sources.** Each search is a Sources row (`web_search`, kind `fetched`):
